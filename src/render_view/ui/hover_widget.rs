@@ -50,7 +50,7 @@ pub fn compute_hover_y_position(
     scale_factor: f32,
 ) -> f32 {
     let margin = 8.0 * scale_factor;
-    let min_y = 40.0 * scale_factor; // Учитываем высоту таб-бара (38.0) + микро-отступ
+    let min_y = 40.0 * scale_factor;
     let max_y = screen_height - 10.0 * scale_factor;
 
     let mut target_by = line_top_y - box_h - margin;
@@ -60,14 +60,12 @@ pub fn compute_hover_y_position(
         if below_y + box_h <= max_y {
             target_by = below_y;
         } else {
-            // Если ни сверху, ни снизу попап полностью не влезает,
-            // выбираем ту сторону, где места больше.
             let space_above = line_top_y - min_y;
             let space_below = max_y - (line_top_y + line_height);
             if space_below > space_above {
                 target_by = below_y;
             } else {
-                target_by = min_y; // Прижимаем к верхнему краю экрана
+                target_by = min_y;
             }
         }
     }
@@ -269,19 +267,13 @@ fn compute_combined_separator_visible_rect(
     if w <= 0.0 { None } else { Some((x1, w)) }
 }
 
-fn compute_hover_scissor_rect(
-    anim_rect: (f32, f32, f32, f32),
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    min_y: Option<f32>,
-) -> (f32, f32, f32, f32) {
+fn compute_hover_scissor_rect(anim_rect: (f32, f32, f32, f32), x: f32, y: f32, w: f32, h: f32, min_y: Option<f32>, clip_rect: Option<(f32, f32, f32, f32)>) -> (f32, f32, f32, f32) {
     let (anim_x, anim_y, anim_w, anim_h) = anim_rect;
-    let cx1 = x.max(anim_x);
-    let cy1 = y.max(anim_y).max(min_y.unwrap_or(f32::NEG_INFINITY));
-    let cx2 = (x + w).min(anim_x + anim_w);
-    let cy2 = (y + h).min(anim_y + anim_h);
+    let (clip_x, clip_y, clip_w, clip_h) = clip_rect.unwrap_or((f32::NEG_INFINITY, f32::NEG_INFINITY, f32::INFINITY, f32::INFINITY));
+    let cx1 = x.max(anim_x).max(clip_x);
+    let cy1 = y.max(anim_y).max(min_y.unwrap_or(f32::NEG_INFINITY)).max(clip_y);
+    let cx2 = (x + w).min(anim_x + anim_w).min(clip_x + clip_w);
+    let cy2 = (y + h).min(anim_y + anim_h).min(clip_y + clip_h);
     (cx1, cy1, (cx2 - cx1).max(0.0), (cy2 - cy1).max(0.0))
 }
 
@@ -484,6 +476,7 @@ impl Renderer {
         ui_registry: &mut UiRegistry,
         attached_hover_w: f32,
         attached_hover_h: f32,
+        clip_rect: Option<(f32, f32, f32, f32)>,
         mx: f32,
         my: f32,
         wants_pointer: &mut bool,
@@ -754,6 +747,7 @@ impl Renderer {
                 w,
                 h,
                 min_y,
+                clip_rect,
             );
             unsafe {
                 gl.enable(glow::SCISSOR_TEST);
@@ -1173,6 +1167,7 @@ impl Renderer {
         wants_pointer: &mut bool,
         opacity: f32,
         stable_size: Option<(f32, f32)>,
+        clip_rect: Option<(f32, f32, f32, f32)>,
     ) -> (f32, f32, f32, f32, f32) {
         let s = self.scale_factor;
         let opacity = opacity.clamp(0.0, 1.0);
@@ -1298,6 +1293,7 @@ impl Renderer {
                 w,
                 h,
                 None,
+                clip_rect,
             );
             unsafe {
                 gl.enable(glow::SCISSOR_TEST);
@@ -1385,6 +1381,7 @@ impl Renderer {
                         code_w,
                         code_h,
                         None,
+                        clip_rect,
                     );
                     if code_w > 0.0 && code_h > 0.0 {
                         self.push_rounded_rect(
@@ -1566,6 +1563,8 @@ impl Renderer {
             let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);
             let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
             let thumb_alpha = if fixed_visible_size { 0.34 } else { 0.2 };
+            let scrollbar_clipped = clip_rect.is_some();
+            if scrollbar_clipped { self.flush(); apply_scissor(&self.gl, self.height, bx, by, box_w, box_h); }
 
             self.push_rounded_rect(
                 bx + box_w - 8.0 * s,
@@ -1588,6 +1587,7 @@ impl Renderer {
             if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
                 ui_registry.reset_cursor_state();
             }
+            if scrollbar_clipped { self.flush(); unsafe { self.gl.disable(glow::SCISSOR_TEST); } }
         }
 
         (bx, by, box_w, box_h, max_scroll)

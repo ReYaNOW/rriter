@@ -22,12 +22,24 @@ static EVENTS: LazyLock<Mutex<Vec<ApiMockServerEvent>>> = LazyLock::new(|| Mutex
 
 struct ApiMockServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
+    snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
 }
 
 #[derive(Clone)]
 struct ApiMockAxumState {
-    snapshot: Arc<ApiMockServerSnapshot>,
+    snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
     proxy_client: reqwest::Client,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MultipartValue {
+    Text(String),
+    File {
+        filename: String,
+        content_type: Option<String>,
+        content_base64: String,
+        size: usize,
+    },
 }
 
 pub fn drain_api_mock_server_events() -> Vec<ApiMockServerEvent> {
@@ -46,14 +58,36 @@ pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), Stri
     }
 
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
+    let snapshot = Arc::new(Mutex::new(snapshot));
+    let thread_snapshot = Arc::clone(&snapshot);
     std::thread::Builder::new()
         .name("rriter-api-mock".to_string())
-        .spawn(move || run_server_thread(snapshot, shutdown_rx))
+        .spawn(move || run_server_thread(thread_snapshot, shutdown_rx))
         .map_err(|err| err.to_string())?;
     *server = Some(ApiMockServerHandle {
         shutdown: Some(shutdown_tx),
+        snapshot,
     });
     Ok(())
+}
+
+pub fn update_api_mock_server_snapshot(snapshot: ApiMockServerSnapshot) -> Result<bool, String> {
+    let server = SERVER
+        .lock()
+        .map_err(|_| "Mock server lock failed".to_string())?;
+    let Some(handle) = server.as_ref() else {
+        return Ok(false);
+    };
+    let mut current = handle
+        .snapshot
+        .lock()
+        .map_err(|_| "Mock server snapshot lock failed".to_string())?;
+    if *current == snapshot {
+        return Ok(false);
+    }
+    *current = snapshot;
+    push_log_event("server config hot-updated");
+    Ok(true)
 }
 
 pub fn stop_api_mock_server() {
@@ -75,7 +109,10 @@ pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiM
     }
 }
 
-fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Receiver<()>) {
+fn run_server_thread(
+    snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
+    shutdown_rx: oneshot::Receiver<()>,
+) {
     push_log_event("tokio runtime: creating multi-thread runtime");
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
@@ -92,7 +129,17 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
 
     runtime.block_on(async move {
         push_log_event("bind address: resolving");
-        let addr = match socket_addr(&snapshot.bind_host, snapshot.port) {
+        let bind_snapshot = match snapshot.lock() {
+            Ok(snapshot) => snapshot.clone(),
+            Err(_) => {
+                push_event(ApiMockServerEvent::Failed(
+                    "Mock server snapshot lock failed".to_string(),
+                ));
+                clear_server_handle();
+                return;
+            }
+        };
+        let addr = match socket_addr(&bind_snapshot.bind_host, bind_snapshot.port) {
             Ok(addr) => addr,
             Err(err) => {
                 push_event(ApiMockServerEvent::Failed(err));
@@ -118,7 +165,7 @@ fn run_server_thread(snapshot: ApiMockServerSnapshot, shutdown_rx: oneshot::Rece
         }
         push_log_event("axum router: building fallback router");
         let state = ApiMockAxumState {
-            snapshot: Arc::new(snapshot),
+            snapshot,
             proxy_client: reqwest::Client::new(),
         };
         let app = Router::new()
@@ -146,6 +193,23 @@ async fn handle_mock_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    let snapshot = match state.snapshot.lock() {
+        Ok(snapshot) => snapshot.clone(),
+        Err(_) => {
+            let response = response_text(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "text/plain",
+                "mock server snapshot lock failed",
+            );
+            push_request_event(
+                method.as_str(),
+                uri.path(),
+                response.status().as_u16(),
+                "snapshot_error",
+            );
+            return response;
+        }
+    };
     let Some(api_method) = api_method_from_http(&method) else {
         let response = response_text(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -161,38 +225,29 @@ async fn handle_mock_request(
         return response;
     };
     let path = uri.path();
-    match resolve_api_mock_route(
-        &state.snapshot.routes,
-        state.snapshot.mode,
-        api_method,
-        path,
-    ) {
+    match resolve_api_mock_route(&snapshot.routes, snapshot.mode, api_method, path) {
         ApiMockRouteDecision::Mock(route) => {
             if let Some(script) = route.python.as_ref().filter(|script| script.enabled) {
                 let request = python_request(&method, &uri, &headers, &body, route);
-                let response =
-                    match call_python_route(&state.snapshot.python_runtime, script, request) {
-                        Ok(output) => {
-                            let status =
-                                StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
-                            let mut builder = Response::builder()
-                                .status(status)
-                                .header("content-type", output.content_type);
-                            for (name, value) in output.headers {
-                                if let Ok(name) = HeaderName::from_bytes(name.as_bytes())
-                                    && let Ok(value) = HeaderValue::from_str(&value)
-                                {
-                                    builder = builder.header(name, value);
-                                }
+                let response = match call_python_route(&snapshot.python_runtime, script, request) {
+                    Ok(output) => {
+                        let status = StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
+                        let mut builder = Response::builder()
+                            .status(status)
+                            .header("content-type", output.content_type);
+                        for (name, value) in output.headers {
+                            if let Ok(name) = HeaderName::from_bytes(name.as_bytes())
+                                && let Ok(value) = HeaderValue::from_str(&value)
+                            {
+                                builder = builder.header(name, value);
                             }
-                            builder
-                                .body(Body::from(output.body))
-                                .unwrap_or_else(|_| Response::new(Body::empty()))
                         }
-                        Err(err) => {
-                            response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err)
-                        }
-                    };
+                        builder
+                            .body(Body::from(output.body))
+                            .unwrap_or_else(|_| Response::new(Body::empty()))
+                    }
+                    Err(err) => response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err),
+                };
                 push_request_event(method.as_str(), path, response.status().as_u16(), "python");
                 return response;
             }
@@ -205,7 +260,15 @@ async fn handle_mock_request(
         ApiMockRouteDecision::Proxy => {
             let method_label = method.as_str().to_string();
             let path_label = path.to_string();
-            let response = proxy_request(state, method, uri, headers, body).await;
+            let response = proxy_request(
+                state.proxy_client.clone(),
+                snapshot.proxy_base_url,
+                method,
+                uri,
+                headers,
+                body,
+            )
+            .await;
             push_request_event(
                 &method_label,
                 &path_label,
@@ -215,6 +278,26 @@ async fn handle_mock_request(
             response
         }
         ApiMockRouteDecision::NotFound => {
+            if should_proxy_unmatched(&snapshot) {
+                let method_label = method.as_str().to_string();
+                let path_label = path.to_string();
+                let response = proxy_request(
+                    state.proxy_client.clone(),
+                    snapshot.proxy_base_url,
+                    method,
+                    uri,
+                    headers,
+                    body,
+                )
+                .await;
+                push_request_event(
+                    &method_label,
+                    &path_label,
+                    response.status().as_u16(),
+                    "proxy",
+                );
+                return response;
+            }
             let response =
                 response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found");
             push_request_event(
@@ -288,9 +371,9 @@ fn request_body_values(
         return (fields_value.clone(), fields_value);
     }
     if lower_content_type.contains("multipart/form-data")
-        && let Some(pairs) = multipart_pairs(body, content_type)
+        && let Some(parts) = multipart_values(body, content_type)
     {
-        let fields = values_from_pairs(&pairs, &route.contract.body.fields);
+        let fields = values_from_multipart(&parts, &route.contract.body.fields);
         let fields_value = map_to_value(&fields);
         return (fields_value.clone(), fields_value);
     }
@@ -320,7 +403,10 @@ fn form_pairs(body: &Bytes) -> BTreeMap<String, Vec<String>> {
     out
 }
 
-fn multipart_pairs(body: &Bytes, content_type: &str) -> Option<BTreeMap<String, Vec<String>>> {
+fn multipart_values(
+    body: &Bytes,
+    content_type: &str,
+) -> Option<BTreeMap<String, Vec<MultipartValue>>> {
     let boundary = content_type
         .split(';')
         .filter_map(|part| part.trim().strip_prefix("boundary="))
@@ -329,27 +415,58 @@ fn multipart_pairs(body: &Bytes, content_type: &str) -> Option<BTreeMap<String, 
     if boundary.is_empty() {
         return None;
     }
-    let marker = format!("--{boundary}");
-    let text = std::str::from_utf8(body).ok()?;
-    let mut out = BTreeMap::<String, Vec<String>>::new();
-    for raw_part in text.split(&marker).skip(1) {
-        let part = raw_part.trim_start_matches("\r\n");
-        if part.starts_with("--") {
+    let marker = format!("--{boundary}").into_bytes();
+    let bytes = body.as_ref();
+    let mut cursor = find_bytes(bytes, &marker)?;
+    let mut out = BTreeMap::<String, Vec<MultipartValue>>::new();
+    loop {
+        cursor = cursor.saturating_add(marker.len());
+        if bytes
+            .get(cursor..cursor.saturating_add(2))
+            .is_some_and(|tail| tail == b"--")
+        {
             break;
         }
-        let Some((header_text, value_text)) = part.split_once("\r\n\r\n") else {
+        if bytes
+            .get(cursor..cursor.saturating_add(2))
+            .is_some_and(|tail| tail == b"\r\n")
+        {
+            cursor = cursor.saturating_add(2);
+        }
+        let Some(header_len) = find_bytes(&bytes[cursor..], b"\r\n\r\n") else {
+            break;
+        };
+        let header_end = cursor.saturating_add(header_len);
+        let value_start = header_end.saturating_add(4);
+        let Some(next_marker) = find_bytes(&bytes[value_start..], &marker) else {
+            break;
+        };
+        let mut value_end = value_start.saturating_add(next_marker);
+        if value_end >= 2
+            && bytes
+                .get(value_end - 2..value_end)
+                .is_some_and(|tail| tail == b"\r\n")
+        {
+            value_end -= 2;
+        }
+        let header_text = String::from_utf8_lossy(&bytes[cursor..header_end]);
+        let Some(name) = multipart_field_name(&header_text) else {
+            cursor = value_start.saturating_add(next_marker);
             continue;
         };
-        let Some(name) = multipart_field_name(header_text) else {
-            continue;
+        let value_bytes = &bytes[value_start..value_end];
+        let value = if let Some(filename) = multipart_file_name(&header_text) {
+            MultipartValue::File {
+                filename,
+                content_type: multipart_content_type(&header_text),
+                content_base64: base64_encode(value_bytes),
+                size: value_bytes.len(),
+            }
+        } else {
+            MultipartValue::Text(String::from_utf8_lossy(value_bytes).into_owned())
         };
-        let value = multipart_file_name(header_text).unwrap_or_else(|| {
-            value_text
-                .trim_end_matches("\r\n")
-                .trim_end_matches("--")
-                .to_string()
-        });
         out.entry(name).or_default().push(value);
+        cursor = value_start.saturating_add(next_marker);
     }
     Some(out)
 }
@@ -360,6 +477,16 @@ fn multipart_field_name(headers: &str) -> Option<String> {
 
 fn multipart_file_name(headers: &str) -> Option<String> {
     multipart_disposition_value(headers, "filename")
+}
+
+fn multipart_content_type(headers: &str) -> Option<String> {
+    headers.lines().find_map(|line| {
+        let line = line.trim();
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case("content-type")
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
 }
 
 fn multipart_disposition_value(headers: &str, key: &str) -> Option<String> {
@@ -385,6 +512,45 @@ fn multipart_disposition_value(headers: &str, key: &str) -> Option<String> {
     None
 }
 
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(0);
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    let mut idx = 0usize;
+    while idx + 3 <= bytes.len() {
+        let n =
+            ((bytes[idx] as u32) << 16) | ((bytes[idx + 1] as u32) << 8) | bytes[idx + 2] as u32;
+        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
+        out.push(TABLE[(n & 0x3f) as usize] as char);
+        idx += 3;
+    }
+    let rem = bytes.len().saturating_sub(idx);
+    if rem == 1 {
+        let n = (bytes[idx] as u32) << 16;
+        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
+        out.push('=');
+        out.push('=');
+    } else if rem == 2 {
+        let n = ((bytes[idx] as u32) << 16) | ((bytes[idx + 1] as u32) << 8);
+        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
+        out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
+        out.push('=');
+    }
+    out
+}
+
 fn values_from_pairs(
     pairs: &BTreeMap<String, Vec<String>>,
     fields: &[ApiMockContractField],
@@ -394,6 +560,22 @@ fn values_from_pairs(
         let value = pairs
             .get(&field.name)
             .map(|values| typed_value_from_strings(field, values))
+            .or_else(|| super::contract::api_mock_default_json(field))
+            .unwrap_or(Value::Null);
+        insert_contract_value(&mut out, field, value);
+    }
+    out
+}
+
+fn values_from_multipart(
+    parts: &BTreeMap<String, Vec<MultipartValue>>,
+    fields: &[ApiMockContractField],
+) -> BTreeMap<String, Value> {
+    let mut out = BTreeMap::new();
+    for field in fields.iter().filter(|field| field.enabled) {
+        let value = parts
+            .get(&field.name)
+            .map(|values| typed_value_from_multipart(field, values))
             .or_else(|| super::contract::api_mock_default_json(field))
             .unwrap_or(Value::Null);
         insert_contract_value(&mut out, field, value);
@@ -449,6 +631,49 @@ fn typed_value_from_strings(field: &ApiMockContractField, values: &[String]) -> 
         .unwrap_or(Value::Null)
 }
 
+fn typed_value_from_multipart(field: &ApiMockContractField, values: &[MultipartValue]) -> Value {
+    if matches!(field.kind, ApiMockContractFieldKind::File) {
+        return values
+            .iter()
+            .rev()
+            .find_map(multipart_file_value)
+            .unwrap_or(Value::Null);
+    }
+    if matches!(field.kind, ApiMockContractFieldKind::Array)
+        && matches!(field.item_kind, Some(ApiMockContractFieldKind::File))
+    {
+        return Value::Array(values.iter().filter_map(multipart_file_value).collect());
+    }
+    let strings: Vec<_> = values.iter().map(multipart_value_text).collect();
+    typed_value_from_strings(field, &strings)
+}
+
+fn multipart_file_value(value: &MultipartValue) -> Option<Value> {
+    let MultipartValue::File {
+        filename,
+        content_type,
+        content_base64,
+        size,
+    } = value
+    else {
+        return None;
+    };
+    Some(json!({
+        "__rriter_type": "file",
+        "filename": filename,
+        "content_type": content_type,
+        "content_base64": content_base64,
+        "size": size,
+    }))
+}
+
+fn multipart_value_text(value: &MultipartValue) -> String {
+    match value {
+        MultipartValue::Text(text) => text.clone(),
+        MultipartValue::File { filename, .. } => filename.clone(),
+    }
+}
+
 fn typed_scalar_value(kind: ApiMockContractFieldKind, value: &str) -> Value {
     match kind {
         ApiMockContractFieldKind::Integer => value
@@ -471,9 +696,9 @@ fn typed_scalar_value(kind: ApiMockContractFieldKind, value: &str) -> Value {
         | ApiMockContractFieldKind::Any => {
             serde_json::from_str(value).unwrap_or_else(|_| Value::String(value.to_string()))
         }
-        ApiMockContractFieldKind::String | ApiMockContractFieldKind::Bytes => {
-            Value::String(value.to_string())
-        }
+        ApiMockContractFieldKind::String
+        | ApiMockContractFieldKind::Bytes
+        | ApiMockContractFieldKind::File => Value::String(value.to_string()),
     }
 }
 
@@ -486,13 +711,14 @@ fn map_to_value(map: &BTreeMap<String, Value>) -> Value {
 }
 
 async fn proxy_request(
-    state: ApiMockAxumState,
+    proxy_client: reqwest::Client,
+    proxy_base_url: String,
     method: Method,
     uri: Uri,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let Some(url) = proxy_url(&state.snapshot.proxy_base_url, &uri) else {
+    let Some(url) = proxy_url(&proxy_base_url, &uri) else {
         return response_text(
             StatusCode::BAD_GATEWAY,
             "text/plain",
@@ -506,7 +732,7 @@ async fn proxy_request(
             "invalid method",
         );
     };
-    let mut request = state.proxy_client.request(req_method, url).body(body);
+    let mut request = proxy_client.request(req_method, url).body(body);
     for (name, value) in headers.iter() {
         if safe_proxy_header(name)
             && let Ok(value) = reqwest::header::HeaderValue::from_bytes(value.as_bytes())
@@ -578,6 +804,11 @@ fn proxy_url(base: &str, uri: &Uri) -> Option<String> {
     Some(format!("{}{}", base, path))
 }
 
+fn should_proxy_unmatched(snapshot: &ApiMockServerSnapshot) -> bool {
+    snapshot.mode != super::types::ApiMockMode::MockSelectedOnly
+        && !snapshot.proxy_base_url.trim().is_empty()
+}
+
 fn safe_proxy_header(name: &HeaderName) -> bool {
     !matches!(
         name.as_str().to_ascii_lowercase().as_str(),
@@ -636,6 +867,27 @@ mod tests {
     }
 
     #[test]
+    fn unmatched_paths_proxy_with_base_url_except_selected_only() {
+        let mut snapshot = ApiMockServerSnapshot {
+            bind_host: "127.0.0.1".to_string(),
+            port: 4010,
+            mode: crate::app::api_mock::types::ApiMockMode::MockAll,
+            proxy_base_url: "https://backend.test".to_string(),
+            python_runtime: Default::default(),
+            routes: Vec::new(),
+        };
+
+        assert!(should_proxy_unmatched(&snapshot));
+        snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
+        assert!(should_proxy_unmatched(&snapshot));
+        snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockSelectedOnly;
+        assert!(!should_proxy_unmatched(&snapshot));
+        snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockAll;
+        snapshot.proxy_base_url.clear();
+        assert!(!should_proxy_unmatched(&snapshot));
+    }
+
+    #[test]
     fn hop_by_hop_headers_are_not_proxied() {
         assert!(!safe_proxy_header(&HeaderName::from_static("connection")));
         assert!(!safe_proxy_header(&HeaderName::from_static("host")));
@@ -656,5 +908,41 @@ mod tests {
         let values = values_from_pairs(&pairs, &[field]);
 
         assert_eq!(values.get("page"), Some(&serde_json::json!(2)));
+    }
+
+    #[test]
+    fn multipart_file_values_keep_metadata_and_content() {
+        let body = Bytes::from_static(
+            b"--rr\r\nContent-Disposition: form-data; name=\"image\"; filename=\"avatar.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n\x00\xff\x10\r\n--rr\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\npic\r\n--rr--\r\n",
+        );
+        let parts = multipart_values(&body, "multipart/form-data; boundary=rr").expect("parts");
+        let image = crate::app::api_mock::types::ApiMockContractField::new(
+            "image",
+            crate::app::api_mock::types::ApiMockContractFieldKind::File,
+            true,
+        );
+        let title = crate::app::api_mock::types::ApiMockContractField::new(
+            "title",
+            crate::app::api_mock::types::ApiMockContractFieldKind::String,
+            false,
+        );
+
+        let values = values_from_multipart(&parts, &[image, title]);
+        let image = values.get("image").expect("image");
+
+        assert_eq!(
+            image.get("filename"),
+            Some(&serde_json::json!("avatar.bin"))
+        );
+        assert_eq!(
+            image.get("content_type"),
+            Some(&serde_json::json!("application/octet-stream"))
+        );
+        assert_eq!(
+            image.get("content_base64"),
+            Some(&serde_json::json!("AP8Q"))
+        );
+        assert_eq!(image.get("size"), Some(&serde_json::json!(3)));
+        assert_eq!(values.get("title"), Some(&serde_json::json!("pic")));
     }
 }

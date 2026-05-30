@@ -11,6 +11,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
 mod main_keys;
+pub(crate) use editor_keys::paired_editor_insert_text;
 
 fn terminal_key_sequence(
     physical_key: PhysicalKey,

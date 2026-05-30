@@ -1,6 +1,233 @@
+fn api_editor_at_vertical_edge(editor: &Editor, down: bool) -> bool {
+    let line_idx = editor
+        .line_offsets
+        .partition_point(|&offset| offset <= editor.cursor)
+        .saturating_sub(1);
+    if down {
+        line_idx >= editor.line_offsets.len().saturating_sub(1)
+    } else {
+        line_idx == 0
+    }
+}
+
+fn api_mock_adjacent_python_part(part: ApiMockSourcePart, down: bool) -> Option<ApiMockSourcePart> {
+    match (part, down) {
+        (ApiMockSourcePart::Prelude, true) => Some(ApiMockSourcePart::Contract),
+        (ApiMockSourcePart::Contract, true) => Some(ApiMockSourcePart::Body),
+        (ApiMockSourcePart::Body, false) => Some(ApiMockSourcePart::Contract),
+        (ApiMockSourcePart::Contract, false) => Some(ApiMockSourcePart::Prelude),
+        _ => None,
+    }
+}
+
+fn api_mock_focus_for_part(route_idx: usize, part: ApiMockSourcePart) -> Option<ApiFocus> {
+    match part {
+        ApiMockSourcePart::Contract => Some(ApiFocus::MockContract { route_idx }),
+        ApiMockSourcePart::Prelude => Some(ApiFocus::MockPrelude { route_idx }),
+        ApiMockSourcePart::Body => Some(ApiFocus::MockBody { route_idx }),
+        ApiMockSourcePart::Signature => None,
+    }
+}
+
+fn api_mock_alt_enter_route_target(
+    mock_python_target: Option<(usize, ApiMockSourcePart)>,
+    alt: bool,
+    is_enter: bool,
+) -> Option<usize> {
+    if alt && is_enter {
+        mock_python_target.map(|(route_idx, _)| route_idx)
+    } else {
+        None
+    }
+}
+
+fn api_mock_tools_queue_route_after_key(
+    before: Option<(usize, ApiMockSourcePart)>,
+    after: Option<(usize, ApiMockSourcePart)>,
+    version_before: u64,
+    version_after: u64,
+) -> Option<usize> {
+    if before == after && version_before != version_after {
+        before.map(|(route_idx, _)| route_idx)
+    } else {
+        None
+    }
+}
+
 impl crate::app::App {
+    fn api_mock_request_wants_server(&self, route_idx: usize) -> bool {
+        match self.ide_panel.api.mock.mode {
+            crate::app::api_mock::types::ApiMockMode::MockAll => {
+                !self.api_route_override(route_idx).is_some_and(|route| {
+                    route.proxy_when_disabled
+                        || (!route.enabled
+                            && route.python.is_none()
+                            && matches!(
+                                &route.response,
+                                crate::app::api_mock::types::ApiMockResponse::Generated
+                            ))
+                })
+            }
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => true,
+            crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => self
+                .api_route_override(route_idx)
+                .is_some_and(|route| route.enabled),
+        }
+    }
+
+    fn api_mock_server_running(&self) -> bool {
+        matches!(
+            self.ide_panel.api.mock.server_status,
+            crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
+        )
+    }
+
+    fn api_mock_job_target(&self, route_idx: usize) -> ApiJobMockTarget {
+        match self.ide_panel.api.mock.mode {
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => {
+                if self
+                    .api_route_override(route_idx)
+                    .is_some_and(|route| route.enabled)
+                {
+                    ApiJobMockTarget::Mock
+                } else {
+                    ApiJobMockTarget::Proxy
+                }
+            }
+            crate::app::api_mock::types::ApiMockMode::MockAll
+            | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => ApiJobMockTarget::Mock,
+        }
+    }
+
+    fn api_server_proxy_base_url(server: &ApiServer) -> String {
+        let mut server_url = server.url.clone();
+        for var in &server.variables {
+            let needle = format!("{{{}}}", var.name);
+            server_url = server_url.replace(&needle, &var.default_value);
+        }
+        if server_url == "/" {
+            server_url = "http://localhost".to_string();
+        }
+        server_url.trim_end_matches('/').to_string()
+    }
+
+    fn sync_api_mock_proxy_base_to_server(&mut self, server: &ApiServer) -> bool {
+        let proxy_base_url = Self::api_server_proxy_base_url(server);
+        if proxy_base_url.is_empty() || self.ide_panel.api.mock.proxy_base_url == proxy_base_url {
+            return false;
+        }
+        self.ide_panel.api.mock.proxy_base_url = proxy_base_url;
+        self.ide_panel.api.persist();
+        true
+    }
+
+    pub(crate) fn sync_api_mock_proxy_base_to_active_server(&mut self) -> bool {
+        let Some((meta, state)) = self.active_api_tab() else {
+            return false;
+        };
+        let selected_server = self
+            .ide_panel
+            .api
+            .models
+            .get(&meta.spec_id)
+            .and_then(|model| {
+                model
+                    .servers
+                    .get(state.server_idx)
+                    .or_else(|| model.servers.first())
+            })
+            .cloned();
+        selected_server
+            .as_ref()
+            .is_some_and(|server| self.sync_api_mock_proxy_base_to_server(server))
+    }
+
+    pub(crate) fn refresh_api_mock_server_snapshot(&mut self) {
+        let snapshot = self.ide_panel.api.mock_server_snapshot();
+        if let Err(err) = update_api_mock_server_snapshot(snapshot) {
+            push_api_mock_server_log(
+                &mut self.ide_panel.api,
+                format!("server config update failed: {err}"),
+            );
+        }
+    }
+
+    pub(crate) fn copy_hover_popup_selection_or_diagnostic(&mut self) -> bool {
+        let mouse = self
+            .renderer
+            .as_ref()
+            .map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
+        let mut copied_text: Option<String> = None;
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if let (Some(popup), Some(a), Some(b)) = (
+                state.popup.as_ref(),
+                state.selection_anchor,
+                state.selection_cursor,
+            ) {
+                let start = a.min(b);
+                let end = a.max(b);
+                if start < end
+                    && end <= popup.text.len()
+                    && popup.text.is_char_boundary(start)
+                    && popup.text.is_char_boundary(end)
+                {
+                    copied_text = Some(popup.text[start..end].to_string());
+                    state.selection_anchor = None;
+                    state.selection_cursor = None;
+                    state.selecting = false;
+                }
+            }
+            if copied_text.is_none()
+                && let (Some(a), Some(b)) =
+                    (state.diag_selection_anchor, state.diag_selection_cursor)
+            {
+                let start = a.min(b);
+                let end = a.max(b);
+                if start < end
+                    && end <= state.diag_text.len()
+                    && state.diag_text.is_char_boundary(start)
+                    && state.diag_text.is_char_boundary(end)
+                {
+                    copied_text = Some(state.diag_text[start..end].to_string());
+                    state.diag_selection_anchor = None;
+                    state.diag_selection_cursor = None;
+                    state.diag_selecting = false;
+                }
+            }
+            if copied_text.is_none()
+                && let (Some((mx, my)), Some((rx, ry, rw, rh, _, _, _))) = (mouse, state.diag_rect)
+                && mx >= rx
+                && mx <= rx + rw
+                && my >= ry
+                && my <= ry + rh
+                && !state.diag_text.is_empty()
+            {
+                copied_text = Some(state.diag_text.clone());
+            }
+        });
+        if let Some(text) = copied_text {
+            self.set_clipboard_text(text);
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        if key_event.state == winit::event::ElementState::Pressed
+            && ctrl
+            && key_event.physical_key
+                == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC)
+            && self.active_tab_is_api_client()
+            && self.copy_hover_popup_selection_or_diagnostic()
+        {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
+        }
         if key_event.state == winit::event::ElementState::Pressed
             && ctrl
             && key_event.physical_key
@@ -11,6 +238,12 @@ impl crate::app::App {
             return true;
         }
         if self.ide_panel.api.focused.is_none() {
+            if key_event.state == winit::event::ElementState::Pressed
+                && key_event.physical_key
+                    == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F2)
+            {
+                return false;
+            }
             return self.active_tab_is_api_client();
         }
         let active = self
@@ -23,14 +256,30 @@ impl crate::app::App {
             return true;
         }
         let shift = self.modifiers.shift_key();
-        if self.api_mock_python_focus_target().is_some() && self.autocomplete_active {
+        let mock_python_target = self.api_mock_python_focus_target();
+        let is_enter_key = matches!(
+            key_event.physical_key,
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter)
+        );
+        if let Some(route_idx) = api_mock_alt_enter_route_target(
+            mock_python_target,
+            self.modifiers.alt_key(),
+            is_enter_key,
+        ) {
+            self.start_api_mock_route_tools_now(route_idx);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
+        }
+        if mock_python_target.is_some() && self.autocomplete_active {
             match self.handle_active_autocomplete_key(key_event.physical_key, ctrl) {
                 crate::app::AutocompletePopupKeyResult::Consumed => return true,
                 crate::app::AutocompletePopupKeyResult::Continue
                 | crate::app::AutocompletePopupKeyResult::NotHandled => {}
             }
         }
-        let mock_python_target = self.api_mock_python_focus_target();
         if mock_python_target.is_some()
             && self.mark_pending_autocomplete_apply_for_key(key_event.physical_key)
         {
@@ -42,6 +291,7 @@ impl crate::app::App {
             self.ide_panel.api.focused,
             Some(
                 ApiFocus::Body { .. }
+                    | ApiFocus::MockContract { .. }
                     | ApiFocus::MockPrelude { .. }
                     | ApiFocus::MockBody { .. }
                     | ApiFocus::MockStaticResponse { .. }
@@ -51,7 +301,14 @@ impl crate::app::App {
             self.ide_panel.api.focused,
             Some(ApiFocus::MockSignature { .. })
         );
-        let is_response = matches!(self.ide_panel.api.focused, Some(ApiFocus::Response { .. }));
+        let is_response = matches!(
+            self.ide_panel.api.focused,
+            Some(
+                ApiFocus::Response { .. }
+                    | ApiFocus::InputSchema { .. }
+                    | ApiFocus::OutputSchema { .. }
+            )
+        );
         let is_readonly = is_response || is_signature;
         let is_array = self
             .ide_panel
@@ -154,6 +411,20 @@ impl crate::app::App {
                 if is_readonly {
                 } else if is_array && !ctrl {
                     backspace_api_array_editor(&mut self.ide_panel.api.input_editor);
+                } else if !ctrl && matches!(mock_python_target, Some((_, ApiMockSourcePart::Body)))
+                {
+                    backspace_api_mock_body_editor(&mut self.ide_panel.api.input_editor);
+                } else if !ctrl
+                    && self.ide_panel.api.input_editor.cursor == 0
+                    && self
+                        .ide_panel
+                        .api
+                        .input_editor
+                        .selection_anchor
+                        .is_none_or(|anchor| anchor == 0)
+                    && let Some((route_idx, part)) = mock_python_target
+                    && self.focus_previous_api_mock_python_part(route_idx, part)
+                {
                 } else if ctrl {
                     self.ide_panel.api.input_editor.delete_word_backward();
                 } else {
@@ -180,6 +451,26 @@ impl crate::app::App {
                     self.ide_panel.api.input_editor.move_word_right(shift);
                 } else {
                     self.ide_panel.api.input_editor.move_right(shift);
+                }
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp)
+                if mock_python_target.is_some() =>
+            {
+                let jumped = mock_python_target.is_some_and(|(route_idx, part)| {
+                    self.move_api_mock_python_vertical_or_focus(route_idx, part, false, shift)
+                });
+                if !jumped {
+                    move_api_input_vertical(&mut self.ide_panel.api.input_editor, false, shift);
+                }
+            }
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowDown)
+                if mock_python_target.is_some() =>
+            {
+                let jumped = mock_python_target.is_some_and(|(route_idx, part)| {
+                    self.move_api_mock_python_vertical_or_focus(route_idx, part, true, shift)
+                });
+                if !jumped {
+                    move_api_input_vertical(&mut self.ide_panel.api.input_editor, true, shift);
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowUp)
@@ -215,15 +506,26 @@ impl crate::app::App {
                     } else {
                         text.replace('\n', "").replace('\r', "")
                     };
-                    let _ = self.ide_panel.api.input_editor.insert_str(&clean);
+                    let (insert_text, move_inside_pair) = if mock_python_target.is_some() {
+                        crate::app::keyboard::paired_editor_insert_text(&clean)
+                    } else {
+                        (clean.as_str(), false)
+                    };
+                    let _ = self.ide_panel.api.input_editor.insert_str(insert_text);
+                    if move_inside_pair {
+                        self.ide_panel.api.input_editor.move_left(false);
+                    }
                     typed_text = Some(clean);
                 }
             }
             _ => {}
         }
-        if let Some((route_idx, _)) = mock_python_target
-            && self.ide_panel.api.input_editor.version != input_version_before
-        {
+        if let Some(route_idx) = api_mock_tools_queue_route_after_key(
+            mock_python_target,
+            self.api_mock_python_focus_target(),
+            input_version_before,
+            self.ide_panel.api.input_editor.version,
+        ) {
             self.queue_api_mock_python_tools(route_idx);
             if let Some(text) = typed_text.as_deref()
                 && (matches!(text, "." | "(" | ",")
@@ -250,6 +552,13 @@ impl crate::app::App {
                 }
             }
         }
+        if matches!(
+            self.ide_panel.api.focused,
+            Some(ApiFocus::MockContractField { .. })
+        ) && self.ide_panel.api.input_editor.version != input_version_before
+        {
+            self.commit_api_focus();
+        }
         if let Some((id, multiline)) = self
             .ide_panel
             .api
@@ -268,6 +577,32 @@ impl crate::app::App {
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
+        true
+    }
+
+    fn move_api_mock_python_vertical_or_focus(
+        &mut self,
+        route_idx: usize,
+        part: ApiMockSourcePart,
+        down: bool,
+        shift: bool,
+    ) -> bool {
+        if shift || !api_editor_at_vertical_edge(&self.ide_panel.api.input_editor, down) {
+            return false;
+        }
+        let Some(next_part) = api_mock_adjacent_python_part(part, down) else {
+            return false;
+        };
+        let Some(next_focus) = api_mock_focus_for_part(route_idx, next_part) else {
+            return false;
+        };
+        self.focus_api_input(next_focus);
+        if down {
+            self.ide_panel.api.input_editor.cursor = 0;
+        } else {
+            self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
+        }
+        self.ide_panel.api.input_editor.selection_anchor = None;
         true
     }
 
@@ -325,6 +660,8 @@ impl crate::app::App {
         else {
             return;
         };
+        let wants_mock_server = self.api_mock_request_wants_server(route_idx);
+        let use_mock_server = wants_mock_server && self.api_mock_server_running();
         let method = route.method;
         let path = route.path.clone();
         let is_json_body = route
@@ -343,8 +680,64 @@ impl crate::app::App {
         let query_values = state.query_values.clone();
         let body_values = state.body_values.clone();
         let body_json_text = state.body_json.clone();
-        let server = server.clone();
-        if route.method.can_send_body() && is_json_body && !json_body_is_valid(&body_json_text) {
+        let selected_server = server.clone();
+        let auth_parts = prepared_auth_for_route(model, route, &self.ide_panel.api.auth);
+        let proxy_url_for_reach = if use_mock_server {
+            build_request_url(&selected_server, &path, &path_values, &query_values)
+                .ok()
+                .map(|mut url| {
+                    append_auth_query(&mut url, &auth_parts);
+                    url
+                })
+        } else {
+            None
+        };
+        let body_multipart = (method.can_send_body() && is_multipart_body)
+            .then(|| api_multipart_parts_for_route(route, model, &body_values));
+        let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
+        let body_json = (method.can_send_body() && is_json_body)
+            .then_some(body_json_text.clone())
+            .filter(|body| !body.trim().is_empty());
+        if wants_mock_server && !use_mock_server {
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                state.response = Some(ApiJobResponse {
+                    request_id: 0,
+                    spec_id,
+                    route_idx,
+                    status: None,
+                    elapsed_ms: 0,
+                    server_reach_ms: None,
+                    timing_text: String::new(),
+                    headers: Vec::new(),
+                    headers_text: String::new(),
+                    body: String::new(),
+                    truncated: false,
+                    error: Some(ApiLoadError::new(
+                        ApiLoadErrorKind::Other,
+                        "Мок-сервер не запущен",
+                    )),
+                    resolved_host: None,
+                });
+            }
+            return;
+        }
+        if matches!(
+            self.ide_panel.api.mock.server_status,
+            crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
+        ) {
+            self.sync_api_mock_proxy_base_to_server(&selected_server);
+            self.refresh_api_mock_server_snapshot();
+        }
+        let server = if use_mock_server {
+            ApiServer {
+                url: api_mock_lan_url(&self.ide_panel.api.mock),
+                description: String::new(),
+                variables: Vec::new(),
+            }
+        } else {
+            selected_server
+        };
+        if method.can_send_body() && is_json_body && !json_body_is_valid(&body_json_text) {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                 state.response = Some(ApiJobResponse {
                     request_id: 0,
@@ -390,14 +783,7 @@ impl crate::app::App {
                 return;
             }
         };
-        let auth_parts = prepared_auth_for_route(model, route, &self.ide_panel.api.auth);
         append_auth_query(&mut url, &auth_parts);
-        let body_multipart = (method.can_send_body() && is_multipart_body)
-            .then(|| api_multipart_parts_for_route(route, model, &body_values));
-        let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
-        let body_json = (method.can_send_body() && is_json_body)
-            .then_some(body_json_text)
-            .filter(|body| !body.trim().is_empty());
         let request_id = self.ide_panel.api.next_request_id.max(1);
         self.ide_panel.api.next_request_id = request_id.saturating_add(1).max(1);
         let job = ApiJobRequest {
@@ -405,8 +791,16 @@ impl crate::app::App {
             spec_id,
             route_idx,
             method,
-            resolved_host: resolve_api_url_host(&url),
+            resolved_host: proxy_url_for_reach
+                .as_ref()
+                .and_then(|url| resolve_api_url_host(url))
+                .or_else(|| resolve_api_url_host(&url)),
             url,
+            mock_target: if use_mock_server {
+                self.api_mock_job_target(route_idx)
+            } else {
+                ApiJobMockTarget::None
+            },
             auth_parts,
             body_json,
             body_form,
@@ -443,6 +837,31 @@ impl crate::app::App {
             return;
         }
         let spec_id = meta.spec_id;
+        if !self.api_mock_server_running() {
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                state.route_idx = Some(manual_idx);
+                state.response = Some(ApiJobResponse {
+                    request_id: 0,
+                    spec_id,
+                    route_idx: manual_idx,
+                    status: None,
+                    elapsed_ms: 0,
+                    server_reach_ms: None,
+                    timing_text: String::new(),
+                    headers: Vec::new(),
+                    headers_text: String::new(),
+                    body: String::new(),
+                    truncated: false,
+                    error: Some(ApiLoadError::new(
+                        ApiLoadErrorKind::Other,
+                        "Мок-сервер не запущен",
+                    )),
+                    resolved_host: None,
+                });
+            }
+            return;
+        }
+        self.refresh_api_mock_server_snapshot();
         let server = ApiServer {
             url: api_mock_lan_url(&self.ide_panel.api.mock),
             description: String::new(),
@@ -481,6 +900,7 @@ impl crate::app::App {
             method: route.method,
             resolved_host: resolve_api_url_host(&url),
             url,
+            mock_target: ApiJobMockTarget::Mock,
             auth_parts: Vec::new(),
             body_json: None,
             body_form: None,
@@ -544,11 +964,7 @@ impl crate::app::App {
             {
                 let virtual_source =
                     build_api_mock_virtual_source(method, &path, &route, &model, &script);
-                self.refresh_api_mock_highlight_cache_for_spans(
-                    route_idx,
-                    &spans,
-                    &virtual_source,
-                );
+                self.refresh_api_mock_highlight_cache_for_spans(route_idx, &spans, &virtual_source);
                 self.ide_panel.api.mock_highlight_spans = self
                     .ide_panel
                     .api
@@ -775,6 +1191,7 @@ impl crate::app::App {
                             let id = payload.entry.id;
                             self.ide_panel.api.upsert_loaded(payload);
                             self.update_api_tabs_after_model_load(id);
+                            self.refresh_api_mock_server_snapshot();
                         }
                         Err(err) => self.ide_panel.api.mark_load_error(result.id, err),
                     }
@@ -822,6 +1239,15 @@ impl crate::app::App {
                 {
                     let route_idx = state.route_idx.unwrap_or(0).min(model.routes.len() - 1);
                     state.route_idx = Some(route_idx);
+                    if !state.auth_view {
+                        let route = &model.routes[route_idx];
+                        meta.route_identity = Some(ApiClientRouteIdentity::OpenApi {
+                            spec_id: id,
+                            route_idx,
+                        });
+                        meta.route_method = Some(route.method);
+                        meta.route_path = route.path.clone();
+                    }
                     if state.path_values.is_empty()
                         && state.query_values.is_empty()
                         && state.body_values.is_empty()

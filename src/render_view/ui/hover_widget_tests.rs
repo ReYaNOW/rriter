@@ -395,7 +395,7 @@ fn test_combined_diagnostic_background_does_not_cover_moving_top_border() {
 
     let anim_scissor = compute_animated_scissor(220.0, 520.0, 100.0, 100.0, 500.0, 300.0, 0.65);
     let (_bg_x, bg_y, _bg_w, bg_h) =
-        compute_hover_scissor_rect(anim_scissor, 100.0, 100.0, 500.0, 180.0, Some(frame_y));
+        compute_hover_scissor_rect(anim_scissor, 100.0, 100.0, 500.0, 180.0, Some(frame_y), None);
     assert_eq!(bg_y, frame_y);
     assert!(bg_h > 0.0);
 }
@@ -417,9 +417,24 @@ fn test_hover_type_content_scissor_does_not_cover_bottom_border() {
         content.2,
         content.3,
         None,
+        None,
     );
     assert_eq!(scissor, content);
     assert_eq!(scissor.1 + scissor.3, 399.0);
+}
+
+#[test]
+fn test_hover_type_content_scissor_respects_parent_code_clip() {
+    let scissor = compute_hover_scissor_rect(
+        (90.0, 90.0, 520.0, 320.0),
+        100.0,
+        100.0,
+        500.0,
+        300.0,
+        None,
+        Some((80.0, 160.0, 420.0, 100.0)),
+    );
+    assert_eq!(scissor, (100.0, 160.0, 400.0, 100.0));
 }
 
 #[test]

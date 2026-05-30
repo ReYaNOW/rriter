@@ -20,6 +20,7 @@ mod about;
 mod source_hover;
 pub(crate) use source_hover::apply_source_hover_response_to_state;
 pub(crate) use source_hover::module_path_from_definition_path;
+pub(crate) use source_hover::prepend_hover_module_path;
 pub(crate) use source_hover::source_class_signature_from_definition_file;
 pub(crate) use source_hover::source_function_signature_from_text;
 use source_hover::*;
@@ -530,6 +531,7 @@ impl ApplicationHandler for App {
                     self.last_frame = Instant::now();
                     self.close_autocomplete();
                     self.is_dragging = false;
+                    self.is_editor_drag_pending = false;
                     self.scroll_x.is_dragging = false;
                     self.scroll_y.is_dragging = false;
                     crate::app::mouse::suppress_hover_popup_until_mouse_move(
@@ -935,8 +937,7 @@ impl ApplicationHandler for App {
                             };
                             let (box_w, box_h) =
                                 self.stable_autocomplete_detail_size(natural_w, natural_h, max_h);
-                            let detail_byte_offset =
-                                self.active_autocomplete_detail_byte_offset();
+                            let detail_byte_offset = self.active_autocomplete_detail_byte_offset();
                             let detail_phys_line = self
                                 .active_autocomplete_detail_editor()
                                 .line_offsets
@@ -988,8 +989,7 @@ impl ApplicationHandler for App {
                             popup.offset_y = Some(popup_y - line_top_y);
                             popup.anim_progress = detail_anim_progress;
                             let selection = self.autocomplete_detail_selection();
-                            let use_api_detail_editor =
-                                self.api_mock_completion_focus().is_some();
+                            let use_api_detail_editor = self.api_mock_completion_focus().is_some();
                             let detail_editor = if use_api_detail_editor {
                                 &self.ide_panel.api.input_editor
                             } else {
@@ -1010,6 +1010,7 @@ impl ApplicationHandler for App {
                                 &mut wants_pointer,
                                 detail_opacity,
                                 Some((box_w, box_h)),
+                                None,
                             );
                             if let Some(start) = perf_detail_draw_start {
                                 perf_detail_draw_ms = start.elapsed().as_secs_f64() * 1000.0;

@@ -190,6 +190,12 @@ mod tests {
         ));
         assert!(!editor.is_dirty());
 
+        editor.set_git_base_text(Some("root\n    child\n\n\tgrand\n".to_string()));
+        let kid_start = editor.get_full_text().find("kid").unwrap();
+        editor.replace_range(kid_start, kid_start + "kid".len(), "child");
+        assert!(editor.get_line_modification_state(1).is_none());
+        assert!(editor.is_dirty());
+
         let mut folds = Editor::new(64);
         folds.insert_str("aaa\nbbb\nccc\n");
         folds.foldable_ranges_bytes.push((0, 8, false));

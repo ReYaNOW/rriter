@@ -1,16 +1,24 @@
 use crate::app::api_client::{
-    API_BODY_TEXT_SCALE, ApiFocus, ApiParam, ApiResponseView, ApiSchema,
-    ApiSchemaKind, ApiSecuritySchemeKind, api_array_edit_parts, api_array_value_parts,
-    api_auth_related_route_count, api_auth_route_rank, api_auth_scheme_row_height,
-    api_body_text_area_height, api_response_text, api_response_text_area_height,
+    API_BODY_TEXT_SCALE, ApiFocus, ApiInputDocView, ApiOutputDocView, ApiParam,
+    ApiResponseView, ApiSchema, ApiSchemaKind, ApiSecuritySchemeKind, api_array_edit_parts,
+    api_array_value_parts, api_route_input_media_count, api_route_input_media_label,
+    api_mock_input_schema_summary, api_mock_input_schema_text, api_route_input_schema_summary,
+    api_route_input_schema_text,
+    api_route_output_example_count, api_route_output_example_menu_label,
+    api_route_output_example_text_for, api_route_output_media_count,
+    api_route_output_schema_summary, api_route_output_schema_text_for, api_auth_related_route_count,
+    api_auth_route_rank, api_auth_scheme_row_height, api_body_text_area_height, api_response_text,
+    api_response_text_area_height, api_route_input_view_height,
     api_route_auth_missing, api_route_auth_scheme_indices, api_schema_allowed_values,
-    api_generated_response_for_route, api_mock_body_editor_text, api_mock_lan_url,
+    api_generated_response_for_route, api_manual_route_model, api_mock_body_editor_text,
     api_schema_is_array_input,
     api_schema_is_file_input, api_schema_is_multi_file_input, api_text_area_baseline_offset,
     api_text_area_line_height, api_text_area_max_scroll_x, api_text_area_top_from_baseline,
     json_body_is_valid, write_api_path_display,
 };
-use crate::app::api_mock::contract::api_mock_handler_signature_text;
+use crate::app::api_mock::contract::{
+    api_mock_contract_from_state_text, api_mock_handler_signature_text,
+};
 use crate::app::api_mock::ty_check::ApiMockSourcePart;
 use crate::app::api_mock::types::api_mock_effective_contract;
 use crate::renderer::Renderer;
@@ -21,6 +29,7 @@ const API_SECTION_TITLE_SCALE: f32 = 0.92;
 const API_FIELD_NAME_SCALE: f32 = 0.94;
 const API_FIELD_TYPE_SCALE: f32 = 0.84;
 const API_FIELD_VALUE_SCALE: f32 = 0.88;
+pub(crate) const API_ONE_LINE_INPUT_SCALE: f32 = API_FIELD_VALUE_SCALE;
 const API_FIELD_META_SCALE: f32 = 0.78;
 #[derive(Clone, Copy)]
 struct ApiFieldRowLayout {
@@ -71,7 +80,7 @@ fn api_centered_text_y(y: f32, h: f32, scale: f32) -> f32 {
 }
 
 fn api_split_label_text_y(y: f32, h: f32, scale: f32, bottom: bool) -> f32 {
-    y + h * if bottom { 0.74 } else { 0.30 } + 4.5 * scale
+    y + h * if bottom { 0.80 } else { 0.30 } + 4.5 * scale
 }
 
 fn response_auth_token_flags(response: &crate::app::api_client::ApiJobResponse) -> (bool, bool) {
@@ -109,6 +118,21 @@ fn json_string_end(line: &str, start: usize) -> usize {
 fn json_string_is_property(line: &str, string_end: usize) -> bool {
     let bytes = line.as_bytes();
     let mut idx = string_end;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    bytes.get(idx).is_some_and(|b| *b == b':')
+}
+
+fn schema_string_is_key(line: &str, string_end: usize) -> bool {
+    let bytes = line.as_bytes();
+    let mut idx = string_end;
+    while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+        idx += 1;
+    }
+    if bytes.get(idx).is_some_and(|b| *b == b'*') {
+        idx += 1;
+    }
     while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
         idx += 1;
     }
@@ -170,6 +194,7 @@ fn api_primitive_type_text(kind: crate::app::api_client::ApiPrimitiveType) -> &'
         crate::app::api_client::ApiPrimitiveType::String => ApiSchemaKind::String,
         crate::app::api_client::ApiPrimitiveType::Date => ApiSchemaKind::Date,
         crate::app::api_client::ApiPrimitiveType::DateTime => ApiSchemaKind::DateTime,
+        crate::app::api_client::ApiPrimitiveType::Time => ApiSchemaKind::Time,
         crate::app::api_client::ApiPrimitiveType::Integer => ApiSchemaKind::Integer,
         crate::app::api_client::ApiPrimitiveType::Number => ApiSchemaKind::Number,
         crate::app::api_client::ApiPrimitiveType::Boolean => ApiSchemaKind::Boolean,
@@ -187,6 +212,7 @@ fn api_schema_type_text(kind: ApiSchemaKind) -> &'static str {
         ApiSchemaKind::String => "string",
         ApiSchemaKind::Date => "date",
         ApiSchemaKind::DateTime => "date-time",
+        ApiSchemaKind::Time => "time",
         ApiSchemaKind::Integer => "int",
         ApiSchemaKind::Number => "number",
         ApiSchemaKind::Boolean => "bool",

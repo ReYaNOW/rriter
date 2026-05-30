@@ -2,7 +2,7 @@ use crate::app::api_mock::contract::api_mock_default_handler_body;
 use crate::app::api_mock::persist::{load_api_mocks, save_api_mocks};
 use crate::app::api_mock::server::{
     apply_api_mock_server_event, drain_api_mock_server_events, start_api_mock_server,
-    stop_api_mock_server,
+    stop_api_mock_server, update_api_mock_server_snapshot,
 };
 use crate::app::api_mock::ty_check::{
     ApiMockSourcePart, ApiMockTyDiagnostic, build_api_mock_virtual_source, spawn_api_mock_ty_check,
@@ -19,6 +19,7 @@ use crate::scroll::ScrollState;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt::Write as _;
 use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -322,6 +323,7 @@ pub enum ApiPrimitiveType {
     String,
     Date,
     DateTime,
+    Time,
     Integer,
     Number,
     Boolean,
@@ -347,6 +349,7 @@ impl ApiPrimitiveType {
             return match schema.get("format").and_then(Value::as_str) {
                 Some("date") => Self::Date,
                 Some("date-time") => Self::DateTime,
+                Some("time") => Self::Time,
                 _ => Self::String,
             };
         }
@@ -368,6 +371,13 @@ pub struct ApiRequestBody {
     pub schema: Option<ApiSchemaRef>,
     pub is_multipart: bool,
     pub is_form_urlencoded: bool,
+    pub media: Vec<ApiRequestBodyMedia>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiRequestBodyMedia {
+    pub content_type: String,
+    pub schema: Option<ApiSchemaRef>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -376,6 +386,7 @@ pub struct ApiSchemaRef(pub usize);
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiSchema {
     pub name: String,
+    pub description: String,
     pub kind: ApiSchemaKind,
     pub properties: Vec<ApiSchemaProperty>,
     pub item: Option<ApiSchemaRef>,
@@ -393,6 +404,7 @@ pub enum ApiSchemaKind {
     String,
     Date,
     DateTime,
+    Time,
     Integer,
     Number,
     Boolean,
@@ -422,6 +434,21 @@ pub struct ApiResponseSummary {
     pub content_type: String,
     pub example: Option<String>,
     pub schema: Option<ApiSchemaRef>,
+    pub media: Vec<ApiResponseMedia>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiResponseMedia {
+    pub content_type: String,
+    pub example: Option<String>,
+    pub examples: Vec<ApiResponseExample>,
+    pub schema: Option<ApiSchemaRef>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiResponseExample {
+    pub label: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -482,6 +509,8 @@ pub struct ApiClientTabMeta {
     pub spec_id: ApiSpecId,
     pub title: String,
     pub route_identity: Option<ApiClientRouteIdentity>,
+    pub route_method: Option<ApiMethod>,
+    pub route_path: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -502,6 +531,26 @@ pub enum ApiResponseView {
     Headers,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApiInputDocView {
+    #[default]
+    Input,
+    Schema,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApiOutputDocView {
+    #[default]
+    Example,
+    Schema,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ApiSchemaPaneFocus {
+    Input,
+    Output,
+}
+
 #[derive(Clone, Debug)]
 pub struct ApiClientTabState {
     pub route_idx: Option<usize>,
@@ -513,6 +562,18 @@ pub struct ApiClientTabState {
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
     pub response_view: ApiResponseView,
+    pub input_doc_view: ApiInputDocView,
+    pub output_doc_view: ApiOutputDocView,
+    pub input_schema_idx: usize,
+    pub input_schema_menu_open: bool,
+    pub output_status_idx: usize,
+    pub output_example_idx: usize,
+    pub output_schema_idx: usize,
+    pub output_schema_menu_open: bool,
+    pub output_schema_menu_anim: f32,
+    pub output_schema_menu_scroll: ScrollState,
+    pub input_schema_collapsed: FxHashSet<String>,
+    pub output_schema_collapsed: FxHashSet<String>,
     pub pending: bool,
     pub pending_request_id: Option<u64>,
     pub tab_scroll: ScrollState,
@@ -520,6 +581,7 @@ pub struct ApiClientTabState {
     pub body_scroll_x: ScrollState,
     pub response_scroll: ScrollState,
     pub response_scroll_x: ScrollState,
+    pub focused_schema_pane: Option<ApiSchemaPaneFocus>,
     pub view_scrolls: Vec<ApiViewScrollMemory>,
     pub route_states: Vec<ApiRouteStateMemory>,
 }
@@ -541,6 +603,16 @@ pub struct ApiRouteStateMemory {
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
     pub response_view: ApiResponseView,
+    pub input_doc_view: ApiInputDocView,
+    pub output_doc_view: ApiOutputDocView,
+    pub input_schema_idx: usize,
+    pub input_schema_menu_open: bool,
+    pub output_status_idx: usize,
+    pub output_example_idx: usize,
+    pub output_schema_idx: usize,
+    pub output_schema_menu_open: bool,
+    pub input_schema_collapsed: FxHashSet<String>,
+    pub output_schema_collapsed: FxHashSet<String>,
     pub pending: bool,
     pub pending_request_id: Option<u64>,
 }
@@ -557,6 +629,18 @@ impl Default for ApiClientTabState {
             body_json: "{\n  \n}".to_string(),
             response: None,
             response_view: ApiResponseView::Body,
+            input_doc_view: ApiInputDocView::Input,
+            output_doc_view: ApiOutputDocView::Example,
+            input_schema_idx: 0,
+            input_schema_menu_open: false,
+            output_status_idx: 0,
+            output_example_idx: 0,
+            output_schema_idx: 0,
+            output_schema_menu_open: false,
+            output_schema_menu_anim: 0.0,
+            output_schema_menu_scroll: ScrollState::new(7.0),
+            input_schema_collapsed: FxHashSet::default(),
+            output_schema_collapsed: FxHashSet::default(),
             pending: false,
             pending_request_id: None,
             tab_scroll: ScrollState::new(7.0),
@@ -564,6 +648,7 @@ impl Default for ApiClientTabState {
             body_scroll_x: ScrollState::new(7.0),
             response_scroll: ScrollState::new(7.0),
             response_scroll_x: ScrollState::new(7.0),
+            focused_schema_pane: None,
             view_scrolls: Vec::new(),
             route_states: Vec::new(),
         }
@@ -583,6 +668,16 @@ impl ApiClientTabState {
             body_json: self.body_json.clone(),
             response: self.response.clone(),
             response_view: self.response_view,
+            input_doc_view: self.input_doc_view,
+            output_doc_view: self.output_doc_view,
+            input_schema_idx: self.input_schema_idx,
+            input_schema_menu_open: self.input_schema_menu_open,
+            output_status_idx: self.output_status_idx,
+            output_example_idx: self.output_example_idx,
+            output_schema_idx: self.output_schema_idx,
+            output_schema_menu_open: self.output_schema_menu_open,
+            input_schema_collapsed: self.input_schema_collapsed.clone(),
+            output_schema_collapsed: self.output_schema_collapsed.clone(),
             pending: self.pending,
             pending_request_id: self.pending_request_id,
         };
@@ -613,6 +708,23 @@ impl ApiClientTabState {
         self.body_json = saved.body_json;
         self.response = saved.response;
         self.response_view = saved.response_view;
+        self.input_doc_view = saved.input_doc_view;
+        self.output_doc_view = saved.output_doc_view;
+        self.input_schema_idx = saved.input_schema_idx;
+        self.input_schema_menu_open = saved.input_schema_menu_open;
+        self.output_status_idx = saved.output_status_idx;
+        self.output_example_idx = saved.output_example_idx;
+        self.output_schema_idx = saved.output_schema_idx;
+        self.output_schema_menu_open = saved.output_schema_menu_open;
+        self.output_schema_menu_anim = if self.output_schema_menu_open {
+            1.0
+        } else {
+            0.0
+        };
+        self.output_schema_menu_scroll.current = 0.0;
+        self.output_schema_menu_scroll.target = 0.0;
+        self.input_schema_collapsed = saved.input_schema_collapsed;
+        self.output_schema_collapsed = saved.output_schema_collapsed;
         self.pending = saved.pending;
         self.pending_request_id = saved.pending_request_id;
         self.body_scroll.current = 0.0;
@@ -623,6 +735,7 @@ impl ApiClientTabState {
         self.response_scroll.target = 0.0;
         self.response_scroll_x.current = 0.0;
         self.response_scroll_x.target = 0.0;
+        self.focused_schema_pane = None;
         true
     }
 
@@ -672,6 +785,16 @@ impl PartialEq for ApiClientTabState {
             && self.body_json == other.body_json
             && self.response == other.response
             && self.response_view == other.response_view
+            && self.input_doc_view == other.input_doc_view
+            && self.output_doc_view == other.output_doc_view
+            && self.input_schema_idx == other.input_schema_idx
+            && self.input_schema_menu_open == other.input_schema_menu_open
+            && self.output_status_idx == other.output_status_idx
+            && self.output_example_idx == other.output_example_idx
+            && self.output_schema_idx == other.output_schema_idx
+            && self.output_schema_menu_open == other.output_schema_menu_open
+            && self.input_schema_collapsed == other.input_schema_collapsed
+            && self.output_schema_collapsed == other.output_schema_collapsed
             && self.pending == other.pending
             && self.pending_request_id == other.pending_request_id
             && self.route_states == other.route_states
@@ -705,6 +828,12 @@ pub enum ApiFocus {
     MockStaticResponse {
         route_idx: usize,
     },
+    MockContractField {
+        route_idx: usize,
+        group: crate::ui_system::ApiMockContractFieldGroup,
+        field_idx: usize,
+        prop: crate::ui_system::ApiMockContractFieldProp,
+    },
     AuthValue {
         spec_id: ApiSpecId,
         scheme: String,
@@ -737,6 +866,14 @@ pub enum ApiFocus {
         name: String,
     },
     Body {
+        spec_id: ApiSpecId,
+        route_idx: usize,
+    },
+    InputSchema {
+        spec_id: ApiSpecId,
+        route_idx: usize,
+    },
+    OutputSchema {
         spec_id: ApiSpecId,
         route_idx: usize,
     },
@@ -819,6 +956,7 @@ pub struct ApiClientState {
     pub import_url_open: bool,
     pub import_error: Option<String>,
     pub import_error_at: Option<u64>,
+    pub spec_remove_dialog: Option<ApiSpecRemoveDialog>,
     pub loading: FxHashSet<ApiSpecId>,
     pub collapsed_tags: FxHashSet<(ApiSpecId, String)>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
@@ -832,6 +970,7 @@ pub struct ApiClientState {
     pub mock_guide_open: bool,
     pub mock_guide_scroll: ScrollState,
     pub mock_server_detail_open: bool,
+    pub mock_server_url_copied_at: Option<Instant>,
     pub mock_server_logs: Vec<ApiMockServerLogLine>,
     pub mock_server_log_scroll: ScrollState,
     pub mock_python_runtime_open: bool,
@@ -842,6 +981,9 @@ pub struct ApiClientState {
     pub mock_python_install_running: bool,
     pub mock_python_install_log: Vec<ApiPythonInstallLogLine>,
     pub mock_python_install_log_scroll: ScrollState,
+    pub mock_route_reset_dialog: Option<ApiMockRouteResetDialog>,
+    pub mock_contract_field_delete_dialog: Option<ApiMockContractFieldDeleteDialog>,
+    pub mock_contract_constraint_menu: Option<ApiMockContractConstraintMenu>,
     pub mock_ty_due: Option<Instant>,
     pub mock_ty_pending: Option<(usize, u64)>,
     pub mock_ty_diagnostics: Vec<ApiMockTyDiagnostic>,
@@ -862,6 +1004,34 @@ pub struct ApiClientState {
     python_version_list_rx: Option<Receiver<ApiPythonVersionListResult>>,
     python_install_rx: Option<Receiver<ApiPythonInstallEvent>>,
     python_path_pick_rx: Option<Receiver<ApiPythonPathPickResult>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiMockContractConstraintMenu {
+    pub route_idx: usize,
+    pub group: crate::ui_system::ApiMockContractFieldGroup,
+    pub field_idx: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiSpecRemoveDialog {
+    pub spec_id: ApiSpecId,
+    pub title: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiMockRouteResetDialog {
+    pub route_idx: usize,
+    pub route_label: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ApiMockContractFieldDeleteDialog {
+    pub route_idx: usize,
+    pub group: crate::ui_system::ApiMockContractFieldGroup,
+    pub field_idx: usize,
+    pub field_label: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -965,6 +1135,7 @@ impl Default for ApiClientState {
             import_url_open: false,
             import_error: None,
             import_error_at: None,
+            spec_remove_dialog: None,
             loading: FxHashSet::default(),
             collapsed_tags: FxHashSet::default(),
             collapsed_route_roots: FxHashSet::default(),
@@ -978,6 +1149,7 @@ impl Default for ApiClientState {
             mock_guide_open: false,
             mock_guide_scroll: ScrollState::new(7.0),
             mock_server_detail_open: false,
+            mock_server_url_copied_at: None,
             mock_server_logs: Vec::new(),
             mock_server_log_scroll: ScrollState::new(7.0),
             mock_python_runtime_open: false,
@@ -988,6 +1160,9 @@ impl Default for ApiClientState {
             mock_python_install_running: false,
             mock_python_install_log: Vec::new(),
             mock_python_install_log_scroll: ScrollState::new(7.0),
+            mock_route_reset_dialog: None,
+            mock_contract_field_delete_dialog: None,
+            mock_contract_constraint_menu: None,
             mock_ty_due: None,
             mock_ty_pending: None,
             mock_ty_diagnostics: Vec::new(),
@@ -1102,8 +1277,9 @@ impl ApiClientState {
     }
 
     pub fn mock_server_snapshot(&self) -> ApiMockServerSnapshot {
-        let specs = self.specs.iter().filter_map(|entry| {
-            let model = self.models.get(&entry.id)?;
+        let specs = self.selected_spec.into_iter().filter_map(|id| {
+            let entry = self.specs.iter().find(|entry| entry.id == id)?;
+            let model = self.models.get(&id)?;
             Some((entry, model))
         });
         ApiMockServerSnapshot {
@@ -1217,7 +1393,8 @@ fn api_focus_targets_active_tab(
         | ApiFocus::MockPrelude { .. }
         | ApiFocus::MockBody { .. }
         | ApiFocus::MockSignature { .. }
-        | ApiFocus::MockStaticResponse { .. } => true,
+        | ApiFocus::MockStaticResponse { .. }
+        | ApiFocus::MockContractField { .. } => true,
         ApiFocus::AuthValue { spec_id, .. }
         | ApiFocus::AuthRefreshToken { spec_id, .. }
         | ApiFocus::AuthUsername { spec_id, .. }
@@ -1234,6 +1411,8 @@ fn api_focus_targets_active_tab(
             spec_id, route_idx, ..
         }
         | ApiFocus::Body { spec_id, route_idx }
+        | ApiFocus::InputSchema { spec_id, route_idx }
+        | ApiFocus::OutputSchema { spec_id, route_idx }
         | ApiFocus::Response { spec_id, route_idx } => {
             active.is_some_and(|(active_spec, active_route)| {
                 active_spec == *spec_id && active_route == Some(*route_idx)

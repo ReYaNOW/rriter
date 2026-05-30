@@ -569,6 +569,8 @@ mod tests {
                     spec_id: crate::app::api_client::ApiSpecId(42),
                     route_idx: 7,
                 }),
+                route_method: None,
+                route_path: String::new(),
             },
             crate::app::api_client::ApiClientTabState {
                 route_idx: Some(7),
@@ -599,6 +601,8 @@ mod tests {
                 spec_id: crate::app::api_client::ApiSpecId(42),
                 title: "Auth".to_string(),
                 route_identity: None,
+                route_method: None,
+                route_path: String::new(),
             },
             crate::app::api_client::ApiClientTabState {
                 auth_view: true,
@@ -954,6 +958,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         last_blink_state: true,
         modifiers: ModifiersState::empty(),
         is_dragging: false,
+        is_editor_drag_pending: false,
         is_focused: true,
         render_suspended: false,
         current_cursor: winit::window::CursorIcon::Default,

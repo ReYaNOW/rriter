@@ -324,6 +324,7 @@ pub(crate) fn build_tree_sitter_autocomplete_options(
     if options.len() == 1 && options[0].0.word == prefix {
         options.clear();
     }
+    options.extend(api_mock_contract_constraint_options(ctx));
     enrich_python_tree_sitter_options(
         &mut options,
         ctx.file_extension,
@@ -545,6 +546,25 @@ impl App {
             return;
         }
         if prefix.is_empty() {
+            let local_options = {
+                let editor = self.autocomplete_editor_for_source(source);
+                let ctx = snapshot.editor_context(editor);
+                api_mock_contract_constraint_options(&ctx)
+            };
+            if !local_options.is_empty() {
+                self.autocomplete_options = local_options;
+                self.autocomplete_anim_progress = 0.0;
+                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
+                self.autocomplete_scroll.current = 0.0;
+                self.autocomplete_scroll.target = 0.0;
+                self.autocomplete_mode = AutocompleteMode::TreeSitter;
+                self.autocomplete_active = true;
+                self.autocomplete_selected_idx = 0;
+                self.autocomplete_hovered_idx = None;
+                self.refresh_autocomplete_detail_popup();
+                self.trace_autocomplete_state("update_ts:local_empty_prefix");
+                return;
+            }
             self.reset_autocomplete_for_empty_prefix();
             self.trace_autocomplete_state("update_ts:empty_prefix");
             return;
@@ -624,7 +644,23 @@ impl App {
     }
 
     pub fn apply_autocomplete(&mut self) {
-        if self.api_mock_completion_focus().is_some() && self.apply_api_mock_autocomplete() {
+        if let Some((route_idx, part)) = self.api_mock_completion_focus()
+            && self.apply_api_mock_autocomplete()
+        {
+            self.ide_panel.api.focused = Some(match part {
+                crate::app::api_mock::ty_check::ApiMockSourcePart::Contract => {
+                    crate::app::api_client::ApiFocus::MockContract { route_idx }
+                }
+                crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude => {
+                    crate::app::api_client::ApiFocus::MockPrelude { route_idx }
+                }
+                crate::app::api_mock::ty_check::ApiMockSourcePart::Body => {
+                    crate::app::api_client::ApiFocus::MockBody { route_idx }
+                }
+                crate::app::api_mock::ty_check::ApiMockSourcePart::Signature => {
+                    crate::app::api_client::ApiFocus::MockSignature { route_idx }
+                }
+            });
             return;
         }
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {

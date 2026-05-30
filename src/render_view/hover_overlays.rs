@@ -94,41 +94,16 @@ impl Renderer {
                 );
                 let hit_type_target = diag_hover_range.map(|range| range.2);
 
-                let mut x_start_px = 0.0f32;
-                let mut x_end_px = 0.0f32;
-                let mut cur_x = 0.0f32;
-                let mut start_found = false;
-                let mut end_found = false;
-                editor.utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
-                    if !start_found && utf16_before >= diag.start_col {
-                        x_start_px = cur_x;
-                        start_found = true;
-                    }
-                    if !end_found && utf16_before >= display_end_col {
-                        x_end_px = cur_x;
-                        end_found = true;
-                    }
-                    cur_x += if ch == '\t' {
-                        self.char_advance(' ') * 4.0
-                    } else {
-                        self.char_advance(ch)
-                    };
-                });
-                // Если col за концом строки — ставим на конец
-                if !start_found {
-                    x_start_px = cur_x;
-                }
-                if !end_found {
-                    x_end_px = if diag.end_line == diag.start_line {
-                        cur_x
-                    } else {
-                        cur_x.max(x_start_px + avg_adv * 4.0)
-                    };
+                let (x_start_px, start_byte) =
+                    self.visual_x_for_utf16_col(editor, line, diag.start_col, true);
+                let (mut x_end_px, end_byte) =
+                    self.visual_x_for_utf16_col(editor, line, display_end_col, false);
+                if diag.end_line != diag.start_line {
+                    x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
                 }
 
                 let x_start = self.left_padding + x_start_px - render_scroll_x;
                 let x_end = self.left_padding + x_end_px - render_scroll_x;
-                let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
                 let top_y = v_line.y_offset - render_scroll_y;
 
                 let mut in_hitbox = false;
@@ -145,15 +120,20 @@ impl Renderer {
                         {
                             in_hitbox = true;
                         }
-                    } else if mx >= x_start
-                        && mx <= x_start + squiggle_w
-                        && crate::app::mouse::hover_content_y_in_line_hitbox(
-                            hover_content_y,
-                            squiggle_hit_y_top,
-                            self.line_height,
-                        )
-                    {
-                        in_hitbox = true;
+                    } else if crate::app::mouse::hover_content_y_in_line_hitbox(
+                        hover_content_y,
+                        squiggle_hit_y_top,
+                        self.line_height,
+                    ) {
+                        let line_x = mx - self.left_padding + render_scroll_x;
+                        in_hitbox = self.visual_text_range_contains_x(
+                            editor,
+                            editor.line_offsets[line],
+                            start_byte,
+                            end_byte,
+                            line_x,
+                            avg_adv / 2.0,
+                        );
                     }
                 }
 
@@ -163,7 +143,8 @@ impl Renderer {
                             .with(|s| s.borrow().combined_type_target())
                             .or(hit_type_target)
                     } else {
-                        let line_x = mx - self.left_padding + render_scroll_x;
+                        let visual_line_x = mx - self.left_padding + render_scroll_x;
+                        let line_x = self.text_x_for_visual_line_x(editor, line, visual_line_x);
                         let target_under_cursor =
                             crate::app::mouse::diagnostic_hover_type_target_at_x(
                                 editor,
@@ -197,12 +178,50 @@ impl Renderer {
                     continue;
                 }
 
-                self.push_squiggle(
-                    x_start.max(self.left_padding),
-                    squiggle_y,
-                    squiggle_w,
-                    color,
-                );
+                let line_start = editor.line_offsets[line];
+                let mut segment_start_x_px = x_start_px;
+                let mut hint_idx = self
+                    .current_python_inlay_hints
+                    .partition_point(|hint| hint.byte_offset < start_byte);
+                let mut pushed_segment = false;
+                while hint_idx < self.current_python_inlay_hints.len() {
+                    let hint_offset = self.current_python_inlay_hints[hint_idx].byte_offset;
+                    if hint_offset >= end_byte {
+                        break;
+                    }
+                    let before_hint_x_px =
+                        self.visual_x_for_byte_offset(editor, line_start, hint_offset, false);
+                    let segment_w = before_hint_x_px - segment_start_x_px;
+                    if segment_w > avg_adv * 0.25 {
+                        self.push_squiggle(
+                            (self.left_padding + segment_start_x_px - render_scroll_x)
+                                .max(self.left_padding),
+                            squiggle_y,
+                            segment_w,
+                            color,
+                        );
+                        pushed_segment = true;
+                    }
+                    while hint_idx < self.current_python_inlay_hints.len()
+                        && self.current_python_inlay_hints[hint_idx].byte_offset == hint_offset
+                    {
+                        hint_idx += 1;
+                    }
+                    segment_start_x_px =
+                        self.visual_x_for_byte_offset(editor, line_start, hint_offset, true);
+                }
+
+                let min_final_w = if pushed_segment { 0.0 } else { avg_adv / 2.0 };
+                let final_w = (x_end_px - segment_start_x_px).max(min_final_w);
+                if final_w > 0.5 {
+                    self.push_squiggle(
+                        (self.left_padding + segment_start_x_px - render_scroll_x)
+                            .max(self.left_padding),
+                        squiggle_y,
+                        final_w,
+                        color,
+                    );
+                }
             }
             self.flush();
         }
@@ -222,6 +241,7 @@ impl Renderer {
         render_scroll_y: f32,
         mut hovered_diag_type_target: Option<usize>,
         wants_pointer: &mut bool,
+        clip_rect: Option<(f32, f32, f32, f32)>,
     ) {
         // --- LSP Diagnostic Tooltip ---
         let hovered_diags_cache_empty =
@@ -529,6 +549,7 @@ impl Renderer {
                 ui_registry,
                 attached_hover_w,
                 attached_hover_h,
+                clip_rect,
                 mx,
                 my,
                 wants_pointer,
@@ -559,6 +580,7 @@ impl Renderer {
                     wants_pointer,
                     1.0,
                     None,
+                    clip_rect,
                 );
                 crate::app::mouse::HOVER_STATE.with(|s| {
                     let mut state = s.borrow_mut();

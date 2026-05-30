@@ -34,6 +34,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         tab_drag: Option<&crate::app::TabDragState>,
+        api: &crate::app::api_client::ApiClientState,
         ide_workspaces: &[std::path::PathBuf],
     ) -> Option<(String, f32, f32)> {
         let tab_bar_bg = self.theme.minimap_bg;
@@ -59,9 +60,36 @@ impl Renderer {
             crate::app::tab_display_titles_for(tabs, active_tab, _editor_path, editor_title);
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
-        for title in &display_titles {
-            let title_w = self.measure_ui_width(title, 1.0);
-            tab_widths.push(tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s);
+        for (idx, title) in display_titles.iter().enumerate() {
+            if let crate::app::EditorTabKind::ApiClient(meta, _) = &tabs[idx].kind
+                && let Some(method) = meta.route_method
+            {
+                let api_title = if meta.title.is_empty() {
+                    "API"
+                } else {
+                    meta.title.as_str()
+                };
+                let mut path = String::new();
+                crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
+                let title_w = self.measure_ui_width(api_title, 1.0);
+                let chip_w = (self.measure_ui_width(method.chip_str(), 0.62) + 16.0 * s)
+                    .max(34.0 * s);
+                let path_w = self.measure_ui_width(&path, 0.88);
+                tab_widths.push(
+                    tab_pad * 2.0
+                        + icon_size_tab
+                        + 8.0 * s
+                        + title_w
+                        + 8.0 * s
+                        + chip_w
+                        + 8.0 * s
+                        + path_w
+                        + 30.0 * s,
+                );
+            } else {
+                let title_w = self.measure_ui_width(title, 1.0);
+                tab_widths.push(tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s);
+            }
         }
 
         let mut hovered_tab_tooltip = None;
@@ -173,7 +201,29 @@ impl Renderer {
                     hovered_tab_y = y + h;
                     current_hovered_idx = Some(i);
                 } else if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind {
-                    hovered_tab_tooltip = Some(format!("{} · API клиент", meta.title));
+                    let source = api.specs.iter().find(|entry| entry.id == meta.spec_id).map(
+                        |entry| match &entry.source {
+                            crate::app::api_client::ApiSpecSource::Local(path) => {
+                                path.to_string_lossy().into_owned()
+                            }
+                            crate::app::api_client::ApiSpecSource::Url(url) => url.clone(),
+                        },
+                    );
+                    let tooltip = if let Some(source) = source {
+                        if let Some(method) = meta.route_method {
+                            let mut path = String::new();
+                            crate::app::api_client::write_api_path_display(
+                                &meta.route_path,
+                                &mut path,
+                            );
+                            format!("{source} · {} {path}", method.chip_str())
+                        } else {
+                            source
+                        }
+                    } else {
+                        format!("{} · API клиент", meta.title)
+                    };
+                    hovered_tab_tooltip = Some(tooltip);
                     hovered_tab_x = current_x.max(x);
                     hovered_tab_y = y + h;
                     current_hovered_idx = Some(i);
@@ -255,7 +305,41 @@ impl Renderer {
                     self.theme.line_num
                 };
             let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
-            self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
+            if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind
+                && let Some(method) = meta.route_method
+            {
+                let api_title = if meta.title.is_empty() {
+                    "API"
+                } else {
+                    meta.title.as_str()
+                };
+                let mut path = String::new();
+                crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
+                self.draw_string_scaled(api_title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
+                let title_w = self.measure_ui_width(api_title, 1.0);
+                let chip_w = (self.measure_ui_width(method.chip_str(), 0.62) + 16.0 * s)
+                    .max(34.0 * s);
+                let chip_x = text_x + title_w + 8.0 * s;
+                let chip_h = 18.0 * s;
+                self.draw_api_method_chip(
+                    method,
+                    chip_x,
+                    y + (h - chip_h) * 0.5,
+                    chip_w,
+                    chip_h,
+                    s,
+                    0.62,
+                );
+                self.draw_string_scaled(
+                    &path,
+                    chip_x + chip_w + 8.0 * s,
+                    y + h / 2.0 + 5.0 * s,
+                    text_color,
+                    0.88,
+                );
+            } else {
+                self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
+            }
 
             let tab_right = current_x + tab_w;
             if tab_right > x && current_x < x + w {

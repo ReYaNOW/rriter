@@ -408,6 +408,21 @@ impl Renderer {
             let gutter_x = 48.0 * s + panel_left_w;
             let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
+            self.draw_api_client_tab(
+                tab_x,
+                tab_bar_h,
+                tab_w,
+                editor_height,
+                s,
+                editor,
+                ide_panel,
+                tab_meta,
+                tab_state,
+                ui_registry,
+                ui_mx,
+                ui_my,
+                blink_alpha,
+            );
             let tab_tooltip = self.draw_tab_bar(
                 tabs,
                 active_tab,
@@ -424,22 +439,8 @@ impl Renderer {
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
+                &ide_panel.api,
                 ide_workspaces,
-            );
-            self.draw_api_client_tab(
-                tab_x,
-                tab_bar_h,
-                tab_w,
-                editor_height,
-                s,
-                editor,
-                ide_panel,
-                tab_meta,
-                tab_state,
-                ui_registry,
-                ui_mx,
-                ui_my,
-                blink_alpha,
             );
             if is_ide_mode {
                 self.draw_status_bar(
@@ -472,6 +473,8 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
+            wants_pointer |=
+                self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
             self.draw_api_modal_overlays(s, &ide_panel.api, ui_registry, mx, my, blink_alpha);
             self.flush();
             self.register_root_resize_blockers(
@@ -799,9 +802,7 @@ impl Renderer {
             if m.bottom < 0.0 || m.top > real_height {
                 continue;
             }
-            let color = if matches!(m.kind, crate::render_view::ModIntervalKind::Deleted) {
-                self.theme.modified_unsaved
-            } else if git_line_mod_color
+            let color = if git_line_mod_color
                 || m.state == crate::editor::LineModState::ModifiedSaved
             {
                 self.theme.modified_saved
@@ -907,6 +908,7 @@ impl Renderer {
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
+                &ide_panel.api,
                 ide_workspaces,
             );
             self.flush();
@@ -1161,6 +1163,7 @@ impl Renderer {
                 render_scroll_y,
                 hovered_diag_type_target,
                 &mut wants_pointer,
+                None,
             );
         }
 

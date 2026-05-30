@@ -81,6 +81,7 @@ fn test_app() -> Option<App> {
         last_blink_state: true,
         modifiers: winit::keyboard::ModifiersState::empty(),
         is_dragging: false,
+        is_editor_drag_pending: false,
         is_focused: true,
         render_suspended: false,
         current_cursor: winit::window::CursorIcon::Default,

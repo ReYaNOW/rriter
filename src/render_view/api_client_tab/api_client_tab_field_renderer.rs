@@ -456,6 +456,81 @@ impl Renderer {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_api_one_line_input(
+        &mut self,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        shown: &str,
+        color: [f32; 4],
+        focused: bool,
+        input_scroll_x: f32,
+        editor: &crate::editor::Editor,
+        blink_alpha: f32,
+        id: crate::ui_system::UiId,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        text_scale: f32,
+    ) {
+        let x = x.round();
+        let y = y.round();
+        let w = w.round();
+        let h = h.round();
+        self.push_rounded_rect_border(
+            x,
+            y,
+            w,
+            h,
+            5.0 * s,
+            (1.0 * s).max(1.0),
+            if focused {
+                [0.60, 0.35, 0.85, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 0.12]
+            },
+            [0.13, 0.14, 0.18, 1.0],
+        );
+        ui_registry.register_text_input(id, x, y, w, h, mx, my);
+        let text_w = (w - 16.0 * s).max(1.0);
+        let scroll_x = if focused { input_scroll_x.round() } else { 0.0 };
+        if focused {
+            let sel_h = (h - 10.0 * s).max(16.0 * s);
+            self.draw_api_editor_selection_one_line(
+                editor,
+                x + 8.0 * s,
+                y + (h - sel_h) * 0.5,
+                text_w,
+                sel_h,
+                text_scale,
+                scroll_x,
+            );
+        }
+        self.draw_api_one_line_clipped(
+            shown,
+            x + 8.0 * s,
+            api_centered_text_y(y, h, s),
+            text_w,
+            scroll_x,
+            color,
+            text_scale,
+        );
+        if focused && blink_alpha > 0.5 {
+            let cursor_w = self.api_editor_cursor_x_one_line(editor, text_scale) - scroll_x;
+            let cursor_h = (h - 12.0 * s).max(16.0 * s);
+            self.push_rect(
+                x + 8.0 * s + cursor_w.clamp(0.0, text_w),
+                y + (h - cursor_h) * 0.5,
+                1.5 * s,
+                cursor_h,
+                self.theme.fg,
+            );
+        }
+    }
+
     fn draw_api_one_line_clipped(
         &mut self,
         text: &str,
@@ -481,6 +556,17 @@ impl Renderer {
                 break;
             }
         }
+    }
+
+    fn api_body_snapped_width(&mut self, text: &str) -> f32 {
+        text.chars()
+            .filter(|&ch| ch != '\u{FE0F}' && ch != '\u{200D}' && ch != '\n' && ch != '\r')
+            .map(|ch| {
+                self.get_ui_glyph(ch)
+                    .map(|g| Self::snapped_text_advance(g.advance, API_BODY_TEXT_SCALE))
+                    .unwrap_or(8.0)
+            })
+            .sum()
     }
 
     pub(crate) fn api_editor_cursor_x_one_line(
@@ -572,15 +658,9 @@ impl Renderer {
             }
             let sel_start = start.max(line_start).min(line_end);
             let sel_end = end.max(line_start).min(line_end);
-            let newline_selected = line_end < text.len() && start <= line_end && end > line_end;
-            if sel_start < sel_end || newline_selected {
+            if sel_start < sel_end {
                 let prefix = self.api_mono_width(&text[line_start..sel_start]) - scroll_x;
-                let text_w = if sel_start < sel_end {
-                    self.api_mono_width(&text[sel_start..sel_end])
-                } else {
-                    0.0
-                };
-                let raw_w = text_w + if newline_selected { 10.0 * s } else { 0.0 };
+                let raw_w = self.api_mono_width(&text[sel_start..sel_end]);
                 let x1 = (x + prefix).max(x);
                 let x2 = (x + prefix + raw_w).min(x + w);
                 if x2 > x1 {
@@ -628,6 +708,116 @@ impl Renderer {
                     return;
                 }
                 let cursor_x = self.api_mono_width(&text[line_start..cursor]) - scroll_x;
+                if cursor_x < -2.0 * s || cursor_x > w + 2.0 * s {
+                    return;
+                }
+                self.push_rect(
+                    x + cursor_x,
+                    y - line_offset + visible_idx as f32 * line_h,
+                    1.5 * s,
+                    line_h,
+                    self.theme.fg,
+                );
+                return;
+            }
+            line_start = line_end + 1;
+        }
+        if max_lines > 0 {
+            self.push_rect(x, y, 1.5 * s, line_h, self.theme.fg);
+        }
+    }
+
+    fn draw_api_editor_selection_multiline_ui(
+        &mut self,
+        editor: &crate::editor::Editor,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+    ) {
+        let Some(anchor) = editor.selection_anchor else {
+            return;
+        };
+        if anchor == editor.cursor {
+            return;
+        }
+        let text = editor.get_full_text();
+        let start = anchor.min(editor.cursor).min(text.len());
+        let end = anchor.max(editor.cursor).min(text.len());
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(&text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let mut line_start = 0usize;
+        for (line_idx, line) in text.split('\n').enumerate() {
+            let line_end = line_start + line.len();
+            if line_idx < first_line {
+                line_start = line_end.saturating_add(1);
+                continue;
+            }
+            let visible_idx = line_idx - first_line;
+            if visible_idx >= max_lines {
+                break;
+            }
+            let sel_start = start.max(line_start).min(line_end);
+            let sel_end = end.max(line_start).min(line_end);
+            if sel_start < sel_end {
+                let prefix = self.api_body_snapped_width(&text[line_start..sel_start]) - scroll_x;
+                let raw_w = self.api_body_snapped_width(&text[sel_start..sel_end]);
+                let x1 = (x + prefix).max(x);
+                let x2 = (x + prefix + raw_w).min(x + w);
+                if x2 > x1 {
+                    let sel_y = y - line_offset + visible_idx as f32 * line_h;
+                    self.push_rect(x1, sel_y, x2 - x1, line_h, self.theme.sel);
+                }
+            }
+            if end <= line_end {
+                break;
+            }
+            line_start = line_end + 1;
+        }
+    }
+
+    fn draw_api_editor_cursor_multiline_ui(
+        &mut self,
+        editor: &crate::editor::Editor,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+    ) {
+        let text = editor.get_full_text();
+        let cursor = editor.cursor.min(text.len());
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(&text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let mut line_start = 0usize;
+        for (line_idx, line) in text.split('\n').enumerate() {
+            let line_end = line_start + line.len();
+            if cursor <= line_end {
+                if line_idx < first_line {
+                    return;
+                }
+                let visible_idx = line_idx - first_line;
+                if visible_idx >= max_lines {
+                    return;
+                }
+                let cursor_x = self.api_body_snapped_width(&text[line_start..cursor]) - scroll_x;
                 if cursor_x < -2.0 * s || cursor_x > w + 2.0 * s {
                     return;
                 }
@@ -698,6 +888,259 @@ impl Renderer {
         }
     }
 
+    fn draw_api_schema_text_area(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+        _headers: bool,
+        fold_input: bool,
+        route_idx: usize,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(0.0, self.api_schema_text_max_scroll(text, w, h, s));
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let mut visual_line_idx = 0usize;
+        for (line_idx, line) in text.split('\n').enumerate() {
+            let wrap_count = self.api_schema_line_wrap_count(line, w);
+            if visual_line_idx + wrap_count <= first_line {
+                visual_line_idx += wrap_count;
+                continue;
+            }
+            if visual_line_idx >= first_line + max_lines {
+                break;
+            }
+            let visible_idx = visual_line_idx.saturating_sub(first_line);
+            let baseline_y = y - line_offset + visible_idx as f32 * line_h;
+            let trimmed = line.trim_start();
+            if matches!(trimmed.as_bytes().first(), Some(b'+' | b'-')) {
+                let id = if fold_input {
+                    crate::ui_system::UiId::ApiInputSchemaFold(route_idx, line_idx)
+                } else {
+                    crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, line_idx)
+                };
+                let indent_w = self.measure_ui_width(&line[..line.len() - trimmed.len()], API_BODY_TEXT_SCALE);
+                ui_registry.register_rect(
+                    id,
+                    x - scroll_x + indent_w,
+                    baseline_y - 17.0 * s,
+                    16.0 * s,
+                    line_h,
+                    mx,
+                    my,
+                );
+            }
+            self.draw_api_schema_wrapped_line(
+                line,
+                x - scroll_x,
+                y - line_offset,
+                w + scroll_x,
+                line_h,
+                visual_line_idx,
+                first_line,
+                max_lines,
+            );
+            visual_line_idx += wrap_count;
+        }
+    }
+
+    fn api_schema_text_max_scroll(&mut self, text: &str, w: f32, h: f32, s: f32) -> f32 {
+        let line_h = api_text_area_line_height(s);
+        let lines = text
+            .split('\n')
+            .map(|line| self.api_schema_line_wrap_count(line, w))
+            .sum::<usize>()
+            .max(1) as f32;
+        (lines * line_h - h).max(0.0)
+    }
+
+    fn api_schema_line_wrap_count(&mut self, line: &str, w: f32) -> usize {
+        let mut count = 1usize;
+        let mut current = line.trim_end();
+        let mut available_w = w;
+        let continuation_w = self.api_schema_continuation_width(line, w);
+        while self.measure_ui_width(current, API_BODY_TEXT_SCALE) > available_w && !current.is_empty() {
+            let (_, next_start) = self.api_schema_wrap_split(current, available_w);
+            let next = current[next_start..].trim_start();
+            if next.len() == current.len() {
+                break;
+            }
+            current = next;
+            available_w = continuation_w;
+            count = count.saturating_add(1);
+        }
+        count
+    }
+
+    fn api_schema_continuation_width(&mut self, line: &str, w: f32) -> f32 {
+        let indent = line.len() - line.trim_start().len();
+        let space_w = self.measure_ui_width(" ", API_BODY_TEXT_SCALE);
+        (w - indent as f32 * space_w - 2.0 * space_w).max(w * 0.5)
+    }
+
+    fn api_schema_wrap_split(&mut self, line: &str, available_w: f32) -> (usize, usize) {
+        let mut x = 0.0;
+        let mut last_soft = None;
+        for (byte_idx, ch) in line.char_indices() {
+            let mut buf = [0u8; 4];
+            let part = ch.encode_utf8(&mut buf);
+            let adv = self.measure_ui_width(part, API_BODY_TEXT_SCALE);
+            if x + adv > available_w && byte_idx > 0 {
+                let end = last_soft.unwrap_or(byte_idx);
+                let mut next = end;
+                while next < line.len()
+                    && line.as_bytes().get(next).is_some_and(|b| b.is_ascii_whitespace())
+                {
+                    next += 1;
+                }
+                return (end, next.max(end));
+            }
+            x += adv;
+            if matches!(ch, ' ' | ',' | '·' | '|') {
+                last_soft = Some(byte_idx + ch.len_utf8());
+            }
+        }
+        (line.len(), line.len())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_schema_wrapped_line(
+        &mut self,
+        line: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        line_h: f32,
+        mut visual_line_idx: usize,
+        first_line: usize,
+        max_lines: usize,
+    ) {
+        let indent = line.len() - line.trim_start().len();
+        let space_w = self.measure_ui_width(" ", API_BODY_TEXT_SCALE);
+        let continuation_x = x + indent as f32 * space_w + 2.0 * space_w;
+        let continuation_w = (w - (continuation_x - x)).max(w * 0.5);
+        let mut current = line.trim_end();
+        let mut draw_x = x;
+        let mut available_w = w;
+        loop {
+            if visual_line_idx >= first_line && visual_line_idx < first_line + max_lines {
+                let baseline_y = y + (visual_line_idx - first_line) as f32 * line_h;
+                if self.measure_ui_width(current, API_BODY_TEXT_SCALE) <= available_w {
+                    self.draw_api_schema_lexed_line(current, draw_x, baseline_y, available_w);
+                    break;
+                }
+                let (end, next_start) = self.api_schema_wrap_split(current, available_w);
+                self.draw_api_schema_lexed_line(current[..end].trim_end(), draw_x, baseline_y, available_w);
+                current = current[next_start..].trim_start();
+            } else if self.measure_ui_width(current, API_BODY_TEXT_SCALE) <= available_w {
+                break;
+            } else {
+                let (_, next_start) = self.api_schema_wrap_split(current, available_w);
+                current = current[next_start..].trim_start();
+            }
+            if current.is_empty() {
+                break;
+            }
+            visual_line_idx = visual_line_idx.saturating_add(1);
+            draw_x = continuation_x;
+            available_w = continuation_w;
+        }
+    }
+
+    fn draw_api_schema_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
+        let (main, meta) = line
+            .split_once("  · ")
+            .map(|(main, meta)| (main, Some(meta)))
+            .unwrap_or((line, None));
+        let mut draw_x = x;
+        let bytes = main.as_bytes();
+        let mut idx = 0usize;
+        while idx < main.len() {
+            if draw_x > x + w {
+                break;
+            }
+            let b = bytes[idx];
+            if matches!(b, b'+' | b'-') {
+                self.draw_json_colored_segment(
+                    &main[idx..idx + 1],
+                    [1.0, 0.68, 0.26, 1.0],
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx += 1;
+                continue;
+            }
+            if b == b'"' {
+                let end = json_string_end(main, idx);
+                let color = if schema_string_is_key(main, end) {
+                    crate::highlighter::DRACULA_CYAN
+                } else {
+                    crate::highlighter::DRACULA_YELLOW
+                };
+                self.draw_json_colored_segment(&main[idx..end], color, x, y, w, &mut draw_x);
+                idx = end;
+                continue;
+            }
+            if b == b'*' {
+                self.draw_json_colored_segment(
+                    &main[idx..idx + 1],
+                    crate::highlighter::DRACULA_PINK,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx += 1;
+                continue;
+            }
+            if b == b'-' || b.is_ascii_digit() {
+                let end = json_number_end(main, idx);
+                self.draw_json_colored_segment(
+                    &main[idx..end],
+                    crate::highlighter::DRACULA_PURPLE,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx = end;
+                continue;
+            }
+            if let Some(end) = json_keyword_end(main, idx) {
+                self.draw_json_colored_segment(
+                    &main[idx..end],
+                    crate::highlighter::DRACULA_PINK,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+                idx = end;
+                continue;
+            }
+            let ch = main[idx..].chars().next().unwrap_or(' ');
+            let end = idx + ch.len_utf8();
+            self.draw_json_colored_segment(&main[idx..end], self.theme.fg, x, y, w, &mut draw_x);
+            idx = end;
+        }
+        if let Some(meta) = meta {
+            self.draw_json_colored_segment("  ", [0.56, 0.58, 0.64, 1.0], x, y, w, &mut draw_x);
+            self.draw_json_colored_segment(meta, [0.56, 0.58, 0.64, 1.0], x, y, w, &mut draw_x);
+        }
+    }
+
     fn draw_api_text_scrollbar(
         &mut self,
         text: &str,
@@ -711,12 +1154,34 @@ impl Renderer {
         if max_scroll <= 0.5 {
             return;
         }
-        let track_w = (3.0 * s).max(2.0);
-        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.22]);
+        let track_w = (4.0 * s).max(3.0);
+        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
         let content_h = h + max_scroll;
         let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
         let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
-        self.push_rect(x, thumb_y, track_w, thumb_h, [0.64, 0.66, 0.72, 0.70]);
+        self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
+    }
+
+    fn draw_api_schema_scrollbar(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+    ) {
+        let max_scroll = self.api_schema_text_max_scroll(text, w, h, s);
+        if max_scroll <= 0.5 {
+            return;
+        }
+        let track_w = (4.0 * s).max(3.0);
+        self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
+        let content_h = h + max_scroll;
+        let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
+        let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
+        self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
     }
 
     #[allow(clippy::too_many_arguments)]

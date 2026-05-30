@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::editor::Editor;
 use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
+use crate::renderer::VisualLine;
 use crate::ui_system::UiId;
 
 fn scrollbar_x_click_target(
@@ -28,6 +29,16 @@ fn scrollbar_x_click_target(
     }
 }
 
+fn content_y_hits_visual_text_row(
+    content_y: f32,
+    line_height: f32,
+    visual_lines: &[VisualLine],
+) -> bool {
+    visual_lines
+        .iter()
+        .any(|line| content_y >= line.y_offset && content_y < line.y_offset + line_height)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,6 +57,39 @@ mod tests {
 
         assert!(scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 0.0, 1.0).is_none());
     }
+
+    #[test]
+    fn editor_text_row_hit_test_rejects_blank_viewport_edges() {
+        let lines = [
+            VisualLine {
+                byte_idx: 0,
+                physical_line: 1,
+                is_soft_wrap: false,
+                whitespace_px_width: 0.0,
+                text_px_width: 10.0,
+                y_offset: 24.0,
+                is_folded: false,
+                fold_suffix: ['\0'; 4],
+                fold_suffix_len: 0,
+            },
+            VisualLine {
+                byte_idx: 4,
+                physical_line: 2,
+                is_soft_wrap: false,
+                whitespace_px_width: 0.0,
+                text_px_width: 10.0,
+                y_offset: 48.0,
+                is_folded: false,
+                fold_suffix: ['\0'; 4],
+                fold_suffix_len: 0,
+            },
+        ];
+
+        assert!(!content_y_hits_visual_text_row(12.0, 24.0, &lines));
+        assert!(content_y_hits_visual_text_row(24.0, 24.0, &lines));
+        assert!(content_y_hits_visual_text_row(71.9, 24.0, &lines));
+        assert!(!content_y_hits_visual_text_row(72.0, 24.0, &lines));
+    }
 }
 
 impl App {
@@ -63,6 +107,8 @@ impl App {
             | UiId::ApiSpecOpen(_)
             | UiId::ApiSpecRefresh(_)
             | UiId::ApiSpecRemove(_)
+            | UiId::ApiSpecRemoveConfirm
+            | UiId::ApiSpecRemoveCancel
             | UiId::ApiAuthRoot
             | UiId::ApiRoutesRoot
             | UiId::ApiRouteTag(_)
@@ -84,10 +130,23 @@ impl App {
             | UiId::ApiPathParamAllowedValue(_, _, _)
             | UiId::ApiQueryParamAllowedValue(_, _, _)
             | UiId::ApiBodyInput(_)
+            | UiId::ApiInputExampleTab(_)
+            | UiId::ApiInputSchemaTab(_)
+            | UiId::ApiInputSchemaMenu(_)
+            | UiId::ApiInputSchemaMenuItem(_, _)
+            | UiId::ApiInputSchemaBody(_)
+            | UiId::ApiInputSchemaFold(_, _)
             | UiId::ApiBodyScrollX(_)
             | UiId::ApiBodyFieldInput(_, _)
             | UiId::ApiBodyAllowedValue(_, _, _)
             | UiId::ApiBodyFilePick(_, _)
+            | UiId::ApiOutputExampleTab(_)
+            | UiId::ApiOutputSchemaTab(_)
+            | UiId::ApiOutputStatusTab(_, _)
+            | UiId::ApiOutputSchemaMenu(_)
+            | UiId::ApiOutputSchemaMenuItem(_, _)
+            | UiId::ApiOutputSchemaBody(_)
+            | UiId::ApiOutputSchemaFold(_, _)
             | UiId::ApiResponseBodyTab(_)
             | UiId::ApiResponseHeadersTab(_)
             | UiId::ApiResponseBody(_)
@@ -96,6 +155,7 @@ impl App {
             | UiId::ApiResponseSaveRefreshToken(_, _)
             | UiId::ApiMockServerToggle
             | UiId::ApiMockServerDetails
+            | UiId::ApiMockServerCopyUrl
             | UiId::ApiMockServerDetailsClose
             | UiId::ApiMockServerLogArea
             | UiId::ApiMockServerLogScrollY
@@ -120,10 +180,23 @@ impl App {
             | UiId::ApiMockRouteEnable(_)
             | UiId::ApiMockRouteDetailsToggle(_)
             | UiId::ApiMockRoutePythonToggle(_)
+            | UiId::ApiMockRouteReset(_)
+            | UiId::ApiMockRouteResetConfirm
+            | UiId::ApiMockRouteResetCancel
+            | UiId::ApiMockContractPathToggle(_)
             | UiId::ApiMockContractQueryToggle(_)
             | UiId::ApiMockContractBodyToggle(_)
+            | UiId::ApiMockContractPathFieldToggle(_, _)
             | UiId::ApiMockContractQueryFieldToggle(_, _)
             | UiId::ApiMockContractBodyFieldToggle(_, _)
+            | UiId::ApiMockContractFieldRequired(_, _, _)
+            | UiId::ApiMockContractFieldNullable(_, _, _)
+            | UiId::ApiMockContractFieldRemove(_, _, _)
+            | UiId::ApiMockContractFieldRemoveConfirm
+            | UiId::ApiMockContractFieldRemoveCancel
+            | UiId::ApiMockContractFieldPropInput(_, _, _, _)
+            | UiId::ApiMockContractFieldAddConstraint(_, _, _)
+            | UiId::ApiMockContractFieldAddConstraintOption(_, _, _, _)
             | UiId::ApiMockStaticResponseInput(_)
             | UiId::ApiMockCombinedPython(_)
             | UiId::ApiMockContractInput(_)
@@ -1118,12 +1191,25 @@ impl App {
                 }
             }
             UiId::EditorTextBody => {
-                self.is_dragging = true;
-                self.ide_panel.file_tree_focused = false;
-                crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 if let Some(r) = self.renderer.as_mut() {
+                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                        0.0
+                    } else {
+                        38.0 * r.scale_factor
+                    };
+                    let content_y = r.last_mouse_y - tab_bar_h + self.scroll_y.current;
+                    if !content_y_hits_visual_text_row(content_y, r.line_height, &r.visual_lines) {
+                        self.is_dragging = false;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+
                     r.suppress_popups_until_next_mouse_move();
                 }
+                self.is_dragging = false;
+                self.is_editor_drag_pending = true;
+                self.ide_panel.file_tree_focused = false;
+                crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();
                 self.ide_panel.lsp_logs_focused = None;
@@ -1390,17 +1476,24 @@ impl App {
                 }
             }
             UiId::PopupCopyDiagnostic(idx) => {
+                let mut message = None;
                 if let Some(path) = &self.file_path {
-                    if let Some(diag) = self
+                    message = self
                         .lsp
                         .as_ref()
                         .and_then(|l| l.diagnostics.get(path))
                         .and_then(|diags| diags.get(idx))
-                    {
-                        let message = diag.message.clone();
-                        self.set_clipboard_text(message);
-                        self.ide_panel.diag_copied_idx = Some(idx);
-                    }
+                        .map(|diag| diag.message.clone());
+                }
+                if message.is_none() {
+                    message = crate::app::mouse::HOVER_STATE.with(|state| {
+                        let state = state.borrow();
+                        (!state.diag_text.is_empty()).then(|| state.diag_text.clone())
+                    });
+                }
+                if let Some(message) = message {
+                    self.set_clipboard_text(message);
+                    self.ide_panel.diag_copied_idx = Some(idx);
                 }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();

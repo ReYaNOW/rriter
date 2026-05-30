@@ -346,22 +346,201 @@ impl Renderer {
         line_start: usize,
         byte_offset: usize,
     ) -> f32 {
+        self.current_inlay_width_until(line_start, byte_offset, false)
+    }
+
+    fn inlay_hint_visual_width(&mut self, idx: usize) -> f32 {
+        let hint_label = self.current_python_inlay_hints[idx].label.clone();
+        self.measure_ui_width(hint_label.trim_end(), 0.92)
+            + 8.0 * self.scale_factor
+            + self.char_advance(' ')
+    }
+
+    fn current_inlay_width_until(
+        &mut self,
+        line_start: usize,
+        byte_offset: usize,
+        include_at_offset: bool,
+    ) -> f32 {
         let mut width = 0.0;
-        let pad_w = 8.0 * self.scale_factor;
-        let value_gap_w = self.char_advance(' ');
         for idx in 0..self.current_python_inlay_hints.len() {
-            let (hint_offset, hint_label) = {
-                let hint = &self.current_python_inlay_hints[idx];
-                (hint.byte_offset, hint.label.clone())
-            };
-            if hint_offset >= byte_offset {
+            let hint_offset = self.current_python_inlay_hints[idx].byte_offset;
+            if hint_offset > byte_offset || (!include_at_offset && hint_offset == byte_offset) {
                 break;
             }
             if hint_offset >= line_start {
-                width += self.measure_ui_width(hint_label.trim_end(), 0.92) + pad_w + value_gap_w;
+                width += self.inlay_hint_visual_width(idx);
             }
         }
         width
+    }
+
+    pub(crate) fn visual_x_for_byte_offset(
+        &mut self,
+        editor: &Editor,
+        line_start: usize,
+        byte_offset: usize,
+        include_inlays_at_offset: bool,
+    ) -> f32 {
+        let (first, second) = editor.text_parts();
+        self.measure_width(first, second, line_start, byte_offset)
+            + self.current_inlay_width_until(line_start, byte_offset, include_inlays_at_offset)
+    }
+
+    pub(crate) fn visual_x_for_utf16_col(
+        &mut self,
+        editor: &Editor,
+        line_idx: usize,
+        col: u32,
+        include_inlays_at_offset: bool,
+    ) -> (f32, usize) {
+        let line_start = editor.line_offsets.get(line_idx).copied().unwrap_or(0);
+        let line_end = editor
+            .line_offsets
+            .get(line_idx + 1)
+            .map(|&o| o.saturating_sub(1))
+            .unwrap_or_else(|| editor.len());
+        let mut byte_offset = line_end;
+        let mut text_x = 0.0f32;
+        let mut cur_x = 0.0f32;
+        let mut found = false;
+
+        editor.utf16_col_to_byte_advance(line_idx, |ch, utf16_before, pos| {
+            if !found && utf16_before >= col {
+                byte_offset = pos;
+                text_x = cur_x;
+                found = true;
+            }
+            if !found {
+                cur_x += self.char_advance(ch);
+            }
+        });
+
+        if !found {
+            text_x = cur_x;
+        }
+
+        (
+            text_x + self.current_inlay_width_until(
+                line_start,
+                byte_offset,
+                include_inlays_at_offset,
+            ),
+            byte_offset,
+        )
+    }
+
+    pub(crate) fn visual_text_range_contains_x(
+        &mut self,
+        editor: &Editor,
+        line_start: usize,
+        start_byte: usize,
+        end_byte: usize,
+        target_x: f32,
+        min_width: f32,
+    ) -> bool {
+        if end_byte < start_byte {
+            return false;
+        }
+
+        let mut segment_start_x =
+            self.visual_x_for_byte_offset(editor, line_start, start_byte, true);
+        let mut hint_idx = self
+            .current_python_inlay_hints
+            .partition_point(|hint| hint.byte_offset < start_byte);
+
+        while hint_idx < self.current_python_inlay_hints.len() {
+            let hint_offset = self.current_python_inlay_hints[hint_idx].byte_offset;
+            if hint_offset >= end_byte {
+                break;
+            }
+
+            let before_hint_x =
+                self.visual_x_for_byte_offset(editor, line_start, hint_offset, false);
+            if target_x >= segment_start_x && target_x <= before_hint_x.max(segment_start_x) {
+                return true;
+            }
+            while hint_idx < self.current_python_inlay_hints.len()
+                && self.current_python_inlay_hints[hint_idx].byte_offset == hint_offset
+            {
+                hint_idx += 1;
+            }
+            segment_start_x = self.visual_x_for_byte_offset(editor, line_start, hint_offset, true);
+        }
+
+        let end_x = self.visual_x_for_byte_offset(editor, line_start, end_byte, false);
+        let segment_end_x = end_x.max(segment_start_x + min_width);
+        target_x >= segment_start_x && target_x <= segment_end_x
+    }
+
+    pub(crate) fn text_x_for_visual_line_x(
+        &mut self,
+        editor: &Editor,
+        line_idx: usize,
+        visual_x: f32,
+    ) -> f32 {
+        let line_start = editor.line_offsets.get(line_idx).copied().unwrap_or(0);
+        let line_end = editor
+            .line_offsets
+            .get(line_idx + 1)
+            .map(|&o| o.saturating_sub(1))
+            .unwrap_or_else(|| editor.len());
+        let mut hint_idx = self
+            .current_python_inlay_hints
+            .partition_point(|hint| hint.byte_offset < line_start);
+        let mut text_x = 0.0f32;
+        let mut visual_cursor_x = 0.0f32;
+        let mut result = 0.0f32;
+        let mut found = false;
+
+        editor.utf16_col_to_byte_advance(line_idx, |ch, _utf16_before, pos| {
+            if found {
+                return;
+            }
+            while hint_idx < self.current_python_inlay_hints.len()
+                && self.current_python_inlay_hints[hint_idx].byte_offset < pos
+            {
+                visual_cursor_x += self.inlay_hint_visual_width(hint_idx);
+                hint_idx += 1;
+            }
+            while hint_idx < self.current_python_inlay_hints.len()
+                && self.current_python_inlay_hints[hint_idx].byte_offset == pos
+            {
+                let hint_w = self.inlay_hint_visual_width(hint_idx);
+                if visual_x <= visual_cursor_x + hint_w {
+                    result = text_x;
+                    found = true;
+                    return;
+                }
+                visual_cursor_x += hint_w;
+                hint_idx += 1;
+            }
+
+            let adv = self.char_advance(ch);
+            if visual_x <= visual_cursor_x + adv {
+                result = text_x + (visual_x - visual_cursor_x).clamp(0.0, adv);
+                found = true;
+                return;
+            }
+            visual_cursor_x += adv;
+            text_x += adv;
+        });
+
+        while !found
+            && hint_idx < self.current_python_inlay_hints.len()
+            && self.current_python_inlay_hints[hint_idx].byte_offset <= line_end
+        {
+            let hint_w = self.inlay_hint_visual_width(hint_idx);
+            if visual_x <= visual_cursor_x + hint_w {
+                result = text_x;
+                found = true;
+                break;
+            }
+            visual_cursor_x += hint_w;
+            hint_idx += 1;
+        }
+
+        if found { result } else { text_x }
     }
 
     pub(crate) fn is_inlay_hint_at_xy(

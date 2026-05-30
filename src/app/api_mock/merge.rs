@@ -34,7 +34,8 @@ pub fn build_api_mock_routes<'a>(
             source_key: "manual".to_string(),
             method: route.method,
             path: route.path.clone(),
-            enabled: route.enabled,
+            enabled: true,
+            proxy_when_disabled: false,
             response: route.response.clone(),
             generated_status: 200,
             generated_content_type: "application/json",
@@ -77,6 +78,15 @@ pub fn build_api_mock_routes<'a>(
                 .unwrap_or_default();
             let (generated_status, generated_content_type, generated_body) =
                 api_generated_response_for_route(route, model);
+            let proxy_when_disabled = override_route.is_some_and(|override_route| {
+                override_route.proxy_when_disabled
+                    || (!override_route.enabled
+                        && override_route.python.is_none()
+                        && matches!(
+                            &override_route.response,
+                            super::types::ApiMockResponse::Generated
+                        ))
+            });
 
             out.push(ApiMockRuntimeRoute {
                 id: api_mock_route_key(&source_key, route.method, &route.path),
@@ -84,6 +94,7 @@ pub fn build_api_mock_routes<'a>(
                 method: route.method,
                 path: route.path.clone(),
                 enabled,
+                proxy_when_disabled,
                 response,
                 generated_status,
                 generated_content_type,
@@ -115,6 +126,16 @@ pub fn resolve_api_mock_route<'a>(
         return ApiMockRouteDecision::Mock(route);
     }
 
+    if routes.iter().any(|route| {
+        route.origin == ApiMockRouteOrigin::OpenApi
+            && route.proxy_when_disabled
+            && !route.enabled
+            && route.method == method
+            && api_mock_path_matches(&route.path, path)
+    }) {
+        return ApiMockRouteDecision::Proxy;
+    }
+
     if let Some(route) = routes.iter().find(|route| {
         route.origin == ApiMockRouteOrigin::OpenApi
             && route.enabled
@@ -127,6 +148,7 @@ pub fn resolve_api_mock_route<'a>(
     if mode == ApiMockMode::MockAll {
         if let Some(route) = routes.iter().find(|route| {
             route.origin == ApiMockRouteOrigin::OpenApi
+                && !route.proxy_when_disabled
                 && route.method == method
                 && api_mock_path_matches(&route.path, path)
         }) {
@@ -291,6 +313,56 @@ mod tests {
 
         let decision =
             resolve_api_mock_route(&routes, ApiMockMode::MockAll, ApiMethod::Get, "/users/42");
+
+        assert!(matches!(decision, ApiMockRouteDecision::Mock(_)));
+    }
+
+    #[test]
+    fn mock_all_hard_disabled_openapi_route_proxies() {
+        let entry = entry();
+        let model = model(route(ApiMethod::Get, "/users"));
+        let mut state = ApiMockState::default();
+        state
+            .route_overrides
+            .push(super::super::types::ApiMockRouteOverride {
+                source_key: super::super::types::api_mock_source_key(&entry),
+                method: ApiMethod::Get,
+                path: "/users".to_string(),
+                enabled: false,
+                proxy_when_disabled: true,
+                response: super::super::types::ApiMockResponse::Generated,
+                python: None,
+                extra_input_fields: Vec::new(),
+                extra_output_fields: Vec::new(),
+            });
+        let routes = build_api_mock_routes([(&entry, &model)], &state);
+
+        let decision = resolve_api_mock_route(&routes, state.mode, ApiMethod::Get, "/users");
+
+        assert_eq!(decision, ApiMockRouteDecision::Proxy);
+    }
+
+    #[test]
+    fn mock_all_python_override_still_mocks_without_route_enable() {
+        let entry = entry();
+        let model = model(route(ApiMethod::Get, "/users"));
+        let mut state = ApiMockState::default();
+        state
+            .route_overrides
+            .push(super::super::types::ApiMockRouteOverride {
+                source_key: super::super::types::api_mock_source_key(&entry),
+                method: ApiMethod::Get,
+                path: "/users".to_string(),
+                enabled: false,
+                proxy_when_disabled: false,
+                response: super::super::types::ApiMockResponse::Generated,
+                python: Some(super::super::types::default_api_mock_python_script()),
+                extra_input_fields: Vec::new(),
+                extra_output_fields: Vec::new(),
+            });
+        let routes = build_api_mock_routes([(&entry, &model)], &state);
+
+        let decision = resolve_api_mock_route(&routes, state.mode, ApiMethod::Get, "/users");
 
         assert!(matches!(decision, ApiMockRouteDecision::Mock(_)));
     }

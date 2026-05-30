@@ -609,21 +609,41 @@ impl Editor {
         let mut gaps = vec![None; curr_hashes.len() + 1];
         let mut dirty = false;
 
-        for i in 0..curr_hashes.len() {
-            if mod_saved[i] {
-                states[i] = Some(LineModState::ModifiedUnsaved);
-                dirty = true;
-            } else if mod_orig[i] {
-                states[i] = Some(LineModState::ModifiedSaved);
+        if self.git_base_text.is_some() {
+            for i in 0..curr_hashes.len() {
+                if mod_saved[i] {
+                    dirty = true;
+                }
+                if mod_orig[i] {
+                    states[i] = Some(LineModState::ModifiedSaved);
+                }
             }
-        }
 
-        for i in 0..=curr_hashes.len() {
-            if del_saved[i] {
-                gaps[i] = Some(LineModState::ModifiedUnsaved);
-                dirty = true;
-            } else if del_orig[i] {
-                gaps[i] = Some(LineModState::ModifiedSaved);
+            for i in 0..=curr_hashes.len() {
+                if del_saved[i] {
+                    dirty = true;
+                }
+                if del_orig[i] {
+                    gaps[i] = Some(LineModState::ModifiedSaved);
+                }
+            }
+        } else {
+            for i in 0..curr_hashes.len() {
+                if mod_saved[i] {
+                    states[i] = Some(LineModState::ModifiedUnsaved);
+                    dirty = true;
+                } else if mod_orig[i] {
+                    states[i] = Some(LineModState::ModifiedSaved);
+                }
+            }
+
+            for i in 0..=curr_hashes.len() {
+                if del_saved[i] {
+                    gaps[i] = Some(LineModState::ModifiedUnsaved);
+                    dirty = true;
+                } else if del_orig[i] {
+                    gaps[i] = Some(LineModState::ModifiedSaved);
+                }
             }
         }
 

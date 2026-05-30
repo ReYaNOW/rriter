@@ -175,7 +175,7 @@ fn tab_sync_swaps_editor_metadata_and_current_icon() {
         return;
     };
     app.editor = editor_with("live");
-    app.base_title = "live.rs".to_string();
+    app.base_title = "*live.rs".to_string();
     app.file_path = Some(PathBuf::from("/tmp/live.rs"));
     app.file_extension = "rs".to_string();
     app.search_results = vec![(0, 1)];
@@ -194,13 +194,16 @@ fn tab_sync_swaps_editor_metadata_and_current_icon() {
     assert_eq!(app.base_title, "other.py");
     assert_eq!(app.file_extension, "py");
     assert_eq!(app.tabs[0].editor.get_full_text(), "live");
-    assert_eq!(app.tabs[0].base_title, "live.rs");
+    assert_eq!(app.tabs[0].base_title, "*live.rs");
     assert_eq!(app.tabs[0].search_results, vec![(0, 1)]);
     assert_eq!(app.tabs[0].search_current_idx, Some(0));
     assert_eq!(app.tabs[0].last_sent_version, 7);
     assert!(app.tabs[0].is_highlighted_once);
     assert!(app.tabs[0].is_highlight_complete);
-    assert_ne!(app.tabs[0].icon_key, "default_file");
+    assert_eq!(
+        app.tabs[0].icon_key,
+        crate::app::file_icons::file_icon_key("live.rs")
+    );
 }
 
 #[test]
@@ -683,3 +686,24 @@ fn app_tabs_recent_files_search_jump_and_autocomplete_empty_paths() {
     assert_eq!(app.autocomplete_options[2].0.word, "property");
 }
 
+#[test]
+fn closing_tab_clamps_stale_tab_scroll_left() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.tabs = vec![
+        tab_with("first.py", Some("/tmp/first.py"), "first"),
+        tab_with("second.py", Some("/tmp/second.py"), "second"),
+    ];
+    app.active_tab = 0;
+    app.sync_active_tab();
+    app.tab_scroll.current = 500.0;
+    app.tab_scroll.target = 500.0;
+
+    app.close_tab_at(1);
+
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.tab_scroll.current, 0.0);
+    assert_eq!(app.tab_scroll.target, 0.0);
+}

@@ -656,6 +656,172 @@ fn open_api_mock_test_route(app: &mut App) -> crate::app::api_client::ApiSpecId 
     spec_id
 }
 
+fn open_api_mock_query_test_route(app: &mut App) -> crate::app::api_client::ApiSpecId {
+    let spec_id = open_api_mock_test_route(app);
+    let model = app.ide_panel.api.models.get_mut(&spec_id).unwrap();
+    model.routes[0].query_params = vec![crate::app::api_client::ApiParam {
+        name: "name".to_string(),
+        location: crate::app::api_client::ApiParamLocation::Query,
+        required: true,
+        primitive_type: crate::app::api_client::ApiPrimitiveType::String,
+        item_type: None,
+        enum_values: Vec::new(),
+        default_value: None,
+        example: None,
+        examples: Vec::new(),
+        description: String::new(),
+        constraints: crate::app::api_mock::types::ApiMockFieldConstraints::default(),
+    }];
+    spec_id
+}
+
+fn add_second_api_mock_test_route(app: &mut App, spec_id: crate::app::api_client::ApiSpecId) {
+    let model = app.ide_panel.api.models.get_mut(&spec_id).unwrap();
+    let mut route = api_mock_test_route();
+    route.path = "/orders".to_string();
+    model.routes.push(route);
+}
+
+fn api_client_tab_route_idx(tab: &crate::app::EditorTab) -> Option<usize> {
+    match &tab.kind {
+        crate::app::EditorTabKind::ApiClient(_, state) => state.route_idx,
+        _ => None,
+    }
+}
+
+#[test]
+fn manual_mock_schema_focus_uses_visible_schema_text_for_selection() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel
+        .api
+        .mock
+        .manual_routes
+        .push(crate::app::api_mock::types::ApiManualRoute {
+            stable_id: "manual-users".to_string(),
+            method: crate::app::api_client::ApiMethod::Get,
+            path: "/users/{user_id}".to_string(),
+            enabled: true,
+            response: crate::app::api_mock::types::ApiMockResponse::Generated,
+            python: Some(crate::app::api_mock::types::default_api_mock_python_script()),
+            input_fields: Vec::new(),
+            output_fields: Vec::new(),
+        });
+
+    app.open_api_manual_route(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::InputSchema {
+        spec_id: crate::app::api_client::API_MANUAL_MOCK_SPEC_ID,
+        route_idx: 0,
+    });
+
+    let text = app.ide_panel.api.input_editor.get_full_text();
+    assert!(text.contains("user_id"));
+    app.ide_panel.api.input_editor.select_all();
+    assert_eq!(
+        app.ide_panel.api.input_editor.get_selection().as_deref(),
+        Some(text.as_str())
+    );
+}
+
+#[test]
+fn api_mock_contract_focus_switch_keeps_python_highlight_cache() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockContract { route_idx: 0 });
+    app.ide_panel.api.input_editor.cursor = 0;
+    app.ide_panel.api.input_editor.selection_anchor = None;
+    let version = app.ide_panel.api.input_editor.version;
+    let cache_key = (
+        0,
+        crate::app::api_mock::ty_check::ApiMockSourcePart::Contract,
+    );
+    let target = Some((cache_key.0, cache_key.1, version));
+    app.ide_panel.api.mock_highlight_cache.insert(
+        cache_key,
+        vec![crate::highlighter::ColorSpan {
+            start: 0,
+            end: 5,
+            color: crate::highlighter::DRACULA_CYAN,
+        }],
+    );
+    app.ide_panel.api.mock_highlight_target = target;
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockPrelude { route_idx: 0 });
+
+    assert!(matches!(
+        app.ide_panel.api.focused,
+        Some(crate::app::api_client::ApiFocus::MockPrelude { route_idx: 0 })
+    ));
+    assert_eq!(app.ide_panel.api.mock_highlight_target, target);
+    assert!(
+        app.ide_panel
+            .api
+            .mock_highlight_cache
+            .contains_key(&cache_key)
+    );
+}
+
+#[test]
+fn api_route_open_reuses_last_api_tab_without_ctrl() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    let spec_id = open_api_mock_test_route(&mut app);
+    add_second_api_mock_test_route(&mut app, spec_id);
+
+    app.open_api_route_with_new_tab(spec_id, 0, true);
+    assert_eq!(app.tabs.len(), 2);
+    app.switch_to_tab(0);
+
+    app.open_api_route(spec_id, 1);
+
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(app.active_tab, 1);
+    assert_eq!(api_client_tab_route_idx(&app.tabs[0]), Some(0));
+    assert_eq!(api_client_tab_route_idx(&app.tabs[1]), Some(1));
+}
+
+#[test]
+fn api_route_open_with_ctrl_adds_same_api_tab() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    let spec_id = open_api_mock_test_route(&mut app);
+    add_second_api_mock_test_route(&mut app, spec_id);
+
+    app.open_api_route_with_new_tab(spec_id, 1, true);
+
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(app.active_tab, 1);
+    assert_eq!(api_client_tab_route_idx(&app.tabs[0]), Some(0));
+    assert_eq!(api_client_tab_route_idx(&app.tabs[1]), Some(1));
+}
+
+#[test]
+fn api_client_stays_visible_when_last_remaining_tab() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    open_api_mock_test_route(&mut app);
+    app.open_new_tab();
+    assert_eq!(app.tabs.len(), 2);
+    assert_eq!(app.active_tab, 1);
+
+    app.close_tab_at(1);
+
+    assert_eq!(app.tabs.len(), 1);
+    assert_eq!(app.active_tab, 0);
+    assert!(app.active_tab_is_api_client());
+    assert!(!app.show_welcome);
+}
+
 fn text_change_for_source_span(
     source: &str,
     start: usize,
@@ -747,6 +913,154 @@ fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
 }
 
 #[test]
+fn api_mock_route_reset_removes_override_and_cached_python_editors() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+
+    app.toggle_api_route_mock(0);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let _ = app
+        .ide_panel
+        .api
+        .input_editor
+        .insert_str("\n    reset_marker = 1");
+
+    app.handle_ui_click(crate::ui_system::UiId::ApiMockRouteReset(0));
+
+    assert!(app.ide_panel.api.mock_route_reset_dialog.is_some());
+    assert_eq!(app.ide_panel.api.mock.route_overrides.len(), 1);
+    app.handle_ui_click(crate::ui_system::UiId::ApiMockRouteResetConfirm);
+
+    assert!(app.ide_panel.api.mock.route_overrides.is_empty());
+    assert!(app.ide_panel.api.focused.is_none());
+    assert!(
+        app.ide_panel
+            .api
+            .mock_python_editors
+            .keys()
+            .all(|(route_idx, _)| *route_idx != 0)
+    );
+    assert!(app.ide_panel.api.mock_ty_diagnostics.is_empty());
+}
+
+#[test]
+fn api_mock_contract_code_edit_updates_field_list_after_focus_leaves() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_query_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockContract { route_idx: 0 });
+
+    let text = app.ide_panel.api.input_editor.get_full_text();
+    let insert_at = text
+        .find("class Query:\n")
+        .map(|idx| idx + "class Query:\n".len())
+        .expect("query contract class exists");
+    app.ide_panel.api.input_editor.cursor = insert_at;
+    let _ = app
+        .ide_panel
+        .api
+        .input_editor
+        .insert_str("    live_value: int\n");
+
+    let script = app.ide_panel.api.mock.route_overrides[0]
+        .python
+        .as_ref()
+        .expect("python mock script");
+    assert!(
+        !script
+            .contract
+            .query
+            .fields
+            .iter()
+            .any(|field| field.name == "live_value" && field.enabled)
+    );
+
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    let script = app.ide_panel.api.mock.route_overrides[0]
+        .python
+        .as_ref()
+        .expect("python mock script");
+    assert!(
+        script
+            .contract
+            .query
+            .fields
+            .iter()
+            .any(|field| field.name == "live_value" && field.enabled)
+    );
+    assert!(
+        app.api_mock_contract_source_for_route(0)
+            .is_some_and(|source| source.contains("live_value: int"))
+    );
+}
+
+#[test]
+fn api_mock_contract_field_remove_deletes_variable_from_contract() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_query_test_route(&mut app);
+    app.toggle_api_route_python(0);
+
+    use crate::ui_system::ApiMockContractFieldGroup;
+
+    let removed_name = app.ide_panel.api.mock.route_overrides[0]
+        .python
+        .as_ref()
+        .expect("python mock script")
+        .contract
+        .query
+        .fields
+        .first()
+        .expect("query field")
+        .name
+        .clone();
+    app.handle_ui_click(crate::ui_system::UiId::ApiMockContractFieldRemove(
+        0,
+        ApiMockContractFieldGroup::Query,
+        0,
+    ));
+    assert!(
+        app.ide_panel
+            .api
+            .mock_contract_field_delete_dialog
+            .is_some()
+    );
+    let script = app.ide_panel.api.mock.route_overrides[0]
+        .python
+        .as_ref()
+        .expect("python mock script");
+    assert!(
+        script
+            .contract
+            .query
+            .fields
+            .iter()
+            .any(|field| field.name == removed_name)
+    );
+
+    app.handle_ui_click(crate::ui_system::UiId::ApiMockContractFieldRemoveConfirm);
+    let script = app.ide_panel.api.mock.route_overrides[0]
+        .python
+        .as_ref()
+        .expect("python mock script");
+    assert!(
+        !script
+            .contract
+            .query
+            .fields
+            .iter()
+            .any(|field| field.name == removed_name)
+    );
+    assert!(!script.contract_source.contains(&format!("{removed_name}:")));
+}
+
+#[test]
 fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
     let Some(mut app) = test_app() else {
         return;
@@ -811,7 +1125,7 @@ fn api_mock_python_editors_keep_independent_undo_and_reset_parts() {
         .insert_str("\n    reset_me = 1");
     app.reset_api_route_python_part(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body);
     let body = app.ide_panel.api.input_editor.get_full_text();
-    assert_eq!(body, "    return Response(ok=True)");
+    assert_eq!(body, "\n    return Response(ok=True)");
     assert!(!body.contains("reset_me"));
     assert!(
         app.ide_panel
@@ -934,8 +1248,137 @@ fn api_mock_tree_sitter_completions_show_before_ty_merge() {
     app.update_api_mock_tree_sitter_autocomplete();
 
     assert!(app.autocomplete_active);
-    assert_eq!(app.autocomplete_mode, crate::app::AutocompleteMode::TreeSitter);
+    assert_eq!(
+        app.autocomplete_mode,
+        crate::app::AutocompleteMode::TreeSitter
+    );
     assert_eq!(app.autocomplete_options[0].0.word, "Response");
+}
+
+#[test]
+fn api_mock_contract_completion_suggests_all_constraint_markers() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockContract { route_idx: 0 });
+    app.ide_panel
+        .api
+        .input_editor
+        .set_text_clean("class Query:\n    name: Annotated[str, ");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+
+    app.update_api_mock_tree_sitter_autocomplete();
+
+    assert!(app.autocomplete_active);
+    for marker in [
+        "MinLen", "MaxLen", "Pattern", "Ge", "Gt", "Le", "Lt", "MinItems", "MaxItems",
+    ] {
+        assert!(
+            app.autocomplete_options
+                .iter()
+                .any(|(item, _)| item.word == marker),
+            "{marker} missing"
+        );
+    }
+    let max_len = app
+        .autocomplete_options
+        .iter()
+        .find(|(item, _)| item.word == "MaxLen")
+        .map(|(item, _)| item)
+        .unwrap();
+    assert_eq!(max_len.insert_text.as_deref(), Some("MaxLen(255)"));
+    assert!(
+        max_len
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("max string length"))
+    );
+}
+
+#[test]
+fn api_mock_contract_field_editor_commits_constraints_and_flags() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_query_test_route(&mut app);
+    app.toggle_api_route_python(0);
+
+    use crate::app::api_client::ApiFocus;
+    use crate::ui_system::{ApiMockContractFieldGroup, ApiMockContractFieldProp};
+
+    app.handle_ui_click(crate::ui_system::UiId::ApiMockContractFieldAddConstraint(
+        0,
+        ApiMockContractFieldGroup::Query,
+        0,
+    ));
+    assert_eq!(
+        app.ide_panel.api.mock_contract_constraint_menu,
+        Some(crate::app::api_client::ApiMockContractConstraintMenu {
+            route_idx: 0,
+            group: ApiMockContractFieldGroup::Query,
+            field_idx: 0,
+        })
+    );
+    app.handle_ui_click(
+        crate::ui_system::UiId::ApiMockContractFieldAddConstraintOption(
+            0,
+            ApiMockContractFieldGroup::Query,
+            0,
+            ApiMockContractFieldProp::Default,
+        ),
+    );
+    assert!(matches!(
+        app.ide_panel.api.focused,
+        Some(ApiFocus::MockContractField {
+            prop: ApiMockContractFieldProp::Default,
+            ..
+        })
+    ));
+
+    app.toggle_api_mock_contract_field_required(0, ApiMockContractFieldGroup::Query, 0);
+    app.toggle_api_mock_contract_field_nullable(0, ApiMockContractFieldGroup::Query, 0);
+
+    for (prop, text) in [
+        (ApiMockContractFieldProp::Default, "guest"),
+        (ApiMockContractFieldProp::Enum, "guest, admin"),
+        (ApiMockContractFieldProp::MinLength, "2"),
+        (ApiMockContractFieldProp::MaxLength, "16"),
+        (ApiMockContractFieldProp::Pattern, "^[a-z]+$"),
+        (ApiMockContractFieldProp::Minimum, "1"),
+        (ApiMockContractFieldProp::Maximum, "99"),
+        (ApiMockContractFieldProp::MinItems, "1"),
+        (ApiMockContractFieldProp::MaxItems, "3"),
+    ] {
+        app.focus_api_input(ApiFocus::MockContractField {
+            route_idx: 0,
+            group: ApiMockContractFieldGroup::Query,
+            field_idx: 0,
+            prop,
+        });
+        app.ide_panel.api.input_editor.set_text_clean(text);
+        app.commit_api_focus();
+    }
+
+    let script = app.api_mock_script_for_tools(0).unwrap();
+    let field = &script.contract.query.fields[0];
+    assert!(!field.required);
+    assert!(field.nullable);
+    assert_eq!(field.default_value.as_deref(), Some("guest"));
+    assert_eq!(field.enum_values, ["guest", "admin"]);
+    assert_eq!(field.constraints.min_length, Some(2));
+    assert_eq!(field.constraints.max_length, Some(16));
+    assert_eq!(field.constraints.pattern.as_deref(), Some("^[a-z]+$"));
+    assert_eq!(field.constraints.minimum.as_deref(), Some("1"));
+    assert_eq!(field.constraints.maximum.as_deref(), Some("99"));
+    assert_eq!(field.constraints.min_items, Some(1));
+    assert_eq!(field.constraints.max_items, Some(3));
+    assert!(field.constraints.nullable);
+    assert!(script.contract_source.contains("class NameEnum(StrEnum):"));
+    assert!(script.contract_source.contains("name: Annotated[NameEnum"));
+    assert!(script.contract_source.contains("MaxLen(16)"));
+    assert!(script.contract_source.contains("Pattern("));
 }
 
 #[test]
@@ -948,7 +1391,10 @@ fn api_mock_detail_popup_uses_api_editor_cursor_context() {
     app.editor = editor_with("main_cursor_should_not_win");
     app.editor.cursor = 0;
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
-    app.ide_panel.api.input_editor.set_text_clean("    Response");
+    app.ide_panel
+        .api
+        .input_editor
+        .set_text_clean("    Response");
     app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
     app.autocomplete_active = true;
     app.autocomplete_selected_idx = 0;
@@ -1023,15 +1469,46 @@ fn api_mock_popup_keys_move_selection_and_refresh_detail_like_editor() {
         false,
     );
 
-    assert_eq!(
-        result,
-        crate::app::AutocompletePopupKeyResult::Consumed
-    );
+    assert_eq!(result, crate::app::AutocompletePopupKeyResult::Consumed);
     assert_eq!(app.autocomplete_selected_idx, 1);
     assert!(
         app.autocomplete_detail_popup
             .as_ref()
             .is_some_and(|popup| popup.text.contains("beta detail"))
+    );
+}
+
+#[test]
+fn api_mock_enter_completion_keeps_body_focus() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.toggle_api_route_python(0);
+    app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
+    app.ide_panel.api.input_editor.set_text_clean("    Res");
+    app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
+    app.autocomplete_active = true;
+    app.autocomplete_options = vec![(
+        api_lsp_item(
+            "Response",
+            crate::highlighter::SymbolKind::Class,
+            None,
+            None,
+        )
+        .into(),
+        Vec::new(),
+    )];
+
+    let result = app.handle_active_autocomplete_key(
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter),
+        false,
+    );
+
+    assert_eq!(result, crate::app::AutocompletePopupKeyResult::Consumed);
+    assert_eq!(
+        app.ide_panel.api.focused,
+        Some(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 })
     );
 }
 
@@ -1043,21 +1520,28 @@ fn api_mock_pending_enter_and_tab_share_main_autocomplete_gate() {
     open_api_mock_test_route(&mut app);
     app.toggle_api_route_python(0);
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
-    app.ide_panel.api.input_editor.set_text_clean("    response.");
+    app.ide_panel
+        .api
+        .input_editor
+        .set_text_clean("    response.");
     app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
     app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
     app.autocomplete_pending_request_id = Some(77);
 
-    assert!(app.mark_pending_autocomplete_apply_for_key(
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
-    ));
+    assert!(
+        app.mark_pending_autocomplete_apply_for_key(winit::keyboard::PhysicalKey::Code(
+            winit::keyboard::KeyCode::Enter
+        ))
+    );
     assert!(app.autocomplete_apply_pending_response);
 
     app.autocomplete_apply_pending_response = false;
     app.autocomplete_pending_request_id = Some(78);
-    assert!(app.mark_pending_autocomplete_apply_for_key(
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Tab)
-    ));
+    assert!(
+        app.mark_pending_autocomplete_apply_for_key(winit::keyboard::PhysicalKey::Code(
+            winit::keyboard::KeyCode::Tab
+        ))
+    );
     assert!(app.autocomplete_apply_pending_response);
 }
 
@@ -1069,7 +1553,10 @@ fn api_mock_ty_exact_single_match_closes_like_main_editor() {
     open_api_mock_test_route(&mut app);
     app.toggle_api_route_python(0);
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
-    app.ide_panel.api.input_editor.set_text_clean("    model_dump");
+    app.ide_panel
+        .api
+        .input_editor
+        .set_text_clean("    model_dump");
     app.ide_panel.api.input_editor.cursor = app.ide_panel.api.input_editor.len();
     app.autocomplete_active = true;
     app.autocomplete_mode = crate::app::AutocompleteMode::TyContext;
@@ -1218,7 +1705,10 @@ fn api_mock_python_hover_uses_virtual_source_fallback() {
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
         let popup_text = state.popup.as_ref().map(|popup| popup.text.as_str());
-        assert!(popup_text.is_some_and(|text| text.contains("class Response")));
+        assert!(popup_text.is_some_and(|text| {
+            text.starts_with("[[MODULE]] api_mock.mock_api.get_users\n")
+                && text.contains("class Response")
+        }));
         state.popup = None;
         state.byte_offset = None;
     });

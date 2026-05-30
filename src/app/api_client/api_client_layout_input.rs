@@ -91,7 +91,11 @@ pub fn api_tab_max_scroll(
     else {
         return 0.0;
     };
-    let Some(route) = model.routes.get(route_idx) else {
+    let Some(route) = (if model.id == API_MANUAL_MOCK_SPEC_ID {
+        model.routes.first()
+    } else {
+        model.routes.get(route_idx)
+    }) else {
         return 0.0;
     };
     let pad = 28.0 * scale;
@@ -101,7 +105,9 @@ pub fn api_tab_max_scroll(
     }
     content_h += 558.0 * scale;
     content_h += 28.0 * scale;
-    content_h += model.servers.len().max(1) as f32 * 34.0 * scale + 42.0 * scale;
+    if model.servers.len() > 1 {
+        content_h += model.servers.len() as f32 * 34.0 * scale + 42.0 * scale;
+    }
     let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
     if !auth_scheme_indices.is_empty() {
         content_h += 28.0 * scale
@@ -112,59 +118,83 @@ pub fn api_tab_max_scroll(
                 .sum::<f32>()
             + 8.0 * scale;
     }
-    if !route.path_params.is_empty() {
-        content_h += 28.0 * scale
-            + route
-                .path_params
-                .iter()
-                .map(|param| api_param_row_height(param, scale))
-                .sum::<f32>()
-            + 8.0 * scale;
-    }
-    if !route.query_params.is_empty() {
-        content_h += 28.0 * scale
-            + route
-                .query_params
-                .iter()
-                .map(|param| api_param_row_height(param, scale))
-                .sum::<f32>()
-            + 8.0 * scale;
-    }
-    if let Some(body) = &route.request_body {
-        content_h += 28.0 * scale;
-        if body.is_multipart || body.is_form_urlencoded {
-            content_h += body
-                .schema
-                .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
-                .map(|schema| {
-                    schema
-                        .properties
-                        .iter()
-                        .filter_map(|prop| model.schema_arena.get(prop.schema.0))
-                        .map(|schema| api_body_prop_row_height(schema, model, scale))
-                        .sum::<f32>()
-                })
-                .unwrap_or(0.0);
-        } else {
-            content_h += api_body_text_area_height(&tab_state.body_json, scale) + 16.0 * scale;
+    content_h += 40.0 * scale;
+    let input_content_h = api_route_input_view_height(route, model, tab_state, scale);
+    if tab_state.input_doc_view == ApiInputDocView::Schema {
+        content_h += 30.0 * scale + input_content_h + 16.0 * scale;
+        if tab_state.input_schema_menu_open {
+            content_h += api_route_input_media_count(route).max(1) as f32 * 30.0 * scale
+                + 4.0 * scale;
+        }
+    } else {
+        if !route.path_params.is_empty() {
+            content_h += 28.0 * scale
+                + route
+                    .path_params
+                    .iter()
+                    .map(|param| api_param_row_height(param, scale))
+                    .sum::<f32>()
+                + 8.0 * scale;
+        }
+        if !route.query_params.is_empty() {
+            content_h += 28.0 * scale
+                + route
+                    .query_params
+                    .iter()
+                    .map(|param| api_param_row_height(param, scale))
+                    .sum::<f32>()
+                + 8.0 * scale;
+        }
+        if let Some(body) = &route.request_body {
+            content_h += 28.0 * scale;
+            if body.is_multipart || body.is_form_urlencoded {
+                content_h += body
+                    .schema
+                    .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+                    .map(|schema| {
+                        schema
+                            .properties
+                            .iter()
+                            .filter_map(|prop| model.schema_arena.get(prop.schema.0))
+                            .map(|schema| api_body_prop_row_height(schema, model, scale))
+                            .sum::<f32>()
+                    })
+                    .unwrap_or(0.0);
+            } else {
+                content_h += api_body_text_area_height(&tab_state.body_json, scale) + 16.0 * scale;
+            }
         }
     }
     content_h += 84.0 * scale;
     if let Some(api) = api
         && api.expanded_mock_routes.contains(&(model.id, route_idx))
     {
-        let mock_override = api.mock.route_overrides.iter().find(|item| {
-            item.method == route.method
-                && item.path == route.path
-                && item.python.as_ref().is_some_and(|script| script.enabled)
-        });
-        content_h += if let Some(script) = mock_override.and_then(|item| item.python.as_ref()) {
+        let manual_route = (model.id == API_MANUAL_MOCK_SPEC_ID)
+            .then(|| api.mock.manual_routes.get(route_idx))
+            .flatten();
+        let mock_script = manual_route
+            .and_then(|route| route.python.as_ref())
+            .or_else(|| {
+                api.mock
+                    .route_overrides
+                    .iter()
+                    .find(|item| {
+                        item.method == route.method
+                            && item.path == route.path
+                            && item.python.as_ref().is_some_and(|script| script.enabled)
+                    })
+                    .and_then(|item| item.python.as_ref())
+            })
+            .filter(|script| script.enabled);
+        content_h += if let Some(script) = mock_script {
             let contract = crate::app::api_mock::types::api_mock_effective_contract(
                 script, route, model,
             );
             let signature_text =
                 crate::app::api_mock::contract::api_mock_handler_signature_text(&contract);
-            230.0 * scale + api_mock_combined_editor_viewport_height(&signature_text, scale)
+            230.0 * scale
+                + api_mock_contract_field_controls_height(&contract, api, route_idx, scale)
+                + api_mock_combined_editor_viewport_height(&signature_text, scale)
         } else {
             230.0 * scale
         };
@@ -184,7 +214,73 @@ pub fn api_tab_max_scroll(
     } else if tab_state.pending {
         content_h += 24.0 * scale;
     }
+    if !route.responses.is_empty() {
+        let example = api_route_output_example_text_for(
+            route,
+            model,
+            tab_state.output_status_idx,
+            tab_state.output_example_idx,
+        );
+        let schema = api_route_output_schema_text_for(
+            route,
+            model,
+            tab_state.output_status_idx,
+            tab_state.output_schema_idx,
+            &tab_state.output_schema_collapsed,
+        );
+        content_h += 120.0 * scale
+            + api_response_text_area_height(&example, scale)
+                .max(api_response_text_area_height(&schema, scale));
+    }
     (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
+pub fn api_route_input_view_height(
+    route: &ApiRouteRow,
+    model: &ApiSpecModel,
+    tab_state: &ApiClientTabState,
+    scale: f32,
+) -> f32 {
+    let mut h = 0.0;
+    if !route.path_params.is_empty() {
+        h += 28.0 * scale
+            + route
+                .path_params
+                .iter()
+                .map(|param| api_param_row_height(param, scale))
+                .sum::<f32>()
+            + 8.0 * scale;
+    }
+    if !route.query_params.is_empty() {
+        h += 28.0 * scale
+            + route
+                .query_params
+                .iter()
+                .map(|param| api_param_row_height(param, scale))
+                .sum::<f32>()
+            + 8.0 * scale;
+    }
+    if let Some(body) = &route.request_body {
+        h += 28.0 * scale;
+        if body.is_multipart || body.is_form_urlencoded {
+            h += body
+                .schema
+                .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
+                .map(|schema| {
+                    schema
+                        .properties
+                        .iter()
+                        .filter_map(|prop| model.schema_arena.get(prop.schema.0))
+                        .map(|schema| api_body_prop_row_height(schema, model, scale))
+                        .sum::<f32>()
+                })
+                .unwrap_or(0.0)
+                + 16.0 * scale;
+        } else {
+            h += api_body_text_area_height(&tab_state.body_json, scale) + 16.0 * scale;
+        }
+    }
+    h.max(260.0 * scale)
 }
 
 pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32 {
@@ -198,6 +294,105 @@ pub fn api_auth_scheme_row_height(scheme: &ApiSecurityScheme, scale: f32) -> f32
     } else {
         58.0 * scale
     }
+}
+
+fn api_mock_contract_field_controls_height(
+    contract: &crate::app::api_mock::types::ApiMockPythonContract,
+    api: &ApiClientState,
+    route_idx: usize,
+    scale: f32,
+) -> f32 {
+    api_mock_contract_class_controls_height(
+        &contract.path_params,
+        api,
+        route_idx,
+        crate::ui_system::ApiMockContractFieldGroup::Path,
+        scale,
+    ) + api_mock_contract_class_controls_height(
+        &contract.query,
+        api,
+        route_idx,
+        crate::ui_system::ApiMockContractFieldGroup::Query,
+        scale,
+    ) + api_mock_contract_class_controls_height(
+        &contract.body,
+        api,
+        route_idx,
+        crate::ui_system::ApiMockContractFieldGroup::Body,
+        scale,
+    )
+}
+
+fn api_mock_contract_class_controls_height(
+    spec: &crate::app::api_mock::types::ApiMockClassSpec,
+    api: &ApiClientState,
+    route_idx: usize,
+    group: crate::ui_system::ApiMockContractFieldGroup,
+    scale: f32,
+) -> f32 {
+    if !spec.enabled {
+        return 0.0;
+    }
+    spec.fields
+        .iter()
+        .enumerate()
+        .filter(|(_, field)| field.enabled)
+        .map(|(field_idx, field)| {
+            let focused_prop = match api.focused.as_ref() {
+                Some(ApiFocus::MockContractField {
+                    route_idx: f_route,
+                    group: f_group,
+                    field_idx: f_field,
+                    prop,
+                }) if *f_route == route_idx && *f_group == group && *f_field == field_idx => {
+                    Some(*prop)
+                }
+                _ => None,
+            };
+            let text_rows = usize::from(field.default_value.is_some())
+                + usize::from(!field.enum_values.is_empty())
+                + usize::from(field.constraints.min_length.is_some())
+                + usize::from(field.constraints.max_length.is_some())
+                + usize::from(field.constraints.pattern.is_some())
+                + usize::from(field.constraints.minimum.is_some())
+                + usize::from(field.constraints.maximum.is_some())
+                + usize::from(field.constraints.min_items.is_some())
+                + usize::from(field.constraints.max_items.is_some())
+                + focused_prop
+                    .filter(|prop| {
+                        !matches!(
+                            prop,
+                            crate::ui_system::ApiMockContractFieldProp::Required
+                                | crate::ui_system::ApiMockContractFieldProp::Nullable
+                        )
+                    })
+                    .is_some_and(|prop| {
+                        match prop {
+                            crate::ui_system::ApiMockContractFieldProp::Default => field.default_value.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::Enum => field.enum_values.is_empty(),
+                            crate::ui_system::ApiMockContractFieldProp::MinLength => field.constraints.min_length.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::MaxLength => field.constraints.max_length.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::Pattern => field.constraints.pattern.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::Minimum => field.constraints.minimum.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::Maximum => field.constraints.maximum.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::MinItems => field.constraints.min_items.is_none(),
+                            crate::ui_system::ApiMockContractFieldProp::MaxItems => field.constraints.max_items.is_none(),
+                            _ => false,
+                        }
+                    }) as usize;
+            let menu_h = api
+                .mock_contract_constraint_menu
+                .is_some_and(|menu| {
+                    menu.route_idx == route_idx && menu.group == group && menu.field_idx == field_idx
+                })
+                .then_some(270.0 * scale)
+                .unwrap_or(0.0);
+            70.0 * scale
+                + usize::from(field.required || field.nullable) as f32 * 30.0 * scale
+                + text_rows as f32 * 34.0 * scale
+                + menu_h
+        })
+        .sum()
 }
 
 pub fn api_param_row_height(param: &ApiParam, scale: f32) -> f32 {

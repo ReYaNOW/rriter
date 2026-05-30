@@ -663,6 +663,75 @@ pub(crate) fn build_ty_autocomplete_options(
         .collect()
 }
 
+fn api_mock_contract_constraint_options(
+    ctx: &AutocompleteEditorContext<'_>,
+) -> Vec<(AutocompleteItem, Vec<usize>)> {
+    match ctx.source {
+        ActiveAutocompleteSource::ApiMock {
+            part: crate::app::api_mock::ty_check::ApiMockSourcePart::Contract,
+            ..
+        } => {}
+        _ => return Vec::new(),
+    }
+    const MARKERS: &[(&str, &str, &str)] = &[
+        ("MinLen", "MinLen(1)", "min string length"),
+        ("MaxLen", "MaxLen(255)", "max string length"),
+        ("Pattern", "Pattern(\"^[a-z0-9_]+$\")", "string regex pattern"),
+        ("Ge", "Ge(0)", "number >= value"),
+        ("Gt", "Gt(0)", "number > value"),
+        ("Le", "Le(100)", "number <= value"),
+        ("Lt", "Lt(100)", "number < value"),
+        ("MinItems", "MinItems(1)", "min array items"),
+        ("MaxItems", "MaxItems(10)", "max array items"),
+    ];
+    let cursor = ctx.cursor.min(ctx.visible_text.len());
+    let line_start = ctx.visible_text[..cursor]
+        .rfind('\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    let line_prefix = &ctx.visible_text[line_start..cursor];
+    let Some((_, type_part)) = line_prefix.split_once(':') else {
+        return Vec::new();
+    };
+    let prefix = ctx.current_word_prefix();
+    let prefix_lower = prefix.to_ascii_lowercase();
+    let in_annotated = type_part.contains("Annotated[");
+    let marker_prefix = !prefix.is_empty()
+        && MARKERS
+            .iter()
+            .any(|(name, _, _)| name.to_ascii_lowercase().starts_with(&prefix_lower));
+    if !in_annotated && !marker_prefix {
+        return Vec::new();
+    }
+    let mut out = Vec::with_capacity(MARKERS.len());
+    for (name, insert, detail) in MARKERS {
+        let name_lower = name.to_ascii_lowercase();
+        let indices = if prefix.is_empty() {
+            Vec::new()
+        } else if let Some(indices) = fuzzy_match(&prefix_lower, &name_lower) {
+            indices
+        } else {
+            continue;
+        };
+        out.push((
+            AutocompleteItem {
+                word: (*name).to_string(),
+                kind: SymbolKind::Class,
+                scope_start: 0,
+                scope_end: usize::MAX,
+                module: Some("RRiter constraint".to_string()),
+                module_path: None,
+                detail: Some(format!("(constraint) {name}: {detail}")),
+                insert_text: Some((*insert).to_string()),
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            indices,
+        ));
+    }
+    out
+}
+
 impl App {
     pub(crate) fn active_api_mock_autocomplete_source(&self) -> Option<ActiveAutocompleteSource> {
         let (route_idx, part) = self.api_mock_completion_focus()?;
@@ -1101,13 +1170,15 @@ impl App {
         let options = {
             let editor = self.autocomplete_editor_for_source(source);
             let ctx = snapshot.editor_context(editor);
-            build_ty_autocomplete_options(
+            let mut options = build_ty_autocomplete_options(
                 &ctx,
                 self.autocomplete_mode,
                 items,
                 &self.autocomplete_signature_items,
                 &self.ide_workspaces,
-            )
+            );
+            options.extend(api_mock_contract_constraint_options(&ctx));
+            options
         };
         self.autocomplete_options = options;
         if autocomplete_trace_enabled() {

@@ -17,7 +17,7 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.02, 0.02, 0.03, 0.82]);
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
         let pad = 24.0 * s;
         let box_w = (860.0 * s).min(self.width - 32.0 * s).max(320.0 * s);
@@ -34,17 +34,17 @@ impl Renderer {
             [0.60, 0.35, 0.85, 0.90],
             [0.12, 0.13, 0.17, 1.0],
         );
-        let close = Button {
-            x: box_x + box_w - 34.0 * s,
-            y: box_y + 8.0 * s,
-            w: 26.0 * s,
-            h: 24.0 * s,
-            text: "x".to_string(),
-            icon: None,
-            text_scale: 0.76,
-            icon_size: 0.0,
+        let close = IconButton {
+            x: box_x + box_w - 42.0 * s,
+            y: box_y + 6.0 * s,
+            size: 32.0 * s,
+            icon: Some(IconType::Cancel),
+            is_active: false,
+            icon_size: Some(26.0 * s),
+            active_square_width: None,
+            custom_color: None,
         };
-        ui_registry.register_button(
+        ui_registry.register_icon_button(
             crate::ui_system::UiId::ApiMockGuideClose,
             &close,
             self,
@@ -210,7 +210,7 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        self.push_rect(0.0, 0.0, self.width, self.height, [0.02, 0.02, 0.03, 0.82]);
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
         let pad = 22.0 * s;
         let box_w = (720.0 * s).min(self.width - 32.0 * s).max(320.0 * s);
@@ -227,17 +227,17 @@ impl Renderer {
             [0.60, 0.35, 0.85, 0.90],
             [0.12, 0.13, 0.17, 1.0],
         );
-        let close = Button {
-            x: box_x + box_w - 34.0 * s,
-            y: box_y + 8.0 * s,
-            w: 26.0 * s,
-            h: 24.0 * s,
-            text: "x".to_string(),
-            icon: None,
-            text_scale: 0.76,
-            icon_size: 0.0,
+        let close = IconButton {
+            x: box_x + box_w - 42.0 * s,
+            y: box_y + 6.0 * s,
+            size: 32.0 * s,
+            icon: Some(IconType::Cancel),
+            is_active: false,
+            icon_size: Some(26.0 * s),
+            active_square_width: None,
+            custom_color: None,
         };
-        ui_registry.register_button(
+        ui_registry.register_icon_button(
             crate::ui_system::UiId::ApiMockServerDetailsClose,
             &close,
             self,

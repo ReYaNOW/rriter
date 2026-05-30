@@ -4,11 +4,20 @@ pub struct ApiJobRequest {
     pub route_idx: usize,
     pub method: ApiMethod,
     pub url: String,
+    pub mock_target: ApiJobMockTarget,
     pub auth_parts: Vec<ApiPreparedAuthPart>,
     pub body_json: Option<String>,
     pub body_form: Option<Vec<ApiInputValue>>,
     pub body_multipart: Option<Vec<ApiMultipartPart>>,
     pub resolved_host: Option<ApiResolvedHost>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ApiJobMockTarget {
+    #[default]
+    None,
+    Mock,
+    Proxy,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -208,7 +217,11 @@ fn push_multipart_quoted(out: &mut Vec<u8>, value: &str) {
 }
 
 fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
-    let server_reach_ms = measure_api_server_reach_ms(job.resolved_host.as_ref());
+    let server_reach_ms = if job.mock_target == ApiJobMockTarget::Mock {
+        None
+    } else {
+        measure_api_server_reach_ms(job.resolved_host.as_ref())
+    };
     let mut response = ApiJobResponse {
         request_id: job.request_id,
         spec_id: job.spec_id,
@@ -278,14 +291,18 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         },
         Err(err) => {
             response.elapsed_ms = started.elapsed().as_millis();
-            response.timing_text =
-                format_api_timing_text(response.elapsed_ms, response.server_reach_ms);
+            response.timing_text = format_api_timing_text(
+                response.elapsed_ms,
+                response.server_reach_ms,
+                job.mock_target,
+            );
             response.error = Some(err);
             return response;
         }
     };
     response.elapsed_ms = started.elapsed().as_millis();
-    response.timing_text = format_api_timing_text(response.elapsed_ms, response.server_reach_ms);
+    response.timing_text =
+        format_api_timing_text(response.elapsed_ms, response.server_reach_ms, job.mock_target);
     match result {
         Ok(mut res) => {
             response.status = Some(res.status().as_u16());
@@ -500,7 +517,20 @@ fn parse_api_ping_rtt_ms(bytes: &[u8]) -> Option<u128> {
     Some((millis.round().max(1.0)) as u128)
 }
 
-fn format_api_timing_text(elapsed_ms: u128, server_reach_ms: Option<u128>) -> String {
+fn format_api_timing_text(
+    elapsed_ms: u128,
+    server_reach_ms: Option<u128>,
+    mock_target: ApiJobMockTarget,
+) -> String {
+    if mock_target == ApiJobMockTarget::Mock {
+        return format!("{elapsed_ms} ms (мок-сервер)");
+    }
+    if mock_target == ApiJobMockTarget::Proxy {
+        return match server_reach_ms {
+            Some(server_reach_ms) => format!("{server_reach_ms} ms до сервера"),
+            None => "n/a до сервера".to_string(),
+        };
+    }
     match server_reach_ms {
         Some(server_reach_ms) => format!("{elapsed_ms} ms (~{server_reach_ms} ms до сервера)"),
         None => format!("{elapsed_ms} ms (n/a до сервера)"),
@@ -631,16 +661,52 @@ fn api_line_byte_at_x(
     renderer: &mut crate::renderer::Renderer,
     line: &str,
     target_x: f32,
+    text_scale: f32,
 ) -> usize {
     let mut x = 0.0;
     for (byte_idx, ch) in line.char_indices() {
-        let adv = renderer.char_advance(ch);
+        if ch == '\n' || ch == '\r' || ch == '\u{FE0F}' || ch == '\u{200D}' {
+            continue;
+        }
+        let adv = renderer
+            .get_ui_glyph(ch)
+            .map(|g| crate::renderer::Renderer::snapped_text_advance(g.advance, text_scale))
+            .unwrap_or(8.0);
         if target_x <= x + adv * 0.5 {
             return byte_idx;
         }
         x += adv;
     }
     line.len()
+}
+
+pub(crate) fn api_multiline_ui_byte_at_pointer(
+    editor: &Editor,
+    renderer: &mut crate::renderer::Renderer,
+    cursor_left_x: f32,
+    cursor_top_y: f32,
+    mx: f32,
+    my: f32,
+    scale: f32,
+    scroll_y: f32,
+    scroll_x: f32,
+    text_scale: f32,
+) -> usize {
+    let line_h = api_text_area_line_height(scale);
+    let content_y = (my - cursor_top_y + scroll_y - line_h * 0.25).max(0.0);
+    let target_line = (content_y / line_h).floor() as usize;
+    let line_idx = target_line.min(editor.line_offsets.len().saturating_sub(1));
+    let Some(&line_start) = editor.line_offsets.get(line_idx) else {
+        return editor.len();
+    };
+    let line_end = line_end_without_newline(editor, line_idx);
+    if line_start >= line_end {
+        return line_start;
+    }
+    let text = editor.line_text_owned(line_idx);
+    let line = text.trim_end_matches(['\r', '\n']);
+    let target_x = (mx - cursor_left_x + scroll_x).max(0.0);
+    line_start + api_line_byte_at_x(renderer, line, target_x, text_scale)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -736,6 +802,21 @@ pub(crate) fn api_mock_body_editor_text(text: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+pub(crate) fn backspace_api_mock_body_editor(editor: &mut Editor) -> Option<(usize, usize)> {
+    if let Some(deleted) = editor.backspace() {
+        return Some(deleted);
+    }
+    if editor.cursor == 0 && editor.len() > 0 && editor.byte_at(0) == b'\n' {
+        let deleted = editor.delete_forward();
+        if deleted.is_some() {
+            editor.cursor = editor.len();
+            editor.selection_anchor = Some(editor.cursor);
+        }
+        return deleted;
+    }
+    None
 }
 
 fn set_api_multiline_cursor_at_pointer(

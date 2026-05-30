@@ -28,12 +28,33 @@ impl App {
 
         let r = self.renderer.as_mut()?;
         let s = r.scale_factor;
-        let w = (FILE_TREE_DIALOG_W * s).min(r.width - 32.0 * s);
+        let base_w = (FILE_TREE_DIALOG_W * s).min(r.width - 32.0 * s);
+        let mut w = base_w;
+        if matches!(kind, FileTreeDialogInputKind::Rename) {
+            let base_x = ((r.width - base_w) / 2.0).round();
+            let base_input_w = if let Some(parent_dir) = parent_dir.as_ref() {
+                let (_, _, input_w) =
+                    file_tree_path_input_layout(base_x, base_w, s, parent_dir, |text| {
+                        r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE)
+                    });
+                input_w
+            } else {
+                base_w - FILE_TREE_DIALOG_SIDE_PAD * 2.0 * s
+            };
+            let text_w = r.measure_ui_width(&text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE);
+            w = file_tree_rename_dialog_width(base_w, r.width - 32.0 * s, base_input_w, text_w, s);
+        }
         let x = ((r.width - w) / 2.0).round();
         let (input_x, input_w) = if let Some(parent_dir) = parent_dir.as_ref() {
-            let (_, input_x, input_w) = file_tree_path_input_layout(x, w, s, parent_dir, |text| {
-                r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE)
-            });
+            let (_, input_x, input_w) = if matches!(kind, FileTreeDialogInputKind::Rename) {
+                file_tree_rename_path_input_layout(x, w, base_w, s, parent_dir, |text| {
+                    r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE)
+                })
+            } else {
+                file_tree_path_input_layout(x, w, s, parent_dir, |text| {
+                    r.measure_ui_width(text, FILE_TREE_DIALOG_INPUT_TEXT_SCALE)
+                })
+            };
             (input_x, input_w)
         } else {
             (
@@ -44,11 +65,19 @@ impl App {
         let pad_x = 8.0 * s;
         let visible_width = (input_w - pad_x * 2.0).max(0.0);
         let scale = FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
-        let scroll_x = file_tree_name_input_scroll_x(&text, cursor, visible_width, |ch| {
-            r.get_ui_glyph(ch)
-                .map(|g| g.advance * scale)
-                .unwrap_or(10.0 * scale)
-        });
+        let scroll_x = if matches!(kind, FileTreeDialogInputKind::Rename) {
+            self.ide_panel
+                .file_tree_rename_dialog
+                .as_ref()
+                .map(|dialog| dialog.input_scroll_x.current.round())
+                .unwrap_or(0.0)
+        } else {
+            file_tree_name_input_scroll_x(&text, cursor, visible_width, |ch| {
+                r.get_ui_glyph(ch)
+                    .map(|g| g.advance * scale)
+                    .unwrap_or(10.0 * scale)
+            })
+        };
         let x_offset = (mx - (input_x + pad_x) + scroll_x).max(0.0);
         Some(file_tree_name_input_hit_index(&text, x_offset, |ch| {
             r.get_ui_glyph(ch)
@@ -64,6 +93,7 @@ impl App {
         target_idx: usize,
         reset_anchor: bool,
     ) {
+        let mut sync_rename_scroll = false;
         let editor = match kind {
             FileTreeDialogInputKind::Create => self
                 .ide_panel
@@ -81,11 +111,90 @@ impl App {
             if reset_anchor || editor.selection_anchor.is_none() {
                 editor.selection_anchor = Some(target_idx);
             }
+            sync_rename_scroll = matches!(kind, FileTreeDialogInputKind::Rename);
         }
+        if sync_rename_scroll {
+            self.sync_file_tree_rename_scroll_target(true);
+        }
+    }
+
+    fn sync_file_tree_rename_scroll_target(&mut self, immediate: bool) {
+        let Some(rect) = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::FileTreeRenameInput)
+        else {
+            return;
+        };
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let s = renderer.scale_factor;
+        let visible_w = (rect.2 - 16.0 * s).max(1.0);
+        let Some(dialog) = self.ide_panel.file_tree_rename_dialog.as_mut() else {
+            return;
+        };
+        crate::app::sync_one_line_input_scroll_target(
+            renderer,
+            &dialog.editor,
+            &mut dialog.input_scroll_x,
+            visible_w,
+            FILE_TREE_DIALOG_INPUT_TEXT_SCALE,
+            10.0 * s,
+            immediate,
+        );
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_file_tree_modal_keyboard(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+        if self
+            .ide_panel
+            .api
+            .mock_contract_field_delete_dialog
+            .is_some()
+        {
+            if key_event.state != winit::event::ElementState::Pressed {
+                return true;
+            }
+            match key_event.physical_key {
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                    self.ide_panel.api.mock_contract_field_delete_dialog = None;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
+                    self.confirm_api_mock_contract_field_delete();
+                }
+                _ => {}
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
+            return true;
+        }
+
+        if self.ide_panel.api.mock_route_reset_dialog.is_some() {
+            if key_event.state != winit::event::ElementState::Pressed {
+                return true;
+            }
+            match key_event.physical_key {
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
+                    self.ide_panel.api.mock_route_reset_dialog = None;
+                }
+                winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
+                | winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::NumpadEnter) => {
+                    self.confirm_api_mock_route_reset();
+                }
+                _ => {}
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
+            return true;
+        }
+
         if self.ide_panel.git.confirm_dialog.is_some() {
             if key_event.state != winit::event::ElementState::Pressed {
                 return true;
@@ -216,6 +325,8 @@ impl App {
                 self.ide_panel.file_tree_rename_dialog = None;
             } else if submit {
                 self.submit_file_tree_rename_dialog();
+            } else {
+                self.sync_file_tree_rename_scroll_target(false);
             }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();

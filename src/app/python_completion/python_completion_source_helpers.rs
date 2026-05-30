@@ -669,25 +669,7 @@ pub(crate) fn prepend_autocomplete_detail_module_path(
     popup: &mut crate::app::mouse::HoverPopup,
     module_path: &str,
 ) {
-    crate::app::file_tree::pre_rasterize_icon("folder", true);
-    let prefix = format!("[[MODULE]] {module_path}\n");
-    if popup.text.starts_with(&prefix) {
-        return;
-    }
-    let shift = prefix.len();
-    popup.text.insert_str(0, &prefix);
-    for span in &mut popup.spans {
-        span.start += shift;
-        span.end += shift;
-    }
-    for (start, end) in &mut popup.inline_code_ranges {
-        *start += shift;
-        *end += shift;
-    }
-    let mut line_kinds = Vec::with_capacity(popup.line_kinds.len() + 1);
-    line_kinds.push(crate::lsp::HoverLineKindPublic::Text);
-    line_kinds.extend(popup.line_kinds.iter().copied());
-    popup.line_kinds = line_kinds;
+    crate::app::events::prepend_hover_module_path(popup, module_path);
 }
 
 pub(crate) fn normalize_ty_import_kind(item: &mut AutocompleteItem) {

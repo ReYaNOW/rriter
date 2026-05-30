@@ -165,36 +165,17 @@ impl Renderer {
             cy += item_h * 2.0 + 12.0 * s;
         }
 
+        let now = now_epoch_secs();
+        let import_error_visible = api.import_error.as_ref().filter(|_| {
+            api.import_error_at
+                .map(|at| now.saturating_sub(at) < 5)
+                .unwrap_or(true)
+        });
+
         if api.import_url_open {
             let input_h = 32.0 * s;
             let input_x = x + pad;
             let input_w = (w - pad * 3.0 - 34.0 * s).max(40.0 * s);
-            self.push_rounded_rect_border(
-                input_x,
-                cy,
-                input_w,
-                input_h,
-                5.0 * s,
-                (1.0 * s).max(1.0),
-                if matches!(
-                    api.focused,
-                    Some(crate::app::api_client::ApiFocus::ImportUrl)
-                ) {
-                    [0.60, 0.35, 0.85, 1.0]
-                } else {
-                    [1.0, 1.0, 1.0, 0.12]
-                },
-                [0.16, 0.17, 0.21, 1.0],
-            );
-            ui_registry.register_text_input(
-                crate::ui_system::UiId::ApiImportUrlInput,
-                input_x,
-                cy,
-                input_w,
-                input_h,
-                mx,
-                my,
-            );
             let text = api.input_editor.get_full_text();
             let shown = if text.is_empty() {
                 "https://example.com/openapi.json"
@@ -206,37 +187,28 @@ impl Renderer {
             } else {
                 self.theme.fg
             };
-            if matches!(
+            let focused = matches!(
                 api.focused,
                 Some(crate::app::api_client::ApiFocus::ImportUrl)
-            ) {
-                self.draw_api_editor_selection_one_line(
-                    &api.input_editor,
-                    input_x + 8.0 * s,
-                    cy + 6.0 * s,
-                    input_w - 16.0 * s,
-                    input_h - 12.0 * s,
-                    0.76,
-                    0.0,
-                );
-            }
-            self.draw_string_scaled_stable(shown, input_x + 8.0 * s, cy + 21.0 * s, color, 0.76);
-            if matches!(
-                api.focused,
-                Some(crate::app::api_client::ApiFocus::ImportUrl)
-            ) && blink_alpha > 0.5
-            {
-                let text_w = self
-                    .api_editor_cursor_x_one_line(&api.input_editor, 0.76)
-                    .min(input_w - 16.0 * s);
-                self.push_rect(
-                    input_x + 8.0 * s + text_w,
-                    cy + 7.0 * s,
-                    1.5 * s,
-                    input_h - 14.0 * s,
-                    self.theme.fg,
-                );
-            }
+            );
+            self.draw_api_one_line_input(
+                input_x,
+                cy,
+                input_w,
+                input_h,
+                s,
+                shown,
+                color,
+                focused,
+                api.input_scroll_x.current,
+                &api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiImportUrlInput,
+                ui_registry,
+                mx,
+                my,
+                crate::render_view::api_client_tab::API_ONE_LINE_INPUT_SCALE,
+            );
             let go = IconButton {
                 x: input_x + input_w + pad,
                 y: cy + 3.0 * s,
@@ -257,22 +229,29 @@ impl Renderer {
                 false,
             );
             cy += input_h + 10.0 * s;
+            if let Some(err) = import_error_visible {
+                self.draw_string_scaled_stable(
+                    err,
+                    x + pad,
+                    cy + 10.0 * s,
+                    [1.0, 0.38, 0.38, 1.0],
+                    0.72,
+                );
+                cy += 20.0 * s;
+            }
         }
 
-        let now = now_epoch_secs();
-        if let Some(err) = &api.import_error
-            && api
-                .import_error_at
-                .map(|at| now.saturating_sub(at) < 5)
-                .unwrap_or(true)
+        if !api.import_url_open
+            && let Some(err) = import_error_visible
         {
             self.draw_string_scaled_stable(
                 err,
                 x + pad,
-                cy + 18.0 * s,
+                cy + 12.0 * s,
                 [1.0, 0.38, 0.38, 1.0],
                 0.72,
             );
+            cy += 20.0 * s;
         }
 
         cy += 10.0 * s;
@@ -353,6 +332,36 @@ impl Renderer {
             [0.62, 0.66, 0.74, 1.0],
             0.82,
         );
+        if api.mock.server_status.running_url().is_some() {
+            let copy_size = 16.0 * s;
+            let copy_x = x + w - pad - copy_size;
+            let copy_y = cy + (26.0 * s - copy_size) * 0.5 - 1.0 * s;
+            let copy_hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::ApiMockServerCopyUrl,
+                copy_x - 3.0 * s,
+                copy_y - 3.0 * s,
+                copy_size + 6.0 * s,
+                copy_size + 6.0 * s,
+                mx,
+                my,
+            );
+            let copied = api
+                .mock_server_url_copied_at
+                .is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(10));
+            self.draw_atlas_icon(
+                if copied { IconType::Check } else { IconType::Copy },
+                copy_x,
+                copy_y,
+                copy_size,
+                if copied {
+                    [0.3, 0.9, 0.4, 1.0]
+                } else if copy_hovered {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    self.theme.sel
+                },
+            );
+        }
         cy += 26.0 * s;
         let details = Button {
             x: x + pad,
@@ -434,29 +443,6 @@ impl Renderer {
             api.focused,
             Some(crate::app::api_client::ApiFocus::MockProxyBase)
         );
-        self.push_rounded_rect_border(
-            proxy_x,
-            cy,
-            proxy_w,
-            proxy_h,
-            5.0 * s,
-            (1.0 * s).max(1.0),
-            if proxy_focused {
-                [0.60, 0.35, 0.85, 1.0]
-            } else {
-                [1.0, 1.0, 1.0, 0.12]
-            },
-            [0.16, 0.17, 0.21, 1.0],
-        );
-        ui_registry.register_text_input(
-            crate::ui_system::UiId::ApiMockProxyBaseInput,
-            proxy_x,
-            cy,
-            proxy_w,
-            proxy_h,
-            mx,
-            my,
-        );
         let proxy_text = if proxy_focused {
             api.input_editor.get_full_text()
         } else {
@@ -467,16 +453,28 @@ impl Renderer {
         } else {
             proxy_text.as_str()
         };
-        self.draw_string_scaled_stable(
+        let color = if proxy_text.is_empty() {
+            [0.55, 0.57, 0.64, 1.0]
+        } else {
+            self.theme.fg
+        };
+        self.draw_api_one_line_input(
+            proxy_x,
+            cy,
+            proxy_w,
+            proxy_h,
+            s,
             shown,
-            proxy_x + 8.0 * s,
-            cy + 20.0 * s,
-            if proxy_text.is_empty() {
-                [0.55, 0.57, 0.64, 1.0]
-            } else {
-                self.theme.fg
-            },
-            0.82,
+            color,
+            proxy_focused,
+            api.input_scroll_x.current,
+            &api.input_editor,
+            blink_alpha,
+            crate::ui_system::UiId::ApiMockProxyBaseInput,
+            ui_registry,
+            mx,
+            my,
+            crate::render_view::api_client_tab::API_ONE_LINE_INPUT_SCALE,
         );
         cy += proxy_h + 18.0 * s;
         let runtime_status_label = match api.mock.uv.status {
@@ -537,7 +535,7 @@ impl Renderer {
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: "Добавить ручной route".to_string(),
+            text: "Добавить мок роут".to_string(),
             icon: Some(IconType::Plus),
             text_scale: 0.82,
             icon_size: 18.0 * s,
@@ -553,10 +551,11 @@ impl Renderer {
         );
         cy += btn_h + 14.0 * s;
         for (manual_idx, route) in api.mock.manual_routes.iter().enumerate().take(8) {
+            let row_y = cy.round();
             let method_x = x + pad;
-            let method_y = cy + 3.0 * s;
-            let method_w = 44.0 * s;
-            let method_h = 22.0 * s;
+            let method_y = row_y + 2.0 * s;
+            let method_w = 52.0 * s;
+            let method_h = 24.0 * s;
             self.draw_api_method_chip(
                 route.method,
                 method_x,
@@ -564,7 +563,7 @@ impl Renderer {
                 method_w,
                 method_h,
                 s,
-                0.58,
+                0.64,
             );
             ui_registry.register_rect(
                 crate::ui_system::UiId::ApiMockManualRouteMethod(manual_idx),
@@ -575,91 +574,58 @@ impl Renderer {
                 mx,
                 my,
             );
-            let open_size = 22.0 * s;
-            let remove_size = 22.0 * s;
-            let path_x = x + pad + 54.0 * s;
-            let path_y = cy;
+            let open_size = 28.0 * s;
+            let remove_size = 30.0 * s;
+            let path_x = x + pad + 64.0 * s;
+            let path_y = row_y;
             let path_w =
-                (w - pad * 2.0 - 54.0 * s - open_size - remove_size - 14.0 * s).max(48.0 * s);
-            let path_h = 28.0 * s;
+                (w - pad * 2.0 - 64.0 * s - open_size - remove_size - 14.0 * s).max(48.0 * s);
+            let path_h = 30.0 * s;
             let path_focused = matches!(
                 api.focused,
                 Some(crate::app::api_client::ApiFocus::MockManualPath { manual_idx: f_idx })
                     if f_idx == manual_idx
-            );
-            self.push_rounded_rect_border(
-                path_x,
-                path_y,
-                path_w,
-                path_h,
-                5.0 * s,
-                (1.0 * s).max(1.0),
-                if path_focused {
-                    [0.60, 0.35, 0.85, 1.0]
-                } else {
-                    [1.0, 1.0, 1.0, 0.12]
-                },
-                [0.16, 0.17, 0.21, 1.0],
-            );
-            ui_registry.register_text_input(
-                crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx),
-                path_x,
-                path_y,
-                path_w,
-                path_h,
-                mx,
-                my,
             );
             let path_text = if path_focused {
                 api.input_editor.get_full_text()
             } else {
                 route.path.clone()
             };
-            if path_focused {
-                self.draw_api_editor_selection_one_line(
-                    &api.input_editor,
-                    path_x + 8.0 * s,
-                    path_y + 5.0 * s,
-                    path_w - 16.0 * s,
-                    path_h - 10.0 * s,
-                    0.72,
-                    0.0,
-                );
-                if blink_alpha > 0.5 {
-                    let text_w = self
-                        .api_editor_cursor_x_one_line(&api.input_editor, 0.72)
-                        .min(path_w - 16.0 * s);
-                    self.push_rect(
-                        path_x + 8.0 * s + text_w,
-                        path_y + 6.0 * s,
-                        1.5 * s,
-                        path_h - 12.0 * s,
-                        self.theme.fg,
-                    );
-                }
-            }
-            self.draw_string_scaled_stable(
-                if path_text.is_empty() {
-                    "/mock"
-                } else {
-                    path_text.as_str()
-                },
-                path_x + 8.0 * s,
-                path_y + 19.0 * s,
-                if path_text.is_empty() {
-                    [0.55, 0.57, 0.64, 1.0]
-                } else {
-                    self.theme.fg
-                },
-                0.72,
+            let shown = if path_text.is_empty() {
+                "/mock"
+            } else {
+                path_text.as_str()
+            };
+            let color = if path_text.is_empty() {
+                [0.55, 0.57, 0.64, 1.0]
+            } else {
+                self.theme.fg
+            };
+            self.draw_api_one_line_input(
+                path_x,
+                path_y,
+                path_w,
+                path_h,
+                s,
+                shown,
+                color,
+                path_focused,
+                api.input_scroll_x.current,
+                &api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx),
+                ui_registry,
+                mx,
+                my,
+                crate::render_view::api_client_tab::API_ONE_LINE_INPUT_SCALE,
             );
             let open = IconButton {
                 x: x + w - pad - remove_size - open_size - 6.0 * s,
-                y: cy + 3.0 * s,
+                y: row_y + 4.0 * s,
                 size: open_size,
                 icon: Some(IconType::Api),
                 is_active: false,
-                icon_size: Some(17.0 * s),
+                icon_size: Some(22.0 * s),
                 active_square_width: None,
                 custom_color: Some([0.50, 0.82, 1.0, 1.0]),
             };
@@ -674,11 +640,11 @@ impl Renderer {
             );
             let remove = IconButton {
                 x: x + w - pad - remove_size,
-                y: cy + 3.0 * s,
+                y: row_y + 3.0 * s,
                 size: remove_size,
                 icon: Some(IconType::Close),
                 is_active: false,
-                icon_size: Some(17.0 * s),
+                icon_size: Some(24.0 * s),
                 active_square_width: None,
                 custom_color: Some([1.0, 0.48, 0.48, 1.0]),
             };
@@ -691,7 +657,7 @@ impl Renderer {
                 s,
                 false,
             );
-            cy += 34.0 * s;
+            cy += 38.0 * s;
         }
 
         if api.specs.is_empty() {

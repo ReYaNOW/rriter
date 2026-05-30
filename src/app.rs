@@ -18,13 +18,13 @@ use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_B
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
-pub(crate) use autocomplete::{
-    AutocompletePopupKeyResult, CompletionApplyPlan, CompletionTextEditOp,
-    apply_completion_plan_to_editor,
-};
 #[cfg(test)]
 pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,
+};
+pub(crate) use autocomplete::{
+    AutocompletePopupKeyResult, CompletionApplyPlan, CompletionTextEditOp,
+    apply_completion_plan_to_editor,
 };
 use glutin::display::GetGlDisplay;
 use python_completion::*;
@@ -85,6 +85,65 @@ fn apply_initial_import_folds(editor: &mut Editor, ext: &str, text: &str) {
         }
         _ => {}
     }
+}
+
+pub(crate) fn one_line_input_max_scroll_x(
+    renderer: &mut Renderer,
+    text: &str,
+    visible_w: f32,
+    text_scale: f32,
+    trailing_pad: f32,
+) -> f32 {
+    let text_w = renderer.measure_ui_width(text, text_scale);
+    (text_w - visible_w + trailing_pad).max(0.0)
+}
+
+pub(crate) fn sync_one_line_input_scroll_target(
+    renderer: &mut Renderer,
+    editor: &Editor,
+    scroll: &mut crate::scroll::ScrollState,
+    visible_w: f32,
+    text_scale: f32,
+    edge_pad: f32,
+    immediate: bool,
+) {
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
+    let cursor_x = renderer.measure_ui_width(&text[..cursor], text_scale);
+    let max_scroll =
+        one_line_input_max_scroll_x(renderer, &text, visible_w, text_scale, edge_pad * 2.0);
+    let mut target = scroll.target;
+    if cursor_x - target > visible_w {
+        target = cursor_x - visible_w + edge_pad;
+    } else if cursor_x < target {
+        target = cursor_x;
+    }
+    scroll.target = target.clamp(0.0, max_scroll);
+    if immediate {
+        scroll.current = scroll.target;
+        scroll.velocity = 0.0;
+    }
+}
+
+fn api_client_tab_display_title(
+    meta: &crate::app::api_client::ApiClientTabMeta,
+    fallback: &str,
+) -> String {
+    let title = if meta.title.is_empty() {
+        fallback
+    } else {
+        &meta.title
+    };
+    let Some(method) = meta.route_method else {
+        return if title.is_empty() {
+            "API".to_string()
+        } else {
+            title.to_string()
+        };
+    };
+    let mut path = String::new();
+    crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
+    format!("{title} {} {path}", method.chip_str())
 }
 
 pub(crate) fn tab_display_titles_for(
@@ -154,7 +213,9 @@ pub(crate) fn tab_display_titles_for(
             } else {
                 &tabs[i].base_title
             };
-            display_titles[i] = if title.is_empty() {
+            display_titles[i] = if let EditorTabKind::ApiClient(meta, _) = &tabs[i].kind {
+                api_client_tab_display_title(meta, title)
+            } else if title.is_empty() {
                 "Безымянный".to_string()
             } else {
                 title.to_string()

@@ -3,6 +3,28 @@
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconButton};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ApiMockContractFieldGroup {
+    Path,
+    Query,
+    Body,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ApiMockContractFieldProp {
+    Required,
+    Nullable,
+    Default,
+    Enum,
+    MinLength,
+    MaxLength,
+    Pattern,
+    Minimum,
+    Maximum,
+    MinItems,
+    MaxItems,
+}
+
 /// Уникальный идентификатор UI элемента
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UiId {
@@ -52,6 +74,8 @@ pub enum UiId {
     ApiSpecOpen(usize),
     ApiSpecRefresh(usize),
     ApiSpecRemove(usize),
+    ApiSpecRemoveConfirm,
+    ApiSpecRemoveCancel,
     ApiAuthRoot,
     ApiRoutesRoot,
     ApiRouteTag(usize),
@@ -73,10 +97,23 @@ pub enum UiId {
     ApiPathParamAllowedValue(usize, usize, usize),
     ApiQueryParamAllowedValue(usize, usize, usize),
     ApiBodyInput(usize),
+    ApiInputExampleTab(usize),
+    ApiInputSchemaTab(usize),
+    ApiInputSchemaMenu(usize),
+    ApiInputSchemaMenuItem(usize, usize),
+    ApiInputSchemaBody(usize),
+    ApiInputSchemaFold(usize, usize),
     ApiBodyScrollX(usize),
     ApiBodyFieldInput(usize, usize),
     ApiBodyAllowedValue(usize, usize, usize),
     ApiBodyFilePick(usize, usize),
+    ApiOutputExampleTab(usize),
+    ApiOutputSchemaTab(usize),
+    ApiOutputStatusTab(usize, usize),
+    ApiOutputSchemaMenu(usize),
+    ApiOutputSchemaMenuItem(usize, usize),
+    ApiOutputSchemaBody(usize),
+    ApiOutputSchemaFold(usize, usize),
     ApiResponseBodyTab(usize),
     ApiResponseHeadersTab(usize),
     ApiResponseBody(usize),
@@ -86,6 +123,7 @@ pub enum UiId {
     ApiTabBody,
     ApiMockServerToggle,
     ApiMockServerDetails,
+    ApiMockServerCopyUrl,
     ApiMockServerDetailsClose,
     ApiMockServerLogArea,
     ApiMockServerLogScrollY,
@@ -110,10 +148,33 @@ pub enum UiId {
     ApiMockRouteEnable(usize),
     ApiMockRouteDetailsToggle(usize),
     ApiMockRoutePythonToggle(usize),
+    ApiMockRouteReset(usize),
+    ApiMockRouteResetConfirm,
+    ApiMockRouteResetCancel,
+    ApiMockContractPathToggle(usize),
     ApiMockContractQueryToggle(usize),
     ApiMockContractBodyToggle(usize),
+    ApiMockContractPathFieldToggle(usize, usize),
     ApiMockContractQueryFieldToggle(usize, usize),
     ApiMockContractBodyFieldToggle(usize, usize),
+    ApiMockContractFieldRequired(usize, ApiMockContractFieldGroup, usize),
+    ApiMockContractFieldNullable(usize, ApiMockContractFieldGroup, usize),
+    ApiMockContractFieldRemove(usize, ApiMockContractFieldGroup, usize),
+    ApiMockContractFieldRemoveConfirm,
+    ApiMockContractFieldRemoveCancel,
+    ApiMockContractFieldPropInput(
+        usize,
+        ApiMockContractFieldGroup,
+        usize,
+        ApiMockContractFieldProp,
+    ),
+    ApiMockContractFieldAddConstraint(usize, ApiMockContractFieldGroup, usize),
+    ApiMockContractFieldAddConstraintOption(
+        usize,
+        ApiMockContractFieldGroup,
+        usize,
+        ApiMockContractFieldProp,
+    ),
     ApiMockStaticResponseInput(usize),
     ApiMockCombinedPython(usize),
     ApiMockContractInput(usize),

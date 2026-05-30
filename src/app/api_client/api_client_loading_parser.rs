@@ -339,10 +339,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         });
     }
 
-    let components = root
-        .get("components")
-        .and_then(|v| v.get("schemas"))
-        .and_then(Value::as_object);
+    let mut schema_cache = FxHashMap::default();
 
     let tag_order = parse_tag_order(root.get("tags"));
     if let Some(paths) = root.get("paths").and_then(Value::as_object) {
@@ -391,11 +388,16 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         .to_string();
                     let request_body = parse_request_body(
                         op.get("requestBody"),
-                        components,
+                        root,
                         &mut model.schema_arena,
+                        &mut schema_cache,
                     );
-                    let responses =
-                        parse_responses(op.get("responses"), components, &mut model.schema_arena);
+                    let responses = parse_responses(
+                        op.get("responses"),
+                        root,
+                        &mut model.schema_arena,
+                        &mut schema_cache,
+                    );
                     model.routes.push(ApiRouteRow {
                         tag,
                         method,
@@ -771,35 +773,66 @@ fn resolve_parameter_ref<'a>(item: &'a Value, root: &'a Value) -> Option<&'a Val
 
 fn parse_request_body(
     value: Option<&Value>,
-    components: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
     arena: &mut Vec<ApiSchema>,
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
 ) -> Option<ApiRequestBody> {
-    let body = value?;
+    let body = value.and_then(|value| resolve_schema_ref(value, root).or(Some(value)))?;
     let content = body.get("content").and_then(Value::as_object)?;
-    let (content_type, media) = content
-        .get_key_value("application/x-www-form-urlencoded")
-        .or_else(|| content.get_key_value("application/json"))
-        .or_else(|| content.get_key_value("multipart/form-data"))
-        .or_else(|| content.iter().next())?;
-    let schema = media
-        .get("schema")
-        .and_then(|schema| normalize_schema(schema, components, arena, 0, &mut Vec::new()));
+    let mut keys: Vec<&String> = content.keys().collect();
+    keys.sort_by(|a, b| {
+        api_request_media_rank(a)
+            .cmp(&api_request_media_rank(b))
+            .then_with(|| a.cmp(b))
+    });
+    let mut media_items = Vec::new();
+    for content_type in keys {
+        let Some(media) = content.get(content_type) else {
+            continue;
+        };
+        let schema = media.get("schema").and_then(|schema| {
+            normalize_schema(schema, root, arena, schema_cache, 0, &mut Vec::new())
+        });
+        media_items.push(ApiRequestBodyMedia {
+            content_type: content_type.to_string(),
+            schema,
+        });
+    }
+    let first = media_items.first()?;
+    let content_type = first.content_type.clone();
+    let schema = first.schema;
     Some(ApiRequestBody {
         required: body
             .get("required")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        content_type: content_type.to_string(),
+        content_type: content_type.clone(),
         schema,
         is_multipart: content_type == "multipart/form-data",
         is_form_urlencoded: content_type == "application/x-www-form-urlencoded",
+        media: media_items,
     })
+}
+
+fn api_request_media_rank(content_type: &str) -> u8 {
+    if content_type == "application/x-www-form-urlencoded" {
+        0
+    } else if content_type == "application/json" {
+        1
+    } else if content_type == "multipart/form-data" {
+        2
+    } else if content_type.contains("json") {
+        3
+    } else {
+        4
+    }
 }
 
 fn normalize_schema(
     schema: &Value,
-    components: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
     arena: &mut Vec<ApiSchema>,
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
     depth: usize,
     guard: &mut Vec<String>,
 ) -> Option<ApiSchemaRef> {
@@ -807,35 +840,59 @@ fn normalize_schema(
         return None;
     }
     if let Some(ref_s) = schema.get("$ref").and_then(Value::as_str) {
-        let name = ref_s.strip_prefix("#/components/schemas/")?;
-        if guard.iter().any(|seen| seen == name) {
+        if let Some(schema_ref) = schema_cache.get(ref_s).copied() {
+            return Some(schema_ref);
+        }
+        if guard.iter().any(|seen| seen == ref_s) {
             return None;
         }
-        let target = components?.get(name)?;
-        guard.push(name.to_string());
-        let out = normalize_schema_named(name, target, components, arena, depth + 1, guard);
+        let target = resolve_schema_ref(schema, root)?;
+        let name = schema_ref_name(ref_s);
+        guard.push(ref_s.to_string());
+        let out = normalize_schema_named(
+            &name,
+            target,
+            root,
+            arena,
+            schema_cache,
+            depth + 1,
+            guard,
+            Some(ref_s),
+        );
         guard.pop();
         return out;
     }
-    normalize_schema_named("", schema, components, arena, depth, guard)
+    normalize_schema_named("", schema, root, arena, schema_cache, depth, guard, None)
 }
 
 fn normalize_schema_named(
     name: &str,
     schema: &Value,
-    components: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
     arena: &mut Vec<ApiSchema>,
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
     depth: usize,
     guard: &mut Vec<String>,
+    cache_key: Option<&str>,
 ) -> Option<ApiSchemaRef> {
     if depth > API_SCHEMA_MAX_DEPTH || arena.len() >= API_SCHEMA_MAX_COUNT {
         return None;
     }
     let idx = arena.len();
     let constraints = parse_schema_constraints(Some(schema));
+    let kind = if schema.get("allOf").and_then(Value::as_array).is_some() {
+        ApiSchemaKind::Object
+    } else {
+        schema_kind(schema)
+    };
     arena.push(ApiSchema {
         name: name.to_string(),
-        kind: schema_kind(schema),
+        description: schema
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
+        kind,
         properties: Vec::new(),
         item: None,
         enum_values: schema_enum_values(Some(schema)).unwrap_or_default(),
@@ -844,41 +901,119 @@ fn normalize_schema_named(
         max_chars: constraints.max_length,
         constraints,
     });
-    if matches!(arena[idx].kind, ApiSchemaKind::Object) {
-        let required = schema
-            .get("required")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .collect::<FxHashSet<_>>()
-            })
-            .unwrap_or_default();
-        if let Some(props) = schema.get("properties").and_then(Value::as_object) {
-            let mut count = 0usize;
-            for (prop_name, prop_schema) in props {
-                if count >= API_SCHEMA_MAX_PROPERTIES {
-                    break;
-                }
-                if let Some(prop_ref) =
-                    normalize_schema(prop_schema, components, arena, depth + 1, guard)
-                {
-                    arena[idx].properties.push(ApiSchemaProperty {
-                        name: prop_name.to_string(),
-                        required: required.contains(prop_name.as_str()),
-                        schema: prop_ref,
-                    });
-                    count += 1;
-                }
+    let schema_ref = ApiSchemaRef(idx);
+    if let Some(cache_key) = cache_key {
+        schema_cache.insert(cache_key.to_string(), schema_ref);
+    }
+    if let Some(items) = schema.get("allOf").and_then(Value::as_array) {
+        for item in items {
+            if arena[idx].properties.len() >= API_SCHEMA_MAX_PROPERTIES {
+                break;
+            }
+            if let Some(part_ref) =
+                normalize_schema(item, root, arena, schema_cache, depth + 1, guard)
+            {
+                let properties = arena
+                    .get(part_ref.0)
+                    .map(|schema| schema.properties.clone())
+                    .unwrap_or_default();
+                append_schema_properties_dedup(&mut arena[idx].properties, properties);
             }
         }
+    }
+    if matches!(arena[idx].kind, ApiSchemaKind::Object) {
+        append_inline_object_properties(schema, root, arena, schema_cache, depth, guard, idx);
     } else if matches!(arena[idx].kind, ApiSchemaKind::Array)
         && let Some(items) = schema.get("items")
     {
-        arena[idx].item = normalize_schema(items, components, arena, depth + 1, guard);
+        arena[idx].item = normalize_schema(items, root, arena, schema_cache, depth + 1, guard);
     }
-    Some(ApiSchemaRef(idx))
+    Some(schema_ref)
+}
+
+fn append_inline_object_properties(
+    schema: &Value,
+    root: &Value,
+    arena: &mut Vec<ApiSchema>,
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
+    depth: usize,
+    guard: &mut Vec<String>,
+    idx: usize,
+) {
+    let required = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .collect::<FxHashSet<_>>()
+        })
+        .unwrap_or_default();
+    let Some(props) = schema.get("properties").and_then(Value::as_object) else {
+        return;
+    };
+    for (prop_name, prop_schema) in props {
+        if arena[idx].properties.len() >= API_SCHEMA_MAX_PROPERTIES {
+            break;
+        }
+        if arena[idx]
+            .properties
+            .iter()
+            .any(|prop| prop.name == *prop_name)
+        {
+            continue;
+        }
+        if let Some(prop_ref) =
+            normalize_schema(prop_schema, root, arena, schema_cache, depth + 1, guard)
+        {
+            arena[idx].properties.push(ApiSchemaProperty {
+                name: prop_name.to_string(),
+                required: required.contains(prop_name.as_str()),
+                schema: prop_ref,
+            });
+        }
+    }
+}
+
+fn append_schema_properties_dedup(
+    target: &mut Vec<ApiSchemaProperty>,
+    properties: Vec<ApiSchemaProperty>,
+) {
+    for prop in properties {
+        if target.len() >= API_SCHEMA_MAX_PROPERTIES {
+            break;
+        }
+        if target.iter().any(|existing| existing.name == prop.name) {
+            continue;
+        }
+        target.push(prop);
+    }
+}
+
+fn schema_ref_name(ref_s: &str) -> String {
+    let tail = ref_s.rsplit('/').next().unwrap_or("");
+    let mut out = String::with_capacity(tail.len());
+    let mut chars = tail.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '~' {
+            match chars.peek().copied() {
+                Some('0') => {
+                    chars.next();
+                    out.push('~');
+                    continue;
+                }
+                Some('1') => {
+                    chars.next();
+                    out.push('/');
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(ch);
+    }
+    out
 }
 
 fn schema_kind(schema: &Value) -> ApiSchemaKind {
@@ -895,6 +1030,7 @@ fn schema_kind(schema: &Value) -> ApiSchemaKind {
         Some("string") => match schema.get("format").and_then(Value::as_str) {
             Some("date") => ApiSchemaKind::Date,
             Some("date-time") => ApiSchemaKind::DateTime,
+            Some("time") => ApiSchemaKind::Time,
             _ => ApiSchemaKind::String,
         },
         Some("integer") => ApiSchemaKind::Integer,
@@ -938,13 +1074,16 @@ fn schema_examples(schema: &Value) -> Vec<String> {
 
 fn parse_responses(
     value: Option<&Value>,
-    components: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
     arena: &mut Vec<ApiSchema>,
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
 ) -> Vec<ApiResponseSummary> {
     let mut out = Vec::new();
     if let Some(map) = value.and_then(Value::as_object) {
         for (status, body) in map {
-            let (content_type, example, schema) = parse_response_media(body, components, arena);
+            let body = resolve_schema_ref(body, root).unwrap_or(body);
+            let media = parse_response_media(body, root, arena, schema_cache);
+            let first = media.first();
             out.push(ApiResponseSummary {
                 status: status.to_string(),
                 description: body
@@ -952,9 +1091,12 @@ fn parse_responses(
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string(),
-                content_type,
-                example,
-                schema,
+                content_type: first
+                    .map(|item| item.content_type.clone())
+                    .unwrap_or_default(),
+                example: first.and_then(|item| item.example.clone()),
+                schema: first.and_then(|item| item.schema),
+                media,
             });
         }
     }
@@ -964,36 +1106,85 @@ fn parse_responses(
 
 fn parse_response_media(
     body: &Value,
-    components: Option<&serde_json::Map<String, Value>>,
+    root: &Value,
     arena: &mut Vec<ApiSchema>,
-) -> (String, Option<String>, Option<ApiSchemaRef>) {
+    schema_cache: &mut FxHashMap<String, ApiSchemaRef>,
+) -> Vec<ApiResponseMedia> {
     let Some(content) = body.get("content").and_then(Value::as_object) else {
-        return (String::new(), None, None);
+        return Vec::new();
     };
-    let Some((content_type, media)) = content
-        .get_key_value("application/json")
-        .or_else(|| content.get_key_value("application/problem+json"))
-        .or_else(|| content.iter().find(|(kind, _)| kind.contains("json")))
-        .or_else(|| content.iter().next())
-    else {
-        return (String::new(), None, None);
-    };
-    let example = media.get("example").and_then(value_to_string).or_else(|| {
-        media
-            .get("examples")
-            .and_then(Value::as_object)
-            .and_then(|examples| examples.values().next())
-            .and_then(|example| {
-                example
-                    .get("value")
-                    .and_then(value_to_string)
-                    .or_else(|| value_to_string(example))
-            })
+    let mut keys: Vec<&String> = content.keys().collect();
+    keys.sort_by(|a, b| {
+        api_response_media_rank(a)
+            .cmp(&api_response_media_rank(b))
+            .then_with(|| a.cmp(b))
     });
-    let schema = media
-        .get("schema")
-        .and_then(|schema| normalize_schema(schema, components, arena, 0, &mut Vec::new()));
-    (content_type.to_string(), example, schema)
+    let mut out = Vec::new();
+    for content_type in keys {
+        let Some(media) = content.get(content_type) else {
+            continue;
+        };
+        let examples = response_examples(media);
+        let example = examples.first().map(|example| example.value.clone());
+        let schema = media
+            .get("schema")
+            .and_then(|schema| normalize_schema(schema, root, arena, schema_cache, 0, &mut Vec::new()));
+        out.push(ApiResponseMedia {
+            content_type: content_type.to_string(),
+            example,
+            examples,
+            schema,
+        });
+    }
+    out
+}
+
+fn response_examples(media: &Value) -> Vec<ApiResponseExample> {
+    let mut out = Vec::new();
+    if let Some(value) = media.get("example").and_then(value_to_string) {
+        out.push(ApiResponseExample {
+            label: "example".to_string(),
+            value,
+        });
+    }
+    if let Some(examples) = media.get("examples").and_then(Value::as_object) {
+        let mut keys: Vec<&String> = examples.keys().collect();
+        keys.sort_unstable();
+        for key in keys {
+            let Some(example) = examples.get(key) else {
+                continue;
+            };
+            let value = example
+                .get("value")
+                .and_then(value_to_string)
+                .or_else(|| value_to_string(example));
+            if let Some(value) = value {
+                let label = example
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .filter(|summary| !summary.trim().is_empty())
+                    .unwrap_or(key)
+                    .to_string();
+                out.push(ApiResponseExample {
+                    label,
+                    value,
+                });
+            }
+        }
+    }
+    out
+}
+
+fn api_response_media_rank(content_type: &str) -> u8 {
+    if content_type == "application/json" {
+        0
+    } else if content_type == "application/problem+json" {
+        1
+    } else if content_type.contains("json") {
+        2
+    } else {
+        3
+    }
 }
 
 fn value_to_string(value: &Value) -> Option<String> {

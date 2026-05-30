@@ -694,17 +694,86 @@ impl App {
                 }
             }
             let api_inner_scroll = hovered_id.and_then(|id| {
-                let rect = self.ui_registry.rect_for(id)?;
+                if let crate::ui_system::UiId::ApiOutputSchemaMenu(route_idx)
+                | crate::ui_system::UiId::ApiOutputSchemaMenuItem(route_idx, _) = id
+                {
+                    let (meta, state) = self.active_api_tab()?;
+                    if state.route_idx != Some(route_idx)
+                        || !state.output_schema_menu_open
+                        || state.output_doc_view
+                            != crate::app::api_client::ApiOutputDocView::Example
+                    {
+                        return None;
+                    }
+                    let example_count = self
+                        .ide_panel
+                        .api
+                        .models
+                        .get(&meta.spec_id)
+                        .and_then(|model| {
+                            model.routes.get(route_idx).map(|route| {
+                                crate::app::api_client::api_route_output_example_count(
+                                    route,
+                                    state.output_status_idx,
+                                )
+                            })
+                        })
+                        .unwrap_or(0)
+                        .max(1);
+                    let row_h = 30.0 * s;
+                    let max_scroll = (example_count as f32 * row_h - row_h * 6.0).max(0.0);
+                    return Some((meta.spec_id, route_idx, false, None, -max_scroll - 1.0));
+                }
+                let rect_id = match id {
+                    crate::ui_system::UiId::ApiInputSchemaFold(route_idx, _) => {
+                        crate::ui_system::UiId::ApiInputSchemaBody(route_idx)
+                    }
+                    crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, _) => {
+                        crate::ui_system::UiId::ApiOutputSchemaBody(route_idx)
+                    }
+                    _ => id,
+                };
+                let rect = self.ui_registry.rect_for(rect_id)?;
                 let (meta, state) = self.active_api_tab()?;
                 let visible_h = (rect.3 - 16.0 * s).max(18.0 * s);
                 match id {
                     crate::ui_system::UiId::ApiBodyInput(route_idx)
+                    | crate::ui_system::UiId::ApiInputSchemaBody(route_idx)
+                    | crate::ui_system::UiId::ApiInputSchemaFold(route_idx, _)
                     | crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx)
                         if state.route_idx == Some(route_idx) =>
                     {
                         let is_static =
                             matches!(id, crate::ui_system::UiId::ApiMockStaticResponseInput(_));
-                        let text = if is_static {
+                        let is_schema =
+                            matches!(
+                                id,
+                                crate::ui_system::UiId::ApiInputSchemaBody(_)
+                                    | crate::ui_system::UiId::ApiInputSchemaFold(_, _)
+                            );
+                        if is_schema
+                            && state.focused_schema_pane
+                                != Some(crate::app::api_client::ApiSchemaPaneFocus::Input)
+                        {
+                            return None;
+                        }
+                        let text = if is_schema {
+                            self.ide_panel
+                                .api
+                                .models
+                                .get(&meta.spec_id)
+                                .and_then(|model| {
+                                    model.routes.get(route_idx).map(|route| {
+                                        crate::app::api_client::api_route_input_schema_text(
+                                            route,
+                                            model,
+                                            state.input_schema_idx,
+                                            &state.input_schema_collapsed,
+                                        )
+                                    })
+                                })
+                                .unwrap_or_default()
+                        } else if is_static {
                             if matches!(
                                 self.ide_panel.api.focused,
                                 Some(crate::app::api_client::ApiFocus::MockStaticResponse {
@@ -713,6 +782,21 @@ impl App {
                             ) {
                                 self.ide_panel.api.input_editor.get_full_text()
                             } else {
+                                let generated = self
+                                    .ide_panel
+                                    .api
+                                    .models
+                                    .get(&meta.spec_id)
+                                    .and_then(|model| {
+                                        model.routes.get(route_idx).map(|route| {
+                                            crate::app::api_client::api_generated_response_for_route(
+                                                route,
+                                                model,
+                                            )
+                                            .2
+                                        })
+                                    })
+                                    .unwrap_or_default();
                                 self.ide_panel
                                     .api
                                     .mock
@@ -731,7 +815,7 @@ impl App {
                                     })
                                     .map(|item| match &item.response {
                                         crate::app::api_mock::types::ApiMockResponse::Generated => {
-                                            String::new()
+                                            generated.clone()
                                         }
                                         crate::app::api_mock::types::ApiMockResponse::Json(
                                             text,
@@ -740,7 +824,7 @@ impl App {
                                             text,
                                         ) => text.clone(),
                                     })
-                                    .unwrap_or_else(|| state.body_json.clone())
+                                    .unwrap_or(generated)
                             }
                         } else if matches!(
                             self.ide_panel.api.focused,
@@ -758,9 +842,63 @@ impl App {
                         Some((meta.spec_id, route_idx, true, None, max_scroll))
                     }
                     crate::ui_system::UiId::ApiResponseBody(route_idx)
+                    | crate::ui_system::UiId::ApiOutputSchemaBody(route_idx)
+                    | crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, _)
                         if state.route_idx == Some(route_idx) =>
                     {
-                        let text = if matches!(
+                        let is_schema =
+                            matches!(
+                                id,
+                                crate::ui_system::UiId::ApiOutputSchemaBody(_)
+                                    | crate::ui_system::UiId::ApiOutputSchemaFold(_, _)
+                            );
+                        if is_schema
+                            && state.focused_schema_pane
+                                != Some(crate::app::api_client::ApiSchemaPaneFocus::Output)
+                        {
+                            return None;
+                        }
+                        if !is_schema
+                            && !matches!(
+                                self.ide_panel.api.focused,
+                                Some(crate::app::api_client::ApiFocus::Response {
+                                    spec_id,
+                                    route_idx: focused_route,
+                                }) if spec_id == meta.spec_id && focused_route == route_idx
+                            )
+                        {
+                            return None;
+                        }
+                        let text = if is_schema {
+                            self.ide_panel
+                                .api
+                                .models
+                                .get(&meta.spec_id)
+                                .and_then(|model| {
+                                    model.routes.get(route_idx).map(|route| {
+                                        match state.output_doc_view {
+                                            crate::app::api_client::ApiOutputDocView::Example => {
+                                                crate::app::api_client::api_route_output_example_text_for(
+                                                    route,
+                                                    model,
+                                                    state.output_status_idx,
+                                                    state.output_example_idx,
+                                                )
+                                            }
+                                            crate::app::api_client::ApiOutputDocView::Schema => {
+                                                crate::app::api_client::api_route_output_schema_text_for(
+                                                    route,
+                                                    model,
+                                                    state.output_status_idx,
+                                                    state.output_schema_idx,
+                                                    &state.output_schema_collapsed,
+                                                )
+                                            }
+                                        }
+                                    })
+                                })
+                                .unwrap_or_default()
+                        } else if matches!(
                             self.ide_panel.api.focused,
                             Some(crate::app::api_client::ApiFocus::Response {
                                 spec_id,
@@ -806,8 +944,14 @@ impl App {
                             }) if focused_route == route_idx => {
                                 Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Body)
                             }
+                            Some(crate::app::api_client::ApiFocus::MockSignature {
+                                route_idx: focused_route,
+                            }) if focused_route == route_idx => {
+                                Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Signature)
+                            }
                             _ => None,
                         };
+                        focused_part?;
                         let route = self
                             .ide_panel
                             .api
@@ -877,6 +1021,20 @@ impl App {
                 }
             });
             if let Some((spec_id, route_idx, body, mock_part, max_scroll)) = api_inner_scroll {
+                if max_scroll < 0.0 {
+                    let menu_max_scroll = (-max_scroll - 1.0).max(0.0);
+                    if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+                        && state.route_idx == Some(route_idx)
+                    {
+                        state.output_schema_menu_scroll.anim_speed = 7.0;
+                        state.output_schema_menu_scroll.scroll_by(dy);
+                        state
+                            .output_schema_menu_scroll
+                            .clamp_target(0.0, menu_max_scroll);
+                        self.window.as_ref().unwrap().request_redraw();
+                    }
+                    return;
+                }
                 let horizontal_delta = if shift { dy } else { dx };
                 let prefer_horizontal = shift || dx.abs() > dy.abs();
                 if mock_part.is_none() && prefer_horizontal && horizontal_delta.abs() > 0.0 {
@@ -938,7 +1096,24 @@ impl App {
                 .get(self.active_tab)
                 .and_then(|tab| match &tab.kind {
                     crate::app::EditorTabKind::ApiClient(meta, state) => {
-                        let model = self.ide_panel.api.models.get(&meta.spec_id);
+                        let manual_model;
+                        let model = match &meta.route_identity {
+                            Some(crate::app::api_client::ApiClientRouteIdentity::Manual {
+                                stable_id,
+                            }) => {
+                                let route = self
+                                    .ide_panel
+                                    .api
+                                    .mock
+                                    .manual_routes
+                                    .iter()
+                                    .find(|route| route.stable_id == *stable_id)?;
+                                manual_model =
+                                    crate::app::api_client::api_manual_route_model(route);
+                                Some(&manual_model)
+                            }
+                            _ => self.ide_panel.api.models.get(&meta.spec_id),
+                        };
                         Some(crate::app::api_client::api_tab_max_scroll(
                             model,
                             state,

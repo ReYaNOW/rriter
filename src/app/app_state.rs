@@ -772,6 +772,7 @@ pub struct App {
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
     pub is_dragging: bool,
+    pub is_editor_drag_pending: bool,
     pub is_focused: bool,
     pub render_suspended: bool,
     pub current_cursor: winit::window::CursorIcon,

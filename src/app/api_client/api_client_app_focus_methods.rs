@@ -29,6 +29,38 @@ impl crate::app::App {
         true
     }
 
+    fn api_mock_input_schema_text_for_focus_route(
+        &self,
+        spec_id: ApiSpecId,
+        route_idx: usize,
+    ) -> Option<String> {
+        if spec_id == API_MANUAL_MOCK_SPEC_ID {
+            let manual_route = self.active_manual_mock_route(route_idx)?;
+            let script = manual_route
+                .python
+                .as_ref()
+                .filter(|script| script.enabled)?;
+            let model = api_manual_route_model(manual_route);
+            let route = model.routes.first()?;
+            let contract =
+                crate::app::api_mock::types::api_mock_effective_contract(script, route, &model);
+            return Some(api_mock_input_schema_text(&contract));
+        }
+        let model = self.ide_panel.api.models.get(&spec_id)?;
+        let route = model.routes.get(route_idx)?;
+        let script = self
+            .active_manual_mock_route(route_idx)
+            .and_then(|route| route.python.as_ref())
+            .or_else(|| {
+                self.api_route_override(route_idx)
+                    .and_then(|route| route.python.as_ref())
+            })
+            .filter(|script| script.enabled)?;
+        let contract =
+            crate::app::api_mock::types::api_mock_effective_contract(script, route, model);
+        Some(api_mock_input_schema_text(&contract))
+    }
+
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
         match focus {
             ApiFocus::ImportUrl => self.ide_panel.api.input_editor.get_full_text(),
@@ -74,8 +106,13 @@ impl crate::app::App {
                 .api_mock_signature_for_route(*route_idx)
                 .unwrap_or_default(),
             ApiFocus::MockStaticResponse { route_idx } => self
-                .api_route_override(*route_idx)
-                .map(|override_route| match &override_route.response {
+                .active_manual_mock_route(*route_idx)
+                .map(|route| &route.response)
+                .or_else(|| {
+                    self.api_route_override(*route_idx)
+                        .map(|route| &route.response)
+                })
+                .map(|response| match response {
                     crate::app::api_mock::types::ApiMockResponse::Generated => self
                         .api_mock_generated_preview(*route_idx)
                         .unwrap_or_else(|| "{}".to_string()),
@@ -86,6 +123,12 @@ impl crate::app::App {
                     self.api_mock_generated_preview(*route_idx)
                         .unwrap_or_else(|| "{}".to_string())
                 }),
+            ApiFocus::MockContractField {
+                route_idx,
+                group,
+                field_idx,
+                prop,
+            } => self.api_mock_contract_field_prop_text(*route_idx, *group, *field_idx, *prop),
             ApiFocus::AuthValue { spec_id, scheme } => self
                 .ide_panel
                 .api
@@ -183,6 +226,62 @@ impl crate::app::App {
                     _ => None,
                 })
                 .unwrap_or_default(),
+            ApiFocus::InputSchema { spec_id, route_idx } => self
+                .api_mock_input_schema_text_for_focus_route(*spec_id, *route_idx)
+                .or_else(|| {
+                    self.tabs
+                        .get(self.active_tab)
+                        .and_then(|tab| match &tab.kind {
+                            crate::app::EditorTabKind::ApiClient(meta, state)
+                                if meta.spec_id == *spec_id
+                                    && state.route_idx == Some(*route_idx) =>
+                            {
+                                self.ide_panel.api.models.get(spec_id).and_then(|model| {
+                                    model.routes.get(*route_idx).map(|route| {
+                                        api_route_input_schema_text(
+                                            route,
+                                            model,
+                                            state.input_schema_idx,
+                                            &state.input_schema_collapsed,
+                                        )
+                                    })
+                                })
+                            }
+                            _ => None,
+                        })
+                })
+                .unwrap_or_default(),
+            ApiFocus::OutputSchema { spec_id, route_idx } => self
+                .tabs
+                .get(self.active_tab)
+                .and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::ApiClient(meta, state)
+                        if meta.spec_id == *spec_id && state.route_idx == Some(*route_idx) =>
+                    {
+                        self.ide_panel.api.models.get(spec_id).and_then(|model| {
+                            model
+                                .routes
+                                .get(*route_idx)
+                                .map(|route| match state.output_doc_view {
+                                    ApiOutputDocView::Example => api_route_output_example_text_for(
+                                        route,
+                                        model,
+                                        state.output_status_idx,
+                                        state.output_example_idx,
+                                    ),
+                                    ApiOutputDocView::Schema => api_route_output_schema_text_for(
+                                        route,
+                                        model,
+                                        state.output_status_idx,
+                                        state.output_schema_idx,
+                                        &state.output_schema_collapsed,
+                                    ),
+                                })
+                        })
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default(),
             ApiFocus::Response { spec_id, route_idx } => self
                 .tabs
                 .get(self.active_tab)
@@ -201,10 +300,8 @@ impl crate::app::App {
     }
 
     fn api_mock_generated_preview(&self, route_idx: usize) -> Option<String> {
-        let (meta, _) = self.active_api_tab()?;
-        let model = self.ide_panel.api.models.get(&meta.spec_id)?;
-        let route = model.routes.get(route_idx)?;
-        Some(api_generated_response_for_route(route, model).2)
+        let (_, _, route, model) = self.api_mock_route_context(route_idx)?;
+        Some(api_generated_response_for_route(&route, &model).2)
     }
 
     fn apply_response_token_to_auth(
@@ -302,14 +399,37 @@ impl crate::app::App {
                 if !path.starts_with('/') {
                     path.insert(0, '/');
                 }
+                let mut contract_path_changed = false;
                 if let Some(route) = self.ide_panel.api.mock.manual_routes.get_mut(manual_idx) {
                     route.path = if path == "/" {
                         format!("/mock-{}", manual_idx.saturating_add(1))
                     } else {
                         path
                     };
+                    if let Some(script) = route.python.as_mut() {
+                        if script.contract.is_empty() {
+                            script.contract =
+                                crate::app::api_mock::types::default_contract_for_manual_route(
+                                    &route.path,
+                                );
+                        } else {
+                            crate::app::api_mock::types::sync_contract_path_params_from_path(
+                                &mut script.contract,
+                                &route.path,
+                            );
+                        }
+                        script.contract_source =
+                            crate::app::api_mock::contract::api_mock_contract_state_text(
+                                &script.contract,
+                            );
+                        contract_path_changed = true;
+                    }
                     self.sync_api_manual_route_tabs();
                     self.ide_panel.api.persist();
+                    if contract_path_changed {
+                        self.invalidate_api_mock_contract_tools(manual_idx);
+                    }
+                    self.refresh_api_mock_server_snapshot();
                 }
             }
             ApiFocus::MockContract { route_idx } => {
@@ -324,21 +444,24 @@ impl crate::app::App {
                     } else {
                         script.contract.clone()
                     };
-                    script.contract =
+                    let contract =
                         crate::app::api_mock::contract::api_mock_contract_from_state_text(
                             &base, &text,
                         );
                     let generated =
-                        crate::app::api_mock::contract::api_mock_contract_state_text(
-                            &script.contract,
-                        );
-                    script.contract_source = if text.trim() == generated.trim() {
+                        crate::app::api_mock::contract::api_mock_contract_state_text(&contract);
+                    let contract_source = if text.trim() == generated.trim() {
                         String::new()
                     } else {
                         text
                     };
-                    self.ide_panel.api.persist();
-                    self.invalidate_api_mock_contract_tools(route_idx);
+                    let changed = base != contract || script.contract_source != contract_source;
+                    if changed {
+                        script.contract = contract;
+                        script.contract_source = contract_source;
+                        self.ide_panel.api.persist();
+                        self.invalidate_api_mock_contract_tools(route_idx);
+                    }
                 }
             }
             ApiFocus::MockPrelude { route_idx } => {
@@ -355,10 +478,21 @@ impl crate::app::App {
             }
             ApiFocus::MockSignature { .. } => {}
             ApiFocus::MockStaticResponse { route_idx } => {
-                self.ensure_api_route_override(route_idx);
                 let generated = self
                     .api_mock_generated_preview(route_idx)
                     .unwrap_or_else(|| "{}".to_string());
+                if let Some(route) = self.active_manual_mock_route_mut(route_idx) {
+                    route.enabled = true;
+                    route.response = if text.trim() == generated.trim() {
+                        crate::app::api_mock::types::ApiMockResponse::Generated
+                    } else {
+                        crate::app::api_mock::types::ApiMockResponse::Json(text)
+                    };
+                    self.ide_panel.api.persist();
+                    self.refresh_api_mock_server_snapshot();
+                    return;
+                }
+                self.ensure_api_route_override(route_idx);
                 if let Some(override_route) = self.api_route_override_mut(route_idx) {
                     let was_enabled = override_route.enabled;
                     override_route.response = if text.trim() == generated.trim() {
@@ -369,6 +503,14 @@ impl crate::app::App {
                     override_route.enabled = was_enabled;
                     self.ide_panel.api.persist();
                 }
+            }
+            ApiFocus::MockContractField {
+                route_idx,
+                group,
+                field_idx,
+                prop,
+            } => {
+                self.commit_api_mock_contract_field_prop(route_idx, group, field_idx, prop, &text);
             }
             ApiFocus::AuthValue { spec_id, scheme } => {
                 let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
@@ -437,6 +579,7 @@ impl crate::app::App {
                     state.body_json = text;
                 }
             }
+            ApiFocus::InputSchema { .. } | ApiFocus::OutputSchema { .. } => {}
             ApiFocus::Response { .. } => {}
         }
     }
@@ -488,6 +631,9 @@ impl crate::app::App {
                     model.schema_arena.get(prop.schema.0)
                 })
                 .is_some_and(api_schema_is_array_input),
+            ApiFocus::MockContractField { prop, .. } => {
+                matches!(prop, crate::ui_system::ApiMockContractFieldProp::Enum)
+            }
             _ => false,
         }
     }

@@ -353,6 +353,7 @@ fn file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids() {
     panel.file_tree_rename_dialog = Some(FileTreeRenameDialog {
         path: root.join("old.rs"),
         editor: Editor::new(64),
+        input_scroll_x: crate::scroll::ScrollState::new(7.0),
         error: None,
     });
     assert!(file_tree_overlay_active_for_panel(&panel));
@@ -371,12 +372,25 @@ fn file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids() {
         error: None,
     });
     assert!(file_tree_overlay_active_for_panel(&panel));
+    panel.file_tree_delete_dialog = None;
+
+    panel.api.mock_contract_field_delete_dialog =
+        Some(crate::app::api_client::ApiMockContractFieldDeleteDialog {
+            route_idx: 0,
+            group: crate::ui_system::ApiMockContractFieldGroup::Query,
+            field_idx: 0,
+            field_label: "q".to_string(),
+        });
+    assert!(file_tree_overlay_active_for_panel(&panel));
 
     assert!(crate::app::App::ui_id_is_file_tree_overlay(
         crate::ui_system::UiId::FileTreeRenameInput
     ));
     assert!(crate::app::App::ui_id_is_file_tree_overlay(
         crate::ui_system::UiId::FileTreeDeleteConfirm
+    ));
+    assert!(crate::app::App::ui_id_is_file_tree_overlay(
+        crate::ui_system::UiId::ApiMockContractFieldRemoveConfirm
     ));
     assert!(!crate::app::App::ui_id_is_file_tree_overlay(
         crate::ui_system::UiId::EditorTextBody

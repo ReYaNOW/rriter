@@ -74,6 +74,18 @@ fn key_text_for_editor_insert<'a>(
     }
 }
 
+pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
+    match text {
+        "(" => ("()", true),
+        "[" => ("[]", true),
+        "{" => ("{}", true),
+        "'" => ("''", true),
+        "\"" => ("\"\"", true),
+        "`" => ("``", true),
+        _ => (text, false),
+    }
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_editor_keyboard_input(
@@ -547,29 +559,8 @@ impl App {
                     self.autocomplete_detail_selecting = false;
                     copied = true;
                 }
-                if !copied {
-                    crate::app::mouse::HOVER_STATE.with(|state| {
-                        let mut state = state.borrow_mut();
-                        if let (Some(popup), Some(a), Some(b)) = (
-                            state.popup.as_ref(),
-                            state.selection_anchor,
-                            state.selection_cursor,
-                        ) {
-                            let start = a.min(b);
-                            let end = a.max(b);
-                            if start < end
-                                && end <= popup.text.len()
-                                && popup.text.is_char_boundary(start)
-                                && popup.text.is_char_boundary(end)
-                            {
-                                self.set_clipboard_text(&popup.text[start..end]);
-                                state.selection_anchor = None;
-                                state.selection_cursor = None;
-                                state.selecting = false;
-                                copied = true;
-                            }
-                        }
-                    });
+                if !copied && self.copy_hover_popup_selection_or_diagnostic() {
+                    copied = true;
                 }
                 if !copied {
                     let graph_copy = self
@@ -584,31 +575,6 @@ impl App {
                             renderer.git_graph_tooltip_selecting = false;
                         }
                         copied = true;
-                    }
-                }
-                if let Some(r) = self.renderer.as_ref() {
-                    if !copied {
-                        let diag_copy = crate::app::mouse::HOVER_STATE.with(|s| {
-                            let s = s.borrow();
-                            s.diag_rect.and_then(|(rx, ry, rw, rh, _, _, _)| {
-                                let mx = r.last_mouse_x;
-                                let my = r.last_mouse_y;
-                                if mx >= rx
-                                    && mx <= rx + rw
-                                    && my >= ry
-                                    && my <= ry + rh
-                                    && !s.diag_text.is_empty()
-                                {
-                                    Some(s.diag_text.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                        });
-                        if let Some(text) = diag_copy {
-                            self.set_clipboard_text(text);
-                            copied = true;
-                        }
                     }
                 }
                 if !copied {
@@ -664,12 +630,7 @@ impl App {
                             self.apply_autocomplete();
                         }
 
-                        let insert_txt = match txt {
-                            "(" => "()",
-                            "[" => "[]",
-                            "{" => "{}",
-                            _ => txt,
-                        };
+                        let (insert_txt, move_inside_pair) = paired_editor_insert_text(txt);
 
                         // We only log if it's a simple character insert, not an autofold/autoclose or space/enter, although the prompt said "что печатаются в редакторе".
                         // Let's log any printable text that is typed.
@@ -693,7 +654,7 @@ impl App {
                             ins_len,
                             Some(insert_txt),
                         );
-                        if txt == "(" || txt == "[" || txt == "{" {
+                        if move_inside_pair {
                             self.editor.move_left(false);
                         }
                         cursor_moved = true;
@@ -1095,5 +1056,15 @@ mod tests {
             key_text_for_editor_insert(PhysicalKey::Code(KeyCode::Period), None, None, true),
             None
         );
+    }
+
+    #[test]
+    fn paired_editor_insert_text_reuses_file_editor_pairs() {
+        assert_eq!(paired_editor_insert_text("("), ("()", true));
+        assert_eq!(paired_editor_insert_text("["), ("[]", true));
+        assert_eq!(paired_editor_insert_text("{"), ("{}", true));
+        assert_eq!(paired_editor_insert_text("'"), ("''", true));
+        assert_eq!(paired_editor_insert_text("\""), ("\"\"", true));
+        assert_eq!(paired_editor_insert_text("x"), ("x", false));
     }
 }

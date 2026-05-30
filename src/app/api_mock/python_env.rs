@@ -31,6 +31,7 @@ pub fn write_api_mock_worker() -> std::io::Result<PathBuf> {
 }
 
 const WORKER_SCRIPT: &str = r#"
+import base64
 import json
 import sys
 import traceback
@@ -60,6 +61,12 @@ class BaseModel:
     def __init__(self, **values):
         for name, value in values.items():
             setattr(self, name, value)
+
+class UploadFile(BaseModel):
+    filename = ""
+    content_type = None
+    content = b""
+    size = 0
 
 class MaxLen:
     def __init__(self, value): pass
@@ -134,6 +141,8 @@ def _patch_model_classes(ns, names):
 def _to_json_value(value):
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
+    if isinstance(value, (bytes, bytearray)):
+        return base64.b64encode(bytes(value)).decode("ascii")
     if isinstance(value, dict):
         return {str(key): _to_json_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple, set)):
@@ -165,6 +174,31 @@ def _normalize_result(result):
         return result
     return json_response(_to_json_value(result))
 
+def _upload_file_from_dict(value):
+    raw = value.get("content_base64") or ""
+    try:
+        content = base64.b64decode(str(raw).encode("ascii"), validate=False)
+    except Exception:
+        content = b""
+    size = value.get("size")
+    if not isinstance(size, int):
+        size = len(content)
+    return UploadFile(
+        filename=str(value.get("filename") or ""),
+        content_type=value.get("content_type"),
+        content=content,
+        size=size,
+    )
+
+def _coerce_input_value(value):
+    if isinstance(value, dict):
+        if value.get("__rriter_type") == "file":
+            return _upload_file_from_dict(value)
+        return AttrDict({str(key): _coerce_input_value(item) for key, item in value.items()})
+    if isinstance(value, list):
+        return [_coerce_input_value(item) for item in value]
+    return value
+
 def _run(msg):
     prelude = msg.get("prelude") or ""
     body = msg.get("script_body")
@@ -180,6 +214,7 @@ def _run(msg):
         "error_response": error_response,
         "AttrDict": AttrDict,
         "BaseModel": BaseModel,
+        "UploadFile": UploadFile,
         "Response": AttrDict,
         "Any": Any,
         "Annotated": Annotated,
@@ -225,12 +260,9 @@ def _run(msg):
     if plan.get("query"):
         call_args.append(AttrDict(msg.get("query") or {}))
     if plan.get("body"):
-        body_arg = msg.get("body")
-        if isinstance(body_arg, dict):
-            body_arg = AttrDict(body_arg)
-        call_args.append(body_arg)
+        call_args.append(_coerce_input_value(msg.get("body")))
     if plan.get("fields"):
-        call_args.append(AttrDict(msg.get("fields") or {}))
+        call_args.append(_coerce_input_value(msg.get("fields") or {}))
     result = ns["handler"](
         *call_args
     )
@@ -267,6 +299,8 @@ mod tests {
         assert!(worker.contains("contract_source"));
         assert!(worker.contains("script_body"));
         assert!(worker.contains("Response"));
+        assert!(worker.contains("UploadFile"));
+        assert!(worker.contains("base64.b64decode"));
         let _ = std::fs::remove_dir_all(api_mock_python_dir());
     }
 }

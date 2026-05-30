@@ -1,7 +1,8 @@
 use super::contract::api_mock_openapi_schema_for_field;
 use super::types::{
-    ApiMockClassSpec, ApiMockResponse, ApiMockState, api_mock_effective_contract,
-    api_mock_source_key, default_contract_for_manual_route,
+    ApiMockClassSpec, ApiMockContractField, ApiMockContractFieldKind, ApiMockResponse,
+    ApiMockState, api_mock_effective_contract, api_mock_source_key,
+    default_contract_for_manual_route,
 };
 use crate::app::api_client::{
     ApiMethod, ApiParam, ApiParamLocation, ApiRequestBody, ApiRouteRow, ApiSchema, ApiSchemaKind,
@@ -334,14 +335,31 @@ fn upsert_contract_params(params: &mut Vec<Value>, location: &str, spec: &ApiMoc
 }
 
 fn request_body_from_contract(spec: &ApiMockClassSpec) -> Value {
+    let content_type = if spec_uses_multipart(spec) {
+        "multipart/form-data"
+    } else {
+        "application/json"
+    };
+    let mut media = Map::new();
+    media.insert("schema".to_string(), object_schema_from_contract(spec));
+    let mut content = Map::new();
+    content.insert(content_type.to_string(), Value::Object(media));
     json!({
         "required": true,
-        "content": {
-            "application/json": {
-                "schema": object_schema_from_contract(spec),
-            }
-        }
+        "content": Value::Object(content),
     })
+}
+
+fn spec_uses_multipart(spec: &ApiMockClassSpec) -> bool {
+    spec.fields
+        .iter()
+        .filter(|field| field.enabled)
+        .any(field_uses_file)
+}
+
+fn field_uses_file(field: &ApiMockContractField) -> bool {
+    matches!(field.kind, ApiMockContractFieldKind::File)
+        || matches!(field.item_kind, Some(ApiMockContractFieldKind::File))
 }
 
 fn object_schema_from_contract(spec: &ApiMockClassSpec) -> Value {
@@ -530,7 +548,10 @@ fn schema_to_openapi(schema: &ApiSchema, model: &ApiSpecModel) -> Value {
                 out.insert("items".to_string(), schema_to_openapi(item, model));
             }
         }
-        ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime => {
+        ApiSchemaKind::String
+        | ApiSchemaKind::Date
+        | ApiSchemaKind::DateTime
+        | ApiSchemaKind::Time => {
             out.insert("type".to_string(), Value::String("string".to_string()));
         }
         ApiSchemaKind::Integer => {
@@ -618,6 +639,7 @@ mod tests {
             method: ApiMethod::Get,
             path: "/users/{id}".to_string(),
             enabled: true,
+            proxy_when_disabled: false,
             response: ApiMockResponse::Generated,
             python: Some(script),
             extra_input_fields: Vec::new(),
@@ -635,6 +657,74 @@ mod tests {
         assert_eq!(
             exported.pointer("/paths/~1users~1{id}/get/parameters/0/schema/maxLength"),
             Some(&json!(12))
+        );
+    }
+
+    #[test]
+    fn export_openapi_keeps_python_multipart_file_contract() {
+        let spec = json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Upload", "version": "1"},
+            "paths": {
+                "/upload": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "image": {"type": "string", "format": "binary"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let entry = ApiSpecEntry {
+            id: ApiSpecId(4),
+            title: "Upload".to_string(),
+            version: "1".to_string(),
+            openapi_version: "3.1.0".to_string(),
+            source: ApiSpecSource::Url("https://example.test/openapi.json".to_string()),
+            last_loaded: None,
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: true,
+            error: None,
+        };
+        let model = parse_openapi_model(entry.id, &spec).expect("parse");
+        let mut script = default_api_mock_python_script();
+        script.contract = default_contract_from_route(&model.routes[0], &model);
+        let mut state = ApiMockState::default();
+        state.route_overrides.push(ApiMockRouteOverride {
+            source_key: api_mock_source_key(&entry),
+            method: ApiMethod::Post,
+            path: "/upload".to_string(),
+            enabled: true,
+            proxy_when_disabled: false,
+            response: ApiMockResponse::Generated,
+            python: Some(script),
+            extra_input_fields: Vec::new(),
+            extra_output_fields: Vec::new(),
+        });
+
+        let exported = export_openapi_value(&entry, &model, &state, None);
+
+        assert_eq!(
+            exported
+                .pointer("/paths/~1upload/post/requestBody/content/multipart~1form-data/schema/properties/image/format"),
+            Some(&json!("binary"))
+        );
+        assert!(
+            exported
+                .pointer("/paths/~1upload/post/requestBody/content/application~1json")
+                .is_none()
         );
     }
 }

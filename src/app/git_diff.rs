@@ -897,7 +897,6 @@ impl App {
             .map(|r| r.get_max_scroll(&self.editor, visible_h))
             .unwrap_or(target);
         let target = target.clamp(0.0, max_s).round();
-        self.scroll_y.current = target;
         self.scroll_y.target = target;
         self.scroll_y.anim_speed = 10.0;
     }
@@ -1073,6 +1072,26 @@ impl App {
         };
         let anchor_line = self.inline_git_anchor_line(anchor_line);
 
+        if let Some(base_text) = self.editor.git_base_text.clone() {
+            let current_text = self.editor.get_full_text();
+            let payload = build_inline_git_diff_payload(
+                GitDiffPayload {
+                    base_text,
+                    worktree_text: current_text,
+                },
+                self.file_extension.clone(),
+                target_hunk.after_start,
+            );
+            self.set_inline_git_popup_from_diff_state(
+                hunk_idx,
+                target_hunk,
+                anchor_line,
+                &payload.state,
+                payload.spans,
+            );
+            return;
+        }
+
         if let Some(file) = self.current_git_file_entry_for_diff() {
             let (tx, rx) = mpsc::channel();
             self.inline_git_diff_rx = Some(rx);
@@ -1103,27 +1122,8 @@ impl App {
             return;
         }
 
-        let Some(base_text) = self.editor.git_base_text.clone() else {
-            self.inline_git_diff_rx = None;
-            self.inline_git_popup = None;
-            return;
-        };
-        let current_text = self.editor.get_full_text();
-        let payload = build_inline_git_diff_payload(
-            GitDiffPayload {
-                base_text,
-                worktree_text: current_text,
-            },
-            self.file_extension.clone(),
-            target_hunk.after_start,
-        );
-        self.set_inline_git_popup_from_diff_state(
-            hunk_idx,
-            target_hunk,
-            anchor_line,
-            &payload.state,
-            payload.spans,
-        );
+        self.inline_git_diff_rx = None;
+        self.inline_git_popup = None;
     }
 
     pub fn jump_inline_git_hunk(&mut self, direction: isize) {

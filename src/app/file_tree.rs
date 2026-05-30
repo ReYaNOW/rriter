@@ -166,6 +166,7 @@ pub struct FileTreeCreateDialog {
 pub struct FileTreeRenameDialog {
     pub path: PathBuf,
     pub editor: Editor,
+    pub input_scroll_x: crate::scroll::ScrollState,
     pub error: Option<String>,
 }
 
@@ -278,6 +279,9 @@ pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState)
         || ide_panel.file_tree_move_dialog.is_some()
         || ide_panel.file_tree_delete_dialog.is_some()
         || ide_panel.git.confirm_dialog.is_some()
+        || ide_panel.api.spec_remove_dialog.is_some()
+        || ide_panel.api.mock_route_reset_dialog.is_some()
+        || ide_panel.api.mock_contract_field_delete_dialog.is_some()
 }
 
 const FILE_TREE_NAME_INPUT_MAX_BYTES: usize = 255;
@@ -335,6 +339,49 @@ where
         .min(content_w * 0.58)
         .max(80.0 * scale);
     let max_prefix_w = (content_w - min_input_w - gap).max(0.0);
+    let prefix = file_tree_clipped_path_suffix(
+        &file_tree_parent_path_prefix(parent_dir),
+        max_prefix_w,
+        &mut measure,
+    );
+    let prefix_w = measure(&prefix).min(max_prefix_w);
+    let input_x = content_x + prefix_w + gap;
+    let input_w = (content_x + content_w - input_x).max(min_input_w.min(content_w));
+    (prefix, input_x, input_w)
+}
+
+pub(crate) fn file_tree_rename_dialog_width(
+    base_w: f32,
+    max_w: f32,
+    base_input_w: f32,
+    text_w: f32,
+    scale: f32,
+) -> f32 {
+    let wanted_input_w = text_w + 16.0 * scale;
+    let extra_w = (wanted_input_w - base_input_w).max(0.0);
+    (base_w + extra_w).min(max_w).max(base_w.min(max_w))
+}
+
+pub(crate) fn file_tree_rename_path_input_layout<F>(
+    dialog_x: f32,
+    dialog_w: f32,
+    base_dialog_w: f32,
+    scale: f32,
+    parent_dir: &Path,
+    mut measure: F,
+) -> (String, f32, f32)
+where
+    F: FnMut(&str) -> f32,
+{
+    let side_pad = FILE_TREE_DIALOG_SIDE_PAD * scale;
+    let content_x = dialog_x + side_pad;
+    let content_w = dialog_w - side_pad * 2.0;
+    let gap = 6.0 * scale;
+    let base_content_w = base_dialog_w - side_pad * 2.0;
+    let min_input_w = (FILE_TREE_PATH_INPUT_MIN_W * scale)
+        .min(base_content_w * 0.58)
+        .max(80.0 * scale);
+    let max_prefix_w = (base_content_w - min_input_w - gap).max(0.0);
     let prefix = file_tree_clipped_path_suffix(
         &file_tree_parent_path_prefix(parent_dir),
         max_prefix_w,
@@ -913,6 +960,7 @@ impl App {
         self.ide_panel.file_tree_rename_dialog = Some(FileTreeRenameDialog {
             path,
             editor,
+            input_scroll_x: crate::scroll::ScrollState::new(7.0),
             error: None,
         });
         self.ide_panel.file_tree_context_menu = None;
@@ -1305,6 +1353,12 @@ impl App {
                 | crate::ui_system::UiId::FileTreeDeleteCancel
                 | crate::ui_system::UiId::GitConfirmAction
                 | crate::ui_system::UiId::GitConfirmCancel
+                | crate::ui_system::UiId::ApiSpecRemoveConfirm
+                | crate::ui_system::UiId::ApiSpecRemoveCancel
+                | crate::ui_system::UiId::ApiMockRouteResetConfirm
+                | crate::ui_system::UiId::ApiMockRouteResetCancel
+                | crate::ui_system::UiId::ApiMockContractFieldRemoveConfirm
+                | crate::ui_system::UiId::ApiMockContractFieldRemoveCancel
         )
     }
 }

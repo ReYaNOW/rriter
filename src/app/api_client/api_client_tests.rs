@@ -192,6 +192,117 @@ mod tests {
     }
 
     #[test]
+    fn api_mock_python_vertical_edges_jump_between_editable_blocks() {
+        let mut editor = Editor::new(64);
+        editor.set_text_clean("one\ntwo");
+        editor.cursor = editor.len();
+
+        assert!(api_editor_at_vertical_edge(&editor, true));
+        assert_eq!(
+            api_mock_adjacent_python_part(ApiMockSourcePart::Contract, true),
+            Some(ApiMockSourcePart::Body)
+        );
+        assert_eq!(
+            api_mock_adjacent_python_part(ApiMockSourcePart::Body, false),
+            Some(ApiMockSourcePart::Contract)
+        );
+        assert_eq!(
+            api_mock_focus_for_part(3, ApiMockSourcePart::Prelude),
+            Some(ApiFocus::MockPrelude { route_idx: 3 })
+        );
+
+        editor.cursor = 1;
+        assert!(!api_editor_at_vertical_edge(&editor, true));
+        assert!(api_editor_at_vertical_edge(&editor, false));
+    }
+
+    #[test]
+    fn api_mock_tools_queue_only_after_same_part_edit() {
+        assert_eq!(
+            api_mock_tools_queue_route_after_key(
+                Some((3, ApiMockSourcePart::Contract)),
+                Some((3, ApiMockSourcePart::Contract)),
+                10,
+                11,
+            ),
+            Some(3)
+        );
+        assert_eq!(
+            api_mock_tools_queue_route_after_key(
+                Some((3, ApiMockSourcePart::Contract)),
+                Some((3, ApiMockSourcePart::Prelude)),
+                10,
+                11,
+            ),
+            None
+        );
+        assert_eq!(
+            api_mock_tools_queue_route_after_key(
+                Some((3, ApiMockSourcePart::Contract)),
+                Some((3, ApiMockSourcePart::Contract)),
+                10,
+                10,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn api_mock_alt_enter_runs_tools_only_inside_python_blocks() {
+        assert_eq!(
+            api_mock_alt_enter_route_target(Some((7, ApiMockSourcePart::Body)), true, true),
+            Some(7)
+        );
+        assert_eq!(
+            api_mock_alt_enter_route_target(Some((7, ApiMockSourcePart::Contract)), false, true),
+            None
+        );
+        assert_eq!(
+            api_mock_alt_enter_route_target(Some((7, ApiMockSourcePart::Prelude)), true, false),
+            None
+        );
+        assert_eq!(api_mock_alt_enter_route_target(None, true, true), None);
+    }
+
+    #[test]
+    fn mock_input_schema_uses_enabled_contract_fields_and_constraints() {
+        let mut contract = crate::app::api_mock::types::ApiMockPythonContract::default();
+        contract.query.enabled = true;
+        let mut query = crate::app::api_mock::types::ApiMockContractField::new(
+            "role",
+            crate::app::api_mock::types::ApiMockContractFieldKind::String,
+            true,
+        );
+        query.enum_values = vec!["admin".to_string(), "guest".to_string()];
+        query.default_value = Some("guest".to_string());
+        contract.query.fields.push(query);
+        contract.body.enabled = true;
+        let mut body = crate::app::api_mock::types::ApiMockContractField::new(
+            "age",
+            crate::app::api_mock::types::ApiMockContractFieldKind::Integer,
+            false,
+        );
+        body.constraints.minimum = Some("1".to_string());
+        body.constraints.maximum = Some("120".to_string());
+        contract.body.fields.push(body);
+
+        let text = api_mock_input_schema_text(&contract);
+
+        assert!(!text.contains("\"query\": {"));
+        assert!(text.contains("\"role\"*: \"string\""));
+        assert!(text.contains("default=guest"));
+        assert!(text.contains("enum=[admin|guest]"));
+        assert!(!text.contains("\"body\": {"));
+        assert!(text.contains("\"age\": 0"));
+        assert!(text.contains("minimum=1"));
+        assert!(text.contains("maximum=120"));
+        assert_eq!(
+            api_mock_input_schema_summary(&contract),
+            "Mock contract · path 0 · query 1 · body 1"
+        );
+    }
+
+    #[test]
     fn api_array_editor_uses_blocks_plus_draft() {
         assert_eq!(api_array_editor_text("alpha\nbeta"), "alpha\nbeta\n");
         assert_eq!(
@@ -212,6 +323,32 @@ mod tests {
         editor.insert_str("x");
         backspace_api_array_editor(&mut editor);
         assert_eq!(editor.get_full_text(), "alpha\nbeta\n");
+    }
+
+    #[test]
+    fn api_mock_body_backspace_removes_leading_empty_default_line() {
+        let mut editor = Editor::new(64);
+        editor.set_text_clean("\n    return Response(ok=True)");
+        editor.cursor = 0;
+        editor.selection_anchor = Some(0);
+
+        assert_eq!(backspace_api_mock_body_editor(&mut editor), Some((0, 1)));
+        assert_eq!(editor.get_full_text(), "    return Response(ok=True)");
+        assert_eq!(editor.cursor, editor.len());
+    }
+
+    #[test]
+    fn api_mock_body_backspace_removes_inner_empty_line_normally() {
+        let mut editor = Editor::new(64);
+        editor.set_text_clean("    return Response(ok=True)\n\n    status = 200");
+        editor.cursor = "    return Response(ok=True)\n".len();
+        editor.selection_anchor = Some(editor.cursor);
+
+        assert_eq!(backspace_api_mock_body_editor(&mut editor), Some((28, 1)));
+        assert_eq!(
+            editor.get_full_text(),
+            "    return Response(ok=True)\n    status = 200"
+        );
     }
 
     #[test]
@@ -278,16 +415,14 @@ mod tests {
                 .is_none()
         );
         assert!(
-            api_mock_hover_content_y_at_point(top_y + line_h * 0.25, top_y, 0.0, line_h)
-                .is_some()
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.25, top_y, 0.0, line_h).is_some()
         );
         assert!(
             api_mock_hover_content_y_at_point(top_y + line_h * 0.75 - 0.1, top_y, 0.0, line_h)
                 .is_some()
         );
         assert!(
-            api_mock_hover_content_y_at_point(top_y + line_h * 0.75, top_y, 0.0, line_h)
-                .is_none()
+            api_mock_hover_content_y_at_point(top_y + line_h * 0.75, top_y, 0.0, line_h).is_none()
         );
     }
 
@@ -397,7 +532,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_openapi_date_and_datetime_types_keep_examples() {
+    fn parse_openapi_date_datetime_time_and_bytes_types_keep_examples() {
         let spec = serde_json::json!({
             "openapi": "3.1.0",
             "info": {"title": "Dates", "version": "1.0.0"},
@@ -409,6 +544,11 @@ mod tests {
                                 "name": "day",
                                 "in": "query",
                                 "schema": {"type": "string", "format": "date", "example": "2026-05-25"}
+                            },
+                            {
+                                "name": "at",
+                                "in": "query",
+                                "schema": {"type": "string", "format": "time", "example": "12:30:00"}
                             }
                         ],
                         "responses": {"200": {"description": "ok"}}
@@ -424,6 +564,14 @@ mod tests {
                                                 "type": "string",
                                                 "format": "date-time",
                                                 "examples": ["2026-05-25T12:30:00Z"]
+                                            },
+                                            "opens_at": {
+                                                "type": "string",
+                                                "format": "time"
+                                            },
+                                            "avatar": {
+                                                "type": "string",
+                                                "format": "binary"
                                             }
                                         }
                                     }
@@ -436,16 +584,51 @@ mod tests {
             }
         });
         let model = parse_openapi_model(ApiSpecId(30), &spec).expect("parse");
-        let param = &model.routes[0].query_params[0];
+        let param = model.routes[0]
+            .query_params
+            .iter()
+            .find(|param| param.name == "day")
+            .expect("day param");
         assert_eq!(param.primitive_type, ApiPrimitiveType::Date);
         assert_eq!(param.examples, vec!["2026-05-25"]);
+        let time_param = model.routes[0]
+            .query_params
+            .iter()
+            .find(|param| param.name == "at")
+            .expect("at param");
+        assert_eq!(time_param.primitive_type, ApiPrimitiveType::Time);
+        assert_eq!(time_param.examples, vec!["12:30:00"]);
 
         let body = model.routes[1].request_body.as_ref().expect("body");
         let root = body.schema.expect("schema");
-        let prop = model.schema_arena[root.0].properties[0].schema;
+        let root_schema = &model.schema_arena[root.0];
+        let prop = root_schema
+            .properties
+            .iter()
+            .find(|prop| prop.name == "starts_at")
+            .expect("starts_at")
+            .schema;
         let schema = &model.schema_arena[prop.0];
         assert_eq!(schema.kind, ApiSchemaKind::DateTime);
         assert_eq!(schema.examples, vec!["2026-05-25T12:30:00Z"]);
+        let opens_at = root_schema
+            .properties
+            .iter()
+            .find(|prop| prop.name == "opens_at")
+            .expect("opens_at")
+            .schema;
+        assert_eq!(model.schema_arena[opens_at.0].kind, ApiSchemaKind::Time);
+        let avatar = root_schema
+            .properties
+            .iter()
+            .find(|prop| prop.name == "avatar")
+            .expect("avatar")
+            .schema;
+        assert_eq!(model.schema_arena[avatar.0].kind, ApiSchemaKind::Bytes);
+        let generated = schema_example_json(root, &model, 0);
+        assert!(generated.contains("\"starts_at\": \"2026-05-25T12:30:00Z\""));
+        assert!(generated.contains("\"opens_at\": \"12:00:00\""));
+        assert!(generated.contains("\"avatar\": \"🖼\""));
     }
 
     #[test]
@@ -881,6 +1064,272 @@ mod tests {
     }
 
     #[test]
+    fn openapi_schema_refs_are_reused_for_large_specs_and_request_body_refs() {
+        let mut paths = serde_json::Map::new();
+        for idx in 0..(API_SCHEMA_MAX_COUNT + 25) {
+            paths.insert(
+                format!("/bulk/{idx:04}"),
+                serde_json::json!({
+                    "post": {
+                        "requestBody": {"$ref": "#/components/requestBodies/SharedBody"},
+                        "responses": {
+                            "200": {"$ref": "#/components/responses/Ok"}
+                        }
+                    }
+                }),
+            );
+        }
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Large", "version": "1.0.0"},
+            "components": {
+                "schemas": {
+                    "BaseBody": {
+                        "type": "object",
+                        "required": ["id"],
+                        "properties": {
+                            "id": {"type": "string"}
+                        }
+                    },
+                    "HugeBody": {
+                        "allOf": [
+                            {"$ref": "#/components/schemas/BaseBody"},
+                            {
+                                "type": "object",
+                                "required": ["payload"],
+                                "properties": {
+                                    "payload": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {"type": "string", "minLength": 2}
+                                        }
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                },
+                "requestBodies": {
+                    "SharedBody": {
+                        "required": true,
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HugeBody"}
+                            }
+                        }
+                    }
+                },
+                "responses": {
+                    "Ok": {
+                        "description": "ok",
+                        "content": {
+                            "application/json": {
+                                "schema": {"$ref": "#/components/schemas/HugeBody"}
+                            }
+                        }
+                    }
+                }
+            },
+            "paths": paths
+        });
+        let model = parse_openapi_model(ApiSpecId(31), &spec).expect("parse");
+        let last_route = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/bulk/0792")
+            .expect("last route");
+
+        assert!(
+            last_route
+                .request_body
+                .as_ref()
+                .and_then(|body| body.schema)
+                .is_some()
+        );
+        assert!(last_route.responses[0].schema.is_some());
+        assert!(model.schema_arena.len() < 16);
+
+        let schema_text = api_route_input_schema_text(last_route, &model, 0, &FxHashSet::default());
+        assert!(!schema_text.contains("\"body\"*"));
+        assert!(schema_text.contains("\"id\"*"));
+        assert!(schema_text.contains("\"payload\"*"));
+        assert!(schema_text.contains("minLength=2"));
+    }
+
+    #[test]
+    fn primitive_arrays_render_inline_without_items_row() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Demo", "version": "1"},
+            "paths": {
+                "/ids": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "addition_ids": {
+                                                "type": "array",
+                                                "items": {"type": "integer"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(32), &spec).expect("parse");
+        let route = &model.routes[0];
+        let schema_text = api_route_input_schema_text(route, &model, 0, &FxHashSet::default());
+
+        assert!(schema_text.contains("\"addition_ids\": [],  · array<integer>"));
+        assert!(!schema_text.contains("\"items\""));
+    }
+
+    #[test]
+    fn input_schema_lists_path_and_query_params_without_body_schema_warning() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Demo", "version": "1"},
+            "paths": {
+                "/users/{user_id}": {
+                    "get": {
+                        "parameters": [
+                            {
+                                "name": "user_id",
+                                "in": "path",
+                                "required": true,
+                                "schema": {"type": "integer"}
+                            },
+                            {
+                                "name": "include",
+                                "in": "query",
+                                "schema": {"type": "array", "items": {"type": "string"}}
+                            }
+                        ],
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(33), &spec).expect("parse");
+        let route = &model.routes[0];
+        let schema_text = api_route_input_schema_text(route, &model, 0, &FxHashSet::default());
+
+        assert!(schema_text.contains("\"path\": {"));
+        assert!(schema_text.contains("\"user_id\"*: 0  · integer"));
+        assert!(schema_text.contains("\"query\": {"));
+        assert!(schema_text.contains("\"include\": []  · array"));
+        assert!(!schema_text.contains("Input body schema not described"));
+    }
+
+    #[test]
+    fn output_example_omits_response_header_and_reports_missing_schema_per_status() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Demo", "version": "1"},
+            "components": {
+                "schemas": {
+                    "RefreshResponse": {
+                        "type": "object",
+                        "properties": {"token": {"type": "string"}}
+                    }
+                }
+            },
+            "paths": {
+                "/login": {
+                    "post": {
+                        "responses": {
+                            "200": {
+                                "description": "ok",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {"$ref": "#/components/schemas/RefreshResponse"}
+                                    }
+                                }
+                            },
+                            "400": {"description": "bad request"},
+                            "422": {
+                                "description": "validation",
+                                "content": {
+                                    "application/json": {
+                                        "examples": {
+                                            "invalid_email": {
+                                                "summary": "InvalidEmail",
+                                                "value": {"error": "invalid email"}
+                                            },
+                                            "weak_password": {
+                                                "summary": "WeakPassword",
+                                                "value": {"error": "weak password"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(34), &spec).expect("parse");
+        let route = &model.routes[0];
+        let ok_example = api_route_output_example_text_for(route, &model, 0, 0);
+        let ok_schema =
+            api_route_output_schema_text_for(route, &model, 0, 0, &FxHashSet::default());
+        let bad_example = api_route_output_example_text_for(route, &model, 1, 0);
+        let bad_schema =
+            api_route_output_schema_text_for(route, &model, 1, 0, &FxHashSet::default());
+        let validation_idx = route
+            .responses
+            .iter()
+            .position(|response| response.status == "422")
+            .expect("422 response");
+
+        assert!(!ok_example.starts_with("Response 200"));
+        assert!(ok_example.contains("\"token\""));
+        assert!(ok_example.contains("{\n  \"token\""));
+        assert!(ok_schema.contains("\"token\""));
+        assert!(!ok_schema.contains("name=RefreshResponse"));
+        assert_eq!(bad_example, "schema/example not described\n");
+        assert_eq!(bad_schema, "null  · not described\n");
+        assert_eq!(api_route_output_example_count(route, validation_idx), 2);
+        assert_eq!(
+            api_route_output_example_label(route, validation_idx, 0),
+            "InvalidEmail"
+        );
+        assert_eq!(
+            api_route_output_example_label(route, validation_idx, 1),
+            "WeakPassword"
+        );
+        assert!(
+            api_route_output_example_text_for(route, &model, validation_idx, 1)
+                .contains("weak password")
+        );
+        let (status, content_type, generated) = api_generated_response_for_route(route, &model);
+        assert_eq!(status, 200);
+        assert_eq!(content_type, "application/json");
+        assert!(generated.contains("\"token\""));
+        let bad_route = ApiRouteRow {
+            responses: vec![route.responses[1].clone()],
+            ..route.clone()
+        };
+        let (status, content_type, generated) =
+            api_generated_response_for_route(&bad_route, &model);
+        assert_eq!(status, 400);
+        assert_eq!(content_type, "text/plain; charset=utf-8");
+        assert_eq!(
+            generated,
+            "Response 400 schema/example not described in OpenAPI."
+        );
+    }
+
+    #[test]
     fn form_and_multipart_field_rows_stay_compact() {
         let model = parse_openapi_model(ApiSpecId(24), &form_spec()).expect("parse");
         let route = &model.routes[0];
@@ -1243,5 +1692,17 @@ mod tests {
         assert!(tab_max.is_finite());
         assert!(tab_max > 0.0);
         assert_eq!(api_tab_max_scroll(None, &tab_state, None, 180.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn api_timing_text_never_mixes_mock_and_server_reach_labels() {
+        assert_eq!(
+            format_api_timing_text(7, Some(3), ApiJobMockTarget::Mock),
+            "7 ms (мок-сервер)"
+        );
+        assert_eq!(
+            format_api_timing_text(7, Some(3), ApiJobMockTarget::Proxy),
+            "3 ms до сервера"
+        );
     }
 }

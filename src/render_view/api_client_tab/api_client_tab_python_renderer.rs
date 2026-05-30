@@ -31,7 +31,7 @@ impl Renderer {
         w: f32,
         s: f32,
     ) {
-        let line_h = api_text_area_line_height(s);
+        let line_h = api_text_area_line_height(s).round();
         self.draw_python_text_area(
             signature,
             spans,
@@ -75,7 +75,7 @@ impl Renderer {
         scroll_y: f32,
         first_line_no: usize,
     ) {
-        let line_h = api_text_area_line_height(s);
+        let line_h = api_text_area_line_height(s).round();
         let first_line = (scroll_y / line_h).floor() as usize;
         let line_offset = scroll_y - first_line as f32 * line_h;
         let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
@@ -89,7 +89,7 @@ impl Renderer {
             if line_idx >= line_count {
                 break;
             }
-            let text_y = y - line_offset + visible_idx as f32 * line_h;
+            let text_y = (y - line_offset + visible_idx as f32 * line_h).round();
             self.draw_editor_line_number_centered(first_line_no + line_idx, x, w, text_y, 1.0);
         }
     }
@@ -142,6 +142,7 @@ impl Renderer {
         scroll_x: f32,
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        clip_rect: Option<(f32, f32, f32, f32)>,
         mx: f32,
         my: f32,
     ) -> bool {
@@ -181,7 +182,7 @@ impl Renderer {
         let old_phys_to_visual = std::mem::take(&mut self.phys_to_visual);
         let old_lsp_diagnostic_indices = std::mem::take(&mut self.lsp_diagnostic_indices);
 
-        self.line_height = api_text_area_line_height(self.scale_factor);
+        self.line_height = api_text_area_line_height(self.scale_factor).round();
         self.left_padding = text_x;
         self.last_scroll_x = scroll_x;
         self.phys_to_visual.extend(0..editor.line_offsets.len());
@@ -245,7 +246,20 @@ impl Renderer {
             render_scroll_y,
             hovered_diag_type_target,
             &mut wants_pointer,
+            clip_rect,
         );
+        if let Some((x, y, w, h)) = clip_rect {
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    x.round() as i32,
+                    (self.height - (y + h)).round() as i32,
+                    w.round() as i32,
+                    h.round() as i32,
+                );
+            }
+        }
 
         self.line_height = old_line_height;
         self.left_padding = old_left_padding;
@@ -268,7 +282,7 @@ impl Renderer {
         scroll_y: f32,
         scroll_x: f32,
     ) {
-        let line_h = api_text_area_line_height(s);
+        let line_h = api_text_area_line_height(s).round();
         let scroll_y = scroll_y.clamp(
             0.0,
             crate::app::api_client::api_text_area_max_scroll(text, h, s),
@@ -296,7 +310,7 @@ impl Renderer {
                 byte_idx = line_end.saturating_add(1);
                 continue;
             }
-            let draw_y = y - line_offset + visible_idx as f32 * line_h;
+            let draw_y = (y - line_offset + visible_idx as f32 * line_h).round();
             self.draw_spanned_api_line(
                 line,
                 spans,
@@ -323,6 +337,8 @@ impl Renderer {
         blink_alpha: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
+        let baseline_y = baseline_y.round();
+        let scroll_y = scroll_y.round();
         let old_line_height = self.line_height;
         let old_baseline_offset = self.baseline_offset;
         let old_left_padding = self.left_padding;
@@ -331,7 +347,7 @@ impl Renderer {
         let old_phys_to_visual = std::mem::take(&mut self.phys_to_visual);
         let old_inlay_hints = std::mem::take(&mut self.current_python_inlay_hints);
 
-        self.line_height = api_text_area_line_height(self.scale_factor);
+        self.line_height = api_text_area_line_height(self.scale_factor).round();
         self.baseline_offset = api_text_area_baseline_offset(self.scale_factor);
         self.left_padding = x;
         self.last_scroll_x = scroll_x;
@@ -342,7 +358,7 @@ impl Renderer {
             .selection_anchor
             .map(|anchor| (anchor.min(editor.cursor), anchor.max(editor.cursor)))
             .unwrap_or((editor.cursor, editor.cursor));
-        let render_scroll_y = scroll_y + self.baseline_offset - baseline_y;
+        let render_scroll_y = (scroll_y + self.baseline_offset - baseline_y).round();
         let empty_search: &[(usize, usize)] = &[];
         let empty_inlay: &[crate::app::PythonInlayHint] = &[];
         if focused {

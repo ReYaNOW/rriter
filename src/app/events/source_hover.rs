@@ -60,7 +60,7 @@ pub(crate) fn module_path_from_definition_path(
 pub(super) const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
 static HOVER_FOLDER_ICON_PREWARM: std::sync::Once = std::sync::Once::new();
 
-pub(super) fn prepend_hover_module_path(
+pub(crate) fn prepend_hover_module_path(
     popup: &mut crate::app::mouse::HoverPopup,
     module_path: &str,
 ) {

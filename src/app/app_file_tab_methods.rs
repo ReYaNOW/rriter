@@ -125,7 +125,8 @@ impl App {
 
         self.close_autocomplete();
         self.show_welcome =
-            self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+            self.tabs.is_empty() && self.file_path.is_none() && self.editor.len() == 0;
+        self.clamp_tab_scroll_to_content_now();
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());

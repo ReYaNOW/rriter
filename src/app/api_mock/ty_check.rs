@@ -1,9 +1,13 @@
 use super::contract::{
-    api_mock_contract_source_text, api_mock_handler_signature_text, api_mock_type_source_prefix,
-    api_mock_type_source_suffix,
+    api_mock_contract_from_state_text, api_mock_contract_source_text, api_mock_default_literal,
+    api_mock_handler_signature_text, api_mock_python_type, api_mock_type_source_prefix,
+    api_mock_type_source_suffix, enabled_fields,
 };
 use super::python_env::api_mock_python_dir;
-use super::types::{ApiMockPythonScript, api_mock_effective_contract};
+use super::types::{
+    ApiMockClassSpec, ApiMockPythonContract, ApiMockPythonScript, ApiPythonRuntimeConfig,
+    ApiPythonRuntimeMode, api_mock_effective_contract,
+};
 use crate::app::api_client::{ApiMethod, ApiRouteRow, ApiSpecModel};
 use std::path::PathBuf;
 use std::process::Command;
@@ -139,6 +143,7 @@ impl ApiMockVirtualSource {
 pub fn spawn_api_mock_ty_check(
     route_idx: usize,
     version: u64,
+    runtime: ApiPythonRuntimeConfig,
     method: ApiMethod,
     path: String,
     route: ApiRouteRow,
@@ -147,8 +152,9 @@ pub fn spawn_api_mock_ty_check(
 ) -> Receiver<ApiMockTyCheckResult> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let result =
-            run_api_mock_ty_check(route_idx, version, method, &path, &route, &model, &script);
+        let result = run_api_mock_ty_check(
+            route_idx, version, &runtime, method, &path, &route, &model, &script,
+        );
         let _ = tx.send(result);
     });
     rx
@@ -157,6 +163,7 @@ pub fn spawn_api_mock_ty_check(
 fn run_api_mock_ty_check(
     route_idx: usize,
     version: u64,
+    runtime: &ApiPythonRuntimeConfig,
     method: ApiMethod,
     path: &str,
     route: &ApiRouteRow,
@@ -184,17 +191,22 @@ fn run_api_mock_ty_check(
             diagnostics: Vec::new(),
         };
     }
-    run_ty(route_idx, version, &file, &virtual_source, script)
+    run_ty(route_idx, version, runtime, &file, &virtual_source, script)
 }
 
 fn run_ty(
     route_idx: usize,
     version: u64,
+    runtime: &ApiPythonRuntimeConfig,
     file: &PathBuf,
     virtual_source: &ApiMockVirtualSource,
     script: &ApiMockPythonScript,
 ) -> ApiMockTyCheckResult {
-    let output = Command::new("ty").arg("check").arg(file).output();
+    let output = api_mock_ty_command(runtime, file).and_then(|mut command| {
+        command
+            .output()
+            .map_err(|err| format!("ty not available: {err}"))
+    });
     match output {
         Ok(output) => {
             let mut message = String::new();
@@ -225,9 +237,48 @@ fn run_ty(
             route_idx,
             version,
             ok: false,
-            message: format!("ty not available: {}", err),
+            message: err,
             diagnostics: Vec::new(),
         },
+    }
+}
+
+fn api_mock_ty_command(
+    runtime: &ApiPythonRuntimeConfig,
+    file: &PathBuf,
+) -> Result<Command, String> {
+    match runtime.mode {
+        ApiPythonRuntimeMode::UvManaged => {
+            let uv_path = runtime
+                .uv_path
+                .as_ref()
+                .ok_or_else(|| "uv path is not configured".to_string())?;
+            let version = if runtime.python_version.trim().is_empty() {
+                "3.13"
+            } else {
+                runtime.python_version.trim()
+            };
+            let mut command = Command::new(uv_path);
+            command
+                .arg("run")
+                .arg("--no-project")
+                .arg("--python")
+                .arg(version)
+                .arg("--no-python-downloads")
+                .arg("ty")
+                .arg("check")
+                .arg(file);
+            Ok(command)
+        }
+        ApiPythonRuntimeMode::CustomPython => {
+            let python_path = runtime
+                .custom_python_path
+                .as_ref()
+                .ok_or_else(|| "Python path is not configured".to_string())?;
+            let mut command = Command::new(python_path);
+            command.arg("-m").arg("ty").arg("check").arg(file);
+            Ok(command)
+        }
     }
 }
 
@@ -378,6 +429,7 @@ fn next_token_end_col(line: &str, start_col: usize) -> usize {
 fn hidden_contract_source(
     source: &str,
     source_start: usize,
+    contract: &ApiMockPythonContract,
 ) -> (String, Vec<ApiMockContractLineMap>) {
     let mut out = String::with_capacity(source.len() + 64);
     let mut maps = Vec::new();
@@ -386,13 +438,13 @@ fn hidden_contract_source(
         let line_body = line.strip_suffix('\n').unwrap_or(line);
         let has_newline = line.ends_with('\n');
         let hidden = hidden_contract_line(line_body);
-        if hidden_response_class_line(line_body) {
-            out.push_str("@dataclass\n");
-        }
         let source_line_start = source_start + out.len();
         out.push_str(&hidden);
         if has_newline {
             out.push('\n');
+        }
+        if let Some(init) = hidden_contract_init_for_line(&hidden, contract) {
+            out.push_str(&init);
         }
         let edit_end = edit_start + line_body.len();
         maps.push(ApiMockContractLineMap {
@@ -414,12 +466,45 @@ fn hidden_contract_source(
     (out, maps)
 }
 
-fn hidden_response_class_line(line: &str) -> bool {
-    let trimmed = line.trim_start();
-    let Some(rest) = trimmed.strip_prefix("class Response") else {
-        return false;
+fn hidden_contract_init_for_line(line: &str, contract: &ApiMockPythonContract) -> Option<String> {
+    let class_name = hidden_contract_class_name(line)?;
+    let spec = match class_name {
+        "Query" => &contract.query,
+        "Body" => &contract.body,
+        "Response" => &contract.response,
+        _ => return None,
     };
-    rest.rfind(':').is_some()
+    Some(hidden_contract_init_for_class(spec))
+}
+
+fn hidden_contract_class_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("class ")?;
+    rest.split(['(', ':']).next().map(str::trim)
+}
+
+fn hidden_contract_init_for_class(spec: &ApiMockClassSpec) -> String {
+    let mut out = String::from("    def __init__(self");
+    for required in [true, false] {
+        for field in enabled_fields(spec).filter(|field| field.required == required) {
+            out.push_str(", ");
+            out.push_str(&field.python_name);
+            out.push_str(": ");
+            out.push_str(&api_mock_python_type(field));
+            if !field.required {
+                out.push_str(" = ");
+                let default_literal = api_mock_default_literal(field);
+                let default_text = default_literal.as_deref().unwrap_or(if field.nullable {
+                    "None"
+                } else {
+                    "..."
+                });
+                out.push_str(default_text);
+            }
+        }
+    }
+    out.push_str(") -> None: ...\n");
+    out
 }
 
 fn hidden_contract_line(line: &str) -> String {
@@ -471,8 +556,13 @@ pub fn build_api_mock_virtual_source(
     model: &ApiSpecModel,
     script: &ApiMockPythonScript,
 ) -> ApiMockVirtualSource {
-    let contract = api_mock_effective_contract(script, route, model);
+    let base_contract = api_mock_effective_contract(script, route, model);
     let contract_source = api_mock_contract_source_text(script, route, model);
+    let contract = if script.contract_source.trim().is_empty() {
+        base_contract
+    } else {
+        api_mock_contract_from_state_text(&base_contract, &contract_source)
+    };
     let mut out = String::with_capacity(
         script.prelude.len() + script.body.len() + contract_source.len() + 2048,
     );
@@ -480,7 +570,7 @@ pub fn build_api_mock_virtual_source(
     out.push_str("# Editable contract classes\n");
     let contract_start = out.len();
     let (hidden_contract, contract_lines) =
-        hidden_contract_source(&contract_source, contract_start);
+        hidden_contract_source(&contract_source, contract_start, &contract);
     out.push_str(&hidden_contract);
     let contract_end = out.len();
     if !contract_source.ends_with('\n') {
@@ -502,7 +592,7 @@ pub fn build_api_mock_virtual_source(
     out.push('\n');
     let mut body_lines = Vec::new();
     if script.body.trim().is_empty() {
-        out.push_str("    return Response(ok=True)\n");
+        out.push_str("\n    return Response(ok=True)\n");
     } else {
         let mut edit_start = 0usize;
         for line in script.body.lines() {
@@ -599,8 +689,93 @@ mod tests {
 
         assert!(source.contains("class Query"));
         assert!(source.contains("page: int | None = None"));
-        assert!(source.contains("@dataclass\nclass Response(BaseModel):"));
+        assert!(source.contains("def __init__(self, page: int | None = None) -> None: ..."));
+        assert!(source.contains("class Response(BaseModel):"));
+        assert!(!source.contains("@dataclass\nclass Response(BaseModel):"));
         assert!(source.contains("def handler(\n    req: Request,\n    id: str,"));
+    }
+
+    #[test]
+    fn ty_source_keeps_response_model_pydantic_style_for_mixed_defaults() {
+        let route = ApiRouteRow {
+            tag: String::new(),
+            method: ApiMethod::Get,
+            path: "/users/me".to_string(),
+            summary: String::new(),
+            operation_id: String::new(),
+            security: None,
+            path_params: Vec::new(),
+            query_params: Vec::new(),
+            request_body: None,
+            responses: Vec::new(),
+        };
+        let model = ApiSpecModel::default();
+        let source = build_api_mock_ty_source(
+            ApiMethod::Get,
+            "/users/me",
+            &route,
+            &model,
+            &ApiMockPythonScript {
+                enabled: true,
+                contract: Default::default(),
+                contract_source:
+                    "class Response:\n    image_link: str | None = None\n    id: int\n".to_string(),
+                prelude: String::new(),
+                body: "return Response(image_link=None, id=1)".to_string(),
+                timeout_ms: 1000,
+            },
+        );
+        let response_start = source.find("class Response(BaseModel):").unwrap();
+        let response_source = &source[response_start..];
+        let image_pos = response_source
+            .find("\n    image_link: str | None = None")
+            .unwrap();
+        let id_pos = response_source.find("\n    id: int").unwrap();
+
+        assert!(image_pos < id_pos);
+        assert!(
+            response_source.contains(
+                "def __init__(self, id: int, image_link: str | None = None) -> None: ..."
+            )
+        );
+        assert!(!source.contains("@dataclass\nclass Response"));
+    }
+
+    #[test]
+    fn ty_source_adds_body_constructor_args_for_completion() {
+        let route = ApiRouteRow {
+            tag: String::new(),
+            method: ApiMethod::Post,
+            path: "/items".to_string(),
+            summary: String::new(),
+            operation_id: String::new(),
+            security: None,
+            path_params: Vec::new(),
+            query_params: Vec::new(),
+            request_body: None,
+            responses: Vec::new(),
+        };
+        let model = ApiSpecModel::default();
+        let source = build_api_mock_ty_source(
+            ApiMethod::Post,
+            "/items",
+            &route,
+            &model,
+            &ApiMockPythonScript {
+                enabled: true,
+                contract: Default::default(),
+                contract_source: "class Body:\n    title: str\n    count: int | None = None\n"
+                    .to_string(),
+                prelude: String::new(),
+                body: "return Response(ok=True)".to_string(),
+                timeout_ms: 1000,
+            },
+        );
+
+        assert!(
+            source
+                .contains("def __init__(self, title: str, count: int | None = None) -> None: ...")
+        );
     }
 
     #[test]
@@ -736,5 +911,55 @@ mod tests {
         assert_eq!(diag.start_col, 4);
         assert_eq!(diag.end_col, "    missing_name".chars().count());
         assert!(diag.message.contains("missing_name"));
+    }
+
+    #[test]
+    fn ty_check_command_uses_selected_uv_python() {
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::UvManaged,
+            uv_path: Some(PathBuf::from("/usr/bin/uv")),
+            custom_python_path: None,
+            python_version: "3.12".to_string(),
+        };
+        let command =
+            api_mock_ty_command(&runtime, &PathBuf::from("/tmp/mock_route_0.py")).unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(command.get_program(), "/usr/bin/uv");
+        assert_eq!(
+            args,
+            vec![
+                "run",
+                "--no-project",
+                "--python",
+                "3.12",
+                "--no-python-downloads",
+                "ty",
+                "check",
+                "/tmp/mock_route_0.py"
+            ]
+        );
+    }
+
+    #[test]
+    fn ty_check_command_uses_custom_python_module() {
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::CustomPython,
+            uv_path: None,
+            custom_python_path: Some(PathBuf::from("/opt/python/bin/python")),
+            python_version: "3.13".to_string(),
+        };
+        let command =
+            api_mock_ty_command(&runtime, &PathBuf::from("/tmp/mock_route_0.py")).unwrap();
+        let args: Vec<_> = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(command.get_program(), "/opt/python/bin/python");
+        assert_eq!(args, vec!["-m", "ty", "check", "/tmp/mock_route_0.py"]);
     }
 }

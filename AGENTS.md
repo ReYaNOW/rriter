@@ -139,8 +139,7 @@ Allowed shell commands:
 * `ls`
 * `grep`
 * `python3 gen_project_ai_map.py`
-* `make fast`
-* `make test`
+* `make codex_test`
 * `cargo +nightly fmt`
 * `make api-map` if still present
 * Read-only inspection commands that stay in project root
@@ -160,7 +159,7 @@ Before multi-file/risky change:
 
 ```text
 1. Change X -> verify Y
-2. Change Z -> verify make fast
+2. Change Z -> verify make codex_test
 ```
 
 Bug fix path:
@@ -169,15 +168,15 @@ Bug fix path:
 2. Read exact source.
 3. Find cause.
 4. Patch minimal code.
-5. Verify with `make fast` when possible.
+5. Verify with `make codex_test` when possible.
 
 Primary success check:
 
 ```bash
-make fast
+make codex_test
 ```
 
-Use `make test` for logic with tests or when user asks.
+Use `make codex_test` for logic with tests or when user asks.
 
 ## 6. Coding Rules
 
@@ -426,7 +425,7 @@ Root:
 * `PROJECT_AI_MAP.txt` -> AI source index/call map. Not exact source.
 * `PROJECT_GUIDE.md` -> broader architecture guide.
 * `Cargo.toml` -> deps/profile/features.
-* `Makefile` -> `make fast`, `make test`, `make api-map`.
+* `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> build-time resource/platform setup.
 
 Entrypoints/state:

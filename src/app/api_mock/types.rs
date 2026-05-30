@@ -55,6 +55,15 @@ pub enum ApiMockServerStatus {
     Failed(String),
 }
 
+impl ApiMockServerStatus {
+    pub(crate) fn running_url(&self) -> Option<&str> {
+        match self {
+            Self::Running { url } => Some(url.as_str()),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiMockCheckStatus {
     #[default]
@@ -81,6 +90,8 @@ pub struct ApiMockRouteOverride {
     pub method: ApiMethod,
     pub path: String,
     pub enabled: bool,
+    #[serde(default)]
+    pub proxy_when_disabled: bool,
     pub response: ApiMockResponse,
     pub python: Option<ApiMockPythonScript>,
     pub extra_input_fields: Vec<ApiMockField>,
@@ -113,7 +124,7 @@ pub struct ApiMockPythonScript {
 }
 
 pub fn default_api_mock_python_body() -> String {
-    "    return Response(ok=True)".to_string()
+    "\n    return Response(ok=True)".to_string()
 }
 
 pub fn is_legacy_api_mock_python_body(text: &str) -> bool {
@@ -219,6 +230,7 @@ pub enum ApiMockContractFieldKind {
     Array,
     Object,
     Bytes,
+    File,
     #[default]
     Any,
 }
@@ -226,9 +238,10 @@ pub enum ApiMockContractFieldKind {
 impl ApiMockContractFieldKind {
     pub fn from_primitive(kind: ApiPrimitiveType) -> Self {
         match kind {
-            ApiPrimitiveType::String | ApiPrimitiveType::Date | ApiPrimitiveType::DateTime => {
-                Self::String
-            }
+            ApiPrimitiveType::String
+            | ApiPrimitiveType::Date
+            | ApiPrimitiveType::DateTime
+            | ApiPrimitiveType::Time => Self::String,
             ApiPrimitiveType::Integer => Self::Integer,
             ApiPrimitiveType::Number => Self::Number,
             ApiPrimitiveType::Boolean => Self::Boolean,
@@ -241,7 +254,10 @@ impl ApiMockContractFieldKind {
 
     pub fn from_schema_kind(kind: ApiSchemaKind) -> Self {
         match kind {
-            ApiSchemaKind::String | ApiSchemaKind::Date | ApiSchemaKind::DateTime => Self::String,
+            ApiSchemaKind::String
+            | ApiSchemaKind::Date
+            | ApiSchemaKind::DateTime
+            | ApiSchemaKind::Time => Self::String,
             ApiSchemaKind::Integer => Self::Integer,
             ApiSchemaKind::Number => Self::Number,
             ApiSchemaKind::Boolean => Self::Boolean,
@@ -320,7 +336,11 @@ pub fn default_contract_from_route(
     if let Some(schema_ref) = route.request_body.as_ref().and_then(|body| body.schema)
         && let Some(schema) = model.schema_arena.get(schema_ref.0)
     {
-        contract.body.fields = body_fields_from_schema(schema, model);
+        let multipart = route
+            .request_body
+            .as_ref()
+            .is_some_and(|body| body.is_multipart);
+        contract.body.fields = body_fields_from_schema(schema, model, multipart);
         contract.body.enabled = true;
     } else if route.request_body.is_some() {
         contract.body.fields.push(ApiMockContractField::new(
@@ -348,6 +368,30 @@ pub fn default_contract_for_manual_route(path: &str) -> ApiMockPythonContract {
     contract
 }
 
+pub fn sync_contract_path_params_from_path(contract: &mut ApiMockPythonContract, path: &str) {
+    let names = api_mock_path_param_names(path);
+    let mut fields = Vec::with_capacity(names.len());
+    for name in names {
+        if let Some(existing) = contract
+            .path_params
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .cloned()
+        {
+            fields.push(existing);
+        } else {
+            fields.push(ApiMockContractField::new(
+                name,
+                ApiMockContractFieldKind::String,
+                true,
+            ));
+        }
+    }
+    contract.path_params.fields = fields;
+    contract.path_params.enabled = !contract.path_params.fields.is_empty();
+}
+
 fn field_from_param(param: &ApiParam) -> ApiMockContractField {
     let mut field = ApiMockContractField::new(
         param.name.clone(),
@@ -365,9 +409,13 @@ fn field_from_param(param: &ApiParam) -> ApiMockContractField {
     field
 }
 
-fn body_fields_from_schema(schema: &ApiSchema, model: &ApiSpecModel) -> Vec<ApiMockContractField> {
+fn body_fields_from_schema(
+    schema: &ApiSchema,
+    model: &ApiSpecModel,
+    multipart: bool,
+) -> Vec<ApiMockContractField> {
     if schema.properties.is_empty() {
-        let mut field = field_from_schema("raw", schema, false, model);
+        let mut field = field_from_schema("raw", schema, false, model, multipart);
         field.required = true;
         return vec![field];
     }
@@ -376,7 +424,13 @@ fn body_fields_from_schema(schema: &ApiSchema, model: &ApiSpecModel) -> Vec<ApiM
         .iter()
         .filter_map(|prop| {
             let schema = model.schema_arena.get(prop.schema.0)?;
-            Some(field_from_schema(&prop.name, schema, prop.required, model))
+            Some(field_from_schema(
+                &prop.name,
+                schema,
+                prop.required,
+                model,
+                multipart,
+            ))
         })
         .collect()
 }
@@ -395,7 +449,7 @@ fn response_class_from_route(route: &ApiRouteRow, model: &ApiSpecModel) -> ApiMo
         .or_else(|| route.responses.first())
         .and_then(|response| response.schema)
         .and_then(|schema_ref| model.schema_arena.get(schema_ref.0))
-        .map(|schema| body_fields_from_schema(schema, model))
+        .map(|schema| body_fields_from_schema(schema, model, false))
         .unwrap_or_default();
     if fields.is_empty() {
         default_response_class()
@@ -421,6 +475,7 @@ fn field_from_schema(
     schema: &ApiSchema,
     required: bool,
     model: &ApiSpecModel,
+    multipart: bool,
 ) -> ApiMockContractField {
     let mut field = ApiMockContractField::new(
         name.to_string(),
@@ -431,6 +486,14 @@ fn field_from_schema(
         .item
         .and_then(|item_ref| model.schema_arena.get(item_ref.0))
         .map(|item| ApiMockContractFieldKind::from_schema_kind(item.kind));
+    if multipart {
+        if matches!(field.kind, ApiMockContractFieldKind::Bytes) {
+            field.kind = ApiMockContractFieldKind::File;
+        }
+        if matches!(field.item_kind, Some(ApiMockContractFieldKind::Bytes)) {
+            field.item_kind = Some(ApiMockContractFieldKind::File);
+        }
+    }
     field.enum_values = schema.enum_values.clone();
     field.default_value = schema.default_value.clone();
     field.examples = schema.examples.clone();
@@ -590,6 +653,7 @@ pub struct ApiMockRuntimeRoute {
     pub method: ApiMethod,
     pub path: String,
     pub enabled: bool,
+    pub proxy_when_disabled: bool,
     pub response: ApiMockResponse,
     pub generated_status: u16,
     pub generated_content_type: &'static str,
@@ -710,10 +774,47 @@ mod tests {
     fn default_python_body_returns_response_class() {
         assert_eq!(
             default_api_mock_python_body(),
-            "    return Response(ok=True)"
+            "\n    return Response(ok=True)"
         );
         assert!(is_legacy_api_mock_python_body(
             "return json_response({\"ok\": True})"
         ));
+    }
+
+    #[test]
+    fn running_status_exposes_copyable_url_only_when_ready() {
+        assert_eq!(
+            ApiMockServerStatus::Running {
+                url: "http://127.0.0.1:4010".to_string()
+            }
+            .running_url(),
+            Some("http://127.0.0.1:4010")
+        );
+        assert_eq!(ApiMockServerStatus::Starting.running_url(), None);
+        assert_eq!(
+            ApiMockServerStatus::Failed("bind failed".to_string()).running_url(),
+            None
+        );
+    }
+
+    #[test]
+    fn manual_contract_path_params_sync_from_route_path() {
+        let mut contract = default_contract_for_manual_route("/users/{id}");
+        contract.path_params.fields[0].default_value = Some("42".to_string());
+
+        sync_contract_path_params_from_path(&mut contract, "/teams/{team_id}/users/{id}");
+
+        assert!(contract.path_params.enabled);
+        assert_eq!(contract.path_params.fields[0].name, "team_id");
+        assert_eq!(contract.path_params.fields[1].name, "id");
+        assert_eq!(
+            contract.path_params.fields[1].default_value.as_deref(),
+            Some("42")
+        );
+
+        sync_contract_path_params_from_path(&mut contract, "/health");
+
+        assert!(!contract.path_params.enabled);
+        assert!(contract.path_params.fields.is_empty());
     }
 }

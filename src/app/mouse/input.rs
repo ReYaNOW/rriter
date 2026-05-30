@@ -88,6 +88,70 @@ fn autocomplete_item_index_at(
     (idx < total_items).then_some(idx)
 }
 
+fn stop_scroll_anim(scroll: &mut crate::scroll::ScrollState) {
+    if !scroll.is_dragging {
+        scroll.stop_anim();
+    }
+}
+
+fn stop_api_tab_scroll_anims(state: &mut crate::app::api_client::ApiClientTabState) {
+    stop_scroll_anim(&mut state.output_schema_menu_scroll);
+    stop_scroll_anim(&mut state.tab_scroll);
+    stop_scroll_anim(&mut state.body_scroll);
+    stop_scroll_anim(&mut state.body_scroll_x);
+    stop_scroll_anim(&mut state.response_scroll);
+    stop_scroll_anim(&mut state.response_scroll_x);
+}
+
+fn stop_click_scroll_anims(app: &mut App) {
+    stop_scroll_anim(&mut app.settings_scroll);
+    stop_scroll_anim(&mut app.tab_scroll);
+    stop_scroll_anim(&mut app.scroll_y);
+    stop_scroll_anim(&mut app.scroll_x);
+    stop_scroll_anim(&mut app.autocomplete_scroll);
+    stop_scroll_anim(&mut app.settings_ide_scroll);
+    if let Some(popup) = &mut app.autocomplete_detail_popup {
+        stop_scroll_anim(&mut popup.scroll);
+    }
+
+    stop_scroll_anim(&mut app.ide_panel.explorer_scroll);
+    stop_scroll_anim(&mut app.ide_panel.git.scroll);
+    stop_scroll_anim(&mut app.ide_panel.git.graph_scroll);
+    stop_scroll_anim(&mut app.ide_panel.lsp_scroll_y);
+    stop_scroll_anim(&mut app.ide_panel.lsp_scroll_x);
+    for scroll in app.ide_panel.lsp_logs_scroll_y.values_mut() {
+        stop_scroll_anim(scroll);
+    }
+    for scroll in app.ide_panel.lsp_logs_scroll_x.values_mut() {
+        stop_scroll_anim(scroll);
+    }
+    stop_scroll_anim(&mut app.ide_panel.problems_scroll);
+    for terminal in &mut app.ide_panel.terminals {
+        stop_scroll_anim(&mut terminal.scroll_y);
+    }
+
+    let api = &mut app.ide_panel.api;
+    stop_scroll_anim(&mut api.panel_scroll);
+    stop_scroll_anim(&mut api.route_scroll);
+    stop_scroll_anim(&mut api.input_scroll_x);
+    stop_scroll_anim(&mut api.mock_guide_scroll);
+    stop_scroll_anim(&mut api.mock_server_log_scroll);
+    stop_scroll_anim(&mut api.mock_python_versions_scroll);
+    stop_scroll_anim(&mut api.mock_python_install_log_scroll);
+    for scroll in api.mock_python_scrolls.values_mut() {
+        stop_scroll_anim(scroll);
+    }
+    for scroll in api.mock_python_scrolls_x.values_mut() {
+        stop_scroll_anim(scroll);
+    }
+
+    for tab in &mut app.tabs {
+        if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
+            stop_api_tab_scroll_anims(state);
+        }
+    }
+}
+
 #[cfg(test)]
 fn autocomplete_scroll_click_target(
     mouse_y: f32,
@@ -132,6 +196,9 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+            stop_click_scroll_anims(self);
+        }
         if state == ElementState::Released && self.autocomplete_detail_selecting {
             self.autocomplete_detail_selecting = false;
             self.window.as_ref().unwrap().request_redraw();
@@ -652,6 +719,22 @@ impl App {
                 }
 
                 let clicked_id = self.ui_registry.find_at(mx, my);
+                if state == ElementState::Pressed
+                    && button == winit::event::MouseButton::Left
+                    && !matches!(
+                        clicked_id,
+                        Some(
+                            crate::ui_system::UiId::ApiOutputSchemaMenu(_)
+                                | crate::ui_system::UiId::ApiOutputSchemaMenuItem(_, _)
+                        )
+                    )
+                    && self.close_active_api_output_example_menu()
+                {
+                    self.window.as_ref().unwrap().request_redraw();
+                    if clicked_id.is_none() {
+                        return;
+                    }
+                }
                 if self.inline_git_popup.is_some()
                     && button == winit::event::MouseButton::Left
                     && state == ElementState::Pressed
@@ -693,6 +776,34 @@ impl App {
                     }
                     self.window.as_ref().unwrap().request_redraw();
                     return;
+                }
+                if button == winit::event::MouseButton::Left
+                    && state == ElementState::Pressed
+                    && (self.ide_panel.api.import_url_open || self.ide_panel.api.import_menu_open)
+                    && !matches!(
+                        clicked_id,
+                        Some(
+                            crate::ui_system::UiId::ApiImportAdd
+                                | crate::ui_system::UiId::ApiImportFile
+                                | crate::ui_system::UiId::ApiImportUrl
+                                | crate::ui_system::UiId::ApiImportUrlInput
+                                | crate::ui_system::UiId::ApiImportUrlConfirm
+                        )
+                    )
+                {
+                    if matches!(
+                        self.ide_panel.api.focused,
+                        Some(crate::app::api_client::ApiFocus::ImportUrl)
+                    ) {
+                        self.commit_api_focus();
+                        self.ide_panel.api.focused = None;
+                    }
+                    self.ide_panel.api.import_url_open = false;
+                    self.ide_panel.api.import_menu_open = false;
+                    self.window.as_ref().unwrap().request_redraw();
+                    if clicked_id.is_none() {
+                        return;
+                    }
                 }
                 if let Some(clicked_id) = clicked_id {
                     if matches!(
@@ -1205,6 +1316,7 @@ impl App {
                 }
             }
             self.is_dragging = false;
+            self.is_editor_drag_pending = false;
             self.ide_panel.is_dragging_terminal = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;

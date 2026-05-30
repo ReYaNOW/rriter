@@ -223,7 +223,7 @@ impl Renderer {
 
         let max_text_x = panel_x + panel_w - 10.0 * s;
         let mut row_y = panel_y + toolbar_h;
-        for (row_idx, line) in popup.lines.iter().take(visible_rows).enumerate() {
+        for line in popup.lines.iter().take(visible_rows) {
             let color = match line.kind {
                 crate::app::git_diff::DiffLineKind::Added
                 | crate::app::git_diff::DiffLineKind::ModifiedNew => {
@@ -236,15 +236,7 @@ impl Renderer {
                 crate::app::git_diff::DiffLineKind::Context => None,
             };
             if let Some(color) = color {
-                let prev_kind = row_idx
-                    .checked_sub(1)
-                    .and_then(|idx| popup.lines.get(idx))
-                    .map(|prev| prev.kind);
-                if !truncated && row_idx + 1 == visible_rows && prev_kind != Some(line.kind) {
-                    self.push_rounded_rect(panel_x, row_y, panel_w, row_h, 7.0 * s, color);
-                } else {
-                    self.push_rect(panel_x, row_y, panel_w, row_h, color);
-                }
+                self.push_rect(panel_x, row_y, panel_w, row_h, color);
             }
             self.draw_inline_git_text_line(
                 &line.text,

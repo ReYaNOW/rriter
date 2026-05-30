@@ -261,6 +261,19 @@ impl App {
             return;
         }
 
+        if self.is_editor_drag_pending
+            && !self.ide_panel.is_dragging_terminal
+            && !self.show_settings
+        {
+            let dx = px - self.last_click_pos.0;
+            let dy = py - self.last_click_pos.1;
+            let threshold = 4.0 * self.renderer.as_ref().unwrap().scale_factor;
+            if dx * dx + dy * dy > threshold * threshold {
+                self.is_editor_drag_pending = false;
+                self.is_dragging = true;
+            }
+        }
+
         let editor_text_selecting =
             self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings;
         if self.drag_api_text_scrollbar_x_from_last_mouse() {
@@ -595,36 +608,49 @@ impl App {
                             u32::MAX
                         };
 
-                        let avg_adv = self.renderer.as_mut().unwrap().char_advance('a');
-                        let mut x_start_px = 0.0f32;
-                        let mut x_end_px = 0.0f32;
-                        let mut cur_x = 0.0f32;
-                        let mut start_found = false;
-                        let mut end_found = false;
-
-                        self.editor
-                            .utf16_col_to_byte_advance(line, |ch, utf16_before, _pos| {
-                                if !start_found && utf16_before >= start_col {
-                                    x_start_px = cur_x;
-                                    start_found = true;
-                                }
-                                if !end_found && utf16_before >= end_col {
-                                    x_end_px = cur_x;
-                                    end_found = true;
-                                }
-                                cur_x += if ch == '\t' {
-                                    self.renderer.as_mut().unwrap().char_advance(' ') * 4.0
-                                } else {
-                                    self.renderer.as_mut().unwrap().char_advance(ch)
-                                };
-                            });
-
-                        if !start_found {
-                            x_start_px = cur_x;
-                        }
-                        if !end_found {
-                            x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
-                        }
+                        let (
+                            avg_adv,
+                            x_start_px,
+                            x_end_px,
+                            hit_visual_text,
+                            logical_line_x,
+                        ) = {
+                            let renderer = self.renderer.as_mut().unwrap();
+                            let avg_adv = renderer.char_advance('a');
+                            let (x_start_px, start_byte) = renderer.visual_x_for_utf16_col(
+                                &self.editor,
+                                line,
+                                start_col,
+                                true,
+                            );
+                            let (mut x_end_px, end_byte) = renderer.visual_x_for_utf16_col(
+                                &self.editor,
+                                line,
+                                end_col,
+                                false,
+                            );
+                            if line != diag.end_line as usize {
+                                x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
+                            }
+                            let line_x = px - left_padding + render_scroll_x;
+                            let hit_visual_text = renderer.visual_text_range_contains_x(
+                                &self.editor,
+                                self.editor.line_offsets[line],
+                                start_byte,
+                                end_byte,
+                                line_x,
+                                avg_adv / 2.0,
+                            );
+                            let logical_line_x =
+                                renderer.text_x_for_visual_line_x(&self.editor, line, line_x);
+                            (
+                                avg_adv,
+                                x_start_px,
+                                x_end_px,
+                                hit_visual_text,
+                                logical_line_x,
+                            )
+                        };
 
                         let Some((_, _, type_target)) = diagnostic_hover_byte_range_on_line(
                             &self.editor,
@@ -639,17 +665,16 @@ impl App {
                         let x_end = left_padding + x_end_px - render_scroll_x;
                         let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
 
-                        if px < x_start || px > x_start + squiggle_w {
+                        if px < x_start || px > x_start + squiggle_w || !hit_visual_text {
                             continue;
                         }
 
-                        let line_x = px - left_padding + render_scroll_x;
                         let type_target_under_cursor = {
                             let renderer = self.renderer.as_mut().unwrap();
                             diagnostic_hover_type_target_at_x(
                                 &self.editor,
                                 line,
-                                line_x,
+                                logical_line_x,
                                 Some(type_target),
                                 |ch| renderer.char_advance(ch),
                             )

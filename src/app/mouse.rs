@@ -39,6 +39,8 @@ mod hover_state_core;
 mod input;
 mod wheel;
 
+#[cfg(test)]
+pub(crate) use hover_mouse_logic::embedded_editor_hover_content_y_at_point;
 pub(crate) use hover_mouse_logic::hover_popup_byte_at;
 pub use hover_mouse_logic::{
     HOVER_REQUEST_DELAY_SEC, HOVER_STATE, advance_hover_anim_progress, clear_hover_popup,
@@ -58,8 +60,6 @@ pub(crate) use hover_mouse_logic::{
     normalize_hover_byte, update_editor_hover_state_for_cursor,
     with_embedded_editor_hover_renderer_context,
 };
-#[cfg(test)]
-pub(crate) use hover_mouse_logic::embedded_editor_hover_content_y_at_point;
 pub use hover_state_core::{
     HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,
 };

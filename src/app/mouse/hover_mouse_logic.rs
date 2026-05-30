@@ -762,8 +762,7 @@ pub(crate) fn embedded_editor_hover_byte_at_point(
     scroll_y: f32,
     scroll_x: f32,
 ) -> Option<usize> {
-    let content_y =
-        embedded_editor_hover_content_y_at_point(my, top_y, scroll_y, line_height)?;
+    let content_y = embedded_editor_hover_content_y_at_point(my, top_y, scroll_y, line_height)?;
     let byte = with_embedded_editor_hover_renderer_context(
         renderer,
         editor,

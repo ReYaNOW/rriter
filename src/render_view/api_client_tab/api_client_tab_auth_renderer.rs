@@ -1,260 +1,4 @@
 impl Renderer {
-    fn draw_api_manual_client_tab(
-        &mut self,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
-        s: f32,
-        ide_panel: &crate::app::IdePanelState,
-        tab_meta: &crate::app::api_client::ApiClientTabMeta,
-        tab_state: &crate::app::api_client::ApiClientTabState,
-        stable_id: &str,
-        ui_registry: &mut crate::ui_system::UiRegistry,
-        mx: f32,
-        my: f32,
-        blink_alpha: f32,
-    ) {
-        let Some((manual_idx, route)) = ide_panel
-            .api
-            .mock
-            .manual_routes
-            .iter()
-            .enumerate()
-            .find(|(_, route)| route.stable_id == stable_id)
-        else {
-            self.draw_string_scaled_stable(
-                "Ручной route удалён",
-                x + 28.0 * s,
-                y + 46.0 * s,
-                [0.72, 0.74, 0.82, 1.0],
-                0.95,
-            );
-            return;
-        };
-
-        self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
-                x.round() as i32,
-                (self.height - (y + h)).round() as i32,
-                w.round() as i32,
-                h.round() as i32,
-            );
-        }
-
-        let tab_clip = (x, y, w, h);
-        let pad = 28.0 * s;
-        let content_w = (w - pad * 2.0).max(1.0);
-        let scroll = tab_state.tab_scroll.current.round();
-        let mut cy = y + pad - scroll;
-        let route_idx = tab_state.route_idx.unwrap_or(manual_idx);
-
-        let method_w = 58.0 * s;
-        self.draw_api_method_chip(route.method, x + pad, cy, method_w, 34.0 * s, s, 0.88);
-        let mut display_path = String::new();
-        write_api_path_display(&route.path, &mut display_path);
-        self.draw_string_scaled_stable(
-            &display_path,
-            x + pad + method_w + 12.0 * s,
-            cy + 23.0 * s,
-            self.theme.fg,
-            1.14,
-        );
-        cy += 50.0 * s;
-
-        self.draw_api_section_title("LAN-сервер", x + pad, cy + 18.0 * s, s);
-        cy += 28.0 * s;
-        let lan_url = api_mock_lan_url(&ide_panel.api.mock);
-        self.draw_string_scaled_stable(
-            &lan_url,
-            x + pad,
-            cy + 20.0 * s,
-            [0.68, 0.70, 0.78, 1.0],
-            0.88,
-        );
-        cy += 42.0 * s;
-
-        let try_btn = Button {
-            x: x + pad,
-            y: cy,
-            w: 148.0 * s,
-            h: 38.0 * s,
-            text: if tab_state.pending {
-                "Жду ответ".to_string()
-            } else {
-                "Отправить".to_string()
-            },
-            icon: Some(IconType::Reload),
-            text_scale: 0.96,
-            icon_size: 22.0 * s,
-        };
-        try_btn.render(self, mx, my, s, false);
-        if !tab_state.pending {
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ApiTryRequest,
-                try_btn.x,
-                try_btn.y,
-                try_btn.w,
-                try_btn.h,
-                mx,
-                my,
-            );
-        }
-        cy += 54.0 * s;
-
-        self.draw_api_section_title("Ответ", x + pad, cy + 18.0 * s, s);
-        cy += 30.0 * s;
-        if let Some(response) = &tab_state.response {
-            if let Some(err) = &response.error {
-                self.draw_string_scaled_stable(
-                    &err.message,
-                    x + pad,
-                    cy + 18.0 * s,
-                    [1.0, 0.42, 0.42, 1.0],
-                    0.88,
-                );
-                cy += 28.0 * s;
-            }
-            if response.error.is_none() || !response.body.is_empty() {
-                let status_text = response
-                    .status
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| "-".to_string());
-                self.draw_string_scaled_stable(
-                    &status_text,
-                    x + pad,
-                    cy + 18.0 * s,
-                    api_status_color(response.status),
-                    0.92,
-                );
-                self.draw_string_scaled_stable(
-                    &response.timing_text,
-                    x + pad + 62.0 * s,
-                    cy + 18.0 * s,
-                    [0.68, 0.70, 0.78, 1.0],
-                    0.88,
-                );
-                cy += 28.0 * s;
-                let response_focused = matches!(
-                    ide_panel.api.focused,
-                    Some(ApiFocus::Response { spec_id, route_idx: f_route })
-                        if spec_id == tab_meta.spec_id && f_route == route_idx
-                );
-                let response_text = if response_focused {
-                    ide_panel.api.input_editor.get_full_text()
-                } else {
-                    api_response_text(response, tab_state.response_view).to_string()
-                };
-                let resp_h = api_response_text_area_height(&response_text, s);
-                self.push_rounded_rect(
-                    x + pad,
-                    cy,
-                    content_w,
-                    resp_h,
-                    6.0 * s,
-                    [0.12, 0.13, 0.17, 1.0],
-                );
-                ui_registry.register_text_input(
-                    crate::ui_system::UiId::ApiResponseBody(route_idx),
-                    x + pad,
-                    cy,
-                    content_w,
-                    resp_h,
-                    mx,
-                    my,
-                );
-                let resp_clip = (
-                    x + pad + 10.0 * s,
-                    cy + 8.0 * s,
-                    content_w - 20.0 * s,
-                    resp_h - 16.0 * s,
-                );
-                if self.begin_api_text_clip(resp_clip, tab_clip) {
-                    if response_focused {
-                        self.draw_api_editor_selection_multiline(
-                            &ide_panel.api.input_editor,
-                            x + pad + 10.0 * s,
-                            cy + 10.0 * s,
-                            content_w - 20.0 * s,
-                            resp_h - 16.0 * s,
-                            s,
-                            tab_state.response_scroll.current,
-                            tab_state.response_scroll_x.current,
-                        );
-                    }
-                    self.draw_json_text_area(
-                        &response_text,
-                        x + pad + 10.0 * s,
-                        cy + 29.0 * s,
-                        content_w - 20.0 * s,
-                        resp_h - 16.0 * s,
-                        s,
-                        tab_state.response_scroll.current,
-                        tab_state.response_scroll_x.current,
-                        tab_state.response_view == ApiResponseView::Headers,
-                    );
-                    self.draw_api_text_scrollbar(
-                        &response_text,
-                        x + pad + content_w - 8.0 * s,
-                        cy + 8.0 * s,
-                        resp_h - 16.0 * s,
-                        s,
-                        tab_state.response_scroll.current,
-                    );
-                    self.draw_api_text_scrollbar_x(
-                        &response_text,
-                        x + pad + 8.0 * s,
-                        cy + resp_h - 8.0 * s,
-                        content_w - 16.0 * s,
-                        content_w - 20.0 * s,
-                        tab_state.response_scroll_x.current,
-                        crate::ui_system::UiId::ApiResponseScrollX(route_idx),
-                        ui_registry,
-                        mx,
-                        my,
-                    );
-                    if response_focused && blink_alpha > 0.5 {
-                        self.draw_api_editor_cursor_multiline(
-                            &ide_panel.api.input_editor,
-                            x + pad + 10.0 * s,
-                            cy + 10.0 * s,
-                            content_w - 20.0 * s,
-                            resp_h - 16.0 * s,
-                            s,
-                            tab_state.response_scroll.current,
-                            tab_state.response_scroll_x.current,
-                        );
-                    }
-                    self.restore_api_tab_clip(tab_clip);
-                }
-                if response.truncated {
-                    self.draw_string_scaled_stable(
-                        "обрезано",
-                        x + pad + content_w - 86.0 * s,
-                        cy + 18.0 * s,
-                        [1.0, 0.76, 0.32, 1.0],
-                        0.78,
-                    );
-                }
-            }
-        } else if tab_state.pending {
-            self.draw_string_scaled_stable(
-                "Запрос выполняется",
-                x + pad,
-                cy + 18.0 * s,
-                [0.68, 0.70, 0.78, 1.0],
-                0.88,
-            );
-        }
-
-        self.flush();
-        unsafe {
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
-    }
-
     fn draw_api_section_title(&mut self, text: &str, x: f32, y: f32, _s: f32) {
         self.draw_string_scaled_stable(
             text,
@@ -263,6 +7,34 @@ impl Renderer {
             [0.74, 0.76, 0.84, 1.0],
             API_SECTION_TITLE_SCALE,
         );
+    }
+
+    fn draw_api_schema_summary(&mut self, text: &str, x: f32, y: f32) {
+        let mut draw_x = x;
+        let y = y.round();
+        for (idx, part) in text.split(" · ").enumerate() {
+            if idx > 0 {
+                self.draw_string_scaled_stable(
+                    " · ",
+                    draw_x,
+                    y,
+                    [0.50, 0.52, 0.60, 1.0],
+                    API_SECTION_TITLE_SCALE,
+                );
+                draw_x += self.measure_ui_width(" · ", API_SECTION_TITLE_SCALE);
+            }
+            let color = if part.contains('/') {
+                [0.35, 0.75, 1.0, 1.0]
+            } else if part.contains("required") {
+                crate::highlighter::DRACULA_PINK
+            } else if idx == 0 {
+                [0.74, 0.76, 0.84, 1.0]
+            } else {
+                [0.62, 0.64, 0.70, 1.0]
+            };
+            self.draw_string_scaled_stable(part, draw_x, y, color, API_SECTION_TITLE_SCALE);
+            draw_x += self.measure_ui_width(part, API_SECTION_TITLE_SCALE);
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -295,9 +67,10 @@ impl Renderer {
                 },
             );
         }
+        let label_w = self.measure_ui_width(label, 0.86);
         self.draw_string_scaled_stable(
             label,
-            x + 11.0 * s,
+            x + ((w - label_w) * 0.5).round(),
             api_centered_text_y(y, h, s),
             if active {
                 self.theme.fg
@@ -352,10 +125,15 @@ impl Renderer {
             API_FIELD_META_SCALE,
         );
 
-        let save_w = 58.0 * s;
-        let clear_w = 58.0 * s;
-        let input_x = x + (w * 0.34).max(145.0 * s);
-        let input_w = (w - (input_x - x) - save_w - clear_w - 28.0 * s).max(120.0 * s);
+        let save_w = 84.0 * s;
+        let clear_w = 84.0 * s;
+        let controls_w = save_w + clear_w + 28.0 * s;
+        let min_input_w = 120.0 * s;
+        let mut input_x = x + (w * 0.30).max(124.0 * s);
+        if w - (input_x - x) - controls_w < min_input_w {
+            input_x = x + (w - controls_w - min_input_w).max(90.0 * s);
+        }
+        let input_w = (w - (input_x - x) - controls_w).max(min_input_w);
         let entry = ide_panel.api.auth.entry(spec_id, &scheme.name);
         if matches!(
             scheme.kind,
@@ -613,60 +391,29 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-        self.push_rounded_rect_border(
-            x,
-            y,
-            w,
-            h,
-            5.0 * s,
-            (1.0 * s).max(1.0),
-            if focused {
-                [0.60, 0.35, 0.85, 1.0]
-            } else {
-                [1.0, 1.0, 1.0, 0.12]
-            },
-            [0.13, 0.14, 0.18, 1.0],
-        );
-        ui_registry.register_text_input(id, x, y, w, h, mx, my);
-        let text_w = w - 16.0 * s;
-        let scroll_x = if focused { input_scroll_x } else { 0.0 };
-        if focused {
-            let sel_y = y + (h - 22.0 * s) * 0.5;
-            self.draw_api_editor_selection_one_line(
-                editor,
-                x + 8.0 * s,
-                sel_y,
-                text_w,
-                22.0 * s,
-                API_FIELD_VALUE_SCALE,
-                scroll_x,
-            );
-        }
         let shown = if mask && !focused && !value.is_empty() {
             "••••••••".to_string()
         } else {
             value.to_string()
         };
-        self.draw_api_one_line_clipped(
+        self.draw_api_one_line_input(
+            x,
+            y,
+            w,
+            h,
+            s,
             &shown,
-            x + 8.0 * s,
-            api_centered_text_y(y, h, s),
-            text_w,
-            scroll_x,
             self.theme.fg,
+            focused,
+            input_scroll_x,
+            editor,
+            blink_alpha,
+            id,
+            ui_registry,
+            mx,
+            my,
             API_FIELD_VALUE_SCALE,
         );
-        if focused && blink_alpha > 0.5 {
-            let cursor_w =
-                self.api_editor_cursor_x_one_line(editor, API_FIELD_VALUE_SCALE) - scroll_x;
-            self.push_rect(
-                x + 8.0 * s + cursor_w.clamp(0.0, text_w),
-                y + (h - 20.0 * s) * 0.5,
-                1.5 * s,
-                20.0 * s,
-                self.theme.fg,
-            );
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -754,7 +501,7 @@ impl Renderer {
             my,
         );
         let field_scroll_x = if focused && !is_array {
-            input_scroll_x
+            input_scroll_x.round()
         } else {
             0.0
         };
@@ -983,7 +730,7 @@ impl Renderer {
         ui_registry.register_text_input(id, input_x, input_y, input_w, input_h, mx, my);
         let field_w = input_w - 16.0 * s;
         let field_scroll_x = if focused && !is_array {
-            input_scroll_x
+            input_scroll_x.round()
         } else {
             0.0
         };

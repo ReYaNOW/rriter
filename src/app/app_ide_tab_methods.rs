@@ -112,12 +112,10 @@ impl App {
                             if auth_view {
                                 self.open_api_auth_tab(spec_id);
                             } else {
-                                self.open_api_spec_tab(spec_id);
-                                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                                    state.route_idx = route_idx;
-                                }
                                 if let Some(route_idx) = route_idx {
-                                    self.sync_api_tab_inputs(spec_id, route_idx);
+                                    self.open_api_route_with_new_tab(spec_id, route_idx, true);
+                                } else {
+                                    self.open_api_spec_tab(spec_id);
                                 }
                             }
                             loaded_any = true;
@@ -226,7 +224,8 @@ impl App {
         } else {
             &self.tabs[ai].base_title
         };
-        let icon_key = crate::app::file_icons::file_icon_key(&title_to_use.to_lowercase());
+        let icon_title = title_to_use.trim_start_matches('*').trim_start();
+        let icon_key = crate::app::file_icons::file_icon_key(&icon_title.to_lowercase());
         self.tabs[ai].icon_key = icon_key;
     }
 
@@ -300,6 +299,41 @@ impl App {
         self.reveal_tab_now(self.active_tab);
     }
 
+    fn clamp_tab_scroll_to_content_now(&mut self) {
+        if !self.is_ide_mode || self.tabs.is_empty() {
+            self.tab_scroll.current = 0.0;
+            self.tab_scroll.target = 0.0;
+            return;
+        }
+
+        let titles = self.tab_display_titles();
+        let Some(r) = self.renderer.as_mut() else {
+            self.tab_scroll.current = 0.0;
+            self.tab_scroll.target = 0.0;
+            return;
+        };
+        let s = r.scale_factor;
+        let tab_x = (48.0 * s + self.ide_panel.left_width * s).round() + 1.0;
+        let viewport_w = (r.width - tab_x).max(0.0);
+        if viewport_w <= 0.0 {
+            self.tab_scroll.current = 0.0;
+            self.tab_scroll.target = 0.0;
+            return;
+        }
+
+        let tab_pad = 16.0 * s;
+        let icon_size_tab = 20.0 * s;
+        let total_w = titles
+            .iter()
+            .map(|title| {
+                tab_pad * 2.0 + icon_size_tab + 8.0 * s + r.measure_ui_width(title, 1.0) + 30.0 * s
+            })
+            .sum::<f32>();
+        let max_scroll = (total_w - viewport_w).max(0.0);
+        self.tab_scroll.current = self.tab_scroll.current.clamp(0.0, max_scroll);
+        self.tab_scroll.target = self.tab_scroll.target.clamp(0.0, max_scroll);
+    }
+
     pub fn switch_to_tab(&mut self, new_idx: usize) {
         if !self.is_ide_mode || self.tabs.is_empty() {
             return;
@@ -369,7 +403,7 @@ impl App {
 
         self.autocomplete_active = false;
         self.show_welcome =
-            self.tabs.len() <= 1 && self.file_path.is_none() && self.editor.len() == 0;
+            self.tabs.is_empty() && self.file_path.is_none() && self.editor.len() == 0;
         self.inline_git_popup = None;
         self.reveal_active_tab_now();
         if let Some(w) = self.window.as_ref() {

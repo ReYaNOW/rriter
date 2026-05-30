@@ -140,6 +140,12 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                && self.close_active_api_output_example_menu()
+            {
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
             // ── Ввод в поле игнора настроек ──────────────────────────────
             if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
                 self.last_action = std::time::Instant::now();

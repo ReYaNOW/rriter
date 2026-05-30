@@ -291,6 +291,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.api.input_scroll_x.update(dt) {
         needs_redraw = true;
     }
+    if let Some(dialog) = app.ide_panel.file_tree_rename_dialog.as_mut()
+        && dialog.input_scroll_x.update(dt)
+    {
+        needs_redraw = true;
+    }
     if app.ide_panel.api.mock_python_versions_scroll.update(dt) {
         needs_redraw = true;
     }
@@ -328,6 +333,24 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 needs_redraw = true;
             }
             if state.response_scroll_x.update(dt) {
+                needs_redraw = true;
+            }
+            let target_menu_anim = if state.output_schema_menu_open
+                && state.output_doc_view == crate::app::api_client::ApiOutputDocView::Example
+            {
+                1.0
+            } else {
+                0.0
+            };
+            let menu_diff = target_menu_anim - state.output_schema_menu_anim;
+            if menu_diff.abs() > 0.001 {
+                state.output_schema_menu_anim += menu_diff * 10.0 * dt;
+                if (target_menu_anim - state.output_schema_menu_anim).abs() <= 0.01 {
+                    state.output_schema_menu_anim = target_menu_anim;
+                }
+                needs_redraw = true;
+            }
+            if state.output_schema_menu_scroll.update(dt) {
                 needs_redraw = true;
             }
         }

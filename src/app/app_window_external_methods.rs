@@ -12,6 +12,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
         self.is_dragging = false;
+        self.is_editor_drag_pending = false;
         self.scroll_y.is_dragging = false;
         self.scroll_x.is_dragging = false;
         self.pending_action = action;
