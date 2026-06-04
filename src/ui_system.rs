@@ -250,6 +250,8 @@ pub enum UiId {
     ProjectSearchExcludeInput,
     ProjectSearchRun,
     ProjectSearchCaseToggle,
+    ProjectSearchHelp,
+    ProjectSearchHelpPopup,
     ProjectSearchFileToggle(usize),
     ProjectSearchMatchJump(usize, usize),
     ProjectSearchPanelBody,

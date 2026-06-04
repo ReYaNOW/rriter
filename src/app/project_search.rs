@@ -3,10 +3,12 @@ use crate::scroll::ScrollState;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use memchr::{memchr2_iter, memchr_iter};
 use rustc_hash::FxHashSet;
+use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::mpsc::{Receiver, channel};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub const PROJECT_SEARCH_FILE_CAP_BYTES: u64 = 8 * 1024 * 1024;
@@ -17,6 +19,9 @@ pub const PROJECT_SEARCH_PAD_X: f32 = 10.0;
 pub const PROJECT_SEARCH_QUERY_H: f32 = 78.0;
 pub const PROJECT_SEARCH_SINGLE_H: f32 = 30.0;
 const PROJECT_SEARCH_PREVIEW_CHARS: usize = 220;
+const PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS: usize = 60;
+const PROJECT_SEARCH_THREADS_PER_ROOT: usize = 2;
+const PROJECT_SEARCH_MAX_ACTIVE_ROOTS: usize = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectSearchField {
@@ -34,6 +39,8 @@ pub struct ProjectSearchMatch {
     pub end_line: u32,
     pub end_col: u32,
     pub preview: String,
+    pub preview_match_start: usize,
+    pub preview_match_end: usize,
     pub extra_lines: usize,
 }
 
@@ -51,14 +58,29 @@ pub enum ProjectSearchFlatRow {
     Match(usize, usize),
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug)]
 pub struct ProjectSearchWorkerResult {
-    pub generation: u64,
     pub files: Vec<ProjectSearchFile>,
     pub total_matches: usize,
     pub elapsed_ms: u128,
     pub capped: bool,
     pub error: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ProjectSearchWorkerMessage {
+    File {
+        generation: u64,
+        file: ProjectSearchFile,
+        elapsed_ms: u128,
+    },
+    Done {
+        generation: u64,
+        elapsed_ms: u128,
+        capped: bool,
+        error: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +109,7 @@ pub struct ProjectSearchLayout {
     pub exclude: ProjectSearchRect,
     pub case_button: ProjectSearchRect,
     pub run_button: ProjectSearchRect,
+    pub help_button: ProjectSearchRect,
     pub stats_y: f32,
     pub list: ProjectSearchRect,
 }
@@ -97,11 +120,12 @@ pub struct ProjectSearchState {
     pub exclude_editor: Editor,
     pub focused: Option<ProjectSearchField>,
     pub case_sensitive: bool,
+    pub help_open: bool,
+    pub dragging_field: Option<ProjectSearchField>,
     pub dirty: bool,
-    pub include_initialized: bool,
     pub generation: u64,
     pub running_generation: Option<u64>,
-    pub rx: Option<Receiver<ProjectSearchWorkerResult>>,
+    pub rx: Option<Receiver<ProjectSearchWorkerMessage>>,
     pub results: Vec<ProjectSearchFile>,
     pub flat_rows: Vec<ProjectSearchFlatRow>,
     pub collapsed: FxHashSet<PathBuf>,
@@ -121,8 +145,9 @@ impl Default for ProjectSearchState {
             exclude_editor: Editor::new(256),
             focused: None,
             case_sensitive: false,
+            help_open: false,
+            dragging_field: None,
             dirty: true,
-            include_initialized: false,
             generation: 0,
             running_generation: None,
             rx: None,
@@ -163,25 +188,39 @@ impl ProjectSearchState {
         self.rebuild_flat_rows();
     }
 
-    pub fn apply_result(&mut self, result: ProjectSearchWorkerResult) -> bool {
-        if Some(result.generation) != self.running_generation
-            || result.generation < self.generation
-        {
+    pub fn apply_message(&mut self, message: ProjectSearchWorkerMessage) -> bool {
+        let generation = match &message {
+            ProjectSearchWorkerMessage::File { generation, .. }
+            | ProjectSearchWorkerMessage::Done { generation, .. } => *generation,
+        };
+        if Some(generation) != self.running_generation || generation < self.generation {
             return false;
         }
-        self.running_generation = None;
-        self.rx = None;
-        self.results = result.files;
-        self.total_matches = result.total_matches;
-        self.elapsed_ms = Some(result.elapsed_ms);
-        self.capped = result.capped;
-        self.error = result.error;
-        self.scroll.target = 0.0;
-        self.scroll.current = 0.0;
-        self.scroll.velocity = 0.0;
-        self.collapsed.clear();
-        self.rebuild_flat_rows();
-        true
+        match message {
+            ProjectSearchWorkerMessage::File {
+                file, elapsed_ms, ..
+            } => {
+                self.total_matches = self.total_matches.saturating_add(file.matches.len());
+                self.elapsed_ms = Some(elapsed_ms);
+                self.results.push(file);
+                self.rebuild_flat_rows();
+                true
+            }
+            ProjectSearchWorkerMessage::Done {
+                elapsed_ms,
+                capped,
+                error,
+                ..
+            } => {
+                self.running_generation = None;
+                self.rx = None;
+                self.elapsed_ms = Some(elapsed_ms);
+                self.capped = capped;
+                self.error = error;
+                self.rebuild_flat_rows();
+                true
+            }
+        }
     }
 
     pub fn max_scroll(&self, list_h: f32, scale: f32) -> f32 {
@@ -200,6 +239,7 @@ pub fn project_search_layout(
     let pad = PROJECT_SEARCH_PAD_X * scale;
     let gap = 7.0 * scale;
     let button = PROJECT_SEARCH_SINGLE_H * scale;
+    let help = (22.0 * scale).round().max(18.0);
     let label_h = 18.0 * scale;
     let mut y = content_y + 9.0 * scale;
     let query_w = (content_w - pad * 2.0 - button * 2.0 - gap * 2.0).max(40.0 * scale);
@@ -220,6 +260,12 @@ pub fn project_search_layout(
         y: query.y,
         w: button,
         h: button,
+    };
+    let help_button = ProjectSearchRect {
+        x: content_x + content_w - pad - help,
+        y: (query.y - 24.0 * scale).max(content_y + 2.0 * scale),
+        w: help,
+        h: help,
     };
 
     y = query.y + query.h + 9.0 * scale;
@@ -244,6 +290,7 @@ pub fn project_search_layout(
         exclude,
         case_button,
         run_button,
+        help_button,
         stats_y,
         list: ProjectSearchRect {
             x: content_x,
@@ -254,352 +301,370 @@ pub fn project_search_layout(
     }
 }
 
-pub fn guess_project_search_include(workspaces: &[PathBuf]) -> String {
-    let mut tokens = Vec::new();
-    for workspace in workspaces {
-        let Some(token) = guess_workspace_include(workspace) else {
-            continue;
-        };
-        if !tokens.iter().any(|existing| existing == &token) {
-            tokens.push(token);
-        }
-    }
-    tokens.join(", ")
-}
-
-fn guess_workspace_include(workspace: &Path) -> Option<String> {
-    let root_name = workspace
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("workspace");
-    let snake_name = root_name.replace('-', "_");
-    let mut candidates = Vec::with_capacity(16);
-    push_candidate(&mut candidates, workspace.to_path_buf(), ".".to_string());
-    if let Ok(entries) = std::fs::read_dir(workspace) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let Some(name) = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_string)
-            else {
-                continue;
-            };
-            if guess_skip_dir(&name) {
-                continue;
-            }
-            push_candidate(&mut candidates, path, format!("./{}", name));
-        }
-    }
-
-    let mut best: Option<(i32, String)> = None;
-    for (path, token) in candidates {
-        let score = score_include_candidate(&path, &token, root_name, &snake_name);
-        if score <= 0 {
-            continue;
-        }
-        if best.as_ref().map_or(true, |(best_score, _)| score > *best_score) {
-            best = Some((score, token));
-        }
-    }
-    best.map(|(_, token)| token)
-}
-
-fn push_candidate(candidates: &mut Vec<(PathBuf, String)>, path: PathBuf, token: String) {
-    if !candidates.iter().any(|(existing, _)| existing == &path) {
-        candidates.push((path, token));
-    }
-}
-
-fn guess_skip_dir(name: &str) -> bool {
-    matches!(
-        name,
-        ".git"
-            | "target"
-            | "node_modules"
-            | ".venv"
-            | "venv"
-            | "__pycache__"
-            | "dist"
-            | "build"
-            | ".idea"
-            | ".vscode"
-    )
-}
-
-fn score_include_candidate(path: &Path, token: &str, root_name: &str, snake_name: &str) -> i32 {
-    let mut score = 0;
-    let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
-    match name {
-        "src" => score += 650,
-        "lib" | "app" => score += 260,
-        "tests" | "test" => score -= 180,
-        _ => {}
-    }
-    if name == root_name || name == snake_name {
-        score += 520;
-    }
-    if path.join("__init__.py").is_file() {
-        score += 160;
-    }
-    for marker in [
-        "Cargo.toml",
-        "pyproject.toml",
-        "package.json",
-        "pubspec.yaml",
-        "go.mod",
-    ] {
-        if path.join(marker).is_file() {
-            score += if token == "." { 90 } else { 45 };
-        }
-    }
-    let (code_files, total_files) = count_code_files_limited(path, 3, 96);
-    score += code_files as i32 * 20;
-    if total_files > 0 {
-        score += ((code_files * 100) / total_files).min(100) as i32;
-    }
-    if token == "." {
-        score -= 40;
-    }
-    score
-}
-
-fn count_code_files_limited(path: &Path, max_depth: usize, file_cap: usize) -> (usize, usize) {
-    fn walk(path: &Path, depth: usize, max_depth: usize, file_cap: usize, out: &mut (usize, usize)) {
-        if depth > max_depth || out.1 >= file_cap {
-            return;
-        }
-        let Ok(entries) = std::fs::read_dir(path) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            if out.1 >= file_cap {
-                break;
-            }
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
-                    if guess_skip_dir(name) {
-                        continue;
-                    }
-                }
-                walk(&path, depth + 1, max_depth, file_cap, out);
-            } else if path.is_file() {
-                out.1 += 1;
-                if path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .is_some_and(is_code_extension)
-                {
-                    out.0 += 1;
-                }
-            }
-        }
-    }
-
-    let mut out = (0, 0);
-    walk(path, 0, max_depth, file_cap, &mut out);
-    out
-}
-
-fn is_code_extension(ext: &str) -> bool {
-    matches!(
-        ext,
-        "rs" | "py"
-            | "pyi"
-            | "js"
-            | "jsx"
-            | "ts"
-            | "tsx"
-            | "go"
-            | "java"
-            | "cs"
-            | "dart"
-            | "toml"
-            | "json"
-            | "yaml"
-            | "yml"
-            | "html"
-            | "css"
-            | "sh"
-            | "md"
-    )
-}
-
-pub fn start_project_search_worker(request: ProjectSearchRequest) -> Receiver<ProjectSearchWorkerResult> {
+pub fn start_project_search_worker(request: ProjectSearchRequest) -> Receiver<ProjectSearchWorkerMessage> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
-        let result = run_project_search(request);
-        let _ = tx.send(result);
+        stream_project_search(request, tx);
     });
     rx
 }
 
+#[cfg(test)]
 pub fn run_project_search(request: ProjectSearchRequest) -> ProjectSearchWorkerResult {
-    let started = Instant::now();
+    let (tx, rx) = channel();
+    stream_project_search(request, tx);
     let mut result = ProjectSearchWorkerResult {
-        generation: request.generation,
         files: Vec::new(),
         total_matches: 0,
         elapsed_ms: 0,
         capped: false,
         error: None,
     };
+    while let Ok(message) = rx.recv() {
+        match message {
+            ProjectSearchWorkerMessage::File {
+                file, elapsed_ms, ..
+            } => {
+                result.total_matches = result.total_matches.saturating_add(file.matches.len());
+                result.files.push(file);
+                result.elapsed_ms = elapsed_ms;
+            }
+            ProjectSearchWorkerMessage::Done {
+                elapsed_ms,
+                capped,
+                error,
+                ..
+            } => {
+                result.elapsed_ms = elapsed_ms;
+                result.capped = capped;
+                result.error = error;
+                break;
+            }
+        }
+    }
+    result
+}
+
+#[derive(Default)]
+struct SearchCaps {
+    matches: usize,
+    files: usize,
+    capped: bool,
+}
+
+fn stream_project_search(
+    request: ProjectSearchRequest,
+    tx: std::sync::mpsc::Sender<ProjectSearchWorkerMessage>,
+) {
+    let started = Instant::now();
+    let generation = request.generation;
     if request.query.is_empty() {
-        result.elapsed_ms = started.elapsed().as_millis();
-        return result;
+        let _ = tx.send(ProjectSearchWorkerMessage::Done {
+            generation,
+            elapsed_ms: started.elapsed().as_millis(),
+            capped: false,
+            error: None,
+        });
+        return;
     }
 
     let plan = match SearchPatternPlan::new(&request.workspaces, &request.include, &request.exclude)
     {
         Ok(plan) => plan,
         Err(error) => {
-            result.error = Some(error);
-            result.elapsed_ms = started.elapsed().as_millis();
-            return result;
+            let _ = tx.send(ProjectSearchWorkerMessage::Done {
+                generation,
+                elapsed_ms: started.elapsed().as_millis(),
+                capped: false,
+                error: Some(error),
+            });
+            return;
         }
     };
     if plan.workspaces.is_empty() {
-        result.error = Some("Нет workspace".to_string());
-        result.elapsed_ms = started.elapsed().as_millis();
-        return result;
+        let _ = tx.send(ProjectSearchWorkerMessage::Done {
+            generation,
+            elapsed_ms: started.elapsed().as_millis(),
+            capped: false,
+            error: Some("Нет workspace".to_string()),
+        });
+        return;
     }
 
-    let needle = request.query.into_bytes();
+    let needle = Arc::new(request.query.into_bytes());
     let unicode_case_fallback = !request.case_sensitive && !needle.is_ascii();
-    let settings_ignore = Arc::new(SettingsIgnoreMatcher::new(request.ignore_patterns));
-    'roots: for root in plan.walk_roots() {
-        if !root.is_dir() {
-            continue;
-        }
-        let settings_ignore_for_walk = Arc::clone(&settings_ignore);
-        let settings_workspaces = plan.workspaces.clone();
-        let mut builder = ignore::WalkBuilder::new(root);
-        builder
-            .hidden(false)
-            .ignore(false)
-            .parents(true)
-            .git_ignore(true)
-            .git_global(false)
-            .git_exclude(true)
-            .require_git(false)
-            .follow_links(false)
-            .filter_entry(move |entry| {
-                !settings_ignore_for_walk.matches_path(entry.path(), &settings_workspaces)
-            });
-        for entry in builder.build() {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let path = entry.path();
-            if !entry.file_type().is_some_and(|ty| ty.is_file()) {
-                continue;
-            }
-            if !plan.is_file_allowed(path) {
-                continue;
-            }
-            if settings_ignore.matches_path(path, &plan.workspaces) {
-                continue;
-            }
-            let Ok(metadata) = std::fs::metadata(path) else {
-                continue;
-            };
-            if metadata.len() > PROJECT_SEARCH_FILE_CAP_BYTES {
-                continue;
-            }
-            let Ok(mut file) = std::fs::File::open(path) else {
-                continue;
-            };
-            let mut buf = Vec::with_capacity(metadata.len() as usize);
-            if file.read_to_end(&mut buf).is_err() {
-                continue;
-            }
-            if memchr::memchr(b'\0', &buf).is_some() {
-                continue;
-            }
-
-            let mut matches = Vec::new();
-            if unicode_case_fallback {
-                let Ok(text) = std::str::from_utf8(&buf) else {
-                    continue;
+    let settings_ignore = Arc::new(SearchIgnoreMatcher::new(request.ignore_patterns));
+    let plan = Arc::new(plan);
+    let caps = Arc::new(Mutex::new(SearchCaps::default()));
+    let capped_flag = Arc::new(AtomicBool::new(false));
+    let roots = plan
+        .walk_roots()
+        .into_iter()
+        .filter(|root| root.is_dir())
+        .map(Path::to_path_buf)
+        .collect::<VecDeque<_>>();
+    let active_roots = roots
+        .len()
+        .min(PROJECT_SEARCH_MAX_ACTIVE_ROOTS)
+        .max(1);
+    let roots = Arc::new(Mutex::new(roots));
+    let mut root_workers = Vec::with_capacity(active_roots);
+    for _ in 0..active_roots {
+        let roots = Arc::clone(&roots);
+        let plan = Arc::clone(&plan);
+        let settings_ignore = Arc::clone(&settings_ignore);
+        let caps = Arc::clone(&caps);
+        let capped_flag = Arc::clone(&capped_flag);
+        let tx = tx.clone();
+        let needle = Arc::clone(&needle);
+        let case_sensitive = request.case_sensitive;
+        root_workers.push(std::thread::spawn(move || {
+            loop {
+                if capped_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                let root = match roots.lock().ok().and_then(|mut roots| roots.pop_front()) {
+                    Some(root) => root,
+                    None => break,
                 };
-                let mut line_offsets = Vec::new();
-                collect_unicode_case_insensitive_matches(text, &needle, |start, end| {
-                    push_match(text, start, end, &mut line_offsets, &mut matches);
-                    matches.len() < remaining_match_room(&result)
-                });
-            } else if request.case_sensitive {
-                let mut ranges = Vec::new();
-                let finder = memchr::memmem::Finder::new(&needle);
-                for start in finder.find_iter(&buf) {
-                    ranges.push((start, start + needle.len()));
-                    if ranges.len() >= remaining_match_room(&result) {
-                        break;
-                    }
-                }
-                if ranges.is_empty() {
-                    continue;
-                }
-                let Ok(text) = std::str::from_utf8(&buf) else {
-                    continue;
-                };
-                let mut line_offsets = Vec::new();
-                for (start, end) in ranges {
-                    push_match(text, start, end, &mut line_offsets, &mut matches);
-                }
-            } else {
-                let mut ranges = Vec::new();
-                collect_ascii_case_insensitive_matches(&buf, &needle, |start, end| {
-                    ranges.push((start, end));
-                    ranges.len() < remaining_match_room(&result)
-                });
-                if ranges.is_empty() {
-                    continue;
-                }
-                let Ok(text) = std::str::from_utf8(&buf) else {
-                    continue;
-                };
-                let mut line_offsets = Vec::new();
-                for (start, end) in ranges {
-                    push_match(text, start, end, &mut line_offsets, &mut matches);
-                }
+                run_project_search_root(
+                    root,
+                    generation,
+                    started,
+                    Arc::clone(&plan),
+                    Arc::clone(&settings_ignore),
+                    Arc::clone(&caps),
+                    Arc::clone(&capped_flag),
+                    tx.clone(),
+                    Arc::clone(&needle),
+                    case_sensitive,
+                    unicode_case_fallback,
+                );
             }
-            if matches.is_empty() {
-                continue;
-            }
-
-            result.total_matches += matches.len();
-            let relative_path = plan.relative_display(path);
-            let icon_key = path
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(|name| crate::app::file_icons::file_icon_key(&name.to_lowercase()))
-                .unwrap_or("default_file");
-            crate::app::file_tree::pre_rasterize_icon(icon_key, false);
-            result.files.push(ProjectSearchFile {
-                path: path.to_path_buf(),
-                relative_path,
-                icon_key,
-                matches,
-            });
-
-            if result.total_matches >= PROJECT_SEARCH_MATCH_CAP
-                || result.files.len() >= PROJECT_SEARCH_FILE_RESULT_CAP
-            {
-                result.capped = true;
-                break 'roots;
-            }
-        }
+        }));
     }
-    result.elapsed_ms = started.elapsed().as_millis();
-    result
+    for worker in root_workers {
+        let _ = worker.join();
+    }
+    let capped = caps.lock().map(|caps| caps.capped).unwrap_or(true);
+    let _ = tx.send(ProjectSearchWorkerMessage::Done {
+        generation,
+        elapsed_ms: started.elapsed().as_millis(),
+        capped,
+        error: None,
+    });
 }
 
-fn remaining_match_room(result: &ProjectSearchWorkerResult) -> usize {
-    PROJECT_SEARCH_MATCH_CAP.saturating_sub(result.total_matches)
+fn run_project_search_root(
+    root: PathBuf,
+    generation: u64,
+    started: Instant,
+    plan: Arc<SearchPatternPlan>,
+    settings_ignore: Arc<SearchIgnoreMatcher>,
+    caps: Arc<Mutex<SearchCaps>>,
+    capped_flag: Arc<AtomicBool>,
+    tx: Sender<ProjectSearchWorkerMessage>,
+    needle: Arc<Vec<u8>>,
+    case_sensitive: bool,
+    unicode_case_fallback: bool,
+) {
+    let settings_ignore_for_walk = Arc::clone(&settings_ignore);
+    let settings_workspaces = plan.workspaces.clone();
+    let mut builder = ignore::WalkBuilder::new(root);
+    builder
+        .hidden(false)
+        .ignore(true)
+        .parents(true)
+        .git_ignore(true)
+        .git_global(false)
+        .git_exclude(true)
+        .require_git(false)
+        .follow_links(false)
+        .threads(PROJECT_SEARCH_THREADS_PER_ROOT)
+        .filter_entry(move |entry| {
+            !settings_ignore_for_walk.matches_path(entry.path(), &settings_workspaces)
+        });
+    let visitor = move || {
+        let plan = Arc::clone(&plan);
+        let settings_ignore = Arc::clone(&settings_ignore);
+        let caps = Arc::clone(&caps);
+        let capped_flag = Arc::clone(&capped_flag);
+        let tx = tx.clone();
+        let needle = Arc::clone(&needle);
+        Box::new(move |entry: Result<ignore::DirEntry, ignore::Error>| {
+            if capped_flag.load(Ordering::Relaxed) {
+                return ignore::WalkState::Quit;
+            }
+            let Ok(entry) = entry else {
+                return ignore::WalkState::Continue;
+            };
+            let path = entry.path();
+            if !entry.file_type().is_some_and(|ty| ty.is_file())
+                || !plan.is_file_allowed(path)
+                || settings_ignore.matches_path(path, &plan.workspaces)
+            {
+                return ignore::WalkState::Continue;
+            }
+            let Some(file) = search_project_file(
+                path,
+                &plan,
+                &needle,
+                case_sensitive,
+                unicode_case_fallback,
+                &caps,
+                &capped_flag,
+            ) else {
+                return ignore::WalkState::Continue;
+            };
+            let elapsed_ms = started.elapsed().as_millis();
+            let _ = tx.send(ProjectSearchWorkerMessage::File {
+                generation,
+                file,
+                elapsed_ms,
+            });
+            ignore::WalkState::Continue
+        }) as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState + Send>
+    };
+    builder.build_parallel().run(visitor);
+}
+
+fn search_project_file(
+    path: &Path,
+    plan: &SearchPatternPlan,
+    needle: &[u8],
+    case_sensitive: bool,
+    unicode_case_fallback: bool,
+    caps: &Mutex<SearchCaps>,
+    capped_flag: &AtomicBool,
+) -> Option<ProjectSearchFile> {
+    if capped_flag.load(Ordering::Relaxed) {
+        return None;
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return None;
+    };
+    if metadata.len() > PROJECT_SEARCH_FILE_CAP_BYTES {
+        return None;
+    }
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return None;
+    };
+    let mut buf = Vec::with_capacity(metadata.len() as usize);
+    if file.read_to_end(&mut buf).is_err() || memchr::memchr(b'\0', &buf).is_some() {
+        return None;
+    }
+    let mut matches = Vec::new();
+    let room = match caps.lock() {
+        Ok(caps) if caps.capped
+            || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+            || caps.matches >= PROJECT_SEARCH_MATCH_CAP =>
+        {
+            capped_flag.store(true, Ordering::Relaxed);
+            return None;
+        }
+        Ok(caps) => PROJECT_SEARCH_MATCH_CAP.saturating_sub(caps.matches),
+        Err(_) => {
+            capped_flag.store(true, Ordering::Relaxed);
+            return None;
+        }
+    };
+    if unicode_case_fallback {
+        let Ok(text) = std::str::from_utf8(&buf) else {
+            return None;
+        };
+        let mut line_offsets = Vec::new();
+        collect_unicode_case_insensitive_matches(text, needle, |start, end| {
+            push_match(text, start, end, &mut line_offsets, &mut matches);
+            matches.len() < room
+        });
+    } else if case_sensitive {
+        let mut ranges = Vec::new();
+        let finder = memchr::memmem::Finder::new(needle);
+        for start in finder.find_iter(&buf) {
+            ranges.push((start, start + needle.len()));
+            if ranges.len() >= room {
+                break;
+            }
+        }
+        if ranges.is_empty() {
+            return None;
+        }
+        let Ok(text) = std::str::from_utf8(&buf) else {
+            return None;
+        };
+        let mut line_offsets = Vec::new();
+        for (start, end) in ranges {
+            push_match(text, start, end, &mut line_offsets, &mut matches);
+        }
+    } else {
+        let mut ranges = Vec::new();
+        collect_ascii_case_insensitive_matches(&buf, needle, |start, end| {
+            ranges.push((start, end));
+            ranges.len() < room
+        });
+        if ranges.is_empty() {
+            return None;
+        }
+        let Ok(text) = std::str::from_utf8(&buf) else {
+            return None;
+        };
+        let mut line_offsets = Vec::new();
+        for (start, end) in ranges {
+            push_match(text, start, end, &mut line_offsets, &mut matches);
+        }
+    }
+    if matches.is_empty() {
+        return None;
+    }
+    let reached_cap = {
+        let mut caps = match caps.lock() {
+            Ok(caps) => caps,
+            Err(_) => {
+                capped_flag.store(true, Ordering::Relaxed);
+                return None;
+            }
+        };
+        if caps.capped
+            || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+            || caps.matches >= PROJECT_SEARCH_MATCH_CAP
+        {
+            caps.capped = true;
+            true
+        } else {
+            let room = PROJECT_SEARCH_MATCH_CAP - caps.matches;
+            if matches.len() > room {
+                matches.truncate(room);
+                caps.capped = true;
+            }
+            caps.matches += matches.len();
+            caps.files += 1;
+            if caps.matches >= PROJECT_SEARCH_MATCH_CAP
+                || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+            {
+                caps.capped = true;
+            }
+            caps.capped
+        }
+    };
+    if reached_cap {
+        capped_flag.store(true, Ordering::Relaxed);
+    }
+    if matches.is_empty() {
+        return None;
+    }
+    let relative_path = plan.relative_display(path);
+    let icon_key = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| crate::app::file_icons::file_icon_key(&name.to_lowercase()))
+        .unwrap_or("default_file");
+    crate::app::file_tree::pre_rasterize_icon(icon_key, false);
+    Some(ProjectSearchFile {
+        path: path.to_path_buf(),
+        relative_path,
+        icon_key,
+        matches,
+    })
 }
 
 fn collect_ascii_case_insensitive_matches(
@@ -674,12 +739,20 @@ fn collect_unicode_case_insensitive_matches(
     }
 }
 
-struct SettingsIgnoreMatcher {
+struct SearchIgnoreMatcher {
     patterns: Vec<String>,
 }
 
-impl SettingsIgnoreMatcher {
-    fn new(patterns: Vec<String>) -> Self {
+impl SearchIgnoreMatcher {
+    fn new(mut patterns: Vec<String>) -> Self {
+        for pattern in crate::app::file_tree::DEFAULT_IGNORE_PATTERNS {
+            if !patterns.iter().any(|existing| existing == pattern) {
+                patterns.push((*pattern).to_string());
+            }
+        }
+        if !patterns.iter().any(|existing| existing == ".git") {
+            patterns.push(".git".to_string());
+        }
         Self { patterns }
     }
 
@@ -732,10 +805,10 @@ fn push_match(
     if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
         line_end -= 1;
     }
-    let preview = text
+    let (preview, preview_match_start, preview_match_end) = text
         .get(line_start..line_end)
-        .map(preview_line)
-        .unwrap_or_default();
+        .map(|line| preview_line_with_match(line, start - line_start, end - line_start))
+        .unwrap_or_else(|| (String::new(), 0, 0));
     let extra_lines = text
         .get(start..end)
         .map(|matched| matched.bytes().filter(|&b| b == b'\n').count())
@@ -748,6 +821,8 @@ fn push_match(
         end_line,
         end_col,
         preview,
+        preview_match_start,
+        preview_match_end,
         extra_lines,
     });
 }
@@ -777,11 +852,55 @@ fn ceil_char_boundary(text: &str, mut idx: usize) -> usize {
     idx
 }
 
-fn preview_line(line: &str) -> String {
-    line.chars()
-        .map(|ch| if ch == '\t' { ' ' } else { ch })
-        .take(PROJECT_SEARCH_PREVIEW_CHARS)
-        .collect()
+fn preview_line_with_match(line: &str, start: usize, end: usize) -> (String, usize, usize) {
+    let start = floor_char_boundary(line, start.min(line.len()));
+    let end = ceil_char_boundary(line, end.min(line.len())).max(start);
+    let total_chars = line.chars().count();
+    let start_char = byte_to_char_idx(line, start);
+    let end_char = byte_to_char_idx(line, end).max(start_char);
+    let (first_char, last_char) = if total_chars <= PROJECT_SEARCH_PREVIEW_CHARS {
+        (0, total_chars)
+    } else {
+        let available = PROJECT_SEARCH_PREVIEW_CHARS.saturating_sub(6).max(32);
+        let mut first = start_char.saturating_sub(PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS);
+        let mut last = (first + available).min(total_chars);
+        if end_char > last {
+            last = end_char.min(total_chars);
+            first = last.saturating_sub(available);
+        }
+        (first, last)
+    };
+    let segment_start = char_to_byte_idx(line, first_char);
+    let segment_end = char_to_byte_idx(line, last_char);
+    let mut preview = String::with_capacity((segment_end - segment_start).min(line.len()) + 6);
+    if segment_start > 0 {
+        preview.push_str("...");
+    }
+    let prefix_len = preview.len();
+    if let Some(segment) = line.get(segment_start..segment_end) {
+        for ch in segment.chars() {
+            preview.push(if ch == '\t' { ' ' } else { ch });
+        }
+    }
+    let match_start = prefix_len + start.max(segment_start).min(segment_end) - segment_start;
+    let match_end = prefix_len + end.max(segment_start).min(segment_end) - segment_start;
+    if segment_end < line.len() {
+        preview.push_str("...");
+    }
+    (preview, match_start, match_end.max(match_start))
+}
+
+fn byte_to_char_idx(text: &str, byte_idx: usize) -> usize {
+    text[..floor_char_boundary(text, byte_idx.min(text.len()))]
+        .chars()
+        .count()
+}
+
+fn char_to_byte_idx(text: &str, char_idx: usize) -> usize {
+    text.char_indices()
+        .nth(char_idx)
+        .map(|(idx, _)| idx)
+        .unwrap_or(text.len())
 }
 
 struct SearchPatternPlan {
@@ -900,15 +1019,16 @@ impl SearchPatternPlan {
     }
 
     fn relative_display(&self, path: &Path) -> String {
-        if let Some((_, rel)) = self.workspace_relative(path) {
+        if let Some((workspace, rel)) = self.workspace_relative(path) {
+            let workspace_name = workspace
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("workspace");
             let rel = to_slash(rel);
             if rel.is_empty() {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("")
-                    .to_string()
+                workspace_name.to_string()
             } else {
-                rel
+                format!("{}/{}", workspace_name, rel)
             }
         } else {
             path.to_string_lossy().replace('\\', "/")
@@ -992,7 +1112,6 @@ fn to_slash(path: &Path) -> String {
 impl crate::app::App {
     pub fn open_project_search_panel(&mut self) {
         self.ide_panel.open(crate::app::PanelId::Search);
-        self.ensure_project_search_include_guess();
         self.ide_panel.project_search.focused = Some(ProjectSearchField::Query);
         self.search_focused = false;
         self.ide_panel.term_search_focused = false;
@@ -1002,38 +1121,7 @@ impl crate::app::App {
         crate::save_panel_state(&self.ide_panel);
     }
 
-    pub fn ensure_project_search_include_guess(&mut self) {
-        if self.ide_panel.project_search.include_initialized
-            && !self
-                .ide_panel
-                .project_search
-                .include_editor
-                .get_full_text()
-                .trim()
-                .is_empty()
-        {
-            return;
-        }
-        let guess = guess_project_search_include(&self.ide_workspaces);
-        if !guess.is_empty() {
-            let old_version = self.ide_panel.project_search.include_editor.version;
-            self.ide_panel.project_search.include_editor = Editor::new(guess.len() + 64);
-            self.ide_panel
-                .project_search
-                .include_editor
-                .version = old_version + 1;
-            self.ide_panel
-                .project_search
-                .include_editor
-                .insert_str(&guess);
-            self.ide_panel.project_search.include_editor.cursor = guess.len();
-            self.ide_panel.project_search.include_editor.selection_anchor = None;
-        }
-        self.ide_panel.project_search.include_initialized = true;
-    }
-
     pub fn start_project_search(&mut self) {
-        self.ensure_project_search_include_guess();
         let query = self.ide_panel.project_search.query_editor.get_full_text();
         self.ide_panel.project_search.generation =
             self.ide_panel.project_search.generation.saturating_add(1);
@@ -1068,16 +1156,20 @@ impl crate::app::App {
     }
 
     pub fn poll_project_search(&mut self) -> bool {
-        let mut latest = None;
+        let mut messages = Vec::new();
         if let Some(rx) = &self.ide_panel.project_search.rx {
-            while let Ok(result) = rx.try_recv() {
-                latest = Some(result);
+            while let Ok(message) = rx.try_recv() {
+                messages.push(message);
             }
         }
-        let Some(result) = latest else {
+        if messages.is_empty() {
             return false;
-        };
-        self.ide_panel.project_search.apply_result(result)
+        }
+        let mut updated = false;
+        for message in messages {
+            updated |= self.ide_panel.project_search.apply_message(message);
+        }
+        updated
     }
 
     pub fn project_search_panel_layout(&self) -> Option<ProjectSearchLayout> {
@@ -1118,6 +1210,23 @@ impl crate::app::App {
     }
 
     pub fn place_project_search_cursor_from_mouse(&mut self, field: ProjectSearchField) {
+        let Some(renderer) = self.renderer.as_ref() else {
+            return;
+        };
+        self.set_project_search_cursor_at(field, renderer.last_mouse_x, renderer.last_mouse_y, true);
+    }
+
+    pub fn drag_project_search_cursor_to(&mut self, field: ProjectSearchField, x: f32, y: f32) {
+        self.set_project_search_cursor_at(field, x, y, false);
+    }
+
+    fn set_project_search_cursor_at(
+        &mut self,
+        field: ProjectSearchField,
+        mouse_x: f32,
+        mouse_y: f32,
+        reset_anchor: bool,
+    ) {
         let Some(layout) = self.project_search_panel_layout() else {
             return;
         };
@@ -1131,19 +1240,34 @@ impl crate::app::App {
         };
         let text_scale = 0.82;
         let line_h = (18.0 * renderer.scale_factor).round().max(1.0);
-        let line_idx = if field == ProjectSearchField::Query {
-            ((renderer.last_mouse_y - rect.y - 5.0 * renderer.scale_factor).max(0.0) / line_h)
-                as usize
-        } else {
-            0
-        };
         let editor = match field {
             ProjectSearchField::Query => &mut self.ide_panel.project_search.query_editor,
             ProjectSearchField::Include => &mut self.ide_panel.project_search.include_editor,
             ProjectSearchField::Exclude => &mut self.ide_panel.project_search.exclude_editor,
         };
         let text = editor.get_full_text();
-        let line = line_idx.min(editor.line_offsets.len().saturating_sub(1));
+        let visual_line = if field == ProjectSearchField::Query {
+            ((mouse_y - rect.y - 5.0 * renderer.scale_factor).max(0.0) / line_h) as usize
+        } else {
+            0
+        };
+        let visible_lines = if field == ProjectSearchField::Query {
+            ((rect.h - 8.0 * renderer.scale_factor) / line_h)
+                .floor()
+                .max(1.0) as usize
+        } else {
+            1
+        };
+        let cursor_line = editor
+            .line_offsets
+            .partition_point(|&offset| offset <= editor.cursor)
+            .saturating_sub(1);
+        let first_line = if field == ProjectSearchField::Query {
+            cursor_line.saturating_sub(visible_lines.saturating_sub(1))
+        } else {
+            0
+        };
+        let line = (first_line + visual_line).min(editor.line_offsets.len().saturating_sub(1));
         let line_start = editor.line_offsets.get(line).copied().unwrap_or(0);
         let mut line_end = editor
             .line_offsets
@@ -1157,7 +1281,7 @@ impl crate::app::App {
         if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
             line_end -= 1;
         }
-        let x_offset = (renderer.last_mouse_x - (rect.x + 7.0 * renderer.scale_factor)).max(0.0);
+        let x_offset = (mouse_x - (rect.x + 7.0 * renderer.scale_factor)).max(0.0);
         let mut current_x = 0.0;
         let mut target = line_end;
         if let Some(line_text) = text.get(line_start..line_end) {
@@ -1175,7 +1299,9 @@ impl crate::app::App {
             }
         }
         editor.cursor = target;
-        editor.selection_anchor = Some(target);
+        if reset_anchor || editor.selection_anchor.is_none() {
+            editor.selection_anchor = Some(target);
+        }
     }
 
     pub fn handle_project_search_match_click(&mut self, file_idx: usize, match_idx: usize) {
@@ -1239,21 +1365,6 @@ mod tests {
     }
 
     #[test]
-    fn project_search_auto_include_prefers_src_and_python_package() {
-        let root = temp_workspace("guess");
-        std::fs::create_dir_all(root.join("src")).unwrap();
-        std::fs::create_dir_all(root.join("car_wash")).unwrap();
-        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
-        std::fs::write(root.join("car_wash/__init__.py"), "").unwrap();
-        std::fs::write(root.join("car_wash/api.py"), "x = 1\n").unwrap();
-
-        let guess = guess_project_search_include(&[root.clone()]);
-
-        assert!(guess == "./src" || guess == "./car_wash");
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
     fn project_search_pattern_plan_clamps_absolute_paths_to_workspace() {
         let root = temp_workspace("pattern");
         std::fs::create_dir_all(root.join("src")).unwrap();
@@ -1290,7 +1401,11 @@ mod tests {
         assert_eq!(result.error, None);
         assert_eq!(result.files.len(), 1);
         assert_eq!(result.total_matches, 2);
-        assert_eq!(result.files[0].relative_path, "src/main.rs");
+        let workspace_name = root.file_name().and_then(|name| name.to_str()).unwrap();
+        assert_eq!(
+            result.files[0].relative_path,
+            format!("{workspace_name}/src/main.rs")
+        );
 
         let multi = run_project_search(ProjectSearchRequest {
             generation: 2,
@@ -1311,12 +1426,17 @@ mod tests {
         let root = temp_workspace("ignore");
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::create_dir_all(root.join("ignored_git")).unwrap();
+        std::fs::create_dir_all(root.join("ignored_ignore")).unwrap();
         std::fs::create_dir_all(root.join("settings_ignored")).unwrap();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
         std::fs::write(root.join("src/main.rs"), "needle\n").unwrap();
         std::fs::write(root.join("src/debug.log"), "needle\n").unwrap();
         std::fs::write(root.join("ignored_git/a.rs"), "needle\n").unwrap();
+        std::fs::write(root.join("ignored_ignore/a.rs"), "needle\n").unwrap();
         std::fs::write(root.join("settings_ignored/a.rs"), "needle\n").unwrap();
+        std::fs::write(root.join(".git/config"), "needle\n").unwrap();
         std::fs::write(root.join(".gitignore"), "ignored_git\n").unwrap();
+        std::fs::write(root.join(".ignore"), "ignored_ignore\n").unwrap();
 
         let result = run_project_search(ProjectSearchRequest {
             generation: 3,
@@ -1330,8 +1450,22 @@ mod tests {
 
         assert_eq!(result.error, None);
         assert_eq!(result.total_matches, 1);
-        assert_eq!(result.files[0].relative_path, "src/main.rs");
+        let workspace_name = root.file_name().and_then(|name| name.to_str()).unwrap();
+        assert_eq!(
+            result.files[0].relative_path,
+            format!("{workspace_name}/src/main.rs")
+        );
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_search_preview_keeps_match_visible_and_ranged() {
+        let line = format!("{}needle{}", "a".repeat(120), "b".repeat(120));
+        let (preview, start, end) = preview_line_with_match(&line, 120, 126);
+
+        assert!(preview.starts_with("..."));
+        assert!(preview.contains("needle"));
+        assert_eq!(&preview[start..end], "needle");
     }
 
     #[test]
@@ -1350,6 +1484,8 @@ mod tests {
                     end_line: 0,
                     end_col: 1,
                     preview: "a".to_string(),
+                    preview_match_start: 0,
+                    preview_match_end: 1,
                     extra_lines: 0,
                 },
                 ProjectSearchMatch {
@@ -1360,6 +1496,8 @@ mod tests {
                     end_line: 1,
                     end_col: 1,
                     preview: "b".to_string(),
+                    preview_match_start: 0,
+                    preview_match_end: 1,
                     extra_lines: 0,
                 },
             ],

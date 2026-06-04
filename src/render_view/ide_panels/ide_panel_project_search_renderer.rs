@@ -5,12 +5,23 @@ use crate::app::project_search::{
 use crate::editor::Editor;
 
 fn project_search_row_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
-    row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()
+    (row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()).round()
+}
+
+fn project_search_scaled_step(px: f32, scale: f32) -> f32 {
+    (px * scale).round()
 }
 
 fn project_search_input_line_y(rect_y: f32, line_idx: usize, line_h: f32, scale: f32) -> f32 {
-    let row_y = rect_y.round() + (5.0 * scale).round() + line_idx as f32 * line_h.round();
+    let row_y = (rect_y + project_search_scaled_step(5.0, scale)).round()
+        + line_idx as f32 * line_h.round();
     project_search_row_text_y(row_y, line_h, scale)
+}
+
+fn project_search_label_text_y(input_y: f32, scale: f32) -> f32 {
+    let row_h = (18.0 * scale).round().max(1.0);
+    let gap = project_search_scaled_step(4.0, scale);
+    project_search_row_text_y(input_y.round() - row_h - gap, row_h, scale)
 }
 
 fn project_search_line_end(text: &str, line_start: usize, mut line_end: usize) -> usize {
@@ -31,8 +42,164 @@ fn project_search_cursor_line(editor: &Editor) -> usize {
         .saturating_sub(1)
 }
 
+fn project_search_prefix_len_for_width(
+    text: &str,
+    max_w: f32,
+    glyph_w: &mut impl FnMut(char) -> f32,
+) -> usize {
+    if max_w <= 0.0 {
+        return 0;
+    }
+    let mut width = 0.0;
+    let mut end = 0;
+    for (idx, ch) in text.char_indices() {
+        let next = width + glyph_w(ch);
+        if next > max_w {
+            break;
+        }
+        width = next;
+        end = idx + ch.len_utf8();
+    }
+    end
+}
+
+fn project_search_suffix_start_for_width(
+    text: &str,
+    max_w: f32,
+    glyph_w: &mut impl FnMut(char) -> f32,
+) -> usize {
+    if max_w <= 0.0 {
+        return text.len();
+    }
+    let mut width = 0.0;
+    let mut start = text.len();
+    for (idx, ch) in text.char_indices().rev() {
+        let next = width + glyph_w(ch);
+        if next > max_w {
+            break;
+        }
+        width = next;
+        start = idx;
+    }
+    start
+}
+
+fn project_search_text_width(text: &str, glyph_w: &mut impl FnMut(char) -> f32) -> f32 {
+    text.chars().map(glyph_w).sum()
+}
+
+fn project_search_visible_match_preview(
+    text: &str,
+    highlight_start: usize,
+    highlight_end: usize,
+    max_w: f32,
+    mut glyph_w: impl FnMut(char) -> f32,
+) -> (String, usize, usize) {
+    let mut full_width_glyph = |ch| glyph_w(ch);
+    let full_w = project_search_text_width(text, &mut full_width_glyph);
+    if full_w <= max_w {
+        return (
+            text.to_string(),
+            highlight_start.min(text.len()),
+            highlight_end.min(text.len()).max(highlight_start.min(text.len())),
+        );
+    }
+
+    let hs = floor_char_boundary_local(text, highlight_start.min(text.len()));
+    let he = ceil_char_boundary_local(text, highlight_end.min(text.len())).max(hs);
+    let hit = text.get(hs..he).unwrap_or("");
+    let ellipsis = "…";
+    let ellipsis_w = project_search_text_width(ellipsis, &mut glyph_w);
+    let hit_w = project_search_text_width(hit, &mut glyph_w);
+    let left_ellipsis = hs > 0;
+    let right_ellipsis = he < text.len();
+    let reserved = hit_w
+        + if left_ellipsis { ellipsis_w } else { 0.0 }
+        + if right_ellipsis { ellipsis_w } else { 0.0 };
+    if reserved >= max_w {
+        let fit = project_search_prefix_len_for_width(hit, max_w, &mut glyph_w);
+        let mut out = String::new();
+        out.push_str(hit.get(..fit).unwrap_or(""));
+        return (out, 0, fit);
+    }
+
+    let context_budget = (max_w - reserved).max(0.0);
+    let before = text.get(..hs).unwrap_or("");
+    let after = text.get(he..).unwrap_or("");
+    let right_budget = context_budget * 0.45;
+    let right_len = project_search_prefix_len_for_width(after, right_budget, &mut glyph_w);
+    let right = after.get(..right_len).unwrap_or("");
+    let right_w = project_search_text_width(right, &mut glyph_w);
+    let left_budget = (context_budget - right_w).max(0.0);
+    let left_start = project_search_suffix_start_for_width(before, left_budget, &mut glyph_w);
+    let left = before.get(left_start..).unwrap_or("");
+
+    let mut out = String::with_capacity(left.len() + hit.len() + right.len() + 6);
+    if left_ellipsis {
+        out.push_str(ellipsis);
+    }
+    out.push_str(left);
+    let out_hs = out.len();
+    out.push_str(hit);
+    let out_he = out.len();
+    out.push_str(right);
+    if right_ellipsis {
+        out.push_str(ellipsis);
+    }
+    (out, out_hs, out_he)
+}
+
+fn floor_char_boundary_local(text: &str, mut idx: usize) -> usize {
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+fn ceil_char_boundary_local(text: &str, mut idx: usize) -> usize {
+    while idx < text.len() && !text.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_project_search_text_stable(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        scale: f32,
+    ) {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(g) = self.get_ui_glyph(c) {
+                let q_x = (draw_x + (g.offset_x * scale).round()).round();
+                let q_y = (baseline_y - (g.offset_y * scale).round()).round();
+                let q_w = if g.width > 0.0 {
+                    (g.width * scale).round().max(1.0)
+                } else {
+                    0.0
+                };
+                let q_h = if g.height > 0.0 {
+                    (g.height * scale).round().max(1.0)
+                } else {
+                    0.0
+                };
+                if q_w > 0.0 && q_h > 0.0 {
+                    self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
+                }
+                draw_x += Self::snapped_text_advance(g.advance, scale);
+            }
+        }
+    }
+
     pub(crate) fn draw_project_search_panel(
         &mut self,
         content_x: f32,
@@ -61,13 +228,14 @@ impl Renderer {
         let label_color = [0.66, 0.68, 0.72, 1.0];
         let label_scale = 0.74;
 
-        self.draw_string_scaled_stable(
-            "Search",
+        self.draw_project_search_text_stable(
+            "Поиск",
             (layout.query.x).round(),
-            (layout.query.y - 6.0 * scale).round(),
+            project_search_label_text_y(layout.query.y, scale),
             label_color,
             label_scale,
         );
+        self.draw_project_search_help_button(layout.help_button, ide_panel, ui_registry, scale);
         self.draw_project_search_input(
             layout.query,
             &ide_panel.project_search.query_editor,
@@ -118,10 +286,10 @@ impl Renderer {
             false,
         );
 
-        self.draw_string_scaled_stable(
-            "files to include",
+        self.draw_project_search_text_stable(
+            "Файлы включить",
             (layout.include.x).round(),
-            (layout.include.y - 6.0 * scale).round(),
+            project_search_label_text_y(layout.include.y, scale),
             label_color,
             label_scale,
         );
@@ -135,10 +303,10 @@ impl Renderer {
             blink_alpha,
         );
 
-        self.draw_string_scaled_stable(
-            "files to exclude",
+        self.draw_project_search_text_stable(
+            "Файлы исключить",
             (layout.exclude.x).round(),
-            (layout.exclude.y - 6.0 * scale).round(),
+            project_search_label_text_y(layout.exclude.y, scale),
             label_color,
             label_scale,
         );
@@ -154,13 +322,210 @@ impl Renderer {
 
         self.push_rect(
             content_x,
-            (layout.stats_y - 12.0 * scale).round(),
+            (layout.stats_y - 16.0 * scale).round(),
             content_w,
             1.0,
             [1.0, 1.0, 1.0, 0.06],
         );
         self.draw_project_search_stats(&layout, ide_panel, pad, scale);
         self.draw_project_search_results(&layout, ide_panel, ui_registry, scale);
+        if ide_panel.project_search.help_open {
+            self.draw_project_search_help_popup(&layout, content_x, content_y, content_w, ui_registry, scale);
+        }
+    }
+
+    fn draw_project_search_help_button(
+        &mut self,
+        rect: ProjectSearchRect,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        scale: f32,
+    ) {
+        ui_registry.register_rect(
+            crate::ui_system::UiId::ProjectSearchHelp,
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        let hovered = ui_registry.hovered() == Some(crate::ui_system::UiId::ProjectSearchHelp);
+        let active = ide_panel.project_search.help_open;
+        let fill = if active {
+            [0.741, 0.576, 0.976, 0.30]
+        } else if hovered {
+            [1.0, 1.0, 1.0, 0.10]
+        } else {
+            [1.0, 1.0, 1.0, 0.05]
+        };
+        self.push_rounded_rect(rect.x, rect.y, rect.w, rect.h, rect.h * 0.5, fill);
+        let tw = self.measure_ui_width("?", 0.82);
+        self.draw_project_search_text_stable(
+            "?",
+            (rect.x + (rect.w - tw) * 0.5).round(),
+            project_search_row_text_y(rect.y, rect.h, scale),
+            [0.88, 0.88, 0.92, 1.0],
+            0.82,
+        );
+    }
+
+    fn draw_project_search_help_popup(
+        &mut self,
+        layout: &ProjectSearchLayout,
+        content_x: f32,
+        content_y: f32,
+        content_w: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        scale: f32,
+    ) {
+        let pad = 12.0 * scale;
+        let w = (content_w - 20.0 * scale).max(180.0 * scale);
+        let x = content_x + 10.0 * scale;
+        let y = (layout.help_button.y + layout.help_button.h + 8.0 * scale)
+            .max(content_y + 8.0 * scale);
+        let h = 252.0 * scale;
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::ProjectSearchHelpPopup,
+            x,
+            y,
+            w,
+            h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        self.push_rounded_rect(x, y, w, h, 6.0 * scale, [0.075, 0.078, 0.092, 0.98]);
+        self.push_rounded_rect(
+            x,
+            y,
+            w,
+            28.0 * scale,
+            6.0 * scale,
+            [0.741, 0.576, 0.976, 0.18],
+        );
+        let popup_y = y.round();
+        let mut cy = project_search_row_text_y(
+            popup_y,
+            project_search_scaled_step(28.0, scale).max(1.0),
+            scale,
+        );
+        self.draw_project_search_text_stable(
+            "Поиск по рабочим областям",
+            (x + pad).round(),
+            cy,
+            [0.96, 0.94, 1.0, 1.0],
+            0.82,
+        );
+        cy += project_search_scaled_step(26.0, scale);
+        self.draw_project_search_help_line(
+            "Ищет только внутри открытых рабочих областей.",
+            x + pad,
+            cy,
+            0.72,
+            [0.80, 0.82, 0.88, 1.0],
+        );
+        cy += project_search_scaled_step(20.0, scale);
+        self.draw_project_search_help_line(
+            "Учитывает .gitignore, .ignore и настройки игнора.",
+            x + pad,
+            cy,
+            0.72,
+            [0.80, 0.82, 0.88, 1.0],
+        );
+        cy += project_search_scaled_step(26.0, scale);
+        self.draw_project_search_help_line(
+            "Шаблоны include / exclude",
+            x + pad,
+            cy,
+            0.78,
+            [0.96, 0.94, 1.0, 1.0],
+        );
+        cy += project_search_scaled_step(21.0, scale);
+        self.draw_project_search_help_line(
+            "Через запятую. Пустое include = все файлы.",
+            x + pad,
+            cy,
+            0.70,
+            [0.76, 0.78, 0.84, 1.0],
+        );
+        cy += project_search_scaled_step(23.0, scale);
+        self.draw_project_search_help_code_row(
+            x + pad,
+            cy,
+            &["./src", "./app", "**/*.py"],
+            scale,
+        );
+        cy += project_search_scaled_step(25.0, scale);
+        self.draw_project_search_help_code_row(
+            x + pad,
+            cy,
+            &["src/**/*.rs", "target", "*.lock"],
+            scale,
+        );
+        cy += project_search_scaled_step(30.0, scale);
+        self.draw_project_search_help_line(
+            "Поиск",
+            x + pad,
+            cy,
+            0.78,
+            [0.96, 0.94, 1.0, 1.0],
+        );
+        cy += project_search_scaled_step(21.0, scale);
+        self.draw_project_search_help_line(
+            "Literal-only. Ctrl+Enter или кнопка запуска.",
+            x + pad,
+            cy,
+            0.70,
+            [0.76, 0.78, 0.84, 1.0],
+        );
+        cy += project_search_scaled_step(20.0, scale);
+        self.draw_project_search_help_line(
+            "Кнопка Aa включает чувствительность к регистру.",
+            x + pad,
+            cy,
+            0.70,
+            [0.76, 0.78, 0.84, 1.0],
+        );
+    }
+
+    fn draw_project_search_help_line(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        scale: f32,
+        color: [f32; 4],
+    ) {
+        self.draw_project_search_text_stable(text, x.round(), y.round(), color, scale);
+    }
+
+    fn draw_project_search_help_code_row(
+        &mut self,
+        mut x: f32,
+        y: f32,
+        parts: &[&str],
+        scale: f32,
+    ) {
+        for part in parts {
+            let text_scale = 0.68;
+            let w = self.measure_ui_width(part, text_scale) + 10.0 * scale;
+            self.push_rounded_rect(
+                x.round(),
+                (y - 13.0 * scale).round(),
+                w.round(),
+                20.0 * scale,
+                4.0 * scale,
+                [0.16, 0.17, 0.20, 1.0],
+            );
+            self.draw_project_search_text_stable(
+                part,
+                (x + 5.0 * scale).round(),
+                y.round(),
+                [0.91, 0.86, 1.0, 1.0],
+                text_scale,
+            );
+            x += w + 6.0 * scale;
+        }
     }
 
     fn draw_project_search_stats(
@@ -173,12 +538,14 @@ impl Renderer {
         let state = &ide_panel.project_search;
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
         scratch.clear();
-        let color = if state.running_generation.is_some() {
+        let x = (layout.list.x + pad).round();
+        let y = layout.stats_y.round();
+        if state.running_generation.is_some() {
             scratch.push_str("Ищет...");
-            [0.741, 0.576, 0.976, 1.0]
+            self.draw_project_search_text_stable(&scratch, x, y, [0.741, 0.576, 0.976, 1.0], 0.80);
         } else if let Some(error) = &state.error {
             scratch.push_str(error);
-            [0.95, 0.35, 0.45, 1.0]
+            self.draw_project_search_text_stable(&scratch, x, y, [0.95, 0.35, 0.45, 1.0], 0.80);
         } else if state.has_run {
             use std::fmt::Write;
             let _ = write!(
@@ -187,28 +554,38 @@ impl Renderer {
                 state.total_matches,
                 state.results.len()
             );
+            let base_w = self.measure_ui_width(&scratch, 0.80).round();
+            self.draw_project_search_text_stable(&scratch, x, y, [0.90, 0.91, 0.94, 1.0], 0.80);
             if let Some(ms) = state.elapsed_ms {
+                scratch.clear();
                 let _ = write!(&mut scratch, " ({} мс)", ms);
+                self.draw_project_search_text_stable(
+                    &scratch,
+                    x + base_w,
+                    y,
+                    [0.62, 0.86, 0.62, 1.0],
+                    0.80,
+                );
+                let time_w = self.measure_ui_width(&scratch, 0.80).round();
+                if state.capped {
+                    self.draw_project_search_text_stable(
+                        " limit",
+                        x + base_w + time_w,
+                        y,
+                        [0.90, 0.91, 0.94, 1.0],
+                        0.80,
+                    );
+                }
+            } else if state.capped {
+                self.draw_project_search_text_stable(
+                    " limit",
+                    x + base_w,
+                    y,
+                    [0.90, 0.91, 0.94, 1.0],
+                    0.80,
+                );
             }
-            if state.capped {
-                scratch.push_str(" limit");
-            }
-            if state.total_matches == 0 {
-                [0.66, 0.68, 0.72, 1.0]
-            } else {
-                [0.62, 0.86, 0.62, 1.0]
-            }
-        } else {
-            scratch.push_str("0 в 0 файлах");
-            [0.50, 0.52, 0.58, 1.0]
-        };
-        self.draw_string_scaled_stable(
-            &scratch,
-            (layout.list.x + pad).round(),
-            layout.stats_y.round(),
-            color,
-            0.80,
-        );
+        }
         self.scratch_buffer = scratch;
     }
 
@@ -617,17 +994,68 @@ impl Renderer {
         if mat.extra_lines > 0 {
             let _ = write!(scratch, "(+{}) ", mat.extra_lines);
         }
+        let highlight_start = scratch.len() + mat.preview_match_start;
+        let highlight_end = scratch.len() + mat.preview_match_end;
         scratch.push_str(&mat.preview);
         let max_w = (layout.list.x + layout.list.w - preview_x - 16.0 * scale).max(0.0);
-        self.draw_tree_label_clipped(
+        self.draw_project_search_match_preview(
             scratch.as_str(),
+            highlight_start,
+            highlight_end,
             preview_x.round(),
             text_y,
             max_w,
-            [0.75, 0.77, 0.82, 1.0],
             0.78,
             clip_scratch,
         );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_project_search_match_preview(
+        &mut self,
+        text: &str,
+        highlight_start: usize,
+        highlight_end: usize,
+        x: f32,
+        y: f32,
+        max_w: f32,
+        scale: f32,
+        scratch: &mut String,
+    ) {
+        if max_w <= 0.0 {
+            return;
+        }
+        scratch.clear();
+        let (visible, hs, he) =
+            project_search_visible_match_preview(text, highlight_start, highlight_end, max_w, |ch| {
+                self.get_ui_glyph(ch)
+                    .map(|g| g.advance * scale)
+                    .unwrap_or(0.0)
+            });
+        scratch.push_str(&visible);
+        if hs < he && scratch.is_char_boundary(hs) && scratch.is_char_boundary(he) {
+            let before = &scratch[..hs];
+            let hit = &scratch[hs..he];
+            let hx = x + self.measure_ui_width(before, scale).round();
+            let hw = self.measure_ui_width(hit, scale).round();
+            if hw > 0.0 {
+                self.push_rounded_rect(
+                    hx.round(),
+                    (y - 13.0 * self.scale_factor).round(),
+                    hw,
+                    17.0 * self.scale_factor,
+                    3.0 * self.scale_factor,
+                    [0.741, 0.576, 0.976, 0.26],
+                );
+            }
+        }
+        self.draw_string_scaled_stable(scratch, x, y, [0.75, 0.77, 0.82, 1.0], scale);
+        if hs < he && scratch.is_char_boundary(hs) && scratch.is_char_boundary(he) {
+            let before = &scratch[..hs];
+            let hit = &scratch[hs..he];
+            let hx = x + self.measure_ui_width(before, scale).round();
+            self.draw_string_scaled_stable(hit, hx.round(), y, [0.98, 0.95, 1.0, 1.0], scale);
+        }
     }
 
     fn draw_project_search_scrollbar(

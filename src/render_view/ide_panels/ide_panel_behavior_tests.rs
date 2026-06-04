@@ -20,6 +20,17 @@ mod tests {
     }
 
     #[test]
+    fn project_search_match_preview_clips_around_hit() {
+        let text = format!("{}needle{}", "a".repeat(30), "b".repeat(30));
+        let (visible, start, end) =
+            project_search_visible_match_preview(&text, 30, 36, 90.0, |_| 10.0);
+
+        assert!(visible.starts_with('…'));
+        assert!(visible.ends_with('…'));
+        assert_eq!(&visible[start..end], "needle");
+    }
+
+    #[test]
     fn git_graph_row_layout_shifts_text_for_many_lanes() {
         let one_lane = [crate::app::git_panel::GitGraphLane {
             column: 0,

@@ -268,7 +268,57 @@ fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
     }
     lines.push(format!("left_width:{:.1}", state.left_width));
     lines.push(format!("bottom_height:{:.1}", state.bottom_height));
+    lines.push(format!(
+        "project_search_include:{}",
+        escape_panel_field(&state.project_search.include_editor.get_full_text())
+    ));
+    lines.push(format!(
+        "project_search_exclude:{}",
+        escape_panel_field(&state.project_search.exclude_editor.get_full_text())
+    ));
     lines.join("\n")
+}
+
+fn escape_panel_field(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn unescape_panel_field(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn set_panel_text_editor(editor: &mut Editor, text: &str) {
+    *editor = Editor::new(text.len() + 64);
+    editor.insert_str(text);
+    editor.cursor = text.len();
+    editor.selection_anchor = None;
 }
 
 #[cfg(test)]
@@ -285,6 +335,32 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
     let mut state = crate::app::IdePanelState::default();
     let mut loaded: Vec<crate::app::PanelSlot> = Vec::new();
     for line in content.lines() {
+        if let Some(value) = line.strip_prefix("left_width:") {
+            if let Ok(v) = value.parse::<f32>() {
+                state.left_width = v;
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("bottom_height:") {
+            if let Ok(v) = value.parse::<f32>() {
+                state.bottom_height = v;
+            }
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("project_search_include:") {
+            set_panel_text_editor(
+                &mut state.project_search.include_editor,
+                &unescape_panel_field(value),
+            );
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("project_search_exclude:") {
+            set_panel_text_editor(
+                &mut state.project_search.exclude_editor,
+                &unescape_panel_field(value),
+            );
+            continue;
+        }
         let parts: Vec<&str> = line.splitn(3, ':').collect();
         if parts.len() == 3 {
             let id = match parts[0] {
@@ -307,16 +383,6 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
                 group,
                 open: parts[2] == "1",
             });
-        } else if parts.len() == 2 {
-            if parts[0] == "left_width" {
-                if let Ok(v) = parts[1].parse::<f32>() {
-                    state.left_width = v;
-                }
-            } else if parts[0] == "bottom_height" {
-                if let Ok(v) = parts[1].parse::<f32>() {
-                    state.bottom_height = v;
-                }
-            }
         }
     }
     if !loaded.is_empty() {
@@ -629,19 +695,31 @@ mod tests {
         state.left_width = 321.25;
         state.bottom_height = 222.75;
         state.toggle(crate::app::PanelId::Terminal);
+        set_panel_text_editor(&mut state.project_search.include_editor, "./core, lib");
+        set_panel_text_editor(&mut state.project_search.exclude_editor, "target\\cache");
 
         let formatted = format_panel_state_content(&state);
         assert!(formatted.contains("Terminal:Bottom:1"));
         assert!(formatted.contains("left_width:321.2"));
         assert!(formatted.contains("bottom_height:222.8"));
+        assert!(formatted.contains("project_search_include:./core, lib"));
+        assert!(formatted.contains("project_search_exclude:target\\\\cache"));
 
         let parsed = parse_panel_state_content(
-            "Explorer:Top:1\nTerminal:Bottom:0\nleft_width:444.4\nbottom_height:155.5\n",
+            "Explorer:Top:1\nTerminal:Bottom:0\nleft_width:444.4\nbottom_height:155.5\nproject_search_include:./src, **/*.rs\nproject_search_exclude:target\\\\cache\n",
         );
         assert!(parsed.is_open(crate::app::PanelId::Explorer));
         assert!(!parsed.is_open(crate::app::PanelId::Terminal));
         assert_eq!(parsed.left_width, 444.4);
         assert_eq!(parsed.bottom_height, 155.5);
+        assert_eq!(
+            parsed.project_search.include_editor.get_full_text(),
+            "./src, **/*.rs"
+        );
+        assert_eq!(
+            parsed.project_search.exclude_editor.get_full_text(),
+            "target\\cache"
+        );
         assert!(
             parsed
                 .slots

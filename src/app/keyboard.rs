@@ -699,6 +699,13 @@ impl App {
         if is_edit {
             self.project_search_editor_mut(field).sync_edits.clear();
             self.ide_panel.project_search.dirty = true;
+            if matches!(
+                field,
+                crate::app::project_search::ProjectSearchField::Include
+                    | crate::app::project_search::ProjectSearchField::Exclude
+            ) {
+                crate::save_panel_state(&self.ide_panel);
+            }
         }
         if should_run {
             self.start_project_search();

@@ -219,6 +219,12 @@ impl App {
             }
         }
 
+        if let Some(field) = self.ide_panel.project_search.dragging_field {
+            self.drag_project_search_cursor_to(field, px, py);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         let mut popup_selecting = false;
         HOVER_STATE.with(|hover_state| {
             let mut hs = hover_state.borrow_mut();

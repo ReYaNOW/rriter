@@ -222,8 +222,9 @@ In draw/render/frame paths:
 * Avoid `format!()` unless trivial and already local style.
 
 * Do not mix rendering with persistent state mutation except existing cache patterns.
-* UI text baselines must be pixel-stable. If text is inside a scrolling/hovering list, compute `render_scroll = scroll.current.round()`, derive `row_y`/`text_y` from rounded values, and draw with stable text helpers. Never feed fractional animated scroll offsets directly into text Y positions; it makes glyphs jump vertically during hover/redraw.
-* Never use ad-hoc `cy + N * s` text baselines for labels that can redraw during hover, blink, modal open/close, or scroll. Use one row helper for the whole visual row, same pattern as `tree_row_text_y`.
+* UI text Y must be pixel-stable: round scroll, row positions, and baselines before drawing.
+* Editable inputs must share one rounded baseline helper for text, selection rectangles, and cursor rectangles.
+* **CRITICAL: TEXT MUST NEVER ACCUMULATE FRACTIONAL BASELINES WITH `cy += N * s`. USE ROUNDED STEP HELPERS LIKE `(N * s).round()`, DRAW FROM INTEGER BASELINES, AND IF SMALL UI GLYPHS STILL WOBBLE AT FRACTIONAL SCALES, SNAP GLYPH OFFSETS/SIZES BEFORE `push_quad`.**
 * Always reuse already implemented code. Do not copy it, but move to a separate function / class and use it in all places. If you are implementing something, try to search for it in the repo, it MAY be already implemented.
 * DO not create files larger than 1600 lines of code. Move logic blocks to new files if that happens. Add info about new files in both .md files. Do not create files with less than 200 lines.
 

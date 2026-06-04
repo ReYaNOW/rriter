@@ -986,6 +986,20 @@ impl App {
                         }
                         self.handle_ui_click(clicked_id);
                     } else {
+                        if let Some(field) = match clicked_id {
+                            crate::ui_system::UiId::ProjectSearchQueryInput => {
+                                Some(crate::app::project_search::ProjectSearchField::Query)
+                            }
+                            crate::ui_system::UiId::ProjectSearchIncludeInput => {
+                                Some(crate::app::project_search::ProjectSearchField::Include)
+                            }
+                            crate::ui_system::UiId::ProjectSearchExcludeInput => {
+                                Some(crate::app::project_search::ProjectSearchField::Exclude)
+                            }
+                            _ => None,
+                        } {
+                            self.ide_panel.project_search.dragging_field = Some(field);
+                        }
                         if clicked_id == crate::ui_system::UiId::TerminalBody {
                             self.ide_panel.is_dragging_terminal = true;
                         } else {
@@ -1210,7 +1224,6 @@ impl App {
                             self.refresh_file_tree();
                         }
                         if toggled_open && drag.panel_id == crate::app::PanelId::Search {
-                            self.ensure_project_search_include_guess();
                             self.ide_panel.project_search.focused =
                                 Some(crate::app::project_search::ProjectSearchField::Query);
                         }
@@ -1326,6 +1339,7 @@ impl App {
             self.ide_panel.is_dragging_terminal = false;
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
+            self.ide_panel.project_search.dragging_field = None;
             self.ide_panel.file_tree_dialog_input_drag = None;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;

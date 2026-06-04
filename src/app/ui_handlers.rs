@@ -221,6 +221,7 @@ impl App {
             | UiId::StatusBar
             | UiId::SearchPanelBody
             | UiId::ProjectSearchPanelBody
+            | UiId::ProjectSearchHelpPopup
             | UiId::InlineGitPanelBody
             | UiId::GitDiffPanelBody => {}
             UiId::StatusDiagnostics => {
@@ -820,7 +821,6 @@ impl App {
                     self.refresh_git_panel();
                 }
                 if panel_id == crate::app::PanelId::Search && self.ide_panel.is_open(panel_id) {
-                    self.ensure_project_search_include_guess();
                     self.ide_panel.project_search.focused =
                         Some(crate::app::project_search::ProjectSearchField::Query);
                 }
@@ -915,6 +915,10 @@ impl App {
                 self.ide_panel.project_search.case_sensitive =
                     !self.ide_panel.project_search.case_sensitive;
                 self.ide_panel.project_search.dirty = true;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchHelp => {
+                self.ide_panel.project_search.help_open = !self.ide_panel.project_search.help_open;
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::ProjectSearchFileToggle(file_idx) => {
