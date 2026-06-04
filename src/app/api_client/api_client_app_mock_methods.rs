@@ -566,7 +566,8 @@ impl crate::app::App {
             .filter(|title| !title.trim().is_empty())
             .unwrap_or(model.title.as_str());
         let spec = Self::api_mock_module_segment(spec_title, "spec");
-        let route = Self::api_mock_module_segment(&format!("{}_{}", method.as_str(), path), "route");
+        let route =
+            Self::api_mock_module_segment(&format!("{}_{}", method.as_str(), path), "route");
         Some(format!("api_mock.{spec}.{route}"))
     }
 
@@ -1406,6 +1407,10 @@ impl crate::app::App {
             return;
         };
         let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
+        let focused_this_route = self
+            .api_mock_python_focus_target()
+            .is_some_and(|(focused_route, _)| focused_route == route_idx);
+        let mut disabled_active_script = false;
         if let Some(override_route) =
             self.ide_panel
                 .api
@@ -1418,8 +1423,13 @@ impl crate::app::App {
                         && item.path == route.path
                 })
         {
-            override_route.enabled = !override_route.enabled;
-            override_route.proxy_when_disabled = !override_route.enabled;
+            let will_enable = !override_route.enabled;
+            override_route.enabled = will_enable;
+            override_route.proxy_when_disabled = !will_enable;
+            if !will_enable && let Some(script) = override_route.python.as_mut() {
+                disabled_active_script = script.enabled;
+                script.enabled = false;
+            }
         } else {
             self.ide_panel.api.mock.route_overrides.push(
                 crate::app::api_mock::types::ApiMockRouteOverride {
@@ -1434,6 +1444,10 @@ impl crate::app::App {
                     extra_output_fields: Vec::new(),
                 },
             );
+        }
+        if disabled_active_script && focused_this_route {
+            self.stash_active_api_mock_editor();
+            self.ide_panel.api.focused = None;
         }
         self.ide_panel.api.persist();
         self.refresh_api_mock_server_snapshot();
@@ -1562,11 +1576,17 @@ impl crate::app::App {
                 script.enabled = will_enable;
                 disabled_active_script = !script.enabled;
                 enabled_script = script.enabled;
+                if will_enable {
+                    override_route.enabled = true;
+                    override_route.proxy_when_disabled = false;
+                }
             } else {
                 let mut script = default_api_mock_python_script();
                 script.contract = default_contract;
                 script.body = api_mock_default_handler_body(&script.contract);
                 override_route.python = Some(script);
+                override_route.enabled = true;
+                override_route.proxy_when_disabled = false;
                 enabled_script = true;
             }
         }
@@ -1638,7 +1658,9 @@ impl crate::app::App {
         let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
         let old_len = self.ide_panel.api.mock.route_overrides.len();
         self.ide_panel.api.mock.route_overrides.retain(|item| {
-            !(item.source_key == source_key && item.method == route.method && item.path == route.path)
+            !(item.source_key == source_key
+                && item.method == route.method
+                && item.path == route.path)
         });
         if old_len == self.ide_panel.api.mock.route_overrides.len() {
             return;
@@ -1663,11 +1685,14 @@ impl crate::app::App {
         self.ide_panel.api.mock_ty_diagnostics.clear();
         self.ide_panel.api.mock_contract_constraint_menu = None;
         let reset_status = match &self.ide_panel.api.mock.check_status {
-            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx: checked, .. }
-            | crate::app::api_mock::types::ApiMockCheckStatus::Ok { route_idx: checked, .. }
+            crate::app::api_mock::types::ApiMockCheckStatus::Pending {
+                route_idx: checked, ..
+            }
+            | crate::app::api_mock::types::ApiMockCheckStatus::Ok {
+                route_idx: checked, ..
+            }
             | crate::app::api_mock::types::ApiMockCheckStatus::Failed {
-                route_idx: checked,
-                ..
+                route_idx: checked, ..
             } => *checked == route_idx,
             crate::app::api_mock::types::ApiMockCheckStatus::Idle => false,
         };
@@ -1882,19 +1907,23 @@ impl crate::app::App {
             .0
             .clone();
         let edit_text = self.ide_panel.api.input_editor.get_full_text();
-        let virtual_source = self
-            .api_mock_route_context(route_idx)
-            .and_then(|(method, path, route, model)| {
-                self.api_mock_script_for_tools(route_idx).map(|script| {
-                    build_api_mock_virtual_source(method, &path, &route, &model, &script)
-                })
-            });
+        let virtual_source =
+            self.api_mock_route_context(route_idx)
+                .and_then(|(method, path, route, model)| {
+                    self.api_mock_script_for_tools(route_idx).map(|script| {
+                        build_api_mock_virtual_source(method, &path, &route, &model, &script)
+                    })
+                });
         let mut ops = Vec::new();
         let mut prelude_imports = Vec::new();
         if let Some(virtual_source) = virtual_source.as_ref() {
             if let Some(main_edit) = item.text_edit.as_ref()
-                && let Some(op) =
-                    api_mock_lsp_edit_to_input_op(virtual_source, part, &virtual_source.source, main_edit)
+                && let Some(op) = api_mock_lsp_edit_to_input_op(
+                    virtual_source,
+                    part,
+                    &virtual_source.source,
+                    main_edit,
+                )
             {
                 ops.push(op);
             }
@@ -1903,14 +1932,21 @@ impl crate::app::App {
                     prelude_imports.push(text.to_string());
                     continue;
                 }
-                if let Some(op) =
-                    api_mock_lsp_edit_to_input_op(virtual_source, part, &virtual_source.source, edit)
-                {
+                if let Some(op) = api_mock_lsp_edit_to_input_op(
+                    virtual_source,
+                    part,
+                    &virtual_source.source,
+                    edit,
+                ) {
                     ops.push(op);
                 }
             }
         }
-        let selected = item.insert_text.as_deref().unwrap_or(&item.word).to_string();
+        let selected = item
+            .insert_text
+            .as_deref()
+            .unwrap_or(&item.word)
+            .to_string();
         let prefix_len = self
             .active_api_mock_autocomplete_source()
             .and_then(|source| self.active_autocomplete_source_snapshot(source))
@@ -1942,7 +1978,11 @@ impl crate::app::App {
                     insert.push('\n');
                 }
                 let end = self.ide_panel.api.input_editor.len();
-                let _ = self.ide_panel.api.input_editor.replace_range(end, end, &insert);
+                let _ = self
+                    .ide_panel
+                    .api
+                    .input_editor
+                    .replace_range(end, end, &insert);
                 self.ide_panel.api.input_editor.cursor =
                     cursor_after_apply.min(self.ide_panel.api.input_editor.len());
                 self.ide_panel.api.input_editor.selection_anchor = None;

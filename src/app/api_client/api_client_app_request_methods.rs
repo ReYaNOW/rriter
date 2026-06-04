@@ -54,6 +54,32 @@ fn api_mock_tools_queue_route_after_key(
     }
 }
 
+fn api_mock_override_is_explicit_mock(
+    route: &crate::app::api_mock::types::ApiMockRouteOverride,
+) -> bool {
+    route.enabled
+        || route.python.as_ref().is_some_and(|script| script.enabled)
+        || !matches!(
+            &route.response,
+            crate::app::api_mock::types::ApiMockResponse::Generated
+        )
+}
+
+fn api_mock_request_requires_stopped_server(
+    mode: crate::app::api_mock::types::ApiMockMode,
+    route: Option<&crate::app::api_mock::types::ApiMockRouteOverride>,
+) -> bool {
+    match mode {
+        crate::app::api_mock::types::ApiMockMode::MockAll => route.is_some_and(|route| {
+            !route.proxy_when_disabled && api_mock_override_is_explicit_mock(route)
+        }),
+        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+        | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
+            route.is_some_and(|route| route.enabled)
+        }
+    }
+}
+
 impl crate::app::App {
     fn api_mock_request_wants_server(&self, route_idx: usize) -> bool {
         match self.ide_panel.api.mock.mode {
@@ -660,8 +686,16 @@ impl crate::app::App {
         else {
             return;
         };
-        let wants_mock_server = self.api_mock_request_wants_server(route_idx);
-        let use_mock_server = wants_mock_server && self.api_mock_server_running();
+        let mock_server_running = self.api_mock_server_running();
+        let wants_mock_server = if mock_server_running {
+            self.api_mock_request_wants_server(route_idx)
+        } else {
+            api_mock_request_requires_stopped_server(
+                self.ide_panel.api.mock.mode,
+                self.api_route_override(route_idx),
+            )
+        };
+        let use_mock_server = wants_mock_server && mock_server_running;
         let method = route.method;
         let path = route.path.clone();
         let is_json_body = route

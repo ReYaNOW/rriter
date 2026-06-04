@@ -467,8 +467,14 @@ mod tests {
         assert_eq!(grid.lines[0][1].presentation, CELL_PRESENTATION_AUTO);
         assert_eq!(grid.lines[0][2].presentation, CELL_PRESENTATION_TEXT);
         assert_eq!(grid.lines[0][3].presentation, CELL_PRESENTATION_AUTO);
-        assert_eq!(terminal_presentation_selector('\u{FE0F}'), Some(CELL_PRESENTATION_EMOJI));
-        assert_eq!(terminal_presentation_selector('\u{FE0E}'), Some(CELL_PRESENTATION_TEXT));
+        assert_eq!(
+            terminal_presentation_selector('\u{FE0F}'),
+            Some(CELL_PRESENTATION_EMOJI)
+        );
+        assert_eq!(
+            terminal_presentation_selector('\u{FE0E}'),
+            Some(CELL_PRESENTATION_TEXT)
+        );
         assert!(is_terminal_zero_width_format('\u{FE0F}'));
         assert!(is_terminal_zero_width_format('\u{FE0E}'));
         assert!(is_terminal_zero_width_format('\u{200D}'));

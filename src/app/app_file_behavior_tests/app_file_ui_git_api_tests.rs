@@ -863,7 +863,7 @@ fn api_lsp_item(
 }
 
 #[test]
-fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
+fn api_mock_python_toggle_preserves_code_and_enables_openapi_mock() {
     let Some(mut app) = test_app() else {
         return;
     };
@@ -871,7 +871,8 @@ fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
 
     app.toggle_api_route_python(0);
     let override_route = app.ide_panel.api.mock.route_overrides.first().unwrap();
-    assert!(!override_route.enabled);
+    assert!(override_route.enabled);
+    assert!(!override_route.proxy_when_disabled);
     assert!(
         override_route
             .python
@@ -885,7 +886,7 @@ fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
         [(entry, model)],
         &app.ide_panel.api.mock,
     );
-    assert!(!routes.first().unwrap().enabled);
+    assert!(routes.first().unwrap().enabled);
 
     app.focus_api_input(crate::app::api_client::ApiFocus::MockBody { route_idx: 0 });
     let _ = app
@@ -909,6 +910,27 @@ fn api_mock_python_toggle_preserves_code_and_does_not_enable_openapi_mock() {
             .input_editor
             .get_full_text()
             .contains("value = 42")
+    );
+}
+
+#[test]
+fn api_mock_disable_turns_off_python() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+
+    app.toggle_api_route_python(0);
+    app.toggle_api_route_mock(0);
+
+    let override_route = app.ide_panel.api.mock.route_overrides.first().unwrap();
+    assert!(!override_route.enabled);
+    assert!(override_route.proxy_when_disabled);
+    assert!(
+        !override_route
+            .python
+            .as_ref()
+            .is_some_and(|script| script.enabled)
     );
 }
 

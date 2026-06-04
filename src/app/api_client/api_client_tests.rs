@@ -8,6 +8,68 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    fn mock_route_override(
+        enabled: bool,
+        proxy_when_disabled: bool,
+        response: crate::app::api_mock::types::ApiMockResponse,
+        python: Option<crate::app::api_mock::types::ApiMockPythonScript>,
+    ) -> crate::app::api_mock::types::ApiMockRouteOverride {
+        crate::app::api_mock::types::ApiMockRouteOverride {
+            source_key: "test".to_string(),
+            method: ApiMethod::Get,
+            path: "/users".to_string(),
+            enabled,
+            proxy_when_disabled,
+            response,
+            python,
+            extra_input_fields: Vec::new(),
+            extra_output_fields: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn stopped_mock_all_without_route_override_allows_real_request() {
+        assert!(!api_mock_request_requires_stopped_server(
+            crate::app::api_mock::types::ApiMockMode::MockAll,
+            None,
+        ));
+    }
+
+    #[test]
+    fn stopped_mock_errors_only_for_explicit_route_mock() {
+        let enabled = mock_route_override(
+            true,
+            false,
+            crate::app::api_mock::types::ApiMockResponse::Generated,
+            None,
+        );
+        let disabled_proxy = mock_route_override(
+            false,
+            true,
+            crate::app::api_mock::types::ApiMockResponse::Generated,
+            None,
+        );
+        let python = mock_route_override(
+            false,
+            false,
+            crate::app::api_mock::types::ApiMockResponse::Generated,
+            Some(crate::app::api_mock::types::default_api_mock_python_script()),
+        );
+
+        assert!(api_mock_request_requires_stopped_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedOnly,
+            Some(&enabled),
+        ));
+        assert!(!api_mock_request_requires_stopped_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
+            Some(&disabled_proxy),
+        ));
+        assert!(api_mock_request_requires_stopped_server(
+            crate::app::api_mock::types::ApiMockMode::MockAll,
+            Some(&python),
+        ));
+    }
+
     #[test]
     fn api_mock_virtual_path_is_unique_per_spec_and_route() {
         let a = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 0);

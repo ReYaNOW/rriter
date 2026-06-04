@@ -608,13 +608,7 @@ impl App {
                             u32::MAX
                         };
 
-                        let (
-                            avg_adv,
-                            x_start_px,
-                            x_end_px,
-                            hit_visual_text,
-                            logical_line_x,
-                        ) = {
+                        let (avg_adv, x_start_px, x_end_px, hit_visual_text, logical_line_x) = {
                             let renderer = self.renderer.as_mut().unwrap();
                             let avg_adv = renderer.char_advance('a');
                             let (x_start_px, start_byte) = renderer.visual_x_for_utf16_col(
@@ -623,12 +617,8 @@ impl App {
                                 start_col,
                                 true,
                             );
-                            let (mut x_end_px, end_byte) = renderer.visual_x_for_utf16_col(
-                                &self.editor,
-                                line,
-                                end_col,
-                                false,
-                            );
+                            let (mut x_end_px, end_byte) =
+                                renderer.visual_x_for_utf16_col(&self.editor, line, end_col, false);
                             if line != diag.end_line as usize {
                                 x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
                             }
