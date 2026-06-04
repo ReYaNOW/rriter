@@ -28,15 +28,15 @@ mod tests {
     }
 
     #[test]
-    fn stopped_mock_all_without_route_override_allows_real_request() {
-        assert!(!api_mock_request_requires_stopped_server(
+    fn stopped_mock_all_without_route_override_requires_mock_server() {
+        assert!(api_mock_request_requires_stopped_server(
             crate::app::api_mock::types::ApiMockMode::MockAll,
             None,
         ));
     }
 
     #[test]
-    fn stopped_mock_errors_only_for_explicit_route_mock() {
+    fn stopped_selected_proxy_requires_server_only_for_mocked_route() {
         let enabled = mock_route_override(
             true,
             false,
@@ -56,8 +56,12 @@ mod tests {
             Some(crate::app::api_mock::types::default_api_mock_python_script()),
         );
 
+        assert!(!api_mock_request_requires_stopped_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
+            None,
+        ));
         assert!(api_mock_request_requires_stopped_server(
-            crate::app::api_mock::types::ApiMockMode::MockSelectedOnly,
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
             Some(&enabled),
         ));
         assert!(!api_mock_request_requires_stopped_server(
@@ -67,6 +71,39 @@ mod tests {
         assert!(api_mock_request_requires_stopped_server(
             crate::app::api_mock::types::ApiMockMode::MockAll,
             Some(&python),
+        ));
+    }
+
+    #[test]
+    fn selected_proxy_send_uses_mock_server_only_for_mocked_route() {
+        let enabled = mock_route_override(
+            true,
+            false,
+            crate::app::api_mock::types::ApiMockResponse::Generated,
+            None,
+        );
+        let disabled_proxy = mock_route_override(
+            false,
+            true,
+            crate::app::api_mock::types::ApiMockResponse::Generated,
+            None,
+        );
+
+        assert!(!api_mock_route_wants_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
+            None,
+        ));
+        assert!(api_mock_route_wants_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
+            Some(&enabled),
+        ));
+        assert!(!api_mock_route_wants_server(
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest,
+            Some(&disabled_proxy),
+        ));
+        assert!(api_mock_route_wants_server(
+            crate::app::api_mock::types::ApiMockMode::MockAll,
+            None,
         ));
     }
 

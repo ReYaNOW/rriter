@@ -118,17 +118,19 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockModeSelect => {
                 self.commit_api_focus();
-                self.ide_panel.api.mock.mode = match self.ide_panel.api.mock.mode {
+                let next_mode = match self.ide_panel.api.mock.mode.canonical() {
                     crate::app::api_mock::types::ApiMockMode::MockAll => {
-                        crate::app::api_mock::types::ApiMockMode::MockSelectedOnly
-                    }
-                    crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
                         crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
                     }
-                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => {
+                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+                    | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
                         crate::app::api_mock::types::ApiMockMode::MockAll
                     }
                 };
+                self.ide_panel.api.mock.mode = next_mode;
+                if next_mode == crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest {
+                    self.sync_api_mock_proxy_base_to_active_server();
+                }
                 self.ide_panel.api.persist();
                 self.refresh_api_mock_server_snapshot();
             }

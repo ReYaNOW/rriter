@@ -126,14 +126,16 @@ pub fn resolve_api_mock_route<'a>(
         return ApiMockRouteDecision::Mock(route);
     }
 
-    if routes.iter().any(|route| {
-        route.origin == ApiMockRouteOrigin::OpenApi
-            && route.proxy_when_disabled
-            && !route.enabled
-            && route.method == method
-            && api_mock_path_matches(&route.path, path)
-    }) {
-        return ApiMockRouteDecision::Proxy;
+    if mode.canonical() != ApiMockMode::MockAll {
+        if routes.iter().any(|route| {
+            route.origin == ApiMockRouteOrigin::OpenApi
+                && route.proxy_when_disabled
+                && !route.enabled
+                && route.method == method
+                && api_mock_path_matches(&route.path, path)
+        }) {
+            return ApiMockRouteDecision::Proxy;
+        }
     }
 
     if let Some(route) = routes.iter().find(|route| {
@@ -148,7 +150,6 @@ pub fn resolve_api_mock_route<'a>(
     if mode == ApiMockMode::MockAll {
         if let Some(route) = routes.iter().find(|route| {
             route.origin == ApiMockRouteOrigin::OpenApi
-                && !route.proxy_when_disabled
                 && route.method == method
                 && api_mock_path_matches(&route.path, path)
         }) {
@@ -156,7 +157,7 @@ pub fn resolve_api_mock_route<'a>(
         }
     }
 
-    if mode == ApiMockMode::MockSelectedProxyRest {
+    if mode.canonical() == ApiMockMode::MockSelectedProxyRest {
         ApiMockRouteDecision::Proxy
     } else {
         ApiMockRouteDecision::NotFound
@@ -318,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn mock_all_hard_disabled_openapi_route_proxies() {
+    fn mock_all_hard_disabled_openapi_route_still_mocks() {
         let entry = entry();
         let model = model(route(ApiMethod::Get, "/users"));
         let mut state = ApiMockState::default();
@@ -339,7 +340,7 @@ mod tests {
 
         let decision = resolve_api_mock_route(&routes, state.mode, ApiMethod::Get, "/users");
 
-        assert_eq!(decision, ApiMockRouteDecision::Proxy);
+        assert!(matches!(decision, ApiMockRouteDecision::Mock(_)));
     }
 
     #[test]
@@ -368,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn selected_only_returns_404_when_route_not_enabled() {
+    fn legacy_selected_only_falls_back_to_proxy() {
         let state = ApiMockState {
             mode: ApiMockMode::MockSelectedOnly,
             ..Default::default()
@@ -384,7 +385,7 @@ mod tests {
             "/users",
         );
 
-        assert_eq!(decision, ApiMockRouteDecision::NotFound);
+        assert_eq!(decision, ApiMockRouteDecision::Proxy);
     }
 
     #[test]

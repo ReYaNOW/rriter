@@ -805,8 +805,7 @@ fn proxy_url(base: &str, uri: &Uri) -> Option<String> {
 }
 
 fn should_proxy_unmatched(snapshot: &ApiMockServerSnapshot) -> bool {
-    snapshot.mode != super::types::ApiMockMode::MockSelectedOnly
-        && !snapshot.proxy_base_url.trim().is_empty()
+    !snapshot.proxy_base_url.trim().is_empty()
 }
 
 fn safe_proxy_header(name: &HeaderName) -> bool {
@@ -867,7 +866,7 @@ mod tests {
     }
 
     #[test]
-    fn unmatched_paths_proxy_with_base_url_except_selected_only() {
+    fn unmatched_paths_proxy_with_base_url() {
         let mut snapshot = ApiMockServerSnapshot {
             bind_host: "127.0.0.1".to_string(),
             port: 4010,
@@ -881,7 +880,7 @@ mod tests {
         snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
         assert!(should_proxy_unmatched(&snapshot));
         snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockSelectedOnly;
-        assert!(!should_proxy_unmatched(&snapshot));
+        assert!(should_proxy_unmatched(&snapshot));
         snapshot.mode = crate::app::api_mock::types::ApiMockMode::MockAll;
         snapshot.proxy_base_url.clear();
         assert!(!should_proxy_unmatched(&snapshot));

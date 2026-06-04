@@ -54,25 +54,19 @@ fn api_mock_tools_queue_route_after_key(
     }
 }
 
-fn api_mock_override_is_explicit_mock(
-    route: &crate::app::api_mock::types::ApiMockRouteOverride,
-) -> bool {
-    route.enabled
-        || route.python.as_ref().is_some_and(|script| script.enabled)
-        || !matches!(
-            &route.response,
-            crate::app::api_mock::types::ApiMockResponse::Generated
-        )
-}
-
 fn api_mock_request_requires_stopped_server(
     mode: crate::app::api_mock::types::ApiMockMode,
     route: Option<&crate::app::api_mock::types::ApiMockRouteOverride>,
 ) -> bool {
-    match mode {
-        crate::app::api_mock::types::ApiMockMode::MockAll => route.is_some_and(|route| {
-            !route.proxy_when_disabled && api_mock_override_is_explicit_mock(route)
-        }),
+    api_mock_route_wants_server(mode, route)
+}
+
+fn api_mock_route_wants_server(
+    mode: crate::app::api_mock::types::ApiMockMode,
+    route: Option<&crate::app::api_mock::types::ApiMockRouteOverride>,
+) -> bool {
+    match mode.canonical() {
+        crate::app::api_mock::types::ApiMockMode::MockAll => true,
         crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
         | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
             route.is_some_and(|route| route.enabled)
@@ -82,23 +76,7 @@ fn api_mock_request_requires_stopped_server(
 
 impl crate::app::App {
     fn api_mock_request_wants_server(&self, route_idx: usize) -> bool {
-        match self.ide_panel.api.mock.mode {
-            crate::app::api_mock::types::ApiMockMode::MockAll => {
-                !self.api_route_override(route_idx).is_some_and(|route| {
-                    route.proxy_when_disabled
-                        || (!route.enabled
-                            && route.python.is_none()
-                            && matches!(
-                                &route.response,
-                                crate::app::api_mock::types::ApiMockResponse::Generated
-                            ))
-                })
-            }
-            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => true,
-            crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => self
-                .api_route_override(route_idx)
-                .is_some_and(|route| route.enabled),
-        }
+        api_mock_route_wants_server(self.ide_panel.api.mock.mode, self.api_route_override(route_idx))
     }
 
     fn api_mock_server_running(&self) -> bool {
@@ -109,8 +87,9 @@ impl crate::app::App {
     }
 
     fn api_mock_job_target(&self, route_idx: usize) -> ApiJobMockTarget {
-        match self.ide_panel.api.mock.mode {
-            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest => {
+        match self.ide_panel.api.mock.mode.canonical() {
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+            | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
                 if self
                     .api_route_override(route_idx)
                     .is_some_and(|route| route.enabled)
@@ -120,8 +99,7 @@ impl crate::app::App {
                     ApiJobMockTarget::Proxy
                 }
             }
-            crate::app::api_mock::types::ApiMockMode::MockAll
-            | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => ApiJobMockTarget::Mock,
+            crate::app::api_mock::types::ApiMockMode::MockAll => ApiJobMockTarget::Mock,
         }
     }
 

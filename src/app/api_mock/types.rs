@@ -46,6 +46,15 @@ pub enum ApiMockMode {
     MockSelectedProxyRest,
 }
 
+impl ApiMockMode {
+    pub(crate) fn canonical(self) -> Self {
+        match self {
+            Self::MockSelectedOnly => Self::MockSelectedProxyRest,
+            mode => mode,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ApiMockServerStatus {
     Stopped,

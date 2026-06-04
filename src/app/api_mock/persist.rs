@@ -26,7 +26,7 @@ impl From<&ApiMockState> for ApiMockPersist {
             version: API_MOCK_PERSIST_VERSION,
             bind_host: lan_bind_host(&state.bind_host).to_string(),
             port: state.port,
-            mode: state.mode,
+            mode: state.mode.canonical(),
             proxy_base_url: state.proxy_base_url.clone(),
             uv: state.uv.clone(),
             route_overrides: state.route_overrides.clone(),
@@ -41,7 +41,7 @@ impl From<ApiMockPersist> for ApiMockState {
             enabled: false,
             bind_host: lan_bind_host(&saved.bind_host).to_string(),
             port: saved.port.max(1),
-            mode: saved.mode,
+            mode: saved.mode.canonical(),
             proxy_base_url: saved.proxy_base_url,
             server_status: ApiMockServerStatus::Stopped,
             check_status: super::types::ApiMockCheckStatus::Idle,
@@ -152,6 +152,22 @@ mod tests {
         assert_eq!(loaded.manual_routes.len(), 1);
 
         let _ = std::fs::remove_dir_all(api_mock_data_dir());
+    }
+
+    #[test]
+    fn legacy_selected_only_mode_loads_as_selected_proxy() {
+        let loaded = ApiMockState::from(ApiMockPersist {
+            version: API_MOCK_PERSIST_VERSION,
+            bind_host: "127.0.0.1".to_string(),
+            port: 4101,
+            mode: ApiMockMode::MockSelectedOnly,
+            proxy_base_url: "https://backend.test".to_string(),
+            uv: ApiUvState::default(),
+            route_overrides: Vec::new(),
+            manual_routes: Vec::new(),
+        });
+
+        assert_eq!(loaded.mode, ApiMockMode::MockSelectedProxyRest);
     }
 
     #[test]

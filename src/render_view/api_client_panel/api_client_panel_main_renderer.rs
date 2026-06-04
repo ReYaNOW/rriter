@@ -403,10 +403,11 @@ impl Renderer {
             false,
         );
         cy += btn_h + 10.0 * s;
-        let mode_label = match api.mock.mode {
+        let mode_label = match api.mock.mode.canonical() {
             ApiMockMode::MockAll => "Мокать все",
-            ApiMockMode::MockSelectedOnly => "Только выбранные",
-            ApiMockMode::MockSelectedProxyRest => "Выбранные + прокси",
+            ApiMockMode::MockSelectedProxyRest | ApiMockMode::MockSelectedOnly => {
+                "Выбранные + прокси"
+            }
         };
         let mode = Button {
             x: x + pad,
