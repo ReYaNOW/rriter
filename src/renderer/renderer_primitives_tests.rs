@@ -187,6 +187,10 @@ impl Renderer {
                     include_bytes!("../icons/atom/icons/ui/files.svg").as_slice(),
             ),
             (
+                crate::widgets::IconType::Search,
+                    include_bytes!("../icons/atom/icons/ui/search.svg").as_slice(),
+            ),
+            (
                 crate::widgets::IconType::Git,
                     include_bytes!("../icons/atom/icons/files/git.svg").as_slice(),
             ),
@@ -256,6 +260,7 @@ impl Renderer {
                 || icon_type == crate::widgets::IconType::GitMinus
                 || icon_type == crate::widgets::IconType::Terminal
                 || icon_type == crate::widgets::IconType::Explorer
+                || icon_type == crate::widgets::IconType::Search
                 || icon_type == crate::widgets::IconType::Git
                 || icon_type == crate::widgets::IconType::GitCompare
                 || icon_type == crate::widgets::IconType::Branch

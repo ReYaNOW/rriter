@@ -115,6 +115,7 @@ fn stop_click_scroll_anims(app: &mut App) {
     }
 
     stop_scroll_anim(&mut app.ide_panel.explorer_scroll);
+    stop_scroll_anim(&mut app.ide_panel.project_search.scroll);
     stop_scroll_anim(&mut app.ide_panel.git.scroll);
     stop_scroll_anim(&mut app.ide_panel.git.graph_scroll);
     stop_scroll_anim(&mut app.ide_panel.lsp_scroll_y);
@@ -1207,6 +1208,11 @@ impl App {
                         // При открытии Explorer — запускаем скан файлов
                         if toggled_open && drag.panel_id == crate::app::PanelId::Explorer {
                             self.refresh_file_tree();
+                        }
+                        if toggled_open && drag.panel_id == crate::app::PanelId::Search {
+                            self.ensure_project_search_include_guess();
+                            self.ide_panel.project_search.focused =
+                                Some(crate::app::project_search::ProjectSearchField::Query);
                         }
                         // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
                         if toggled_open {

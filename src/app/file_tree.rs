@@ -51,6 +51,17 @@ const FILE_TREE_UNDO_LIMIT: usize = 64;
 ///   - точные имена:   `node_modules`, `.DS_Store`
 ///   - glob-wildcards: `*.pyc`, `foo*`
 pub fn matches_ignore_pattern(name: &str, patterns: &[&str]) -> bool {
+    matches_ignore_pattern_values(name, patterns.iter().copied())
+}
+
+pub fn matches_ignore_pattern_strings(name: &str, patterns: &[String]) -> bool {
+    matches_ignore_pattern_values(name, patterns.iter().map(String::as_str))
+}
+
+fn matches_ignore_pattern_values<'a>(
+    name: &str,
+    patterns: impl IntoIterator<Item = &'a str>,
+) -> bool {
     for pattern in patterns {
         let p = pattern.trim();
         if p.is_empty() {

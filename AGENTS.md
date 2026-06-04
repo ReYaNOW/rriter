@@ -451,6 +451,7 @@ Entrypoints/state:
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
+* `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, results, and jump routing.
 * `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
 * `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
 
@@ -499,6 +500,7 @@ Rendering:
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
 * `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace, dialogs, tests.
+* `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search panel controls/results rendering.
 * `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
 * `src/render_view/search.rs` -> search panel UI.
 * `src/render_view/settings_ui.rs` -> settings UI.

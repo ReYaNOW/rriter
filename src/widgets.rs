@@ -16,6 +16,7 @@ pub enum IconType {
     GitMinus,
     Terminal,
     Explorer,
+    Search,
     Git,
     GitCompare,
     Branch,

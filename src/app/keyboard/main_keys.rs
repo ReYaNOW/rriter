@@ -282,6 +282,12 @@ impl App {
             let term_focused = self.is_ide_mode
                 && self.ide_panel.terminal_focused
                 && self.ide_panel.is_open(crate::app::PanelId::Terminal);
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::F1) && !term_focused {
+                self.show_settings = !self.show_settings;
+                self.is_dragging = false;
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
             if let PhysicalKey::Code(KeyCode::F8) = key_event.physical_key {
                 if !term_focused {
                     self.show_fps = !self.show_fps;
@@ -298,6 +304,27 @@ impl App {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+                return;
+            }
+
+            if self.is_ide_mode
+                && ctrl
+                && self.modifiers.shift_key()
+                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyF)
+            {
+                self.open_project_search_panel();
+                self.last_action = std::time::Instant::now();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+
+            if self.is_ide_mode
+                && self.ide_panel.is_open(crate::app::PanelId::Search)
+                && self.ide_panel.project_search.focused.is_some()
+            {
+                self.handle_project_search_keyboard_input(key_event);
                 return;
             }
 

@@ -566,6 +566,208 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyEvent) {
+        if key_event.state != ElementState::Pressed {
+            return;
+        }
+        let Some(field) = self.ide_panel.project_search.focused else {
+            return;
+        };
+        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let shift = self.modifiers.shift_key();
+        let mut is_edit = false;
+        let mut should_run = false;
+
+        match key_event.physical_key {
+            PhysicalKey::Code(KeyCode::Escape) => {
+                self.ide_panel.project_search.focused = None;
+            }
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
+                if ctrl =>
+            {
+                should_run = true;
+            }
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                if field == crate::app::project_search::ProjectSearchField::Query {
+                    self.project_search_editor_mut(field).insert_str("\n");
+                    is_edit = true;
+                } else {
+                    should_run = true;
+                }
+            }
+            PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                let editor = self.project_search_editor_mut(field);
+                if ctrl {
+                    editor.move_word_left(shift);
+                } else {
+                    editor.move_left(shift);
+                }
+            }
+            PhysicalKey::Code(KeyCode::ArrowRight) => {
+                let editor = self.project_search_editor_mut(field);
+                if ctrl {
+                    editor.move_word_right(shift);
+                } else {
+                    editor.move_right(shift);
+                }
+            }
+            PhysicalKey::Code(KeyCode::ArrowUp) => {
+                if field == crate::app::project_search::ProjectSearchField::Query {
+                    self.move_project_search_query_line(-1, shift);
+                }
+            }
+            PhysicalKey::Code(KeyCode::ArrowDown) => {
+                if field == crate::app::project_search::ProjectSearchField::Query {
+                    self.move_project_search_query_line(1, shift);
+                }
+            }
+            PhysicalKey::Code(KeyCode::Home) => {
+                self.project_search_editor_mut(field).move_home(shift);
+            }
+            PhysicalKey::Code(KeyCode::End) => {
+                self.project_search_editor_mut(field).move_end(shift);
+            }
+            PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                self.project_search_editor_mut(field).select_all();
+            }
+            PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                let selected = self.project_search_editor_mut(field).get_selection();
+                if let Some(text) = selected {
+                    self.set_clipboard_text(text);
+                }
+            }
+            PhysicalKey::Code(KeyCode::KeyX) if ctrl => {
+                let selected = self.project_search_editor_mut(field).get_selection();
+                if let Some(text) = selected {
+                    self.set_clipboard_text(text);
+                    self.project_search_editor_mut(field).delete_selection();
+                    is_edit = true;
+                }
+            }
+            PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
+                if let Some(text) = self.get_clipboard_text() {
+                    let text = if field == crate::app::project_search::ProjectSearchField::Query {
+                        text
+                    } else {
+                        text.replace('\n', "").replace('\r', "")
+                    };
+                    if !text.is_empty() {
+                        self.project_search_editor_mut(field).insert_str(&text);
+                        is_edit = true;
+                    }
+                }
+            }
+            PhysicalKey::Code(KeyCode::Backspace) => {
+                let changed = if ctrl {
+                    self.project_search_editor_mut(field)
+                        .delete_word_backward()
+                        .is_some()
+                } else {
+                    self.project_search_editor_mut(field).backspace().is_some()
+                };
+                is_edit |= changed;
+            }
+            PhysicalKey::Code(KeyCode::Delete) => {
+                let changed = if ctrl {
+                    self.project_search_editor_mut(field)
+                        .delete_word_forward()
+                        .is_some()
+                } else {
+                    self.project_search_editor_mut(field).delete_forward().is_some()
+                };
+                is_edit |= changed;
+            }
+            _ => {
+                if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                    if let Some(text) = key_event.logical_key.to_text() {
+                        let text = if field
+                            == crate::app::project_search::ProjectSearchField::Query
+                        {
+                            text.to_string()
+                        } else {
+                            text.replace('\n', "").replace('\r', "")
+                        };
+                        if !text.is_empty() {
+                            self.project_search_editor_mut(field).insert_str(&text);
+                            is_edit = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        if is_edit {
+            self.project_search_editor_mut(field).sync_edits.clear();
+            self.ide_panel.project_search.dirty = true;
+        }
+        if should_run {
+            self.start_project_search();
+        }
+        self.last_action = Instant::now();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    fn project_search_editor_mut(
+        &mut self,
+        field: crate::app::project_search::ProjectSearchField,
+    ) -> &mut Editor {
+        match field {
+            crate::app::project_search::ProjectSearchField::Query => {
+                &mut self.ide_panel.project_search.query_editor
+            }
+            crate::app::project_search::ProjectSearchField::Include => {
+                &mut self.ide_panel.project_search.include_editor
+            }
+            crate::app::project_search::ProjectSearchField::Exclude => {
+                &mut self.ide_panel.project_search.exclude_editor
+            }
+        }
+    }
+
+    fn move_project_search_query_line(&mut self, delta: i32, shift: bool) {
+        let editor = &mut self.ide_panel.project_search.query_editor;
+        let text = editor.get_full_text();
+        let current_line = editor
+            .line_offsets
+            .partition_point(|&offset| offset <= editor.cursor)
+            .saturating_sub(1);
+        let target_line = if delta < 0 {
+            current_line.saturating_sub(1)
+        } else {
+            (current_line + 1).min(editor.line_offsets.len().saturating_sub(1))
+        };
+        if target_line == current_line {
+            return;
+        }
+        let current_start = editor.line_offsets.get(current_line).copied().unwrap_or(0);
+        let current_col = editor.cursor.saturating_sub(current_start);
+        let target_start = editor.line_offsets.get(target_line).copied().unwrap_or(0);
+        let mut target_end = editor
+            .line_offsets
+            .get(target_line + 1)
+            .copied()
+            .unwrap_or(text.len())
+            .min(text.len());
+        if target_end > target_start && text.as_bytes().get(target_end - 1) == Some(&b'\n') {
+            target_end -= 1;
+        }
+        let mut target = (target_start + current_col).min(target_end);
+        while target < target_end && !text.is_char_boundary(target) {
+            target += 1;
+        }
+        if shift {
+            if editor.selection_anchor.is_none() {
+                editor.selection_anchor = Some(editor.cursor);
+            }
+        } else {
+            editor.selection_anchor = None;
+        }
+        editor.cursor = target;
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == ElementState::Pressed {
             let ctrl = self.modifiers.control_key() || self.modifiers.super_key();

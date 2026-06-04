@@ -86,6 +86,7 @@ pub enum PendingAction {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum PanelId {
     Explorer,
+    Search,
     Git,
     ApiClient,
     Terminal,
@@ -97,6 +98,7 @@ impl PanelId {
     pub fn label(self) -> &'static str {
         match self {
             PanelId::Explorer => "Проводник",
+            PanelId::Search => "Поиск",
             PanelId::Git => "Git",
             PanelId::ApiClient => "API клиент",
             PanelId::Terminal => "Терминал",
@@ -107,6 +109,7 @@ impl PanelId {
     pub fn icon(self) -> crate::widgets::IconType {
         match self {
             PanelId::Explorer => crate::widgets::IconType::Explorer,
+            PanelId::Search => crate::widgets::IconType::Search,
             PanelId::Git => crate::widgets::IconType::Git,
             PanelId::ApiClient => crate::widgets::IconType::Api,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
@@ -313,6 +316,7 @@ pub struct IdePanelState {
     pub file_tree_delete_dialog: Option<crate::app::file_tree::FileTreeDeleteDialog>,
     pub file_tree_undo_stack: Vec<crate::app::file_tree::FileTreeUndoEntry>,
     pub file_tree_dialog_input_drag: Option<crate::app::file_tree::FileTreeDialogInputKind>,
+    pub project_search: crate::app::project_search::ProjectSearchState,
     pub git: crate::app::git_panel::GitPanelState,
     pub api: crate::app::api_client::ApiClientState,
     /// Актуальная инфа о LSP серверах для рендера панели
@@ -357,6 +361,11 @@ impl Default for IdePanelState {
             slots: vec![
                 PanelSlot {
                     id: PanelId::Explorer,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
+                    id: PanelId::Search,
                     group: PanelGroup::Top,
                     open: false,
                 },
@@ -406,6 +415,7 @@ impl Default for IdePanelState {
             file_tree_delete_dialog: None,
             file_tree_undo_stack: Vec::new(),
             file_tree_dialog_input_drag: None,
+            project_search: crate::app::project_search::ProjectSearchState::default(),
             git: crate::app::git_panel::GitPanelState::default(),
             api: crate::app::api_client::ApiClientState::default(),
             lsp_servers: Vec::new(),
@@ -1183,7 +1193,9 @@ mod tests {
     #[test]
     fn panel_metadata_maps_to_labels_and_icons() {
         assert_eq!(PanelId::Explorer.label(), "Проводник");
+        assert_eq!(PanelId::Search.label(), "Поиск");
         assert_eq!(PanelId::Terminal.label(), "Терминал");
+        assert!(PanelId::Search.icon() == crate::widgets::IconType::Search);
         assert!(PanelId::Problems.icon() == crate::widgets::IconType::Problems);
         assert!(PanelId::LspServers.icon() == crate::widgets::IconType::LspServers);
         assert!(PanelId::ApiClient.icon() == crate::widgets::IconType::Api);

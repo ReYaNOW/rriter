@@ -372,6 +372,7 @@ impl App {
             && !self.ide_panel.terminal_focused
             && !self.ide_panel.term_search_focused
             && !self.ide_panel.git.message_focused
+            && self.ide_panel.project_search.focused.is_none()
             && self.ide_panel.lsp_logs_focused.is_none()
             && !self.ide_panel.lsp_log_filter_focused
             && !self.ide_panel.file_tree_focused

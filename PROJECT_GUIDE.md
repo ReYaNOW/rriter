@@ -59,7 +59,7 @@ Important ideas:
 * Hot draw path must avoid large allocations.
 * `render_view.rs` is frame orchestrator.
 * `render_view/editor_text_layer.rs` owns visible editor glyph/background/cursor draw loops.
-* `render_view/ide_panels.rs` owns IDE sidebar, explorer panel, and bottom panel shells.
+* `render_view/ide_panels.rs` owns IDE sidebar, explorer/project search panels, and bottom panel shells.
 * `render_view/hover_overlays.rs` owns LSP squiggle hover collection and hover overlay draw routing.
 * Specialized modules render text, tabs, minimap, terminal, panels, dialogs.
 
@@ -579,6 +579,7 @@ Implementation is split through `include!`:
 
 * `src/render_view/ide_panels/ide_panel_helpers.rs` -> shared layout/tooltip helpers.
 * `src/render_view/ide_panels/ide_panel_side_renderer.rs` -> side/top panels and explorer rows.
+* `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search controls and virtualized result rows.
 * `src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs` -> Git graph/file tooltip drawing.
 * `src/render_view/ide_panels/ide_panel_git_graph_renderer.rs` -> Git graph panel.
 * `src/render_view/ide_panels/ide_panel_git_workspace_renderer.rs` -> Git workspace panel.

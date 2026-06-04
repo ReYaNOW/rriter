@@ -289,6 +289,30 @@ impl App {
             }
         }
 
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Search) {
+            let s = self.renderer.as_ref().unwrap().scale_factor;
+            let mx = self.renderer.as_ref().unwrap().last_mouse_x;
+            let my = self.renderer.as_ref().unwrap().last_mouse_y;
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Search, s, true);
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                if let Some(layout) = self.project_search_panel_layout() {
+                    self.ide_panel.project_search.scroll.anim_speed = 7.0;
+                    self.ide_panel.project_search.scroll.scroll_by(dy);
+                    let max_scroll = self
+                        .ide_panel
+                        .project_search
+                        .max_scroll(layout.list.h, s);
+                    self.ide_panel
+                        .project_search
+                        .scroll
+                        .clamp_target(0.0, max_scroll);
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+                return;
+            }
+        }
+
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Git) {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;

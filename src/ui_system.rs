@@ -244,6 +244,16 @@ pub enum UiId {
     SearchInput,
     SearchPanelBody,
 
+    // Project search
+    ProjectSearchQueryInput,
+    ProjectSearchIncludeInput,
+    ProjectSearchExcludeInput,
+    ProjectSearchRun,
+    ProjectSearchCaseToggle,
+    ProjectSearchFileToggle(usize),
+    ProjectSearchMatchJump(usize, usize),
+    ProjectSearchPanelBody,
+
     // Tabs
     EditorTab(usize),
     EditorTabClose(usize),

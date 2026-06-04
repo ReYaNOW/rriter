@@ -419,6 +419,31 @@ impl Renderer {
 
             // (Ручка ресайза была здесь, перенесена в конец блока левой панели)
 
+            // --- Project search ---
+            if ide_panel.is_open(crate::app::PanelId::Search) {
+                let is_top = ide_panel.slots.iter().any(|s| {
+                    s.id == crate::app::PanelId::Search && s.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    let panel_bottom_h = if ide_panel.any_bottom_open() {
+                        ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                    self.draw_project_search_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        (content_bottom - title_h).max(0.0),
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        blink_alpha,
+                    );
+                }
+            }
+
             // --- LSP серверы ---
             if ide_panel.is_open(crate::app::PanelId::LspServers) {
                 let is_top = ide_panel.slots.iter().any(|s| {

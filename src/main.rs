@@ -248,6 +248,7 @@ fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
     for slot in &state.slots {
         let id_s = match slot.id {
             crate::app::PanelId::Explorer => "Explorer",
+            crate::app::PanelId::Search => "Search",
             crate::app::PanelId::Git => "Git",
             crate::app::PanelId::ApiClient => "ApiClient",
             crate::app::PanelId::Terminal => "Terminal",
@@ -288,6 +289,7 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
         if parts.len() == 3 {
             let id = match parts[0] {
                 "Explorer" => crate::app::PanelId::Explorer,
+                "Search" => crate::app::PanelId::Search,
                 "Git" => crate::app::PanelId::Git,
                 "ApiClient" => crate::app::PanelId::ApiClient,
                 "Terminal" => crate::app::PanelId::Terminal,

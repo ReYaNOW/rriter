@@ -10,6 +10,7 @@ pub mod git_panel;
 pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
+pub mod project_search;
 mod python_completion;
 pub mod terminal;
 pub mod ui_handlers;

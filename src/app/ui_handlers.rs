@@ -220,6 +220,7 @@ impl App {
             UiId::HoverPopupScroll
             | UiId::StatusBar
             | UiId::SearchPanelBody
+            | UiId::ProjectSearchPanelBody
             | UiId::InlineGitPanelBody
             | UiId::GitDiffPanelBody => {}
             UiId::StatusDiagnostics => {
@@ -818,6 +819,11 @@ impl App {
                 if panel_id == crate::app::PanelId::Git && self.ide_panel.is_open(panel_id) {
                     self.refresh_git_panel();
                 }
+                if panel_id == crate::app::PanelId::Search && self.ide_panel.is_open(panel_id) {
+                    self.ensure_project_search_include_guess();
+                    self.ide_panel.project_search.focused =
+                        Some(crate::app::project_search::ProjectSearchField::Query);
+                }
                 crate::save_panel_state(&self.ide_panel);
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -885,6 +891,38 @@ impl App {
             }
             UiId::FileTreeDeleteCancel => {
                 self.ide_panel.file_tree_delete_dialog = None;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+
+            // Project search
+            UiId::ProjectSearchQueryInput => {
+                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Query);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchIncludeInput => {
+                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Include);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchExcludeInput => {
+                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Exclude);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchRun => {
+                self.start_project_search();
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchCaseToggle => {
+                self.ide_panel.project_search.case_sensitive =
+                    !self.ide_panel.project_search.case_sensitive;
+                self.ide_panel.project_search.dirty = true;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchFileToggle(file_idx) => {
+                self.ide_panel.project_search.toggle_file(file_idx);
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::ProjectSearchMatchJump(file_idx, match_idx) => {
+                self.handle_project_search_match_click(file_idx, match_idx);
                 self.window.as_ref().unwrap().request_redraw();
             }
 
