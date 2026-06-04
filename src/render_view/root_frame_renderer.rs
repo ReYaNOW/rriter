@@ -439,6 +439,7 @@ impl Renderer {
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
+                lsp,
                 &ide_panel.api,
                 ide_workspaces,
             );
@@ -908,6 +909,7 @@ impl Renderer {
                 ui_registry,
                 tab_scroll_x,
                 ide_panel.tab_drag.as_ref(),
+                lsp,
                 &ide_panel.api,
                 ide_workspaces,
             );

@@ -4,6 +4,34 @@ use glow::HasContext;
 
 pub(crate) const EXTERNAL_TAB_TITLE_COLOR: [f32; 4] = [1.0, 0.55, 0.18, 1.0];
 
+fn tab_diagnostic_severity(
+    diagnostics: &[crate::lsp::Diagnostic],
+) -> Option<crate::lsp::DiagSeverity> {
+    let mut has_warning = false;
+    for diagnostic in diagnostics {
+        match diagnostic.severity {
+            crate::lsp::DiagSeverity::Error => return Some(crate::lsp::DiagSeverity::Error),
+            crate::lsp::DiagSeverity::Warning => has_warning = true,
+            _ => {}
+        }
+    }
+    has_warning.then_some(crate::lsp::DiagSeverity::Warning)
+}
+
+fn tab_diagnostic_severity_for_path(
+    lsp: Option<&crate::lsp::LspManager>,
+    path: Option<&std::path::PathBuf>,
+) -> Option<crate::lsp::DiagSeverity> {
+    let lsp = lsp?;
+    let path = path?;
+    let diagnostics = lsp
+        .diagnostics
+        .get(path)
+        .map(|diags| diags.as_slice())
+        .unwrap_or_else(|| lsp.get_diagnostics(path));
+    tab_diagnostic_severity(diagnostics)
+}
+
 pub(crate) fn tab_path_is_external(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
@@ -34,6 +62,7 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         tab_scroll_x: f32,
         tab_drag: Option<&crate::app::TabDragState>,
+        lsp: Option<&crate::lsp::LspManager>,
         api: &crate::app::api_client::ApiClientState,
         ide_workspaces: &[std::path::PathBuf],
     ) -> Option<(String, f32, f32)> {
@@ -303,8 +332,9 @@ impl Renderer {
                     self.theme.fg
                 } else {
                     self.theme.line_num
-                };
+            };
             let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
+            let text_y = y + h / 2.0 + 5.0 * s;
             if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind
                 && let Some(method) = meta.route_method
             {
@@ -315,7 +345,7 @@ impl Renderer {
                 };
                 let mut path = String::new();
                 crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
-                self.draw_string_scaled(api_title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
+                self.draw_string_scaled(api_title, text_x, text_y, text_color, 1.0);
                 let title_w = self.measure_ui_width(api_title, 1.0);
                 let chip_w = (self.measure_ui_width(method.chip_str(), 0.62) + 16.0 * s)
                     .max(34.0 * s);
@@ -333,12 +363,27 @@ impl Renderer {
                 self.draw_string_scaled(
                     &path,
                     chip_x + chip_w + 8.0 * s,
-                    y + h / 2.0 + 5.0 * s,
+                    text_y,
                     text_color,
                     0.88,
                 );
             } else {
-                self.draw_string_scaled(title, text_x, y + h / 2.0 + 5.0 * s, text_color, 1.0);
+                self.draw_string_scaled(title, text_x, text_y, text_color, 1.0);
+                if let Some(severity) = tab_diagnostic_severity_for_path(lsp, paths[i]) {
+                    let title_w =
+                        (tab_w - (tab_pad * 2.0 + icon_size_tab + 8.0 * s + 30.0 * s)).max(0.0);
+                    let color = match severity {
+                        crate::lsp::DiagSeverity::Error => self.theme.diag_error,
+                        crate::lsp::DiagSeverity::Warning => self.theme.diag_warn,
+                        _ => self.theme.diag_warn,
+                    };
+                    self.push_squiggle(
+                        text_x,
+                        text_y + 2.0 * s,
+                        title_w,
+                        color,
+                    );
+                }
             }
 
             let tab_right = current_x + tab_w;
