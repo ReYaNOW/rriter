@@ -702,7 +702,8 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiResponseBodyTab(route_idx)
-            | crate::ui_system::UiId::ApiResponseHeadersTab(route_idx) => {
+            | crate::ui_system::UiId::ApiResponseHeadersTab(route_idx)
+            | crate::ui_system::UiId::ApiResponseCurlTab(route_idx) => {
                 let Some((meta, state)) = self.active_api_tab() else {
                     return true;
                 };
@@ -713,6 +714,7 @@ impl crate::app::App {
                 let view = match id {
                     crate::ui_system::UiId::ApiResponseBodyTab(_) => ApiResponseView::Body,
                     crate::ui_system::UiId::ApiResponseHeadersTab(_) => ApiResponseView::Headers,
+                    crate::ui_system::UiId::ApiResponseCurlTab(_) => ApiResponseView::Curl,
                     _ => ApiResponseView::Body,
                 };
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {

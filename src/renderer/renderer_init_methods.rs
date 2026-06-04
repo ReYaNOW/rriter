@@ -254,6 +254,25 @@ impl Renderer {
 
             fonts.push(FontData::new_static(nerd_font_data));
 
+            let symbol_font_paths = [
+                "/usr/share/fonts/noto/NotoSansSymbols2-Regular.ttf",
+                "/usr/share/fonts/noto/NotoSansSymbols-Regular.ttf",
+                "/usr/share/fonts/TTF/NotoSansSymbols2-Regular.ttf",
+                "/usr/share/fonts/TTF/NotoSansSymbols-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+                "/usr/share/fonts/truetype/noto/NotoSansSymbols-Regular.ttf",
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                "/usr/share/fonts/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/ancient-scripts/Symbola_hint.ttf",
+            ];
+
+            for path in symbol_font_paths.iter() {
+                if std::path::Path::new(path).exists() {
+                    fonts.push(FontData::new_lazy(path));
+                }
+            }
+
             let emoji_paths = [
                 "/usr/share/fonts/noto/NotoColorEmoji.ttf",
                 "/usr/share/fonts/noto-emoji/NotoColorEmoji.ttf",

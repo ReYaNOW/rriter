@@ -710,6 +710,7 @@ impl crate::app::App {
                     timing_text: String::new(),
                     headers: Vec::new(),
                     headers_text: String::new(),
+                    curl_text: String::new(),
                     body: String::new(),
                     truncated: false,
                     error: Some(ApiLoadError::new(
@@ -749,6 +750,7 @@ impl crate::app::App {
                     timing_text: String::new(),
                     headers: Vec::new(),
                     headers_text: String::new(),
+                    curl_text: String::new(),
                     body: String::new(),
                     truncated: false,
                     error: Some(ApiLoadError::new(
@@ -774,6 +776,7 @@ impl crate::app::App {
                         timing_text: String::new(),
                         headers: Vec::new(),
                         headers_text: String::new(),
+                        curl_text: String::new(),
                         body: String::new(),
                         truncated: false,
                         error: Some(err),
@@ -850,6 +853,7 @@ impl crate::app::App {
                     timing_text: String::new(),
                     headers: Vec::new(),
                     headers_text: String::new(),
+                    curl_text: String::new(),
                     body: String::new(),
                     truncated: false,
                     error: Some(ApiLoadError::new(
@@ -882,6 +886,7 @@ impl crate::app::App {
                         timing_text: String::new(),
                         headers: Vec::new(),
                         headers_text: String::new(),
+                        curl_text: String::new(),
                         body: String::new(),
                         truncated: false,
                         error: Some(err),

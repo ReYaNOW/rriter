@@ -888,6 +888,47 @@ impl Renderer {
         }
     }
 
+    fn draw_curl_text_area(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        s: f32,
+        scroll_y: f32,
+        scroll_x: f32,
+    ) {
+        let line_h = api_text_area_line_height(s);
+        let scroll_y = scroll_y.clamp(
+            0.0,
+            crate::app::api_client::api_text_area_max_scroll(text, h, s),
+        );
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let line_offset = scroll_y - first_line as f32 * line_h;
+        let max_lines = (h / line_h).ceil().max(1.0) as usize + 1;
+        let mut byte_idx = 0usize;
+        for (line_idx, line) in text.split('\n').enumerate() {
+            let line_start = byte_idx;
+            let line_end = line_start + line.len();
+            if line_idx < first_line {
+                byte_idx = line_end.saturating_add(1);
+                continue;
+            }
+            let visible_idx = line_idx - first_line;
+            if visible_idx >= max_lines {
+                break;
+            }
+            self.draw_curl_lexed_line(
+                line,
+                x - scroll_x,
+                y - line_offset + visible_idx as f32 * line_h,
+                w + scroll_x,
+            );
+            byte_idx = line_end.saturating_add(1);
+        }
+    }
+
     fn draw_api_schema_text_area(
         &mut self,
         text: &str,

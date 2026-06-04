@@ -2240,6 +2240,7 @@ impl Renderer {
                 let tab_h = 28.0 * s;
                 let body_w = self.measure_ui_width("Body", 0.86) + 22.0 * s;
                 let headers_w = self.measure_ui_width("Headers", 0.86) + 22.0 * s;
+                let curl_w = self.measure_ui_width("Curl", 0.86) + 22.0 * s;
                 self.draw_api_response_tab(
                     "Body",
                     tab_state.response_view == ApiResponseView::Body,
@@ -2262,6 +2263,19 @@ impl Renderer {
                     tab_h,
                     s,
                     crate::ui_system::UiId::ApiResponseHeadersTab(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                self.draw_api_response_tab(
+                    "Curl",
+                    tab_state.response_view == ApiResponseView::Curl,
+                    x + pad + body_w + headers_w + 16.0 * s,
+                    tab_y,
+                    curl_w,
+                    tab_h,
+                    s,
+                    crate::ui_system::UiId::ApiResponseCurlTab(route_idx),
                     ui_registry,
                     mx,
                     my,
@@ -2391,17 +2405,30 @@ impl Renderer {
                             tab_state.response_scroll_x.current,
                         );
                     }
-                    self.draw_json_text_area(
-                        &response_text,
-                        x + pad + 10.0 * s,
-                        cy + 29.0 * s,
-                        content_w - 20.0 * s,
-                        resp_h - 16.0 * s,
-                        s,
-                        tab_state.response_scroll.current,
-                        tab_state.response_scroll_x.current,
-                        tab_state.response_view == ApiResponseView::Headers,
-                    );
+                    if tab_state.response_view == ApiResponseView::Curl {
+                        self.draw_curl_text_area(
+                            &response_text,
+                            x + pad + 10.0 * s,
+                            cy + 29.0 * s,
+                            content_w - 20.0 * s,
+                            resp_h - 16.0 * s,
+                            s,
+                            tab_state.response_scroll.current,
+                            tab_state.response_scroll_x.current,
+                        );
+                    } else {
+                        self.draw_json_text_area(
+                            &response_text,
+                            x + pad + 10.0 * s,
+                            cy + 29.0 * s,
+                            content_w - 20.0 * s,
+                            resp_h - 16.0 * s,
+                            s,
+                            tab_state.response_scroll.current,
+                            tab_state.response_scroll_x.current,
+                            tab_state.response_view == ApiResponseView::Headers,
+                        );
+                    }
                     self.draw_api_text_scrollbar(
                         &response_text,
                         x + pad + content_w - 8.0 * s,

@@ -31,6 +31,7 @@ const API_FIELD_TYPE_SCALE: f32 = 0.84;
 const API_FIELD_VALUE_SCALE: f32 = 0.88;
 pub(crate) const API_ONE_LINE_INPUT_SCALE: f32 = API_FIELD_VALUE_SCALE;
 const API_FIELD_META_SCALE: f32 = 0.78;
+
 #[derive(Clone, Copy)]
 struct ApiFieldRowLayout {
     row_h: f32,

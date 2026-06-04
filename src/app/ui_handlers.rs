@@ -149,6 +149,7 @@ impl App {
             | UiId::ApiOutputSchemaFold(_, _)
             | UiId::ApiResponseBodyTab(_)
             | UiId::ApiResponseHeadersTab(_)
+            | UiId::ApiResponseCurlTab(_)
             | UiId::ApiResponseBody(_)
             | UiId::ApiResponseScrollX(_)
             | UiId::ApiResponseUseAccessToken(_, _)

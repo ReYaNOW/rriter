@@ -8,7 +8,12 @@ pub struct Cell {
     pub c: char,
     pub fg: u8,
     pub bg: u8,
+    pub presentation: u8,
 }
+
+pub(crate) const CELL_PRESENTATION_AUTO: u8 = 0;
+pub(crate) const CELL_PRESENTATION_TEXT: u8 = 1;
+pub(crate) const CELL_PRESENTATION_EMOJI: u8 = 2;
 
 impl Default for Cell {
     fn default() -> Self {
@@ -16,8 +21,24 @@ impl Default for Cell {
             c: ' ',
             fg: 7,
             bg: 0,
+            presentation: CELL_PRESENTATION_AUTO,
         }
     }
+}
+
+#[inline(always)]
+pub(crate) fn terminal_presentation_selector(c: char) -> Option<u8> {
+    match c {
+        '\u{FE0E}' => Some(CELL_PRESENTATION_TEXT),
+        '\u{FE0F}' => Some(CELL_PRESENTATION_EMOJI),
+        _ => None,
+    }
+}
+
+#[inline(always)]
+pub(crate) fn is_terminal_zero_width_format(c: char) -> bool {
+    let u = c as u32;
+    c == '\u{200D}' || (0xFE00..=0xFE0F).contains(&u) || (0xE0100..=0xE01EF).contains(&u)
 }
 
 #[inline(always)]
@@ -245,9 +266,31 @@ impl TermGrid {
                 cell.c = c;
                 cell.fg = fg;
                 cell.bg = bg;
+                cell.presentation = CELL_PRESENTATION_AUTO;
             }
         }
         self.cur_x += 1;
+    }
+
+    pub fn apply_presentation_selector(&mut self, presentation: u8) {
+        if self.cur_x == 0 {
+            return;
+        }
+        let Some(line) = self.lines.get_mut(self.cur_y) else {
+            return;
+        };
+        let cell_x = self.cur_x - 1;
+        if let Some(cell) = line.get_mut(cell_x) {
+            if cell.c != ' ' {
+                cell.presentation = if presentation == CELL_PRESENTATION_EMOJI
+                    && crate::renderer::terminal_force_text_presentation(cell.c)
+                {
+                    CELL_PRESENTATION_TEXT
+                } else {
+                    presentation
+                };
+            }
+        }
     }
 
     pub fn newline(&mut self) {
@@ -404,6 +447,37 @@ mod tests {
         assert_eq!(grid.cols, 6);
         assert_eq!(grid.visible_rows, 3);
         assert!(grid.lines.iter().all(|line| line.len() == 6));
+    }
+
+    #[test]
+    fn terminal_print_applies_text_selector_but_keeps_text_default_symbols_text() {
+        let mut grid = TermGrid::new(8, 2);
+
+        feed(&mut grid, "✔\u{FE0F}X✅\u{FE0E}Y".as_bytes());
+
+        assert_eq!(
+            grid.lines[0][0..4]
+                .iter()
+                .map(|cell| cell.c)
+                .collect::<String>(),
+            "✔X✅Y"
+        );
+        assert_eq!(grid.cur_x, 4);
+        assert_eq!(grid.lines[0][0].presentation, CELL_PRESENTATION_TEXT);
+        assert_eq!(grid.lines[0][1].presentation, CELL_PRESENTATION_AUTO);
+        assert_eq!(grid.lines[0][2].presentation, CELL_PRESENTATION_TEXT);
+        assert_eq!(grid.lines[0][3].presentation, CELL_PRESENTATION_AUTO);
+        assert_eq!(terminal_presentation_selector('\u{FE0F}'), Some(CELL_PRESENTATION_EMOJI));
+        assert_eq!(terminal_presentation_selector('\u{FE0E}'), Some(CELL_PRESENTATION_TEXT));
+        assert!(is_terminal_zero_width_format('\u{FE0F}'));
+        assert!(is_terminal_zero_width_format('\u{FE0E}'));
+        assert!(is_terminal_zero_width_format('\u{200D}'));
+        assert!(!is_terminal_zero_width_format('✔'));
+    }
+
+    #[test]
+    fn terminal_cell_presentation_flag_keeps_cell_size_tight() {
+        assert_eq!(std::mem::size_of::<Cell>(), 8);
     }
 
     #[test]
@@ -703,7 +777,8 @@ mod tests {
             Cell {
                 c: 's',
                 fg: 7,
-                bg: 0
+                bg: 0,
+                presentation: CELL_PRESENTATION_AUTO,
             };
             3
         ]);
@@ -799,6 +874,13 @@ mod tests {
 
 impl Perform for TermGrid {
     fn print(&mut self, c: char) {
+        if let Some(presentation) = terminal_presentation_selector(c) {
+            self.apply_presentation_selector(presentation);
+            return;
+        }
+        if is_terminal_zero_width_format(c) {
+            return;
+        }
         self.put_char(c);
     }
     fn execute(&mut self, byte: u8) {

@@ -529,6 +529,7 @@ pub enum ApiResponseView {
     #[default]
     Body,
     Headers,
+    Curl,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -779,6 +779,47 @@ mod tests {
     }
 
     #[test]
+    fn api_curl_command_includes_auth_and_json_body() {
+        let job = ApiJobRequest {
+            request_id: 9,
+            spec_id: ApiSpecId(120),
+            route_idx: 2,
+            method: ApiMethod::Post,
+            url: "https://api.example.test/pets?debug=true".to_string(),
+            mock_target: ApiJobMockTarget::None,
+            auth_parts: vec![
+                ApiPreparedAuthPart::Header {
+                    name: "X-Trace".to_string(),
+                    value: "abc".to_string(),
+                },
+                ApiPreparedAuthPart::Bearer {
+                    token: "token-1-abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789".to_string(),
+                },
+                ApiPreparedAuthPart::Cookie {
+                    name: "session".to_string(),
+                    value: "cookie-1".to_string(),
+                },
+            ],
+            body_json: Some(r#"{"name":"O'Reilly"}"#.to_string()),
+            body_form: None,
+            body_multipart: None,
+            resolved_host: None,
+        };
+
+        let curl = format_api_curl_command(&job);
+
+        assert!(curl.contains("curl \\\n  -X POST"));
+        assert!(curl.contains("  'https://api.example.test/pets?debug=true'"));
+        assert!(curl.contains("-H 'accept: application/json'"));
+        assert!(curl.contains("-H 'X-Trace: abc'"));
+        assert!(curl.contains("-H 'Authorization: Bearer token-1-"));
+        assert!(curl.contains("'\\\n'"));
+        assert!(curl.contains("-H 'Cookie: session=cookie-1'"));
+        assert!(curl.contains("-H 'Content-Type: application/json'"));
+        assert!(curl.contains(r#"--data-binary '{"name":"O'\''Reilly"}'"#));
+    }
+
+    #[test]
     fn auth_capture_saves_tokens_refresh_and_cookie_keys() {
         let model = parse_openapi_model(ApiSpecId(13), &auth_spec()).expect("parse");
         let mut auth = ApiAuthStore::default();
@@ -795,6 +836,7 @@ mod tests {
                 "session=cookie-secret; HttpOnly; Path=/".to_string(),
             )],
             headers_text: String::new(),
+            curl_text: String::new(),
             body: serde_json::json!({
                 "access_token": "access",
                 "refresh_token": "refresh",
@@ -1437,6 +1479,7 @@ mod tests {
             timing_text: String::new(),
             headers: Vec::new(),
             headers_text: String::new(),
+            curl_text: String::new(),
             body: r#"{"access_token":"a"}"#.to_string(),
             truncated: false,
             resolved_host: None,
@@ -1469,6 +1512,7 @@ mod tests {
                 timing_text: "3ms".to_string(),
                 headers: Vec::new(),
                 headers_text: String::new(),
+                curl_text: String::new(),
                 body: "{\"ok\":true}".to_string(),
                 truncated: false,
                 error: None,
@@ -1681,6 +1725,7 @@ mod tests {
                 timing_text: "1 ms (~1 ms до сервера)".to_string(),
                 headers: Vec::new(),
                 headers_text: String::new(),
+                curl_text: String::new(),
                 body: "{}".to_string(),
                 truncated: false,
                 error: None,

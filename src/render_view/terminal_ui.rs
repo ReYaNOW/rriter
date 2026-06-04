@@ -11,6 +11,32 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
     (content_y + body_offset, (content_h - body_offset).max(0.0))
 }
 
+fn terminal_glyph_anchor(
+    c: char,
+    glyph: crate::renderer::GlyphInfo,
+    cell_x: f32,
+    row_y: f32,
+    cell_w: f32,
+    char_h: f32,
+    baseline_y: f32,
+    scale: f32,
+) -> (f32, f32, f32) {
+    if !crate::renderer::terminal_force_text_presentation(c) || glyph.is_emoji != 0.0 {
+        return (cell_x, baseline_y, scale);
+    }
+
+    let max_w = cell_w * 0.70;
+    let max_h = char_h * 0.58;
+    let fit_scale = scale
+        .min(max_w / glyph.width.max(1.0))
+        .min(max_h / glyph.height.max(1.0));
+    let fitted_w = glyph.width * fit_scale;
+    let fitted_h = glyph.height * fit_scale;
+    let x = cell_x + (cell_w - fitted_w) * 0.5 - glyph.offset_x * fit_scale;
+    let y = row_y + (char_h - fitted_h) * 0.5 + glyph.offset_y * fit_scale;
+    (x, y, fit_scale)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_terminal_panel(
@@ -342,14 +368,22 @@ impl Renderer {
                         } else {
                             self.theme.fg
                         };
-                        let mut char_buf = [0u8; 4];
-                        self.draw_string_mono_scaled(
-                            cell.c.encode_utf8(&mut char_buf),
-                            cx,
-                            draw_y + self.baseline_offset * term_scale,
-                            fg_color,
-                            term_scale,
-                        );
+                        let prefer_color = match cell.presentation {
+                            crate::app::terminal::CELL_PRESENTATION_TEXT => Some(false),
+                            crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
+                            _ => None,
+                        };
+                        if let Some(g) = self.get_terminal_glyph(cell.c, prefer_color) {
+                            let baseline_y = draw_y + self.baseline_offset * term_scale;
+                            let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
+                                cell.c, g, cx, draw_y, cell_w, char_h, baseline_y, term_scale,
+                            );
+                            let (q_x, q_y, q_w, q_h) =
+                                crate::renderer::glyph_quad_rect(glyph_x, glyph_y, g, glyph_scale);
+                            self.push_quad(
+                                q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, fg_color, g.is_emoji,
+                            );
+                        }
                     }
                 }
             }
@@ -717,5 +751,59 @@ impl Renderer {
                 self.scratch_buffer = scratch;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn glyph(
+        width: f32,
+        height: f32,
+        offset_x: f32,
+        offset_y: f32,
+        is_emoji: f32,
+    ) -> crate::renderer::GlyphInfo {
+        crate::renderer::GlyphInfo {
+            u: 0.0,
+            v: 0.0,
+            uw: 0.0,
+            vh: 0.0,
+            width,
+            height,
+            offset_x,
+            offset_y,
+            advance: width,
+            is_emoji,
+        }
+    }
+
+    #[test]
+    fn terminal_glyph_anchor_shrinks_check_mark_inside_cell() {
+        let g = glyph(18.0, 24.0, 1.0, 20.0, 0.0);
+        let (x, y, scale) = terminal_glyph_anchor('✔', g, 100.0, 40.0, 12.0, 28.0, 60.0, 1.05);
+        let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(x, y, g, scale);
+
+        assert!(scale < 1.05);
+        assert!(q_x >= 100.0);
+        assert!(q_x + q_w <= 112.0);
+        assert!(q_y >= 40.0);
+        assert!(q_y + q_h <= 68.0);
+    }
+
+    #[test]
+    fn terminal_glyph_anchor_leaves_regular_and_emoji_glyphs_unchanged() {
+        let regular = glyph(9.0, 18.0, 0.0, 15.0, 0.0);
+        assert_eq!(
+            terminal_glyph_anchor('A', regular, 10.0, 20.0, 12.0, 28.0, 40.0, 1.05),
+            (10.0, 40.0, 1.05)
+        );
+
+        let emoji = glyph(20.0, 20.0, 0.0, 17.0, 1.0);
+        assert_eq!(
+            terminal_glyph_anchor('✅', emoji, 10.0, 20.0, 12.0, 28.0, 40.0, 1.05),
+            (10.0, 40.0, 1.05)
+        );
     }
 }

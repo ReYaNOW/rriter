@@ -47,6 +47,7 @@ pub struct ApiJobResponse {
     pub timing_text: String,
     pub headers: Vec<(String, String)>,
     pub headers_text: String,
+    pub curl_text: String,
     pub body: String,
     pub truncated: bool,
     pub error: Option<ApiLoadError>,
@@ -57,6 +58,7 @@ pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &s
     match view {
         ApiResponseView::Body => &response.body,
         ApiResponseView::Headers => &response.headers_text,
+        ApiResponseView::Curl => &response.curl_text,
     }
 }
 
@@ -143,6 +145,15 @@ fn apply_auth_to_builder(
         request = request.header("Cookie", cookie_header);
     }
     request
+}
+
+fn api_auth_parts_have_header(auth_parts: &[ApiPreparedAuthPart], name: &str) -> bool {
+    auth_parts.iter().any(|part| match part {
+        ApiPreparedAuthPart::Header {
+            name: header_name, ..
+        } => header_name.eq_ignore_ascii_case(name),
+        _ => false,
+    })
 }
 
 fn build_multipart_body(
@@ -232,6 +243,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
         timing_text: String::new(),
         headers: Vec::new(),
         headers_text: String::new(),
+        curl_text: format_api_curl_command(&job),
         body: String::new(),
         truncated: false,
         error: None,
@@ -346,6 +358,151 @@ fn format_api_response_headers(headers: &[(String, String)]) -> String {
         out.push_str(value);
     }
     out
+}
+
+fn format_api_curl_command(job: &ApiJobRequest) -> String {
+    let mut out = String::with_capacity(job.url.len().saturating_add(160));
+    out.push_str("curl \\\n  -X ");
+    out.push_str(job.method.as_str());
+    out.push_str(" \\\n  ");
+    push_shell_quoted(&mut out, &job.url);
+
+    if !api_auth_parts_have_header(&job.auth_parts, "accept") {
+        push_curl_header(&mut out, "accept", "application/json");
+    }
+    let mut cookie_header = String::new();
+    for part in &job.auth_parts {
+        match part {
+            ApiPreparedAuthPart::Header { name, value } => {
+                push_curl_header(&mut out, name, value);
+            }
+            ApiPreparedAuthPart::Basic { username, password } => {
+                let mut value = String::with_capacity(username.len() + password.len() + 1);
+                value.push_str(username);
+                value.push(':');
+                value.push_str(password);
+                push_curl_arg(&mut out, "-u", &value);
+            }
+            ApiPreparedAuthPart::Bearer { token } => {
+                let mut value = String::with_capacity("Bearer ".len() + token.len());
+                value.push_str("Bearer ");
+                value.push_str(token);
+                push_curl_header(&mut out, "Authorization", &value);
+            }
+            ApiPreparedAuthPart::Digest { value } => {
+                let mut header = String::with_capacity("Digest ".len() + value.len());
+                header.push_str("Digest ");
+                header.push_str(value);
+                push_curl_header(&mut out, "Authorization", &header);
+            }
+            ApiPreparedAuthPart::Cookie { name, value } => {
+                if !cookie_header.is_empty() {
+                    cookie_header.push_str("; ");
+                }
+                cookie_header.push_str(name);
+                cookie_header.push('=');
+                cookie_header.push_str(value);
+            }
+            ApiPreparedAuthPart::Query { .. } => {}
+        }
+    }
+    if !cookie_header.is_empty() {
+        push_curl_header(&mut out, "Cookie", &cookie_header);
+    }
+
+    if let Some(parts) = job.body_multipart.as_ref() {
+        for part in parts {
+            let mut value = String::new();
+            match part {
+                ApiMultipartPart::Text { name, value: text } => {
+                    value.reserve(name.len() + text.len() + 1);
+                    value.push_str(name);
+                    value.push('=');
+                    value.push_str(text);
+                }
+                ApiMultipartPart::File { name, path } => {
+                    let path_text = path.to_string_lossy();
+                    value.reserve(name.len() + path_text.len() + 2);
+                    value.push_str(name);
+                    value.push_str("=@");
+                    value.push_str(&path_text);
+                }
+            }
+            push_curl_arg(&mut out, "-F", &value);
+        }
+    } else if let Some(fields) = job.body_form.as_ref() {
+        let pairs = api_form_pairs(fields);
+        if pairs.is_empty() {
+            push_curl_header(&mut out, "Content-Type", "application/x-www-form-urlencoded");
+            push_curl_arg(&mut out, "--data", "");
+        } else {
+            for (name, value) in pairs {
+                let mut field = String::with_capacity(name.len() + value.len() + 1);
+                field.push_str(name);
+                field.push('=');
+                field.push_str(value);
+                push_curl_arg(&mut out, "--data-urlencode", &field);
+            }
+        }
+    } else if job.method.can_send_body() {
+        push_curl_header(&mut out, "Content-Type", "application/json");
+        push_curl_arg(
+            &mut out,
+            "--data-binary",
+            job.body_json.as_deref().unwrap_or_default(),
+        );
+    }
+
+    out
+}
+
+fn push_curl_header(out: &mut String, name: &str, value: &str) {
+    let mut header = String::with_capacity(name.len() + value.len() + 2);
+    header.push_str(name);
+    header.push_str(": ");
+    header.push_str(value);
+    if name.eq_ignore_ascii_case("authorization") && header.chars().count() > 96 {
+        push_wrapped_curl_arg(out, "-H", &header, 96);
+    } else {
+        push_curl_arg(out, "-H", &header);
+    }
+}
+
+fn push_curl_arg(out: &mut String, flag: &str, value: &str) {
+    out.push_str(" \\\n  ");
+    out.push_str(flag);
+    out.push(' ');
+    push_shell_quoted(out, value);
+}
+
+fn push_wrapped_curl_arg(out: &mut String, flag: &str, value: &str, chunk_chars: usize) {
+    out.push_str(" \\\n  ");
+    out.push_str(flag);
+    out.push(' ');
+    let mut start = 0usize;
+    let mut chars = 0usize;
+    for (idx, _) in value.char_indices() {
+        if chars == chunk_chars {
+            push_shell_quoted(out, &value[start..idx]);
+            out.push_str("\\\n");
+            start = idx;
+            chars = 0;
+        }
+        chars += 1;
+    }
+    push_shell_quoted(out, &value[start..]);
+}
+
+fn push_shell_quoted(out: &mut String, value: &str) {
+    out.push('\'');
+    for ch in value.chars() {
+        if ch == '\'' {
+            out.push_str(r#"'\''"#);
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push('\'');
 }
 
 #[cfg(test)]

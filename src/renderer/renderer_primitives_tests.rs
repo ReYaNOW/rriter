@@ -480,6 +480,50 @@ mod tests {
     }
 
     #[test]
+    fn emoji_presentation_property_keeps_terminal_symbols_text_first() {
+        assert!(!default_emoji_presentation('✔'));
+        assert!(!default_emoji_presentation('✓'));
+        assert!(!default_emoji_presentation('⠋'));
+        assert!(!default_emoji_presentation('⣿'));
+        assert!(default_emoji_presentation('⬇'));
+        assert!(!default_emoji_presentation('☀'));
+        assert!(default_emoji_presentation('☔'));
+        assert!(default_emoji_presentation('⏳'));
+        assert!(default_emoji_presentation('✅'));
+        assert!(default_emoji_presentation('😀'));
+        assert!(default_emoji_presentation('🎉'));
+        assert!(default_emoji_presentation('🟢'));
+    }
+
+    #[test]
+    fn terminal_symbols_reject_color_emoji_glyph_content_when_text_preferred() {
+        assert!(!accept_rendered_glyph_content(false, Content::Color));
+        assert!(accept_rendered_glyph_content(false, Content::Mask));
+        assert!(accept_rendered_glyph_content(true, Content::Color));
+        assert!(accept_rendered_glyph_content(true, Content::Mask));
+        assert!(terminal_force_text_presentation('✔'));
+        assert!(!terminal_force_text_presentation('✅'));
+    }
+
+    #[test]
+    fn custom_svg_glyphs_only_cover_builtin_ui_arrows() {
+        assert!(custom_svg_glyph_source('▶').is_some());
+        assert!(custom_svg_glyph_source('▼').is_some());
+        assert!(custom_svg_glyph_source('✔').is_none());
+        assert!(custom_svg_glyph_source('✓').is_none());
+        assert!(custom_svg_glyph_source('x').is_none());
+    }
+
+    #[test]
+    fn braille_mask_covers_docker_compose_spinner_chars() {
+        assert_eq!(braille_dot_mask('⠋'), Some(0x0B));
+        assert_eq!(braille_dot_mask('⠙'), Some(0x19));
+        assert_eq!(braille_dot_mask('⣿'), Some(0xFF));
+        assert_eq!(braille_dot_mask('\u{2800}'), Some(0));
+        assert_eq!(braille_dot_mask('✔'), None);
+    }
+
+    #[test]
     fn custom_svg_alpha_bbox_centering_moves_down_glyph_visual_only() {
         let mut rgba = vec![0u8; 4 * 6 * 4];
         for y in 3..6 {

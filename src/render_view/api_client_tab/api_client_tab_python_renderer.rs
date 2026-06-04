@@ -549,6 +549,106 @@ impl Renderer {
         self.draw_json_colored_segment(value, value_color, x, y, w, &mut draw_x);
     }
 
+    fn draw_curl_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {
+        const CURL_CMD: [f32; 4] = [1.0, 0.36, 0.18, 1.0];
+        const CURL_GREEN: [f32; 4] = [0.44, 0.86, 0.58, 1.0];
+        const CURL_METHOD: [f32; 4] = [0.70, 0.72, 0.78, 1.0];
+
+        let start = line.len().saturating_sub(line.trim_start().len());
+        let rest = &line[start..];
+        let mut draw_x = x;
+        if start > 0 {
+            self.draw_json_colored_segment(&line[..start], CURL_GREEN, x, y, w, &mut draw_x);
+        }
+        if rest.starts_with("curl")
+            && rest
+                .as_bytes()
+                .get(4)
+                .is_none_or(|b| b.is_ascii_whitespace())
+        {
+            self.draw_json_colored_segment("curl", CURL_CMD, x, y, w, &mut draw_x);
+            self.draw_curl_green_or_slash(&rest[4..], x, y, w, &mut draw_x);
+            return;
+        }
+        if rest.starts_with("-X")
+            && rest
+                .as_bytes()
+                .get(2)
+                .is_none_or(|b| b.is_ascii_whitespace())
+        {
+            self.draw_json_colored_segment("-X", CURL_GREEN, x, y, w, &mut draw_x);
+            let mut method_start = 2usize;
+            while rest
+                .as_bytes()
+                .get(method_start)
+                .is_some_and(|b| b.is_ascii_whitespace())
+            {
+                method_start += 1;
+            }
+            if method_start > 2 {
+                self.draw_json_colored_segment(
+                    &rest[2..method_start],
+                    CURL_GREEN,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+            }
+            let mut method_end = method_start;
+            while rest
+                .as_bytes()
+                .get(method_end)
+                .is_some_and(|b| !b.is_ascii_whitespace() && *b != b'\\')
+            {
+                method_end += 1;
+            }
+            if method_end > method_start {
+                self.draw_json_colored_segment(
+                    &rest[method_start..method_end],
+                    CURL_METHOD,
+                    x,
+                    y,
+                    w,
+                    &mut draw_x,
+                );
+            }
+            self.draw_curl_green_or_slash(&rest[method_end..], x, y, w, &mut draw_x);
+            return;
+        }
+        self.draw_curl_green_or_slash(rest, x, y, w, &mut draw_x);
+    }
+
+    fn draw_curl_green_or_slash(
+        &mut self,
+        line: &str,
+        x: f32,
+        y: f32,
+        w: f32,
+        draw_x: &mut f32,
+    ) {
+        const CURL_GREEN: [f32; 4] = [0.44, 0.86, 0.58, 1.0];
+        const CURL_SLASH: [f32; 4] = [0.82, 0.84, 0.88, 1.0];
+
+        for ch in line.chars() {
+            if *draw_x > x + w {
+                break;
+            }
+            let mut buf = [0u8; 4];
+            self.draw_string_scaled_stable(
+                ch.encode_utf8(&mut buf),
+                *draw_x,
+                y,
+                if ch == '\\' { CURL_SLASH } else { CURL_GREEN },
+                API_BODY_TEXT_SCALE,
+            );
+            *draw_x += self
+                .get_ui_glyph(ch)
+                .map(|g| Self::snapped_text_advance(g.advance, API_BODY_TEXT_SCALE))
+                .unwrap_or(8.0);
+        }
+    }
+
     fn draw_json_colored_segment(
         &mut self,
         segment: &str,

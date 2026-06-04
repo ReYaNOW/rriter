@@ -116,6 +116,7 @@ pub enum UiId {
     ApiOutputSchemaFold(usize, usize),
     ApiResponseBodyTab(usize),
     ApiResponseHeadersTab(usize),
+    ApiResponseCurlTab(usize),
     ApiResponseBody(usize),
     ApiResponseScrollX(usize),
     ApiResponseUseAccessToken(usize, usize),
