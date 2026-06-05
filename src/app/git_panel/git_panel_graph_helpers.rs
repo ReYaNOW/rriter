@@ -121,13 +121,13 @@ fn merge_stage_snapshot(current: &mut GitStatusSnapshot, next: GitStatusSnapshot
 
         let mut next_files = FxHashMap::default();
         for file in &next_workspace.files {
-            next_files.insert(file.display_path.as_str(), file);
+            next_files.insert(file.display_path.as_ref(), file);
         }
         current_workspace
             .files
-            .retain(|file| next_files.contains_key(file.display_path.as_str()));
+            .retain(|file| next_files.contains_key(file.display_path.as_ref()));
         for file in &mut current_workspace.files {
-            if let Some(next_file) = next_files.get(file.display_path.as_str()) {
+            if let Some(next_file) = next_files.get(file.display_path.as_ref()) {
                 file.rel_path.clone_from(&next_file.rel_path);
                 file.old_rel_path.clone_from(&next_file.old_rel_path);
                 file.staged = next_file.staged;
@@ -155,9 +155,9 @@ fn git_staged_confirm_files(
                     .filter(|file| file.staged)
                     .map(|file| GitConfirmFile {
                         repo_root: repo_root.clone(),
-                        rel_path: file.rel_path.clone(),
-                        old_rel_path: file.old_rel_path.clone(),
-                        display_path: file.display_path.clone(),
+                        rel_path: file.rel_path.to_string(),
+                        old_rel_path: file.old_rel_path.as_ref().map(ToString::to_string),
+                        display_path: file.display_path.to_string(),
                     })
                     .collect(),
             )
@@ -819,9 +819,9 @@ pub(crate) fn github_base_url_from_remote_url(url: &str) -> Option<String> {
 
 #[derive(Clone, Debug)]
 struct ActiveGraphLane {
-    oid: String,
+    oid: std::sync::Arc<str>,
     color_idx: usize,
-    branch_name: Option<String>,
+    branch_name: Option<std::sync::Arc<str>>,
 }
 
 fn git_graph_lane(
@@ -849,7 +849,7 @@ fn push_unique_graph_lane(lanes: &mut Vec<GitGraphLane>, lane: GitGraphLane) {
 }
 
 fn last_graph_lane_index(active: &[ActiveGraphLane], oid: &str) -> Option<usize> {
-    active.iter().rposition(|lane| lane.oid == oid)
+    active.iter().rposition(|lane| lane.oid.as_ref() == oid)
 }
 
 fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
@@ -874,19 +874,25 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
 
     for commit in commits {
         let input_lanes = active.as_slice();
-        let input_idx = input_lanes.iter().position(|lane| lane.oid == commit.oid);
+        let input_idx = input_lanes
+            .iter()
+            .position(|lane| lane.oid.as_ref() == commit.oid.as_str());
         let circle_idx = input_idx.unwrap_or(input_lanes.len());
         if commit.branch_name.is_none() {
             commit.branch_name = merge_source_by_oid
                 .get(&commit.oid)
                 .cloned()
-                .or_else(|| input_idx.and_then(|idx| input_lanes[idx].branch_name.clone()));
+                .or_else(|| {
+                    input_idx
+                        .and_then(|idx| input_lanes[idx].branch_name.as_deref())
+                        .map(str::to_string)
+                });
         }
-        let commit_branch_name = commit.branch_name.clone();
-        let propagating_branch_name = commit_branch_name
-            .as_ref()
+        let propagating_branch_name = commit
+            .branch_name
+            .as_deref()
             .filter(|label| git_graph_branch_label_propagates(label))
-            .cloned();
+            .map(std::sync::Arc::<str>::from);
 
         let parents = commit.parent_oids.as_slice();
         output_lanes.clear();
@@ -894,10 +900,10 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
         let mut first_parent_added = false;
         if !parents.is_empty() {
             for lane in input_lanes {
-                if lane.oid == commit.oid {
+                if lane.oid.as_ref() == commit.oid.as_str() {
                     if !first_parent_added {
                         output_lanes.push(ActiveGraphLane {
-                            oid: parents[0].clone(),
+                            oid: std::sync::Arc::<str>::from(parents[0].as_str()),
                             color_idx: lane.color_idx,
                             branch_name: propagating_branch_name.clone(),
                         });
@@ -915,17 +921,16 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
 
         let first_unprocessed_parent = if first_parent_added { 1 } else { 0 };
         for (parent_idx, parent) in parents.iter().enumerate().skip(first_unprocessed_parent) {
-            let merge_parent_label = merge_source_by_oid.get(parent).cloned();
+            let merge_parent_label = merge_source_by_oid.get(parent).map(String::as_str);
             let parent_branch_name = if merge_parent_label
-                .as_deref()
                 .is_some_and(|label| label != "merged side branch")
             {
-                merge_parent_label
+                merge_parent_label.map(std::sync::Arc::<str>::from)
             } else {
                 branch_by_oid
                     .get(parent)
-                    .cloned()
-                    .or(merge_parent_label)
+                    .map(|label| std::sync::Arc::<str>::from(label.as_str()))
+                    .or_else(|| merge_parent_label.map(std::sync::Arc::<str>::from))
                     .or_else(|| propagating_branch_name.clone())
             };
             let color_idx = if parent_idx == 0 {
@@ -942,7 +947,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 color_idx
             };
             output_lanes.push(ActiveGraphLane {
-                oid: parent.clone(),
+                oid: std::sync::Arc::<str>::from(parent.as_str()),
                 color_idx,
                 branch_name: parent_branch_name,
             });
@@ -958,10 +963,12 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 color_idx
             });
 
-        let mut lanes = Vec::with_capacity(input_lanes.len() + output_lanes.len() + parents.len());
+        let mut lanes = std::mem::take(&mut commit.lanes);
+        lanes.clear();
+        lanes.reserve(input_lanes.len() + output_lanes.len() + parents.len());
         let mut output_idx = 0usize;
         for (index, lane) in input_lanes.iter().enumerate() {
-            if lane.oid == commit.oid {
+            if lane.oid.as_ref() == commit.oid.as_str() {
                 if index != circle_idx {
                     push_unique_graph_lane(
                         &mut lanes,
@@ -978,7 +985,9 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
                 continue;
             }
 
-            if output_idx < output_lanes.len() && lane.oid == output_lanes[output_idx].oid {
+            if output_idx < output_lanes.len()
+                && lane.oid.as_ref() == output_lanes[output_idx].oid.as_ref()
+            {
                 if index == output_idx {
                     push_unique_graph_lane(
                         &mut lanes,

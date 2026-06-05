@@ -6,6 +6,8 @@ impl App {
             self.ide_panel.git.pending_label = None;
             self.ide_panel.git.pending_started_at = None;
             self.ide_panel.git.pending_label_until = None;
+            self.ide_panel.git.status_refresh_pending = false;
+            self.ide_panel.git.status_refresh_dirty = false;
             return;
         }
         self.ide_panel.git.graph_refresh_after_status = true;
@@ -37,13 +39,22 @@ impl App {
         let mut reload_graph_cache = false;
         let mut prefetch_graph_after_status = false;
         let mut force_prefetch_graph_after_status = false;
+        let mut refresh_rerun = false;
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
         for receiver in receivers {
             let mut keep = true;
             loop {
                 match receiver.rx.try_recv() {
-                    Ok(event) => {
+                    Ok(result) => {
+                        if receiver.refresh {
+                            refresh_rerun |= self.ide_panel.git.finish_status_refresh();
+                        }
+                        self.ide_panel
+                            .git
+                            .branch_ahead_cache
+                            .extend(result.branch_ahead_cache);
+                        let event = result.event;
                         if event.request_id >= self.ide_panel.git.latest_request_id {
                             let reload_graph = event
                                 .notice
@@ -67,6 +78,9 @@ impl App {
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
+                        if receiver.refresh {
+                            refresh_rerun |= self.ide_panel.git.finish_status_refresh();
+                        }
                         keep = false;
                         break;
                     }
@@ -96,7 +110,15 @@ impl App {
             }
         }
         if stale_seen && self.ide_panel.git.rx.is_empty() {
+            self.ide_panel.git.status_refresh_dirty = true;
+            refresh_rerun = true;
+        }
+        if refresh_rerun
+            && self.ide_panel.git.rx.is_empty()
+            && !self.ide_panel.git.status_refresh_pending
+        {
             self.spawn_git_task(GitAction::Refresh);
+            updated = true;
         }
         if reload_graph_cache {
             self.ide_panel.git.graph_cache.clear();

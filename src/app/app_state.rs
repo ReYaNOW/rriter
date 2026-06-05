@@ -894,6 +894,8 @@ pub struct App {
     pub file_tree_rx: Option<std::sync::mpsc::Receiver<crate::app::file_tree::FileTreeScanMessage>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
+    pub file_tree_watcher_stop_tx: Option<std::sync::mpsc::Sender<()>>,
+    pub file_tree_watched_dirs: Vec<PathBuf>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
     pub git_diff_rx: Vec<std::sync::mpsc::Receiver<crate::app::git_diff::GitDiffEvent>>,
     pub inline_git_diff_rx:

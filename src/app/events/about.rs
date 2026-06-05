@@ -250,13 +250,27 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     // Watcher сигнализирует об изменениях на диске — обновляем дерево
     {
         let mut fs_changed = false;
+        let mut watcher_disconnected = false;
         if let Some(rx) = &app.file_tree_notify_rx {
-            while rx.try_recv().is_ok() {
-                fs_changed = true;
+            loop {
+                match rx.try_recv() {
+                    Ok(()) => fs_changed = true,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        watcher_disconnected = true;
+                        break;
+                    }
+                }
             }
+        }
+        if watcher_disconnected {
+            app.file_tree_notify_rx = None;
+            app.file_tree_watcher_stop_tx = None;
+            app.file_tree_watched_dirs.clear();
         }
         if fs_changed {
             app.refresh_file_tree();
+            app.start_file_watcher();
             if app.ide_panel.is_open(crate::app::PanelId::Git) {
                 app.refresh_git_panel();
             }

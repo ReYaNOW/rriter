@@ -12,6 +12,9 @@ pub(crate) use geometry::{
 pub const MAX_VERTICES: usize = 32_768;
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
+pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;
+pub(crate) const PRIMARY_ATLAS_UPLOAD_FORMAT: u32 = glow::RED;
+pub(crate) const COLOR_ATLAS_MODE: f32 = 10.0;
 const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
 
 #[inline(always)]
@@ -218,6 +221,7 @@ pub struct IconAtlasEntry {
     pub v: f32,
     pub uw: f32,
     pub vh: f32,
+    pub color: bool,
 }
 
 pub struct Renderer {
@@ -227,6 +231,7 @@ pub struct Renderer {
     pub vao: glow::VertexArray,
     pub vbo: glow::Buffer,
     pub texture: glow::Texture,
+    pub color_texture: Option<glow::Texture>,
     pub vertices: Vec<Vertex>,
 
     pub fonts: Vec<FontData>,
@@ -240,6 +245,9 @@ pub struct Renderer {
     pub atlas_x: i32,
     pub atlas_y: i32,
     pub max_row_h: i32,
+    pub color_atlas_x: i32,
+    pub color_atlas_y: i32,
+    pub color_max_row_h: i32,
     pub font_size: f32,
     pub scale_factor: f32,
 

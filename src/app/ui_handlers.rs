@@ -446,6 +446,7 @@ impl App {
                     self.ide_workspaces.remove(idx);
                     self.save_current_config();
                     self.refresh_file_tree();
+                    self.start_file_watcher();
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }

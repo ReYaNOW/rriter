@@ -815,7 +815,7 @@ impl Renderer {
                 }
                 let visible = y + row_h >= list_y && y <= list_y + list_h;
                 let row_collapsed = row.file_idx.is_none()
-                    && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_str()));
+                    && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_ref()));
                 if visible {
                     let indent_x = panel_x
                         + pad

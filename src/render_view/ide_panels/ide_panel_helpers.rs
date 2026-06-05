@@ -272,7 +272,7 @@ fn git_file_tooltip_path(
     repo_root: &std::path::Path,
     file: &crate::app::git_panel::GitFileEntry,
 ) -> std::path::PathBuf {
-    repo_root.join(file.rel_path.as_str())
+    repo_root.join(file.rel_path.as_ref())
 }
 
 fn compact_home_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {

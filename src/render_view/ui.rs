@@ -460,11 +460,13 @@ impl Renderer {
     pub fn draw_icon(&mut self, tex: &glow::Texture, x: f32, y: f32, w: f32, h: f32) {
         self.flush();
         unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(*tex));
         }
         self.push_quad(x, y, w, h, 0.0, 0.0, 1.0, 1.0, [1.0, 1.0, 1.0, 1.0], 1.0);
         self.flush();
         unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
         }
     }
@@ -501,7 +503,11 @@ impl Renderer {
             entry.uw,
             entry.vh,
             color,
-            5.0,
+            if entry.color {
+                crate::renderer::COLOR_ATLAS_MODE
+            } else {
+                5.0
+            },
         );
     }
 
@@ -562,7 +568,11 @@ impl Renderer {
             entry.uw,
             entry.vh,
             [1.0, 1.0, 1.0, 1.0],
-            5.0,
+            if entry.color {
+                crate::renderer::COLOR_ATLAS_MODE
+            } else {
+                5.0
+            },
         );
     }
 

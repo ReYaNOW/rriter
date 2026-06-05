@@ -1,3 +1,26 @@
+const INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT: usize = 24 * 1024;
+const INACTIVE_HIGHLIGHT_COMPLETION_CAP_LIMIT: usize = 2048;
+const INACTIVE_HIGHLIGHT_SMALL_CAP_LIMIT: usize = 4096;
+
+fn inactive_highlight_cache_over_limit(tab: &EditorTab) -> bool {
+    tab.spans.capacity() > INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT
+        || tab.completions.capacity() > INACTIVE_HIGHLIGHT_COMPLETION_CAP_LIMIT
+        || tab.foldable_ranges.capacity() > INACTIVE_HIGHLIGHT_SMALL_CAP_LIMIT
+        || tab.syntax_errors.capacity() > INACTIVE_HIGHLIGHT_SMALL_CAP_LIMIT
+}
+
+fn compact_tab_highlight_cache(tab: &mut EditorTab) {
+    tab.spans.clear();
+    tab.spans.shrink_to_fit();
+    tab.completions.clear();
+    tab.completions.shrink_to_fit();
+    tab.foldable_ranges.clear();
+    tab.foldable_ranges.shrink_to_fit();
+    tab.syntax_errors.clear();
+    tab.syntax_errors.shrink_to_fit();
+    tab.is_highlight_complete = false;
+}
+
 impl App {
     pub(crate) fn save_current_config(&self) {
         let config = crate::Config {
@@ -299,6 +322,17 @@ impl App {
         self.reveal_tab_now(self.active_tab);
     }
 
+    fn compact_inactive_highlight_caches(&mut self, recent_tab_idx: Option<usize>) {
+        for (idx, tab) in self.tabs.iter_mut().enumerate() {
+            if idx == self.active_tab || Some(idx) == recent_tab_idx {
+                continue;
+            }
+            if inactive_highlight_cache_over_limit(tab) {
+                compact_tab_highlight_cache(tab);
+            }
+        }
+    }
+
     fn clamp_tab_scroll_to_content_now(&mut self) {
         if !self.is_ide_mode || self.tabs.is_empty() {
             self.tab_scroll.current = 0.0;
@@ -342,6 +376,7 @@ impl App {
             return;
         }
 
+        let previous_tab = self.active_tab;
         self.commit_api_focus();
         self.ide_panel.api.focused = None;
         self.sync_active_tab();
@@ -406,10 +441,58 @@ impl App {
             self.tabs.is_empty() && self.file_path.is_none() && self.editor.len() == 0;
         self.inline_git_popup = None;
         self.reveal_active_tab_now();
+        self.compact_inactive_highlight_caches(Some(previous_tab));
+        self.start_file_watcher();
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
             w.request_redraw();
         }
         self.save_tabs_state();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tab_with_large_highlight_cache() -> EditorTab {
+        let mut spans = Vec::with_capacity(INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT + 1);
+        spans.push(crate::highlighter::ColorSpan {
+            start: 0,
+            end: 1,
+            color: [1.0, 1.0, 1.0, 1.0],
+        });
+        EditorTab {
+            editor: crate::editor::Editor::new(16),
+            file_path: None,
+            base_title: "large.rs".to_string(),
+            file_extension: "rs".to_string(),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            spans,
+            completions: Vec::new(),
+            foldable_ranges: Vec::new(),
+            syntax_errors: Vec::new(),
+            last_sent_version: 0,
+            search_results: Vec::new(),
+            search_current_idx: None,
+            is_highlighted_once: true,
+            is_highlight_complete: true,
+            icon_key: "default_file",
+            kind: EditorTabKind::Normal,
+        }
+    }
+
+    #[test]
+    fn inactive_highlight_cache_compaction_drops_retained_buffers() {
+        let mut tab = tab_with_large_highlight_cache();
+
+        assert!(inactive_highlight_cache_over_limit(&tab));
+        compact_tab_highlight_cache(&mut tab);
+
+        assert!(tab.spans.is_empty());
+        assert_eq!(tab.spans.capacity(), 0);
+        assert!(tab.is_highlighted_once);
+        assert!(!tab.is_highlight_complete);
     }
 }

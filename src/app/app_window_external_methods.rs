@@ -106,6 +106,7 @@ impl App {
             w.request_redraw();
         }
         self.save_tabs_state();
+        self.start_file_watcher();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

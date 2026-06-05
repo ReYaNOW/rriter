@@ -1,6 +1,16 @@
 use super::*;
 
 impl Highlighter {
+    fn shrink_sync_byte_colors_for_small_text(&mut self) {
+        if self.sync_text.len() >= 512 * 1024 {
+            return;
+        }
+        let cap_limit = self.sync_text.len().saturating_mul(2).max(64 * 1024);
+        if self.sync_byte_colors_buf.capacity() > cap_limit {
+            self.sync_byte_colors_buf.shrink_to_fit();
+        }
+    }
+
     pub fn restore_cached_view(&mut self, version: u64, text: String, ext: String) {
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         self.sync_text = text.clone();
@@ -124,6 +134,9 @@ impl Highlighter {
         self.syntax_errors = syntax_errors;
         self.sync_tree = tree;
         self.is_complete = is_complete;
+        if is_complete {
+            self.shrink_sync_byte_colors_for_small_text();
+        }
         true
     }
 
@@ -416,6 +429,7 @@ impl Highlighter {
         self.current_version = version;
         self.is_complete = true;
         self.spans = flat_spans;
+        self.shrink_sync_byte_colors_for_small_text();
         true
     }
 }

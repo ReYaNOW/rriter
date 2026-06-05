@@ -554,6 +554,19 @@ fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     parse_kde_color(&content, target_group, target_key)
 }
 
+fn rayon_thread_cap(available: usize) -> usize {
+    available.clamp(1, 4)
+}
+
+fn init_rayon_global_pool() {
+    let threads = std::thread::available_parallelism()
+        .map(|threads| rayon_thread_cap(threads.get()))
+        .unwrap_or(1);
+    let _ = rayon::ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .build_global();
+}
+
 fn load_dracula() -> Theme {
     let sel_color =
         get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
@@ -876,6 +889,14 @@ mod tests {
         assert_eq!(color, Some([128.0 / 255.0, 64.0 / 255.0, 1.0, 1.0]));
         assert_eq!(parse_kde_color("[Bad]\nColor=1,2\n", "Bad", "Color"), None);
     }
+
+    #[test]
+    fn rayon_thread_cap_stays_small_and_nonzero() {
+        assert_eq!(rayon_thread_cap(0), 1);
+        assert_eq!(rayon_thread_cap(1), 1);
+        assert_eq!(rayon_thread_cap(4), 4);
+        assert_eq!(rayon_thread_cap(128), 4);
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -889,6 +910,7 @@ fn main() {
         }
         mallopt(-8, 2);
     }
+    init_rayon_global_pool();
 
     let args: Vec<String> = env::args().collect();
     if let Some(idx) = args.iter().position(|arg| arg == "--probe-git-graph") {
@@ -1140,6 +1162,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         ide_panel: crate::app::IdePanelState::default(),
         file_tree_rx: None,
         file_tree_notify_rx: None,
+        file_tree_watcher_stop_tx: None,
+        file_tree_watched_dirs: Vec::new(),
         external_changes_rx: None,
         git_diff_rx: Vec::new(),
         inline_git_diff_rx: None,

@@ -501,7 +501,7 @@ impl App {
                 workspace
                     .files
                     .iter()
-                    .find(|file| repo_root.join(&file.rel_path) == abs_path)
+                    .find(|file| repo_root.join(file.rel_path.as_ref()) == abs_path)
                     .cloned()
                     .map(|file| (repo_root.clone(), file))
             })
@@ -576,8 +576,8 @@ impl App {
         };
         let meta = GitDiffTabMeta {
             repo_root,
-            rel_path: file.rel_path.clone(),
-            old_rel_path: file.old_rel_path.clone(),
+            rel_path: file.rel_path.to_string(),
+            old_rel_path: file.old_rel_path.as_ref().map(ToString::to_string),
             status: file.status,
             workspace_idx,
         };
@@ -602,12 +602,15 @@ impl App {
 
         let version = self.next_tab_highlight_version();
         let state = GitDiffState::loading(version);
-        let title = format!("Diff: {}", file_name_for_diff_title(&file.rel_path));
+        let title = format!(
+            "Diff: {}",
+            file_name_for_diff_title(file.rel_path.as_ref())
+        );
         let tab = EditorTab {
             editor: new_editor_with_text(&state.displayed_text, version),
             file_path: None,
             base_title: title,
-            file_extension: Path::new(&file.rel_path)
+            file_extension: Path::new(file.rel_path.as_ref())
                 .extension()
                 .map(|ext| ext.to_string_lossy().into_owned())
                 .unwrap_or_default(),
@@ -687,8 +690,8 @@ impl App {
                         return None;
                     }
                     workspace.files.iter().find(|file| {
-                        file.rel_path == meta.rel_path
-                            && file.old_rel_path == meta.old_rel_path
+                        file.rel_path.as_ref() == meta.rel_path.as_str()
+                            && file.old_rel_path.as_deref() == meta.old_rel_path.as_deref()
                     })
                 })
                 .map(|file| file.staged)
@@ -1119,8 +1122,8 @@ impl App {
             std::thread::spawn(move || {
                 let result = load_git_diff_with_side(
                     repo_root,
-                    file.rel_path,
-                    file.old_rel_path,
+                    file.rel_path.into(),
+                    file.old_rel_path.map(Into::into),
                     file.status,
                     file.staged,
                 )

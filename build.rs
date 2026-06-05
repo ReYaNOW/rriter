@@ -35,6 +35,33 @@ fn icon_stem(icon_path: &str) -> &str {
     last.strip_suffix(".svg").unwrap_or(last)
 }
 
+fn unescape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '\\' {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('/') => out.push('/'),
+            Some('b') => out.push('\u{0008}'),
+            Some('f') => out.push('\u{000c}'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 fn parse_associations(json: &str, names_field: &str) -> Vec<(String, Vec<String>, String)> {
     let mut result = Vec::new();
     let mut search_from = 0;
@@ -66,7 +93,9 @@ fn parse_associations(json: &str, names_field: &str) -> Vec<(String, Vec<String>
                 .map(|s| s.trim().to_ascii_lowercase())
                 .filter(|s| !s.is_empty())
                 .collect();
-            let pattern = extract_str(obj, "pattern").unwrap_or("").to_string();
+            let pattern = extract_str(obj, "pattern")
+                .map(unescape_json_str)
+                .unwrap_or_default();
             if !stem.is_empty() && (!names.is_empty() || !pattern.is_empty()) {
                 result.push((stem, names, pattern));
             }
@@ -95,11 +124,7 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
         p = &p[..p.len() - 1];
     }
 
-    let clean = |s: &str| {
-        s.replace("\\.", ".")
-            .replace("\\\\", "\\")
-            .replace("\\-", "-")
-    };
+    let clean = |s: &str| s.replace("\\.", ".").replace("\\-", "-");
 
     if p.contains('[') || p.contains('(') || p.contains('|') || p.contains('+') || p.contains('?') {
         return None;
@@ -337,33 +362,22 @@ fn main() {
             "pub fn match_file_pattern(name: &str) -> Option<&'static str> {{"
         )
         .unwrap();
-        let mut fallback_file = Vec::new();
         for (stem, _, pattern) in &file_entries {
             if !pattern.is_empty() {
                 if let Some(code) = pattern_to_rust(pattern, stem) {
                     writeln!(map_out, "{}", code).unwrap();
                 } else {
-                    fallback_file.push((pattern.clone(), stem.clone()));
+                    writeln!(
+                        map_out,
+                        "    if super::simple_regex_match(name, \"{}\") {{ return Some(\"{}\"); }}",
+                        escape(pattern),
+                        escape(stem)
+                    )
+                    .unwrap();
                 }
             }
         }
         writeln!(map_out, "    None\n}}\n").unwrap();
-
-        writeln!(
-            map_out,
-            "pub static FILE_ICON_FALLBACKS: &[(&str, &str)] = &["
-        )
-        .unwrap();
-        for (pattern, stem) in fallback_file {
-            writeln!(
-                map_out,
-                "    (\"{}\", \"{}\"),",
-                escape(&pattern),
-                escape(&stem)
-            )
-            .unwrap();
-        }
-        writeln!(map_out, "];\n").unwrap();
 
         writeln!(map_out, "#[inline]").unwrap();
         writeln!(
@@ -371,33 +385,22 @@ fn main() {
             "pub fn match_folder_pattern(name: &str) -> Option<&'static str> {{"
         )
         .unwrap();
-        let mut fallback_folder = Vec::new();
         for (stem, _, pattern) in &folder_entries {
             if !pattern.is_empty() {
                 if let Some(code) = pattern_to_rust(pattern, stem) {
                     writeln!(map_out, "{}", code).unwrap();
                 } else {
-                    fallback_folder.push((pattern.clone(), stem.clone()));
+                    writeln!(
+                        map_out,
+                        "    if super::simple_regex_match(name, \"{}\") {{ return Some(\"{}\"); }}",
+                        escape(pattern),
+                        escape(stem)
+                    )
+                    .unwrap();
                 }
             }
         }
         writeln!(map_out, "    None\n}}\n").unwrap();
-
-        writeln!(
-            map_out,
-            "pub static FOLDER_ICON_FALLBACKS: &[(&str, &str)] = &["
-        )
-        .unwrap();
-        for (pattern, stem) in fallback_folder {
-            writeln!(
-                map_out,
-                "    (\"{}\", \"{}\"),",
-                escape(&pattern),
-                escape(&stem)
-            )
-            .unwrap();
-        }
-        writeln!(map_out, "];\n").unwrap();
     }
 
     fs::write(gen_dir.join("file_icons_map.rs"), map_out.as_bytes()).unwrap();

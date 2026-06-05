@@ -133,6 +133,7 @@ impl App {
             w.request_redraw();
         }
         self.save_tabs_state();
+        self.start_file_watcher();
     }
 
     pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {
@@ -209,6 +210,7 @@ impl App {
             self.load_file_internal_options(path, false, wait_highlight, false);
         }
         self.reveal_active_tab_now();
+        self.start_file_watcher();
     }
     pub fn ensure_cursor_visible(
         target_scroll_y: &mut f32,

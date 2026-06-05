@@ -39,19 +39,19 @@ impl GitFileStatus {
 #[derive(Clone, Debug)]
 pub struct GitFileEntry {
     pub workspace_idx: usize,
-    pub rel_path: String,
-    pub old_rel_path: Option<String>,
-    pub display_path: String,
-    pub depth: usize,
+    pub rel_path: Box<str>,
+    pub old_rel_path: Option<Box<str>>,
+    pub display_path: Box<str>,
+    pub depth: u16,
     pub staged: bool,
     pub status: GitFileStatus,
 }
 
 #[derive(Clone, Debug)]
 pub struct GitTreeRow {
-    pub name: String,
-    pub path: String,
-    pub depth: usize,
+    pub name: Box<str>,
+    pub path: Box<str>,
+    pub depth: u16,
     pub file_idx: Option<usize>,
     pub icon_key: &'static str,
 }
@@ -119,6 +119,15 @@ impl GitStatusSnapshot {
         roots
     }
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct BranchAheadKey {
+    repo_root: PathBuf,
+    head_oid: git2::Oid,
+    upstream_oid: git2::Oid,
+}
+
+type BranchAheadCache = FxHashMap<BranchAheadKey, usize>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitGraphLaneKind {
@@ -288,6 +297,9 @@ pub struct GitPanelState {
     pub latest_request_id: u64,
     rx: Vec<GitPanelReceiver>,
     stage_tx: Option<mpsc::Sender<GitStageCommand>>,
+    status_refresh_pending: bool,
+    status_refresh_dirty: bool,
+    branch_ahead_cache: BranchAheadCache,
     pub stage_pending_workspace_idx: Option<usize>,
     pub notice: Option<String>,
     pub confirm_dialog: Option<GitConfirmDialog>,
@@ -315,8 +327,14 @@ pub struct GitPanelState {
 }
 
 struct GitPanelReceiver {
-    rx: mpsc::Receiver<GitPanelEvent>,
+    rx: mpsc::Receiver<GitPanelTaskResult>,
     blocking: bool,
+    refresh: bool,
+}
+
+struct GitPanelTaskResult {
+    event: GitPanelEvent,
+    branch_ahead_cache: BranchAheadCache,
 }
 
 struct GitActionOutcome {
@@ -344,6 +362,9 @@ impl Default for GitPanelState {
             latest_request_id: 0,
             rx: Vec::new(),
             stage_tx: None,
+            status_refresh_pending: false,
+            status_refresh_dirty: false,
+            branch_ahead_cache: BranchAheadCache::default(),
             stage_pending_workspace_idx: None,
             notice: None,
             confirm_dialog: None,
@@ -373,6 +394,27 @@ impl Default for GitPanelState {
 }
 
 impl GitPanelState {
+    fn begin_status_refresh(&mut self) -> bool {
+        if self.status_refresh_pending {
+            self.status_refresh_dirty = true;
+            false
+        } else {
+            self.status_refresh_pending = true;
+            self.status_refresh_dirty = false;
+            true
+        }
+    }
+
+    fn finish_status_refresh(&mut self) -> bool {
+        self.status_refresh_pending = false;
+        if self.status_refresh_dirty {
+            self.status_refresh_dirty = false;
+            true
+        } else {
+            false
+        }
+    }
+
     pub(crate) fn pending_elapsed_secs(&self, now: std::time::Instant) -> Option<f32> {
         self.pending
             .then_some(self.pending_started_at?)
@@ -447,7 +489,8 @@ struct GitStageCommand {
     request_id: u64,
     files: Vec<GitStageFileCommand>,
     workspaces: Vec<PathBuf>,
-    tx: mpsc::Sender<GitPanelEvent>,
+    branch_ahead_cache: BranchAheadCache,
+    tx: mpsc::Sender<GitPanelTaskResult>,
 }
 
 enum GitAction {

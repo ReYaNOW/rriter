@@ -367,6 +367,10 @@ impl Renderer {
             self.gl.use_program(Some(self.program));
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.active_texture(glow::TEXTURE1);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, self.color_texture);
+            self.gl.active_texture(glow::TEXTURE0);
             self.gl.clear_color(
                 0.173, // #2c
                 0.180, // #2e

@@ -169,6 +169,8 @@ fn test_app() -> Option<App> {
         ide_panel: IdePanelState::default(),
         file_tree_rx: None,
         file_tree_notify_rx: None,
+        file_tree_watcher_stop_tx: None,
+        file_tree_watched_dirs: Vec::new(),
         external_changes_rx: None,
         git_diff_rx: Vec::new(),
         inline_git_diff_rx: None,

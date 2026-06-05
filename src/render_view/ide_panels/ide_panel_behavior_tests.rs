@@ -189,9 +189,9 @@ mod tests {
         let repo_root = std::path::Path::new("/home/reyan/projects/rriter");
         let file = crate::app::git_panel::GitFileEntry {
             workspace_idx: 0,
-            rel_path: "src/main.rs".to_string(),
+            rel_path: "src/main.rs".into(),
             old_rel_path: None,
-            display_path: "src/main.rs".to_string(),
+            display_path: "src/main.rs".into(),
             depth: 1,
             staged: false,
             status: crate::app::git_panel::GitFileStatus::Modified,

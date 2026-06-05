@@ -105,13 +105,10 @@ fn draw_braille_dot(data: &mut [u8], width: usize, height: usize, cx: f32, cy: f
                 continue;
             }
 
-            let idx = (y * width + x) * 4;
+            let idx = y * width + x;
             let alpha = (coverage * 255.0).round() as u8;
-            if alpha > data[idx + 3] {
-                data[idx] = 255;
-                data[idx + 1] = 255;
-                data[idx + 2] = 255;
-                data[idx + 3] = alpha;
+            if alpha > data[idx] {
+                data[idx] = alpha;
             }
         }
     }
@@ -151,18 +148,9 @@ impl Renderer {
         let w = advance as i32;
         let h = (self.font_size * 0.88).round().max(10.0) as i32;
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
-            self.atlas_x = 2;
-            self.atlas_y += self.max_row_h + 2;
-            self.max_row_h = 0;
-        }
-        if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.reset_texture_atlas();
-        }
-
         let width = w as usize;
         let height = h as usize;
-        let mut rgba = vec![0u8; width * height * 4];
+        let mut alpha = vec![0u8; width * height];
         let radius = (self.font_size * 0.075).max(1.1);
         let col_gap = (w as f32 * 0.34).max(radius * 2.35);
         let x0 = w as f32 * 0.5 - col_gap * 0.5;
@@ -178,29 +166,16 @@ impl Renderer {
             let (col, row) = braille_dot_pos(bit);
             let cx = if col == 0 { x0 } else { x1 };
             let cy = top + row as f32 * row_gap;
-            draw_braille_dot(&mut rgba, width, height, cx, cy, radius);
+            draw_braille_dot(&mut alpha, width, height, cx, cy, radius);
         }
 
-        unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_sub_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                self.atlas_x,
-                self.atlas_y,
-                w,
-                h,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(&rgba)),
-            );
-        }
+        let entry = self.upload_alpha_atlas(w, h, &alpha)?;
 
         let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
-            uw: w as f32 / ATLAS_SIZE_W as f32,
-            vh: h as f32 / ATLAS_SIZE_H as f32,
+            u: entry.u,
+            v: entry.v,
+            uw: entry.uw,
+            vh: entry.vh,
             width: w as f32,
             height: h as f32,
             offset_x: 0.0,
@@ -208,10 +183,6 @@ impl Renderer {
             advance,
             is_emoji: 0.0,
         };
-        self.atlas_x += w + 2;
-        if h > self.max_row_h {
-            self.max_row_h = h;
-        }
         Some(info)
     }
 
@@ -226,12 +197,6 @@ impl Renderer {
         let w = target_size as i32;
         let h = target_size as i32;
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
-            self.atlas_x = 2;
-            self.atlas_y += self.max_row_h + 2;
-            self.max_row_h = 0;
-        }
-
         let mut pixmap = tiny_skia::Pixmap::new(w as u32, h as u32)?;
         let scale = target_size / 24.0;
         let transform = tiny_skia::Transform::from_scale(scale, scale);
@@ -245,26 +210,14 @@ impl Renderer {
             pixel[2] = 255;
         }
 
-        unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_sub_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                self.atlas_x,
-                self.atlas_y,
-                w,
-                h,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(data)),
-            );
-        }
+        let alpha = Self::rgba_alpha_bytes(data);
+        let entry = self.upload_alpha_atlas(w, h, &alpha)?;
 
         let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
-            uw: w as f32 / ATLAS_SIZE_W as f32,
-            vh: h as f32 / ATLAS_SIZE_H as f32,
+            u: entry.u,
+            v: entry.v,
+            uw: entry.uw,
+            vh: entry.vh,
             width: w as f32,
             height: h as f32,
             offset_x: 0.0,
@@ -273,10 +226,6 @@ impl Renderer {
             is_emoji: 0.0,
         };
 
-        self.atlas_x += w + 2;
-        if h > self.max_row_h {
-            self.max_row_h = h;
-        }
         Some(info)
     }
 
@@ -399,65 +348,26 @@ impl Renderer {
             return Some(info);
         }
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
-            self.atlas_x = 2;
-            self.atlas_y += self.max_row_h + 2;
-            self.max_row_h = 0;
-        }
-        if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.reset_texture_atlas();
-        }
-
-        let mut rgba = vec![0u8; (w * h * 4) as usize];
         let is_color = img.content == Content::Color;
-        match img.content {
-            Content::Mask => {
-                for i in 0..(w * h) as usize {
-                    rgba[i * 4] = 255;
-                    rgba[i * 4 + 1] = 255;
-                    rgba[i * 4 + 2] = 255;
-                    rgba[i * 4 + 3] = img.data[i];
-                }
-            }
-            _ => {
-                if img.data.len() == rgba.len() {
-                    rgba.copy_from_slice(&img.data);
-                }
-            }
-        }
-
-        unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_sub_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                self.atlas_x,
-                self.atlas_y,
-                w,
-                h,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(&rgba)),
-            );
-        }
+        let entry = if is_color {
+            self.upload_color_rgba(w, h, &img.data)?
+        } else {
+            self.upload_alpha_atlas(w, h, &img.data)?
+        };
 
         let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
-            uw: w as f32 / ATLAS_SIZE_W as f32,
-            vh: h as f32 / ATLAS_SIZE_H as f32,
+            u: entry.u,
+            v: entry.v,
+            uw: entry.uw,
+            vh: entry.vh,
             width: w as f32,
             height: h as f32,
             offset_x: img.placement.left as f32,
             offset_y: img.placement.top as f32,
             advance: glyph_advance,
-            is_emoji: if is_color { 1.0 } else { 0.0 },
+            is_emoji: if is_color { COLOR_ATLAS_MODE } else { 0.0 },
         };
         self.glyphs.insert(cache_key, info);
-        self.atlas_x += w + 2;
-        if h > self.max_row_h {
-            self.max_row_h = h;
-        }
         Some(info)
     }
 
@@ -608,65 +518,26 @@ impl Renderer {
             return Some(info);
         }
 
-        if self.atlas_x + w + 2 > ATLAS_SIZE_W {
-            self.atlas_x = 2;
-            self.atlas_y += self.max_row_h + 2;
-            self.max_row_h = 0;
-        }
-        if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.reset_texture_atlas();
-        }
-
-        let mut rgba = vec![0u8; (w * h * 4) as usize];
         let is_color = img.content == Content::Color;
-        match img.content {
-            Content::Mask => {
-                for i in 0..(w * h) as usize {
-                    rgba[i * 4] = 255;
-                    rgba[i * 4 + 1] = 255;
-                    rgba[i * 4 + 2] = 255;
-                    rgba[i * 4 + 3] = img.data[i];
-                }
-            }
-            _ => {
-                if img.data.len() == rgba.len() {
-                    rgba.copy_from_slice(&img.data);
-                }
-            }
-        }
-
-        unsafe {
-            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            self.gl.tex_sub_image_2d(
-                glow::TEXTURE_2D,
-                0,
-                self.atlas_x,
-                self.atlas_y,
-                w,
-                h,
-                glow::RGBA,
-                glow::UNSIGNED_BYTE,
-                glow::PixelUnpackData::Slice(Some(&rgba)),
-            );
-        }
+        let entry = if is_color {
+            self.upload_color_rgba(w, h, &img.data)?
+        } else {
+            self.upload_alpha_atlas(w, h, &img.data)?
+        };
 
         let info = GlyphInfo {
-            u: self.atlas_x as f32 / ATLAS_SIZE_W as f32,
-            v: self.atlas_y as f32 / ATLAS_SIZE_H as f32,
-            uw: w as f32 / ATLAS_SIZE_W as f32,
-            vh: h as f32 / ATLAS_SIZE_H as f32,
+            u: entry.u,
+            v: entry.v,
+            uw: entry.uw,
+            vh: entry.vh,
             width: w as f32,
             height: h as f32,
             offset_x: img.placement.left as f32,
             offset_y: img.placement.top as f32 - self.scale_factor.round().max(1.0),
             advance: glyph_advance,
-            is_emoji: if is_color { 1.0 } else { 0.0 },
+            is_emoji: if is_color { COLOR_ATLAS_MODE } else { 0.0 },
         };
         self.ui_glyphs.insert(c, info);
-        self.atlas_x += w + 2;
-        if h > self.max_row_h {
-            self.max_row_h = h;
-        }
         Some(info)
     }
 

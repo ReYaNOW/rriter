@@ -1,9 +1,10 @@
 use super::*;
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 use std::{
-    path::{Component, Path},
-    sync::Arc,
-    time::SystemTime,
+    path::{Component, Path, PathBuf},
+    sync::{mpsc, Arc},
+    time::{Duration, SystemTime},
 };
 
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
@@ -425,27 +426,72 @@ pub(super) fn notify_paths_need_file_tree_refresh<'a>(
     paths.into_iter().any(|path| !path_has_git_dir(path))
 }
 
+fn push_watch_path(path: &Path, seen: &mut FxHashSet<PathBuf>, out: &mut Vec<PathBuf>) {
+    if seen.insert(path.to_path_buf()) {
+        out.push(path.to_path_buf());
+    }
+}
+
+pub(crate) fn build_file_tree_watch_paths(
+    roots: &[PathBuf],
+    expanded_dirs: &FxHashSet<PathBuf>,
+    open_file_parent_dirs: &[PathBuf],
+) -> Vec<PathBuf> {
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::with_capacity(
+        roots
+            .len()
+            .saturating_add(expanded_dirs.len())
+            .saturating_add(open_file_parent_dirs.len()),
+    );
+
+    for root in roots {
+        push_watch_path(root, &mut seen, &mut out);
+    }
+    let mut expanded = expanded_dirs
+        .iter()
+        .filter(|dir| {
+            roots
+                .iter()
+                .any(|root| *dir == root || dir.starts_with(root))
+        })
+        .collect::<Vec<_>>();
+    expanded.sort();
+    for dir in expanded {
+        push_watch_path(dir, &mut seen, &mut out);
+    }
+    let mut open_dirs = open_file_parent_dirs.iter().collect::<Vec<_>>();
+    open_dirs.sort();
+    for dir in open_dirs {
+        push_watch_path(dir, &mut seen, &mut out);
+    }
+    out
+}
+
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
 /// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
+pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>, stop_rx: mpsc::Receiver<()>) {
     std::thread::spawn(move || {
         use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 
         let (dtx, drx) = mpsc::channel();
-        let mut debouncer = match new_debouncer(std::time::Duration::from_millis(300), dtx) {
+        let mut debouncer = match new_debouncer(Duration::from_millis(300), dtx) {
             Ok(d) => d,
             Err(_) => return,
         };
 
         for path in &paths {
-            let _ = debouncer.watcher().watch(path, RecursiveMode::Recursive);
+            let _ = debouncer.watcher().watch(path, RecursiveMode::NonRecursive);
         }
 
         // Блокируемся в цикле — debouncer должен жить, пока работает watcher.
         loop {
-            match drx.recv() {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            match drx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Ok(events)) => {
                     let paths = events.iter().map(|event| event.path.as_path());
                     if notify_paths_need_file_tree_refresh(paths) {
@@ -455,6 +501,7 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>) {
                     }
                 }
                 Ok(Err(_)) => {}
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(_) => break,
             }
         }
@@ -491,6 +538,27 @@ mod tests {
         assert!(notify_paths_need_file_tree_refresh([Path::new(
             "/workspace/not.git/index"
         )]));
+    }
+
+    #[test]
+    fn file_tree_watch_paths_keep_visible_and_open_dirs_only() {
+        let root = PathBuf::from("/workspace");
+        let mut expanded = FxHashSet::default();
+        expanded.insert(root.clone());
+        expanded.insert(root.join("src"));
+        expanded.insert(PathBuf::from("/other"));
+        let open_dirs = vec![root.join("src"), PathBuf::from("/tmp")];
+
+        let paths = build_file_tree_watch_paths(&[root.clone()], &expanded, &open_dirs);
+
+        assert_eq!(
+            paths,
+            vec![
+                root.clone(),
+                root.join("src"),
+                PathBuf::from("/tmp"),
+            ]
+        );
     }
 
     #[test]

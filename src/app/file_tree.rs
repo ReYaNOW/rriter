@@ -686,18 +686,60 @@ impl App {
         updated
     }
 
-    /// Запускает (или перезапускает) фоновый watcher для текущих workspaces.
-    /// Старый watcher бricht автоматически, т.к. его `Sender` дропается вместе с rx.
+    fn file_tree_open_file_parent_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = Vec::new();
+        if let Some(parent) = self.file_path.as_ref().and_then(|path| path.parent()) {
+            dirs.push(parent.to_path_buf());
+        }
+        for tab in &self.tabs {
+            if !matches!(&tab.kind, crate::app::EditorTabKind::Normal) {
+                continue;
+            }
+            if let Some(parent) = tab.file_path.as_ref().and_then(|path| path.parent()) {
+                dirs.push(parent.to_path_buf());
+            }
+        }
+        dirs
+    }
+
+    fn stop_file_watcher(&mut self) {
+        if let Some(stop_tx) = self.file_tree_watcher_stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        self.file_tree_notify_rx = None;
+        self.file_tree_watched_dirs.clear();
+    }
+
+    /// Запускает (или перезапускает) lazy watcher для текущих visible/open dirs.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn start_file_watcher(&mut self) {
         if self.ide_workspaces.is_empty() {
-            self.file_tree_notify_rx = None;
+            self.stop_file_watcher();
             return;
         }
-        let paths = self.ide_workspaces.clone();
+        let open_dirs = self.file_tree_open_file_parent_dirs();
+        let paths = crate::app::file_tree::build_file_tree_watch_paths(
+            &self.ide_workspaces,
+            &self.ide_panel.file_tree_expanded,
+            &open_dirs,
+        );
+        if paths == self.file_tree_watched_dirs && self.file_tree_notify_rx.is_some() {
+            return;
+        }
+        if let Some(stop_tx) = self.file_tree_watcher_stop_tx.take() {
+            let _ = stop_tx.send(());
+        }
+        if paths.is_empty() {
+            self.file_tree_notify_rx = None;
+            self.file_tree_watched_dirs.clear();
+            return;
+        }
         let (tx, rx) = mpsc::channel();
+        let (stop_tx, stop_rx) = mpsc::channel();
         self.file_tree_notify_rx = Some(rx);
-        crate::app::file_tree::spawn_watcher(paths, tx);
+        self.file_tree_watcher_stop_tx = Some(stop_tx);
+        self.file_tree_watched_dirs = paths.clone();
+        crate::app::file_tree::spawn_watcher(paths, tx, stop_rx);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -715,6 +757,7 @@ impl App {
             self.ide_panel.file_tree_expanded.insert(node.path.clone());
         }
         self.refresh_file_tree();
+        self.start_file_watcher();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

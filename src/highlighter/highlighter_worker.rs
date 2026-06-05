@@ -763,8 +763,9 @@ impl Highlighter {
 
                 last_full_spans = flat_spans.clone();
 
-                // Очистка памяти от гигантских буферов после парсинга больших файлов
-                if byte_colors_buf.capacity() > 1024 * 1024 && text.len() < 1024 * 512 {
+                // Очистка памяти от гигантских буферов после парсинга больших файлов.
+                let byte_color_cap_limit = text.len().saturating_mul(2).max(64 * 1024);
+                if text.len() < 1024 * 512 && byte_colors_buf.capacity() > byte_color_cap_limit {
                     byte_colors_buf.shrink_to_fit();
                 }
 

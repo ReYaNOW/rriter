@@ -12,18 +12,34 @@ fn unix_days_to_ymd(days: i64) -> (i64, i64, i64) {
     (year, month, day)
 }
 
-fn collect_git_status(workspaces: &[PathBuf]) -> GitStatusSnapshot {
+fn collect_git_status_with_cache(
+    workspaces: &[PathBuf],
+    branch_ahead_cache: &mut BranchAheadCache,
+) -> GitStatusSnapshot {
     let mut out = GitStatusSnapshot {
         workspaces: Vec::with_capacity(workspaces.len()),
     };
     for (workspace_idx, root) in workspaces.iter().enumerate() {
         out.workspaces
-            .push(collect_workspace_status(workspace_idx, root));
+            .push(collect_workspace_status_with_cache(
+                workspace_idx,
+                root,
+                branch_ahead_cache,
+            ));
     }
     out
 }
 
 fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceStatus {
+    let mut branch_ahead_cache = BranchAheadCache::default();
+    collect_workspace_status_with_cache(workspace_idx, root, &mut branch_ahead_cache)
+}
+
+fn collect_workspace_status_with_cache(
+    workspace_idx: usize,
+    root: &Path,
+    branch_ahead_cache: &mut BranchAheadCache,
+) -> GitWorkspaceStatus {
     let repo = match git2::Repository::discover(root) {
         Ok(repo) => repo,
         Err(err) => {
@@ -51,6 +67,11 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
         .recurse_untracked_dirs(true)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true);
+    if let Ok(rel_root) = root.strip_prefix(&repo_root)
+        && !rel_root.as_os_str().is_empty()
+    {
+        status_opts.pathspec(rel_root);
+    }
 
     let statuses = match repo.statuses(Some(&mut status_opts)) {
         Ok(statuses) => statuses,
@@ -104,25 +125,25 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
                 existing.status = file_status;
             }
             if existing.old_rel_path.is_none() {
-                existing.old_rel_path = (file_status == GitFileStatus::Renamed)
-                    .then(|| old_rel_path.as_ref())
-                    .flatten()
-                    .map(|path| path.to_string_lossy().into_owned());
+            existing.old_rel_path = (file_status == GitFileStatus::Renamed)
+                .then(|| old_rel_path.as_ref())
+                .flatten()
+                .map(|path| path.to_string_lossy().into_owned().into_boxed_str());
             }
             continue;
         }
         file_by_display_path.insert(display_path.clone(), files.len());
         let old_rel_path = if file_status == GitFileStatus::Renamed {
-            old_rel_path.map(|path| path.to_string_lossy().into_owned())
+            old_rel_path.map(|path| path.to_string_lossy().into_owned().into_boxed_str())
         } else {
             None
         };
         files.push(GitFileEntry {
             workspace_idx,
-            rel_path: rel_path.to_string_lossy().into_owned(),
+            rel_path: rel_path.to_string_lossy().into_owned().into_boxed_str(),
             old_rel_path,
-            display_path,
-            depth,
+            display_path: display_path.into_boxed_str(),
+            depth: depth.min(u16::MAX as usize) as u16,
             staged,
             status: file_status,
         });
@@ -131,7 +152,7 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
     files.sort_by(|a, b| a.display_path.cmp(&b.display_path));
     let tree = build_git_tree(&files);
     let branch_name = current_branch_name(&repo);
-    let ahead = branch_ahead(&repo).unwrap_or(0);
+    let ahead = branch_ahead_cached(&repo, &repo_root, branch_ahead_cache).unwrap_or(0);
 
     GitWorkspaceStatus {
         workspace_idx,
@@ -146,10 +167,25 @@ fn collect_workspace_status(workspace_idx: usize, root: &Path) -> GitWorkspaceSt
 }
 
 fn build_git_tree(files: &[GitFileEntry]) -> Vec<GitTreeRow> {
+    if !git_tree_files_are_sorted(files) {
+        return build_git_tree_from_unsorted_files(files);
+    }
+    let mut rows = Vec::with_capacity(files.len());
+    push_git_tree_rows(files, 0, files.len(), "", 0, &mut rows);
+    rows
+}
+
+fn git_tree_files_are_sorted(files: &[GitFileEntry]) -> bool {
+    files
+        .windows(2)
+        .all(|pair| pair[0].display_path <= pair[1].display_path)
+}
+
+fn build_git_tree_from_unsorted_files(files: &[GitFileEntry]) -> Vec<GitTreeRow> {
     let mut order = (0..files.len()).collect::<Vec<_>>();
     order.sort_by(|&left, &right| files[left].display_path.cmp(&files[right].display_path));
     let mut rows = Vec::with_capacity(files.len());
-    push_git_tree_rows(files, &order, 0, order.len(), "", 0, &mut rows);
+    push_git_tree_rows_ordered(files, &order, 0, order.len(), "", 0, &mut rows);
     rows
 }
 
@@ -185,17 +221,16 @@ fn git_tree_join_path(parent_path: &str, name: &str) -> String {
 
 fn push_git_tree_rows(
     files: &[GitFileEntry],
-    order: &[usize],
     start: usize,
     end: usize,
     parent_path: &str,
-    depth: usize,
+    depth: u16,
     rows: &mut Vec<GitTreeRow>,
 ) {
     let mut idx = start;
     while idx < end {
         let Some((name, true)) =
-            git_tree_next_part(&files[order[idx]].display_path, parent_path)
+            git_tree_next_part(files[idx].display_path.as_ref(), parent_path)
         else {
             idx += 1;
             continue;
@@ -203,27 +238,92 @@ fn push_git_tree_rows(
         let folder_start = idx;
         idx += 1;
         while idx < end
-            && git_tree_next_part(&files[order[idx]].display_path, parent_path)
+            && git_tree_next_part(files[idx].display_path.as_ref(), parent_path)
                 .is_some_and(|(next_name, has_child)| has_child && next_name == name)
         {
             idx += 1;
         }
         let path = git_tree_join_path(parent_path, name);
         rows.push(GitTreeRow {
-            name: name.to_string(),
-            path: path.clone(),
+            name: name.into(),
+            path: path.clone().into_boxed_str(),
             depth,
             file_idx: None,
             icon_key: crate::app::file_icons::folder_icon_key_for_name(name),
         });
-        push_git_tree_rows(files, order, folder_start, idx, &path, depth + 1, rows);
+        push_git_tree_rows(
+            files,
+            folder_start,
+            idx,
+            &path,
+            depth.saturating_add(1),
+            rows,
+        );
+    }
+
+    for file_idx in start..end {
+        let file = &files[file_idx];
+        if let Some((name, false)) = git_tree_next_part(file.display_path.as_ref(), parent_path) {
+            rows.push(GitTreeRow {
+                name: name.into(),
+                path: file.display_path.clone(),
+                depth,
+                file_idx: Some(file_idx),
+                icon_key: crate::app::file_icons::file_icon_key_for_name(name),
+            });
+        }
+    }
+}
+
+fn push_git_tree_rows_ordered(
+    files: &[GitFileEntry],
+    order: &[usize],
+    start: usize,
+    end: usize,
+    parent_path: &str,
+    depth: u16,
+    rows: &mut Vec<GitTreeRow>,
+) {
+    let mut idx = start;
+    while idx < end {
+        let Some((name, true)) =
+            git_tree_next_part(files[order[idx]].display_path.as_ref(), parent_path)
+        else {
+            idx += 1;
+            continue;
+        };
+        let folder_start = idx;
+        idx += 1;
+        while idx < end
+            && git_tree_next_part(files[order[idx]].display_path.as_ref(), parent_path)
+                .is_some_and(|(next_name, has_child)| has_child && next_name == name)
+        {
+            idx += 1;
+        }
+        let path = git_tree_join_path(parent_path, name);
+        rows.push(GitTreeRow {
+            name: name.into(),
+            path: path.clone().into_boxed_str(),
+            depth,
+            file_idx: None,
+            icon_key: crate::app::file_icons::folder_icon_key_for_name(name),
+        });
+        push_git_tree_rows_ordered(
+            files,
+            order,
+            folder_start,
+            idx,
+            &path,
+            depth.saturating_add(1),
+            rows,
+        );
     }
 
     for &file_idx in order.iter().take(end).skip(start) {
         let file = &files[file_idx];
-        if let Some((name, false)) = git_tree_next_part(&file.display_path, parent_path) {
+        if let Some((name, false)) = git_tree_next_part(file.display_path.as_ref(), parent_path) {
             rows.push(GitTreeRow {
-                name: name.to_string(),
+                name: name.into(),
                 path: file.display_path.clone(),
                 depth,
                 file_idx: Some(file_idx),
@@ -250,7 +350,7 @@ pub(crate) fn git_visible_tree_row_count(
         }
         count += 1;
         if row.file_idx.is_none()
-            && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_str()))
+            && workspace_collapsed.is_some_and(|dirs| dirs.contains(row.path.as_ref()))
         {
             collapsed_depth = Some(row.depth);
         }
@@ -277,13 +377,13 @@ pub(crate) fn git_folder_file_indices(
     if row.file_idx.is_some() {
         return Vec::new();
     }
-    let folder = row.path.as_str();
+    let folder = row.path.as_ref();
     workspace
         .files
         .iter()
         .enumerate()
         .filter_map(|(file_idx, file)| {
-            git_path_is_descendant(file.display_path.as_str(), folder).then_some(file_idx)
+            git_path_is_descendant(file.display_path.as_ref(), folder).then_some(file_idx)
         })
         .collect()
 }
@@ -299,11 +399,11 @@ pub(crate) fn git_folder_stage_state(
         return None;
     }
 
-    let folder = row.path.as_str();
+    let folder = row.path.as_ref();
     let mut total = 0usize;
     let mut staged = 0usize;
     for file in &workspace.files {
-        if git_path_is_descendant(file.display_path.as_str(), folder) {
+        if git_path_is_descendant(file.display_path.as_ref(), folder) {
             total += 1;
             if file.staged {
                 staged += 1;
@@ -380,9 +480,12 @@ fn current_branch_name(repo: &git2::Repository) -> Option<String> {
         .map(|name| name.chars().take(12).collect())
 }
 
-fn branch_ahead(repo: &git2::Repository) -> Result<usize, git2::Error> {
+fn branch_ahead_key(
+    repo: &git2::Repository,
+    repo_root: &Path,
+) -> Result<BranchAheadKey, git2::Error> {
     let head = repo.head()?;
-    let local_oid = head
+    let head_oid = head
         .target()
         .ok_or_else(|| git2::Error::from_str("No HEAD"))?;
     let name = head
@@ -394,7 +497,24 @@ fn branch_ahead(repo: &git2::Repository) -> Result<usize, git2::Error> {
         .get()
         .target()
         .ok_or_else(|| git2::Error::from_str("No upstream target"))?;
-    let (ahead, _) = repo.graph_ahead_behind(local_oid, upstream_oid)?;
+    Ok(BranchAheadKey {
+        repo_root: repo_root.to_path_buf(),
+        head_oid,
+        upstream_oid,
+    })
+}
+
+fn branch_ahead_cached(
+    repo: &git2::Repository,
+    repo_root: &Path,
+    cache: &mut BranchAheadCache,
+) -> Result<usize, git2::Error> {
+    let key = branch_ahead_key(repo, repo_root)?;
+    if let Some(&ahead) = cache.get(&key) {
+        return Ok(ahead);
+    }
+    let (ahead, _) = repo.graph_ahead_behind(key.head_oid, key.upstream_oid)?;
+    cache.insert(key, ahead);
     Ok(ahead)
 }
 
@@ -660,10 +780,10 @@ mod tests {
     fn git_file(display_path: &str, staged: bool, status: GitFileStatus) -> GitFileEntry {
         GitFileEntry {
             workspace_idx: 0,
-            rel_path: display_path.to_string(),
+            rel_path: display_path.into(),
             old_rel_path: None,
-            display_path: display_path.to_string(),
-            depth: display_path.matches('/').count(),
+            display_path: display_path.into(),
+            depth: display_path.matches('/').count().min(u16::MAX as usize) as u16,
             staged,
             status,
         }
@@ -1118,9 +1238,9 @@ mod tests {
                     branch_name: None,
                     files: vec![GitFileEntry {
                         workspace_idx: 1,
-                        rel_path: "other.rs".to_string(),
+                        rel_path: "other.rs".into(),
                         old_rel_path: None,
-                        display_path: "other.rs".to_string(),
+                        display_path: "other.rs".into(),
                         depth: 0,
                         staged: true,
                         status: GitFileStatus::Added,
@@ -1148,9 +1268,9 @@ mod tests {
                 branch_name: None,
                 files: vec![GitFileEntry {
                     workspace_idx: 1,
-                    rel_path: "other.rs".to_string(),
+                    rel_path: "other.rs".into(),
                     old_rel_path: None,
-                    display_path: "other.rs".to_string(),
+                    display_path: "other.rs".into(),
                     depth: 0,
                     staged: true,
                     status: GitFileStatus::Added,
@@ -1200,6 +1320,94 @@ mod tests {
     }
 
     #[test]
+    fn git_status_refresh_state_coalesces_dirty_rerun() {
+        let mut state = GitPanelState::default();
+
+        assert!(state.begin_status_refresh());
+        assert!(state.status_refresh_pending);
+        assert!(!state.status_refresh_dirty);
+
+        assert!(!state.begin_status_refresh());
+        assert!(state.status_refresh_pending);
+        assert!(state.status_refresh_dirty);
+
+        assert!(state.finish_status_refresh());
+        assert!(!state.status_refresh_pending);
+        assert!(!state.status_refresh_dirty);
+
+        assert!(state.begin_status_refresh());
+        assert!(state.status_refresh_pending);
+        assert!(!state.status_refresh_dirty);
+    }
+
+    #[test]
+    fn git_status_pathspec_limits_workspace_subdir_results() {
+        let root = temp_git_root("pathspec");
+        let workspace = root.join("sub");
+        std::fs::create_dir_all(&workspace).unwrap();
+        let _repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("outside.txt"), "outside\n").unwrap();
+        std::fs::write(workspace.join("inside.txt"), "inside\n").unwrap();
+
+        let status = collect_workspace_status(7, &workspace);
+
+        assert_eq!(status.workspace_idx, 7);
+        assert_eq!(status.files.len(), 1);
+        assert_eq!(status.files[0].display_path.as_ref(), "inside.txt");
+        assert_eq!(status.files[0].rel_path.as_ref(), "sub/inside.txt");
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn git_branch_ahead_cache_keys_by_head_and_upstream_oid() {
+        let root = temp_git_root("ahead_cache");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "a\n").unwrap();
+        toggle_stage(&root, "a.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let branch_name = repo.head().unwrap().shorthand().unwrap().to_string();
+        repo.remote("origin", root.to_str().unwrap()).unwrap();
+        repo.reference(
+            &format!("refs/remotes/origin/{branch_name}"),
+            head.id(),
+            true,
+            "test remote ref",
+        )
+        .unwrap();
+        let mut config = repo.config().unwrap();
+        config
+            .set_str(&format!("branch.{branch_name}.remote"), "origin")
+            .unwrap();
+        config
+            .set_str(
+                &format!("branch.{branch_name}.merge"),
+                &format!("refs/heads/{branch_name}"),
+            )
+            .unwrap();
+
+        let mut cache = BranchAheadCache::default();
+        assert_eq!(branch_ahead_cached(&repo, &root, &mut cache).unwrap(), 0);
+        assert_eq!(cache.len(), 1);
+        assert_eq!(branch_ahead_cached(&repo, &root, &mut cache).unwrap(), 0);
+        assert_eq!(cache.len(), 1);
+
+        std::fs::write(root.join("b.txt"), "b\n").unwrap();
+        toggle_stage(&root, "b.txt", None, false).unwrap();
+        commit_repo(&root, "second", false).unwrap();
+
+        assert_eq!(branch_ahead_cached(&repo, &root, &mut cache).unwrap(), 1);
+        assert_eq!(cache.len(), 2);
+        assert_eq!(branch_ahead_cached(&repo, &root, &mut cache).unwrap(), 1);
+        assert_eq!(cache.len(), 2);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn stage_event_preserves_visible_topology_and_merges_existing_files() {
         let mut state = GitPanelState::default();
         state.snapshot = GitStatusSnapshot {
@@ -1241,7 +1449,7 @@ mod tests {
         assert_eq!(state.snapshot.workspaces[0].files.len(), 1);
         assert!(!state.snapshot.workspaces[0].files[0].staged);
         assert_eq!(
-            state.snapshot.workspaces[0].files[0].display_path,
+            state.snapshot.workspaces[0].files[0].display_path.as_ref(),
             "tests/test_api.py"
         );
 
@@ -1357,7 +1565,7 @@ mod tests {
 
         assert_eq!(state.snapshot.workspaces[0].files.len(), 1);
         assert_eq!(
-            state.snapshot.workspaces[0].files[0].display_path,
+            state.snapshot.workspaces[0].files[0].display_path.as_ref(),
             "tests/test_api.py"
         );
         assert!(state.snapshot.workspaces[0].files[0].staged);
@@ -1377,8 +1585,8 @@ mod tests {
         assert_eq!(
             rows.iter()
                 .map(|row| (
-                    row.name.as_str(),
-                    row.path.as_str(),
+                    row.name.as_ref(),
+                    row.path.as_ref(),
                     row.depth,
                     row.file_idx
                 ))
@@ -1422,12 +1630,12 @@ mod tests {
         let src_idx = workspace
             .tree
             .iter()
-            .position(|row| row.path == "src" && row.file_idx.is_none())
+            .position(|row| row.path.as_ref() == "src" && row.file_idx.is_none())
             .unwrap();
         let src_extra_idx = workspace
             .tree
             .iter()
-            .position(|row| row.path == "src-extra" && row.file_idx.is_none())
+            .position(|row| row.path.as_ref() == "src-extra" && row.file_idx.is_none())
             .unwrap();
 
         assert_eq!(
@@ -1454,14 +1662,14 @@ mod tests {
         let workspace = collect_workspace_status(7, &root);
         assert_eq!(workspace.workspace_idx, 7);
         assert_eq!(workspace.files.len(), 1);
-        assert_eq!(workspace.files[0].display_path, "src/main.rs");
+        assert_eq!(workspace.files[0].display_path.as_ref(), "src/main.rs");
         assert!(!workspace.files[0].staged);
         assert_eq!(workspace.files[0].status, GitFileStatus::Untracked);
         assert_eq!(
             workspace
                 .tree
                 .iter()
-                .map(|row| row.name.as_str())
+                .map(|row| row.name.as_ref())
                 .collect::<Vec<_>>(),
             vec!["src", "main.rs"]
         );

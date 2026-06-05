@@ -108,6 +108,7 @@ impl Renderer {
                 in vec2 v_uv; in vec4 v_col; in float v_mode; flat in vec3 v_sdf_params;
                 out vec4 out_color;
                 uniform sampler2D tex;
+                uniform sampler2D color_tex;
 
                 float roundedBoxSDF(vec2 CenterPosition, vec2 Size, float Radius) {
                     return length(max(abs(CenterPosition) - Size + Radius, 0.0)) - Radius;
@@ -159,11 +160,15 @@ impl Renderer {
                         if (alpha <= 0.0) discard;
                         float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);
                         out_color = vec4(v_col.rgb + (noise - 0.5) / 128.0, v_col.a * alpha);
+                    } else if (v_mode == 10.0) {
+                        out_color = texture(color_tex, v_uv) * v_col;
                     } else {
                         vec4 tex_color = texture(tex, v_uv);
                         if (v_mode == 1.0) { out_color = vec4(tex_color.rgb, tex_color.a * v_col.a); }
-                        else if (v_mode == 5.0) { out_color = tex_color * v_col; }
-                        else { out_color = vec4(v_col.rgb, tex_color.a * v_col.a); }
+                        else {
+                            float alpha = tex_color.r;
+                            out_color = vec4(v_col.rgb, alpha * v_col.a);
+                        }
                     }
                 }");
             gl.compile_shader(f_shader);
@@ -173,6 +178,11 @@ impl Renderer {
             gl.attach_shader(program, f_shader);
             gl.link_program(program);
             let proj_loc = gl.get_uniform_location(program, "proj");
+            let tex_loc = gl.get_uniform_location(program, "tex");
+            let color_tex_loc = gl.get_uniform_location(program, "color_tex");
+            gl.use_program(Some(program));
+            gl.uniform_1_i32(tex_loc.as_ref(), 0);
+            gl.uniform_1_i32(color_tex_loc.as_ref(), 1);
 
             gl.delete_shader(v_shader);
             gl.delete_shader(f_shader);
@@ -203,7 +213,9 @@ impl Renderer {
             gl.enable_vertex_attrib_array(sdf_loc);
 
             let texture = gl.create_texture().unwrap();
+            gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             gl.tex_parameter_i32(
                 glow::TEXTURE_2D,
                 glow::TEXTURE_MIN_FILTER,
@@ -217,11 +229,11 @@ impl Renderer {
             gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGBA8 as i32,
+                PRIMARY_ATLAS_INTERNAL_FORMAT as i32,
                 ATLAS_SIZE_W,
                 ATLAS_SIZE_H,
                 0,
-                glow::RGBA,
+                PRIMARY_ATLAS_UPLOAD_FORMAT,
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(None),
             );
@@ -361,6 +373,7 @@ impl Renderer {
                 vao,
                 vbo,
                 texture,
+                color_texture: None,
                 vertices: Vec::with_capacity(MAX_VERTICES),
                 fonts,
                 ui_fonts,
@@ -371,6 +384,9 @@ impl Renderer {
                 atlas_x: 2,
                 atlas_y: 2,
                 max_row_h: 0,
+                color_atlas_x: 2,
+                color_atlas_y: 2,
+                color_max_row_h: 0,
                 font_size: 18.0 * scale_factor,
                 scale_factor,
                 theme,

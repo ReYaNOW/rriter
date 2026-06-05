@@ -46,8 +46,8 @@ impl App {
         self.spawn_git_task(GitAction::ToggleStageMany {
             files: vec![GitStageFileCommand {
                 repo_root,
-                rel_path: file.rel_path,
-                old_rel_path: file.old_rel_path,
+                rel_path: file.rel_path.into(),
+                old_rel_path: file.old_rel_path.map(Into::into),
                 staged: file.staged,
             }],
         });
@@ -92,8 +92,8 @@ impl App {
                             .filter(|file| file.staged != target_staged)
                             .map(|file| GitStageFileCommand {
                                 repo_root: repo_root.clone(),
-                                rel_path: file.rel_path.clone(),
-                                old_rel_path: file.old_rel_path.clone(),
+                                rel_path: file.rel_path.to_string(),
+                                old_rel_path: file.old_rel_path.as_ref().map(ToString::to_string),
                                 staged: file.staged,
                             })
                             .collect::<Vec<_>>()
@@ -233,8 +233,8 @@ impl App {
                             .filter_map(|idx| workspace.files.get(*idx))
                             .map(|file| GitStageFileCommand {
                                 repo_root: repo_root.clone(),
-                                rel_path: file.rel_path.clone(),
-                                old_rel_path: file.old_rel_path.clone(),
+                                rel_path: file.rel_path.to_string(),
+                                old_rel_path: file.old_rel_path.as_ref().map(ToString::to_string),
                                 staged: false,
                             })
                             .collect::<Vec<_>>()
@@ -398,13 +398,18 @@ impl App {
             .collapsed_dirs
             .entry(workspace_idx)
             .or_default();
-        if !dirs.remove(row.path.as_str()) {
-            dirs.insert(row.path.clone());
+        if !dirs.remove(row.path.as_ref()) {
+            dirs.insert(row.path.to_string());
         }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn spawn_git_task(&mut self, action: GitAction) {
+        let refresh = matches!(&action, GitAction::Refresh);
+        if refresh && !self.ide_panel.git.begin_status_refresh() {
+            return;
+        }
+
         if let GitAction::LoadGraph {
             workspace_idx,
             repo_root,
@@ -488,17 +493,20 @@ impl App {
         self.ide_panel.git.notice = None;
 
         let workspaces = self.ide_workspaces.clone();
+        let branch_ahead_cache = self.ide_panel.git.branch_ahead_cache.clone();
         let (tx, rx) = mpsc::channel();
-        self.ide_panel
-            .git
-            .rx
-            .push(GitPanelReceiver { rx, blocking });
+        self.ide_panel.git.rx.push(GitPanelReceiver {
+            rx,
+            blocking,
+            refresh,
+        });
 
         if let GitAction::ToggleStageMany { files } = action {
             let mut command = Some(GitStageCommand {
                 request_id,
                 files,
                 workspaces,
+                branch_ahead_cache,
                 tx,
             });
             if let Some(stage_tx) = &self.ide_panel.git.stage_tx {
@@ -513,13 +521,18 @@ impl App {
             std::thread::spawn(move || {
                 for command in stage_rx {
                     let notice = run_stage_files(&command.files);
-                    let snapshot = collect_git_status(&command.workspaces);
-                    let _ = command.tx.send(GitPanelEvent {
-                        request_id: command.request_id,
-                        snapshot,
-                        notice,
-                        preserve_snapshot_on_empty: true,
-                        clear_message: false,
+                    let mut branch_ahead_cache = command.branch_ahead_cache;
+                    let snapshot =
+                        collect_git_status_with_cache(&command.workspaces, &mut branch_ahead_cache);
+                    let _ = command.tx.send(GitPanelTaskResult {
+                        event: GitPanelEvent {
+                            request_id: command.request_id,
+                            snapshot,
+                            notice,
+                            preserve_snapshot_on_empty: true,
+                            clear_message: false,
+                        },
+                        branch_ahead_cache,
                     });
                 }
             });
@@ -531,13 +544,17 @@ impl App {
 
         std::thread::spawn(move || {
             let outcome = run_git_action(action);
-            let snapshot = collect_git_status(&workspaces);
-            let _ = tx.send(GitPanelEvent {
-                request_id,
-                snapshot,
-                notice: outcome.notice,
-                preserve_snapshot_on_empty: false,
-                clear_message: outcome.clear_message,
+            let mut branch_ahead_cache = branch_ahead_cache;
+            let snapshot = collect_git_status_with_cache(&workspaces, &mut branch_ahead_cache);
+            let _ = tx.send(GitPanelTaskResult {
+                event: GitPanelEvent {
+                    request_id,
+                    snapshot,
+                    notice: outcome.notice,
+                    preserve_snapshot_on_empty: false,
+                    clear_message: outcome.clear_message,
+                },
+                branch_ahead_cache,
             });
         });
     }

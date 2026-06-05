@@ -292,31 +292,63 @@ impl Renderer {
         self.atlas_x = 2;
         self.atlas_y = 2;
         self.max_row_h = 0;
+        self.color_atlas_x = 2;
+        self.color_atlas_y = 2;
+        self.color_max_row_h = 0;
         unsafe {
             use glow::HasContext;
+            self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             self.gl.tex_image_2d(
                 glow::TEXTURE_2D,
                 0,
-                glow::RGBA8 as i32,
+                PRIMARY_ATLAS_INTERNAL_FORMAT as i32,
                 ATLAS_SIZE_W,
                 ATLAS_SIZE_H,
                 0,
-                glow::RGBA,
+                PRIMARY_ATLAS_UPLOAD_FORMAT,
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(None),
             );
+            if let Some(color_texture) = self.color_texture {
+                self.gl.active_texture(glow::TEXTURE1);
+                self.gl
+                    .bind_texture(glow::TEXTURE_2D, Some(color_texture));
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                self.gl.active_texture(glow::TEXTURE0);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            }
         }
     }
 
+    fn rgba_alpha_bytes(data: &[u8]) -> Vec<u8> {
+        data.chunks_exact(4).map(|px| px[3]).collect()
+    }
+
+    fn rgba_uses_color(data: &[u8]) -> bool {
+        data.chunks_exact(4)
+            .any(|px| px[3] != 0 && (px[0] != 255 || px[1] != 255 || px[2] != 255))
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub(crate) fn upload_icon_rgba(
+    fn upload_alpha_atlas(
         &mut self,
         width: i32,
         height: i32,
         data: &[u8],
     ) -> Option<IconAtlasEntry> {
-        if width <= 0 || height <= 0 || data.is_empty() {
+        if width <= 0 || height <= 0 || data.len() != (width as usize) * (height as usize) {
             return None;
         }
         if self.atlas_x + width + 2 > ATLAS_SIZE_W {
@@ -334,7 +366,9 @@ impl Renderer {
         let y = self.atlas_y;
         unsafe {
             use glow::HasContext;
+            self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
             self.gl.tex_sub_image_2d(
                 glow::TEXTURE_2D,
                 0,
@@ -342,7 +376,7 @@ impl Renderer {
                 y,
                 width,
                 height,
-                glow::RGBA,
+                PRIMARY_ATLAS_UPLOAD_FORMAT,
                 glow::UNSIGNED_BYTE,
                 glow::PixelUnpackData::Slice(Some(data)),
             );
@@ -354,7 +388,162 @@ impl Renderer {
             v: y as f32 / ATLAS_SIZE_H as f32,
             uw: width as f32 / ATLAS_SIZE_W as f32,
             vh: height as f32 / ATLAS_SIZE_H as f32,
+            color: false,
         })
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn ensure_color_texture(&mut self) -> Option<glow::Texture> {
+        if self.color_texture.is_none() {
+            unsafe {
+                use glow::HasContext;
+                let texture = self.gl.create_texture().ok()?;
+                self.gl.active_texture(glow::TEXTURE1);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                self.gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MIN_FILTER,
+                    glow::LINEAR as i32,
+                );
+                self.gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MAG_FILTER,
+                    glow::LINEAR as i32,
+                );
+                self.gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_WRAP_S,
+                    glow::CLAMP_TO_EDGE as i32,
+                );
+                self.gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_WRAP_T,
+                    glow::CLAMP_TO_EDGE as i32,
+                );
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                self.gl.active_texture(glow::TEXTURE0);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+                self.color_texture = Some(texture);
+            }
+        }
+        self.color_texture
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn reset_color_texture_atlas(&mut self) {
+        self.flush();
+        self.glyphs.clear();
+        self.ui_glyphs.clear();
+        self.icons.clear();
+        self.file_icon_cache.clear();
+        self.color_atlas_x = 2;
+        self.color_atlas_y = 2;
+        self.color_max_row_h = 0;
+        if let Some(color_texture) = self.color_texture {
+            unsafe {
+                use glow::HasContext;
+                self.gl.active_texture(glow::TEXTURE1);
+                self.gl
+                    .bind_texture(glow::TEXTURE_2D, Some(color_texture));
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                self.gl.active_texture(glow::TEXTURE0);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            }
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn upload_color_rgba(
+        &mut self,
+        width: i32,
+        height: i32,
+        data: &[u8],
+    ) -> Option<IconAtlasEntry> {
+        if width <= 0 || height <= 0 || data.len() != (width as usize) * (height as usize) * 4 {
+            return None;
+        }
+        let color_texture = self.ensure_color_texture()?;
+        if self.color_atlas_x + width + 2 > ATLAS_SIZE_W {
+            self.color_atlas_x = 2;
+            self.color_atlas_y += self.color_max_row_h + 2;
+            self.color_max_row_h = 0;
+        }
+        if self.color_atlas_y + height + 2 > ATLAS_SIZE_H {
+            self.reset_color_texture_atlas();
+        }
+        if self.color_atlas_x + width + 2 > ATLAS_SIZE_W
+            || self.color_atlas_y + height + 2 > ATLAS_SIZE_H
+        {
+            return None;
+        }
+        let x = self.color_atlas_x;
+        let y = self.color_atlas_y;
+        unsafe {
+            use glow::HasContext;
+            self.gl.active_texture(glow::TEXTURE1);
+            self.gl
+                .bind_texture(glow::TEXTURE_2D, Some(color_texture));
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                x,
+                y,
+                width,
+                height,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(data)),
+            );
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+        }
+        self.color_atlas_x += width + 2;
+        self.color_max_row_h = self.color_max_row_h.max(height);
+        Some(IconAtlasEntry {
+            u: x as f32 / ATLAS_SIZE_W as f32,
+            v: y as f32 / ATLAS_SIZE_H as f32,
+            uw: width as f32 / ATLAS_SIZE_W as f32,
+            vh: height as f32 / ATLAS_SIZE_H as f32,
+            color: true,
+        })
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn upload_icon_rgba(
+        &mut self,
+        width: i32,
+        height: i32,
+        data: &[u8],
+    ) -> Option<IconAtlasEntry> {
+        if width <= 0 || height <= 0 || data.is_empty() {
+            return None;
+        }
+        if Self::rgba_uses_color(data) {
+            self.upload_color_rgba(width, height, data)
+        } else {
+            let alpha = Self::rgba_alpha_bytes(data);
+            self.upload_alpha_atlas(width, height, &alpha)
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -557,6 +746,17 @@ mod tests {
     }
 
     #[test]
+    fn rgba_alpha_extraction_and_color_detection_are_stable() {
+        let rgba = [
+            255, 255, 255, 0, 255, 255, 255, 10, 64, 128, 255, 200,
+        ];
+
+        assert_eq!(Renderer::rgba_alpha_bytes(&rgba), vec![0, 10, 200]);
+        assert!(Renderer::rgba_uses_color(&rgba));
+        assert!(!Renderer::rgba_uses_color(&[255, 255, 255, 1, 255, 255, 255, 255]));
+    }
+
+    #[test]
     fn vertex_layout_is_plain_data_and_visual_line_fields_are_stable() {
         let vertex = Vertex {
             pos: [1.0, 2.0],
@@ -591,6 +791,9 @@ mod tests {
     fn renderer_constants_keep_expected_atlas_and_batch_sizes() {
         assert_eq!(ATLAS_SIZE_W, 1024);
         assert_eq!(ATLAS_SIZE_H, 1024);
+        assert_eq!(PRIMARY_ATLAS_INTERNAL_FORMAT, glow::R8);
+        assert_eq!(PRIMARY_ATLAS_UPLOAD_FORMAT, glow::RED);
+        assert_eq!(COLOR_ATLAS_MODE, 10.0);
         assert!(MAX_VERTICES >= 32_768);
     }
 }
