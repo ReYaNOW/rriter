@@ -7,10 +7,17 @@ use std::{
 };
 
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
-    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>>,
+    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, RasterizedIconState>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 const RASTERIZED_ICON_CACHE_LIMIT: usize = 256;
+const RASTERIZED_ICON_READY_BYTE_LIMIT: usize = 1024 * 1024;
 const GITIGNORE_CACHE_LIMIT: usize = 32;
+
+pub enum RasterizedIconState {
+    Pending,
+    Missing,
+    Ready(Box<[u8]>),
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GitignoreFingerprint {
@@ -29,17 +36,48 @@ static GITIGNORE_CACHE: once_cell::sync::Lazy<
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
 fn trim_rasterized_icon_cache(
-    cache: &mut rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>,
+    cache: &mut rustc_hash::FxHashMap<&'static str, RasterizedIconState>,
     keep_key: &'static str,
 ) {
-    while cache.len() >= RASTERIZED_ICON_CACHE_LIMIT {
-        let victim = cache
-            .iter()
-            .find_map(|(&key, value)| (key != keep_key && value.is_some()).then_some(key));
+    while cache.len() > RASTERIZED_ICON_CACHE_LIMIT {
+        let victim = cache.iter().find_map(|(&key, value)| {
+            (key != keep_key
+                && matches!(
+                    value,
+                    RasterizedIconState::Pending | RasterizedIconState::Missing
+                ))
+            .then_some(key)
+        });
+        let victim = victim.or_else(|| {
+            cache.iter().find_map(|(&key, value)| {
+                (key != keep_key && matches!(value, RasterizedIconState::Ready(_))).then_some(key)
+            })
+        });
         let Some(victim) = victim else {
             break;
         };
         cache.remove(&victim);
+    }
+
+    let mut ready_bytes = cache
+        .values()
+        .map(|value| match value {
+            RasterizedIconState::Ready(data) => data.len(),
+            RasterizedIconState::Pending | RasterizedIconState::Missing => 0,
+        })
+        .sum::<usize>();
+    while ready_bytes > RASTERIZED_ICON_READY_BYTE_LIMIT {
+        let victim = cache.iter().find_map(|(&key, value)| match value {
+            RasterizedIconState::Ready(data) if key != keep_key => Some((key, data.len())),
+            RasterizedIconState::Ready(_)
+            | RasterizedIconState::Pending
+            | RasterizedIconState::Missing => None,
+        });
+        let Some((victim, bytes)) = victim else {
+            break;
+        };
+        cache.remove(&victim);
+        ready_bytes = ready_bytes.saturating_sub(bytes);
     }
 }
 
@@ -108,17 +146,43 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
 }
 
 pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
-    let cache = RASTERIZED_ICONS.lock().unwrap();
-    if let Some(state) = cache.get(key) {
-        if state.is_some() {
-            return;
-        }
+    if !reserve_rasterized_icon(key) {
+        return;
     }
-    drop(cache); // Не блокируем другие потоки во время рендеринга
+    finish_reserved_rasterized_icon(key, is_folder);
+}
 
+pub fn request_rasterized_icon(key: &'static str, is_folder: bool) {
+    if reserve_rasterized_icon(key) {
+        std::thread::spawn(move || {
+            finish_reserved_rasterized_icon(key, is_folder);
+        });
+    }
+}
+
+fn reserve_rasterized_icon(key: &'static str) -> bool {
+    let Ok(mut cache) = RASTERIZED_ICONS.lock() else {
+        return false;
+    };
+    if cache.contains_key(key) {
+        return false;
+    }
+    cache.insert(key, RasterizedIconState::Pending);
+    trim_rasterized_icon_cache(&mut cache, key);
+    true
+}
+
+fn store_rasterized_icon_state(key: &'static str, state: RasterizedIconState) {
+    if let Ok(mut cache) = RASTERIZED_ICONS.lock() {
+        cache.insert(key, state);
+        trim_rasterized_icon_cache(&mut cache, key);
+    }
+}
+
+fn finish_reserved_rasterized_icon(key: &'static str, is_folder: bool) {
     let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
     if svg_bytes.is_empty() {
-        RASTERIZED_ICONS.lock().unwrap().insert(key, None);
+        store_rasterized_icon_state(key, RasterizedIconState::Missing);
         return;
     }
     let opt = resvg::usvg::Options::default();
@@ -143,12 +207,15 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
                     px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
                 }
             }
-            let mut cache = RASTERIZED_ICONS.lock().unwrap();
-            trim_rasterized_icon_cache(&mut cache, key);
-            cache.insert(key, Some(data));
+            store_rasterized_icon_state(
+                key,
+                RasterizedIconState::Ready(data.into_boxed_slice()),
+            );
+        } else {
+            store_rasterized_icon_state(key, RasterizedIconState::Missing);
         }
     } else {
-        RASTERIZED_ICONS.lock().unwrap().insert(key, None);
+        store_rasterized_icon_state(key, RasterizedIconState::Missing);
     }
 }
 

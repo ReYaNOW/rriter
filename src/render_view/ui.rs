@@ -510,24 +510,26 @@ impl Renderer {
         key: &'static str,
         is_folder: bool,
     ) -> Option<IconAtlasEntry> {
+        use crate::app::file_tree::RasterizedIconState;
+
         let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
 
         if let Some(state) = cache.remove(key) {
-            if let Some(data) = state {
-                drop(cache);
-                let entry = self.upload_icon_rgba(64, 64, &data)?;
-                self.file_icon_cache.insert(key, entry);
-                Some(entry)
-            } else {
-                cache.insert(key, None);
-                None
+            match state {
+                RasterizedIconState::Ready(data) => {
+                    drop(cache);
+                    let entry = self.upload_icon_rgba(64, 64, &data)?;
+                    self.file_icon_cache.insert(key, entry);
+                    Some(entry)
+                }
+                state @ (RasterizedIconState::Pending | RasterizedIconState::Missing) => {
+                    cache.insert(key, state);
+                    None
+                }
             }
         } else {
-            cache.insert(key, None);
             drop(cache);
-            std::thread::spawn(move || {
-                crate::app::file_tree::pre_rasterize_icon(key, is_folder);
-            });
+            crate::app::file_tree::request_rasterized_icon(key, is_folder);
             None
         }
     }

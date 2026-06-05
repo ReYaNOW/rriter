@@ -873,13 +873,15 @@ impl Renderer {
                             let home = std::env::var_os("HOME")
                                 .or_else(|| std::env::var_os("USERPROFILE"))
                                 .map(std::path::PathBuf::from);
-                            git_file_tooltip = Some((
-                                workspace.workspace_idx,
-                                file_idx,
-                                git_file_tooltip_text(file, home.as_deref()),
-                                mx,
-                                my,
-                            ));
+                            if let Some(repo_root) = workspace.repo_root.as_deref() {
+                                git_file_tooltip = Some((
+                                    workspace.workspace_idx,
+                                    file_idx,
+                                    git_file_tooltip_text(repo_root, file, home.as_deref()),
+                                    mx,
+                                    my,
+                                ));
+                            }
                         }
 
                         let (checkbox_color, check_color) =

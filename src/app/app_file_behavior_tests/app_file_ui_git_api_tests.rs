@@ -256,7 +256,6 @@ fn git_panel_workspace_confirm_dialogs_use_staged_files_headless() {
             files: vec![
                 crate::app::git_panel::GitFileEntry {
                     workspace_idx: 0,
-                    repo_root: PathBuf::from("/workspace"),
                     rel_path: "src/lib.rs".to_string(),
                     old_rel_path: None,
                     display_path: "src/lib.rs".to_string(),
@@ -266,7 +265,6 @@ fn git_panel_workspace_confirm_dialogs_use_staged_files_headless() {
                 },
                 crate::app::git_panel::GitFileEntry {
                     workspace_idx: 0,
-                    repo_root: PathBuf::from("/workspace"),
                     rel_path: "src/main.rs".to_string(),
                     old_rel_path: None,
                     display_path: "src/main.rs".to_string(),
@@ -311,7 +309,6 @@ fn git_panel_stage_clicks_are_locked_while_pending_headless() {
             branch_name: None,
             files: vec![crate::app::git_panel::GitFileEntry {
                 workspace_idx: 0,
-                repo_root: PathBuf::from("/workspace"),
                 rel_path: "tests/test_api.py".to_string(),
                 old_rel_path: None,
                 display_path: "tests/test_api.py".to_string(),
@@ -362,7 +359,6 @@ fn git_file_row_checkbox_only_toggles_stage() {
             branch_name: None,
             files: vec![crate::app::git_panel::GitFileEntry {
                 workspace_idx: 0,
-                repo_root: PathBuf::from("/workspace"),
                 rel_path: "src/main.rs".to_string(),
                 old_rel_path: None,
                 display_path: "src/main.rs".to_string(),
@@ -395,7 +391,6 @@ fn git_file_label_double_click_opens_diff_not_stage() {
             branch_name: None,
             files: vec![crate::app::git_panel::GitFileEntry {
                 workspace_idx: 0,
-                repo_root: PathBuf::from("/workspace"),
                 rel_path: "src/main.rs".to_string(),
                 old_rel_path: None,
                 display_path: "src/main.rs".to_string(),
@@ -438,7 +433,6 @@ fn diff_tab_dedup_by_repo_path() {
             branch_name: None,
             files: vec![crate::app::git_panel::GitFileEntry {
                 workspace_idx: 0,
-                repo_root: PathBuf::from("/workspace"),
                 rel_path: "src/main.rs".to_string(),
                 old_rel_path: None,
                 display_path: "src/main.rs".to_string(),

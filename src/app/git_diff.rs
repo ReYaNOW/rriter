@@ -485,7 +485,7 @@ fn new_editor_with_text(text: &str, version: u64) -> Editor {
 }
 
 impl App {
-    fn current_git_file_entry_for_diff(&self) -> Option<GitFileEntry> {
+    fn current_git_file_entry_for_diff(&self) -> Option<(PathBuf, GitFileEntry)> {
         if !self.is_ide_mode || self.active_tab_is_git_diff() {
             return None;
         }
@@ -496,9 +496,15 @@ impl App {
             .snapshot
             .workspaces
             .iter()
-            .flat_map(|workspace| workspace.files.iter())
-            .find(|file| file.repo_root.join(&file.rel_path) == abs_path)
-            .cloned()
+            .find_map(|workspace| {
+                let repo_root = workspace.repo_root.as_ref()?;
+                workspace
+                    .files
+                    .iter()
+                    .find(|file| repo_root.join(&file.rel_path) == abs_path)
+                    .cloned()
+                    .map(|file| (repo_root.clone(), file))
+            })
     }
 
     pub(crate) fn current_file_git_base_text(&self) -> Option<String> {
@@ -543,23 +549,33 @@ impl App {
         }
     }
 
-    fn git_file_entry(&self, workspace_idx: usize, file_idx: usize) -> Option<GitFileEntry> {
+    fn git_file_entry(
+        &self,
+        workspace_idx: usize,
+        file_idx: usize,
+    ) -> Option<(PathBuf, GitFileEntry)> {
         self.ide_panel
             .git
             .snapshot
             .workspaces
             .iter()
             .find(|workspace| workspace.workspace_idx == workspace_idx)
-            .and_then(|workspace| workspace.files.get(file_idx))
-            .cloned()
+            .and_then(|workspace| {
+                let repo_root = workspace.repo_root.clone()?;
+                workspace
+                    .files
+                    .get(file_idx)
+                    .cloned()
+                    .map(|file| (repo_root, file))
+            })
     }
 
     pub fn open_git_diff_tab(&mut self, workspace_idx: usize, file_idx: usize) {
-        let Some(file) = self.git_file_entry(workspace_idx, file_idx) else {
+        let Some((repo_root, file)) = self.git_file_entry(workspace_idx, file_idx) else {
             return;
         };
         let meta = GitDiffTabMeta {
-            repo_root: file.repo_root.clone(),
+            repo_root,
             rel_path: file.rel_path.clone(),
             old_rel_path: file.old_rel_path.clone(),
             status: file.status,
@@ -666,9 +682,12 @@ impl App {
                 .iter()
                 .find(|workspace| workspace.workspace_idx == meta.workspace_idx)
                 .and_then(|workspace| {
+                    let repo_root = workspace.repo_root.as_ref()?;
+                    if repo_root != &meta.repo_root {
+                        return None;
+                    }
                     workspace.files.iter().find(|file| {
-                        file.repo_root == meta.repo_root
-                            && file.rel_path == meta.rel_path
+                        file.rel_path == meta.rel_path
                             && file.old_rel_path == meta.old_rel_path
                     })
                 })
@@ -1092,14 +1111,14 @@ impl App {
             return;
         }
 
-        if let Some(file) = self.current_git_file_entry_for_diff() {
+        if let Some((repo_root, file)) = self.current_git_file_entry_for_diff() {
             let (tx, rx) = mpsc::channel();
             self.inline_git_diff_rx = Some(rx);
             let editor_version = self.editor.version;
             let file_extension = self.file_extension.clone();
             std::thread::spawn(move || {
                 let result = load_git_diff_with_side(
-                    file.repo_root,
+                    repo_root,
                     file.rel_path,
                     file.old_rel_path,
                     file.status,

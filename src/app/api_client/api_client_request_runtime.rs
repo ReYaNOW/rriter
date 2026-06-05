@@ -744,6 +744,10 @@ pub fn format_api_path_display(path: &str) -> String {
 
 pub fn write_api_path_display(path: &str, out: &mut String) {
     out.clear();
+    append_api_path_display(path, out);
+}
+
+pub fn append_api_path_display(path: &str, out: &mut String) {
     let mut chars = path.chars().peekable();
     while let Some(ch) = chars.next() {
         if ch == '{' {

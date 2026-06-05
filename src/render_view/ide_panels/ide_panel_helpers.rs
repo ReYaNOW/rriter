@@ -268,8 +268,11 @@ fn git_status_word(status: crate::app::git_panel::GitFileStatus) -> &'static str
     }
 }
 
-fn git_file_tooltip_path(file: &crate::app::git_panel::GitFileEntry) -> std::path::PathBuf {
-    file.repo_root.join(file.rel_path.as_str())
+fn git_file_tooltip_path(
+    repo_root: &std::path::Path,
+    file: &crate::app::git_panel::GitFileEntry,
+) -> std::path::PathBuf {
+    repo_root.join(file.rel_path.as_str())
 }
 
 fn compact_home_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
@@ -290,10 +293,11 @@ fn compact_home_path(path: &std::path::Path, home: Option<&std::path::Path>) -> 
 }
 
 fn git_file_tooltip_text(
+    repo_root: &std::path::Path,
     file: &crate::app::git_panel::GitFileEntry,
     home: Option<&std::path::Path>,
 ) -> String {
-    let path = git_file_tooltip_path(file);
+    let path = git_file_tooltip_path(repo_root, file);
     format!(
         "{} • {}",
         compact_home_path(&path, home),

@@ -128,7 +128,6 @@ fn merge_stage_snapshot(current: &mut GitStatusSnapshot, next: GitStatusSnapshot
             .retain(|file| next_files.contains_key(file.display_path.as_str()));
         for file in &mut current_workspace.files {
             if let Some(next_file) = next_files.get(file.display_path.as_str()) {
-                file.repo_root.clone_from(&next_file.repo_root);
                 file.rel_path.clone_from(&next_file.rel_path);
                 file.old_rel_path.clone_from(&next_file.old_rel_path);
                 file.staged = next_file.staged;
@@ -147,18 +146,21 @@ fn git_staged_confirm_files(
         .workspaces
         .iter()
         .find(|workspace| workspace.workspace_idx == workspace_idx)
-        .map(|workspace| {
-            workspace
-                .files
-                .iter()
-                .filter(|file| file.staged)
-                .map(|file| GitConfirmFile {
-                    repo_root: file.repo_root.clone(),
-                    rel_path: file.rel_path.clone(),
-                    old_rel_path: file.old_rel_path.clone(),
-                    display_path: file.display_path.clone(),
-                })
-                .collect()
+        .and_then(|workspace| {
+            let repo_root = workspace.repo_root.as_ref()?;
+            Some(
+                workspace
+                    .files
+                    .iter()
+                    .filter(|file| file.staged)
+                    .map(|file| GitConfirmFile {
+                        repo_root: repo_root.clone(),
+                        rel_path: file.rel_path.clone(),
+                        old_rel_path: file.old_rel_path.clone(),
+                        display_path: file.display_path.clone(),
+                    })
+                    .collect(),
+            )
         })
         .unwrap_or_default()
 }
@@ -866,6 +868,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
     }
 
     let mut active: Vec<ActiveGraphLane> = Vec::new();
+    let mut output_lanes: Vec<ActiveGraphLane> = Vec::new();
     let mut next_color = 1usize;
     let mut max_column = 0usize;
 
@@ -886,8 +889,8 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
             .cloned();
 
         let parents = commit.parent_oids.as_slice();
-        let mut output_lanes: Vec<ActiveGraphLane> =
-            Vec::with_capacity(input_lanes.len() + parents.len());
+        output_lanes.clear();
+        output_lanes.reserve(input_lanes.len() + parents.len());
         let mut first_parent_added = false;
         if !parents.is_empty() {
             for lane in input_lanes {
@@ -1057,7 +1060,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
         max_column = max_column.max(circle_idx);
         max_column = max_column.max(input_lanes.len().saturating_sub(1));
         max_column = max_column.max(output_lanes.len().saturating_sub(1));
-        active = output_lanes;
+        std::mem::swap(&mut active, &mut output_lanes);
     }
 
     max_column.saturating_add(1).max(1)

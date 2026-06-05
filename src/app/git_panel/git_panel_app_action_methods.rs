@@ -13,15 +13,21 @@ impl App {
         {
             return;
         }
-        let Some(file) = self
+        let Some((repo_root, file)) = self
             .ide_panel
             .git
             .snapshot
             .workspaces
             .iter()
             .find(|workspace| workspace.workspace_idx == workspace_idx)
-            .and_then(|workspace| workspace.files.get(file_idx))
-            .cloned()
+            .and_then(|workspace| {
+                let repo_root = workspace.repo_root.clone()?;
+                workspace
+                    .files
+                    .get(file_idx)
+                    .cloned()
+                    .map(|file| (repo_root, file))
+            })
         else {
             return;
         };
@@ -39,7 +45,7 @@ impl App {
         self.ide_panel.git.stage_pending_workspace_idx = Some(workspace_idx);
         self.spawn_git_task(GitAction::ToggleStageMany {
             files: vec![GitStageFileCommand {
-                repo_root: file.repo_root,
+                repo_root,
                 rel_path: file.rel_path,
                 old_rel_path: file.old_rel_path,
                 staged: file.staged,
@@ -76,17 +82,23 @@ impl App {
                         .iter()
                         .all(|idx| workspace.files.get(*idx).is_some_and(|file| file.staged));
                 let target_staged = !all_staged;
-                let files = file_indices
-                    .iter()
-                    .filter_map(|idx| workspace.files.get(*idx))
-                    .filter(|file| file.staged != target_staged)
-                    .map(|file| GitStageFileCommand {
-                        repo_root: file.repo_root.clone(),
-                        rel_path: file.rel_path.clone(),
-                        old_rel_path: file.old_rel_path.clone(),
-                        staged: file.staged,
+                let files = workspace
+                    .repo_root
+                    .as_ref()
+                    .map(|repo_root| {
+                        file_indices
+                            .iter()
+                            .filter_map(|idx| workspace.files.get(*idx))
+                            .filter(|file| file.staged != target_staged)
+                            .map(|file| GitStageFileCommand {
+                                repo_root: repo_root.clone(),
+                                rel_path: file.rel_path.clone(),
+                                old_rel_path: file.old_rel_path.clone(),
+                                staged: file.staged,
+                            })
+                            .collect::<Vec<_>>()
                     })
-                    .collect::<Vec<_>>();
+                    .unwrap_or_default();
                 (file_indices, target_staged, files)
             })
         else {
@@ -212,16 +224,22 @@ impl App {
                     .enumerate()
                     .filter_map(|(idx, file)| (!file.staged).then_some(idx))
                     .collect::<Vec<_>>();
-                let files = file_indices
-                    .iter()
-                    .filter_map(|idx| workspace.files.get(*idx))
-                    .map(|file| GitStageFileCommand {
-                        repo_root: file.repo_root.clone(),
-                        rel_path: file.rel_path.clone(),
-                        old_rel_path: file.old_rel_path.clone(),
-                        staged: false,
+                let files = workspace
+                    .repo_root
+                    .as_ref()
+                    .map(|repo_root| {
+                        file_indices
+                            .iter()
+                            .filter_map(|idx| workspace.files.get(*idx))
+                            .map(|file| GitStageFileCommand {
+                                repo_root: repo_root.clone(),
+                                rel_path: file.rel_path.clone(),
+                                old_rel_path: file.old_rel_path.clone(),
+                                staged: false,
+                            })
+                            .collect::<Vec<_>>()
                     })
-                    .collect::<Vec<_>>();
+                    .unwrap_or_default();
                 (file_indices, files)
             })
         else {

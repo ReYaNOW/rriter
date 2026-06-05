@@ -1296,7 +1296,6 @@ mod tests {
             branch_name: None,
             files: vec![crate::app::git_panel::GitFileEntry {
                 workspace_idx,
-                repo_root: std::path::PathBuf::from(format!("/repo_{workspace_idx}")),
                 rel_path: rel_path.clone(),
                 old_rel_path: None,
                 display_path: rel_path.clone(),

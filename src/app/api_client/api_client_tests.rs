@@ -1048,6 +1048,20 @@ mod tests {
     }
 
     #[test]
+    fn api_path_display_append_keeps_existing_prefix() {
+        let mut out = String::from("GET ");
+        append_api_path_display("/sites/{id}/complete", &mut out);
+        assert_eq!(out, "GET /sites/ {id} /complete");
+    }
+
+    #[test]
+    fn api_path_display_writer_clears_existing_buffer() {
+        let mut out = String::from("stale");
+        write_api_path_display("/sites/{id}/complete", &mut out);
+        assert_eq!(out, "/sites/ {id} /complete");
+    }
+
+    #[test]
     fn route_grouping_uses_sorted_tag_ranges() {
         let model = parse_openapi_model(ApiSpecId(1), &sample_spec()).expect("parse");
         let groups = grouped_route_ranges(&model.routes, &FxHashSet::default(), model.id);

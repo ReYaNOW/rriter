@@ -149,7 +149,7 @@ fn write_api_client_tab_display_title(
     out.push(' ');
     out.push_str(method.chip_str());
     out.push(' ');
-    crate::app::api_client::write_api_path_display(&meta.route_path, out);
+    crate::app::api_client::append_api_path_display(&meta.route_path, out);
 }
 
 fn tab_effective_path<'a>(

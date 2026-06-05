@@ -186,9 +186,9 @@ mod tests {
 
     #[test]
     fn git_file_tooltip_uses_tilde_path_and_status_word() {
+        let repo_root = std::path::Path::new("/home/reyan/projects/rriter");
         let file = crate::app::git_panel::GitFileEntry {
             workspace_idx: 0,
-            repo_root: std::path::PathBuf::from("/home/reyan/projects/rriter"),
             rel_path: "src/main.rs".to_string(),
             old_rel_path: None,
             display_path: "src/main.rs".to_string(),
@@ -198,7 +198,7 @@ mod tests {
         };
 
         assert_eq!(
-            git_file_tooltip_text(&file, Some(std::path::Path::new("/home/reyan"))),
+            git_file_tooltip_text(repo_root, &file, Some(std::path::Path::new("/home/reyan"))),
             "~/projects/rriter/src/main.rs • Изменен"
         );
         assert_eq!(

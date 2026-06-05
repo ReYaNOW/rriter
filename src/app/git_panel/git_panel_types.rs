@@ -1,7 +1,6 @@
 use crate::app::App;
 use crate::editor::Editor;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
@@ -40,7 +39,6 @@ impl GitFileStatus {
 #[derive(Clone, Debug)]
 pub struct GitFileEntry {
     pub workspace_idx: usize,
-    pub repo_root: PathBuf,
     pub rel_path: String,
     pub old_rel_path: Option<String>,
     pub display_path: String,
@@ -108,10 +106,14 @@ impl GitStatusSnapshot {
             if active_workspace.is_some_and(|idx| idx != workspace.workspace_idx) {
                 continue;
             }
-            for file in workspace.files.iter().filter(|file| file.staged) {
-                if seen.insert(file.repo_root.clone()) {
-                    roots.push(file.repo_root.clone());
-                }
+            if !workspace.files.iter().any(|file| file.staged) {
+                continue;
+            }
+            let Some(repo_root) = &workspace.repo_root else {
+                continue;
+            };
+            if seen.insert(repo_root.clone()) {
+                roots.push(repo_root.clone());
             }
         }
         roots
@@ -474,4 +476,3 @@ enum GitAction {
         repo_root: PathBuf,
     },
 }
-
