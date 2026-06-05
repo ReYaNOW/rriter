@@ -1086,7 +1086,7 @@ impl App {
                         .map(|ext| ext.to_string_lossy().to_string())
                         .unwrap_or_default();
                     tab.icon_key =
-                        crate::app::file_icons::file_icon_key(&tab.base_title.to_ascii_lowercase());
+                        crate::app::file_icons::file_icon_key_for_name(&tab.base_title);
                 }
             }
         }

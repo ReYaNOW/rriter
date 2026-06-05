@@ -6,6 +6,7 @@ use glutin::context::PossiblyCurrentContext;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
@@ -645,7 +646,7 @@ pub struct CtrlDefinitionState {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PythonInlayHint {
     pub byte_offset: usize,
-    pub label: String,
+    pub label: Arc<str>,
 }
 
 fn is_python_ident_byte(b: u8) -> bool {
@@ -702,7 +703,7 @@ pub(crate) fn python_positional_inlay_hints_from_lsp(
         }
         out.push(PythonInlayHint {
             byte_offset,
-            label: format!("{name}: "),
+            label: Arc::<str>::from(format!("{name}: ")),
         });
     }
     out.sort_unstable_by_key(|hint| hint.byte_offset);
@@ -1093,11 +1094,11 @@ mod tests {
             vec![
                 PythonInlayHint {
                     byte_offset: 6,
-                    label: "id: ".to_string(),
+                    label: Arc::<str>::from("id: "),
                 },
                 PythonInlayHint {
                     byte_offset: 28,
-                    label: "payload: ".to_string(),
+                    label: Arc::<str>::from("payload: "),
                 },
             ]
         );
@@ -1108,11 +1109,11 @@ mod tests {
         let mut hints = vec![
             PythonInlayHint {
                 byte_offset: 10,
-                label: "first: ".to_string(),
+                label: Arc::<str>::from("first: "),
             },
             PythonInlayHint {
                 byte_offset: 30,
-                label: "second: ".to_string(),
+                label: Arc::<str>::from("second: "),
             },
         ];
 
@@ -1136,7 +1137,7 @@ mod tests {
             hints,
             vec![PythonInlayHint {
                 byte_offset: 26,
-                label: "second: ".to_string(),
+                label: Arc::<str>::from("second: "),
             }]
         );
     }

@@ -447,6 +447,7 @@ impl Renderer {
                 mod_intervals_cache: Vec::with_capacity(64),
                 merged_intervals_cache: Vec::with_capacity(64),
                 tab_x_anim: Vec::new(),
+                tab_display_titles: Vec::new(),
             };
 
             for i in 32..128u8 {

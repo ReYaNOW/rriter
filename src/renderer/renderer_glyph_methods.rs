@@ -157,25 +157,7 @@ impl Renderer {
             self.max_row_h = 0;
         }
         if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.glyphs.clear();
-            self.ui_glyphs.clear();
-            self.atlas_x = 2;
-            self.atlas_y = 2;
-            self.max_row_h = 0;
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                self.gl.tex_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
-                    0,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                );
-            }
+            self.reset_texture_atlas();
         }
 
         let width = w as usize;
@@ -423,25 +405,7 @@ impl Renderer {
             self.max_row_h = 0;
         }
         if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.glyphs.clear();
-            self.ui_glyphs.clear();
-            self.atlas_x = 2;
-            self.atlas_y = 2;
-            self.max_row_h = 0;
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                self.gl.tex_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
-                    0,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                );
-            }
+            self.reset_texture_atlas();
         }
 
         let mut rgba = vec![0u8; (w * h * 4) as usize];
@@ -650,25 +614,7 @@ impl Renderer {
             self.max_row_h = 0;
         }
         if self.atlas_y + h + 2 > ATLAS_SIZE_H {
-            self.glyphs.clear();
-            self.ui_glyphs.clear();
-            self.atlas_x = 2;
-            self.atlas_y = 2;
-            self.max_row_h = 0;
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                self.gl.tex_image_2d(
-                    glow::TEXTURE_2D,
-                    0,
-                    glow::RGBA8 as i32,
-                    ATLAS_SIZE_W,
-                    ATLAS_SIZE_H,
-                    0,
-                    glow::RGBA,
-                    glow::UNSIGNED_BYTE,
-                    glow::PixelUnpackData::Slice(None),
-                );
-            }
+            self.reset_texture_atlas();
         }
 
         let mut rgba = vec![0u8; (w * h * 4) as usize];

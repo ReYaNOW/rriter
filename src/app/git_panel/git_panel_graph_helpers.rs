@@ -818,7 +818,6 @@ pub(crate) fn github_base_url_from_remote_url(url: &str) -> Option<String> {
 #[derive(Clone, Debug)]
 struct ActiveGraphLane {
     oid: String,
-    column: usize,
     color_idx: usize,
     branch_name: Option<String>,
 }
@@ -871,7 +870,7 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
     let mut max_column = 0usize;
 
     for commit in commits {
-        let input_lanes = active.clone();
+        let input_lanes = active.as_slice();
         let input_idx = input_lanes.iter().position(|lane| lane.oid == commit.oid);
         let circle_idx = input_idx.unwrap_or(input_lanes.len());
         if commit.branch_name.is_none() {
@@ -886,26 +885,27 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
             .filter(|label| git_graph_branch_label_propagates(label))
             .cloned();
 
-        let parents = commit.parent_oids.clone();
+        let parents = commit.parent_oids.as_slice();
         let mut output_lanes: Vec<ActiveGraphLane> =
             Vec::with_capacity(input_lanes.len() + parents.len());
         let mut first_parent_added = false;
         if !parents.is_empty() {
-            for lane in &input_lanes {
+            for lane in input_lanes {
                 if lane.oid == commit.oid {
                     if !first_parent_added {
                         output_lanes.push(ActiveGraphLane {
                             oid: parents[0].clone(),
-                            column: output_lanes.len(),
                             color_idx: lane.color_idx,
                             branch_name: propagating_branch_name.clone(),
                         });
                         first_parent_added = true;
                     }
                 } else {
-                    let mut lane = lane.clone();
-                    lane.column = output_lanes.len();
-                    output_lanes.push(lane);
+                    output_lanes.push(ActiveGraphLane {
+                        oid: lane.oid.clone(),
+                        color_idx: lane.color_idx,
+                        branch_name: lane.branch_name.clone(),
+                    });
                 }
             }
         }
@@ -940,7 +940,6 @@ fn apply_git_graph_lanes(commits: &mut [GitGraphCommit]) -> usize {
             };
             output_lanes.push(ActiveGraphLane {
                 oid: parent.clone(),
-                column: output_lanes.len(),
                 color_idx,
                 branch_name: parent_branch_name,
             });
@@ -1140,4 +1139,3 @@ fn div_floor(value: i64, divisor: i64) -> i64 {
         quotient
     }
 }
-

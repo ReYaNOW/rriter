@@ -126,25 +126,43 @@ pub(crate) fn sync_one_line_input_scroll_target(
     }
 }
 
-fn api_client_tab_display_title(
+fn write_api_client_tab_display_title(
     meta: &crate::app::api_client::ApiClientTabMeta,
     fallback: &str,
-) -> String {
+    out: &mut String,
+) {
+    out.clear();
     let title = if meta.title.is_empty() {
         fallback
     } else {
         &meta.title
     };
     let Some(method) = meta.route_method else {
-        return if title.is_empty() {
-            "API".to_string()
+        if title.is_empty() {
+            out.push_str("API");
         } else {
-            title.to_string()
-        };
+            out.push_str(title);
+        }
+        return;
     };
-    let mut path = String::new();
-    crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
-    format!("{title} {} {path}", method.chip_str())
+    out.push_str(title);
+    out.push(' ');
+    out.push_str(method.chip_str());
+    out.push(' ');
+    crate::app::api_client::write_api_path_display(&meta.route_path, out);
+}
+
+fn tab_effective_path<'a>(
+    tabs: &'a [EditorTab],
+    idx: usize,
+    active_tab: usize,
+    active_path: Option<&'a PathBuf>,
+) -> Option<&'a PathBuf> {
+    if idx == active_tab {
+        active_path
+    } else {
+        tabs[idx].file_path.as_ref()
+    }
 }
 
 pub(crate) fn tab_display_titles_for(
@@ -153,21 +171,31 @@ pub(crate) fn tab_display_titles_for(
     active_path: Option<&PathBuf>,
     active_title: &str,
 ) -> Vec<String> {
-    let mut paths: Vec<Option<&PathBuf>> = tabs.iter().map(|t| t.file_path.as_ref()).collect();
-    if active_tab < paths.len() {
-        paths[active_tab] = active_path;
-    }
+    let mut display_titles = Vec::with_capacity(tabs.len());
+    write_tab_display_titles_for(tabs, active_tab, active_path, active_title, &mut display_titles);
+    display_titles
+}
 
-    let mut display_titles = vec![String::new(); tabs.len()];
+pub(crate) fn write_tab_display_titles_for(
+    tabs: &[EditorTab],
+    active_tab: usize,
+    active_path: Option<&PathBuf>,
+    active_title: &str,
+    display_titles: &mut Vec<String>,
+) {
+    display_titles.clear();
+    display_titles.resize_with(tabs.len(), String::new);
     for i in 0..tabs.len() {
-        if let Some(p1) = paths[i] {
+        let display_title = &mut display_titles[i];
+        display_title.clear();
+        if let Some(p1) = tab_effective_path(tabs, i, active_tab, active_path) {
             let mut diff_level = 0;
             let mut collision = false;
             for j in 0..tabs.len() {
                 if i == j {
                     continue;
                 }
-                if let Some(p2) = paths[j]
+                if let Some(p2) = tab_effective_path(tabs, j, active_tab, active_path)
                     && p1.file_name() == p2.file_name()
                 {
                     collision = true;
@@ -189,24 +217,22 @@ pub(crate) fn tab_display_titles_for(
                 }
             }
             if collision && diff_level > 0 {
-                let comps: Vec<_> = p1.components().rev().collect();
-                if diff_level < comps.len() {
-                    let diff_dir = comps[diff_level].as_os_str().to_string_lossy();
-                    let file_name = comps[0].as_os_str().to_string_lossy();
-                    display_titles[i] = if diff_level == 1 {
-                        format!("{diff_dir}/{file_name}")
+                let mut rev_components = p1.components().rev();
+                let file_name = rev_components.next();
+                let diff_dir = p1.components().rev().nth(diff_level);
+                if let (Some(diff_dir), Some(file_name)) = (diff_dir, file_name) {
+                    display_title.push_str(&diff_dir.as_os_str().to_string_lossy());
+                    if diff_level == 1 {
+                        display_title.push('/');
                     } else {
-                        format!("{diff_dir}/.../{file_name}")
-                    };
+                        display_title.push_str("/.../");
+                    }
+                    display_title.push_str(&file_name.as_os_str().to_string_lossy());
                 } else {
-                    display_titles[i] = p1.to_string_lossy().into_owned();
+                    display_title.push_str(&p1.to_string_lossy());
                 }
             } else {
-                display_titles[i] = p1
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
+                display_title.push_str(&p1.file_name().unwrap_or_default().to_string_lossy());
             }
         } else {
             let title = if i == active_tab {
@@ -214,16 +240,15 @@ pub(crate) fn tab_display_titles_for(
             } else {
                 &tabs[i].base_title
             };
-            display_titles[i] = if let EditorTabKind::ApiClient(meta, _) = &tabs[i].kind {
-                api_client_tab_display_title(meta, title)
+            if let EditorTabKind::ApiClient(meta, _) = &tabs[i].kind {
+                write_api_client_tab_display_title(meta, title, display_title);
             } else if title.is_empty() {
-                "Безымянный".to_string()
+                display_title.push_str("Безымянный");
             } else {
-                title.to_string()
-            };
+                display_title.push_str(title);
+            }
         }
     }
-    display_titles
 }
 
 include!("app/app_ide_tab_methods.rs");

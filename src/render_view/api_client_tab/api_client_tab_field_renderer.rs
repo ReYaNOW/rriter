@@ -549,7 +549,9 @@ impl Renderer {
                 .map(|g| Self::snapped_text_advance(g.advance, scale))
                 .unwrap_or(8.0);
             if draw_x >= x && draw_x + adv <= max_x {
-                self.draw_string_scaled_stable(&ch.to_string(), draw_x, y, color, scale);
+                let mut buf = [0u8; 4];
+                let glyph = ch.encode_utf8(&mut buf);
+                self.draw_string_scaled_stable(glyph, draw_x, y, color, scale);
             }
             draw_x += adv;
             if draw_x > max_x {

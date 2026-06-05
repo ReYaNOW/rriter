@@ -39,9 +39,11 @@ impl Renderer {
         show_readonly_notice: bool,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
-        self.current_python_inlay_hints.clear();
-        self.current_python_inlay_hints
-            .extend_from_slice(python_inlay_hints);
+        if self.current_python_inlay_hints.as_slice() != python_inlay_hints {
+            self.current_python_inlay_hints.clear();
+            self.current_python_inlay_hints
+                .extend_from_slice(python_inlay_hints);
+        }
 
         let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);

@@ -4,6 +4,7 @@
 
 use once_cell::sync::Lazy;
 use regex::RegexSet;
+use std::borrow::Cow;
 
 pub mod file_icons_map {
     include!(concat!(env!("OUT_DIR"), "/file_icons_map.rs"));
@@ -36,6 +37,24 @@ static FOLDER_REGEXES: Lazy<FallbackMatcher> = Lazy::new(|| {
     let set = RegexSet::new(patterns).unwrap_or_else(|_| RegexSet::empty());
     FallbackMatcher { set, keys }
 });
+
+fn lowercase_name_for_icon_lookup(name: &str) -> Cow<'_, str> {
+    if name.chars().any(char::is_uppercase) {
+        Cow::Owned(name.to_lowercase())
+    } else {
+        Cow::Borrowed(name)
+    }
+}
+
+pub fn file_icon_key_for_name(name: &str) -> &'static str {
+    let lower = lowercase_name_for_icon_lookup(name);
+    file_icon_key(lower.as_ref())
+}
+
+pub fn folder_icon_key_for_name(name: &str) -> &'static str {
+    let lower = lowercase_name_for_icon_lookup(name);
+    folder_icon_key(lower.as_ref())
+}
 
 /// `name` — имя файла в нижнем регистре. Возвращает ключ иконки.
 pub fn file_icon_key(name: &str) -> &'static str {
@@ -111,6 +130,7 @@ mod tests {
         assert_ne!(file_icon_key("main.py"), "default_file");
         assert_ne!(file_icon_key("component.test.ts"), "default_file");
         assert_eq!(file_icon_key("unknown.rriter-no-icon"), "default_file");
+        assert_eq!(file_icon_key_for_name("MAIN.PY"), file_icon_key("main.py"));
 
         assert!(!svg_for_key(file_icon_key("main.py"), false).is_empty());
         assert!(!svg_for_key("default_file", false).is_empty());
@@ -121,6 +141,7 @@ mod tests {
         assert_ne!(folder_icon_key("src"), "default");
         assert_ne!(folder_icon_key(".github"), "default");
         assert_eq!(folder_icon_key("rriter-no-icon-folder"), "default");
+        assert_eq!(folder_icon_key_for_name("SRC"), folder_icon_key("src"));
 
         assert!(!svg_for_key(folder_icon_key("src"), true).is_empty());
         assert!(!svg_for_key("default", true).is_empty());

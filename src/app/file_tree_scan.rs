@@ -9,6 +9,8 @@ use std::{
 pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
     std::sync::Mutex<rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+const RASTERIZED_ICON_CACHE_LIMIT: usize = 256;
+const GITIGNORE_CACHE_LIMIT: usize = 32;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct GitignoreFingerprint {
@@ -26,6 +28,21 @@ static GITIGNORE_CACHE: once_cell::sync::Lazy<
     std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, GitignoreCacheEntry>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
+fn trim_rasterized_icon_cache(
+    cache: &mut rustc_hash::FxHashMap<&'static str, Option<Vec<u8>>>,
+    keep_key: &'static str,
+) {
+    while cache.len() >= RASTERIZED_ICON_CACHE_LIMIT {
+        let victim = cache
+            .iter()
+            .find_map(|(&key, value)| (key != keep_key && value.is_some()).then_some(key));
+        let Some(victim) = victim else {
+            break;
+        };
+        cache.remove(&victim);
+    }
+}
+
 fn gitignore_fingerprint(gitignore_path: &Path) -> GitignoreFingerprint {
     match std::fs::metadata(gitignore_path) {
         Ok(metadata) => GitignoreFingerprint {
@@ -38,6 +55,19 @@ fn gitignore_fingerprint(gitignore_path: &Path) -> GitignoreFingerprint {
             len: 0,
             modified: None,
         },
+    }
+}
+
+fn trim_gitignore_cache(
+    cache: &mut rustc_hash::FxHashMap<PathBuf, GitignoreCacheEntry>,
+    keep_root: &Path,
+) {
+    while cache.len() >= GITIGNORE_CACHE_LIMIT {
+        let victim = cache.keys().find(|path| path.as_path() != keep_root).cloned();
+        let Some(victim) = victim else {
+            break;
+        };
+        cache.remove(&victim);
     }
 }
 
@@ -64,6 +94,7 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
     );
 
     if let Ok(mut cache) = GITIGNORE_CACHE.lock() {
+        trim_gitignore_cache(&mut cache, root);
         cache.insert(
             root.to_path_buf(),
             GitignoreCacheEntry {
@@ -112,7 +143,9 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
                     px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
                 }
             }
-            RASTERIZED_ICONS.lock().unwrap().insert(key, Some(data));
+            let mut cache = RASTERIZED_ICONS.lock().unwrap();
+            trim_rasterized_icon_cache(&mut cache, key);
+            cache.insert(key, Some(data));
         }
     } else {
         RASTERIZED_ICONS.lock().unwrap().insert(key, None);
@@ -173,7 +206,7 @@ pub(super) fn scan_dir_parallel(
     all_patterns: &[&str],
 ) -> Vec<FileNode> {
     let is_expanded = expanded.contains(&path);
-    let icon_key = crate::app::file_icons::folder_icon_key(&name.to_ascii_lowercase());
+    let icon_key = crate::app::file_icons::folder_icon_key_for_name(&name);
 
     let is_ignored = if is_root {
         false
@@ -227,7 +260,7 @@ pub(super) fn scan_dir_parallel(
     let mut file_nodes: Vec<FileNode> = files
         .into_par_iter()
         .map(|(f_name, f_path)| {
-            let f_icon_key = crate::app::file_icons::file_icon_key(&f_name.to_ascii_lowercase());
+            let f_icon_key = crate::app::file_icons::file_icon_key_for_name(&f_name);
             let is_ignored = gitignore
                 .matched_path_or_any_parents(&f_path, false)
                 .is_ignore()

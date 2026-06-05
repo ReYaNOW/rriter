@@ -1,4 +1,4 @@
-use crate::renderer::Renderer;
+use crate::renderer::{IconAtlasEntry, Renderer};
 use glow::HasContext;
 use std::borrow::Cow;
 
@@ -477,21 +477,58 @@ impl Renderer {
         size: f32,
         color: [f32; 4],
     ) {
-        if let Some(&tex) = self.icons.get(&icon) {
-            self.flush(); // Сбрасываем батч, чтобы сменить текстуру
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            }
-            let color = if icon == crate::widgets::IconType::Api {
-                [1.0, 1.0, 1.0, 1.0]
-            } else {
-                color
+        let entry = if let Some(&entry) = self.icons.get(&icon) {
+            entry
+        } else {
+            let Some(entry) = self.upload_builtin_icon(icon) else {
+                return;
             };
-            self.push_quad(x, y, size, size, 0.0, 0.0, 1.0, 1.0, color, 5.0);
-            self.flush();
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture)); // Возвращаем шрифтовой атлас
+            self.icons.insert(icon, entry);
+            entry
+        };
+        let color = if icon == crate::widgets::IconType::Api {
+            [1.0, 1.0, 1.0, 1.0]
+        } else {
+            color
+        };
+        self.push_quad(
+            x,
+            y,
+            size,
+            size,
+            entry.u,
+            entry.v,
+            entry.uw,
+            entry.vh,
+            color,
+            5.0,
+        );
+    }
+
+    fn upload_file_icon_from_pending_raster(
+        &mut self,
+        key: &'static str,
+        is_folder: bool,
+    ) -> Option<IconAtlasEntry> {
+        let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
+
+        if let Some(state) = cache.remove(key) {
+            if let Some(data) = state {
+                drop(cache);
+                let entry = self.upload_icon_rgba(64, 64, &data)?;
+                self.file_icon_cache.insert(key, entry);
+                Some(entry)
+            } else {
+                cache.insert(key, None);
+                None
             }
+        } else {
+            cache.insert(key, None);
+            drop(cache);
+            std::thread::spawn(move || {
+                crate::app::file_tree::pre_rasterize_icon(key, is_folder);
+            });
+            None
         }
     }
 
@@ -500,99 +537,31 @@ impl Renderer {
     pub fn draw_file_icon(
         &mut self,
         key: &'static str,
-        _is_folder: bool,
+        is_folder: bool,
         x: f32,
         y: f32,
         size: f32,
     ) {
-        if !self.file_icon_cache.contains_key(key) {
-            let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
-
-            if let Some(state) = cache.get(key) {
-                if let Some(data) = state {
-                    let data_clone = data.clone();
-                    cache.remove(key); // Remove only when we are consuming it
-                    drop(cache);
-
-                    let target = 64i32;
-                    let tex = unsafe {
-                        let tex = self.gl.create_texture().unwrap();
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                        self.gl.tex_image_2d(
-                            glow::TEXTURE_2D,
-                            0,
-                            glow::RGBA8 as i32,
-                            target,
-                            target,
-                            0,
-                            glow::RGBA,
-                            glow::UNSIGNED_BYTE,
-                            glow::PixelUnpackData::Slice(Some(&data_clone)),
-                        );
-                        self.gl.generate_mipmap(glow::TEXTURE_2D);
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MIN_FILTER,
-                            glow::LINEAR_MIPMAP_LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MAG_FILTER,
-                            glow::LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_S,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_T,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-                        tex
-                    };
-                    self.file_icon_cache.insert(key, tex);
-                } else {
-                    // It's currently loading (None). Do nothing and wait.
-                    return;
-                }
-            } else {
-                // Not in cache at all. Mark as loading and spawn a thread.
-                cache.insert(key, None);
-                drop(cache);
-
-                std::thread::spawn(move || {
-                    // This function handles rendering the SVG and storing Some(data) back
-                    crate::app::file_tree::pre_rasterize_icon(key, _is_folder);
-                });
+        let entry = if let Some(&entry) = self.file_icon_cache.get(key) {
+            entry
+        } else {
+            let Some(entry) = self.upload_file_icon_from_pending_raster(key, is_folder) else {
                 return;
-            }
-        }
-
-        if let Some(&tex) = self.file_icon_cache.get(key) {
-            self.flush();
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-            }
-            self.push_quad(
-                x,
-                y,
-                size,
-                size,
-                0.0,
-                0.0,
-                1.0,
-                1.0,
-                [1.0, 1.0, 1.0, 1.0],
-                5.0,
-            );
-            self.flush();
-            unsafe {
-                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
-            }
-        }
+            };
+            entry
+        };
+        self.push_quad(
+            x,
+            y,
+            size,
+            size,
+            entry.u,
+            entry.v,
+            entry.uw,
+            entry.vh,
+            [1.0, 1.0, 1.0, 1.0],
+            5.0,
+        );
     }
 
     // (функции удалены)

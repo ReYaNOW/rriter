@@ -350,7 +350,7 @@ impl Renderer {
     }
 
     fn inlay_hint_visual_width(&mut self, idx: usize) -> f32 {
-        let hint_label = self.current_python_inlay_hints[idx].label.clone();
+        let hint_label = std::sync::Arc::clone(&self.current_python_inlay_hints[idx].label);
         self.measure_ui_width(hint_label.trim_end(), 0.92)
             + 8.0 * self.scale_factor
             + self.char_advance(' ')
@@ -625,7 +625,8 @@ impl Renderer {
                 while inlay_idx < self.current_python_inlay_hints.len()
                     && self.current_python_inlay_hints[inlay_idx].byte_offset == last_valid_byte
                 {
-                    let hint_label = self.current_python_inlay_hints[inlay_idx].label.clone();
+                    let hint_label =
+                        std::sync::Arc::clone(&self.current_python_inlay_hints[inlay_idx].label);
                     let hint_w = self.measure_ui_width(hint_label.trim_end(), 0.92)
                         + 8.0 * self.scale_factor
                         + self.char_advance(' ');
@@ -726,7 +727,8 @@ impl Renderer {
                 while inlay_idx < self.current_python_inlay_hints.len()
                     && self.current_python_inlay_hints[inlay_idx].byte_offset == last_valid_byte
                 {
-                    let hint_label = self.current_python_inlay_hints[inlay_idx].label.clone();
+                    let hint_label =
+                        std::sync::Arc::clone(&self.current_python_inlay_hints[inlay_idx].label);
                     let value_gap_w = self.char_advance(' ');
                     let hint_w = self.measure_ui_width(hint_label.trim_end(), 0.92)
                         + 8.0 * self.scale_factor

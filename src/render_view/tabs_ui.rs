@@ -80,13 +80,21 @@ impl Renderer {
         let tab_pad = 16.0 * s;
         let icon_size_tab = 20.0 * s;
 
-        let mut paths: Vec<Option<&std::path::PathBuf>> =
-            tabs.iter().map(|t| t.file_path.as_ref()).collect();
-        if active_tab < paths.len() {
-            paths[active_tab] = _editor_path;
-        }
-        let display_titles =
-            crate::app::tab_display_titles_for(tabs, active_tab, _editor_path, editor_title);
+        let path_for_tab = |idx: usize| {
+            if idx == active_tab {
+                _editor_path
+            } else {
+                tabs[idx].file_path.as_ref()
+            }
+        };
+        let mut display_titles = std::mem::take(&mut self.tab_display_titles);
+        crate::app::write_tab_display_titles_for(
+            tabs,
+            active_tab,
+            _editor_path,
+            editor_title,
+            &mut display_titles,
+        );
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
         for (idx, title) in display_titles.iter().enumerate() {
@@ -216,7 +224,7 @@ impl Renderer {
                 && my <= y + h;
 
             if is_hovered {
-                if let Some(p) = paths[i] {
+                if let Some(p) = path_for_tab(i) {
                     hovered_tab_tooltip = Some(p.to_string_lossy().into_owned());
                     hovered_tab_x = current_x.max(x);
                     hovered_tab_y = y + h;
@@ -317,16 +325,17 @@ impl Renderer {
                     [1.0, 1.0, 1.0, 1.0],
                 );
             } else {
-                let icon_key = if is_active {
-                    crate::app::file_icons::file_icon_key(&title.to_lowercase())
-                } else {
-                    tab.icon_key
-                };
-                self.draw_file_icon(icon_key, false, current_x + tab_pad, icon_y, icon_size_tab);
+                self.draw_file_icon(
+                    tab.icon_key,
+                    false,
+                    current_x + tab_pad,
+                    icon_y,
+                    icon_size_tab,
+                );
             }
 
             let text_color =
-                if paths[i].is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
+                if path_for_tab(i).is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
                     EXTERNAL_TAB_TITLE_COLOR
                 } else if is_active {
                     self.theme.fg
@@ -369,7 +378,7 @@ impl Renderer {
                 );
             } else {
                 self.draw_string_scaled(title, text_x, text_y, text_color, 1.0);
-                if let Some(severity) = tab_diagnostic_severity_for_path(lsp, paths[i]) {
+                if let Some(severity) = tab_diagnostic_severity_for_path(lsp, path_for_tab(i)) {
                     let title_w =
                         (tab_w - (tab_pad * 2.0 + icon_size_tab + 8.0 * s + 30.0 * s)).max(0.0);
                     let color = match severity {
@@ -514,12 +523,15 @@ impl Renderer {
             None
         };
 
-        if let (Some(text), Some((anchor_x, anchor_y))) = (hovered_tab_tooltip, tooltip_anchor) {
-            if !self.hide_popups_until_mouse_move {
-                return Some((text, anchor_x, anchor_y));
-            }
-        }
-        None
+        let tooltip = if let (Some(text), Some((anchor_x, anchor_y))) =
+            (hovered_tab_tooltip, tooltip_anchor)
+        {
+            (!self.hide_popups_until_mouse_move).then_some((text, anchor_x, anchor_y))
+        } else {
+            None
+        };
+        self.tab_display_titles = display_titles;
+        tooltip
     }
 
     pub fn draw_tab_tooltip(&mut self, text: &str, hovered_tab_x: f32, hovered_tab_y: f32, s: f32) {

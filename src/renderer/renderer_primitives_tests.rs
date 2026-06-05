@@ -128,250 +128,250 @@ impl Renderer {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn load_builtin_icons(&mut self) {
-        let builtin = [
-            (
-                crate::widgets::IconType::Save,
-                    include_bytes!("../icons/document-save.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Discard,
-                    include_bytes!("../icons/edit-delete.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Cancel,
-                    include_bytes!("../icons/dialog-cancel.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Warning,
-                    include_bytes!("../icons/dialog-warning.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Error,
-                    include_bytes!("../icons/circle-x.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::CaseMatch,
-                    include_bytes!("../icons/format-text-uppercase.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Up,
-                    include_bytes!("../icons/go-up.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Down,
-                    include_bytes!("../icons/go-down.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Close,
-                    include_bytes!("../icons/window-close.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Plus,
-                    include_bytes!("../icons/plus.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::GitPlus,
-                    include_bytes!("../icons/plus_git.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::GitMinus,
-                    include_bytes!("../icons/minus.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Terminal,
-                    include_bytes!("../icons/atom/icons/ui/terminal.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Explorer,
-                    include_bytes!("../icons/atom/icons/ui/files.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Search,
-                    include_bytes!("../icons/atom/icons/ui/search.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Git,
-                    include_bytes!("../icons/atom/icons/files/git.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::GitCompare,
-                    include_bytes!("../icons/atom/icons/ui/git-compare.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Branch,
-                    include_bytes!("../icons/branch.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Problems,
-                    include_bytes!("../icons/problems.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::LspServers,
-                    include_bytes!("../icons/atom/icons/ui/server.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Api,
-                    include_bytes!("../icons/api.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Copy,
-                    include_bytes!("../icons/copy.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Check,
-                    include_bytes!("../icons/check.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Rollback,
-                    include_bytes!("../icons/rollback.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Reload,
-                    include_bytes!("../icons/reload.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Person,
-                    include_bytes!("../icons/atom/icons/ui/person.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::Time,
-                    include_bytes!("../icons/time.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::NumberCount,
-                    include_bytes!("../icons/number_count.svg").as_slice(),
-            ),
-            (
-                crate::widgets::IconType::GithubDark,
-                    include_bytes!("../icons/atom/icons/files/github_dark.svg").as_slice(),
-            ),
-        ];
+    fn builtin_icon_svg(icon_type: crate::widgets::IconType) -> Option<&'static [u8]> {
+        let data = match icon_type {
+            crate::widgets::IconType::Save => include_bytes!("../icons/document-save.svg").as_slice(),
+            crate::widgets::IconType::Discard => include_bytes!("../icons/edit-delete.svg").as_slice(),
+            crate::widgets::IconType::Cancel => include_bytes!("../icons/dialog-cancel.svg").as_slice(),
+            crate::widgets::IconType::Warning => include_bytes!("../icons/dialog-warning.svg").as_slice(),
+            crate::widgets::IconType::Error => include_bytes!("../icons/circle-x.svg").as_slice(),
+            crate::widgets::IconType::CaseMatch => include_bytes!("../icons/format-text-uppercase.svg").as_slice(),
+            crate::widgets::IconType::Up => include_bytes!("../icons/go-up.svg").as_slice(),
+            crate::widgets::IconType::Down => include_bytes!("../icons/go-down.svg").as_slice(),
+            crate::widgets::IconType::Close => include_bytes!("../icons/window-close.svg").as_slice(),
+            crate::widgets::IconType::Plus => include_bytes!("../icons/plus.svg").as_slice(),
+            crate::widgets::IconType::GitPlus => include_bytes!("../icons/plus_git.svg").as_slice(),
+            crate::widgets::IconType::GitMinus => include_bytes!("../icons/minus.svg").as_slice(),
+            crate::widgets::IconType::Terminal => include_bytes!("../icons/atom/icons/ui/terminal.svg").as_slice(),
+            crate::widgets::IconType::Explorer => include_bytes!("../icons/atom/icons/ui/files.svg").as_slice(),
+            crate::widgets::IconType::Search => include_bytes!("../icons/atom/icons/ui/search.svg").as_slice(),
+            crate::widgets::IconType::Git => include_bytes!("../icons/atom/icons/files/git.svg").as_slice(),
+            crate::widgets::IconType::GitCompare => include_bytes!("../icons/atom/icons/ui/git-compare.svg").as_slice(),
+            crate::widgets::IconType::Branch => include_bytes!("../icons/branch.svg").as_slice(),
+            crate::widgets::IconType::Problems => include_bytes!("../icons/problems.svg").as_slice(),
+            crate::widgets::IconType::LspServers => include_bytes!("../icons/atom/icons/ui/server.svg").as_slice(),
+            crate::widgets::IconType::Api => include_bytes!("../icons/api.svg").as_slice(),
+            crate::widgets::IconType::Copy => include_bytes!("../icons/copy.svg").as_slice(),
+            crate::widgets::IconType::Check => include_bytes!("../icons/check.svg").as_slice(),
+            crate::widgets::IconType::Rollback => include_bytes!("../icons/rollback.svg").as_slice(),
+            crate::widgets::IconType::Reload => include_bytes!("../icons/reload.svg").as_slice(),
+            crate::widgets::IconType::Person => include_bytes!("../icons/atom/icons/ui/person.svg").as_slice(),
+            crate::widgets::IconType::Time => include_bytes!("../icons/time.svg").as_slice(),
+            crate::widgets::IconType::NumberCount => include_bytes!("../icons/number_count.svg").as_slice(),
+            crate::widgets::IconType::GithubDark => include_bytes!("../icons/atom/icons/files/github_dark.svg").as_slice(),
+        };
+        Some(data)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn builtin_icon_types() -> &'static [crate::widgets::IconType] {
+        &[
+            crate::widgets::IconType::Save,
+            crate::widgets::IconType::Discard,
+            crate::widgets::IconType::Cancel,
+            crate::widgets::IconType::Warning,
+            crate::widgets::IconType::Error,
+            crate::widgets::IconType::CaseMatch,
+            crate::widgets::IconType::Up,
+            crate::widgets::IconType::Down,
+            crate::widgets::IconType::Close,
+            crate::widgets::IconType::Plus,
+            crate::widgets::IconType::GitPlus,
+            crate::widgets::IconType::GitMinus,
+            crate::widgets::IconType::Terminal,
+            crate::widgets::IconType::Explorer,
+            crate::widgets::IconType::Search,
+            crate::widgets::IconType::Git,
+            crate::widgets::IconType::GitCompare,
+            crate::widgets::IconType::Branch,
+            crate::widgets::IconType::Problems,
+            crate::widgets::IconType::LspServers,
+            crate::widgets::IconType::Api,
+            crate::widgets::IconType::Copy,
+            crate::widgets::IconType::Check,
+            crate::widgets::IconType::Rollback,
+            crate::widgets::IconType::Reload,
+            crate::widgets::IconType::Person,
+            crate::widgets::IconType::Time,
+            crate::widgets::IconType::NumberCount,
+            crate::widgets::IconType::GithubDark,
+        ]
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn rasterize_builtin_icon(
+        icon_type: crate::widgets::IconType,
+    ) -> Option<(Vec<u8>, i32, i32)> {
+        let data = Self::builtin_icon_svg(icon_type)?;
         let opt = resvg::usvg::Options::default();
-        for (icon_type, data) in builtin {
-            let svg_data_str = String::from_utf8_lossy(data);
-            let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
-                // Заменяем жестко прописанный белый цвет на старый розовый #da4453
-                svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
-            } else if icon_type == crate::widgets::IconType::Problems {
-                svg_data_str.replace("#D81B60", "#ffffff")
-            } else if icon_type == crate::widgets::IconType::Plus
-                || icon_type == crate::widgets::IconType::GitPlus
-                || icon_type == crate::widgets::IconType::GitMinus
-                || icon_type == crate::widgets::IconType::Terminal
-                || icon_type == crate::widgets::IconType::Explorer
-                || icon_type == crate::widgets::IconType::Search
-                || icon_type == crate::widgets::IconType::Git
-                || icon_type == crate::widgets::IconType::GitCompare
-                || icon_type == crate::widgets::IconType::Branch
-                || icon_type == crate::widgets::IconType::Copy
-                || icon_type == crate::widgets::IconType::Check
-                || icon_type == crate::widgets::IconType::Rollback
-                || icon_type == crate::widgets::IconType::Reload
-                || icon_type == crate::widgets::IconType::Person
-                || icon_type == crate::widgets::IconType::Time
-                || icon_type == crate::widgets::IconType::NumberCount
-                || icon_type == crate::widgets::IconType::GithubDark
-            {
-                svg_data_str
-                    .replace("currentColor", "#ffffff")
-                    .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
-                    .replace("stroke=\"#000000\"", "stroke=\"#ffffff\"")
-                    .replace("#64B5F6", "#ffffff")
-                    .replace("#F06292", "#ffffff")
-                    .replace("#E4E5E6", "#ffffff")
-            } else {
-                svg_data_str.into_owned()
-            };
+        let svg_data_str = String::from_utf8_lossy(data);
+        let mut svg_str = if icon_type == crate::widgets::IconType::Discard {
+            svg_data_str.replace("stroke=\"#ffffff\"", "stroke=\"#da4453\"")
+        } else if icon_type == crate::widgets::IconType::Problems {
+            svg_data_str.replace("#D81B60", "#ffffff")
+        } else if icon_type == crate::widgets::IconType::Plus
+            || icon_type == crate::widgets::IconType::GitPlus
+            || icon_type == crate::widgets::IconType::GitMinus
+            || icon_type == crate::widgets::IconType::Terminal
+            || icon_type == crate::widgets::IconType::Explorer
+            || icon_type == crate::widgets::IconType::Search
+            || icon_type == crate::widgets::IconType::Git
+            || icon_type == crate::widgets::IconType::GitCompare
+            || icon_type == crate::widgets::IconType::Branch
+            || icon_type == crate::widgets::IconType::Copy
+            || icon_type == crate::widgets::IconType::Check
+            || icon_type == crate::widgets::IconType::Rollback
+            || icon_type == crate::widgets::IconType::Reload
+            || icon_type == crate::widgets::IconType::Person
+            || icon_type == crate::widgets::IconType::Time
+            || icon_type == crate::widgets::IconType::NumberCount
+            || icon_type == crate::widgets::IconType::GithubDark
+        {
+            svg_data_str
+                .replace("currentColor", "#ffffff")
+                .replace("fill=\"#000000\"", "fill=\"#ffffff\"")
+                .replace("stroke=\"#000000\"", "stroke=\"#ffffff\"")
+                .replace("#64B5F6", "#ffffff")
+                .replace("#F06292", "#ffffff")
+                .replace("#E4E5E6", "#ffffff")
+        } else {
+            svg_data_str.into_owned()
+        };
 
-            // Подбираем идеальную толщину для разных иконок, чтобы они выглядели сбалансированно.
-            let target_stroke_width = match icon_type {
-                crate::widgets::IconType::Up | crate::widgets::IconType::Down => "1.7", // Стрелки делаем чуть изящнее
-                _ => "2.0", // Остальные иконки - "сочные" и жирные
-            };
-            svg_str = svg_str.replace(
-                "stroke-width=\"2\"",
-                &format!("stroke-width=\"{}\"", target_stroke_width),
+        let target_stroke_width = match icon_type {
+            crate::widgets::IconType::Up | crate::widgets::IconType::Down => "1.7",
+            _ => "2.0",
+        };
+        svg_str = svg_str.replace(
+            "stroke-width=\"2\"",
+            &format!("stroke-width=\"{}\"", target_stroke_width),
+        );
+
+        let tree = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt).ok()?;
+        let size = tree.size();
+        let target_size = match icon_type {
+            crate::widgets::IconType::Error | crate::widgets::IconType::Warning => 128.0,
+            _ => 64.0,
+        };
+
+        let scale = if size.width() > size.height() {
+            target_size / size.width()
+        } else {
+            target_size / size.height()
+        };
+        let scaled_w = size.width() * scale;
+        let scaled_h = size.height() * scale;
+        let width = target_size as u32;
+        let height = target_size as u32;
+        let mut pixmap = tiny_skia::Pixmap::new(width, height)?;
+        let dx = (target_size - scaled_w) / 2.0;
+        let dy = (target_size - scaled_h) / 2.0;
+        let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
+        resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+        let data = pixmap.data_mut();
+        for pixel in data.chunks_exact_mut(4) {
+            let a = pixel[3] as u32;
+            if a > 0 && a < 255 {
+                pixel[0] = ((pixel[0] as u32 * 255) / a).min(255) as u8;
+                pixel[1] = ((pixel[1] as u32 * 255) / a).min(255) as u8;
+                pixel[2] = ((pixel[2] as u32 * 255) / a).min(255) as u8;
+            }
+        }
+
+        Some((data.to_vec(), width as i32, height as i32))
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn reset_texture_atlas(&mut self) {
+        self.flush();
+        self.glyphs.clear();
+        self.ui_glyphs.clear();
+        self.icons.clear();
+        self.file_icon_cache.clear();
+        self.atlas_x = 2;
+        self.atlas_y = 2;
+        self.max_row_h = 0;
+        unsafe {
+            use glow::HasContext;
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                glow::RGBA8 as i32,
+                ATLAS_SIZE_W,
+                ATLAS_SIZE_H,
+                0,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
             );
+        }
+    }
 
-            if let Ok(tree) = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt) {
-                let size = tree.size();
-                // Error/warning icons are visible at larger status-bar size.
-                // Keep other UI icons at 64px to avoid extra texture work.
-                let target_size = match icon_type {
-                    crate::widgets::IconType::Error | crate::widgets::IconType::Warning => 128.0,
-                    _ => 64.0,
-                };
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn upload_icon_rgba(
+        &mut self,
+        width: i32,
+        height: i32,
+        data: &[u8],
+    ) -> Option<IconAtlasEntry> {
+        if width <= 0 || height <= 0 || data.is_empty() {
+            return None;
+        }
+        if self.atlas_x + width + 2 > ATLAS_SIZE_W {
+            self.atlas_x = 2;
+            self.atlas_y += self.max_row_h + 2;
+            self.max_row_h = 0;
+        }
+        if self.atlas_y + height + 2 > ATLAS_SIZE_H {
+            self.reset_texture_atlas();
+        }
+        if self.atlas_x + width + 2 > ATLAS_SIZE_W || self.atlas_y + height + 2 > ATLAS_SIZE_H {
+            return None;
+        }
+        let x = self.atlas_x;
+        let y = self.atlas_y;
+        unsafe {
+            use glow::HasContext;
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_sub_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                x,
+                y,
+                width,
+                height,
+                glow::RGBA,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(Some(data)),
+            );
+        }
+        self.atlas_x += width + 2;
+        self.max_row_h = self.max_row_h.max(height);
+        Some(IconAtlasEntry {
+            u: x as f32 / ATLAS_SIZE_W as f32,
+            v: y as f32 / ATLAS_SIZE_H as f32,
+            uw: width as f32 / ATLAS_SIZE_W as f32,
+            vh: height as f32 / ATLAS_SIZE_H as f32,
+        })
+    }
 
-                let scale = if size.width() > size.height() {
-                    target_size / size.width()
-                } else {
-                    target_size / size.height()
-                };
-                let scaled_w = size.width() * scale;
-                let scaled_h = size.height() * scale;
-                let width = target_size as u32;
-                let height = target_size as u32;
-                if let Some(mut pixmap) = tiny_skia::Pixmap::new(width, height) {
-                    // Динамически центрируем SVG на основе его параметров ширины/высоты,
-                    // чтобы текстура всегда была идеальным квадратом. Это предотвратит
-                    // растягивание иконок и смещение фонового круга при наведении.
-                    let dx = (target_size - scaled_w) / 2.0;
-                    let dy = (target_size - scaled_h) / 2.0;
-                    let transform = tiny_skia::Transform::from_row(scale, 0.0, 0.0, scale, dx, dy);
-                    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn upload_builtin_icon(
+        &mut self,
+        icon_type: crate::widgets::IconType,
+    ) -> Option<IconAtlasEntry> {
+        let (data, width, height) = Self::rasterize_builtin_icon(icon_type)?;
+        self.upload_icon_rgba(width, height, &data)
+    }
 
-                    let data = pixmap.data_mut();
-                    for pixel in data.chunks_exact_mut(4) {
-                        let a = pixel[3] as u32;
-                        if a > 0 && a < 255 {
-                            pixel[0] = ((pixel[0] as u32 * 255) / a).min(255) as u8;
-                            pixel[1] = ((pixel[1] as u32 * 255) / a).min(255) as u8;
-                            pixel[2] = ((pixel[2] as u32 * 255) / a).min(255) as u8;
-                        }
-                    }
-
-                    let tex = unsafe {
-                        use glow::HasContext;
-                        let tex = self.gl.create_texture().unwrap();
-                        self.gl.bind_texture(glow::TEXTURE_2D, Some(tex));
-                        self.gl.tex_image_2d(
-                            glow::TEXTURE_2D,
-                            0,
-                            glow::RGBA8 as i32,
-                            width as i32,
-                            height as i32,
-                            0,
-                            glow::RGBA,
-                            glow::UNSIGNED_BYTE,
-                            glow::PixelUnpackData::Slice(Some(data)),
-                        );
-                        self.gl.generate_mipmap(glow::TEXTURE_2D);
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MIN_FILTER,
-                            glow::LINEAR_MIPMAP_LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_MAG_FILTER,
-                            glow::LINEAR as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_S,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        self.gl.tex_parameter_i32(
-                            glow::TEXTURE_2D,
-                            glow::TEXTURE_WRAP_T,
-                            glow::CLAMP_TO_EDGE as i32,
-                        );
-                        tex
-                    };
-
-                    self.icons.insert(icon_type, tex);
-                }
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn load_builtin_icons(&mut self) {
+        self.icons.clear();
+        for &icon_type in Self::builtin_icon_types() {
+            if let Some(entry) = self.upload_builtin_icon(icon_type) {
+                self.icons.insert(icon_type, entry);
             }
         }
 

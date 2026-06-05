@@ -58,6 +58,14 @@ impl LspManager {
         }
     }
 
+    fn relative_lookup_path(&self, path: &Path) -> PathBuf {
+        if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            std::env::current_dir().unwrap_or_default().join(path)
+        }
+    }
+
     /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
     fn ensure_python(&mut self) {
         if self.python.is_none() && !self.python_disabled {
@@ -593,18 +601,25 @@ impl LspManager {
         all
     }
 
-    pub fn get_diagnostics(&self, path: &PathBuf) -> &[Diagnostic] {
-        let abs_path = if path.is_absolute() {
-            path.clone()
+    pub fn get_diagnostics(&self, path: &Path) -> &[Diagnostic] {
+        if path.is_absolute() {
+            self.diagnostics
+                .get(path)
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
         } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
+            let abs_path = ws.join(path);
+            self.diagnostics
+                .get(abs_path.as_path())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
         } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.diagnostics
-            .get(&abs_path)
-            .map(|v| v.as_slice())
-            .unwrap_or(&[])
+            let abs_path = self.relative_lookup_path(path);
+            self.diagnostics
+                .get(abs_path.as_path())
+                .map(|v| v.as_slice())
+                .unwrap_or(&[])
+        }
     }
 
     pub fn clear_diagnostics_for_path(&mut self, path: &PathBuf) {
@@ -623,34 +638,52 @@ impl LspManager {
         self.dirty_diagnostics = false;
     }
 
-    pub fn get_instant_diagnostics_with_version(&self, path: &PathBuf) -> (i32, &[Diagnostic]) {
-        let abs_path = if path.is_absolute() {
-            path.clone()
+    pub fn get_instant_diagnostics_with_version(&self, path: &Path) -> (i32, &[Diagnostic]) {
+        if path.is_absolute() {
+            self.merged_instant_diagnostics
+                .get(path)
+                .map(|(v, d)| (*v, d.as_slice()))
+                .unwrap_or((0, &[]))
         } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
+            let abs_path = ws.join(path);
+            self.merged_instant_diagnostics
+                .get(abs_path.as_path())
+                .map(|(v, d)| (*v, d.as_slice()))
+                .unwrap_or((0, &[]))
         } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.merged_instant_diagnostics
-            .get(&abs_path)
-            .map(|(v, d)| (*v, d.as_slice()))
-            .unwrap_or((0, &[]))
+            let abs_path = self.relative_lookup_path(path);
+            self.merged_instant_diagnostics
+                .get(abs_path.as_path())
+                .map(|(v, d)| (*v, d.as_slice()))
+                .unwrap_or((0, &[]))
+        }
     }
 
-    pub fn has_stale_instant_diagnostics(&self, path: &PathBuf, editor_version: u64) -> bool {
-        let abs_path = if path.is_absolute() {
-            path.clone()
+    pub fn has_stale_instant_diagnostics(&self, path: &Path, editor_version: u64) -> bool {
+        if path.is_absolute() {
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+                diags
+                    .get(path)
+                    .is_some_and(|(version, _)| (*version as u64) < editor_version)
+            };
+            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
         } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
+            let abs_path = ws.join(path);
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+                diags
+                    .get(abs_path.as_path())
+                    .is_some_and(|(version, _)| (*version as u64) < editor_version)
+            };
+            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
         } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
-            diags
-                .get(&abs_path)
-                .is_some_and(|(version, _)| (*version as u64) < editor_version)
-        };
-        is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+            let abs_path = self.relative_lookup_path(path);
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+                diags
+                    .get(abs_path.as_path())
+                    .is_some_and(|(version, _)| (*version as u64) < editor_version)
+            };
+            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+        }
     }
 
     /// Диагностики для текущего файла, отфильтрованные по строке

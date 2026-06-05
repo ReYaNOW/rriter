@@ -141,7 +141,7 @@ impl App {
         let title = self.base_title.clone();
         if !self.tabs.is_empty() {
             self.tabs[self.active_tab].icon_key =
-                crate::app::file_icons::file_icon_key(&title.to_lowercase());
+                crate::app::file_icons::file_icon_key_for_name(&title);
         }
 
         if let Some(path) = &self.file_path {
@@ -225,7 +225,7 @@ impl App {
             &self.tabs[ai].base_title
         };
         let icon_title = title_to_use.trim_start_matches('*').trim_start();
-        let icon_key = crate::app::file_icons::file_icon_key(&icon_title.to_lowercase());
+        let icon_key = crate::app::file_icons::file_icon_key_for_name(icon_title);
         self.tabs[ai].icon_key = icon_key;
     }
 

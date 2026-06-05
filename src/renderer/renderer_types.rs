@@ -212,6 +212,14 @@ impl FontData {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct IconAtlasEntry {
+    pub u: f32,
+    pub v: f32,
+    pub uw: f32,
+    pub vh: f32,
+}
+
 pub struct Renderer {
     pub gl: glow::Context,
     pub program: glow::Program,
@@ -268,10 +276,10 @@ pub struct Renderer {
     pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
 
-    pub icons: std::collections::HashMap<crate::widgets::IconType, glow::Texture>,
+    pub icons: std::collections::HashMap<crate::widgets::IconType, IconAtlasEntry>,
     pub icon_logo: Option<glow::Texture>,
-    /// Кэш SVG-иконок для дерева файлов. Ключ — &'static str из file_icons_map.
-    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, glow::Texture>,
+    /// Кэш SVG-иконок для дерева файлов. Ключ = &'static str из file_icons_map.
+    pub file_icon_cache: rustc_hash::FxHashMap<&'static str, IconAtlasEntry>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub hide_popups_until_mouse_move: bool,
@@ -316,4 +324,5 @@ pub struct Renderer {
     pub mod_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub tab_x_anim: Vec<f32>,
+    pub tab_display_titles: Vec<String>,
 }

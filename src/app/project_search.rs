@@ -656,7 +656,7 @@ fn search_project_file(
     let icon_key = path
         .file_name()
         .and_then(|name| name.to_str())
-        .map(|name| crate::app::file_icons::file_icon_key(&name.to_lowercase()))
+        .map(crate::app::file_icons::file_icon_key_for_name)
         .unwrap_or("default_file");
     crate::app::file_tree::pre_rasterize_icon(icon_key, false);
     Some(ProjectSearchFile {
