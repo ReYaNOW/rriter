@@ -582,9 +582,7 @@ impl App {
             PhysicalKey::Code(KeyCode::Escape) => {
                 self.ide_panel.project_search.focused = None;
             }
-            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
-                if ctrl =>
-            {
+            PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) if ctrl => {
                 should_run = true;
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
@@ -673,15 +671,16 @@ impl App {
                         .delete_word_forward()
                         .is_some()
                 } else {
-                    self.project_search_editor_mut(field).delete_forward().is_some()
+                    self.project_search_editor_mut(field)
+                        .delete_forward()
+                        .is_some()
                 };
                 is_edit |= changed;
             }
             _ => {
                 if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
                     if let Some(text) = key_event.logical_key.to_text() {
-                        let text = if field
-                            == crate::app::project_search::ProjectSearchField::Query
+                        let text = if field == crate::app::project_search::ProjectSearchField::Query
                         {
                             text.to_string()
                         } else {

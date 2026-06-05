@@ -61,15 +61,17 @@ fn collect_workspace_status_with_cache(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.to_path_buf());
 
+    let rel_root = root
+        .strip_prefix(&repo_root)
+        .ok()
+        .filter(|rel_root| !rel_root.as_os_str().is_empty());
     let mut status_opts = git2::StatusOptions::new();
     status_opts
         .include_untracked(true)
         .recurse_untracked_dirs(true)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true);
-    if let Ok(rel_root) = root.strip_prefix(&repo_root)
-        && !rel_root.as_os_str().is_empty()
-    {
+    if let Some(rel_root) = rel_root {
         status_opts.pathspec(rel_root);
     }
 
@@ -90,7 +92,6 @@ fn collect_workspace_status_with_cache(
     };
 
     let mut files = Vec::new();
-    let mut file_by_display_path: FxHashMap<String, usize> = FxHashMap::default();
     for entry in statuses.iter() {
         let status = entry.status();
         if status.is_ignored() || status.is_empty() {
@@ -99,18 +100,10 @@ fn collect_workspace_status_with_cache(
         let Some((rel_path, old_rel_path)) = status_entry_paths(&entry) else {
             continue;
         };
-        let abs_path = repo_root.join(&rel_path);
-        if !abs_path.starts_with(root) {
+        let Some(display_path) = git_status_display_path(rel_path, rel_root, root, &repo_root)
+        else {
             continue;
-        }
-        let display_path = abs_path
-            .strip_prefix(root)
-            .ok()
-            .and_then(|path| path.to_str())
-            .map(|path| path.trim_start_matches('/').to_string())
-            .filter(|path| !path.is_empty())
-            .or_else(|| rel_path.to_str().map(str::to_string))
-            .unwrap_or_else(|| "?".to_string());
+        };
         let depth = display_path
             .split('/')
             .filter(|part| !part.is_empty())
@@ -118,21 +111,6 @@ fn collect_workspace_status_with_cache(
             .saturating_sub(1);
         let staged = status_intersects_index(status);
         let file_status = git_file_status(status, staged);
-        if let Some(existing_idx) = file_by_display_path.get(display_path.as_str()).copied() {
-            let existing: &mut GitFileEntry = &mut files[existing_idx];
-            existing.staged |= staged;
-            if staged {
-                existing.status = file_status;
-            }
-            if existing.old_rel_path.is_none() {
-            existing.old_rel_path = (file_status == GitFileStatus::Renamed)
-                .then(|| old_rel_path.as_ref())
-                .flatten()
-                .map(|path| path.to_string_lossy().into_owned().into_boxed_str());
-            }
-            continue;
-        }
-        file_by_display_path.insert(display_path.clone(), files.len());
         let old_rel_path = if file_status == GitFileStatus::Renamed {
             old_rel_path.map(|path| path.to_string_lossy().into_owned().into_boxed_str())
         } else {
@@ -150,6 +128,7 @@ fn collect_workspace_status_with_cache(
     }
 
     files.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+    merge_git_status_files(&mut files);
     let tree = build_git_tree(&files);
     let branch_name = current_branch_name(&repo);
     let ahead = branch_ahead_cached(&repo, &repo_root, branch_ahead_cache).unwrap_or(0);
@@ -333,6 +312,59 @@ fn push_git_tree_rows_ordered(
     }
 }
 
+fn git_status_path_string(path: &Path) -> Option<String> {
+    path.to_str()
+        .map(|path| path.trim_start_matches('/').to_string())
+        .filter(|path| !path.is_empty())
+}
+
+fn git_status_display_path(
+    rel_path: &Path,
+    rel_root: Option<&Path>,
+    root: &Path,
+    repo_root: &Path,
+) -> Option<String> {
+    if let Some(rel_root) = rel_root {
+        let display_path = rel_path.strip_prefix(rel_root).ok()?;
+        return git_status_path_string(display_path).or_else(|| git_status_path_string(rel_path));
+    }
+    if root == repo_root {
+        return git_status_path_string(rel_path);
+    }
+
+    let abs_path = repo_root.join(rel_path);
+    if !abs_path.starts_with(root) {
+        return None;
+    }
+    abs_path
+        .strip_prefix(root)
+        .ok()
+        .and_then(git_status_path_string)
+        .or_else(|| git_status_path_string(rel_path))
+}
+
+fn merge_git_status_files(files: &mut Vec<GitFileEntry>) {
+    if files.len() < 2 {
+        return;
+    }
+    let mut idx = 1usize;
+    while idx < files.len() {
+        if files[idx - 1].display_path != files[idx].display_path {
+            idx += 1;
+            continue;
+        }
+        let duplicate = files.remove(idx);
+        let existing = &mut files[idx - 1];
+        existing.staged |= duplicate.staged;
+        if duplicate.staged {
+            existing.status = duplicate.status;
+        }
+        if existing.old_rel_path.is_none() {
+            existing.old_rel_path = duplicate.old_rel_path;
+        }
+    }
+}
+
 pub(crate) fn git_visible_tree_row_count(
     workspace_idx: usize,
     rows: &[GitTreeRow],
@@ -418,14 +450,13 @@ pub(crate) fn git_folder_stage_state(
     }
 }
 
-fn status_entry_paths(entry: &git2::StatusEntry<'_>) -> Option<(PathBuf, Option<PathBuf>)> {
+fn status_entry_paths<'a>(entry: &'a git2::StatusEntry<'_>) -> Option<(&'a Path, Option<&'a Path>)> {
     let delta = entry.index_to_workdir().or_else(|| entry.head_to_index())?;
-    let new_path = delta.new_file().path()?.to_path_buf();
+    let new_path = delta.new_file().path()?;
     let old_path = delta
         .old_file()
         .path()
-        .filter(|path| *path != new_path.as_path())
-        .map(Path::to_path_buf);
+        .filter(|path| *path != new_path);
     Some((new_path, old_path))
 }
 
@@ -852,7 +883,7 @@ mod tests {
 
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {
         GitGraphCommit {
-            oid: oid.to_string(),
+            oid: Arc::<str>::from(oid),
             short_oid: oid.chars().take(7).collect(),
             summary: oid.to_string(),
             branch_name: None,
@@ -871,7 +902,10 @@ mod tests {
             is_head: false,
             github_url: None,
             stats: None,
-            parent_oids: parents.iter().map(|parent| (*parent).to_string()).collect(),
+            parent_oids: parents
+                .iter()
+                .map(|parent| Arc::<str>::from(*parent))
+                .collect(),
         }
     }
 

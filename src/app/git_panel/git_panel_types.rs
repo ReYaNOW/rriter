@@ -2,7 +2,7 @@ use crate::app::App;
 use crate::editor::Editor;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GitFileStatus {
@@ -162,10 +162,10 @@ pub struct GitGraphRef {
 
 #[derive(Clone, Debug)]
 pub struct GitGraphCommit {
-    pub oid: String,
+    pub oid: Arc<str>,
     pub short_oid: String,
     pub summary: String,
-    pub branch_name: Option<String>,
+    pub branch_name: Option<Arc<str>>,
     pub author_name: String,
     pub author_email: String,
     pub time_secs: i64,
@@ -181,7 +181,7 @@ pub struct GitGraphCommit {
     pub is_head: bool,
     pub github_url: Option<String>,
     pub stats: Option<GitGraphStats>,
-    parent_oids: Vec<String>,
+    parent_oids: Vec<Arc<str>>,
 }
 
 #[derive(Clone, Debug)]
@@ -295,6 +295,7 @@ pub struct GitPanelState {
     pending_label_until: Option<std::time::Instant>,
     pub next_request_id: u64,
     pub latest_request_id: u64,
+    applied_request_id: u64,
     rx: Vec<GitPanelReceiver>,
     stage_tx: Option<mpsc::Sender<GitStageCommand>>,
     status_refresh_pending: bool,
@@ -360,6 +361,7 @@ impl Default for GitPanelState {
             pending_label_until: None,
             next_request_id: 1,
             latest_request_id: 0,
+            applied_request_id: 0,
             rx: Vec::new(),
             stage_tx: None,
             status_refresh_pending: false,
@@ -428,6 +430,7 @@ impl GitPanelState {
 
     fn apply_event(&mut self, event: GitPanelEvent) {
         self.latest_request_id = event.request_id;
+        self.applied_request_id = event.request_id;
         self.notice = event.notice;
         if event.clear_message {
             self.message_editor = Editor::new(512);

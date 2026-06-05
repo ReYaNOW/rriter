@@ -172,7 +172,13 @@ pub(crate) fn tab_display_titles_for(
     active_title: &str,
 ) -> Vec<String> {
     let mut display_titles = Vec::with_capacity(tabs.len());
-    write_tab_display_titles_for(tabs, active_tab, active_path, active_title, &mut display_titles);
+    write_tab_display_titles_for(
+        tabs,
+        active_tab,
+        active_path,
+        active_title,
+        &mut display_titles,
+    );
     display_titles
 }
 

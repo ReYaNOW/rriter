@@ -482,20 +482,20 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiRouteTag(group_idx) => {
                 if let Some(spec_id) = self.ide_panel.api.selected_spec {
-                    if let Some(model) = self.ide_panel.api.models.get(&spec_id) {
-                        let groups = grouped_route_ranges(
-                            &model.routes,
-                            &self.ide_panel.api.collapsed_tags,
-                            spec_id,
-                        );
-                        if let Some((tag, _, _, _)) = groups.get(group_idx) {
-                            let key = (spec_id, tag.clone());
-                            if self.ide_panel.api.collapsed_tags.contains(&key) {
-                                self.ide_panel.api.collapsed_tags.remove(&key);
-                            } else {
-                                self.ide_panel.api.collapsed_tags.insert(key);
-                            }
-                        }
+                    let tag = self
+                        .ide_panel
+                        .api
+                        .models
+                        .get(&spec_id)
+                        .and_then(|model| {
+                            let group = model.route_groups.get(group_idx)?;
+                            model.routes.get(group.start)
+                        })
+                        .map(|route| route.tag.clone());
+                    if let Some(tag) = tag {
+                        self.ide_panel
+                            .api
+                            .toggle_tag_collapsed(spec_id, tag.as_str());
                     }
                 }
             }

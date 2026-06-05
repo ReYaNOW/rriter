@@ -98,9 +98,44 @@ pub struct ApiSpecModel {
     pub openapi_version: String,
     pub servers: Vec<ApiServer>,
     pub routes: Vec<ApiRouteRow>,
+    pub route_groups: Vec<ApiRouteGroup>,
+    pub route_display_paths: Vec<String>,
     pub security_schemes: Vec<ApiSecurityScheme>,
     pub root_security: Vec<ApiSecurityRequirement>,
     pub schema_arena: Vec<ApiSchema>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ApiRouteGroup {
+    pub start: usize,
+    pub len: usize,
+}
+
+impl ApiSpecModel {
+    pub fn rebuild_route_layout_cache(&mut self) {
+        self.route_groups.clear();
+        self.route_display_paths.clear();
+        self.route_display_paths.reserve(self.routes.len());
+        for route in &self.routes {
+            let mut path = String::with_capacity(route.path.len() + 8);
+            write_api_path_display(&route.path, &mut path);
+            self.route_display_paths.push(path);
+        }
+
+        let mut start = 0usize;
+        while start < self.routes.len() {
+            let tag = self.routes[start].tag.as_str();
+            let mut end = start + 1;
+            while end < self.routes.len() && self.routes[end].tag == tag {
+                end += 1;
+            }
+            self.route_groups.push(ApiRouteGroup {
+                start,
+                len: end - start,
+            });
+            start = end;
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -959,7 +994,7 @@ pub struct ApiClientState {
     pub import_error_at: Option<u64>,
     pub spec_remove_dialog: Option<ApiSpecRemoveDialog>,
     pub loading: FxHashSet<ApiSpecId>,
-    pub collapsed_tags: FxHashSet<(ApiSpecId, String)>,
+    pub collapsed_tags: FxHashMap<ApiSpecId, FxHashSet<String>>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
     pub expanded_mock_routes: FxHashSet<(ApiSpecId, usize)>,
     pub panel_scroll: ScrollState,
@@ -1138,7 +1173,7 @@ impl Default for ApiClientState {
             import_error_at: None,
             spec_remove_dialog: None,
             loading: FxHashSet::default(),
-            collapsed_tags: FxHashSet::default(),
+            collapsed_tags: FxHashMap::default(),
             collapsed_route_roots: FxHashSet::default(),
             expanded_mock_routes: FxHashSet::default(),
             panel_scroll: ScrollState::new(7.0),
@@ -1272,6 +1307,29 @@ impl ApiClientState {
         self.models.get(&id)
     }
 
+    pub fn tag_collapsed(&self, spec_id: ApiSpecId, tag: &str) -> bool {
+        self.collapsed_tags
+            .get(&spec_id)
+            .is_some_and(|tags| tags.contains(tag))
+    }
+
+    pub fn toggle_tag_collapsed(&mut self, spec_id: ApiSpecId, tag: &str) {
+        let remove_spec_entry = {
+            let tags = self.collapsed_tags.entry(spec_id).or_default();
+            if !tags.remove(tag) {
+                tags.insert(tag.to_string());
+            }
+            tags.is_empty()
+        };
+        if remove_spec_entry {
+            self.collapsed_tags.remove(&spec_id);
+        }
+    }
+
+    pub fn clear_collapsed_tags_for_spec(&mut self, spec_id: ApiSpecId) {
+        self.collapsed_tags.remove(&spec_id);
+    }
+
     pub fn selected_entry(&self) -> Option<&ApiSpecEntry> {
         let id = self.selected_spec?;
         self.specs.iter().find(|entry| entry.id == id)
@@ -1344,7 +1402,7 @@ impl ApiClientState {
         self.models.remove(&id);
         self.auth.retain_spec(id);
         self.loading.remove(&id);
-        self.collapsed_tags.retain(|(spec_id, _)| *spec_id != id);
+        self.clear_collapsed_tags_for_spec(id);
         self.collapsed_route_roots.remove(&id);
         self.expanded_mock_routes
             .retain(|(spec_id, _)| *spec_id != id);

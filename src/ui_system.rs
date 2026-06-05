@@ -1,7 +1,7 @@
 /// Декларативная система UI для автоматической обработки кнопок и виджетов
 /// Устраняет необходимость вручную прописывать координаты и биндинги для каждой кнопки
 use crate::renderer::Renderer;
-use crate::widgets::{Button, IconButton};
+use crate::widgets::{Button, ButtonView, IconButton};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ApiMockContractFieldGroup {
@@ -439,6 +439,20 @@ impl UiRegistry {
         &mut self,
         id: UiId,
         button: &Button,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
+        self.register_button_view(id, button.as_view(), renderer, mx, my, scale, pressed)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn register_button_view(
+        &mut self,
+        id: UiId,
+        button: ButtonView<'_>,
         renderer: &mut Renderer,
         mx: f32,
         my: f32,

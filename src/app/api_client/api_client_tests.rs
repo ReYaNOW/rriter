@@ -1064,8 +1064,16 @@ mod tests {
     #[test]
     fn route_grouping_uses_sorted_tag_ranges() {
         let model = parse_openapi_model(ApiSpecId(1), &sample_spec()).expect("parse");
-        let groups = grouped_route_ranges(&model.routes, &FxHashSet::default(), model.id);
-        assert_eq!(groups, vec![("pets".to_string(), 0, 2, false)]);
+        let groups: Vec<_> = model
+            .route_groups
+            .iter()
+            .map(|group| (model.routes[group.start].tag.as_str(), group.start, group.len))
+            .collect();
+        assert_eq!(groups, vec![("pets", 0, 2)]);
+        assert_eq!(model.route_display_paths.len(), model.routes.len());
+        for (route, display_path) in model.routes.iter().zip(model.route_display_paths.iter()) {
+            assert_eq!(display_path, &format_api_path_display(&route.path));
+        }
     }
 
     #[test]
@@ -1745,7 +1753,11 @@ mod tests {
         state.selected_spec = Some(first);
         state.models.insert(first, ApiSpecModel::default());
         state.loading.insert(first);
-        state.collapsed_tags.insert((first, "pets".to_string()));
+        state
+            .collapsed_tags
+            .entry(first)
+            .or_default()
+            .insert("pets".to_string());
 
         assert_eq!(state.remove_spec(0), Some(first));
         assert_eq!(state.selected_spec, Some(second));
@@ -1820,7 +1832,11 @@ mod tests {
         state.models.insert(model.id, model.clone());
 
         let expanded = api_panel_max_scroll(&state, 120.0, 1.0);
-        state.collapsed_tags.insert((model.id, "pets".to_string()));
+        state
+            .collapsed_tags
+            .entry(model.id)
+            .or_default()
+            .insert("pets".to_string());
         let collapsed = api_panel_max_scroll(&state, 120.0, 1.0);
         assert!(expanded.is_finite());
         assert!(collapsed.is_finite());

@@ -1,7 +1,7 @@
 use crate::editor::Editor;
 use crate::scroll::ScrollState;
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use memchr::{memchr2_iter, memchr_iter};
+use memchr::{memchr_iter, memchr2_iter};
 use rustc_hash::FxHashSet;
 use std::collections::VecDeque;
 use std::io::Read;
@@ -301,7 +301,9 @@ pub fn project_search_layout(
     }
 }
 
-pub fn start_project_search_worker(request: ProjectSearchRequest) -> Receiver<ProjectSearchWorkerMessage> {
+pub fn start_project_search_worker(
+    request: ProjectSearchRequest,
+) -> Receiver<ProjectSearchWorkerMessage> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         stream_project_search(request, tx);
@@ -403,10 +405,7 @@ fn stream_project_search(
         .filter(|root| root.is_dir())
         .map(Path::to_path_buf)
         .collect::<VecDeque<_>>();
-    let active_roots = roots
-        .len()
-        .min(PROJECT_SEARCH_MAX_ACTIVE_ROOTS)
-        .max(1);
+    let active_roots = roots.len().min(PROJECT_SEARCH_MAX_ACTIVE_ROOTS).max(1);
     let roots = Arc::new(Mutex::new(roots));
     let mut root_workers = Vec::with_capacity(active_roots);
     for _ in 0..active_roots {
@@ -523,7 +522,8 @@ fn run_project_search_root(
                 elapsed_ms,
             });
             ignore::WalkState::Continue
-        }) as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState + Send>
+        })
+            as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState + Send>
     };
     builder.build_parallel().run(visitor);
 }
@@ -555,9 +555,10 @@ fn search_project_file(
     }
     let mut matches = Vec::new();
     let room = match caps.lock() {
-        Ok(caps) if caps.capped
-            || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
-            || caps.matches >= PROJECT_SEARCH_MATCH_CAP =>
+        Ok(caps)
+            if caps.capped
+                || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+                || caps.matches >= PROJECT_SEARCH_MATCH_CAP =>
         {
             capped_flag.store(true, Ordering::Relaxed);
             return None;
@@ -1070,14 +1071,20 @@ fn expand_path_token(token: &str, workspaces: &[PathBuf]) -> Vec<PathBuf> {
     let raw = Path::new(token);
     if raw.is_absolute() {
         let path = raw.canonicalize().unwrap_or_else(|_| raw.to_path_buf());
-        if workspaces.iter().any(|workspace| path.starts_with(workspace)) {
+        if workspaces
+            .iter()
+            .any(|workspace| path.starts_with(workspace))
+        {
             return vec![path];
         }
         return Vec::new();
     }
     let rel = token.strip_prefix("./").unwrap_or(token);
     let rel = if rel == "." { "" } else { rel };
-    workspaces.iter().map(|workspace| workspace.join(rel)).collect()
+    workspaces
+        .iter()
+        .map(|workspace| workspace.join(rel))
+        .collect()
 }
 
 fn glob_patterns_for_token(token: &str, workspaces: &[PathBuf]) -> Vec<String> {
@@ -1095,7 +1102,9 @@ fn glob_patterns_for_token(token: &str, workspaces: &[PathBuf]) -> Vec<String> {
         }
         out
     } else {
-        vec![to_slash(Path::new(token.strip_prefix("./").unwrap_or(token)))]
+        vec![to_slash(Path::new(
+            token.strip_prefix("./").unwrap_or(token),
+        ))]
     }
 }
 
@@ -1213,7 +1222,12 @@ impl crate::app::App {
         let Some(renderer) = self.renderer.as_ref() else {
             return;
         };
-        self.set_project_search_cursor_at(field, renderer.last_mouse_x, renderer.last_mouse_y, true);
+        self.set_project_search_cursor_at(
+            field,
+            renderer.last_mouse_x,
+            renderer.last_mouse_y,
+            true,
+        );
     }
 
     pub fn drag_project_search_cursor_to(&mut self, field: ProjectSearchField, x: f32, y: f32) {
@@ -1305,8 +1319,12 @@ impl crate::app::App {
     }
 
     pub fn handle_project_search_match_click(&mut self, file_idx: usize, match_idx: usize) {
-        let Some((path, start_line, start_col, end_line, end_col)) =
-            self.ide_panel.project_search.results.get(file_idx).and_then(|file| {
+        let Some((path, start_line, start_col, end_line, end_col)) = self
+            .ide_panel
+            .project_search
+            .results
+            .get(file_idx)
+            .and_then(|file| {
                 file.matches.get(match_idx).map(|mat| {
                     (
                         file.path.clone(),
@@ -1320,7 +1338,8 @@ impl crate::app::App {
         else {
             return;
         };
-        let was_active = self.current_abs_path().as_ref() == Some(&self.abs_path_for_workspace(&path));
+        let was_active =
+            self.current_abs_path().as_ref() == Some(&self.abs_path_for_workspace(&path));
         self.jump_to_project_search_position(path, true, start_line, start_col, end_line, end_col);
         if !was_active {
             self.scroll_y.current = self.scroll_y.target;
@@ -1339,9 +1358,11 @@ impl crate::app::App {
         end_line: u32,
         end_col: u32,
     ) {
-        let was_open = self.jump_to_lsp_position_in_file(path, start_line, start_col, add_to_history, 0.45);
+        let was_open =
+            self.jump_to_lsp_position_in_file(path, start_line, start_col, add_to_history, 0.45);
         let text = self.editor.get_full_text();
-        let start = crate::lsp::lsp_pos_to_offset(&text, start_line, start_col).min(self.editor.len());
+        let start =
+            crate::lsp::lsp_pos_to_offset(&text, start_line, start_col).min(self.editor.len());
         let end = crate::lsp::lsp_pos_to_offset(&text, end_line, end_col).min(self.editor.len());
         self.editor.selection_anchor = Some(start.min(end));
         self.editor.cursor = end.max(start);

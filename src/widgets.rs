@@ -44,7 +44,50 @@ pub struct Button {
     pub icon_size: f32,
 }
 
+#[derive(Clone, Copy)]
+pub struct ButtonView<'a> {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub text: &'a str,
+    pub icon: Option<IconType>,
+    pub text_scale: f32,
+    pub icon_size: f32,
+}
+
 impl Button {
+    pub fn as_view(&self) -> ButtonView<'_> {
+        ButtonView {
+            x: self.x,
+            y: self.y,
+            w: self.w,
+            h: self.h,
+            text: self.text.as_str(),
+            icon: self.icon,
+            text_scale: self.text_scale,
+            icon_size: self.icon_size,
+        }
+    }
+
+    pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
+        self.as_view().is_hovered(mx, my)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn render(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
+        self.as_view().render(renderer, mx, my, scale, pressed)
+    }
+}
+
+impl<'a> ButtonView<'a> {
     pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
     }
@@ -87,7 +130,7 @@ impl Button {
         let icon_y = y + (h - icon_size) / 2.0;
         let text_y = y + h / 2.0 + 5.0 * scale;
 
-        let text_w = renderer.measure_ui_width(&self.text, text_scale);
+        let text_w = renderer.measure_ui_width(self.text, text_scale);
         let mut content_w = text_w;
         if self.icon.is_some() {
             content_w += icon_size;
@@ -113,7 +156,7 @@ impl Button {
         }
 
         if !self.text.is_empty() {
-            renderer.draw_string_scaled(&self.text, content_x, text_y, text_color, text_scale);
+            renderer.draw_string_scaled(self.text, content_x, text_y, text_color, text_scale);
         }
 
         hovered

@@ -195,7 +195,7 @@ pub(crate) fn api_manual_route_title(method: ApiMethod, path: &str) -> String {
 pub(crate) fn api_manual_route_model(
     route: &crate::app::api_mock::types::ApiManualRoute,
 ) -> ApiSpecModel {
-    ApiSpecModel {
+    let mut model = ApiSpecModel {
         id: API_MANUAL_MOCK_SPEC_ID,
         title: "Manual Mock".to_string(),
         version: String::new(),
@@ -206,10 +206,14 @@ pub(crate) fn api_manual_route_model(
             variables: Vec::new(),
         }],
         routes: vec![api_manual_route_row(route)],
+        route_groups: Vec::new(),
+        route_display_paths: Vec::new(),
         security_schemes: Vec::new(),
         root_security: Vec::new(),
         schema_arena: Vec::new(),
-    }
+    };
+    model.rebuild_route_layout_cache();
+    model
 }
 
 pub(crate) fn api_manual_route_row(

@@ -256,19 +256,19 @@ impl Renderer {
 
         cy += 10.0 * s;
         self.draw_string_scaled_stable("Мок-сервер", x + pad, cy + 18.0 * s, self.theme.fg, 0.96);
-        let help = Button {
+        let help = ButtonView {
             x: x + w - pad - 30.0 * s,
             y: cy - 2.0 * s,
             w: 30.0 * s,
             h: 24.0 * s,
-            text: "?".to_string(),
+            text: "?",
             icon: None,
             text_scale: 0.84,
             icon_size: 0.0,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockGuideOpen,
-            &help,
+            help,
             self,
             mx,
             my,
@@ -281,7 +281,7 @@ impl Renderer {
             api.mock.server_status,
             ApiMockServerStatus::Running { .. } | ApiMockServerStatus::Starting
         );
-        let toggle = Button {
+        let toggle = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(98.0 * s),
@@ -290,8 +290,7 @@ impl Renderer {
                 "Остановить"
             } else {
                 "Запустить"
-            }
-            .to_string(),
+            },
             icon: Some(if server_running {
                 IconType::Close
             } else {
@@ -300,9 +299,9 @@ impl Renderer {
             text_scale: 0.86,
             icon_size: 18.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockServerToggle,
-            &toggle,
+            toggle,
             self,
             mx,
             my,
@@ -363,19 +362,19 @@ impl Renderer {
             );
         }
         cy += 26.0 * s;
-        let details = Button {
+        let details = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: "Статус и логи".to_string(),
+            text: "Статус и логи",
             icon: Some(IconType::Time),
             text_scale: 0.84,
             icon_size: 18.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockServerDetails,
-            &details,
+            details,
             self,
             mx,
             my,
@@ -383,19 +382,19 @@ impl Renderer {
             false,
         );
         cy += btn_h + 10.0 * s;
-        let export = Button {
+        let export = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: "Экспорт openapi.json".to_string(),
+            text: "Экспорт openapi.json",
             icon: Some(IconType::Save),
             text_scale: 0.84,
             icon_size: 17.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockExportOpenApi,
-            &export,
+            export,
             self,
             mx,
             my,
@@ -409,19 +408,19 @@ impl Renderer {
                 "Выбранные + прокси"
             }
         };
-        let mode = Button {
+        let mode = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: mode_label.to_string(),
+            text: mode_label,
             icon: Some(IconType::Reload),
             text_scale: 0.84,
             icon_size: 18.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockModeSelect,
-            &mode,
+            mode,
             self,
             mx,
             my,
@@ -511,19 +510,19 @@ impl Renderer {
             );
             cy += 22.0 * s;
         }
-        let python_manage = Button {
+        let python_manage = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: "Python мок-сервера".to_string(),
+            text: "Python мок-сервера",
             icon: Some(IconType::Api),
             text_scale: 0.82,
             icon_size: 18.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockPythonManage,
-            &python_manage,
+            python_manage,
             self,
             mx,
             my,
@@ -531,19 +530,19 @@ impl Renderer {
             false,
         );
         cy += btn_h + 14.0 * s;
-        let manual = Button {
+        let manual = ButtonView {
             x: x + pad,
             y: cy,
             w: (w - pad * 2.0).max(80.0 * s),
             h: btn_h,
-            text: "Добавить мок роут".to_string(),
+            text: "Добавить мок роут",
             icon: Some(IconType::Plus),
             text_scale: 0.82,
             icon_size: 18.0 * s,
         };
-        ui_registry.register_button(
+        ui_registry.register_button_view(
             crate::ui_system::UiId::ApiMockAddManualRoute,
-            &manual,
+            manual,
             self,
             mx,
             my,
@@ -865,10 +864,12 @@ impl Renderer {
                 }
                 return;
             }
-            let groups = grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id);
-            let mut group_idx = 0usize;
-            let mut path_scratch = String::new();
-            for (tag, start, len, collapsed) in groups {
+            for (group_idx, group) in model.route_groups.iter().enumerate() {
+                let Some(first_route) = model.routes.get(group.start) else {
+                    continue;
+                };
+                let tag = first_route.tag.as_str();
+                let collapsed = api.tag_collapsed(model.id, tag);
                 let tag_hovered = hover_settled
                     && ui_registry.register_rect(
                         crate::ui_system::UiId::ApiRouteTag(group_idx),
@@ -885,7 +886,7 @@ impl Renderer {
                 let tag_x = x + pad + indent_w;
                 self.draw_tree_disclosure_icon(!collapsed, tag_x, cy, tag_h, self.theme.line_num);
                 self.draw_string_scaled_stable(
-                    &tag,
+                    tag,
                     tag_x + 18.0 * s,
                     tree_text_y(cy),
                     self.theme.fg,
@@ -893,7 +894,8 @@ impl Renderer {
                 );
                 cy += tag_h;
                 if !collapsed {
-                    for route_idx in start..start + len {
+                    let route_end = group.start.saturating_add(group.len).min(model.routes.len());
+                    for route_idx in group.start..route_end {
                         let route = &model.routes[route_idx];
                         ui_registry.register_rect(
                             crate::ui_system::UiId::ApiRouteRow(route_idx),
@@ -926,9 +928,13 @@ impl Renderer {
                             s,
                             0.62,
                         );
-                        write_api_path_display(&route.path, &mut path_scratch);
+                        let display_path = model
+                            .route_display_paths
+                            .get(route_idx)
+                            .map(String::as_str)
+                            .unwrap_or(route.path.as_str());
                         self.draw_string_scaled_stable(
-                            &path_scratch,
+                            display_path,
                             route_x + chip_w + 8.0 * s,
                             tree_text_y(cy),
                             self.theme.fg,
@@ -950,7 +956,6 @@ impl Renderer {
                         cy += row_h;
                     }
                 }
-                group_idx += 1;
             }
         }
 

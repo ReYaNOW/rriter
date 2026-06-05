@@ -255,64 +255,63 @@ pub(crate) fn is_hover_target_byte(editor: &crate::editor::Editor, byte_offset: 
     matches!(b, b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_') || b >= 0x80
 }
 
+const PYTHON_HOVER_KEYWORDS: &[&str] = &[
+    "False", "None", "True", "and", "as", "assert", "async", "await", "break", "class", "continue",
+    "def", "del", "elif", "else", "except", "finally", "for", "from", "global", "if", "import",
+    "in", "is", "lambda", "nonlocal", "not", "or", "pass", "raise", "return", "try", "while",
+    "with", "yield",
+];
+
+#[cfg(test)]
 pub(crate) fn is_python_hover_keyword(token: &str) -> bool {
-    matches!(
-        token,
-        "False"
-            | "None"
-            | "True"
-            | "and"
-            | "as"
-            | "assert"
-            | "async"
-            | "await"
-            | "break"
-            | "class"
-            | "continue"
-            | "def"
-            | "del"
-            | "elif"
-            | "else"
-            | "except"
-            | "finally"
-            | "for"
-            | "from"
-            | "global"
-            | "if"
-            | "import"
-            | "in"
-            | "is"
-            | "lambda"
-            | "nonlocal"
-            | "not"
-            | "or"
-            | "pass"
-            | "raise"
-            | "return"
-            | "try"
-            | "while"
-            | "with"
-            | "yield"
-    )
+    PYTHON_HOVER_KEYWORDS.contains(&token)
 }
 
+#[cfg(test)]
 pub(crate) fn hover_token_text(
     editor: &crate::editor::Editor,
     byte_offset: usize,
 ) -> Option<String> {
     let (start, end) = hover_token_bounds(editor, byte_offset);
-    let text = editor.get_full_text();
-    text.get(start..end).map(|s| s.to_string())
+    let end = end.min(editor.len());
+    if start > end {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(end - start);
+    for pos in start..end {
+        bytes.push(editor.byte_at(pos));
+    }
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
-fn is_escaped_quote(bytes: &[u8], quote_pos: usize) -> bool {
+fn is_escaped_quote(editor: &crate::editor::Editor, line_start: usize, quote_pos: usize) -> bool {
     let mut slash_count = 0;
     let mut pos = quote_pos;
-    while pos > 0 && bytes[pos - 1] == b'\\' {
+    while pos > line_start && editor.byte_at(pos - 1) == b'\\' {
         slash_count += 1;
         pos -= 1;
     }
     slash_count % 2 == 1
+}
+
+fn hover_line_bounds_for_byte(
+    editor: &crate::editor::Editor,
+    byte_offset: usize,
+) -> (usize, usize, usize) {
+    let len = editor.len();
+    if len == 0 {
+        return (0, 0, 0);
+    }
+    let idx = byte_offset.min(len - 1);
+    let mut line_start = idx;
+    while line_start > 0 && editor.byte_at(line_start - 1) != b'\n' {
+        line_start -= 1;
+    }
+    let mut line_end = idx;
+    while line_end < len && editor.byte_at(line_end) != b'\n' {
+        line_end += 1;
+    }
+    (idx, line_start, line_end)
 }
 
 pub(crate) fn diagnostic_hover_byte_range_on_line(
@@ -573,11 +572,8 @@ pub(crate) fn normalize_hover_byte(
     byte_offset: usize,
 ) -> Option<usize> {
     let normalized = is_hover_target_byte(editor, byte_offset).then_some(byte_offset)?;
-
-    if hover_token_text(editor, normalized)
-        .as_deref()
-        .is_some_and(is_python_hover_keyword)
-    {
+    let (start, end) = hover_token_bounds(editor, normalized);
+    if hover_token_is_python_keyword(editor, start, end) {
         return None;
     }
 
@@ -588,47 +584,41 @@ pub(crate) fn hover_token_bounds(
     editor: &crate::editor::Editor,
     byte_offset: usize,
 ) -> (usize, usize) {
-    let text = editor.get_full_text();
-    if !text.is_empty() {
-        let bytes = text.as_bytes();
-        let idx = byte_offset.min(bytes.len().saturating_sub(1));
-        let line_start = bytes[..=idx]
-            .iter()
-            .rposition(|&b| b == b'\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
-        let line_end = bytes[idx..]
-            .iter()
-            .position(|&b| b == b'\n')
-            .map(|pos| idx + pos)
-            .unwrap_or(bytes.len());
+    let len = editor.len();
+    if len > 0 {
+        let (idx, line_start, line_end) = hover_line_bounds_for_byte(editor, byte_offset);
 
         let mut quote_pos = None;
-        if matches!(bytes[idx], b'\'' | b'"') && !is_escaped_quote(bytes, idx) {
+        if matches!(editor.byte_at(idx), b'\'' | b'"') && !is_escaped_quote(editor, line_start, idx)
+        {
             quote_pos = Some(idx);
         } else {
             let mut pos = idx;
             while pos > line_start {
                 pos -= 1;
-                if matches!(bytes[pos], b'\'' | b'"') && !is_escaped_quote(bytes, pos) {
+                if matches!(editor.byte_at(pos), b'\'' | b'"')
+                    && !is_escaped_quote(editor, line_start, pos)
+                {
                     quote_pos = Some(pos);
                     break;
                 }
             }
             if quote_pos.is_none()
                 && idx + 1 < line_end
-                && matches!(bytes[idx + 1], b'\'' | b'"')
-                && !is_escaped_quote(bytes, idx + 1)
+                && matches!(editor.byte_at(idx + 1), b'\'' | b'"')
+                && !is_escaped_quote(editor, line_start, idx + 1)
             {
                 quote_pos = Some(idx + 1);
             }
         }
 
         if let Some(quote_start) = quote_pos {
-            let quote = bytes[quote_start];
+            let quote = editor.byte_at(quote_start);
             let mut quote_end = quote_start + 1;
             while quote_end < line_end {
-                if bytes[quote_end] == quote && !is_escaped_quote(bytes, quote_end) {
+                if editor.byte_at(quote_end) == quote
+                    && !is_escaped_quote(editor, line_start, quote_end)
+                {
                     break;
                 }
                 quote_end += 1;
@@ -637,7 +627,7 @@ pub(crate) fn hover_token_bounds(
             if quote_end < line_end {
                 let mut prefix_start = quote_start;
                 while prefix_start > line_start {
-                    let prev = bytes[prefix_start - 1];
+                    let prev = editor.byte_at(prefix_start - 1);
                     if matches!(prev, b'f' | b'F' | b'r' | b'R' | b'b' | b'B' | b'u' | b'U') {
                         prefix_start -= 1;
                     } else {
@@ -652,7 +642,6 @@ pub(crate) fn hover_token_bounds(
         }
     }
 
-    let len = editor.len();
     let mut start = byte_offset.min(len);
     while start > 0 && is_hover_target_byte(editor, start - 1) {
         start -= 1;
@@ -664,6 +653,21 @@ pub(crate) fn hover_token_bounds(
     }
 
     (start, end)
+}
+
+fn hover_token_is_python_keyword(editor: &crate::editor::Editor, start: usize, end: usize) -> bool {
+    if start > end || end > editor.len() {
+        return false;
+    }
+    let token_len = end - start;
+    PYTHON_HOVER_KEYWORDS.iter().any(|keyword| {
+        let bytes = keyword.as_bytes();
+        bytes.len() == token_len
+            && bytes
+                .iter()
+                .enumerate()
+                .all(|(idx, byte)| editor.byte_at(start + idx) == *byte)
+    })
 }
 
 pub(crate) fn hover_bytes_share_token(
@@ -809,11 +813,11 @@ pub fn hover_anchor_for_byte(
     byte_offset: usize,
     render_scroll_y: f32,
 ) -> (f32, f32) {
-    let (start, end) = hover_token_bounds(editor, byte_offset);
-    let text = editor.get_full_text();
-    if text.is_empty() {
+    if editor.len() == 0 {
         return (renderer.last_mouse_x, renderer.last_mouse_y);
     }
+
+    let (start, end) = hover_token_bounds(editor, byte_offset);
 
     let phys_line = editor
         .line_offsets
@@ -821,13 +825,13 @@ pub fn hover_anchor_for_byte(
         .saturating_sub(1);
     let line_start = editor.line_offsets.get(phys_line).copied().unwrap_or(0);
 
-    let mut token_start = start.min(text.len());
-    while token_start > line_start && !text.is_char_boundary(token_start) {
+    let mut token_start = start.min(editor.len());
+    while token_start > line_start && !hover_is_char_boundary(editor, token_start) {
         token_start -= 1;
     }
 
-    let mut token_end = end.min(text.len());
-    while token_end < text.len() && !text.is_char_boundary(token_end) {
+    let mut token_end = end.min(editor.len());
+    while token_end < editor.len() && !hover_is_char_boundary(editor, token_end) {
         token_end += 1;
     }
 
@@ -835,8 +839,8 @@ pub fn hover_anchor_for_byte(
         return (renderer.last_mouse_x, renderer.last_mouse_y);
     }
 
-    let target_w = compute_hover_x_offset(
-        &text,
+    let target_w = compute_hover_x_offset_editor(
+        editor,
         line_start,
         token_start,
         token_end,
@@ -855,6 +859,70 @@ pub fn hover_anchor_for_byte(
     (x, y)
 }
 
+fn hover_is_char_boundary(editor: &crate::editor::Editor, index: usize) -> bool {
+    if index == 0 || index == editor.len() {
+        return true;
+    }
+    let b = editor.byte_at(index);
+    b < 128 || b >= 192
+}
+
+fn editor_char_at(editor: &crate::editor::Editor, pos: usize, end: usize) -> Option<(char, usize)> {
+    if pos >= end {
+        return None;
+    }
+    let first = editor.byte_at(pos);
+    let wanted_len = if first < 0x80 {
+        1
+    } else if first < 0xE0 {
+        2
+    } else if first < 0xF0 {
+        3
+    } else {
+        4
+    };
+    let char_len = wanted_len.min(end - pos);
+    let mut buf = [0u8; 4];
+    for idx in 0..char_len {
+        buf[idx] = editor.byte_at(pos + idx);
+    }
+    let ch = std::str::from_utf8(&buf[..char_len]).ok()?.chars().next()?;
+    Some((ch, char_len.max(1)))
+}
+
+fn compute_hover_x_offset_editor<F>(
+    editor: &crate::editor::Editor,
+    line_start: usize,
+    token_start: usize,
+    token_end: usize,
+    byte_offset: usize,
+    mut char_advance: F,
+) -> f32
+where
+    F: FnMut(char) -> f32,
+{
+    let mut target_byte = byte_offset.clamp(token_start, token_end);
+    while target_byte > token_start && !hover_is_char_boundary(editor, target_byte) {
+        target_byte -= 1;
+    }
+
+    let mut target_w = 0.0;
+    let mut pos = line_start.min(editor.len());
+    let target = target_byte.min(editor.len());
+    while pos < target {
+        if let Some((ch, step)) = editor_char_at(editor, pos, target) {
+            if ch != '\n' && ch != '\u{FE0F}' && ch != '\u{200D}' {
+                target_w += char_advance(ch);
+            }
+            pos += step;
+        } else {
+            pos += 1;
+        }
+    }
+    target_w
+}
+
+#[cfg(test)]
 pub(crate) fn compute_hover_x_offset<F>(
     text: &str,
     line_start: usize,

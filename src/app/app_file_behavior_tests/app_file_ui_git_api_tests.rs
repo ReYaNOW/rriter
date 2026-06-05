@@ -633,17 +633,20 @@ fn open_api_mock_test_route(app: &mut App) -> crate::app::api_client::ApiSpecId 
         selected: true,
         error: None,
     };
-    let model = crate::app::api_client::ApiSpecModel {
+    let mut model = crate::app::api_client::ApiSpecModel {
         id: spec_id,
         title: "Mock API".to_string(),
         version: "1".to_string(),
         openapi_version: "3.1.0".to_string(),
         servers: Vec::new(),
         routes: vec![api_mock_test_route()],
+        route_groups: Vec::new(),
+        route_display_paths: Vec::new(),
         security_schemes: Vec::new(),
         root_security: Vec::new(),
         schema_arena: Vec::new(),
     };
+    model.rebuild_route_layout_cache();
     app.ide_panel.api.specs.push(entry);
     app.ide_panel.api.models.insert(spec_id, model);
     app.open_api_route(spec_id, 0);
@@ -674,6 +677,7 @@ fn add_second_api_mock_test_route(app: &mut App, spec_id: crate::app::api_client
     let mut route = api_mock_test_route();
     route.path = "/orders".to_string();
     model.routes.push(route);
+    model.rebuild_route_layout_cache();
 }
 
 fn api_client_tab_route_idx(tab: &crate::app::EditorTab) -> Option<usize> {

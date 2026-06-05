@@ -897,15 +897,21 @@ impl App {
 
             // Project search
             UiId::ProjectSearchQueryInput => {
-                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Query);
+                self.focus_project_search_field(
+                    crate::app::project_search::ProjectSearchField::Query,
+                );
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::ProjectSearchIncludeInput => {
-                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Include);
+                self.focus_project_search_field(
+                    crate::app::project_search::ProjectSearchField::Include,
+                );
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::ProjectSearchExcludeInput => {
-                self.focus_project_search_field(crate::app::project_search::ProjectSearchField::Exclude);
+                self.focus_project_search_field(
+                    crate::app::project_search::ProjectSearchField::Exclude,
+                );
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::ProjectSearchRun => {

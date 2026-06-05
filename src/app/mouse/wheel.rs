@@ -299,10 +299,7 @@ impl App {
                 if let Some(layout) = self.project_search_panel_layout() {
                     self.ide_panel.project_search.scroll.anim_speed = 7.0;
                     self.ide_panel.project_search.scroll.scroll_by(dy);
-                    let max_scroll = self
-                        .ide_panel
-                        .project_search
-                        .max_scroll(layout.list.h, s);
+                    let max_scroll = self.ide_panel.project_search.max_scroll(layout.list.h, s);
                     self.ide_panel
                         .project_search
                         .scroll

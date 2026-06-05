@@ -1,23 +1,3 @@
-pub fn grouped_route_ranges(
-    routes: &[ApiRouteRow],
-    collapsed: &FxHashSet<(ApiSpecId, String)>,
-    spec_id: ApiSpecId,
-) -> Vec<(String, usize, usize, bool)> {
-    let mut groups = Vec::new();
-    let mut start = 0usize;
-    while start < routes.len() {
-        let tag = routes[start].tag.clone();
-        let mut end = start + 1;
-        while end < routes.len() && routes[end].tag == tag {
-            end += 1;
-        }
-        let is_collapsed = collapsed.contains(&(spec_id, tag.clone()));
-        groups.push((tag, start, end - start, is_collapsed));
-        start = end;
-    }
-    groups
-}
-
 pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) -> f32 {
     let pad = 10.0 * scale;
     let mut content_h = pad + 40.0 * scale;
@@ -39,12 +19,13 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
         content_h += 28.0 * scale;
         content_h += 34.0 * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
-            for (_, _, len, collapsed) in
-                grouped_route_ranges(&model.routes, &api.collapsed_tags, model.id)
-            {
+            for group in &model.route_groups {
+                let Some(route) = model.routes.get(group.start) else {
+                    continue;
+                };
                 content_h += 28.0 * scale;
-                if !collapsed {
-                    content_h += len as f32 * 30.0 * scale;
+                if !api.tag_collapsed(model.id, route.tag.as_str()) {
+                    content_h += group.len as f32 * 30.0 * scale;
                 }
             }
         }

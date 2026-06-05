@@ -147,22 +147,18 @@ fn pattern_positions_match(
             pattern_positions_match(pat, next, end, text, pos, accept)
                 || repeat_atom_positions_match(pat, start, atom_end, text, pos, next, end, accept)
         }
-        Some(b'+') => {
-            atom_positions_match(pat, start, atom_end, text, pos, &mut |next_pos| {
-                if next_pos == pos {
-                    return false;
-                }
-                pattern_positions_match(pat, next, end, text, next_pos, accept)
-                    || repeat_atom_positions_match(
-                        pat, start, atom_end, text, next_pos, next, end, accept,
-                    )
-            })
-        }
-        _ => {
-            atom_positions_match(pat, start, atom_end, text, pos, &mut |next_pos| {
-                pattern_positions_match(pat, next, end, text, next_pos, accept)
-            })
-        }
+        Some(b'+') => atom_positions_match(pat, start, atom_end, text, pos, &mut |next_pos| {
+            if next_pos == pos {
+                return false;
+            }
+            pattern_positions_match(pat, next, end, text, next_pos, accept)
+                || repeat_atom_positions_match(
+                    pat, start, atom_end, text, next_pos, next, end, accept,
+                )
+        }),
+        _ => atom_positions_match(pat, start, atom_end, text, pos, &mut |next_pos| {
+            pattern_positions_match(pat, next, end, text, next_pos, accept)
+        }),
     }
 }
 

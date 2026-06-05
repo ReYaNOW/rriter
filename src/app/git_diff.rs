@@ -602,10 +602,7 @@ impl App {
 
         let version = self.next_tab_highlight_version();
         let state = GitDiffState::loading(version);
-        let title = format!(
-            "Diff: {}",
-            file_name_for_diff_title(file.rel_path.as_ref())
-        );
+        let title = format!("Diff: {}", file_name_for_diff_title(file.rel_path.as_ref()));
         let tab = EditorTab {
             editor: new_editor_with_text(&state.displayed_text, version),
             file_path: None,

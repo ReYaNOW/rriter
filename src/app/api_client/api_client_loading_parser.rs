@@ -327,6 +327,8 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         openapi_version: openapi_version.to_string(),
         servers: parse_servers(root.get("servers")),
         routes: Vec::new(),
+        route_groups: Vec::new(),
+        route_display_paths: Vec::new(),
         security_schemes: parse_security_schemes(root),
         root_security: parse_security_requirements(root.get("security")).unwrap_or_default(),
         schema_arena: Vec::new(),
@@ -423,6 +425,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
     model
         .routes
         .dedup_by(|a, b| a.tag == b.tag && a.path == b.path && a.method == b.method);
+    model.rebuild_route_layout_cache();
     Ok(model)
 }
 

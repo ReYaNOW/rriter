@@ -277,17 +277,21 @@ mod tests {
     }
 
     fn model(route: ApiRouteRow) -> ApiSpecModel {
-        ApiSpecModel {
+        let mut model = ApiSpecModel {
             id: ApiSpecId(7),
             title: "Demo".to_string(),
             version: "1".to_string(),
             openapi_version: "3.1.0".to_string(),
             servers: Vec::new(),
             routes: vec![route],
+            route_groups: Vec::new(),
+            route_display_paths: Vec::new(),
             security_schemes: Vec::new(),
             root_security: Vec::new(),
             schema_arena: Vec::new(),
-        }
+        };
+        model.rebuild_route_layout_cache();
+        model
     }
 
     fn route(method: ApiMethod, path: &str) -> ApiRouteRow {

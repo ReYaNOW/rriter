@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use rustc_hash::FxHashSet;
 use std::{
     path::{Component, Path, PathBuf},
-    sync::{mpsc, Arc},
+    sync::{Arc, mpsc},
     time::{Duration, SystemTime},
 };
 
@@ -13,6 +13,7 @@ pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
 const RASTERIZED_ICON_CACHE_LIMIT: usize = 256;
 const RASTERIZED_ICON_READY_BYTE_LIMIT: usize = 1024 * 1024;
 const GITIGNORE_CACHE_LIMIT: usize = 32;
+const FILE_TREE_PARALLEL_ENTRY_THRESHOLD: usize = 512;
 
 pub enum RasterizedIconState {
     Pending,
@@ -102,7 +103,10 @@ fn trim_gitignore_cache(
     keep_root: &Path,
 ) {
     while cache.len() >= GITIGNORE_CACHE_LIMIT {
-        let victim = cache.keys().find(|path| path.as_path() != keep_root).cloned();
+        let victim = cache
+            .keys()
+            .find(|path| path.as_path() != keep_root)
+            .cloned();
         let Some(victim) = victim else {
             break;
         };
@@ -208,10 +212,7 @@ fn finish_reserved_rasterized_icon(key: &'static str, is_folder: bool) {
                     px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
                 }
             }
-            store_rasterized_icon_state(
-                key,
-                RasterizedIconState::Ready(data.into_boxed_slice()),
-            );
+            store_rasterized_icon_state(key, RasterizedIconState::Ready(data.into_boxed_slice()));
         } else {
             store_rasterized_icon_state(key, RasterizedIconState::Missing);
         }
@@ -250,11 +251,15 @@ pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(Stri
         }
     }
 
-    // Параллельная многопоточная натуральная сортировка O(N log N)
-    rayon::join(
-        || dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
-        || files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
-    );
+    if dirs.len().saturating_add(files.len()) >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
+        rayon::join(
+            || dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
+            || files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0)),
+        );
+    } else {
+        dirs.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
+        files.sort_by(|a, b| lexical_sort::natural_lexical_cmp(&a.0, &b.0));
+    }
 
     (dirs, files)
 }
@@ -263,6 +268,7 @@ pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(Stri
 // Фоновый скан
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 pub(super) fn scan_dir_parallel(
     path: PathBuf,
     name: String,
@@ -273,83 +279,164 @@ pub(super) fn scan_dir_parallel(
     gitignore: &ignore::gitignore::Gitignore,
     all_patterns: &[&str],
 ) -> Vec<FileNode> {
-    let is_expanded = expanded.contains(&path);
-    let icon_key = crate::app::file_icons::folder_icon_key_for_name(&name);
-
-    let is_ignored = if is_root {
-        false
-    } else {
-        gitignore
-            .matched_path_or_any_parents(&path, true)
-            .is_ignore()
-            || matches_ignore_pattern(&name, all_patterns)
-    };
-
-    let me = FileNode {
-        path: path.clone(),
+    let mut out = Vec::new();
+    push_scan_dir_nodes(
+        &mut out,
+        path,
         name,
         depth,
-        is_dir: true,
-        is_expanded,
-        icon_key,
-        is_ignored,
-    };
+        expanded,
+        is_root,
+        max_depth,
+        gitignore,
+        all_patterns,
+    );
+    out
+}
 
-    if !is_expanded || depth >= max_depth {
-        return vec![me];
+struct PendingScanDir {
+    path: PathBuf,
+    name: String,
+    depth: usize,
+    is_root: bool,
+}
+
+enum ScanTask {
+    Dir(PendingScanDir),
+    Files {
+        files: Vec<(String, PathBuf)>,
+        depth: usize,
+    },
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_scan_dir_nodes(
+    out: &mut Vec<FileNode>,
+    path: PathBuf,
+    name: String,
+    depth: usize,
+    expanded: &FxHashSet<PathBuf>,
+    is_root: bool,
+    max_depth: usize,
+    gitignore: &ignore::gitignore::Gitignore,
+    all_patterns: &[&str],
+) {
+    let mut stack = vec![ScanTask::Dir(PendingScanDir {
+        path,
+        name,
+        depth,
+        is_root,
+    })];
+
+    while let Some(task) = stack.pop() {
+        match task {
+            ScanTask::Dir(PendingScanDir {
+                path,
+                name,
+                depth,
+                is_root,
+            }) => {
+                let is_expanded = expanded.contains(&path);
+                let icon_key = crate::app::file_icons::folder_icon_key_for_name(&name);
+                let is_ignored = if is_root {
+                    false
+                } else {
+                    gitignore
+                        .matched_path_or_any_parents(&path, true)
+                        .is_ignore()
+                        || matches_ignore_pattern(&name, all_patterns)
+                };
+
+                out.push(FileNode {
+                    path: path.clone(),
+                    name,
+                    depth,
+                    is_dir: true,
+                    is_expanded,
+                    icon_key,
+                    is_ignored,
+                });
+
+                if !is_expanded || depth >= max_depth {
+                    continue;
+                }
+
+                let (mut dirs, mut files) = read_children(&path);
+                dirs.retain(|(d_name, _)| !matches_ignore_pattern(d_name, all_patterns));
+                files.retain(|(f_name, _)| !matches_ignore_pattern(f_name, all_patterns));
+
+                if !files.is_empty() {
+                    stack.push(ScanTask::Files {
+                        files,
+                        depth: depth + 1,
+                    });
+                }
+                for (d_name, d_path) in dirs.into_iter().rev() {
+                    stack.push(ScanTask::Dir(PendingScanDir {
+                        path: d_path,
+                        name: d_name,
+                        depth: depth + 1,
+                        is_root: false,
+                    }));
+                }
+            }
+            ScanTask::Files { files, depth } => {
+                push_file_nodes(out, files, depth, gitignore, all_patterns);
+            }
+        }
     }
+}
 
-    let (mut dirs, mut files) = read_children(&path);
+fn file_tree_file_node(
+    f_name: String,
+    f_path: PathBuf,
+    depth: usize,
+    gitignore: &ignore::gitignore::Gitignore,
+    all_patterns: &[&str],
+) -> FileNode {
+    let f_icon_key = crate::app::file_icons::file_icon_key_for_name(&f_name);
+    let is_ignored = gitignore
+        .matched_path_or_any_parents(&f_path, false)
+        .is_ignore()
+        || matches_ignore_pattern(&f_name, all_patterns);
+    FileNode {
+        path: f_path,
+        name: f_name,
+        depth,
+        is_dir: false,
+        is_expanded: false,
+        icon_key: f_icon_key,
+        is_ignored,
+    }
+}
 
-    // Фильтруем по паттернам ДО параллельного рекурсивного обхода —
-    // это экономит поток-часы на игнорируемых поддеревьях.
-    dirs.retain(|(d_name, _)| !matches_ignore_pattern(d_name, all_patterns));
-    files.retain(|(f_name, _)| !matches_ignore_pattern(f_name, all_patterns));
-
-    // Многопоточный обход дерева. flat_map в rayon собирает результаты
-    // асинхронно, но СТРОГО соблюдая оригинальный порядок массивов.
-    let mut dir_nodes: Vec<FileNode> = dirs
-        .into_par_iter()
-        .flat_map(|(d_name, d_path)| {
-            scan_dir_parallel(
-                d_path,
-                d_name,
-                depth + 1,
-                expanded,
-                false,
-                max_depth,
+fn push_file_nodes(
+    out: &mut Vec<FileNode>,
+    files: Vec<(String, PathBuf)>,
+    depth: usize,
+    gitignore: &ignore::gitignore::Gitignore,
+    all_patterns: &[&str],
+) {
+    if files.len() >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
+        let mut file_nodes: Vec<FileNode> = files
+            .into_par_iter()
+            .map(|(f_name, f_path)| {
+                file_tree_file_node(f_name, f_path, depth, gitignore, all_patterns)
+            })
+            .collect();
+        out.append(&mut file_nodes);
+    } else {
+        out.reserve(files.len());
+        for (f_name, f_path) in files {
+            out.push(file_tree_file_node(
+                f_name,
+                f_path,
+                depth,
                 gitignore,
                 all_patterns,
-            )
-        })
-        .collect();
-
-    // Параллельное применение Regex паттернов для подбора иконок файлов
-    let mut file_nodes: Vec<FileNode> = files
-        .into_par_iter()
-        .map(|(f_name, f_path)| {
-            let f_icon_key = crate::app::file_icons::file_icon_key_for_name(&f_name);
-            let is_ignored = gitignore
-                .matched_path_or_any_parents(&f_path, false)
-                .is_ignore()
-                || matches_ignore_pattern(&f_name, all_patterns);
-            FileNode {
-                path: f_path,
-                name: f_name,
-                depth: depth + 1,
-                is_dir: false,
-                is_expanded: false,
-                icon_key: f_icon_key,
-                is_ignored,
-            }
-        })
-        .collect();
-
-    let mut result = Vec::with_capacity(1 + dir_nodes.len() + file_nodes.len());
-    result.push(me);
-    result.append(&mut dir_nodes);
-    result.append(&mut file_nodes);
-    result
+            ));
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -366,34 +453,33 @@ pub fn spawn_scan(
 ) -> mpsc::Receiver<FileTreeScanMessage> {
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
-        // STEP 1: Полный параллельный скан вглубь (работает < 5ms)
+        // STEP 1: Build ordered tree in one reusable buffer.
         let all_patterns_refs: Vec<&str> = user_patterns.iter().map(String::as_str).collect();
-        let full_nodes: Vec<FileNode> = roots
-            .into_par_iter()
-            .flat_map(|root| {
-                if !root.exists() {
-                    return Vec::new();
-                }
+        let mut full_nodes = Vec::new();
+        for root in roots {
+            if !root.exists() {
+                continue;
+            }
 
-                let gitignore = gitignore_for_root(&root);
+            let gitignore = gitignore_for_root(&root);
 
-                let name = root
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| root.to_string_lossy().into_owned());
+            let name = root
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_else(|| root.to_string_lossy().into_owned());
 
-                scan_dir_parallel(
-                    root.clone(),
-                    name,
-                    0,
-                    &expanded,
-                    true,
-                    10,
-                    gitignore.as_ref(),
-                    &all_patterns_refs,
-                )
-            })
-            .collect();
+            push_scan_dir_nodes(
+                &mut full_nodes,
+                root.clone(),
+                name,
+                0,
+                &expanded,
+                true,
+                10,
+                gitignore.as_ref(),
+                &all_patterns_refs,
+            );
+        }
 
         let mut needed_icons = rustc_hash::FxHashSet::default();
         for node in &full_nodes {
@@ -404,9 +490,15 @@ pub fn spawn_scan(
         let _ = tx.send(FileTreeScanMessage::Nodes(full_nodes));
 
         // STEP 2: Параллельная растеризация иконок без блокировки UI
-        needed_icons.into_par_iter().for_each(|(key, is_dir)| {
-            crate::app::file_tree::pre_rasterize_icon(key, is_dir);
-        });
+        if needed_icons.len() >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
+            needed_icons.into_par_iter().for_each(|(key, is_dir)| {
+                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+            });
+        } else {
+            for (key, is_dir) in needed_icons {
+                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+            }
+        }
 
         // STEP 3: Финальный легкий триггер для перерисовки (иконки появятся)
         let _ = tx.send(FileTreeScanMessage::IconsReady);
@@ -553,11 +645,7 @@ mod tests {
 
         assert_eq!(
             paths,
-            vec![
-                root.clone(),
-                root.join("src"),
-                PathBuf::from("/tmp"),
-            ]
+            vec![root.clone(), root.join("src"), PathBuf::from("/tmp"),]
         );
     }
 
