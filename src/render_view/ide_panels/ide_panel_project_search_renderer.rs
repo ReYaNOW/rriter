@@ -824,7 +824,7 @@ impl Renderer {
             }
         }
         self.scratch_buffer = scratch;
-        self.draw_project_search_scrollbar(layout, state, scale);
+        self.draw_project_search_scrollbar(layout, state, ui_registry, scale);
 
         self.flush();
         unsafe {
@@ -990,6 +990,16 @@ impl Renderer {
         );
 
         let preview_x = line_x + line_w + 10.0 * scale;
+        if !mat.preview_ready {
+            self.draw_project_search_text_stable(
+                "...",
+                preview_x.round(),
+                text_y,
+                [0.50, 0.52, 0.58, 1.0],
+                0.78,
+            );
+            return;
+        }
         scratch.clear();
         if mat.extra_lines > 0 {
             let _ = write!(scratch, "(+{}) ", mat.extra_lines);
@@ -1062,23 +1072,28 @@ impl Renderer {
         &mut self,
         layout: &ProjectSearchLayout,
         state: &crate::app::project_search::ProjectSearchState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
         scale: f32,
     ) {
-        let row_h = PROJECT_SEARCH_ROW_H * scale;
-        let total_h = state.flat_rows.len() as f32 * row_h;
-        if total_h <= layout.list.h || layout.list.h <= 0.0 {
+        let Some(thumb) =
+            crate::app::project_search::project_search_scrollbar_thumb(layout, state, scale)
+        else {
             return;
-        }
-        let max_scroll = (total_h - layout.list.h).max(0.0);
-        let ratio = (state.scroll.current / max_scroll.max(1.0)).clamp(0.0, 1.0);
-        let track_h = layout.list.h;
-        let thumb_h = (layout.list.h / total_h * track_h).max(22.0 * scale);
-        let thumb_y = layout.list.y + ratio * (track_h - thumb_h);
+        };
+        ui_registry.register_rect(
+            crate::ui_system::UiId::ProjectSearchScrollbar,
+            layout.list.x + layout.list.w - 14.0 * scale,
+            layout.list.y,
+            12.0 * scale,
+            layout.list.h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
         self.push_rounded_rect(
-            layout.list.x + layout.list.w - 10.0 * scale,
-            thumb_y.round(),
-            5.0 * scale,
-            thumb_h,
+            thumb.x.round(),
+            thumb.y.round(),
+            thumb.w,
+            thumb.h,
             3.0 * scale,
             [0.48, 0.48, 0.56, 0.55],
         );

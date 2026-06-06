@@ -1,15 +1,22 @@
 use crate::editor::Editor;
 use crate::scroll::ScrollState;
+use grep_regex::RegexMatcherBuilder;
+use grep_searcher::{BinaryDetection, SearcherBuilder};
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use memchr::{memchr_iter, memchr2_iter};
+use memchr::memmem::Finder;
 use rustc_hash::FxHashSet;
-use std::collections::VecDeque;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+
+#[path = "project_search_grep.rs"]
+mod project_search_grep;
+#[path = "project_search_preview.rs"]
+mod project_search_preview;
+pub(crate) use project_search_preview::project_search_scrollbar_thumb;
 
 pub const PROJECT_SEARCH_FILE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 pub const PROJECT_SEARCH_MATCH_CAP: usize = 10_000;
@@ -20,8 +27,18 @@ pub const PROJECT_SEARCH_QUERY_H: f32 = 78.0;
 pub const PROJECT_SEARCH_SINGLE_H: f32 = 30.0;
 const PROJECT_SEARCH_PREVIEW_CHARS: usize = 220;
 const PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS: usize = 60;
-const PROJECT_SEARCH_THREADS_PER_ROOT: usize = 2;
-const PROJECT_SEARCH_MAX_ACTIVE_ROOTS: usize = 4;
+const PROJECT_SEARCH_BUFFER_KEEP_BYTES: usize = 1024 * 1024;
+const PROJECT_SEARCH_MAX_THREADS: usize = 8;
+
+fn project_search_threads_for_available(available: usize) -> usize {
+    available.clamp(1, PROJECT_SEARCH_MAX_THREADS)
+}
+
+fn project_search_thread_count() -> usize {
+    std::thread::available_parallelism()
+        .map(|threads| project_search_threads_for_available(threads.get()))
+        .unwrap_or(4)
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProjectSearchField {
@@ -34,6 +51,7 @@ pub enum ProjectSearchField {
 pub struct ProjectSearchMatch {
     pub byte_start: usize,
     pub byte_end: usize,
+    pub line_byte_start: usize,
     pub start_line: u32,
     pub start_col: u32,
     pub end_line: u32,
@@ -41,6 +59,7 @@ pub struct ProjectSearchMatch {
     pub preview: String,
     pub preview_match_start: usize,
     pub preview_match_end: usize,
+    pub preview_ready: bool,
     pub extra_lines: usize,
 }
 
@@ -126,6 +145,9 @@ pub struct ProjectSearchState {
     pub generation: u64,
     pub running_generation: Option<u64>,
     pub rx: Option<Receiver<ProjectSearchWorkerMessage>>,
+    pub preview_tx: Option<Sender<project_search_preview::ProjectSearchPreviewRequest>>,
+    pub preview_rx: Option<Receiver<project_search_preview::ProjectSearchPreviewWorkerMessage>>,
+    pub preview_pending: FxHashSet<project_search_preview::ProjectSearchPreviewKey>,
     pub results: Vec<ProjectSearchFile>,
     pub flat_rows: Vec<ProjectSearchFlatRow>,
     pub collapsed: FxHashSet<PathBuf>,
@@ -151,6 +173,9 @@ impl Default for ProjectSearchState {
             generation: 0,
             running_generation: None,
             rx: None,
+            preview_tx: None,
+            preview_rx: None,
+            preview_pending: FxHashSet::default(),
             results: Vec::new(),
             flat_rows: Vec::new(),
             collapsed: FxHashSet::default(),
@@ -354,6 +379,57 @@ struct SearchCaps {
     capped: bool,
 }
 
+#[derive(Default)]
+struct SearchProfile {
+    files_seen: AtomicU64, files_read: AtomicU64, bytes_read: AtomicU64,
+    matches: AtomicU64, read_ms: AtomicU64, scan_ms: AtomicU64, prep_ms: AtomicU64,
+}
+
+impl SearchProfile {
+    fn log(&self, query: &str, backend: &str, elapsed_ms: u128, capped: bool) {
+        #[cfg(test)]
+        {
+            let _ = (self, query, backend, elapsed_ms, capped);
+            return;
+        }
+        #[cfg(not(test))]
+        {
+            let read_ms = self.read_ms.load(Ordering::Relaxed);
+            let scan_ms = self.scan_ms.load(Ordering::Relaxed);
+            let prep_ms = self.prep_ms.load(Ordering::Relaxed);
+            eprintln!(
+                "[PROJECT SEARCH] query={:?} backend={} threads={} total={}ms files={}/{} matches={} bytes={}KiB read_thread={}ms scan_thread={}ms prep_thread={}ms capped={}",
+                query,
+                backend,
+                project_search_thread_count(),
+                elapsed_ms,
+                self.files_read.load(Ordering::Relaxed),
+                self.files_seen.load(Ordering::Relaxed),
+                self.matches.load(Ordering::Relaxed),
+                self.bytes_read.load(Ordering::Relaxed) / 1024,
+                read_ms,
+                scan_ms,
+                prep_ms,
+                capped
+            );
+        }
+    }
+}
+
+fn elapsed_ms_u64(start: Instant) -> u64 {
+    start.elapsed().as_millis().min(u64::MAX as u128) as u64
+}
+
+fn push_project_search_ranges(text: &str, ranges: &[(usize, usize)], matches: &mut Vec<ProjectSearchMatch>, profile: &SearchProfile) {
+    let prep_started = Instant::now();
+    profile.matches.fetch_add(ranges.len() as u64, Ordering::Relaxed);
+    let mut cursor = ProjectSearchLineCursor::default();
+    for &(start, end) in ranges {
+        push_match(text, start, end, &mut cursor, matches);
+    }
+    profile.prep_ms.fetch_add(elapsed_ms_u64(prep_started), Ordering::Relaxed);
+}
+
 fn stream_project_search(
     request: ProjectSearchRequest,
     tx: std::sync::mpsc::Sender<ProjectSearchWorkerMessage>,
@@ -393,83 +469,82 @@ fn stream_project_search(
         return;
     }
 
-    let needle = Arc::new(request.query.into_bytes());
+    let query = request.query;
+    let needle = Arc::new(query.as_bytes().to_vec());
     let unicode_case_fallback = !request.case_sensitive && !needle.is_ascii();
+    let grep_pattern = (!unicode_case_fallback
+        && !query.as_bytes().contains(&b'\n')
+        && !query.as_bytes().contains(&b'\r'))
+    .then(|| Arc::<str>::from(regex::escape(&query)));
+    let backend = if grep_pattern.is_some() {
+        "grep"
+    } else if unicode_case_fallback {
+        "unicode"
+    } else {
+        "buffer"
+    };
     let settings_ignore = Arc::new(SearchIgnoreMatcher::new(request.ignore_patterns));
     let plan = Arc::new(plan);
     let caps = Arc::new(Mutex::new(SearchCaps::default()));
+    let profile = Arc::new(SearchProfile::default());
     let capped_flag = Arc::new(AtomicBool::new(false));
     let roots = plan
         .walk_roots()
         .into_iter()
         .filter(|root| root.is_dir())
         .map(Path::to_path_buf)
-        .collect::<VecDeque<_>>();
-    let active_roots = roots.len().min(PROJECT_SEARCH_MAX_ACTIVE_ROOTS).max(1);
-    let roots = Arc::new(Mutex::new(roots));
-    let mut root_workers = Vec::with_capacity(active_roots);
-    for _ in 0..active_roots {
-        let roots = Arc::clone(&roots);
-        let plan = Arc::clone(&plan);
-        let settings_ignore = Arc::clone(&settings_ignore);
-        let caps = Arc::clone(&caps);
-        let capped_flag = Arc::clone(&capped_flag);
-        let tx = tx.clone();
-        let needle = Arc::clone(&needle);
-        let case_sensitive = request.case_sensitive;
-        root_workers.push(std::thread::spawn(move || {
-            loop {
-                if capped_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-                let root = match roots.lock().ok().and_then(|mut roots| roots.pop_front()) {
-                    Some(root) => root,
-                    None => break,
-                };
-                run_project_search_root(
-                    root,
-                    generation,
-                    started,
-                    Arc::clone(&plan),
-                    Arc::clone(&settings_ignore),
-                    Arc::clone(&caps),
-                    Arc::clone(&capped_flag),
-                    tx.clone(),
-                    Arc::clone(&needle),
-                    case_sensitive,
-                    unicode_case_fallback,
-                );
-            }
-        }));
-    }
-    for worker in root_workers {
-        let _ = worker.join();
-    }
+        .collect::<Vec<_>>();
+    run_project_search_roots(
+        roots,
+        generation,
+        started,
+        Arc::clone(&plan),
+        Arc::clone(&settings_ignore),
+        Arc::clone(&caps),
+        Arc::clone(&profile),
+        Arc::clone(&capped_flag),
+        tx.clone(),
+        Arc::clone(&needle),
+        grep_pattern,
+        request.case_sensitive,
+        unicode_case_fallback,
+    );
     let capped = caps.lock().map(|caps| caps.capped).unwrap_or(true);
+    let elapsed_ms = started.elapsed().as_millis();
+    profile.log(&query, backend, elapsed_ms, capped);
     let _ = tx.send(ProjectSearchWorkerMessage::Done {
         generation,
-        elapsed_ms: started.elapsed().as_millis(),
+        elapsed_ms,
         capped,
         error: None,
     });
 }
 
-fn run_project_search_root(
-    root: PathBuf,
+fn run_project_search_roots(
+    roots: Vec<PathBuf>,
     generation: u64,
     started: Instant,
     plan: Arc<SearchPatternPlan>,
     settings_ignore: Arc<SearchIgnoreMatcher>,
     caps: Arc<Mutex<SearchCaps>>,
+    profile: Arc<SearchProfile>,
     capped_flag: Arc<AtomicBool>,
     tx: Sender<ProjectSearchWorkerMessage>,
     needle: Arc<Vec<u8>>,
+    grep_pattern: Option<Arc<str>>,
     case_sensitive: bool,
     unicode_case_fallback: bool,
 ) {
+    let mut roots = roots.into_iter();
+    let Some(first_root) = roots.next() else {
+        return;
+    };
     let settings_ignore_for_walk = Arc::clone(&settings_ignore);
     let settings_workspaces = plan.workspaces.clone();
-    let mut builder = ignore::WalkBuilder::new(root);
+    let mut builder = ignore::WalkBuilder::new(first_root);
+    for root in roots {
+        builder.add(root);
+    }
     builder
         .hidden(false)
         .ignore(true)
@@ -479,17 +554,32 @@ fn run_project_search_root(
         .git_exclude(true)
         .require_git(false)
         .follow_links(false)
-        .threads(PROJECT_SEARCH_THREADS_PER_ROOT)
+        .threads(project_search_thread_count())
         .filter_entry(move |entry| {
             !settings_ignore_for_walk.matches_path(entry.path(), &settings_workspaces)
         });
     let visitor = move || {
         let plan = Arc::clone(&plan);
-        let settings_ignore = Arc::clone(&settings_ignore);
         let caps = Arc::clone(&caps);
+        let profile = Arc::clone(&profile);
         let capped_flag = Arc::clone(&capped_flag);
         let tx = tx.clone();
         let needle = Arc::clone(&needle);
+        let grep_pattern = grep_pattern.as_ref().map(Arc::clone);
+        let case_finder = case_sensitive.then(|| Finder::new(needle.as_slice()).into_owned());
+        let mut file_buf = Vec::new();
+        let grep_matcher = grep_pattern.as_ref().and_then(|pattern| {
+            RegexMatcherBuilder::new()
+                .case_insensitive(!case_sensitive)
+                .build(pattern)
+                .ok()
+        });
+        let mut grep_searcher = grep_pattern.as_ref().map(|_| {
+            SearcherBuilder::new()
+                .binary_detection(BinaryDetection::quit(b'\0'))
+                .line_number(true)
+                .build()
+        });
         Box::new(move |entry: Result<ignore::DirEntry, ignore::Error>| {
             if capped_flag.load(Ordering::Relaxed) {
                 return ignore::WalkState::Quit;
@@ -500,19 +590,40 @@ fn run_project_search_root(
             let path = entry.path();
             if !entry.file_type().is_some_and(|ty| ty.is_file())
                 || !plan.is_file_allowed(path)
-                || settings_ignore.matches_path(path, &plan.workspaces)
             {
                 return ignore::WalkState::Continue;
             }
-            let Some(file) = search_project_file(
-                path,
-                &plan,
-                &needle,
-                case_sensitive,
-                unicode_case_fallback,
-                &caps,
-                &capped_flag,
-            ) else {
+            let file = if let (Some(matcher), Some(searcher)) =
+                (grep_matcher.as_ref(), grep_searcher.as_mut())
+            {
+                project_search_grep::search_project_file_grep(
+                    path,
+                    &plan,
+                    needle.as_slice(),
+                    matcher,
+                    searcher,
+                    case_sensitive,
+                    &caps,
+                    &profile,
+                    &capped_flag,
+                )
+            } else {
+                let file = search_project_file(
+                    path,
+                    &plan,
+                    needle.as_slice(),
+                    case_finder.as_ref(),
+                    case_sensitive,
+                    unicode_case_fallback,
+                    &mut file_buf,
+                    &caps,
+                    &profile,
+                    &capped_flag,
+                );
+                trim_project_search_buffer(&mut file_buf);
+                file
+            };
+            let Some(file) = file else {
                 return ignore::WalkState::Continue;
             };
             let elapsed_ms = started.elapsed().as_millis();
@@ -528,31 +639,62 @@ fn run_project_search_root(
     builder.build_parallel().run(visitor);
 }
 
+fn trim_project_search_buffer(buf: &mut Vec<u8>) {
+    if buf.capacity() > PROJECT_SEARCH_BUFFER_KEEP_BYTES {
+        buf.clear();
+        buf.shrink_to(PROJECT_SEARCH_BUFFER_KEEP_BYTES);
+    }
+}
+
+fn is_definitely_binary_project_search_file(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "tif" | "tiff" |
+        "ttf" | "otf" | "woff" | "woff2" | "eot" | "pdf" | "zip" | "gz" | "tgz" |
+        "xz" | "bz2" | "zst" | "7z" | "rar" | "tar" | "pack" | "idx" | "so" |
+        "dylib" | "dll" | "a" | "rlib" | "rmeta" | "class" | "pyc" | "pyo" |
+        "o" | "obj" | "wasm"
+    )
+}
+
 fn search_project_file(
     path: &Path,
     plan: &SearchPatternPlan,
     needle: &[u8],
+    case_finder: Option<&Finder<'static>>,
     case_sensitive: bool,
     unicode_case_fallback: bool,
+    buf: &mut Vec<u8>,
     caps: &Mutex<SearchCaps>,
+    profile: &SearchProfile,
     capped_flag: &AtomicBool,
 ) -> Option<ProjectSearchFile> {
     if capped_flag.load(Ordering::Relaxed) {
         return None;
     }
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return None;
-    };
-    if metadata.len() > PROJECT_SEARCH_FILE_CAP_BYTES {
+    profile.files_seen.fetch_add(1, Ordering::Relaxed);
+    if is_definitely_binary_project_search_file(path) {
         return None;
     }
+    let read_started = Instant::now();
     let Ok(mut file) = std::fs::File::open(path) else {
         return None;
     };
-    let mut buf = Vec::with_capacity(metadata.len() as usize);
-    if file.read_to_end(&mut buf).is_err() || memchr::memchr(b'\0', &buf).is_some() {
+    buf.clear();
+    if (&mut file)
+        .take(PROJECT_SEARCH_FILE_CAP_BYTES.saturating_add(1))
+        .read_to_end(buf)
+        .is_err()
+        || buf.len() as u64 > PROJECT_SEARCH_FILE_CAP_BYTES
+    {
         return None;
     }
+    profile.files_read.fetch_add(1, Ordering::Relaxed);
+    profile.bytes_read.fetch_add(buf.len() as u64, Ordering::Relaxed);
+    profile.read_ms.fetch_add(elapsed_ms_u64(read_started), Ordering::Relaxed);
     let mut matches = Vec::new();
     let room = match caps.lock() {
         Ok(caps)
@@ -570,49 +712,52 @@ fn search_project_file(
         }
     };
     if unicode_case_fallback {
-        let Ok(text) = std::str::from_utf8(&buf) else {
+        let Some(text) = project_search_text(buf) else {
             return None;
         };
-        let mut line_offsets = Vec::new();
+        let mut ranges = Vec::new();
+        let scan_started = Instant::now();
         collect_unicode_case_insensitive_matches(text, needle, |start, end| {
-            push_match(text, start, end, &mut line_offsets, &mut matches);
-            matches.len() < room
+            ranges.push((start, end));
+            ranges.len() < room
         });
+        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
+        if ranges.is_empty() {
+            return None;
+        }
+        push_project_search_ranges(text, &ranges, &mut matches, profile);
     } else if case_sensitive {
         let mut ranges = Vec::new();
-        let finder = memchr::memmem::Finder::new(needle);
-        for start in finder.find_iter(&buf) {
+        let scan_started = Instant::now();
+        let Some(finder) = case_finder else {
+            return None;
+        };
+        for start in finder.find_iter(buf) {
             ranges.push((start, start + needle.len()));
             if ranges.len() >= room {
                 break;
             }
         }
+        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
         if ranges.is_empty() {
             return None;
         }
-        let Ok(text) = std::str::from_utf8(&buf) else {
+        let Some(text) = project_search_text(buf) else {
             return None;
         };
-        let mut line_offsets = Vec::new();
-        for (start, end) in ranges {
-            push_match(text, start, end, &mut line_offsets, &mut matches);
-        }
+        push_project_search_ranges(text, &ranges, &mut matches, profile);
     } else {
         let mut ranges = Vec::new();
-        collect_ascii_case_insensitive_matches(&buf, needle, |start, end| {
-            ranges.push((start, end));
-            ranges.len() < room
-        });
+        let scan_started = Instant::now();
+        collect_ascii_case_insensitive_matches(buf, needle, room, &mut ranges);
+        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
         if ranges.is_empty() {
             return None;
         }
-        let Ok(text) = std::str::from_utf8(&buf) else {
+        let Some(text) = project_search_text(buf) else {
             return None;
         };
-        let mut line_offsets = Vec::new();
-        for (start, end) in ranges {
-            push_match(text, start, end, &mut line_offsets, &mut matches);
-        }
+        push_project_search_ranges(text, &ranges, &mut matches, profile);
     }
     if matches.is_empty() {
         return None;
@@ -659,7 +804,6 @@ fn search_project_file(
         .and_then(|name| name.to_str())
         .map(crate::app::file_icons::file_icon_key_for_name)
         .unwrap_or("default_file");
-    crate::app::file_tree::pre_rasterize_icon(icon_key, false);
     Some(ProjectSearchFile {
         path: path.to_path_buf(),
         relative_path,
@@ -668,41 +812,56 @@ fn search_project_file(
     })
 }
 
+fn project_search_text(buf: &[u8]) -> Option<&str> {
+    if memchr::memchr(b'\0', buf).is_some() {
+        return None;
+    }
+    std::str::from_utf8(buf).ok()
+}
+
 fn collect_ascii_case_insensitive_matches(
-    hay: &[u8],
+    haystack: &[u8],
     needle: &[u8],
-    mut emit: impl FnMut(usize, usize) -> bool,
+    room: usize,
+    ranges: &mut Vec<(usize, usize)>,
 ) {
-    if needle.is_empty() || hay.len() < needle.len() {
+    if needle.is_empty() || room == 0 || haystack.len() < needle.len() {
         return;
     }
     let first = needle[0];
     let lower = first.to_ascii_lowercase();
     let upper = first.to_ascii_uppercase();
-    if lower != upper {
-        for idx in memchr2_iter(lower, upper, hay) {
-            if idx + needle.len() <= hay.len() && ascii_eq_at(hay, idx, needle) {
-                if !emit(idx, idx + needle.len()) {
-                    break;
-                }
+    if lower == upper {
+        for start in memchr::memchr_iter(first, haystack) {
+            push_ascii_case_match(haystack, needle, start, room, ranges);
+            if ranges.len() >= room {
+                break;
             }
         }
     } else {
-        for idx in memchr_iter(first, hay) {
-            if idx + needle.len() <= hay.len() && ascii_eq_at(hay, idx, needle) {
-                if !emit(idx, idx + needle.len()) {
-                    break;
-                }
+        for start in memchr::memchr2_iter(lower, upper, haystack) {
+            push_ascii_case_match(haystack, needle, start, room, ranges);
+            if ranges.len() >= room {
+                break;
             }
         }
     }
 }
 
-fn ascii_eq_at(hay: &[u8], start: usize, needle: &[u8]) -> bool {
-    needle
-        .iter()
-        .enumerate()
-        .all(|(i, &b)| hay[start + i].to_ascii_lowercase() == b.to_ascii_lowercase())
+fn push_ascii_case_match(
+    haystack: &[u8],
+    needle: &[u8],
+    start: usize,
+    room: usize,
+    ranges: &mut Vec<(usize, usize)>,
+) {
+    let end = start + needle.len();
+    if end <= haystack.len()
+        && haystack[start..end].eq_ignore_ascii_case(needle)
+        && ranges.len() < room
+    {
+        ranges.push((start, end));
+    }
 }
 
 fn collect_unicode_case_insensitive_matches(
@@ -778,65 +937,72 @@ impl SearchIgnoreMatcher {
     }
 }
 
+#[derive(Default)]
+struct ProjectSearchLineCursor {
+    scan: usize,
+    line: u32,
+    line_start: usize,
+}
+
+impl ProjectSearchLineCursor {
+    fn lsp_pos(&mut self, text: &str, offset: usize) -> (u32, u32, usize) {
+        let offset = offset.min(text.len());
+        if offset < self.scan {
+            *self = Self::default();
+        }
+        let bytes = text.as_bytes();
+        while self.scan < offset {
+            if bytes.get(self.scan) == Some(&b'\n') {
+                self.line = self.line.saturating_add(1);
+                self.line_start = self.scan + 1;
+            }
+            self.scan += 1;
+        }
+        (
+            self.line,
+            utf16_units_between(text, self.line_start, offset),
+            self.line_start,
+        )
+    }
+}
+
 fn push_match(
     text: &str,
     start: usize,
     end: usize,
-    line_offsets: &mut Vec<usize>,
+    cursor: &mut ProjectSearchLineCursor,
     matches: &mut Vec<ProjectSearchMatch>,
 ) {
     let start = floor_char_boundary(text, start.min(text.len()));
     let end = ceil_char_boundary(text, end.min(text.len()));
-    if line_offsets.is_empty() {
-        *line_offsets = line_offsets_for_text(text);
-    }
-    let offsets = line_offsets.as_slice();
-    let (start_line, start_col) = crate::lsp::offset_to_lsp_pos(text, start, offsets);
-    let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(text, end, offsets);
-    let line_idx = start_line as usize;
-    let line_start = offsets.get(line_idx).copied().unwrap_or(0);
-    let mut line_end = offsets
-        .get(line_idx + 1)
-        .copied()
-        .unwrap_or(text.len())
-        .min(text.len());
-    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
-        line_end -= 1;
-    }
-    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
-        line_end -= 1;
-    }
-    let (preview, preview_match_start, preview_match_end) = text
-        .get(line_start..line_end)
-        .map(|line| preview_line_with_match(line, start - line_start, end - line_start))
-        .unwrap_or_else(|| (String::new(), 0, 0));
-    let extra_lines = text
-        .get(start..end)
-        .map(|matched| matched.bytes().filter(|&b| b == b'\n').count())
-        .unwrap_or(0);
+    let (start_line, start_col, line_start) = cursor.lsp_pos(text, start);
+    let (end_line, end_col, _) = cursor.lsp_pos(text, end);
+    let extra_lines = end_line.saturating_sub(start_line) as usize;
     matches.push(ProjectSearchMatch {
         byte_start: start,
         byte_end: end,
+        line_byte_start: line_start,
         start_line,
         start_col,
         end_line,
         end_col,
-        preview,
-        preview_match_start,
-        preview_match_end,
+        preview: String::new(),
+        preview_match_start: 0,
+        preview_match_end: 0,
+        preview_ready: false,
         extra_lines,
     });
 }
 
-fn line_offsets_for_text(text: &str) -> Vec<usize> {
-    let mut offsets = Vec::new();
-    offsets.push(0);
-    for (idx, byte) in text.bytes().enumerate() {
-        if byte == b'\n' {
-            offsets.push(idx + 1);
-        }
+fn utf16_units_between(text: &str, start: usize, end: usize) -> u32 {
+    let Some(slice) = text.get(start.min(text.len())..end.min(text.len())) else {
+        return 0;
+    };
+    if slice.is_ascii() {
+        slice.len() as u32
+    } else {
+        slice.chars().map(|ch| ch.len_utf16() as u32).sum()
     }
-    offsets
 }
 
 fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
@@ -856,31 +1022,33 @@ fn ceil_char_boundary(text: &str, mut idx: usize) -> usize {
 fn preview_line_with_match(line: &str, start: usize, end: usize) -> (String, usize, usize) {
     let start = floor_char_boundary(line, start.min(line.len()));
     let end = ceil_char_boundary(line, end.min(line.len())).max(start);
-    let total_chars = line.chars().count();
-    let start_char = byte_to_char_idx(line, start);
-    let end_char = byte_to_char_idx(line, end).max(start_char);
-    let (first_char, last_char) = if total_chars <= PROJECT_SEARCH_PREVIEW_CHARS {
-        (0, total_chars)
+    let (segment_start, segment_end) = if line.len() <= PROJECT_SEARCH_PREVIEW_CHARS {
+        (0, line.len())
     } else {
         let available = PROJECT_SEARCH_PREVIEW_CHARS.saturating_sub(6).max(32);
-        let mut first = start_char.saturating_sub(PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS);
-        let mut last = (first + available).min(total_chars);
-        if end_char > last {
-            last = end_char.min(total_chars);
+        let mut first = start.saturating_sub(PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS);
+        let mut last = (first + available).min(line.len());
+        if end > last {
+            last = end.min(line.len());
             first = last.saturating_sub(available);
         }
-        (first, last)
+        (
+            floor_char_boundary(line, first),
+            ceil_char_boundary(line, last),
+        )
     };
-    let segment_start = char_to_byte_idx(line, first_char);
-    let segment_end = char_to_byte_idx(line, last_char);
     let mut preview = String::with_capacity((segment_end - segment_start).min(line.len()) + 6);
     if segment_start > 0 {
         preview.push_str("...");
     }
     let prefix_len = preview.len();
     if let Some(segment) = line.get(segment_start..segment_end) {
-        for ch in segment.chars() {
-            preview.push(if ch == '\t' { ' ' } else { ch });
+        if segment.as_bytes().contains(&b'\t') {
+            for ch in segment.chars() {
+                preview.push(if ch == '\t' { ' ' } else { ch });
+            }
+        } else {
+            preview.push_str(segment);
         }
     }
     let match_start = prefix_len + start.max(segment_start).min(segment_end) - segment_start;
@@ -889,19 +1057,6 @@ fn preview_line_with_match(line: &str, start: usize, end: usize) -> (String, usi
         preview.push_str("...");
     }
     (preview, match_start, match_end.max(match_start))
-}
-
-fn byte_to_char_idx(text: &str, byte_idx: usize) -> usize {
-    text[..floor_char_boundary(text, byte_idx.min(text.len()))]
-        .chars()
-        .count()
-}
-
-fn char_to_byte_idx(text: &str, char_idx: usize) -> usize {
-    text.char_indices()
-        .nth(char_idx)
-        .map(|(idx, _)| idx)
-        .unwrap_or(text.len())
 }
 
 struct SearchPatternPlan {
@@ -1118,260 +1273,6 @@ fn to_slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-impl crate::app::App {
-    pub fn open_project_search_panel(&mut self) {
-        self.ide_panel.open(crate::app::PanelId::Search);
-        self.ide_panel.project_search.focused = Some(ProjectSearchField::Query);
-        self.search_focused = false;
-        self.ide_panel.term_search_focused = false;
-        self.ide_panel.git.message_focused = false;
-        self.ide_panel.file_tree_focused = false;
-        self.ide_panel.lsp_log_filter_focused = false;
-        crate::save_panel_state(&self.ide_panel);
-    }
-
-    pub fn start_project_search(&mut self) {
-        let query = self.ide_panel.project_search.query_editor.get_full_text();
-        self.ide_panel.project_search.generation =
-            self.ide_panel.project_search.generation.saturating_add(1);
-        let generation = self.ide_panel.project_search.generation;
-        self.ide_panel.project_search.has_run = true;
-        self.ide_panel.project_search.error = None;
-        self.ide_panel.project_search.elapsed_ms = None;
-        self.ide_panel.project_search.capped = false;
-        self.ide_panel.project_search.results.clear();
-        self.ide_panel.project_search.flat_rows.clear();
-        self.ide_panel.project_search.collapsed.clear();
-        self.ide_panel.project_search.total_matches = 0;
-        self.ide_panel.project_search.scroll.target = 0.0;
-        self.ide_panel.project_search.scroll.current = 0.0;
-        if query.is_empty() {
-            self.ide_panel.project_search.running_generation = None;
-            self.ide_panel.project_search.rx = None;
-            return;
-        }
-        let request = ProjectSearchRequest {
-            generation,
-            query,
-            include: self.ide_panel.project_search.include_editor.get_full_text(),
-            exclude: self.ide_panel.project_search.exclude_editor.get_full_text(),
-            case_sensitive: self.ide_panel.project_search.case_sensitive,
-            workspaces: self.ide_workspaces.clone(),
-            ignore_patterns: self.ide_ignore_patterns.clone(),
-        };
-        self.ide_panel.project_search.running_generation = Some(generation);
-        self.ide_panel.project_search.rx = Some(start_project_search_worker(request));
-        self.ide_panel.project_search.dirty = false;
-    }
-
-    pub fn poll_project_search(&mut self) -> bool {
-        let mut messages = Vec::new();
-        if let Some(rx) = &self.ide_panel.project_search.rx {
-            while let Ok(message) = rx.try_recv() {
-                messages.push(message);
-            }
-        }
-        if messages.is_empty() {
-            return false;
-        }
-        let mut updated = false;
-        for message in messages {
-            updated |= self.ide_panel.project_search.apply_message(message);
-        }
-        updated
-    }
-
-    pub fn project_search_panel_layout(&self) -> Option<ProjectSearchLayout> {
-        if !self.is_ide_mode || !self.ide_panel.is_open(crate::app::PanelId::Search) {
-            return None;
-        }
-        let renderer = self.renderer.as_ref()?;
-        let scale = renderer.scale_factor;
-        let wh = self
-            .window
-            .as_ref()
-            .map(|window| window.inner_size().height as f32)
-            .unwrap_or(renderer.height);
-        let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-            self.ide_panel.bottom_height * scale
-        } else {
-            0.0
-        };
-        let content_bottom = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, scale);
-        Some(project_search_layout(
-            48.0 * scale,
-            32.0 * scale,
-            self.ide_panel.left_width * scale,
-            (content_bottom - 32.0 * scale).max(0.0),
-            scale,
-        ))
-    }
-
-    pub fn focus_project_search_field(&mut self, field: ProjectSearchField) {
-        self.ide_panel.project_search.focused = Some(field);
-        self.search_focused = false;
-        self.ide_panel.term_search_focused = false;
-        self.ide_panel.git.message_focused = false;
-        self.ide_panel.file_tree_focused = false;
-        self.ide_panel.lsp_log_filter_focused = false;
-        self.ide_panel.lsp_logs_focused = None;
-        self.place_project_search_cursor_from_mouse(field);
-    }
-
-    pub fn place_project_search_cursor_from_mouse(&mut self, field: ProjectSearchField) {
-        let Some(renderer) = self.renderer.as_ref() else {
-            return;
-        };
-        self.set_project_search_cursor_at(
-            field,
-            renderer.last_mouse_x,
-            renderer.last_mouse_y,
-            true,
-        );
-    }
-
-    pub fn drag_project_search_cursor_to(&mut self, field: ProjectSearchField, x: f32, y: f32) {
-        self.set_project_search_cursor_at(field, x, y, false);
-    }
-
-    fn set_project_search_cursor_at(
-        &mut self,
-        field: ProjectSearchField,
-        mouse_x: f32,
-        mouse_y: f32,
-        reset_anchor: bool,
-    ) {
-        let Some(layout) = self.project_search_panel_layout() else {
-            return;
-        };
-        let Some(renderer) = self.renderer.as_mut() else {
-            return;
-        };
-        let rect = match field {
-            ProjectSearchField::Query => layout.query,
-            ProjectSearchField::Include => layout.include,
-            ProjectSearchField::Exclude => layout.exclude,
-        };
-        let text_scale = 0.82;
-        let line_h = (18.0 * renderer.scale_factor).round().max(1.0);
-        let editor = match field {
-            ProjectSearchField::Query => &mut self.ide_panel.project_search.query_editor,
-            ProjectSearchField::Include => &mut self.ide_panel.project_search.include_editor,
-            ProjectSearchField::Exclude => &mut self.ide_panel.project_search.exclude_editor,
-        };
-        let text = editor.get_full_text();
-        let visual_line = if field == ProjectSearchField::Query {
-            ((mouse_y - rect.y - 5.0 * renderer.scale_factor).max(0.0) / line_h) as usize
-        } else {
-            0
-        };
-        let visible_lines = if field == ProjectSearchField::Query {
-            ((rect.h - 8.0 * renderer.scale_factor) / line_h)
-                .floor()
-                .max(1.0) as usize
-        } else {
-            1
-        };
-        let cursor_line = editor
-            .line_offsets
-            .partition_point(|&offset| offset <= editor.cursor)
-            .saturating_sub(1);
-        let first_line = if field == ProjectSearchField::Query {
-            cursor_line.saturating_sub(visible_lines.saturating_sub(1))
-        } else {
-            0
-        };
-        let line = (first_line + visual_line).min(editor.line_offsets.len().saturating_sub(1));
-        let line_start = editor.line_offsets.get(line).copied().unwrap_or(0);
-        let mut line_end = editor
-            .line_offsets
-            .get(line + 1)
-            .copied()
-            .unwrap_or(text.len())
-            .min(text.len());
-        if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
-            line_end -= 1;
-        }
-        if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
-            line_end -= 1;
-        }
-        let x_offset = (mouse_x - (rect.x + 7.0 * renderer.scale_factor)).max(0.0);
-        let mut current_x = 0.0;
-        let mut target = line_end;
-        if let Some(line_text) = text.get(line_start..line_end) {
-            for (rel_idx, ch) in line_text.char_indices() {
-                let adv = renderer
-                    .get_ui_glyph(ch)
-                    .map(|glyph| glyph.advance)
-                    .unwrap_or(10.0)
-                    * text_scale;
-                if x_offset <= current_x + adv * 0.5 {
-                    target = line_start + rel_idx;
-                    break;
-                }
-                current_x += adv;
-            }
-        }
-        editor.cursor = target;
-        if reset_anchor || editor.selection_anchor.is_none() {
-            editor.selection_anchor = Some(target);
-        }
-    }
-
-    pub fn handle_project_search_match_click(&mut self, file_idx: usize, match_idx: usize) {
-        let Some((path, start_line, start_col, end_line, end_col)) = self
-            .ide_panel
-            .project_search
-            .results
-            .get(file_idx)
-            .and_then(|file| {
-                file.matches.get(match_idx).map(|mat| {
-                    (
-                        file.path.clone(),
-                        mat.start_line,
-                        mat.start_col,
-                        mat.end_line,
-                        mat.end_col,
-                    )
-                })
-            })
-        else {
-            return;
-        };
-        let was_active =
-            self.current_abs_path().as_ref() == Some(&self.abs_path_for_workspace(&path));
-        self.jump_to_project_search_position(path, true, start_line, start_col, end_line, end_col);
-        if !was_active {
-            self.scroll_y.current = self.scroll_y.target;
-            self.scroll_y.velocity = 0.0;
-            self.scroll_x.current = self.scroll_x.target;
-            self.scroll_x.velocity = 0.0;
-        }
-    }
-
-    fn jump_to_project_search_position(
-        &mut self,
-        path: PathBuf,
-        add_to_history: bool,
-        start_line: u32,
-        start_col: u32,
-        end_line: u32,
-        end_col: u32,
-    ) {
-        let was_open =
-            self.jump_to_lsp_position_in_file(path, start_line, start_col, add_to_history, 0.45);
-        let text = self.editor.get_full_text();
-        let start =
-            crate::lsp::lsp_pos_to_offset(&text, start_line, start_col).min(self.editor.len());
-        let end = crate::lsp::lsp_pos_to_offset(&text, end_line, end_col).min(self.editor.len());
-        self.editor.selection_anchor = Some(start.min(end));
-        self.editor.cursor = end.max(start);
-        if !was_open {
-            self.reprioritize_highlighter_around_cursor();
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1490,6 +1391,14 @@ mod tests {
     }
 
     #[test]
+    fn project_search_thread_count_never_oversubscribes_small_cpus() {
+        assert_eq!(project_search_threads_for_available(1), 1);
+        assert_eq!(project_search_threads_for_available(2), 2);
+        assert_eq!(project_search_threads_for_available(4), 4);
+        assert_eq!(project_search_threads_for_available(16), PROJECT_SEARCH_MAX_THREADS);
+    }
+
+    #[test]
     fn project_search_flat_rows_respect_collapsed_files() {
         let mut state = ProjectSearchState::default();
         state.results.push(ProjectSearchFile {
@@ -1500,6 +1409,7 @@ mod tests {
                 ProjectSearchMatch {
                     byte_start: 0,
                     byte_end: 1,
+                    line_byte_start: 0,
                     start_line: 0,
                     start_col: 0,
                     end_line: 0,
@@ -1507,11 +1417,13 @@ mod tests {
                     preview: "a".to_string(),
                     preview_match_start: 0,
                     preview_match_end: 1,
+                    preview_ready: true,
                     extra_lines: 0,
                 },
                 ProjectSearchMatch {
                     byte_start: 2,
                     byte_end: 3,
+                    line_byte_start: 2,
                     start_line: 1,
                     start_col: 0,
                     end_line: 1,
@@ -1519,6 +1431,7 @@ mod tests {
                     preview: "b".to_string(),
                     preview_match_start: 0,
                     preview_match_end: 1,
+                    preview_ready: true,
                     extra_lines: 0,
                 },
             ],

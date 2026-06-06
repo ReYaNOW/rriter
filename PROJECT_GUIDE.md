@@ -15,6 +15,17 @@ Main principles:
 5. Minimal abstractions.
 6. Smooth input/render path first.
 
+### Benchmark tools
+
+Files:
+
+```text
+src/bin/project_search_grep_searcher_bench.rs
+src/bin/project_search_io_uring_bench.rs
+```
+
+These standalone Cargo binaries benchmark project substring search backends against fixed IDE workspaces without spawning external search processes.
+
 ## 2. Core architecture
 
 ### Text engine
@@ -92,6 +103,10 @@ Files:
 ```text
 src/app.rs
 src/app/app_state.rs
+src/app/project_search.rs
+src/app/project_search_grep.rs
+src/app/project_search_preview.rs
+src/app/project_search_app.rs
 src/app/events.rs
 src/app/events/*
 src/app/keyboard.rs

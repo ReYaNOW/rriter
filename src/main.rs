@@ -548,6 +548,71 @@ fn parse_kde_color(content: &str, target_group: &str, target_key: &str) -> Optio
     None
 }
 
+#[cfg_attr(coverage_nightly, coverage(off))]
+fn run_project_search_probe(args: &[String], idx: usize) {
+    let Some(query) = args.get(idx + 1).cloned() else {
+        eprintln!("usage: rriter --probe-project-search <query> [iterations]");
+        return;
+    };
+    let iterations = args
+        .get(idx + 2)
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(3)
+        .max(1);
+    let config = load_config();
+    let panel = load_panel_state();
+    let include = panel.project_search.include_editor.get_full_text();
+    let exclude = panel.project_search.exclude_editor.get_full_text();
+    for run_idx in 0..iterations {
+        let started = Instant::now();
+        let rx = crate::app::project_search::start_project_search_worker(
+            crate::app::project_search::ProjectSearchRequest {
+                generation: run_idx as u64 + 1,
+                query: query.clone(),
+                include: include.clone(),
+                exclude: exclude.clone(),
+                case_sensitive: false,
+                workspaces: config.ide_workspaces.clone(),
+                ignore_patterns: config.ide_ignore_patterns.clone(),
+            },
+        );
+        let mut result_files = 0usize;
+        let mut matches = 0usize;
+        let mut worker_ms = 0u128;
+        let mut capped = false;
+        let mut error = None;
+        while let Ok(message) = rx.recv() {
+            match message {
+                crate::app::project_search::ProjectSearchWorkerMessage::File { file, .. } => {
+                    result_files += 1;
+                    matches = matches.saturating_add(file.matches.len());
+                }
+                crate::app::project_search::ProjectSearchWorkerMessage::Done {
+                    elapsed_ms,
+                    capped: done_capped,
+                    error: done_error,
+                    ..
+                } => {
+                    worker_ms = elapsed_ms;
+                    capped = done_capped;
+                    error = done_error;
+                    break;
+                }
+            }
+        }
+        println!(
+            "[PROJECT SEARCH PROBE] run={} wall={}ms worker={}ms result_files={} matches={} capped={} error={}",
+            run_idx + 1,
+            started.elapsed().as_millis(),
+            worker_ms,
+            result_files,
+            matches,
+            capped,
+            error.unwrap_or_default()
+        );
+    }
+}
+
 fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     let path = PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config/kdeglobals");
     let content = std::fs::read_to_string(path).ok()?;
@@ -926,6 +991,10 @@ fn main() {
             Ok(report) => print!("{report}"),
             Err(err) => eprintln!("{err}"),
         }
+        return;
+    }
+    if let Some(idx) = args.iter().position(|arg| arg == "--probe-project-search") {
+        run_project_search_probe(&args, idx);
         return;
     }
     let run_ide_on_startup = args.iter().any(|a| a == "--ide" || a == "ide");

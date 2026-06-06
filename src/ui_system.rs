@@ -257,6 +257,7 @@ pub enum UiId {
     ProjectSearchHelpPopup,
     ProjectSearchFileToggle(usize),
     ProjectSearchMatchJump(usize, usize),
+    ProjectSearchScrollbar,
     ProjectSearchPanelBody,
 
     // Tabs

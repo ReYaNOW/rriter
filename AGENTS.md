@@ -428,6 +428,8 @@ Root:
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> build-time resource/platform setup.
+* `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
+* `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
 Entrypoints/state:
 
@@ -452,7 +454,10 @@ Entrypoints/state:
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
-* `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, results, and jump routing.
+* `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, fallback scanning, and results.
+* `src/app/project_search_grep.rs` -> grep-searcher streaming backend and line-level match building for fast project search.
+* `src/app/project_search_preview.rs` -> lazy visible-row preview worker and project-search scrollbar drag math.
+* `src/app/project_search_app.rs` -> App methods for project search panel focus, worker start/poll, cursor placement, and result jumps.
 * `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
 * `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
 

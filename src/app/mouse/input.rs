@@ -1009,6 +1009,13 @@ impl App {
                         }
                         self.handle_ui_click(clicked_id);
                     } else {
+                        if clicked_id == crate::ui_system::UiId::ProjectSearchScrollbar {
+                            if self.start_project_search_scrollbar_drag(my) {
+                                let _ = self.queue_visible_project_search_previews();
+                                self.window.as_ref().unwrap().request_redraw();
+                            }
+                            return;
+                        }
                         if let Some(field) = match clicked_id {
                             crate::ui_system::UiId::ProjectSearchQueryInput => {
                                 Some(crate::app::project_search::ProjectSearchField::Query)
@@ -1363,6 +1370,7 @@ impl App {
             self.scroll_y.is_dragging = false;
             self.is_dragging_search = false;
             self.ide_panel.project_search.dragging_field = None;
+            self.ide_panel.project_search.scroll.is_dragging = false;
             self.ide_panel.file_tree_dialog_input_drag = None;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;

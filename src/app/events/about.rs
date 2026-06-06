@@ -207,6 +207,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_project_search() {
         needs_redraw = true;
     }
+    if app.poll_project_search_previews() {
+        needs_redraw = true;
+    }
+    if app.queue_visible_project_search_previews() || app.project_search_has_pending_previews() {
+        needs_redraw = true;
+    }
     if app.poll_git_panel() {
         needs_redraw = true;
     }
@@ -285,6 +291,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
     if app.ide_panel.project_search.scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.queue_visible_project_search_previews() || app.project_search_has_pending_previews() {
         needs_redraw = true;
     }
     if app.ide_panel.git.scroll.update(dt) {

@@ -11,6 +11,7 @@ pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
 pub mod project_search;
+mod project_search_app;
 mod python_completion;
 pub mod terminal;
 pub mod ui_handlers;

@@ -224,6 +224,13 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if self.ide_panel.project_search.scroll.is_dragging {
+            if self.drag_project_search_scrollbar_to(py) {
+                let _ = self.queue_visible_project_search_previews();
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
 
         let mut popup_selecting = false;
         HOVER_STATE.with(|hover_state| {
