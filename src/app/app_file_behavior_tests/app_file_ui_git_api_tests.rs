@@ -192,7 +192,15 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
             root: PathBuf::from("/workspace"),
             repo_root: Some(PathBuf::from("/workspace")),
             branch_name: None,
-            files: Vec::new(),
+            files: vec![crate::app::git_panel::GitFileEntry {
+                workspace_idx: 0,
+                rel_path: "src/main.rs".into(),
+                old_rel_path: None,
+                display_path: "src/main.rs".into(),
+                depth: 1,
+                staged: true,
+                status: crate::app::git_panel::GitFileStatus::Modified,
+            }],
             tree: vec![crate::app::git_panel::GitTreeRow {
                 name: "src".into(),
                 path: "src".into(),
@@ -236,10 +244,13 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
     assert!(!app.ide_panel.git.message_focused);
 
     let _ = app.ide_panel.git.message_editor.insert_str("ready");
+    app.ide_panel.git.snapshot.workspaces[0].files[0].staged = false;
+    app.ide_panel.git.notice = None;
     app.ide_panel.git.message_focused = true;
     app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuItem(1));
-    assert_eq!(app.ide_panel.git.notice.as_deref(), Some("No staged files"));
-    assert!(!app.ide_panel.git.message_focused);
+    assert_eq!(app.ide_panel.git.notice.as_deref(), None);
+    assert!(app.ide_panel.git.message_focused);
+    assert!(!app.ide_panel.git.pending);
 }
 
 #[test]
@@ -294,6 +305,7 @@ fn git_panel_workspace_confirm_dialogs_use_staged_files_headless() {
     app.handle_ui_click(crate::ui_system::UiId::GitUnstageAll(0));
     assert!(app.ide_panel.git.confirm_dialog.is_none());
     assert!(!app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert_eq!(app.ide_panel.git.stage_pending_workspace_idx, Some(0));
 }
 
 #[test]
@@ -347,7 +359,7 @@ fn git_panel_stage_clicks_are_locked_while_pending_headless() {
 }
 
 #[test]
-fn git_file_row_checkbox_only_toggles_stage() {
+fn git_file_row_checkbox_only_queues_stage() {
     let Some(mut app) = test_app() else {
         return;
     };
@@ -374,6 +386,7 @@ fn git_file_row_checkbox_only_toggles_stage() {
 
     app.handle_ui_click(crate::ui_system::UiId::GitFile(0, 0));
     assert!(app.ide_panel.git.snapshot.workspaces[0].files[0].staged);
+    assert_eq!(app.ide_panel.git.stage_pending_workspace_idx, Some(0));
     assert!(app.tabs.is_empty());
 }
 

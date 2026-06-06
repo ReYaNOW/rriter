@@ -98,6 +98,12 @@ impl GitStatusSnapshot {
             .map(|workspace| workspace.workspace_idx)
     }
 
+    pub fn has_staged_repo_files(&self) -> bool {
+        self.workspaces.iter().any(|workspace| {
+            workspace.repo_root.is_some() && workspace.files.iter().any(|file| file.staged)
+        })
+    }
+
     pub fn staged_repo_roots(&self) -> Vec<PathBuf> {
         let mut seen = FxHashSet::default();
         let mut roots = Vec::new();
@@ -285,6 +291,7 @@ pub struct GitPanelState {
     pub message_focused: bool,
     pub amend: bool,
     pub commit_menu_open: bool,
+    pub repo_action_menu_workspace_idx: Option<usize>,
     pub collapsed_workspaces: FxHashSet<usize>,
     pub collapsed_dirs: FxHashMap<usize, FxHashSet<String>>,
     pub scroll: crate::scroll::ScrollState,
@@ -351,6 +358,7 @@ impl Default for GitPanelState {
             message_focused: false,
             amend: false,
             commit_menu_open: false,
+            repo_action_menu_workspace_idx: None,
             collapsed_workspaces: FxHashSet::default(),
             collapsed_dirs: FxHashMap::default(),
             scroll: crate::scroll::ScrollState::new(15.0),
@@ -426,6 +434,14 @@ impl GitPanelState {
     pub fn staged_workspace_lock(&self) -> Option<usize> {
         self.stage_pending_workspace_idx
             .or_else(|| self.snapshot.active_staged_workspace_idx())
+    }
+
+    pub fn status_loading(&self) -> bool {
+        self.status_refresh_pending
+    }
+
+    pub fn commit_enabled(&self) -> bool {
+        self.snapshot.has_staged_repo_files()
     }
 
     fn apply_event(&mut self, event: GitPanelEvent) {
@@ -519,6 +535,12 @@ enum GitAction {
         files: Vec<GitStageFileCommand>,
     },
     Push {
+        repo_root: PathBuf,
+    },
+    Fetch {
+        repo_root: PathBuf,
+    },
+    Pull {
         repo_root: PathBuf,
     },
 }

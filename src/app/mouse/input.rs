@@ -308,6 +308,29 @@ impl App {
         }
 
         if state == ElementState::Pressed
+            && self.ide_panel.git.repo_action_menu_workspace_idx.is_some()
+        {
+            let clicked_id = self.ui_registry.find_at(mx, my);
+            let keep_git_menu = matches!(
+                clicked_id,
+                Some(
+                    crate::ui_system::UiId::GitRepoActionMenu(_)
+                        | crate::ui_system::UiId::GitFetch(_)
+                        | crate::ui_system::UiId::GitPull(_)
+                )
+            );
+            if !keep_git_menu {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                if clicked_id.is_none() {
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return;
+                }
+            }
+        }
+
+        if state == ElementState::Pressed
             && button != winit::event::MouseButton::Left
             && self.autocomplete_window_contains(mx, my)
         {

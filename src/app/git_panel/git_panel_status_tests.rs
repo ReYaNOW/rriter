@@ -718,6 +718,50 @@ fn push_repo(repo_root: &Path) -> Result<(), String> {
     push_repo_with_git_cli(repo_root, &remote_name, branch, &remote_ref)
 }
 
+fn fetch_repo(repo_root: &Path) -> Result<(), String> {
+    run_git_cli(repo_root, &["fetch"], "FETCH")
+}
+
+fn pull_repo(repo_root: &Path) -> Result<(), String> {
+    run_git_cli(repo_root, &["pull"], "PULL")
+}
+
+fn run_git_cli(repo_root: &Path, args: &[&str], label: &str) -> Result<(), String> {
+    println!(
+        "[GIT {label}] git -C {} {}",
+        repo_root.display(),
+        args.join(" ")
+    );
+    let mut command = std::process::Command::new("git");
+    command
+        .arg("-C")
+        .arg(repo_root)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0");
+    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
+        command.env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes");
+    }
+    let output = command.output().map_err(|err| err.to_string())?;
+    if output.status.success() {
+        println!("[GIT {label}] ok");
+        Ok(())
+    } else {
+        let stderr = short_command_output(&output.stderr);
+        let stdout = short_command_output(&output.stdout);
+        println!(
+            "[GIT {label}] failed status={:?} stderr={} stdout={}",
+            output.status.code(),
+            stderr,
+            stdout
+        );
+        if stderr.is_empty() {
+            Err(stdout)
+        } else {
+            Err(stderr)
+        }
+    }
+}
+
 fn push_repo_with_git_cli(
     repo_root: &Path,
     remote_name: &str,
@@ -1351,6 +1395,23 @@ mod tests {
         state.pending = false;
         assert!(!git_stage_click_locked(&state, 0));
         assert!(git_stage_click_locked(&state, 1));
+    }
+
+    #[test]
+    fn git_commit_visual_stays_enabled_while_stage_task_pending() {
+        let mut state = GitPanelState::default();
+        state.stage_pending_workspace_idx = Some(0);
+        state.snapshot = GitStatusSnapshot {
+            workspaces: vec![git_workspace(vec![git_file(
+                "src/main.rs",
+                true,
+                GitFileStatus::Modified,
+            )], None)],
+        };
+
+        assert!(state.commit_enabled());
+        state.stage_pending_workspace_idx = None;
+        assert!(state.commit_enabled());
     }
 
     #[test]

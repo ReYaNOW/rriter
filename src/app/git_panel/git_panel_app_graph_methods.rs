@@ -17,6 +17,14 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn refresh_git_panel_window(&mut self) {
         self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.repo_action_menu_workspace_idx = None;
+        self.ide_panel.git.snapshot = GitStatusSnapshot::default();
+        self.ide_panel.git.selected_file = None;
+        self.ide_panel.git.branch_ahead_cache.clear();
+        self.ide_panel.git.notice = None;
+        self.ide_panel.git.rx.retain(|rx| !rx.refresh);
+        self.ide_panel.git.status_refresh_pending = false;
+        self.ide_panel.git.status_refresh_dirty = false;
         self.ide_panel.git.graph_cache.clear();
         self.ide_panel.git.graph_latest_request_by_root.clear();
         self.ide_panel.git.graph_pending_roots.clear();
@@ -58,10 +66,12 @@ impl App {
                             if receiver.refresh {
                                 refresh_rerun |= self.ide_panel.git.finish_status_refresh();
                             }
-                            let reload_graph = event
-                                .notice
-                                .as_deref()
-                                .is_some_and(|notice| notice.starts_with("Committed "));
+                            let reload_graph =
+                                event.notice.as_deref().is_some_and(|notice| {
+                                    notice.starts_with("Committed ")
+                                        || notice == "Fetch done"
+                                        || notice == "Pull done"
+                                });
                             self.ide_panel.git.apply_event(event);
                             status_event_applied = true;
                             self.ide_panel.git.pending = false;

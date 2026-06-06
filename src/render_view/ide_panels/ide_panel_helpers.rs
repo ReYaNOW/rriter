@@ -240,6 +240,47 @@ fn render_git_graph_button(
     }
 }
 
+fn draw_git_checkmark(
+    renderer: &mut Renderer,
+    check_x: f32,
+    check_y: f32,
+    check_size: f32,
+    color: [f32; 4],
+) {
+    let icon_size = (check_size * 0.86).round().max(1.0);
+    renderer.draw_atlas_icon(
+        crate::widgets::IconType::Check,
+        (check_x + (check_size - icon_size) * 0.5).round(),
+        (check_y + (check_size - icon_size) * 0.5).round(),
+        icon_size,
+        color,
+    );
+}
+
+fn render_git_action_button(
+    renderer: &mut Renderer,
+    ui_registry: &mut crate::ui_system::UiRegistry,
+    id: crate::ui_system::UiId,
+    button: &Button,
+    workspace_disabled: bool,
+    action_disabled: bool,
+    mx: f32,
+    my: f32,
+    s: f32,
+) -> bool {
+    if workspace_disabled {
+        render_git_disabled_button(renderer, button, s);
+        register_git_locked_button_cursor(ui_registry, id, button, mx, my);
+        false
+    } else if action_disabled {
+        button.render(renderer, -1.0, -1.0, s, false);
+        register_git_locked_button_cursor(ui_registry, id, button, mx, my);
+        false
+    } else {
+        ui_registry.register_button(id, button, renderer, mx, my, s, false)
+    }
+}
+
 fn register_git_locked_button_cursor(
     ui_registry: &mut crate::ui_system::UiRegistry,
     id: crate::ui_system::UiId,

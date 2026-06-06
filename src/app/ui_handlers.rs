@@ -612,6 +612,7 @@ impl App {
             // Git panel
             UiId::GitWorkspaceToggle(workspace_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.toggle_git_workspace(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -619,6 +620,7 @@ impl App {
             }
             UiId::GitFile(workspace_idx, file_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.toggle_git_file_stage(workspace_idx, file_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -626,6 +628,7 @@ impl App {
             }
             UiId::GitFileDiff(workspace_idx, file_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 let (mx, my) = self
                     .renderer
                     .as_ref()
@@ -651,6 +654,7 @@ impl App {
             }
             UiId::GitFolderStage(workspace_idx, row_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.toggle_git_folder_stage(workspace_idx, row_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -658,6 +662,7 @@ impl App {
             }
             UiId::GitFolder(workspace_idx, row_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.toggle_git_tree_folder(workspace_idx, row_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -665,13 +670,15 @@ impl App {
             }
             UiId::GitCommit => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.commit_git_panel();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitCommitMenuToggle => {
-                if !self.ide_panel.git.pending {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                if self.ide_panel.git.commit_enabled() {
                     self.ide_panel.git.commit_menu_open = !self.ide_panel.git.commit_menu_open;
                 }
                 if let Some(window) = self.window.as_ref() {
@@ -680,7 +687,8 @@ impl App {
             }
             UiId::GitCommitMenuItem(idx) => {
                 self.ide_panel.git.commit_menu_open = false;
-                if !self.ide_panel.git.pending {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                if self.ide_panel.git.commit_enabled() {
                     self.commit_git_panel_option(idx);
                 }
                 if let Some(window) = self.window.as_ref() {
@@ -689,30 +697,67 @@ impl App {
             }
             UiId::GitPush(workspace_idx) => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.push_git_workspace(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitRollbackStaged(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.open_git_rollback_staged_dialog(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitStageAll(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.stage_all_git_workspace(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitUnstageAll(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.open_git_unstage_all_dialog(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
+            UiId::GitRepoActionMenu(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                if !self.ide_panel.git.pending {
+                    if self.ide_panel.git.repo_action_menu_workspace_idx == Some(workspace_idx) {
+                        self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                    } else {
+                        self.ide_panel.git.repo_action_menu_workspace_idx = Some(workspace_idx);
+                    }
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitFetch(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                self.fetch_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::GitPull(workspace_idx) => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                self.pull_git_workspace(workspace_idx);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::GitConfirmAction => {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.confirm_git_dialog();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -720,23 +765,28 @@ impl App {
             }
             UiId::GitConfirmCancel => {
                 self.ide_panel.git.confirm_dialog = None;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitRefresh => {
+                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.refresh_git_panel_window();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitGraphToggle => {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.toggle_git_graph();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
             UiId::GitGraphWorkspace(workspace_idx) => {
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 self.select_git_graph_workspace(workspace_idx);
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -761,6 +811,7 @@ impl App {
             }
             UiId::GitMessageInput => {
                 self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.repo_action_menu_workspace_idx = None;
                 let was_focused = self.ide_panel.git.message_focused;
                 self.ide_panel.git.message_focused = true;
                 self.search_focused = false;

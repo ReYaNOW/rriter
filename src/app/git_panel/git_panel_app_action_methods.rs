@@ -147,6 +147,9 @@ impl App {
         if self.ide_panel.git.pending {
             return;
         }
+        if !self.ide_panel.git.commit_enabled() {
+            return;
+        }
         self.ide_panel.git.commit_menu_open = false;
         self.ide_panel.git.message_focused = false;
         let message = self.ide_panel.git.message_editor.get_full_text();
@@ -186,6 +189,42 @@ impl App {
             return;
         };
         self.spawn_git_task(GitAction::Push { repo_root });
+    }
+
+    pub fn fetch_git_workspace(&mut self, workspace_idx: usize) {
+        if self.ide_panel.git.pending {
+            return;
+        }
+        let Some(repo_root) = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_idx == workspace_idx)
+            .and_then(|workspace| workspace.repo_root.clone())
+        else {
+            return;
+        };
+        self.spawn_git_task(GitAction::Fetch { repo_root });
+    }
+
+    pub fn pull_git_workspace(&mut self, workspace_idx: usize) {
+        if self.ide_panel.git.pending {
+            return;
+        }
+        let Some(repo_root) = self
+            .ide_panel
+            .git
+            .snapshot
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.workspace_idx == workspace_idx)
+            .and_then(|workspace| workspace.repo_root.clone())
+        else {
+            return;
+        };
+        self.spawn_git_task(GitAction::Pull { repo_root });
     }
 
     pub fn open_git_rollback_staged_dialog(&mut self, workspace_idx: usize) {
@@ -481,6 +520,8 @@ impl App {
                 } => Some("Commit & Push"),
                 GitAction::Commit { .. } => Some("Commit"),
                 GitAction::Push { .. } => Some("Push"),
+                GitAction::Fetch { .. } => Some("Fetch"),
+                GitAction::Pull { .. } => Some("Pull"),
                 _ => None,
             };
             self.ide_panel.git.pending_started_at = Some(now);

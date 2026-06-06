@@ -62,6 +62,20 @@ fn run_git_action(action: GitAction) -> GitActionOutcome {
             },
             clear_message: false,
         },
+        GitAction::Fetch { repo_root } => GitActionOutcome {
+            notice: match fetch_repo(&repo_root) {
+                Ok(()) => Some("Fetch done".to_string()),
+                Err(err) => Some(err),
+            },
+            clear_message: false,
+        },
+        GitAction::Pull { repo_root } => GitActionOutcome {
+            notice: match pull_repo(&repo_root) {
+                Ok(()) => Some("Pull done".to_string()),
+                Err(err) => Some(err),
+            },
+            clear_message: false,
+        },
     }
 }
 

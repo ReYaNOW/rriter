@@ -38,6 +38,7 @@ impl Renderer {
         let text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
         let mut label_scratch = String::new();
         let mut git_file_tooltip: Option<(usize, usize, String, f32, f32)> = None;
+        let mut repo_action_menu: Option<(usize, f32, f32, f32)> = None;
 
         let input_x = panel_x + pad;
         let input_y = title_h + 8.0 * s;
@@ -192,6 +193,7 @@ impl Renderer {
         }
 
         let commit_y = title_h + 44.0 * s;
+        let commit_enabled = ide_panel.git.commit_enabled();
         let arrow_w = (38.0 * s).min((inner_w * 0.28).max(22.0 * s));
         let commit_gap = (4.0 * s).min((inner_w * 0.06).max(0.0));
         let commit_main_w = (inner_w - arrow_w - commit_gap).max(1.0);
@@ -205,7 +207,7 @@ impl Renderer {
             text_scale: 0.92,
             icon_size: 20.0 * s,
         };
-        if ide_panel.git.pending {
+        if !commit_enabled {
             render_git_disabled_button(self, &commit_btn, s);
         } else {
             ui_registry.register_button(
@@ -228,7 +230,7 @@ impl Renderer {
             text_scale: 0.0,
             icon_size: 24.0 * s,
         };
-        if ide_panel.git.pending {
+        if !commit_enabled {
             render_git_disabled_button(self, &menu_btn, s);
         } else {
             ui_registry.register_button(
@@ -359,6 +361,7 @@ impl Renderer {
                 let workspace_name_color =
                     git_disabled_color(self.theme.fg, workspace_disabled, 0.38);
                 let show_stage_actions = !workspace.files.is_empty();
+                let show_repo_menu = workspace.repo_root.is_some();
                 let stage_interaction_disabled =
                     git_stage_controls_disabled(workspace_disabled, ide_panel.git.pending);
                 let changed_count = workspace.files.len();
@@ -384,8 +387,15 @@ impl Renderer {
                 };
                 let stage_btn_w = 26.0 * s;
                 let stage_btn_gap = 4.0 * s;
+                let repo_menu_w = if show_repo_menu {
+                    stage_btn_w + 8.0 * s
+                } else {
+                    0.0
+                };
                 let stage_actions_w = if show_stage_actions {
-                    stage_btn_w * 3.0 + stage_btn_gap * 2.0 + 8.0 * s
+                    stage_btn_w * 3.0 + stage_btn_gap * 2.0 + repo_menu_w
+                } else if show_repo_menu {
+                    repo_menu_w
                 } else {
                     0.0
                 };
@@ -521,7 +531,16 @@ impl Renderer {
                 let right_x = panel_x + panel_w - pad;
                 if show_stage_actions {
                     let stage_btn_h = 22.0 * s;
-                    let unstage_x = right_x - stage_btn_w;
+                    let menu_x = if show_repo_menu {
+                        right_x - stage_btn_w
+                    } else {
+                        right_x
+                    };
+                    let unstage_x = if show_repo_menu {
+                        menu_x - stage_btn_gap - stage_btn_w
+                    } else {
+                        right_x - stage_btn_w
+                    };
                     let stage_x = unstage_x - stage_btn_gap - stage_btn_w;
                     let rollback_x = stage_x - stage_btn_gap - stage_btn_w;
                     let push_x = if workspace.ahead > 0 {
@@ -704,8 +723,58 @@ impl Renderer {
                                 Some((kind, workspace.workspace_idx, tooltip.to_string(), mx, my));
                         }
                     }
+                    if show_repo_menu {
+                        let menu_btn = Button {
+                            x: menu_x,
+                            y: btn_y,
+                            w: stage_btn_w,
+                            h: stage_btn_h,
+                            text: String::new(),
+                            icon: Some(crate::widgets::IconType::Down),
+                            text_scale: 0.0,
+                            icon_size: 21.0 * s,
+                        };
+                        let menu_open = ide_panel.git.repo_action_menu_workspace_idx
+                            == Some(workspace.workspace_idx);
+                        render_git_action_button(
+                            self,
+                            ui_registry,
+                            crate::ui_system::UiId::GitRepoActionMenu(workspace.workspace_idx),
+                            &menu_btn,
+                            workspace_disabled,
+                            ide_panel.git.pending,
+                            mx,
+                            my,
+                            s,
+                        );
+                        if menu_open {
+                            self.push_rect(
+                                menu_btn.x + 5.0 * s,
+                                menu_btn.y + menu_btn.h - 2.0,
+                                (menu_btn.w - 10.0 * s).max(1.0),
+                                2.0,
+                                [0.60, 0.35, 0.85, 0.8],
+                            );
+                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
+                            repo_action_menu = Some((
+                                workspace.workspace_idx,
+                                (menu_btn.x + menu_btn.w - menu_w).round(),
+                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
+                                menu_w,
+                            ));
+                        }
+                    }
                 } else if workspace.ahead > 0 {
-                    let push_x = right_x - push_w;
+                    let menu_x = if show_repo_menu {
+                        right_x - stage_btn_w
+                    } else {
+                        right_x
+                    };
+                    let push_x = if show_repo_menu {
+                        menu_x - 6.0 * s - push_w
+                    } else {
+                        right_x - push_w
+                    };
                     label_scratch.clear();
                     let _ = std::fmt::Write::write_fmt(
                         &mut label_scratch,
@@ -757,13 +826,65 @@ impl Renderer {
                             false,
                         );
                     }
+                    if show_repo_menu {
+                        let stage_btn_h = 22.0 * s;
+                        let btn_y = y + ((workspace_h - stage_btn_h) / 2.0).round();
+                        let menu_btn = Button {
+                            x: menu_x,
+                            y: btn_y,
+                            w: stage_btn_w,
+                            h: stage_btn_h,
+                            text: String::new(),
+                            icon: Some(crate::widgets::IconType::Down),
+                            text_scale: 0.0,
+                            icon_size: 21.0 * s,
+                        };
+                        let menu_open = ide_panel.git.repo_action_menu_workspace_idx
+                            == Some(workspace.workspace_idx);
+                        render_git_action_button(
+                            self,
+                            ui_registry,
+                            crate::ui_system::UiId::GitRepoActionMenu(workspace.workspace_idx),
+                            &menu_btn,
+                            workspace_disabled,
+                            ide_panel.git.pending,
+                            mx,
+                            my,
+                            s,
+                        );
+                        if menu_open {
+                            self.push_rect(
+                                menu_btn.x + 5.0 * s,
+                                menu_btn.y + menu_btn.h - 2.0,
+                                (menu_btn.w - 10.0 * s).max(1.0),
+                                2.0,
+                                [0.60, 0.35, 0.85, 0.8],
+                            );
+                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
+                            repo_action_menu = Some((
+                                workspace.workspace_idx,
+                                (menu_btn.x + menu_btn.w - menu_w).round(),
+                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
+                                menu_w,
+                            ));
+                        }
+                    }
                 } else if changed_count > 0 {
                     label_scratch.clear();
                     let _ = std::fmt::Write::write_fmt(
                         &mut label_scratch,
                         format_args!("{changed_count}"),
                     );
-                    let badge_x = right_x - count_badge_w;
+                    let menu_x = if show_repo_menu {
+                        right_x - stage_btn_w
+                    } else {
+                        right_x
+                    };
+                    let badge_x = if show_repo_menu {
+                        menu_x - stage_btn_gap - count_badge_w
+                    } else {
+                        right_x - count_badge_w
+                    };
                     let badge_y = y + ((workspace_h - count_badge_h) / 2.0).round();
                     self.push_rounded_rect(
                         badge_x,
@@ -780,6 +901,91 @@ impl Renderer {
                         git_disabled_color([0.86, 0.90, 1.0, 1.0], workspace_disabled, 0.38),
                         count_text_scale,
                     );
+                    if show_repo_menu {
+                        let stage_btn_h = 22.0 * s;
+                        let btn_y = y + ((workspace_h - stage_btn_h) / 2.0).round();
+                        let menu_btn = Button {
+                            x: menu_x,
+                            y: btn_y,
+                            w: stage_btn_w,
+                            h: stage_btn_h,
+                            text: String::new(),
+                            icon: Some(crate::widgets::IconType::Down),
+                            text_scale: 0.0,
+                            icon_size: 21.0 * s,
+                        };
+                        let menu_open = ide_panel.git.repo_action_menu_workspace_idx
+                            == Some(workspace.workspace_idx);
+                        render_git_action_button(
+                            self,
+                            ui_registry,
+                            crate::ui_system::UiId::GitRepoActionMenu(workspace.workspace_idx),
+                            &menu_btn,
+                            workspace_disabled,
+                            ide_panel.git.pending,
+                            mx,
+                            my,
+                            s,
+                        );
+                        if menu_open {
+                            self.push_rect(
+                                menu_btn.x + 5.0 * s,
+                                menu_btn.y + menu_btn.h - 2.0,
+                                (menu_btn.w - 10.0 * s).max(1.0),
+                                2.0,
+                                [0.60, 0.35, 0.85, 0.8],
+                            );
+                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
+                            repo_action_menu = Some((
+                                workspace.workspace_idx,
+                                (menu_btn.x + menu_btn.w - menu_w).round(),
+                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
+                                menu_w,
+                            ));
+                        }
+                    }
+                } else if show_repo_menu {
+                    let stage_btn_h = 22.0 * s;
+                    let btn_y = y + ((workspace_h - stage_btn_h) / 2.0).round();
+                    let menu_btn = Button {
+                        x: right_x - stage_btn_w,
+                        y: btn_y,
+                        w: stage_btn_w,
+                        h: stage_btn_h,
+                        text: String::new(),
+                        icon: Some(crate::widgets::IconType::Down),
+                        text_scale: 0.0,
+                        icon_size: 21.0 * s,
+                    };
+                    let menu_open = ide_panel.git.repo_action_menu_workspace_idx
+                        == Some(workspace.workspace_idx);
+                    render_git_action_button(
+                        self,
+                        ui_registry,
+                        crate::ui_system::UiId::GitRepoActionMenu(workspace.workspace_idx),
+                        &menu_btn,
+                        workspace_disabled,
+                        ide_panel.git.pending,
+                        mx,
+                        my,
+                        s,
+                    );
+                    if menu_open {
+                        self.push_rect(
+                            menu_btn.x + 5.0 * s,
+                            menu_btn.y + menu_btn.h - 2.0,
+                            (menu_btn.w - 10.0 * s).max(1.0),
+                            2.0,
+                            [0.60, 0.35, 0.85, 0.8],
+                        );
+                        let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
+                        repo_action_menu = Some((
+                            workspace.workspace_idx,
+                            (menu_btn.x + menu_btn.w - menu_w).round(),
+                            (menu_btn.y + menu_btn.h + 4.0 * s).round(),
+                            menu_w,
+                        ));
+                    }
                 }
             }
             y += workspace_h;
@@ -895,12 +1101,12 @@ impl Renderer {
                             checkbox_color,
                         );
                         if file.staged {
-                            self.draw_string_scaled(
-                                "✓",
-                                check_x + 2.0 * s,
-                                y + 18.0 * s,
+                            draw_git_checkmark(
+                                self,
+                                check_x,
+                                check_y,
+                                file_layout.check_size,
                                 check_color,
-                                0.78,
                             );
                         }
 
@@ -993,13 +1199,7 @@ impl Renderer {
                         );
                         match folder_stage {
                             Some(crate::app::git_panel::GitFolderStageState::All) => {
-                                self.draw_string_scaled(
-                                    "✓",
-                                    check_x + 2.0 * s,
-                                    y + 18.0 * s,
-                                    check_color,
-                                    0.78,
-                                );
+                                draw_git_checkmark(self, check_x, check_y, check_size, check_color);
                             }
                             Some(crate::app::git_panel::GitFolderStageState::Partial) => {
                                 let mark_w = 8.0 * s;
@@ -1065,7 +1265,7 @@ impl Renderer {
         }
 
         if !drew_any {
-            let hint = if ide_panel.git.pending {
+            let hint = if ide_panel.git.pending || ide_panel.git.status_loading() {
                 "Git scan..."
             } else {
                 "No changes"
@@ -1148,7 +1348,54 @@ impl Renderer {
             );
         }
 
-        if ide_panel.git.commit_menu_open && !ide_panel.git.pending {
+        if let Some((workspace_idx, menu_x, menu_y, menu_w)) = repo_action_menu
+            && !ide_panel.git.pending
+        {
+            let item_h = 30.0 * s;
+            let menu_h = item_h * 2.0 + 8.0 * s;
+            let panel_bottom = title_h + content_h;
+            let menu_y = menu_y.min(panel_bottom - menu_h - 4.0 * s).max(title_h + 4.0 * s);
+            self.push_rounded_rect(
+                menu_x,
+                menu_y,
+                menu_w,
+                menu_h,
+                7.0 * s,
+                [0.18, 0.19, 0.25, 0.98],
+            );
+            for (idx, &(label, id)) in [
+                ("Fetch", crate::ui_system::UiId::GitFetch(workspace_idx)),
+                ("Pull", crate::ui_system::UiId::GitPull(workspace_idx)),
+            ]
+            .iter()
+            .enumerate()
+            {
+                let item_y = menu_y + 4.0 * s + idx as f32 * item_h;
+                let hovered =
+                    ui_registry.register_rect(id, menu_x, item_y, menu_w, item_h, mx, my);
+                if hovered {
+                    self.push_rounded_rect(
+                        menu_x + 5.0 * s,
+                        item_y + 3.0 * s,
+                        menu_w - 10.0 * s,
+                        item_h - 6.0 * s,
+                        5.0 * s,
+                        [1.0, 1.0, 1.0, 0.07],
+                    );
+                }
+                self.draw_tree_label_clipped(
+                    label,
+                    menu_x + 14.0 * s,
+                    item_y + item_h / 2.0 + 5.0 * s,
+                    menu_w - 28.0 * s,
+                    self.theme.fg,
+                    0.88,
+                    &mut label_scratch,
+                );
+            }
+        }
+
+        if ide_panel.git.commit_menu_open && commit_enabled {
             let menu_w = inner_w.min(230.0 * s).max(120.0 * s).min(panel_w);
             let menu_x = (panel_x + pad + inner_w - menu_w).max(panel_x + 2.0 * s);
             let item_h = 32.0 * s;
