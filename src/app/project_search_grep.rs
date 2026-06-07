@@ -2,14 +2,14 @@ use grep_regex::RegexMatcher;
 use grep_searcher::{Searcher, Sink, SinkMatch};
 use memchr::memmem::Finder;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 use super::{
-    elapsed_ms_u64, is_definitely_binary_project_search_file, ProjectSearchFile,
-    ProjectSearchMatch, SearchCaps, SearchPatternPlan, SearchProfile, PROJECT_SEARCH_FILE_CAP_BYTES,
-    PROJECT_SEARCH_FILE_RESULT_CAP, PROJECT_SEARCH_MATCH_CAP,
+    PROJECT_SEARCH_FILE_CAP_BYTES, PROJECT_SEARCH_FILE_RESULT_CAP, PROJECT_SEARCH_MATCH_CAP,
+    ProjectSearchFile, ProjectSearchMatch, SearchCaps, SearchPatternPlan, SearchProfile,
+    elapsed_ms_u64, is_definitely_binary_project_search_file,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -133,14 +133,7 @@ fn push_project_search_line_matches(
             return false;
         }
         profile.matches.fetch_add(1, Ordering::Relaxed);
-        push_line_match(
-            line,
-            line_start_abs,
-            line_number,
-            start,
-            end,
-            matches,
-        );
+        push_line_match(line, line_start_abs, line_number, start, end, matches);
         !capped_flag.load(Ordering::Relaxed)
     });
     keep_going && !capped_flag.load(Ordering::Relaxed)

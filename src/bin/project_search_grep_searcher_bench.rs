@@ -171,14 +171,11 @@ fn run_grep_searcher(roots: &[PathBuf], query: &str) -> BenchResult {
                 return WalkState::Continue;
             }
             if sink.matches > 0 {
-                counters
-                    .files_with_matches
-                    .fetch_add(1, Ordering::Relaxed);
+                counters.files_with_matches.fetch_add(1, Ordering::Relaxed);
                 counters.matches.fetch_add(sink.matches, Ordering::Relaxed);
             }
             WalkState::Continue
-        })
-            as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> WalkState + Send>
+        }) as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> WalkState + Send>
     };
     builder.build_parallel().run(visitor);
     let total_ms = total_started.elapsed().as_millis();
@@ -207,9 +204,10 @@ impl Sink for OccurrenceSink {
     type Error = std::io::Error;
 
     fn matched(&mut self, _: &Searcher, mat: &SinkMatch<'_>) -> Result<bool, Self::Error> {
-        self.matches = self
-            .matches
-            .saturating_add(count_ascii_case_insensitive(mat.bytes(), self.needle.as_slice()));
+        self.matches = self.matches.saturating_add(count_ascii_case_insensitive(
+            mat.bytes(),
+            self.needle.as_slice(),
+        ));
         Ok(true)
     }
 }
@@ -286,10 +284,43 @@ fn is_binary_by_extension(path: &Path) -> bool {
     };
     matches!(
         ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "tif" | "tiff" | "ttf"
-            | "otf" | "woff" | "woff2" | "eot" | "pdf" | "zip" | "gz" | "tgz" | "xz"
-            | "bz2" | "zst" | "7z" | "rar" | "tar" | "pack" | "idx" | "so" | "dylib"
-            | "dll" | "a" | "rlib" | "rmeta" | "class" | "pyc" | "pyo" | "o" | "obj"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "bmp"
+            | "tif"
+            | "tiff"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "eot"
+            | "pdf"
+            | "zip"
+            | "gz"
+            | "tgz"
+            | "xz"
+            | "bz2"
+            | "zst"
+            | "7z"
+            | "rar"
+            | "tar"
+            | "pack"
+            | "idx"
+            | "so"
+            | "dylib"
+            | "dll"
+            | "a"
+            | "rlib"
+            | "rmeta"
+            | "class"
+            | "pyc"
+            | "pyo"
+            | "o"
+            | "obj"
             | "wasm"
     )
 }

@@ -1,15 +1,16 @@
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
-    fn draw_api_modal_overlays(
+    fn draw_ide_modal_overlays(
         &mut self,
         s: f32,
-        api: &crate::app::api_client::ApiClientState,
+        ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
         blink_alpha: f32,
     ) -> bool {
         let mut drew = false;
+        let api = &ide_panel.api;
         if api.mock_python_runtime_open {
             self.draw_api_mock_python_overlay(s, api, ui_registry, mx, my, blink_alpha);
             drew = true;
@@ -32,6 +33,10 @@ impl Renderer {
             );
             drew = true;
         }
+        if ide_panel.project_search.help_open {
+            self.draw_project_search_help_overlay(ide_panel, ui_registry, mx, my, s);
+            drew = true;
+        }
         drew
     }
 
@@ -46,7 +51,7 @@ impl Renderer {
         s: f32,
     ) -> (bool, Vec<(usize, usize)>) {
         self.draw_empty_ide(panel_left_w);
-        if self.draw_api_modal_overlays(s, &ide_panel.api, ui_registry, mx, my, blink_alpha) {
+        if self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha) {
             self.flush();
             return (ui_registry.wants_pointer(), Vec::new());
         }
@@ -184,6 +189,7 @@ impl Renderer {
     ) {
         if panel_left_w > 0.0 && !is_ui_disabled && !modal_overlay_open {
             let resize_x = 48.0 * s + panel_left_w;
+            let resize_hit = 3.0 * s;
             let resize_h = if panel_bottom_h > 0.0 && ide_panel.bottom_panel_blocks_editor_hover()
             {
                 ide_bottom_panel_y(self.height, panel_bottom_h, s)
@@ -192,9 +198,9 @@ impl Renderer {
             };
             ui_registry.register_blocker(
                 crate::ui_system::UiId::ResizeLeft,
-                resize_x - 8.0 * s,
+                resize_x - resize_hit,
                 0.0,
-                16.0 * s,
+                resize_hit * 2.0,
                 resize_h,
                 mx,
                 my,

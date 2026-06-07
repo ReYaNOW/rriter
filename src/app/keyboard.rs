@@ -573,6 +573,12 @@ impl App {
         let Some(field) = self.ide_panel.project_search.focused else {
             return;
         };
+        if field == crate::app::project_search::ProjectSearchField::Filter
+            && !self.ide_panel.project_search.filter_enabled()
+        {
+            self.ide_panel.project_search.focused = None;
+            return;
+        }
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let shift = self.modifiers.shift_key();
         let mut is_edit = false;
@@ -583,13 +589,13 @@ impl App {
                 self.ide_panel.project_search.focused = None;
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) if ctrl => {
-                should_run = true;
+                should_run = field != crate::app::project_search::ProjectSearchField::Filter;
             }
             PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
                 if field == crate::app::project_search::ProjectSearchField::Query {
                     self.project_search_editor_mut(field).insert_str("\n");
                     is_edit = true;
-                } else {
+                } else if field != crate::app::project_search::ProjectSearchField::Filter {
                     should_run = true;
                 }
             }
@@ -697,7 +703,11 @@ impl App {
 
         if is_edit {
             self.project_search_editor_mut(field).sync_edits.clear();
-            self.ide_panel.project_search.dirty = true;
+            if field == crate::app::project_search::ProjectSearchField::Filter {
+                self.ide_panel.project_search.apply_live_filter();
+            } else {
+                self.ide_panel.project_search.dirty = true;
+            }
             if matches!(
                 field,
                 crate::app::project_search::ProjectSearchField::Include
@@ -728,6 +738,9 @@ impl App {
             }
             crate::app::project_search::ProjectSearchField::Exclude => {
                 &mut self.ide_panel.project_search.exclude_editor
+            }
+            crate::app::project_search::ProjectSearchField::Filter => {
+                &mut self.ide_panel.project_search.filter_editor
             }
         }
     }

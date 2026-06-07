@@ -134,11 +134,11 @@ impl ProjectSearchState {
             if self.preview_pending.contains(&key) {
                 continue;
             }
-            let Some((path, mat)) = self
-                .results
-                .get(file_idx)
-                .and_then(|file| file.matches.get(match_idx).map(|mat| (file.path.clone(), mat)))
-            else {
+            let Some((path, mat)) = self.results.get(file_idx).and_then(|file| {
+                file.matches
+                    .get(match_idx)
+                    .map(|mat| (file.path.clone(), mat))
+            }) else {
                 continue;
             };
             if mat.preview_ready {
@@ -171,8 +171,7 @@ impl ProjectSearchState {
         };
         self.scroll.drag_offset = drag_offset;
         self.scroll.target = target;
-        self.scroll.current = target;
-        self.scroll.velocity = 0.0;
+        self.scroll.anim_speed = 15.0;
         self.scroll.is_dragging = true;
         true
     }
@@ -192,12 +191,11 @@ impl ProjectSearchState {
         ) else {
             return false;
         };
-        if (self.scroll.current - target).abs() < 0.5 {
+        if (self.scroll.target - target).abs() < 0.5 {
             return false;
         }
         self.scroll.target = target;
-        self.scroll.current = target;
-        self.scroll.velocity = 0.0;
+        self.scroll.anim_speed = 15.0;
         true
     }
 }
@@ -295,6 +293,9 @@ pub fn project_search_scrollbar_thumb(
     state: &ProjectSearchState,
     scale: f32,
 ) -> Option<ProjectSearchRect> {
+    if !state.has_run || state.running_generation.is_some() {
+        return None;
+    }
     let row_h = PROJECT_SEARCH_ROW_H * scale;
     let total_h = state.flat_rows.len() as f32 * row_h;
     if total_h <= layout.list.h || layout.list.h <= 0.0 {
@@ -372,6 +373,7 @@ mod tests {
                 }
             })
             .collect();
+        state.has_run = true;
         state.scroll.current = 240.0;
         let layout = ProjectSearchLayout {
             query: ProjectSearchRect {
@@ -387,6 +389,12 @@ mod tests {
                 h: 0.0,
             },
             exclude: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            filter: ProjectSearchRect {
                 x: 0.0,
                 y: 0.0,
                 w: 0.0,

@@ -120,6 +120,18 @@ impl App {
             return;
         }
 
+        if self.ide_panel.project_search.help_open {
+            if key_event.state == ElementState::Pressed
+                && key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+            {
+                self.ide_panel.project_search.help_open = false;
+                if let Some(w) = self.window.as_ref() {
+                    w.request_redraw();
+                }
+            }
+            return;
+        }
+
         if key_event.state == ElementState::Pressed {
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                 && (self.inline_git_popup.take().is_some()

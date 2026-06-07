@@ -1115,7 +1115,7 @@ impl ApplicationHandler for App {
 
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s
+                        if (mx - resize_x).abs() < 3.0 * s
                             && my >= 0.0
                             && my < wh - effective_bottom_h
                         {
@@ -1159,6 +1159,17 @@ impl ApplicationHandler for App {
                         }
                         Some(_) => winit::window::CursorIcon::Pointer,
                         None => winit::window::CursorIcon::Default,
+                    }
+                } else if self.ide_panel.project_search.help_open {
+                    let (mx, my) = {
+                        let r = self.renderer.as_ref().unwrap();
+                        (r.last_mouse_x, r.last_mouse_y)
+                    };
+                    match self.ui_registry.find_overlay_at(mx, my) {
+                        Some(crate::ui_system::UiId::ProjectSearchHelp) => {
+                            winit::window::CursorIcon::Pointer
+                        }
+                        _ => winit::window::CursorIcon::Default,
                     }
                 } else if self.file_tree_overlay_active() {
                     let (mx, my) = {

@@ -1,8 +1,8 @@
 use crate::editor::Editor;
 use crate::scroll::ScrollState;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
-use globset::{Glob, GlobSet, GlobSetBuilder};
 use memchr::memmem::Finder;
 use rustc_hash::FxHashSet;
 use std::io::Read;
@@ -45,6 +45,7 @@ pub enum ProjectSearchField {
     Query,
     Include,
     Exclude,
+    Filter,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -126,6 +127,7 @@ pub struct ProjectSearchLayout {
     pub query: ProjectSearchRect,
     pub include: ProjectSearchRect,
     pub exclude: ProjectSearchRect,
+    pub filter: ProjectSearchRect,
     pub case_button: ProjectSearchRect,
     pub run_button: ProjectSearchRect,
     pub help_button: ProjectSearchRect,
@@ -137,6 +139,7 @@ pub struct ProjectSearchState {
     pub query_editor: Editor,
     pub include_editor: Editor,
     pub exclude_editor: Editor,
+    pub filter_editor: Editor,
     pub focused: Option<ProjectSearchField>,
     pub case_sensitive: bool,
     pub help_open: bool,
@@ -165,6 +168,7 @@ impl Default for ProjectSearchState {
             query_editor: Editor::new(512),
             include_editor: Editor::new(256),
             exclude_editor: Editor::new(256),
+            filter_editor: Editor::new(256),
             focused: None,
             case_sensitive: false,
             help_open: false,
@@ -190,9 +194,24 @@ impl Default for ProjectSearchState {
 }
 
 impl ProjectSearchState {
+    pub fn filter_enabled(&self) -> bool {
+        self.has_run && self.running_generation.is_none() && !self.results.is_empty()
+    }
+
+    pub fn filter_active(&self) -> bool {
+        self.filter_enabled() && !self.filter_editor.get_full_text().trim().is_empty()
+    }
+
     pub fn rebuild_flat_rows(&mut self) {
         self.flat_rows.clear();
+        let filter = self
+            .filter_enabled()
+            .then(|| self.filter_editor.get_full_text())
+            .unwrap_or_default();
         for (file_idx, file) in self.results.iter().enumerate() {
+            if !project_search_filter_matches_path(&file.relative_path, &filter) {
+                continue;
+            }
             self.flat_rows.push(ProjectSearchFlatRow::File(file_idx));
             if !self.collapsed.contains(&file.path) {
                 for match_idx in 0..file.matches.len() {
@@ -211,6 +230,13 @@ impl ProjectSearchState {
             self.collapsed.insert(path);
         }
         self.rebuild_flat_rows();
+    }
+
+    pub fn apply_live_filter(&mut self) {
+        self.rebuild_flat_rows();
+        self.scroll.current = 0.0;
+        self.scroll.target = 0.0;
+        self.scroll.velocity = 0.0;
     }
 
     pub fn apply_message(&mut self, message: ProjectSearchWorkerMessage) -> bool {
@@ -307,12 +333,20 @@ pub fn project_search_layout(
         w: include.w,
         h: PROJECT_SEARCH_SINGLE_H * scale,
     };
-    let stats_y = exclude.y + exclude.h + 26.0 * scale;
+    y = exclude.y + exclude.h + 22.0 * scale;
+    let filter = ProjectSearchRect {
+        x: content_x + pad,
+        y: y + label_h,
+        w: include.w,
+        h: PROJECT_SEARCH_SINGLE_H * scale,
+    };
+    let stats_y = filter.y + filter.h + 26.0 * scale;
     let list_y = stats_y + 8.0 * scale;
     ProjectSearchLayout {
         query,
         include,
         exclude,
+        filter,
         case_button,
         run_button,
         help_button,
@@ -381,8 +415,13 @@ struct SearchCaps {
 
 #[derive(Default)]
 struct SearchProfile {
-    files_seen: AtomicU64, files_read: AtomicU64, bytes_read: AtomicU64,
-    matches: AtomicU64, read_ms: AtomicU64, scan_ms: AtomicU64, prep_ms: AtomicU64,
+    files_seen: AtomicU64,
+    files_read: AtomicU64,
+    bytes_read: AtomicU64,
+    matches: AtomicU64,
+    read_ms: AtomicU64,
+    scan_ms: AtomicU64,
+    prep_ms: AtomicU64,
 }
 
 impl SearchProfile {
@@ -420,14 +459,23 @@ fn elapsed_ms_u64(start: Instant) -> u64 {
     start.elapsed().as_millis().min(u64::MAX as u128) as u64
 }
 
-fn push_project_search_ranges(text: &str, ranges: &[(usize, usize)], matches: &mut Vec<ProjectSearchMatch>, profile: &SearchProfile) {
+fn push_project_search_ranges(
+    text: &str,
+    ranges: &[(usize, usize)],
+    matches: &mut Vec<ProjectSearchMatch>,
+    profile: &SearchProfile,
+) {
     let prep_started = Instant::now();
-    profile.matches.fetch_add(ranges.len() as u64, Ordering::Relaxed);
+    profile
+        .matches
+        .fetch_add(ranges.len() as u64, Ordering::Relaxed);
     let mut cursor = ProjectSearchLineCursor::default();
     for &(start, end) in ranges {
         push_match(text, start, end, &mut cursor, matches);
     }
-    profile.prep_ms.fetch_add(elapsed_ms_u64(prep_started), Ordering::Relaxed);
+    profile
+        .prep_ms
+        .fetch_add(elapsed_ms_u64(prep_started), Ordering::Relaxed);
 }
 
 fn stream_project_search(
@@ -588,9 +636,7 @@ fn run_project_search_roots(
                 return ignore::WalkState::Continue;
             };
             let path = entry.path();
-            if !entry.file_type().is_some_and(|ty| ty.is_file())
-                || !plan.is_file_allowed(path)
-            {
+            if !entry.file_type().is_some_and(|ty| ty.is_file()) || !plan.is_file_allowed(path) {
                 return ignore::WalkState::Continue;
             }
             let file = if let (Some(matcher), Some(searcher)) =
@@ -652,11 +698,44 @@ fn is_definitely_binary_project_search_file(path: &Path) -> bool {
     };
     matches!(
         ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "tif" | "tiff" |
-        "ttf" | "otf" | "woff" | "woff2" | "eot" | "pdf" | "zip" | "gz" | "tgz" |
-        "xz" | "bz2" | "zst" | "7z" | "rar" | "tar" | "pack" | "idx" | "so" |
-        "dylib" | "dll" | "a" | "rlib" | "rmeta" | "class" | "pyc" | "pyo" |
-        "o" | "obj" | "wasm"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "bmp"
+            | "tif"
+            | "tiff"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "eot"
+            | "pdf"
+            | "zip"
+            | "gz"
+            | "tgz"
+            | "xz"
+            | "bz2"
+            | "zst"
+            | "7z"
+            | "rar"
+            | "tar"
+            | "pack"
+            | "idx"
+            | "so"
+            | "dylib"
+            | "dll"
+            | "a"
+            | "rlib"
+            | "rmeta"
+            | "class"
+            | "pyc"
+            | "pyo"
+            | "o"
+            | "obj"
+            | "wasm"
     )
 }
 
@@ -693,8 +772,12 @@ fn search_project_file(
         return None;
     }
     profile.files_read.fetch_add(1, Ordering::Relaxed);
-    profile.bytes_read.fetch_add(buf.len() as u64, Ordering::Relaxed);
-    profile.read_ms.fetch_add(elapsed_ms_u64(read_started), Ordering::Relaxed);
+    profile
+        .bytes_read
+        .fetch_add(buf.len() as u64, Ordering::Relaxed);
+    profile
+        .read_ms
+        .fetch_add(elapsed_ms_u64(read_started), Ordering::Relaxed);
     let mut matches = Vec::new();
     let room = match caps.lock() {
         Ok(caps)
@@ -721,7 +804,9 @@ fn search_project_file(
             ranges.push((start, end));
             ranges.len() < room
         });
-        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
+        profile
+            .scan_ms
+            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
         if ranges.is_empty() {
             return None;
         }
@@ -738,7 +823,9 @@ fn search_project_file(
                 break;
             }
         }
-        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
+        profile
+            .scan_ms
+            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
         if ranges.is_empty() {
             return None;
         }
@@ -750,7 +837,9 @@ fn search_project_file(
         let mut ranges = Vec::new();
         let scan_started = Instant::now();
         collect_ascii_case_insensitive_matches(buf, needle, room, &mut ranges);
-        profile.scan_ms.fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
+        profile
+            .scan_ms
+            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
         if ranges.is_empty() {
             return None;
         }
@@ -1273,6 +1362,38 @@ fn to_slash(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+fn project_search_filter_matches_path(relative_path: &str, filter: &str) -> bool {
+    let tokens = split_pattern_tokens(filter);
+    if tokens.is_empty() {
+        return true;
+    }
+    let path = relative_path.to_lowercase();
+    tokens
+        .iter()
+        .any(|token| project_search_filter_token_matches_path(&path, token))
+}
+
+fn project_search_filter_token_matches_path(path: &str, token: &str) -> bool {
+    let token = token.trim().to_lowercase();
+    if token.is_empty() {
+        return true;
+    }
+    if let Some(suffix) = token.strip_prefix("*.").filter(|suffix| {
+        !suffix.is_empty()
+            && !suffix.as_bytes().contains(&b'*')
+            && !suffix.contains('/')
+            && !suffix.contains('\\')
+    }) {
+        return path
+            .strip_suffix(suffix)
+            .is_some_and(|prefix| prefix.as_bytes().last() == Some(&b'.'));
+    }
+    if token.as_bytes().contains(&b'*') {
+        return false;
+    }
+    path.contains(&token)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1395,7 +1516,10 @@ mod tests {
         assert_eq!(project_search_threads_for_available(1), 1);
         assert_eq!(project_search_threads_for_available(2), 2);
         assert_eq!(project_search_threads_for_available(4), 4);
-        assert_eq!(project_search_threads_for_available(16), PROJECT_SEARCH_MAX_THREADS);
+        assert_eq!(
+            project_search_threads_for_available(16),
+            PROJECT_SEARCH_MAX_THREADS
+        );
     }
 
     #[test]
@@ -1439,6 +1563,29 @@ mod tests {
         state.rebuild_flat_rows();
         assert_eq!(state.flat_rows.len(), 3);
         state.toggle_file(0);
+        assert_eq!(state.flat_rows, vec![ProjectSearchFlatRow::File(0)]);
+    }
+
+    #[test]
+    fn project_search_live_filter_rebuilds_visible_rows_only() {
+        let mut state = ProjectSearchState::default();
+        state.has_run = true;
+        state.results.push(ProjectSearchFile {
+            path: PathBuf::from("/w/src/a.rs"),
+            relative_path: "src/a.rs".to_string(),
+            icon_key: "rust",
+            matches: Vec::new(),
+        });
+        state.results.push(ProjectSearchFile {
+            path: PathBuf::from("/w/src/a.py"),
+            relative_path: "src/a.py".to_string(),
+            icon_key: "python",
+            matches: Vec::new(),
+        });
+        state.filter_editor.insert_str("*.rs");
+
+        state.apply_live_filter();
+
         assert_eq!(state.flat_rows, vec![ProjectSearchFlatRow::File(0)]);
     }
 }

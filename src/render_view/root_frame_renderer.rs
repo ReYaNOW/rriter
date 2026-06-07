@@ -261,6 +261,7 @@ impl Renderer {
             && (ide_panel.api.mock_python_runtime_open
                 || ide_panel.api.mock_guide_open
                 || ide_panel.api.mock_server_detail_open
+                || ide_panel.project_search.help_open
                 || crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel));
         let (ui_mx, ui_my) = if modal_overlay_open {
             (-1.0, -1.0)
@@ -482,7 +483,7 @@ impl Renderer {
             }
             wants_pointer |=
                 self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
-            self.draw_api_modal_overlays(s, &ide_panel.api, ui_registry, mx, my, blink_alpha);
+            self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha);
             self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
@@ -1155,6 +1156,8 @@ impl Renderer {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));
+        } else if ide_panel.project_search.help_open {
+            crate::app::mouse::clear_hover_popup(Some(self));
         } else if ide_panel.api.mock_guide_open || ide_panel.api.mock_server_detail_open {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if ide_panel.api.mock_python_runtime_open {
@@ -1203,7 +1206,7 @@ impl Renderer {
                 overlay_my,
                 blink_alpha,
             );
-            self.draw_api_modal_overlays(s, &ide_panel.api, ui_registry, mx, my, blink_alpha);
+            self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha);
         }
 
         if is_ide_mode {

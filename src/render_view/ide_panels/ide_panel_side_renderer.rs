@@ -790,17 +790,18 @@ impl Renderer {
             // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)
             // Не подсвечиваем, когда терминал в фокусе
             let resize_x = panel_x + panel_left_w;
+            let resize_hit = 3.0 * s;
             let resize_max_y = blocking_bottom_y.unwrap_or(real_height);
             if !is_ui_disabled
-                && mx >= resize_x - 8.0 * s
-                && mx <= resize_x + 8.0 * s
+                && mx >= resize_x - resize_hit
+                && mx <= resize_x + resize_hit
                 && my >= 0.0
                 && my <= resize_max_y
             {
                 self.push_rect(
-                    resize_x - 2.0,
+                    resize_x - 1.0,
                     0.0,
-                    2.0,
+                    1.0,
                     resize_max_y,
                     [0.60, 0.35, 0.85, 0.4],
                 );

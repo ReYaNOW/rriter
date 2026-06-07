@@ -965,6 +965,12 @@ impl App {
                 );
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::ProjectSearchFilterInput => {
+                self.focus_project_search_field(
+                    crate::app::project_search::ProjectSearchField::Filter,
+                );
+                self.window.as_ref().unwrap().request_redraw();
+            }
             UiId::ProjectSearchRun => {
                 self.start_project_search();
                 self.window.as_ref().unwrap().request_redraw();

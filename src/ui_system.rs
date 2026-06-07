@@ -251,6 +251,7 @@ pub enum UiId {
     ProjectSearchQueryInput,
     ProjectSearchIncludeInput,
     ProjectSearchExcludeInput,
+    ProjectSearchFilterInput,
     ProjectSearchRun,
     ProjectSearchCaseToggle,
     ProjectSearchHelp,

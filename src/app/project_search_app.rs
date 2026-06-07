@@ -32,6 +32,10 @@ impl crate::app::App {
         self.ide_panel.project_search.total_matches = 0;
         self.ide_panel.project_search.scroll.target = 0.0;
         self.ide_panel.project_search.scroll.current = 0.0;
+        if self.ide_panel.project_search.focused == Some(ProjectSearchField::Filter) {
+            self.ide_panel.project_search.focused = None;
+            self.ide_panel.project_search.dragging_field = None;
+        }
         if query.is_empty() {
             self.ide_panel.project_search.running_generation = None;
             self.ide_panel.project_search.rx = None;
@@ -109,11 +113,9 @@ impl crate::app::App {
         let Some(renderer) = self.renderer.as_ref() else {
             return false;
         };
-        self.ide_panel.project_search.start_scrollbar_drag(
-            &layout,
-            mouse_y,
-            renderer.scale_factor,
-        )
+        self.ide_panel
+            .project_search
+            .start_scrollbar_drag(&layout, mouse_y, renderer.scale_factor)
     }
 
     pub fn drag_project_search_scrollbar_to(&mut self, mouse_y: f32) -> bool {
@@ -155,6 +157,10 @@ impl crate::app::App {
     }
 
     pub fn focus_project_search_field(&mut self, field: ProjectSearchField) {
+        if field == ProjectSearchField::Filter && !self.ide_panel.project_search.filter_enabled() {
+            self.ide_panel.project_search.focused = None;
+            return;
+        }
         self.ide_panel.project_search.focused = Some(field);
         self.search_focused = false;
         self.ide_panel.term_search_focused = false;
@@ -188,6 +194,9 @@ impl crate::app::App {
         mouse_y: f32,
         reset_anchor: bool,
     ) {
+        if field == ProjectSearchField::Filter && !self.ide_panel.project_search.filter_enabled() {
+            return;
+        }
         let Some(layout) = self.project_search_panel_layout() else {
             return;
         };
@@ -198,6 +207,7 @@ impl crate::app::App {
             ProjectSearchField::Query => layout.query,
             ProjectSearchField::Include => layout.include,
             ProjectSearchField::Exclude => layout.exclude,
+            ProjectSearchField::Filter => layout.filter,
         };
         let text_scale = 0.82;
         let line_h = (18.0 * renderer.scale_factor).round().max(1.0);
@@ -205,6 +215,7 @@ impl crate::app::App {
             ProjectSearchField::Query => &mut self.ide_panel.project_search.query_editor,
             ProjectSearchField::Include => &mut self.ide_panel.project_search.include_editor,
             ProjectSearchField::Exclude => &mut self.ide_panel.project_search.exclude_editor,
+            ProjectSearchField::Filter => &mut self.ide_panel.project_search.filter_editor,
         };
         let text = editor.get_full_text();
         let visual_line = if field == ProjectSearchField::Query {
@@ -249,9 +260,12 @@ impl crate::app::App {
             for (rel_idx, ch) in line_text.char_indices() {
                 let adv = renderer
                     .get_ui_glyph(ch)
-                    .map(|glyph| glyph.advance)
-                    .unwrap_or(10.0)
-                    * text_scale;
+                    .map(|glyph| {
+                        crate::renderer::Renderer::snapped_text_advance(glyph.advance, text_scale)
+                    })
+                    .unwrap_or_else(|| {
+                        crate::renderer::Renderer::snapped_text_advance(10.0, text_scale)
+                    });
                 if x_offset <= current_x + adv * 0.5 {
                     target = line_start + rel_idx;
                     break;
@@ -272,13 +286,9 @@ impl crate::app::App {
             .results
             .get(file_idx)
             .and_then(|file| {
-                file.matches.get(match_idx).map(|mat| {
-                    (
-                        file.path.clone(),
-                        mat.byte_start,
-                        mat.byte_end,
-                    )
-                })
+                file.matches
+                    .get(match_idx)
+                    .map(|mat| (file.path.clone(), mat.byte_start, mat.byte_end))
             })
         else {
             return;

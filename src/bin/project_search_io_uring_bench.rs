@@ -144,9 +144,7 @@ fn collect_candidate_paths(roots: &[PathBuf]) -> Vec<PathBuf> {
             }
             ignore::WalkState::Continue
         })
-            as Box<
-                dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState + Send,
-            >
+            as Box<dyn FnMut(Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState + Send>
     };
     builder.build_parallel().run(visitor);
     Arc::try_unwrap(paths)
@@ -165,7 +163,9 @@ struct SearchStats {
 
 impl SearchStats {
     fn add(&mut self, other: Self) {
-        self.files_with_matches = self.files_with_matches.saturating_add(other.files_with_matches);
+        self.files_with_matches = self
+            .files_with_matches
+            .saturating_add(other.files_with_matches);
         self.matches = self.matches.saturating_add(other.matches);
         self.bytes_read = self.bytes_read.saturating_add(other.bytes_read);
         self.errors = self.errors.saturating_add(other.errors);
@@ -333,12 +333,7 @@ impl FileTask {
         })
     }
 
-    fn handle_read(
-        &mut self,
-        result: i32,
-        needle: &[u8],
-        stats: &mut SearchStats,
-    ) -> ReadAction {
+    fn handle_read(&mut self, result: i32, needle: &[u8], stats: &mut SearchStats) -> ReadAction {
         if result < 0 {
             stats.errors = stats.errors.saturating_add(1);
             return ReadAction::Close;
@@ -445,7 +440,11 @@ fn user_op(user_data: u64) -> u64 {
     user_data & 0b11
 }
 
-fn count_ascii_case_insensitive_stream(prev_tail: &mut Vec<u8>, chunk: &[u8], needle: &[u8]) -> u64 {
+fn count_ascii_case_insensitive_stream(
+    prev_tail: &mut Vec<u8>,
+    chunk: &[u8],
+    needle: &[u8],
+) -> u64 {
     if needle.is_empty() || chunk.is_empty() {
         return 0;
     }
@@ -540,10 +539,43 @@ fn is_binary_by_extension(path: &Path) -> bool {
     };
     matches!(
         ext,
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "ico" | "bmp" | "tif" | "tiff" | "ttf"
-            | "otf" | "woff" | "woff2" | "eot" | "pdf" | "zip" | "gz" | "tgz" | "xz"
-            | "bz2" | "zst" | "7z" | "rar" | "tar" | "pack" | "idx" | "so" | "dylib"
-            | "dll" | "a" | "rlib" | "rmeta" | "class" | "pyc" | "pyo" | "o" | "obj"
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "webp"
+            | "ico"
+            | "bmp"
+            | "tif"
+            | "tiff"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "eot"
+            | "pdf"
+            | "zip"
+            | "gz"
+            | "tgz"
+            | "xz"
+            | "bz2"
+            | "zst"
+            | "7z"
+            | "rar"
+            | "tar"
+            | "pack"
+            | "idx"
+            | "so"
+            | "dylib"
+            | "dll"
+            | "a"
+            | "rlib"
+            | "rmeta"
+            | "class"
+            | "pyc"
+            | "pyo"
+            | "o"
+            | "obj"
             | "wasm"
     )
 }

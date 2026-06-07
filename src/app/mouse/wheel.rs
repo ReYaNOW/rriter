@@ -170,6 +170,10 @@ impl App {
         let (dx, dy) = wheel_delta(delta, lh);
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.ide_panel.project_search.help_open {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if self.api_python_runtime_overlay_active() {
             self.scroll_api_python_runtime_overlay(dy);
             self.window.as_ref().unwrap().request_redraw();

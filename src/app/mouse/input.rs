@@ -265,6 +265,22 @@ impl App {
             return;
         }
 
+        if state == ElementState::Pressed && self.ide_panel.project_search.help_open {
+            if button == winit::event::MouseButton::Left {
+                match self.ui_registry.find_overlay_at(mx, my) {
+                    Some(crate::ui_system::UiId::ProjectSearchHelp) => {
+                        self.handle_ui_click(crate::ui_system::UiId::ProjectSearchHelp);
+                    }
+                    Some(crate::ui_system::UiId::ProjectSearchHelpPopup) => {}
+                    _ => {
+                        self.ide_panel.project_search.help_open = false;
+                    }
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if state == ElementState::Pressed && self.file_tree_overlay_active() {
             match button {
                 winit::event::MouseButton::Left => {
@@ -721,7 +737,7 @@ impl App {
                     let mut manual_resize = false;
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 6.0 * s && my >= 0.0 && my < resize_bottom_limit
+                        if (mx - resize_x).abs() < 3.0 * s && my >= 0.0 && my < resize_bottom_limit
                         {
                             self.ide_panel.is_resizing_left = true;
                             manual_resize = true;
@@ -1026,9 +1042,16 @@ impl App {
                             crate::ui_system::UiId::ProjectSearchExcludeInput => {
                                 Some(crate::app::project_search::ProjectSearchField::Exclude)
                             }
+                            crate::ui_system::UiId::ProjectSearchFilterInput => {
+                                Some(crate::app::project_search::ProjectSearchField::Filter)
+                            }
                             _ => None,
                         } {
-                            self.ide_panel.project_search.dragging_field = Some(field);
+                            if field != crate::app::project_search::ProjectSearchField::Filter
+                                || self.ide_panel.project_search.filter_enabled()
+                            {
+                                self.ide_panel.project_search.dragging_field = Some(field);
+                            }
                         }
                         if clicked_id == crate::ui_system::UiId::TerminalBody {
                             self.ide_panel.is_dragging_terminal = true;
