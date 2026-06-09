@@ -378,11 +378,10 @@ mod tests {
             severity,
             code: None,
             code_href: None,
-            message: String::new(),
+            message: std::sync::Arc::<str>::from(""),
             source: None,
-            quickfixes: Vec::new(),
-            tags: Vec::new(),
-            spans: Vec::new(),
+            quickfixes: Vec::new().into_boxed_slice(),
+            tags: Vec::new().into_boxed_slice(),
         }
     }
 
@@ -407,20 +406,20 @@ mod tests {
     #[test]
     fn active_line_useless_expression_suppresses_only_current_b018() {
         let mut diag = test_diagnostic(crate::lsp::DiagSeverity::Warning);
-        diag.code = Some("B018".to_string());
+        diag.code = Some(std::sync::Arc::<str>::from("B018"));
         assert!(should_suppress_active_line_useless_expression(&diag, 0));
         assert!(!should_suppress_active_line_useless_expression(&diag, 1));
 
-        diag.code = Some("useless-expression".to_string());
+        diag.code = Some(std::sync::Arc::<str>::from("useless-expression"));
         assert!(should_suppress_active_line_useless_expression(&diag, 0));
 
         diag.code = None;
         diag.message = "Found useless expression. Either assign it to a variable or remove it."
-            .to_string();
+            .into();
         assert!(should_suppress_active_line_useless_expression(&diag, 0));
 
-        diag.code = Some("F401".to_string());
-        diag.message = "imported but unused".to_string();
+        diag.code = Some(std::sync::Arc::<str>::from("F401"));
+        diag.message = "imported but unused".into();
         assert!(!should_suppress_active_line_useless_expression(&diag, 0));
     }
 

@@ -4,32 +4,13 @@ use glow::HasContext;
 
 pub(crate) const EXTERNAL_TAB_TITLE_COLOR: [f32; 4] = [1.0, 0.55, 0.18, 1.0];
 
-fn tab_diagnostic_severity(
-    diagnostics: &[crate::lsp::Diagnostic],
-) -> Option<crate::lsp::DiagSeverity> {
-    let mut has_warning = false;
-    for diagnostic in diagnostics {
-        match diagnostic.severity {
-            crate::lsp::DiagSeverity::Error => return Some(crate::lsp::DiagSeverity::Error),
-            crate::lsp::DiagSeverity::Warning => has_warning = true,
-            _ => {}
-        }
-    }
-    has_warning.then_some(crate::lsp::DiagSeverity::Warning)
-}
-
 fn tab_diagnostic_severity_for_path(
     lsp: Option<&crate::lsp::LspManager>,
     path: Option<&std::path::PathBuf>,
 ) -> Option<crate::lsp::DiagSeverity> {
     let lsp = lsp?;
     let path = path?;
-    let diagnostics = lsp
-        .diagnostics
-        .get(path)
-        .map(|diags| diags.as_slice())
-        .unwrap_or_else(|| lsp.get_diagnostics(path));
-    tab_diagnostic_severity(diagnostics)
+    lsp.diagnostic_severity_for_path(path)
 }
 
 pub(crate) fn tab_path_is_external(

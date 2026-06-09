@@ -85,7 +85,7 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
     assert_eq!(diag.severity, DiagSeverity::Warning);
     assert_eq!(diag.code.as_deref(), Some("F401"));
     assert_eq!(diag.source.as_deref(), Some("ruff"));
-    assert_eq!(diag.message, "remove unused import\nnext");
+    assert_eq!(diag.message.as_ref(), "remove unused import\nnext");
     assert_eq!(diag.quickfixes.len(), 1);
 
     let edit_json = serde_json::json!({
@@ -535,7 +535,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
     assert_eq!(diag.severity, DiagSeverity::Hint);
     assert_eq!(diag.code, None);
     assert_eq!(diag.source, None);
-    assert_eq!(diag.message, "raw    text");
+    assert_eq!(diag.message.as_ref(), "raw    text");
     assert!(parse_diagnostic_value(&serde_json::json!({})).is_none());
 
     assert_eq!(
@@ -638,7 +638,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
             assert_eq!(version, Some(3));
             assert_eq!(result_id, None);
             assert_eq!(items.len(), 1);
-            assert_eq!(items[0].message, "boom");
+            assert_eq!(items[0].message.as_ref(), "boom");
         }
         other => panic!("unexpected event: {other:?}"),
     }
@@ -797,7 +797,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             assert_eq!(server_name, "ty");
             assert_eq!(path, PathBuf::from("/tmp/workspace.py"));
             assert_eq!(version, Some(4));
-            assert_eq!(items[0].message, "workspace boom");
+            assert_eq!(items[0].message.as_ref(), "workspace boom");
             assert_eq!(result_id.as_deref(), Some("r1"));
         }
         other => panic!("unexpected event: {other:?}"),
@@ -810,13 +810,52 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             ..
         } => {
             assert_eq!(path, PathBuf::from("/tmp/related.py"));
-            assert_eq!(items[0].message, "related boom");
+            assert_eq!(items[0].message.as_ref(), "related boom");
             assert_eq!(result_id.as_deref(), Some("r2"));
         }
         other => panic!("unexpected event: {other:?}"),
     }
     match recv_non_log(&event_rx) {
         LspEvent::WorkspaceDiagnosticsDone { request_id } => assert_eq!(request_id, 7),
+        other => panic!("unexpected event: {other:?}"),
+    }
+
+    let (large_event_tx, large_event_rx) = mpsc::channel();
+    let (large_out_tx, _large_out_rx) = mpsc::channel();
+    let large_pending = Arc::new(Mutex::new(HashMap::from([(
+        6,
+        PendingRequestKind::Completion,
+    )])));
+    let items = (0..96)
+        .map(|idx| format!(r#"{{"label":"Item{idx}","kind":7}}"#))
+        .collect::<Vec<_>>()
+        .join(",");
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","id":6,"result":{{"isIncomplete":false,"items":[{items}]}}}}"#
+    );
+    dispatch_frame(
+        body.as_bytes(),
+        &large_event_tx,
+        "ty",
+        &large_out_tx,
+        &large_pending,
+    );
+    match large_event_rx.recv().unwrap() {
+        LspEvent::Log { name, message } => {
+            assert_eq!(name, "ty");
+            assert!(message.contains(r#""items_omitted":96"#));
+            assert!(message.contains(r#""body_bytes":"#));
+            assert!(!message.contains("Item95"));
+            assert!(message.len() < 160);
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+    match recv_non_log(&large_event_rx) {
+        LspEvent::CompletionResponse { request_id, items } => {
+            assert_eq!(request_id, 6);
+            assert_eq!(items.len(), 96);
+            assert_eq!(items[95].label, "Item95");
+        }
         other => panic!("unexpected event: {other:?}"),
     }
 

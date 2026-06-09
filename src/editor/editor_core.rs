@@ -886,6 +886,17 @@ impl Editor {
         s
     }
 
+    pub fn text_equals(&self, text: &str) -> bool {
+        if self.len() != text.len() {
+            return false;
+        }
+        let (first, second) = self.text_parts();
+        let bytes = text.as_bytes();
+        let first_len = first.len();
+        bytes.get(..first_len) == Some(first.as_bytes())
+            && bytes.get(first_len..) == Some(second.as_bytes())
+    }
+
     pub fn line_text_owned(&self, line: usize) -> String {
         let Some(&start) = self.line_offsets.get(line) else {
             return String::new();

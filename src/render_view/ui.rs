@@ -1287,7 +1287,7 @@ impl Renderer {
     pub fn draw_diagnostics_ruler(
         &mut self,
         editor: &crate::editor::Editor,
-        lsp_diags: &[crate::lsp::Diagnostic],
+        lsp_diags: &[&crate::lsp::Diagnostic],
         track_y: f32,
         track_h: f32,
         scrollbar_w: f32,
@@ -1318,7 +1318,7 @@ impl Renderer {
         let mut lines_with_errors = std::collections::HashSet::new();
         let mut lines_with_warnings = std::collections::HashSet::new();
 
-        for diag in lsp_diags {
+        for &diag in lsp_diags {
             if crate::render_view::should_suppress_active_line_useless_expression(
                 diag,
                 cursor_phys_line,

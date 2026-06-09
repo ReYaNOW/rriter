@@ -116,6 +116,11 @@ pub enum HighlighterMessage {
         invalidate_start_byte: Option<usize>,
         invalidate_end_byte: Option<usize>,
     },
+    Priority {
+        request_id: u64,
+        version: u64,
+        priority_anchor: usize,
+    },
 }
 
 pub struct Highlighter {
@@ -143,6 +148,7 @@ pub struct Highlighter {
     sync_tree: Option<tree_sitter::Tree>,
     sync_query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query>,
     sync_byte_colors_buf: Vec<[f32; 4]>,
+    pending_priority_anchor: Option<usize>,
 }
 
 pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
@@ -158,10 +164,12 @@ pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
 const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_LINES: usize = 800;
+pub(crate) const TREE_SITTER_FULL_HIGHLIGHT_MAX_BYTES: usize = 512 * 1024;
+pub(crate) const TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES: usize = 5_000;
 const PRIORITY_HIGHLIGHT_HEAD_LINES: usize = 80;
 const PRIORITY_HIGHLIGHT_HEAD_MIN_BYTES: usize = 12 * 1024;
-const PRIORITY_HIGHLIGHT_TAIL_LINES: usize = 240;
-const PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES: usize = 32 * 1024;
+const PRIORITY_HIGHLIGHT_TAIL_LINES: usize = 360;
+const PRIORITY_HIGHLIGHT_TAIL_MIN_BYTES: usize = 48 * 1024;
 
 #[derive(Debug)]
 struct Scope {
@@ -499,6 +507,26 @@ pub(crate) fn should_prioritize_front_highlight(ext: &str, text: &str) -> bool {
     false
 }
 
+fn should_skip_full_highlight(lang_name: &'static str, text: &str) -> bool {
+    if !matches!(lang_name, "py" | "rs") {
+        return false;
+    }
+    if text.len() > TREE_SITTER_FULL_HIGHLIGHT_MAX_BYTES {
+        return true;
+    }
+
+    let mut lines = 1usize;
+    for &b in text.as_bytes() {
+        if b == b'\n' {
+            lines += 1;
+            if lines > TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn priority_highlight_range(lang_name: &'static str, text: &str, anchor: usize) -> Range<usize> {
     let bytes = text.as_bytes();
     if bytes.is_empty() {
@@ -662,6 +690,231 @@ fn push_language_import_foldable_ranges(
     }
 }
 
+fn inject_builtin_completions(
+    lang_name: &'static str,
+    completions_map: &mut HashMap<(String, usize, usize), SymbolKind>,
+) {
+    fn inject(
+        completions_map: &mut HashMap<(String, usize, usize), SymbolKind>,
+        items: &[(&str, SymbolKind)],
+    ) {
+        for &(word, kind) in items {
+            let kind = if kind == SymbolKind::Keyword {
+                SymbolKind::Keyword
+            } else {
+                SymbolKind::Builtin
+            };
+            completions_map
+                .entry((word.to_string(), 0, usize::MAX))
+                .or_insert(kind);
+        }
+    }
+
+    match lang_name {
+        "py" => {
+            inject(
+                completions_map,
+                &[
+                    ("print", SymbolKind::Function),
+                    ("len", SymbolKind::Function),
+                    ("int", SymbolKind::Class),
+                    ("str", SymbolKind::Class),
+                    ("list", SymbolKind::Class),
+                    ("dict", SymbolKind::Class),
+                    ("set", SymbolKind::Class),
+                    ("tuple", SymbolKind::Class),
+                    ("bool", SymbolKind::Class),
+                    ("float", SymbolKind::Class),
+                    ("sum", SymbolKind::Function),
+                    ("min", SymbolKind::Function),
+                    ("max", SymbolKind::Function),
+                    ("abs", SymbolKind::Function),
+                    ("isinstance", SymbolKind::Function),
+                    ("issubclass", SymbolKind::Function),
+                    ("hasattr", SymbolKind::Function),
+                    ("getattr", SymbolKind::Function),
+                    ("setattr", SymbolKind::Function),
+                    ("delattr", SymbolKind::Function),
+                    ("dir", SymbolKind::Function),
+                    ("type", SymbolKind::Class),
+                    ("enumerate", SymbolKind::Function),
+                    ("zip", SymbolKind::Function),
+                    ("map", SymbolKind::Class),
+                    ("filter", SymbolKind::Class),
+                    ("range", SymbolKind::Class),
+                    ("reversed", SymbolKind::Class),
+                    ("open", SymbolKind::Function),
+                    ("super", SymbolKind::Function),
+                    ("Exception", SymbolKind::Class),
+                    ("ValueError", SymbolKind::Class),
+                    ("TypeError", SymbolKind::Class),
+                    ("KeyError", SymbolKind::Class),
+                    ("IndexError", SymbolKind::Class),
+                    ("AttributeError", SymbolKind::Class),
+                    ("RuntimeError", SymbolKind::Class),
+                    ("KeyboardInterrupt", SymbolKind::Class),
+                    ("True", SymbolKind::Keyword),
+                    ("False", SymbolKind::Keyword),
+                    ("None", SymbolKind::Keyword),
+                    ("__name__", SymbolKind::Variable),
+                    ("__file__", SymbolKind::Variable),
+                    ("__doc__", SymbolKind::Variable),
+                    ("__dict__", SymbolKind::Variable),
+                    ("__init__", SymbolKind::Function),
+                    ("__call__", SymbolKind::Function),
+                ],
+            );
+        }
+        "rs" => {
+            inject(
+                completions_map,
+                &[
+                    ("println!", SymbolKind::Function),
+                    ("print!", SymbolKind::Function),
+                    ("format!", SymbolKind::Function),
+                    ("panic!", SymbolKind::Function),
+                    ("vec!", SymbolKind::Function),
+                    ("String", SymbolKind::Class),
+                    ("Vec", SymbolKind::Class),
+                    ("Option", SymbolKind::Class),
+                    ("Result", SymbolKind::Class),
+                    ("Some", SymbolKind::Variable),
+                    ("None", SymbolKind::Variable),
+                    ("Ok", SymbolKind::Variable),
+                    ("Err", SymbolKind::Variable),
+                    ("Box", SymbolKind::Class),
+                    ("Rc", SymbolKind::Class),
+                    ("Arc", SymbolKind::Class),
+                    ("HashMap", SymbolKind::Class),
+                    ("HashSet", SymbolKind::Class),
+                    ("std", SymbolKind::Variable),
+                    ("iter", SymbolKind::Function),
+                    ("map", SymbolKind::Function),
+                    ("collect", SymbolKind::Function),
+                    ("unwrap", SymbolKind::Function),
+                    ("expect", SymbolKind::Function),
+                    ("clone", SymbolKind::Function),
+                    ("as_ref", SymbolKind::Function),
+                    ("into", SymbolKind::Function),
+                    ("from", SymbolKind::Function),
+                    ("mut", SymbolKind::Keyword),
+                    ("let", SymbolKind::Keyword),
+                    ("fn", SymbolKind::Keyword),
+                    ("impl", SymbolKind::Keyword),
+                    ("pub", SymbolKind::Keyword),
+                    ("struct", SymbolKind::Keyword),
+                ],
+            );
+        }
+        "dart" => {
+            inject(
+                completions_map,
+                &[
+                    ("print", SymbolKind::Function),
+                    ("String", SymbolKind::Class),
+                    ("int", SymbolKind::Class),
+                    ("double", SymbolKind::Class),
+                    ("bool", SymbolKind::Class),
+                    ("List", SymbolKind::Class),
+                    ("Map", SymbolKind::Class),
+                    ("Set", SymbolKind::Class),
+                    ("Future", SymbolKind::Class),
+                    ("Stream", SymbolKind::Class),
+                    ("Widget", SymbolKind::Class),
+                    ("StatelessWidget", SymbolKind::Class),
+                    ("StatefulWidget", SymbolKind::Class),
+                    ("BuildContext", SymbolKind::Class),
+                    ("Scaffold", SymbolKind::Class),
+                    ("AppBar", SymbolKind::Class),
+                    ("Text", SymbolKind::Class),
+                    ("Container", SymbolKind::Class),
+                    ("Column", SymbolKind::Class),
+                    ("Row", SymbolKind::Class),
+                    ("ListView", SymbolKind::Class),
+                    ("Padding", SymbolKind::Class),
+                    ("Center", SymbolKind::Class),
+                    ("initState", SymbolKind::Function),
+                    ("build", SymbolKind::Function),
+                    ("dispose", SymbolKind::Function),
+                    ("setState", SymbolKind::Function),
+                    ("late", SymbolKind::Keyword),
+                    ("final", SymbolKind::Keyword),
+                    ("const", SymbolKind::Keyword),
+                ],
+            );
+        }
+        "js" | "ts" | "tsx" => {
+            inject(
+                completions_map,
+                &[
+                    ("console", SymbolKind::Variable),
+                    ("window", SymbolKind::Variable),
+                    ("document", SymbolKind::Variable),
+                    ("require", SymbolKind::Function),
+                    ("setTimeout", SymbolKind::Function),
+                    ("setInterval", SymbolKind::Function),
+                    ("Promise", SymbolKind::Class),
+                    ("Math", SymbolKind::Class),
+                    ("Object", SymbolKind::Class),
+                    ("Array", SymbolKind::Class),
+                    ("String", SymbolKind::Class),
+                    ("Number", SymbolKind::Class),
+                    ("Boolean", SymbolKind::Class),
+                    ("Error", SymbolKind::Class),
+                    ("true", SymbolKind::Keyword),
+                    ("false", SymbolKind::Keyword),
+                    ("null", SymbolKind::Keyword),
+                    ("undefined", SymbolKind::Keyword),
+                ],
+            );
+        }
+        "c" | "cpp" => {
+            inject(
+                completions_map,
+                &[
+                    ("int", SymbolKind::Class),
+                    ("float", SymbolKind::Class),
+                    ("double", SymbolKind::Class),
+                    ("char", SymbolKind::Class),
+                    ("void", SymbolKind::Class),
+                    ("struct", SymbolKind::Keyword),
+                    ("class", SymbolKind::Keyword),
+                    ("return", SymbolKind::Keyword),
+                    ("if", SymbolKind::Keyword),
+                    ("else", SymbolKind::Keyword),
+                    ("for", SymbolKind::Keyword),
+                    ("while", SymbolKind::Keyword),
+                    ("sizeof", SymbolKind::Function),
+                    ("printf", SymbolKind::Function),
+                    ("malloc", SymbolKind::Function),
+                    ("free", SymbolKind::Function),
+                    ("true", SymbolKind::Keyword),
+                    ("false", SymbolKind::Keyword),
+                    ("nullptr", SymbolKind::Keyword),
+                    ("this", SymbolKind::Keyword),
+                ],
+            );
+        }
+        _ => {}
+    }
+}
+
+fn completion_items_from_map(
+    completions_map: HashMap<(String, usize, usize), SymbolKind>,
+) -> Vec<CompletionItem> {
+    let mut completions: Vec<CompletionItem> = completions_map
+        .into_iter()
+        .map(|((word, scope_start, scope_end), kind)| CompletionItem {
+            word,
+            kind,
+            scope_start,
+            scope_end,
+        })
+        .collect();
+    completions.sort_by(|a, b| a.word.cmp(&b.word));
+    completions
+}
+
 fn priority_highlight_spans_from_slice(
     parser: &mut tree_sitter::Parser,
     lang: &tree_sitter::Language,
@@ -781,6 +1034,41 @@ fn merge_highlight_spans(
     }
 
     base
+}
+
+fn merge_partial_highlight_spans(
+    mut base: Vec<ColorSpan>,
+    overlay: Vec<ColorSpan>,
+    range: Range<usize>,
+) -> Vec<ColorSpan> {
+    if range.start >= range.end {
+        return base;
+    }
+
+    let mut ranges = vec![(range.start, range.end)];
+    cut_spans_by_ranges(&mut base, &mut ranges);
+    base.extend(overlay.into_iter().filter(|span| span.start < span.end));
+    if base.is_empty() {
+        return base;
+    }
+
+    base.sort_by_key(|span| span.start);
+    let mut merged = Vec::with_capacity(base.len());
+    let mut current = base[0].clone();
+    for span in base.into_iter().skip(1) {
+        if span.start <= current.end && span.color == current.color {
+            current.end = current.end.max(span.end);
+        } else {
+            if current.start < current.end {
+                merged.push(current);
+            }
+            current = span;
+        }
+    }
+    if current.start < current.end {
+        merged.push(current);
+    }
+    merged
 }
 
 fn flatten_spans_for_range(

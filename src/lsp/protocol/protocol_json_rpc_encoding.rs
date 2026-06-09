@@ -331,6 +331,71 @@ pub(super) fn dispatch_frame(
     out_tx: &Sender<Vec<u8>>,
     pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) {
+    let header = match serde_json::from_slice::<RpcHeader<'_>>(body) {
+        Ok(header) => header,
+        Err(e) => {
+            let log_msg = format!("[LSP RECV ERROR] {}: {}", e, String::from_utf8_lossy(body));
+            let _ = event_tx.send(LspEvent::Log {
+                name: server_name,
+                message: log_msg,
+            });
+            return;
+        }
+    };
+    let header_id = header.id.as_ref().and_then(RpcId::as_i64);
+    let header_pending_kind = if header.method.is_none() {
+        header_id.and_then(|req_id| {
+            pending_requests
+                .lock()
+                .ok()
+                .and_then(|mut p| p.remove(&(req_id as i32)))
+        })
+    } else {
+        None
+    };
+
+    if header.method == Some("textDocument/publishDiagnostics") {
+        let _ = event_tx.send(LspEvent::Log {
+            name: server_name,
+            message: recv_log_message_from_header(
+                body,
+                header.id.as_ref(),
+                header.method,
+                None,
+            ),
+        });
+        if let Some(event) = parse_publish_diagnostics_frame(body, server_name) {
+            let _ = event_tx.send(event);
+        }
+        return;
+    }
+
+    if matches!(
+        header_pending_kind.as_ref(),
+        Some(PendingRequestKind::WorkspaceDiagnostic)
+    ) {
+        let _ = event_tx.send(LspEvent::Log {
+            name: server_name,
+            message: recv_log_message_from_header(
+                body,
+                header.id.as_ref(),
+                header.method,
+                top_result_items_len(body),
+            ),
+        });
+        if header.error.is_none() {
+            for event in parse_workspace_diagnostics_frame(body, server_name) {
+                let _ = event_tx.send(event);
+            }
+        }
+        if let Some(req_id) = header_id {
+            let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
+                request_id: req_id as i32,
+            });
+        }
+        return;
+    }
+
     let msg: serde_json::Value = match serde_json::from_slice(body) {
         Ok(v) => v,
         Err(e) => {
@@ -457,10 +522,12 @@ pub(super) fn dispatch_frame(
         }
         None => {
             if let Some(req_id) = id {
-                let pending_kind = pending_requests
-                    .lock()
-                    .ok()
-                    .and_then(|mut p| p.remove(&(req_id as i32)));
+                let pending_kind = header_pending_kind.or_else(|| {
+                    pending_requests
+                        .lock()
+                        .ok()
+                        .and_then(|mut p| p.remove(&(req_id as i32)))
+                });
 
                 if msg.get("error").is_some() {
                     match pending_kind {
@@ -572,30 +639,90 @@ pub(super) fn dispatch_frame(
 
 fn recv_log_message(body: &[u8], msg: &serde_json::Value) -> String {
     const LARGE_ITEMS_LOG_LIMIT: usize = 80;
+    const LARGE_BODY_LOG_LIMIT: usize = 16 * 1024;
     if let Some(items_len) = msg
         .pointer("/result/items")
         .and_then(|value| value.as_array())
         .map(Vec::len)
         .filter(|len| *len > LARGE_ITEMS_LOG_LIMIT)
     {
-        let mut compact = msg.clone();
-        if let Some(result) = compact
-            .get_mut("result")
-            .and_then(|value| value.as_object_mut())
-        {
-            result.insert(
-                "items".to_string(),
-                serde_json::json!({
-                    "omitted": items_len,
-                    "reason": "large LSP result"
-                }),
-            );
-        }
-        if let Ok(text) = serde_json::to_string(&compact) {
-            return format!("[LSP RECV] {text}");
-        }
+        return recv_log_summary(msg, body.len(), Some(items_len));
+    }
+    if body.len() > LARGE_BODY_LOG_LIMIT {
+        return recv_log_summary(msg, body.len(), None);
     }
     format!("[LSP RECV] {}", String::from_utf8_lossy(body))
+}
+
+fn recv_log_message_from_header(
+    body: &[u8],
+    id: Option<&RpcId<'_>>,
+    method: Option<&str>,
+    result_items_len: Option<usize>,
+) -> String {
+    const LARGE_ITEMS_LOG_LIMIT: usize = 80;
+    const LARGE_BODY_LOG_LIMIT: usize = 16 * 1024;
+    if let Some(items_len) = result_items_len.filter(|len| *len > LARGE_ITEMS_LOG_LIMIT) {
+        return recv_log_summary_from_parts(id, method, body.len(), Some(items_len));
+    }
+    if body.len() > LARGE_BODY_LOG_LIMIT {
+        return recv_log_summary_from_parts(id, method, body.len(), None);
+    }
+    format!("[LSP RECV] {}", String::from_utf8_lossy(body))
+}
+
+fn recv_log_summary(
+    msg: &serde_json::Value,
+    body_bytes: usize,
+    omitted_items: Option<usize>,
+) -> String {
+    let id = msg
+        .get("id")
+        .and_then(|value| serde_json::to_string(value).ok())
+        .unwrap_or_else(|| "null".to_string());
+    let method = msg
+        .get("method")
+        .and_then(|value| value.as_str())
+        .map(|method| format!(r#","method":"{}""#, json_escape(method)))
+        .unwrap_or_default();
+    let items = omitted_items
+        .map(|len| format!(r#","items_omitted":{len},"reason":"large LSP result""#))
+        .unwrap_or_else(|| r#","reason":"large LSP message""#.to_string());
+    format!(r#"[LSP RECV] {{"jsonrpc":"2.0","id":{id}{method},"body_bytes":{body_bytes}{items}}}"#)
+}
+
+fn recv_log_summary_from_parts(
+    id: Option<&RpcId<'_>>,
+    method: Option<&str>,
+    body_bytes: usize,
+    omitted_items: Option<usize>,
+) -> String {
+    let id = id
+        .map(RpcId::log_json)
+        .unwrap_or_else(|| "null".to_string());
+    let method = method
+        .map(|method| format!(r#","method":"{}""#, json_escape(method)))
+        .unwrap_or_default();
+    let items = omitted_items
+        .map(|len| format!(r#","items_omitted":{len},"reason":"large LSP result""#))
+        .unwrap_or_else(|| r#","reason":"large LSP message""#.to_string());
+    format!(r#"[LSP RECV] {{"jsonrpc":"2.0","id":{id}{method},"body_bytes":{body_bytes}{items}}}"#)
+}
+
+fn top_result_items_len(body: &[u8]) -> Option<usize> {
+    #[derive(serde::Deserialize)]
+    struct Frame {
+        result: Option<ResultItems>,
+    }
+    #[derive(serde::Deserialize)]
+    struct ResultItems {
+        items: Option<Vec<serde::de::IgnoredAny>>,
+    }
+    serde_json::from_slice::<Frame>(body)
+        .ok()
+        .and_then(|frame| frame.result)
+        .and_then(|result| result.items)
+        .map(|items| items.len())
 }
 
 // ── Запуск процесса ───────────────────────────────────────────────────────────

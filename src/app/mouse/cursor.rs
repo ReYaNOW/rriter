@@ -575,7 +575,7 @@ impl App {
                     .unwrap_or(0.0);
 
             if let (Some(lsp), Some(path)) = (self.lsp.as_ref(), self.file_path.as_ref()) {
-                let (_, diagnostics) = lsp.get_instant_diagnostics_with_version(path);
+                let (_, diagnostics) = lsp.instant_merged_diagnostics(path);
                 let render_scroll_x = self.scroll_x.current.round();
                 let left_padding = self.renderer.as_ref().unwrap().left_padding;
                 let last_line = self.editor.line_offsets.len().saturating_sub(1);

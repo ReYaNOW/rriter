@@ -465,12 +465,12 @@ fn problem_jump_to_closed_large_file_prioritizes_target_region() {
             severity: crate::lsp::DiagSeverity::Error,
             code: None,
             code_href: None,
-            message: "problem".to_string(),
+            message: std::sync::Arc::<str>::from("problem"),
             source: None,
-            quickfixes: Vec::new(),
-            tags: Vec::new(),
-            spans: Vec::new(),
-        }],
+            quickfixes: Vec::new().into_boxed_slice(),
+            tags: Vec::new().into_boxed_slice(),
+        }]
+        .into(),
     );
     app.lsp = Some(lsp);
     app.ide_panel.flat_diags.push((path.clone(), 0));
@@ -517,12 +517,12 @@ fn problem_jump_to_open_file_does_not_restart_highlighter() {
             severity: crate::lsp::DiagSeverity::Warning,
             code: None,
             code_href: None,
-            message: "problem".to_string(),
+            message: std::sync::Arc::<str>::from("problem"),
             source: None,
-            quickfixes: Vec::new(),
-            tags: Vec::new(),
-            spans: Vec::new(),
-        }],
+            quickfixes: Vec::new().into_boxed_slice(),
+            tags: Vec::new().into_boxed_slice(),
+        }]
+        .into(),
     );
     app.lsp = Some(lsp);
     app.ide_panel.flat_diags.push((path, 0));

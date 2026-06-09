@@ -69,6 +69,7 @@ impl App {
         }
 
         let path_to_close = self.file_path.take();
+        let old_ext = self.file_extension.clone();
         self.base_title = "Добро пожаловать".to_string();
         let old_version = self.editor.version;
         self.editor = Editor::new(8192);
@@ -84,17 +85,16 @@ impl App {
         self.autocomplete_active = false;
         self.show_welcome = true;
 
-        self.file_extension = String::new();
-
         if self.is_ide_mode {
             if let Some(lsp) = &mut self.lsp {
-                let ext = self.file_extension.clone();
                 if let Some(path) = path_to_close {
-                    lsp.notify_close(&path, &ext);
+                    lsp.notify_close(&path, &old_ext);
                 }
             }
             self.tabs.clear();
         }
+
+        self.file_extension = String::new();
 
         self.scroll_y.current = 0.0;
         self.scroll_y.target = 0.0;
@@ -257,6 +257,23 @@ impl App {
     }
 
     fn reset_highlighter_with_text(&mut self, text: String, _seed_immediately: bool) {
+        let priority =
+            crate::highlighter::should_prioritize_front_highlight(&self.file_extension, &text);
+        if !cfg!(test)
+            && (text.len() >= crate::highlighter::TREE_SITTER_HIGHLIGHT_MAX_BYTES || priority)
+        {
+            eprintln!(
+                "[HL TRACE app:reset_clear] ver={} bytes={} lines={} ext={} priority={} cursor={} old_spans={} old_complete={}",
+                self.editor.version,
+                text.len(),
+                text.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1,
+                self.file_extension,
+                priority,
+                self.editor.cursor.min(text.len()),
+                self.highlighter.spans.len(),
+                self.highlighter.is_complete,
+            );
+        }
         self.highlighter.spans.clear();
         self.highlighter.completions.clear();
         self.highlighter.foldable_ranges.clear();
@@ -275,6 +292,33 @@ impl App {
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.reset_highlighter_with_text(self.editor.get_full_text(), false);
         self.is_highlighted_once = false;
+    }
+
+    pub(crate) fn request_visible_priority_highlight(&mut self) -> bool {
+        if self.show_welcome
+            || self.active_tab_is_api_client()
+            || self.active_tab_is_git_diff()
+        {
+            return false;
+        }
+        let Some(renderer) = self.renderer.as_ref() else {
+            return false;
+        };
+        let line_height = renderer.line_height.max(1.0);
+        let Some(&last_line_start) = self.editor.line_offsets.last() else {
+            return false;
+        };
+        let top_line = (self.scroll_y.target.max(0.0) / line_height).floor() as usize;
+        let anchor_line = top_line.min(self.editor.line_offsets.len().saturating_sub(1));
+        let anchor = self
+            .editor
+            .line_offsets
+            .get(anchor_line)
+            .copied()
+            .unwrap_or(last_line_start)
+            .min(self.editor.len());
+        self.highlighter
+            .request_priority_highlight(self.editor.version, anchor)
     }
 
     pub fn load_file_internal(
@@ -387,7 +431,7 @@ impl App {
                             }
                             continue;
                         }
-                        if disk_text != tab.editor.get_full_text() {
+                        if !tab.editor.text_equals(&disk_text) {
                             let old_version = tab.editor.version;
                             tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
                             tab.editor.version = old_version + 1;
@@ -521,7 +565,7 @@ impl App {
             if tab.file_path.as_ref() != Some(&change.path) || tab.editor.is_dirty() {
                 continue;
             }
-            if change.disk_text == tab.editor.get_full_text() {
+            if tab.editor.text_equals(&change.disk_text) {
                 continue;
             }
             let old_version = tab.editor.version;

@@ -5,14 +5,9 @@ RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think abou
 Read in order:
 
 1. `AGENTS.md`
-2. `PROJECT_AI_MAP.txt`
+2. `PROJECT_AI_MAP.txt` (do not read fully, use as project INDEX)
 3. Needed source files in workspace
 4. `PROJECT_GUIDE.md` only for broader architecture
-
-If `PROJECT_AI_MAP.txt` missing:
-
-* Direct file access exists -> inspect source.
-* Chat-only/no full source -> ask for map before source files.
 
 Do not infer exact code from map. Map = index only.
 

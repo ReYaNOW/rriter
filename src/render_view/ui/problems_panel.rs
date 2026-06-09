@@ -192,16 +192,7 @@ impl Renderer {
                         let text_y = current_y + item_h * 0.7;
 
                         let (err_count, warn_count) = if let Some(l) = lsp {
-                            let diags = l.get_diagnostics(path);
-                            let e = diags
-                                .iter()
-                                .filter(|d| matches!(d.severity, crate::lsp::DiagSeverity::Error))
-                                .count();
-                            let w = diags
-                                .iter()
-                                .filter(|d| matches!(d.severity, crate::lsp::DiagSeverity::Warning))
-                                .count();
-                            (e, w)
+                            l.diagnostic_counts_for_path(path)
                         } else {
                             (0, 0)
                         };
@@ -257,7 +248,7 @@ impl Renderer {
                 }
 
                 let diag = if let Some(l) = lsp {
-                    if let Some(d) = l.get_diagnostics(path).get(*diag_idx) {
+                    if let Some(d) = l.diagnostic_at(path, *diag_idx) {
                         d
                     } else {
                         continue;

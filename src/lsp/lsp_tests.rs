@@ -20,7 +20,7 @@ fn test_process_with_events(
     (proc, cmd_rx, event_tx)
 }
 
-fn open_cmd(rx: &Receiver<Cmd>) -> (String, &'static str, i32, String) {
+fn open_cmd(rx: &Receiver<Cmd>) -> (String, &'static str, i32, Arc<str>) {
     match rx.try_recv().unwrap() {
         Cmd::Open {
             uri,
@@ -32,6 +32,10 @@ fn open_cmd(rx: &Receiver<Cmd>) -> (String, &'static str, i32, String) {
     }
 }
 
+fn diag_arc(items: Vec<Diagnostic>) -> Arc<[Diagnostic]> {
+    Arc::from(items)
+}
+
 fn test_diag(message: &str, severity: DiagSeverity, code: Option<&str>) -> Diagnostic {
     Diagnostic {
         start_line: 1,
@@ -39,14 +43,24 @@ fn test_diag(message: &str, severity: DiagSeverity, code: Option<&str>) -> Diagn
         end_line: 1,
         end_col: 8,
         severity,
-        code: code.map(str::to_string),
+        code: code.map(std::sync::Arc::<str>::from),
         code_href: None,
-        message: message.to_string(),
-        source: Some("ruff".to_string()),
-        quickfixes: Vec::new(),
-        tags: Vec::new(),
-        spans: Vec::new(),
+        message: std::sync::Arc::<str>::from(message),
+        source: Some(std::sync::Arc::<str>::from("ruff")),
+        quickfixes: Vec::new().into_boxed_slice(),
+        tags: Vec::new().into_boxed_slice(),
     }
+}
+
+fn python_text_with_lines(lines: usize) -> String {
+    let mut text = String::with_capacity(lines.saturating_mul(2).saturating_sub(1));
+    for line in 0..lines {
+        if line > 0 {
+            text.push('\n');
+        }
+        text.push('x');
+    }
+    text
 }
 
 #[test]
@@ -98,7 +112,7 @@ fn lsp_manager_keeps_and_reopens_saved_python_file_after_disable() {
     let path = PathBuf::from("/tmp/current.py");
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp")]);
     manager.current_path = Some(path.clone());
-    manager.current_python_file = Some((path.clone(), "print(2)\n".to_string(), 9));
+    manager.current_python_file = Some((path.clone(), Arc::from("print(2)\n"), 9));
 
     manager.disable_python();
     assert_eq!(manager.current_python_file.as_ref().unwrap().2, 9);
@@ -111,7 +125,7 @@ fn lsp_manager_keeps_and_reopens_saved_python_file_after_disable() {
         assert_eq!(cmd.0, path_to_uri(&path.to_string_lossy()));
         assert_eq!(cmd.1, "python");
         assert_eq!(cmd.2, 9);
-        assert_eq!(cmd.3, "print(2)\n");
+        assert_eq!(cmd.3.as_ref(), "print(2)\n");
     }
 }
 
@@ -120,24 +134,24 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     let path = PathBuf::from("/tmp/pkg/main.py");
     let (mut proc, rx) = test_process(&RUFF_SERVER);
 
-    proc.notify_open(&path, "print(1)\n", 3, None);
+    proc.notify_open(&path, Arc::from("print(1)\n"), 3, None);
     let opened = open_cmd(&rx);
     assert_eq!(opened.0, path_to_uri(&path.to_string_lossy()));
     assert_eq!(opened.1, "python");
     assert_eq!(opened.2, 3);
-    assert_eq!(opened.3, "print(1)\n");
+    assert_eq!(opened.3.as_ref(), "print(1)\n");
     assert_eq!(proc.current_uri.as_deref(), Some(opened.0.as_str()));
     assert_eq!(
-        proc.open_file_data.as_ref().map(|(_, text)| text.as_str()),
+        proc.open_file_data.as_ref().map(|(_, text)| text.as_ref()),
         Some("print(1)\n")
     );
 
-    proc.notify_change(&path, "print(2)\n", 4);
+    proc.notify_change(&path, Arc::from("print(2)\n"), 4);
     match rx.try_recv().unwrap() {
         Cmd::Change { uri, version, text } => {
             assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
             assert_eq!(version, 4);
-            assert_eq!(text, "print(2)\n");
+            assert_eq!(text.as_ref(), "print(2)\n");
         }
         _ => panic!("expected change command"),
     }
@@ -205,6 +219,10 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
         _ => panic!("expected workspace diagnostic command"),
     }
 
+    proc.notify_close(&PathBuf::from("/tmp/pkg/other.py"));
+    assert!(matches!(rx.try_recv(), Err(TryRecvError::Empty)));
+    assert_eq!(proc.current_uri.as_deref(), Some(opened.0.as_str()));
+
     proc.notify_close(&path);
     match rx.try_recv().unwrap() {
         Cmd::Close { uri } => assert_eq!(uri, path_to_uri(&path.to_string_lossy())),
@@ -212,8 +230,6 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     }
     assert!(proc.current_uri.is_none());
 
-    proc.restart();
-    assert!(matches!(rx.try_recv().unwrap(), Cmd::Restart));
     proc.shutdown();
     assert!(matches!(rx.try_recv().unwrap(), Cmd::Shutdown));
 }
@@ -228,6 +244,8 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
     let mut manager = LspManager::new(vec![ws.clone()]);
     manager.python = Some(ruff);
     manager.ty_process = Some(ty);
+    manager.open_python_files.insert(abs.clone(), 2);
+    manager.active_workspaces = vec![ws.clone()];
 
     manager.notify_open(&rel, "py", "x = 1\n", 11);
     assert_eq!(manager.current_path.as_ref(), Some(&abs));
@@ -235,7 +253,7 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
         manager
             .current_python_file
             .as_ref()
-            .map(|(p, text, v)| (p, text.as_str(), *v)),
+            .map(|(p, text, v)| (p, text.as_ref(), *v)),
         Some((&abs, "x = 1\n", 11))
     );
     assert_eq!(open_cmd(&ruff_rx).2, 11);
@@ -246,7 +264,7 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
         manager
             .current_python_file
             .as_ref()
-            .map(|(_, text, v)| (text.as_str(), *v)),
+            .map(|(_, text, v)| (text.as_ref(), *v)),
         Some(("x = 2\n", 12))
     );
     assert!(matches!(
@@ -261,13 +279,109 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
     manager.notify_open(&PathBuf::from("notes.txt"), "txt", "plain", 1);
     assert!(manager.current_python_file.is_none());
 
-    manager.current_python_file = Some((abs.clone(), "x = 3\n".to_string(), 13));
+    manager.current_python_file = Some((abs.clone(), Arc::from("x = 3\n"), 13));
     manager.current_path = Some(abs.clone());
     manager.notify_close(&rel, "py");
     assert!(manager.current_path.is_none());
     assert!(manager.current_python_file.is_none());
     assert!(matches!(ruff_rx.try_recv().unwrap(), Cmd::Close { .. }));
     assert!(matches!(ty_rx.try_recv().unwrap(), Cmd::Close { .. }));
+}
+
+#[test]
+fn lsp_manager_tracks_active_workspaces_from_open_python_tabs() {
+    let ws_a = PathBuf::from("/tmp/ws-a");
+    let ws_b = PathBuf::from("/tmp/ws-b");
+    let mut manager = LspManager::new(vec![ws_a.clone(), ws_b.clone()]);
+    manager.python_disabled = true;
+
+    let a_file = ws_a.join("a.py");
+    let b_file = ws_b.join("b.py");
+    manager.notify_open(&a_file, "py", "a = 1\n", 1);
+    assert_eq!(manager.active_workspaces, vec![ws_a.clone()]);
+
+    manager.notify_open(&b_file, "py", "b = 1\n", 1);
+    assert_eq!(manager.active_workspaces, vec![ws_a.clone(), ws_b.clone()]);
+
+    manager.notify_close(&a_file, "py");
+    assert_eq!(manager.active_workspaces, vec![ws_b.clone()]);
+
+    manager.notify_close(&b_file, "py");
+    assert!(manager.active_workspaces.is_empty());
+    assert!(manager.open_python_files.is_empty());
+}
+
+#[test]
+fn lsp_manager_closing_last_workspace_file_prunes_workspace_diagnostics() {
+    let ws_a = PathBuf::from("/tmp/ws-a");
+    let ws_b = PathBuf::from("/tmp/ws-b");
+    let a_file = ws_a.join("a.py");
+    let b_file = ws_b.join("b.py");
+    let stale = ws_a.join("pkg/stale.py");
+    let keep = ws_b.join("pkg/keep.py");
+    let mut manager = LspManager::new(vec![ws_a.clone(), ws_b.clone()]);
+    manager.python_disabled = true;
+    manager.notify_open(&a_file, "py", "a = 1\n", 1);
+    manager.notify_open(&b_file, "py", "b = 1\n", 1);
+    manager.diagnostics.insert(
+        stale.clone(),
+        diag_arc(vec![test_diag("stale", DiagSeverity::Error, None)]),
+    );
+    manager.instant_diagnostics.insert(
+        stale.clone(),
+        (
+            1,
+            diag_arc(vec![test_diag(
+                "stale instant",
+                DiagSeverity::Error,
+                None,
+            )]),
+        ),
+    );
+    manager.ty_instant_diagnostics.insert(
+        stale.clone(),
+        (
+            1,
+            diag_arc(vec![test_diag("stale ty", DiagSeverity::Error, None)]),
+        ),
+    );
+    manager
+        .ty_diag_result_ids
+        .insert(stale.clone(), "stale-r1".to_string());
+    manager.diagnostics.insert(
+        keep.clone(),
+        diag_arc(vec![test_diag("keep", DiagSeverity::Warning, None)]),
+    );
+
+    manager.notify_close(&a_file, "py");
+
+    assert_eq!(manager.active_workspaces, vec![ws_b]);
+    assert!(!manager.diagnostics.contains_key(&stale));
+    assert!(!manager.instant_diagnostics.contains_key(&stale));
+    assert!(!manager.ty_instant_diagnostics.contains_key(&stale));
+    assert!(!manager.ty_diag_result_ids.contains_key(&stale));
+    assert_eq!(manager.get_diagnostics(&keep).len(), 1);
+}
+
+#[test]
+fn lsp_manager_keeps_workspace_diagnostics_when_another_file_stays_open() {
+    let ws = PathBuf::from("/tmp/ws");
+    let a_file = ws.join("a.py");
+    let b_file = ws.join("b.py");
+    let workspace_diag = ws.join("pkg/other.py");
+    let mut manager = LspManager::new(vec![ws.clone()]);
+    manager.python_disabled = true;
+    manager.notify_open(&a_file, "py", "a = 1\n", 1);
+    manager.notify_open(&b_file, "py", "b = 1\n", 1);
+    manager.diagnostics.insert(
+        workspace_diag.clone(),
+        diag_arc(vec![test_diag("keep", DiagSeverity::Warning, None)]),
+    );
+
+    manager.notify_close(&a_file, "py");
+
+    assert_eq!(manager.active_workspaces, vec![ws]);
+    assert_eq!(manager.get_diagnostics(&workspace_diag).len(), 1);
 }
 
 #[test]
@@ -390,11 +504,11 @@ fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
     assert_eq!(manager.ty_status, LspServerStatus::Crashed);
     assert!(!manager.dirty_diagnostics);
 
-    let diags = manager.get_diagnostics(&path);
+    let diags = manager.diagnostic_refs_for_path(&path);
     assert_eq!(diags.len(), 2);
-    assert_eq!(diags[0].message, "ruff");
-    assert_eq!(diags[1].message, "ty");
-    let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
+    assert_eq!(diags[0].message.as_ref(), "ruff");
+    assert_eq!(diags[1].message.as_ref(), "ty");
+    let (version, instant) = manager.instant_merged_diagnostics(&path);
     assert_eq!(version, 5);
     assert_eq!(instant.len(), 2);
     assert_eq!(
@@ -409,8 +523,8 @@ fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
     let logs = &manager.server_logs[RUFF_SERVER.program];
     assert_eq!(logs.len(), 32);
     assert!(!logs.iter().any(|log| log.text.contains("old log")));
-    assert!(logs[0].text.contains("\"idx\": 0"));
-    assert!(logs[31].text.contains("\"idx\": 31"));
+    assert!(logs[0].text.contains("\"idx\":0"));
+    assert!(logs[31].text.contains("\"idx\":31"));
     assert!(logs[31].text.is_char_boundary(logs[31].text.len()));
 
     let info = manager.servers_info();
@@ -428,28 +542,92 @@ fn diagnostics_merge_combines_servers_and_tracks_max_version() {
     let mut ty = HashMap::new();
     ruff.insert(
         path.clone(),
-        (3, vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))]),
+        (
+            3,
+            diag_arc(vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))]),
+        ),
     );
     ty.insert(
         path.clone(),
-        (7, vec![test_diag("ty", DiagSeverity::Info, None)]),
+        (7, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
     );
     ty.insert(
         only_ty.clone(),
-        (2, vec![test_diag("ty only", DiagSeverity::Warning, None)]),
+        (
+            2,
+            diag_arc(vec![test_diag("ty only", DiagSeverity::Warning, None)]),
+        ),
     );
 
     let (version, merged) = merged_diagnostics_for_path(&path, &ruff, &ty);
     assert_eq!(version, 7);
     assert_eq!(merged.len(), 2);
-    assert_eq!(merged[0].message, "ruff");
-    assert_eq!(merged[1].message, "ty");
+    assert_eq!(merged[0].message.as_ref(), "ruff");
+    assert_eq!(merged[1].message.as_ref(), "ty");
 
     let all = merged_diagnostics_for_all_paths(&ruff, &ty);
     assert_eq!(all.len(), 2);
     let ty_only = all.iter().find(|(p, _)| p == &only_ty).unwrap();
     assert_eq!(ty_only.1.len(), 1);
-    assert_eq!(ty_only.1[0].message, "ty only");
+    assert_eq!(ty_only.1[0].message.as_ref(), "ty only");
+}
+
+#[test]
+fn instant_merged_diagnostics_lazily_combines_servers_and_handles_empty() {
+    let path = PathBuf::from("/tmp/main.py");
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp")]);
+
+    let (empty_version, empty) = manager.instant_merged_diagnostics(&path);
+    assert_eq!(empty_version, 0);
+    assert!(empty.is_empty());
+
+    manager.instant_diagnostics.insert(
+        path.clone(),
+        (
+            3,
+            diag_arc(vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))]),
+        ),
+    );
+    manager.ty_instant_diagnostics.insert(
+        path.clone(),
+        (7, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
+    );
+
+    let (version, merged) = manager.instant_merged_diagnostics(&path);
+    assert_eq!(version, 7);
+    assert_eq!(merged.len(), 2);
+    assert_eq!(merged[0].message.as_ref(), "ruff");
+    assert_eq!(merged[1].message.as_ref(), "ty");
+    assert!(manager.get_diagnostics(&path).is_empty());
+}
+
+#[test]
+fn manager_poll_moves_diagnostic_items_into_instant_store() {
+    let path = PathBuf::from("/tmp/ws/app.py");
+    let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.python = Some(ruff);
+
+    ruff_tx
+        .send(LspEvent::Diagnostics {
+            server_name: RUFF_SERVER.program,
+            path: path.clone(),
+            version: Some(4),
+            items: vec![test_diag("moved", DiagSeverity::Error, Some("E1"))],
+            result_id: None,
+        })
+        .unwrap();
+
+    let events = manager.poll();
+    match &events[0] {
+        LspEvent::Diagnostics { items, .. } => assert!(items.is_empty()),
+        other => panic!("unexpected event: {other:?}"),
+    }
+
+    let (version, instant) = manager.instant_merged_diagnostics(&path);
+    assert_eq!(version, 4);
+    assert_eq!(instant.len(), 1);
+    assert_eq!(instant[0].message.as_ref(), "moved");
 }
 
 #[test]
@@ -568,7 +746,7 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
     assert!(manager.get_diagnostics(&path).is_empty());
     assert!(
         manager
-            .get_instant_diagnostics_with_version(&path)
+            .instant_merged_diagnostics(&path)
             .1
             .is_empty()
     );
@@ -588,9 +766,12 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
 
     let events = manager.poll();
     assert_eq!(events.len(), 1);
-    assert_eq!(manager.get_diagnostics(&path).len(), 1);
-    assert_eq!(manager.get_diagnostics(&path)[0].message, "flushed");
-    assert_eq!(manager.get_instant_diagnostics_with_version(&path).0, 2);
+    assert_eq!(manager.diagnostic_count(&path), 1);
+    assert_eq!(
+        manager.diagnostic_at(&path, 0).map(|diag| diag.message.as_ref()),
+        Some("flushed")
+    );
+    assert_eq!(manager.instant_merged_diagnostics(&path).0, 2);
     assert!(!manager.dirty_diagnostics);
     assert!(manager.last_change.is_none());
 }
@@ -600,6 +781,10 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
     let path = PathBuf::from("/tmp/ws/pkg/offscreen.py");
     let (ty, ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager
+        .open_python_files
+        .insert(PathBuf::from("/tmp/ws/current.py"), 1);
+    manager.active_workspaces = vec![PathBuf::from("/tmp/ws")];
     manager.ty_process = Some(ty);
     manager.ty_status = LspServerStatus::Running;
 
@@ -637,7 +822,10 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
 
     let events = manager.poll();
     assert_eq!(events.len(), 2);
-    assert_eq!(manager.get_diagnostics(&path)[0].message, "offscreen");
+    assert_eq!(
+        manager.diagnostic_at(&path, 0).map(|diag| diag.message.as_ref()),
+        Some("offscreen")
+    );
     assert!(manager.ty_workspace_diag_pending.is_none());
 
     manager.ty_workspace_diag_dirty = true;
@@ -653,6 +841,56 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
         }
         _ => panic!("expected second workspace diagnostic command"),
     }
+}
+
+#[test]
+fn manager_requests_ty_workspace_diagnostics_for_large_current_python_file() {
+    let path = PathBuf::from("/tmp/ws/huge.py");
+    let (ty, ty_rx) = test_process(&TY_SERVER);
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    let large_line_count = 50_000;
+    let text = python_text_with_lines(large_line_count);
+    manager.python_disabled = true;
+    manager.notify_open(&path, "py", &text, 1);
+    assert_eq!(manager.current_python_lines, Some(large_line_count));
+
+    manager.python_disabled = false;
+    manager.ty_process = Some(ty);
+    manager.ty_status = LspServerStatus::Running;
+    manager.ty_workspace_diag_dirty = true;
+
+    let events = manager.poll();
+    assert!(events.is_empty());
+    match ty_rx.try_recv().unwrap() {
+        Cmd::WorkspaceDiagnostic {
+            previous_result_ids_json,
+            ..
+        } => assert_eq!(previous_result_ids_json, "[]"),
+        _ => panic!("unexpected command"),
+    }
+    assert!(manager.ty_workspace_diag_pending.is_some());
+    assert!(!manager.ty_workspace_diag_dirty);
+}
+
+#[test]
+fn manager_skips_ty_workspace_diagnostics_without_active_workspace_root() {
+    let path = PathBuf::from("/tmp/external.py");
+    let (ty, ty_rx) = test_process(&TY_SERVER);
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.python_disabled = true;
+    manager.notify_open(&path, "py", "x = 1\n", 1);
+    assert!(manager.active_workspaces.is_empty());
+
+    manager.python_disabled = false;
+    manager.ty_process = Some(ty);
+    manager.ty_status = LspServerStatus::Running;
+    manager.ty_workspace_diag_dirty = true;
+
+    let events = manager.poll();
+    assert!(events.is_empty());
+    assert!(manager.ty_workspace_diag_pending.is_none());
+    assert!(manager.ty_workspace_diag_dirty);
+    assert!(matches!(ty_rx.try_recv(), Err(TryRecvError::Empty)));
 }
 
 #[test]
@@ -692,19 +930,18 @@ fn lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe() {
     manager.ty_status = LspServerStatus::Running;
     manager.diagnostics.insert(
         path.clone(),
-        vec![test_diag("stale", DiagSeverity::Error, None)],
+        diag_arc(vec![test_diag("stale", DiagSeverity::Error, None)]),
     );
     manager.instant_diagnostics.insert(
         path.clone(),
-        (1, vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        (
+            1,
+            diag_arc(vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        ),
     );
     manager.ty_instant_diagnostics.insert(
         path.clone(),
-        (2, vec![test_diag("ty", DiagSeverity::Info, None)]),
-    );
-    manager.merged_instant_diagnostics.insert(
-        path.clone(),
-        (2, vec![test_diag("merged", DiagSeverity::Hint, None)]),
+        (2, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
     );
     manager.dirty_diagnostics = true;
     manager.server_logs.insert(
@@ -726,7 +963,6 @@ fn lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe() {
     assert!(manager.diagnostics.is_empty());
     assert!(manager.instant_diagnostics.is_empty());
     assert!(manager.ty_instant_diagnostics.is_empty());
-    assert!(manager.merged_instant_diagnostics.is_empty());
     assert!(!manager.dirty_diagnostics);
     assert!(manager.server_logs.is_empty());
     assert!(matches!(ruff_rx.try_recv().unwrap(), Cmd::Shutdown));
@@ -762,26 +998,25 @@ fn clear_diagnostics_for_path_removes_abs_and_relative_entries() {
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
     manager.diagnostics.insert(
         path.clone(),
-        vec![test_diag("stale", DiagSeverity::Error, None)],
+        diag_arc(vec![test_diag("stale", DiagSeverity::Error, None)]),
     );
     manager.instant_diagnostics.insert(
         path.clone(),
-        (1, vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        (
+            1,
+            diag_arc(vec![test_diag("instant", DiagSeverity::Warning, None)]),
+        ),
     );
     manager.ty_instant_diagnostics.insert(
         path.clone(),
-        (2, vec![test_diag("ty", DiagSeverity::Info, None)]),
-    );
-    manager.merged_instant_diagnostics.insert(
-        path.clone(),
-        (2, vec![test_diag("merged", DiagSeverity::Hint, None)]),
+        (2, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
     );
     manager.dirty_diagnostics = true;
 
     manager.clear_diagnostics_for_path(&PathBuf::from("app.py"));
 
     assert!(manager.get_diagnostics(&path).is_empty());
-    let (version, instant) = manager.get_instant_diagnostics_with_version(&path);
+    let (version, instant) = manager.instant_merged_diagnostics(&path);
     assert_eq!(version, 0);
     assert!(instant.is_empty());
     assert!(!manager.dirty_diagnostics);

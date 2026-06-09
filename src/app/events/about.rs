@@ -640,6 +640,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             app.open_folder_rx = None;
             if let Some(path) = result {
                 app.ide_workspaces.push(path.clone());
+                if let Some(lsp) = &mut app.lsp {
+                    lsp.set_workspaces(app.ide_workspaces.clone());
+                }
                 app.ide_panel.file_tree_expanded.insert(path.clone());
                 app.refresh_file_tree();
                 app.start_file_watcher();
@@ -1151,6 +1154,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
         needs_redraw = true;
     }
+    if app.request_visible_priority_highlight() {
+        needs_redraw = true;
+    }
 
     let git_progress_animating =
         app.ide_panel.git.pending && app.ide_panel.git.pending_label.is_some();
@@ -1166,7 +1172,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
 
-    let is_highlighting = !app.is_highlighted_once;
+    let is_highlighting =
+        !app.is_highlighted_once || app.highlighter.has_pending_priority_highlight();
     let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
     let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
     match compute_about_wait_plan(

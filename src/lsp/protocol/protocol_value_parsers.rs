@@ -3,6 +3,315 @@
 /// Минимальный value-tree для парсинга LSP ответов без полной serde-схемы.
 /// Используем только базовый JSON-парсинг.
 
+use serde::Deserialize;
+use std::borrow::Cow;
+
+#[derive(Deserialize)]
+pub(super) struct RpcHeader<'a> {
+    #[serde(borrow)]
+    pub method: Option<&'a str>,
+    #[serde(borrow)]
+    pub id: Option<RpcId<'a>>,
+    #[serde(default)]
+    pub error: Option<serde::de::IgnoredAny>,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+pub(super) enum RpcId<'a> {
+    Number(i64),
+    Text(&'a str),
+}
+
+impl RpcId<'_> {
+    pub(super) fn as_i64(&self) -> Option<i64> {
+        match self {
+            RpcId::Number(id) => Some(*id),
+            RpcId::Text(text) => text.parse().ok(),
+        }
+    }
+
+    pub(super) fn log_json(&self) -> String {
+        match self {
+            RpcId::Number(id) => id.to_string(),
+            RpcId::Text(text) => format!(r#""{}""#, json_escape(text)),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+struct PublishDiagnosticsFrame<'a> {
+    #[serde(borrow)]
+    params: PublishDiagnosticsParams<'a>,
+}
+
+#[derive(Deserialize)]
+struct PublishDiagnosticsParams<'a> {
+    uri: &'a str,
+    version: Option<i32>,
+    #[serde(default, borrow)]
+    diagnostics: Vec<BorrowedDiagnostic<'a>>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceDiagnosticFrame<'a> {
+    #[serde(default, borrow)]
+    result: Option<WorkspaceDiagnosticResult<'a>>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceDiagnosticResult<'a> {
+    #[serde(default, borrow)]
+    items: Vec<WorkspaceDiagnosticReport<'a>>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceDiagnosticReport<'a> {
+    #[serde(default)]
+    kind: Option<&'a str>,
+    #[serde(default)]
+    uri: Option<&'a str>,
+    #[serde(default)]
+    version: Option<i32>,
+    #[serde(default, rename = "resultId")]
+    result_id: Option<&'a str>,
+    #[serde(default, borrow)]
+    items: Vec<BorrowedDiagnostic<'a>>,
+    #[serde(default, rename = "relatedDocuments", borrow)]
+    related_documents:
+        std::collections::HashMap<Cow<'a, str>, WorkspaceDiagnosticRelatedReport<'a>>,
+}
+
+#[derive(Deserialize)]
+struct WorkspaceDiagnosticRelatedReport<'a> {
+    #[serde(default)]
+    kind: Option<&'a str>,
+    #[serde(default)]
+    version: Option<i32>,
+    #[serde(default, rename = "resultId")]
+    result_id: Option<&'a str>,
+    #[serde(default, borrow)]
+    items: Vec<BorrowedDiagnostic<'a>>,
+}
+
+#[derive(Deserialize)]
+struct BorrowedDiagnostic<'a> {
+    range: BorrowedRange,
+    severity: Option<u64>,
+    #[serde(default, borrow)]
+    code: Option<BorrowedCode<'a>>,
+    #[serde(default, rename = "codeDescription", borrow)]
+    code_description: Option<BorrowedCodeDescription<'a>>,
+    #[serde(default, borrow)]
+    message: Cow<'a, str>,
+    #[serde(default)]
+    source: Option<&'a str>,
+    #[serde(default)]
+    tags: Vec<u32>,
+    #[serde(default, borrow)]
+    data: Option<BorrowedDiagnosticData<'a>>,
+}
+
+#[derive(Deserialize)]
+struct BorrowedRange {
+    start: BorrowedPosition,
+    end: BorrowedPosition,
+}
+
+#[derive(Deserialize)]
+struct BorrowedPosition {
+    line: u32,
+    character: u32,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum BorrowedCode<'a> {
+    Text(&'a str),
+    Number(u64),
+}
+
+#[derive(Deserialize)]
+struct BorrowedCodeDescription<'a> {
+    href: Option<&'a str>,
+}
+
+#[derive(Deserialize)]
+struct BorrowedDiagnosticData<'a> {
+    title: Option<&'a str>,
+    #[serde(default, borrow)]
+    edits: Vec<BorrowedTextEdit<'a>>,
+}
+
+#[derive(Deserialize)]
+struct BorrowedTextEdit<'a> {
+    range: BorrowedRange,
+    #[serde(default, rename = "newText", borrow)]
+    new_text: Cow<'a, str>,
+}
+
+fn clean_diagnostic_message(message: &str) -> Cow<'_, str> {
+    let mut out = Cow::Borrowed(message);
+    if out.contains("info: ") {
+        let mut clean_msg = String::with_capacity(out.len());
+        for line in out.lines() {
+            let mut l = line;
+            if l.starts_with("info: ") {
+                l = &l[6..];
+            }
+            clean_msg.push_str(l);
+            clean_msg.push('\n');
+        }
+        out = Cow::Owned(clean_msg.trim_end().to_string());
+    }
+    if out.contains("\\n") || out.contains("\\t") || out.contains('\r') {
+        out = Cow::Owned(
+            out.replace("\\n", "\n")
+                .replace("\\t", "    ")
+                .replace('\r', ""),
+        );
+    }
+    out
+}
+
+fn parse_borrowed_text_edit_value(v: &BorrowedTextEdit<'_>) -> TextChange {
+    TextChange {
+        start_line: v.range.start.line,
+        start_col: v.range.start.character,
+        end_line: v.range.end.line,
+        end_col: v.range.end.character,
+        new_text: v.new_text.to_string(),
+    }
+}
+
+fn parse_borrowed_diagnostic_value(v: &BorrowedDiagnostic<'_>) -> Diagnostic {
+    let severity = match v.severity.unwrap_or(1) {
+        1 => DiagSeverity::Error,
+        2 => DiagSeverity::Warning,
+        3 => DiagSeverity::Info,
+        _ => DiagSeverity::Hint,
+    };
+
+    let code = v.code.as_ref().map(|code| match code {
+        BorrowedCode::Text(text) => Arc::<str>::from(*text),
+        BorrowedCode::Number(value) => Arc::<str>::from(value.to_string()),
+    });
+
+    let mut quickfixes = Vec::new();
+    if let Some(data) = &v.data && let Some(title) = data.title {
+        let edits = data
+            .edits
+            .iter()
+            .map(parse_borrowed_text_edit_value)
+            .collect::<Vec<_>>();
+        if !edits.is_empty() {
+            quickfixes.push(QuickFix {
+                title: title.to_string(),
+                edits,
+            });
+        }
+    }
+
+    let message = clean_diagnostic_message(&v.message);
+    Diagnostic {
+        start_line: v.range.start.line,
+        start_col: v.range.start.character,
+        end_line: v.range.end.line,
+        end_col: v.range.end.character,
+        severity,
+        code,
+        code_href: v
+            .code_description
+            .as_ref()
+            .and_then(|code| code.href)
+            .map(Arc::<str>::from),
+        message: Arc::<str>::from(message.as_ref()),
+        source: v.source.map(Arc::<str>::from),
+        quickfixes: quickfixes.into_boxed_slice(),
+        tags: v.tags.clone().into_boxed_slice(),
+    }
+}
+
+pub(super) fn parse_publish_diagnostics_frame(
+    body: &[u8],
+    server_name: &'static str,
+) -> Option<LspEvent> {
+    let frame: PublishDiagnosticsFrame<'_> = serde_json::from_slice(body).ok()?;
+    let items = frame
+        .params
+        .diagnostics
+        .iter()
+        .map(parse_borrowed_diagnostic_value)
+        .collect::<Vec<_>>();
+    Some(LspEvent::Diagnostics {
+        server_name,
+        path: uri_to_path(frame.params.uri),
+        version: frame.params.version,
+        items,
+        result_id: None,
+    })
+}
+
+pub(super) fn parse_workspace_diagnostics_frame(
+    body: &[u8],
+    server_name: &'static str,
+) -> Vec<LspEvent> {
+    let Ok(frame) = serde_json::from_slice::<WorkspaceDiagnosticFrame<'_>>(body) else {
+        return Vec::new();
+    };
+    let Some(result) = frame.result else {
+        return Vec::new();
+    };
+
+    let mut events = Vec::new();
+    for item in result.items {
+        if let Some(uri) = item.uri {
+            push_workspace_diagnostic_event(
+                &mut events,
+                server_name,
+                uri,
+                item.kind,
+                item.version,
+                item.result_id,
+                &item.items,
+            );
+        }
+        for (uri, report) in item.related_documents {
+            push_workspace_diagnostic_event(
+                &mut events,
+                server_name,
+                uri.as_ref(),
+                report.kind,
+                report.version,
+                report.result_id,
+                &report.items,
+            );
+        }
+    }
+    events
+}
+
+fn push_workspace_diagnostic_event(
+    events: &mut Vec<LspEvent>,
+    server_name: &'static str,
+    uri: &str,
+    kind: Option<&str>,
+    version: Option<i32>,
+    result_id: Option<&str>,
+    items: &[BorrowedDiagnostic<'_>],
+) {
+    if kind == Some("unchanged") {
+        return;
+    }
+    events.push(LspEvent::Diagnostics {
+        server_name,
+        path: uri_to_path(uri),
+        version,
+        items: items.iter().map(parse_borrowed_diagnostic_value).collect(),
+        result_id: result_id.map(str::to_string),
+    });
+}
+
 pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic> {
     let range = v.get("range")?;
     let start = range.get("start")?;
@@ -20,30 +329,16 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
         _ => DiagSeverity::Hint,
     };
 
-    let mut message = v
+    let message = v
         .get("message")
         .and_then(|m| m.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    if message.contains("info: ") {
-        let mut clean_msg = String::with_capacity(message.len());
-        for line in message.lines() {
-            let mut l = line;
-            if l.starts_with("info: ") {
-                l = &l[6..];
-            }
-            clean_msg.push_str(l);
-            clean_msg.push('\n');
-        }
-        message = clean_msg.trim_end().to_string();
-    }
+        .unwrap_or("");
 
     let code = v.get("code").and_then(|c| {
         if let Some(s) = c.as_str() {
-            Some(s.to_string())
+            Some(Arc::<str>::from(s))
         } else if let Some(n) = c.as_u64() {
-            Some(n.to_string())
+            Some(Arc::<str>::from(n.to_string()))
         } else {
             None
         }
@@ -52,13 +347,13 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
     let source = v
         .get("source")
         .and_then(|s| s.as_str())
-        .map(|s| s.to_string());
+        .map(Arc::<str>::from);
 
     let code_href = v
         .get("codeDescription")
         .and_then(|cd| cd.get("href"))
         .and_then(|h| h.as_str())
-        .map(|s| s.to_string());
+        .map(Arc::<str>::from);
 
     let mut tags = Vec::new();
     if let Some(tags_arr) = v.get("tags").and_then(|t| t.as_array()) {
@@ -89,10 +384,7 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
         }
     }
 
-    message = message
-        .replace("\\n", "\n")
-        .replace("\\t", "    ")
-        .replace('\r', "");
+    let message = clean_diagnostic_message(message);
 
     Some(Diagnostic {
         start_line: sl,
@@ -102,11 +394,10 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
         severity,
         code,
         code_href,
-        message,
+        message: Arc::<str>::from(message.as_ref()),
         source,
-        quickfixes,
-        tags,
-        spans: Vec::new(),
+        quickfixes: quickfixes.into_boxed_slice(),
+        tags: tags.into_boxed_slice(),
     })
 }
 

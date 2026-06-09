@@ -645,11 +645,7 @@ impl ApplicationHandler for App {
                 if let Some(lsp) = &self.lsp {
                     if self.ide_panel.problems_tab == 0 {
                         if let Some(p) = &self.file_path {
-                            let mut diags = lsp
-                                .get_diagnostics(p)
-                                .iter()
-                                .enumerate()
-                                .collect::<Vec<_>>();
+                            let mut diags = lsp.diagnostic_entries_for_path(p);
                             diags.sort_by(|(_, a), (_, b)| {
                                 a.start_line
                                     .cmp(&b.start_line)
@@ -660,14 +656,9 @@ impl ApplicationHandler for App {
                             }
                         }
                     } else {
-                        let mut paths: Vec<_> = lsp.diagnostics.keys().collect();
-                        paths.sort();
+                        let paths = lsp.diagnostic_paths();
                         for p in paths {
-                            let mut diags = lsp
-                                .get_diagnostics(p)
-                                .iter()
-                                .enumerate()
-                                .collect::<Vec<_>>();
+                            let mut diags = lsp.diagnostic_entries_for_path(p);
                             if diags.is_empty() {
                                 continue;
                             }

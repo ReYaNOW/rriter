@@ -611,7 +611,7 @@ impl Renderer {
                             if let Some(l) = lsp {
                                 for (p, diags) in &l.diagnostics {
                                     if !diags.is_empty() && p.starts_with(&node.path) {
-                                        for d in diags {
+                                        for d in diags.iter() {
                                             if d.severity == crate::lsp::DiagSeverity::Error {
                                                 has_error = true;
                                                 break;

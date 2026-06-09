@@ -444,6 +444,9 @@ impl App {
             UiId::SettingsIdeRemoveWorkspace(idx) => {
                 if idx < self.ide_workspaces.len() {
                     self.ide_workspaces.remove(idx);
+                    if let Some(lsp) = &mut self.lsp {
+                        lsp.set_workspaces(self.ide_workspaces.clone());
+                    }
                     self.save_current_config();
                     self.refresh_file_tree();
                     self.start_file_watcher();
@@ -1527,17 +1530,20 @@ impl App {
             UiId::ProblemUrl(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx) {
                     if let Some(lsp) = &self.lsp {
-                        let diags = lsp.get_diagnostics(path);
-                        if let Some(diag) = diags.get(*diag_idx) {
+                        if let Some(diag) = lsp.diagnostic_at(path, *diag_idx) {
                             if let Some(href) = &diag.code_href {
                                 #[cfg(target_os = "windows")]
                                 let _ = std::process::Command::new("cmd")
-                                    .args(["/c", "start", "", href])
+                                    .args(["/c", "start", "", href.as_ref()])
                                     .spawn();
                                 #[cfg(target_os = "macos")]
-                                let _ = std::process::Command::new("open").arg(href).spawn();
+                                let _ = std::process::Command::new("open")
+                                    .arg(href.as_ref())
+                                    .spawn();
                                 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-                                let _ = std::process::Command::new("xdg-open").arg(href).spawn();
+                                let _ = std::process::Command::new("xdg-open")
+                                    .arg(href.as_ref())
+                                    .spawn();
                             }
                         }
                     }
@@ -1551,7 +1557,7 @@ impl App {
                     let diag = self
                         .lsp
                         .as_ref()
-                        .and_then(|lsp| lsp.get_diagnostics(&path).get(diag_idx).cloned());
+                        .and_then(|lsp| lsp.diagnostic_at(&path, diag_idx).cloned());
                     if let Some(diag) = diag {
                         self.jump_to_lsp_position_in_file(
                             path,
@@ -1571,10 +1577,9 @@ impl App {
                     if let Some(diag) = self
                         .lsp
                         .as_ref()
-                        .and_then(|l| l.diagnostics.get(path))
-                        .and_then(|diags| diags.get(*diag_idx))
+                        .and_then(|l| l.diagnostic_at(path, *diag_idx))
                     {
-                        let message = diag.message.clone();
+                        let message = diag.message.to_string();
                         self.set_clipboard_text(message);
                         self.ide_panel.diag_copied_idx = Some(idx);
                     }
@@ -1589,9 +1594,8 @@ impl App {
                     message = self
                         .lsp
                         .as_ref()
-                        .and_then(|l| l.diagnostics.get(path))
-                        .and_then(|diags| diags.get(idx))
-                        .map(|diag| diag.message.clone());
+                        .and_then(|l| l.diagnostic_at(path, idx))
+                        .map(|diag| diag.message.to_string());
                 }
                 if message.is_none() {
                     message = crate::app::mouse::HOVER_STATE.with(|state| {

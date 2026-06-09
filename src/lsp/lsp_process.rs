@@ -70,10 +70,24 @@ fn format_lsp_log_entry(
     Vec<(usize, usize, usize)>,
 ) {
     let compact_message = compact_lsp_log_message(message);
-    if compact_message.len() > LSP_LOG_HIGHLIGHT_MAX_BYTES {
-        return (compact_message, Vec::new(), Vec::new());
+    let mut spans = Vec::new();
+    if compact_message.len() <= LSP_LOG_HIGHLIGHT_MAX_BYTES {
+        let prefix_end = compact_message
+            .find('\n')
+            .or_else(|| compact_message.find(']').map(|idx| idx + 1))
+            .unwrap_or(compact_message.len());
+        let color = if compact_message.contains("[LSP RECV]") {
+            [0.313, 0.980, 0.482, 1.0]
+        } else {
+            [0.545, 0.913, 0.992, 1.0]
+        };
+        spans.push(crate::highlighter::ColorSpan {
+            start: 0,
+            end: prefix_end,
+            color,
+        });
     }
-    format_and_highlight_json(&compact_message)
+    (compact_message, spans, Vec::new())
 }
 
 fn trim_lsp_logs(logs: &mut Vec<LogEntry>, now: Instant) {
@@ -137,14 +151,26 @@ pub struct Diagnostic {
     pub end_col: u32,
     pub severity: DiagSeverity,
     /// Код ошибки (например "E501", "F401")
-    pub code: Option<String>,
+    pub code: Option<Arc<str>>,
     /// Ссылка на документацию (из codeDescription.href)
-    pub code_href: Option<String>,
-    pub message: String,
-    pub source: Option<String>,
-    pub quickfixes: Vec<QuickFix>,
-    pub tags: Vec<u32>,
-    pub spans: Vec<crate::highlighter::ColorSpan>,
+    pub code_href: Option<Arc<str>>,
+    pub message: Arc<str>,
+    pub source: Option<Arc<str>>,
+    pub quickfixes: Box<[QuickFix]>,
+    pub tags: Box<[u32]>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DiagnosticSourceKind {
+    Legacy,
+    Ruff,
+    Ty,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct MergedDiagnosticIndex {
+    source: DiagnosticSourceKind,
+    index: usize,
 }
 
 struct SpawnedProcess {
@@ -281,7 +307,7 @@ struct OpenFile {
     uri: String,
     lang: &'static str,
     version: i32,
-    text: String,
+    text: Arc<str>,
 }
 
 fn send_and_log(
@@ -355,7 +381,6 @@ fn run_supervisor(
     let mut open_file: Option<OpenFile> = None;
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
-    let mut user_requested_restart = false;
     let pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
@@ -427,7 +452,7 @@ fn run_supervisor(
 
         // Если был открыт файл — reopenуем после рестарта
         if let Some(ref of) = open_file {
-            let msg = make_did_open(&of.uri, of.lang, of.version, &of.text);
+            let msg = make_did_open(&of.uri, of.lang, of.version, of.text.as_ref());
             if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                 continue 'outer;
             }
@@ -438,13 +463,10 @@ fn run_supervisor(
             // Проверяем краш процесса
             match proc.child.try_wait() {
                 Ok(Some(_)) => {
-                    if !user_requested_restart {
-                        let _ = event_tx.send(LspEvent::StatusChanged {
-                            name: def.program,
-                            status: LspServerStatus::Crashed,
-                        });
-                    }
-                    user_requested_restart = false;
+                    let _ = event_tx.send(LspEvent::StatusChanged {
+                        name: def.program,
+                        status: LspServerStatus::Crashed,
+                    });
                     thread::sleep(Duration::from_millis(1000));
                     break 'inner; // рестарт
                 }
@@ -455,19 +477,13 @@ fn run_supervisor(
             // Обрабатываем команды от главного треда
             loop {
                 match cmd_rx.try_recv() {
-                    Ok(Cmd::Restart) => {
-                        user_requested_restart = true;
-                        // Убиваем текущий процесс — supervisor перезапустит
-                        let _ = proc.child.kill();
-                        break 'inner;
-                    }
                     Ok(Cmd::Open {
                         uri,
                         lang,
                         version,
                         text,
                     }) => {
-                        let msg = make_did_open(&uri, lang, version, &text);
+                        let msg = make_did_open(&uri, lang, version, text.as_ref());
                         open_file = Some(OpenFile {
                             uri,
                             lang,
@@ -483,17 +499,17 @@ fn run_supervisor(
                             of.version = version;
                             of.text = text.clone();
                         }
-                        let msg = make_did_change_full(&uri, version, &text);
+                        let msg = make_did_change_full(&uri, version, text.as_ref());
                         if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                             break 'inner;
                         }
                     }
-                    Ok(Cmd::Close { uri: _ }) => {
-                        if let Some(ref of) = open_file {
-                            let msg = make_did_close(&of.uri);
+                    Ok(Cmd::Close { uri }) => {
+                        if let Some(ref of) = open_file && of.uri == uri {
+                            let msg = make_did_close(&uri);
                             let _ = send_and_log(&proc.out_tx, &event_tx, def.program, msg);
+                            open_file = None;
                         }
-                        open_file = None;
                     }
                     Ok(Cmd::Hover { id, uri, line, col }) => {
                         if let Ok(mut pending) = pending_requests.lock() {
@@ -625,7 +641,7 @@ pub struct LspProcess {
     pub event_rx: Receiver<LspEvent>,
     current_uri: Option<String>,
     def: &'static LspServerDef,
-    pub open_file_data: Option<(String, String)>, // (lang, text) for re-open after restart
+    pub open_file_data: Option<(String, Arc<str>)>, // (lang, text) for re-open after restart
 }
 
 impl LspProcess {
@@ -654,35 +670,30 @@ impl LspProcess {
     pub fn notify_open(
         &mut self,
         path: &PathBuf,
-        text: &str,
+        text: Arc<str>,
         version: i32,
         _workspace: Option<&PathBuf>,
     ) {
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
-        self.open_file_data = Some((self.def.language_id.to_string(), text.to_string()));
+        self.open_file_data = Some((self.def.language_id.to_string(), text.clone()));
         let _ = self.cmd_tx.send(Cmd::Open {
             uri,
             lang: self.def.language_id,
             version,
-            text: text.to_string(),
+            text,
         });
-    }
-
-    /// Перезапустить сервер
-    pub fn restart(&mut self) {
-        let _ = self.cmd_tx.send(Cmd::Restart);
     }
 
     /// textDocument/didChange — полный текст (Full Sync).
     /// Вызывать когда editor.sync_edits непуст.
-    pub fn notify_change(&mut self, path: &PathBuf, text: &str, version: i32) {
+    pub fn notify_change(&mut self, path: &PathBuf, text: Arc<str>, version: i32) {
         let uri = path_to_uri(&path.to_string_lossy());
         self.current_uri = Some(uri.clone());
         let _ = self.cmd_tx.send(Cmd::Change {
             uri,
             version,
-            text: text.to_string(),
+            text,
         });
     }
 
@@ -771,8 +782,11 @@ impl LspProcess {
     /// textDocument/didClose
     pub fn notify_close(&mut self, path: &PathBuf) {
         let uri = path_to_uri(&path.to_string_lossy());
-        let _ = self.cmd_tx.send(Cmd::Close { uri });
-        self.current_uri = None;
+        if self.current_uri.as_deref() == Some(uri.as_str()) {
+            let _ = self.cmd_tx.send(Cmd::Close { uri });
+            self.current_uri = None;
+            self.open_file_data = None;
+        }
     }
 
     /// Запрашивает code actions (быстрые исправления от ruff) для позиции.
@@ -855,28 +869,35 @@ fn encode_diagnostics_json(diags: &[Diagnostic]) -> String {
     out
 }
 
+#[allow(dead_code)]
 fn merged_diagnostics_for_path(
     path: &Path,
-    ruff: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-    ty: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-) -> (i32, Vec<Diagnostic>) {
-    let mut merged = Vec::new();
-    let mut max_v = 0;
-    if let Some((v, d)) = ruff.get(path) {
-        merged.extend(d.clone());
-        max_v = max_v.max(*v);
+    ruff: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    ty: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+) -> (i32, Arc<[Diagnostic]>) {
+    match (ruff.get(path), ty.get(path)) {
+        (Some((rv, rd)), Some((tv, td))) => {
+            if rd.is_empty() {
+                return (*tv, td.clone());
+            }
+            if td.is_empty() {
+                return (*rv, rd.clone());
+            }
+            let mut merged = Vec::with_capacity(rd.len() + td.len());
+            merged.extend(rd.iter().cloned());
+            merged.extend(td.iter().cloned());
+            ((*rv).max(*tv), Arc::from(merged.into_boxed_slice()))
+        }
+        (Some((v, d)), None) | (None, Some((v, d))) => (*v, d.clone()),
+        (None, None) => (0, Arc::from([])),
     }
-    if let Some((v, d)) = ty.get(path) {
-        merged.extend(d.clone());
-        max_v = max_v.max(*v);
-    }
-    (max_v, merged)
 }
 
+#[allow(dead_code)]
 fn merged_diagnostics_for_all_paths(
-    ruff: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-    ty: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-) -> Vec<(PathBuf, Vec<Diagnostic>)> {
+    ruff: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    ty: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+) -> Vec<(PathBuf, Arc<[Diagnostic]>)> {
     let mut paths = std::collections::HashSet::new();
     for k in ruff.keys() {
         paths.insert(k.clone());

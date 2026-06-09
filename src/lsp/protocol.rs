@@ -223,20 +223,18 @@ pub(super) const TY_SERVER: LspServerDef = LspServerDef {
 // ── Внутренние команды main → supervisor ─────────────────────────────────────
 
 pub(super) enum Cmd {
-    /// Перезапустить сервер
-    Restart,
     /// Открыть файл (didOpen)
     Open {
         uri: String,
         lang: &'static str,
         version: i32,
-        text: String,
+        text: Arc<str>,
     },
     /// Изменить файл (didChange, полный текст)
     Change {
         uri: String,
         version: i32,
-        text: String,
+        text: Arc<str>,
     },
     /// Закрыть файл (didClose)
     Close {

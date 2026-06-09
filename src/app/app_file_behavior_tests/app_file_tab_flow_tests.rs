@@ -707,3 +707,90 @@ fn closing_tab_clamps_stale_tab_scroll_left() {
     assert_eq!(app.tab_scroll.current, 0.0);
     assert_eq!(app.tab_scroll.target, 0.0);
 }
+
+fn file_tab_test_diag(message: &str) -> crate::lsp::Diagnostic {
+    crate::lsp::Diagnostic {
+        start_line: 0,
+        start_col: 0,
+        end_line: 0,
+        end_col: 1,
+        severity: crate::lsp::DiagSeverity::Error,
+        code: None,
+        code_href: None,
+        message: std::sync::Arc::<str>::from(message),
+        source: Some(std::sync::Arc::<str>::from("ty")),
+        quickfixes: Vec::new().into_boxed_slice(),
+        tags: Vec::new().into_boxed_slice(),
+    }
+}
+
+#[test]
+fn closing_last_tab_from_workspace_removes_diagnostics_from_all_problems_source() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let ws_a = PathBuf::from("/tmp/rriter-ws-a");
+    let ws_b = PathBuf::from("/tmp/rriter-ws-b");
+    let a_file = ws_a.join("a.py");
+    let b_file = ws_b.join("b.py");
+    let stale = ws_b.join("pkg/stale.py");
+    let keep = ws_a.join("pkg/keep.py");
+    app.is_ide_mode = true;
+    app.ide_workspaces = vec![ws_a.clone(), ws_b.clone()];
+    app.tabs = vec![
+        tab_with("a.py", Some(a_file.to_str().unwrap()), "a = 1\n"),
+        tab_with("b.py", Some(b_file.to_str().unwrap()), "b = 1\n"),
+    ];
+    app.active_tab = 0;
+    app.editor = Editor::new(32);
+    app.sync_active_tab();
+
+    let mut lsp = crate::lsp::LspManager::new(vec![ws_a.clone(), ws_b.clone()]);
+    lsp.python_disabled = true;
+    lsp.notify_open(&a_file, "py", "a = 1\n", 1);
+    lsp.notify_open(&b_file, "py", "b = 1\n", 1);
+    lsp.diagnostics
+        .insert(stale.clone(), vec![file_tab_test_diag("stale")].into());
+    lsp.diagnostics
+        .insert(keep.clone(), vec![file_tab_test_diag("keep")].into());
+    app.lsp = Some(lsp);
+
+    app.close_tab_at(1);
+
+    let lsp = app.lsp.as_ref().unwrap();
+    assert!(!lsp.diagnostics.contains_key(&stale));
+    assert_eq!(lsp.get_diagnostics(&keep).len(), 1);
+}
+
+#[test]
+fn closing_single_python_file_uses_old_extension_and_clears_lsp_diagnostics() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let ws = PathBuf::from("/tmp/rriter-ws-single");
+    let path = ws.join("main.py");
+    app.is_ide_mode = true;
+    app.ide_workspaces = vec![ws.clone()];
+    app.tabs = vec![tab_with(
+        "main.py",
+        Some(path.to_str().unwrap()),
+        "print(1)\n",
+    )];
+    app.active_tab = 0;
+    app.editor = Editor::new(32);
+    app.sync_active_tab();
+
+    let mut lsp = crate::lsp::LspManager::new(vec![ws]);
+    lsp.python_disabled = true;
+    lsp.notify_open(&path, "py", "print(1)\n", 1);
+    lsp.diagnostics
+        .insert(path.clone(), vec![file_tab_test_diag("stale")].into());
+    app.lsp = Some(lsp);
+
+    app.close_current_file();
+
+    let lsp = app.lsp.as_ref().unwrap();
+    assert!(lsp.diagnostics.is_empty());
+    assert!(app.tabs.is_empty());
+    assert_eq!(app.file_extension, "");
+}

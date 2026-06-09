@@ -4,22 +4,50 @@ pub struct LspServerSummary<'a> {
     pub log_count: usize,
 }
 
+fn python_line_count(text: &str) -> usize {
+    text.as_bytes()
+        .iter()
+        .filter(|&&byte| byte == b'\n')
+        .count()
+        .saturating_add(1)
+}
+
+#[cfg(target_os = "linux")]
+fn trim_allocator_after_large_diagnostics(count: usize, workspace_done: bool) {
+    if count < 1024 && !workspace_done {
+        return;
+    }
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+    unsafe {
+        malloc_trim(0);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn trim_allocator_after_large_diagnostics(_count: usize, _workspace_done: bool) {}
+
 pub struct LspManager {
     python: Option<LspProcess>,
     ty_process: Option<LspProcess>,
     workspaces: Vec<PathBuf>,
+    active_workspaces: Vec<PathBuf>,
+    open_python_files: HashMap<PathBuf, usize>,
     /// Актуальные диагностики для каждого открытого файла
-    pub diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
-    pub instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-    pub merged_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
-    pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Vec<Diagnostic>)>,
+    pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
+    pub instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
     ty_diag_result_ids: HashMap<PathBuf, String>,
+    diag_text_pool: HashMap<Arc<str>, Arc<str>>,
     ty_workspace_diag_pending: Option<i32>,
     ty_workspace_diag_dirty: bool,
     pub dirty_diagnostics: bool,
     pub last_change: Option<std::time::Instant>,
     current_path: Option<PathBuf>,
-    current_python_file: Option<(PathBuf, String, i32)>,
+    current_python_file: Option<(PathBuf, Arc<str>, i32)>,
+    current_python_lines: Option<usize>,
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     pub ty_status: LspServerStatus,
@@ -39,17 +67,21 @@ impl LspManager {
             python: None,
             ty_process: None,
             workspaces,
+            active_workspaces: Vec::new(),
+            open_python_files: HashMap::new(),
             diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
-            merged_instant_diagnostics: HashMap::new(),
+            merged_diagnostic_indices: HashMap::new(),
             ty_diag_result_ids: HashMap::new(),
+            diag_text_pool: HashMap::new(),
             ty_workspace_diag_pending: None,
             ty_workspace_diag_dirty: false,
             dirty_diagnostics: false,
             last_change: None,
             current_path: None,
             current_python_file: None,
+            current_python_lines: None,
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
             python_disabled: false,
@@ -66,43 +98,151 @@ impl LspManager {
         }
     }
 
+    fn configured_workspace_for_path(&self, path: &Path) -> Option<&PathBuf> {
+        self.workspaces.iter().find(|ws| path.starts_with(ws))
+    }
+
+    fn refresh_active_workspaces(&mut self) -> bool {
+        let mut next = Vec::new();
+        for ws in &self.workspaces {
+            if self.open_python_files.keys().any(|path| path.starts_with(ws)) {
+                next.push(ws.clone());
+            }
+        }
+        if self.active_workspaces == next {
+            return false;
+        }
+        self.active_workspaces = next;
+        true
+    }
+
+    fn prune_inactive_workspace_diagnostics(&mut self) {
+        let active_workspaces = self.active_workspaces.clone();
+        let open_python_files = self.open_python_files.clone();
+        let keep_path = |path: &PathBuf| {
+            active_workspaces.iter().any(|ws| path.starts_with(ws))
+                || open_python_files.contains_key(path)
+        };
+        let before = self.diagnostics.len()
+            + self.instant_diagnostics.len()
+            + self.ty_instant_diagnostics.len()
+            + self.merged_diagnostic_indices.len()
+            + self.ty_diag_result_ids.len();
+        self.diagnostics.retain(|path, _| keep_path(path));
+        self.instant_diagnostics.retain(|path, _| keep_path(path));
+        self.ty_instant_diagnostics.retain(|path, _| keep_path(path));
+        self.merged_diagnostic_indices.retain(|path, _| keep_path(path));
+        self.ty_diag_result_ids.retain(|path, _| keep_path(path));
+        self.rebuild_diag_text_pool();
+        let after = self.diagnostics.len()
+            + self.instant_diagnostics.len()
+            + self.ty_instant_diagnostics.len()
+            + self.merged_diagnostic_indices.len()
+            + self.ty_diag_result_ids.len();
+        if before != after {
+            self.dirty_diagnostics = false;
+        }
+    }
+
+    fn reset_ty_workspace_state(&mut self) {
+        self.ty_diag_result_ids.clear();
+        self.merged_diagnostic_indices.clear();
+        self.diag_text_pool.clear();
+        self.ty_workspace_diag_pending = None;
+        self.ty_workspace_diag_dirty =
+            !self.open_python_files.is_empty() && !self.active_workspaces.is_empty();
+    }
+
+    fn sync_python_processes_after_open_set_change(&mut self, reopen_current: bool) {
+        self.prune_inactive_workspace_diagnostics();
+        self.reset_ty_workspace_state();
+
+        if self.open_python_files.is_empty() {
+            if let Some(p) = self.python.take() {
+                p.shutdown();
+            }
+            if let Some(p) = self.ty_process.take() {
+                p.shutdown();
+            }
+            self.python_status = LspServerStatus::Disabled;
+            self.ty_status = LspServerStatus::Disabled;
+            self.ty_workspace_diag_dirty = false;
+            return;
+        }
+
+        if self.python_disabled {
+            return;
+        }
+
+        let workspaces = self.active_workspaces.clone();
+        if let Some(p) = self.python.take() {
+            p.shutdown();
+        }
+        if let Some(p) = self.ty_process.take() {
+            p.shutdown();
+        }
+        self.python_status = LspServerStatus::Starting;
+        self.ty_status = LspServerStatus::Starting;
+        self.python = Some(LspProcess::start(&RUFF_SERVER, workspaces.clone()));
+        self.ty_process = Some(LspProcess::start(&TY_SERVER, workspaces));
+        self.reset_ty_workspace_state();
+
+        if reopen_current {
+            self.reopen_current_python_file();
+        }
+    }
+
+    fn note_open_python_file(&mut self, path: PathBuf, lines: usize) -> bool {
+        let had_open = !self.open_python_files.is_empty();
+        self.open_python_files.insert(path, lines);
+        let active_changed = self.refresh_active_workspaces();
+        active_changed || had_open != !self.open_python_files.is_empty()
+    }
+
+    fn note_close_python_file(&mut self, path: &PathBuf) -> bool {
+        let had_open = !self.open_python_files.is_empty();
+        self.open_python_files.remove(path);
+        let active_changed = self.refresh_active_workspaces();
+        active_changed || had_open != !self.open_python_files.is_empty()
+    }
+
+    pub fn set_workspaces(&mut self, workspaces: Vec<PathBuf>) {
+        self.workspaces = workspaces;
+        if self.refresh_active_workspaces() {
+            self.sync_python_processes_after_open_set_change(true);
+        } else {
+            self.prune_inactive_workspace_diagnostics();
+        }
+    }
+
     /// Запускает нужный LSP-сервер если ещё не запущен (lazy)
     fn ensure_python(&mut self) {
+        if self.open_python_files.is_empty() {
+            return;
+        }
         if self.python.is_none() && !self.python_disabled {
             self.python_status = LspServerStatus::Starting;
-            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
+            self.python = Some(LspProcess::start(
+                &RUFF_SERVER,
+                self.active_workspaces.clone(),
+            ));
         }
         if self.ty_process.is_none() && !self.python_disabled {
             self.ty_status = LspServerStatus::Starting;
-            self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
-            self.ty_diag_result_ids.clear();
-            self.ty_workspace_diag_pending = None;
-            self.ty_workspace_diag_dirty = true;
+            self.ty_process = Some(LspProcess::start(
+                &TY_SERVER,
+                self.active_workspaces.clone(),
+            ));
+            self.reset_ty_workspace_state();
         }
     }
 
     /// Перезапустить ruff сервер
     pub fn restart_python(&mut self) {
-        if let Some(proc) = &mut self.python {
-            proc.restart();
-            self.python_status = LspServerStatus::Starting;
-        } else if !self.python_disabled {
-            self.python_status = LspServerStatus::Starting;
-            self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
+        if self.open_python_files.is_empty() || self.python_disabled {
+            return;
         }
-        if let Some(proc) = &mut self.ty_process {
-            proc.restart();
-            self.ty_status = LspServerStatus::Starting;
-            self.ty_diag_result_ids.clear();
-            self.ty_workspace_diag_pending = None;
-            self.ty_workspace_diag_dirty = true;
-        } else if !self.python_disabled {
-            self.ty_status = LspServerStatus::Starting;
-            self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
-            self.ty_diag_result_ids.clear();
-            self.ty_workspace_diag_pending = None;
-            self.ty_workspace_diag_dirty = true;
-        }
+        self.sync_python_processes_after_open_set_change(true);
     }
 
     /// Отключить ruff (остановить и не перезапускать)
@@ -119,8 +259,8 @@ impl LspManager {
         self.diagnostics.clear();
         self.instant_diagnostics.clear();
         self.ty_instant_diagnostics.clear();
-        self.merged_instant_diagnostics.clear();
         self.ty_diag_result_ids.clear();
+        self.diag_text_pool.clear();
         self.ty_workspace_diag_pending = None;
         self.ty_workspace_diag_dirty = false;
         self.dirty_diagnostics = false;
@@ -130,13 +270,26 @@ impl LspManager {
     /// Включить ruff обратно
     pub fn enable_python(&mut self) {
         self.python_disabled = false;
+        if self.open_python_files.is_empty() {
+            self.python_status = LspServerStatus::Disabled;
+            self.ty_status = LspServerStatus::Disabled;
+            return;
+        }
         self.python_status = LspServerStatus::Starting;
         self.ty_status = LspServerStatus::Starting;
-        self.python = Some(LspProcess::start(&RUFF_SERVER, self.workspaces.clone()));
-        self.ty_process = Some(LspProcess::start(&TY_SERVER, self.workspaces.clone()));
-        self.ty_diag_result_ids.clear();
-        self.ty_workspace_diag_pending = None;
-        self.ty_workspace_diag_dirty = true;
+        self.python = Some(LspProcess::start(
+            &RUFF_SERVER,
+            self.active_workspaces.clone(),
+        ));
+        self.ty_process = Some(LspProcess::start(
+            &TY_SERVER,
+            self.active_workspaces.clone(),
+        ));
+        self.reset_ty_workspace_state();
+        self.current_python_lines = self
+            .current_python_file
+            .as_ref()
+            .map(|(_, text, _)| python_line_count(text.as_ref()));
         self.reopen_current_python_file();
     }
 
@@ -144,12 +297,12 @@ impl LspManager {
         let Some((path, text, version)) = self.current_python_file.clone() else {
             return;
         };
-        let ws = self.workspaces.first().cloned();
+        let ws = self.configured_workspace_for_path(&path).cloned();
         if let Some(proc) = &mut self.python {
-            proc.notify_open(&path, &text, version, ws.as_ref());
+            proc.notify_open(&path, text.clone(), version, ws.as_ref());
         }
         if let Some(proc) = &mut self.ty_process {
-            proc.notify_open(&path, &text, version, ws.as_ref());
+            proc.notify_open(&path, text.clone(), version, ws.as_ref());
         }
     }
 
@@ -224,19 +377,28 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         self.current_path = Some(abs_path.clone());
-        let ws = self.workspaces.first().cloned();
         if Self::is_python_ext(ext) {
-            self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
-            self.ensure_python();
+            let text = Arc::<str>::from(text);
+            let lines = python_line_count(text.as_ref());
+            self.current_python_file = Some((abs_path.clone(), text.clone(), version));
+            self.current_python_lines = Some(lines);
+            let open_set_changed = self.note_open_python_file(abs_path.clone(), lines);
+            if open_set_changed {
+                self.sync_python_processes_after_open_set_change(false);
+            } else {
+                self.ensure_python();
+            }
+            let ws = self.configured_workspace_for_path(&abs_path).cloned();
             if let Some(proc) = &mut self.python {
-                proc.notify_open(&abs_path, text, version, ws.as_ref());
+                proc.notify_open(&abs_path, text.clone(), version, ws.as_ref());
             }
             if let Some(proc) = &mut self.ty_process {
-                proc.notify_open(&abs_path, text, version, ws.as_ref());
+                proc.notify_open(&abs_path, text.clone(), version, ws.as_ref());
             }
             self.ty_workspace_diag_dirty = true;
         } else {
             self.current_python_file = None;
+            self.current_python_lines = None;
         }
     }
 
@@ -253,13 +415,31 @@ impl LspManager {
         };
         if Self::is_python_ext(ext) {
             self.current_path = Some(abs_path.clone());
-            self.current_python_file = Some((abs_path.clone(), text.to_string(), version));
-            self.ensure_python();
+            let text = Arc::<str>::from(text);
+            let lines = python_line_count(text.as_ref());
+            let was_open = self.open_python_files.contains_key(&abs_path);
+            self.current_python_file = Some((abs_path.clone(), text.clone(), version));
+            self.current_python_lines = Some(lines);
+            let open_set_changed = self.note_open_python_file(abs_path.clone(), lines);
+            if open_set_changed {
+                self.sync_python_processes_after_open_set_change(false);
+            } else {
+                self.ensure_python();
+            }
+            let ws = self.configured_workspace_for_path(&abs_path).cloned();
             if let Some(proc) = &mut self.python {
-                proc.notify_change(&abs_path, text, version);
+                if was_open {
+                    proc.notify_change(&abs_path, text.clone(), version);
+                } else {
+                    proc.notify_open(&abs_path, text.clone(), version, ws.as_ref());
+                }
             }
             if let Some(proc) = &mut self.ty_process {
-                proc.notify_change(&abs_path, text, version);
+                if was_open {
+                    proc.notify_change(&abs_path, text.clone(), version);
+                } else {
+                    proc.notify_open(&abs_path, text.clone(), version, ws.as_ref());
+                }
             }
             self.ty_workspace_diag_dirty = true;
         }
@@ -396,6 +576,7 @@ impl LspManager {
             if matches!(self.current_python_file.as_ref(), Some((path, _, _)) if path == &abs_path)
             {
                 self.current_python_file = None;
+                self.current_python_lines = None;
             }
             if let Some(proc) = &mut self.python {
                 proc.notify_close(&abs_path);
@@ -403,7 +584,12 @@ impl LspManager {
             if let Some(proc) = &mut self.ty_process {
                 proc.notify_close(&abs_path);
             }
-            self.ty_workspace_diag_dirty = true;
+            if self.note_close_python_file(&abs_path) {
+                self.sync_python_processes_after_open_set_change(true);
+            } else {
+                self.prune_inactive_workspace_diagnostics();
+                self.ty_workspace_diag_dirty = !self.active_workspaces.is_empty();
+            }
         }
     }
 
@@ -430,6 +616,7 @@ impl LspManager {
             || self.python_disabled
             || self.suppress_diagnostics
             || self.ty_status != LspServerStatus::Running
+            || self.active_workspaces.is_empty()
         {
             return;
         }
@@ -492,6 +679,8 @@ impl LspManager {
         }
 
         // Обновляем кешированные диагностики и статусы
+        let mut received_diagnostics = 0usize;
+        let mut workspace_diagnostics_done = false;
         for ev in &mut all {
             match ev {
                 LspEvent::Diagnostics {
@@ -504,26 +693,22 @@ impl LspManager {
                 } => {
                     if !self.suppress_diagnostics {
                         let v = version.unwrap_or(0);
+                        received_diagnostics = received_diagnostics.saturating_add(items.len());
+                        self.compact_diagnostic_text(items);
 
                         if *server_name == TY_SERVER.program {
                             if let Some(result_id) = result_id.as_ref() {
                                 self.ty_diag_result_ids
                                     .insert(path.clone(), result_id.clone());
                             }
+                            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
                             self.ty_instant_diagnostics
-                                .insert(path.clone(), (v, items.clone()));
+                                .insert(path.clone(), (v, items));
                         } else {
+                            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
                             self.instant_diagnostics
-                                .insert(path.clone(), (v, items.clone()));
+                                .insert(path.clone(), (v, items));
                         }
-
-                        let (max_v, merged) = merged_diagnostics_for_path(
-                            path,
-                            &self.instant_diagnostics,
-                            &self.ty_instant_diagnostics,
-                        );
-                        self.merged_instant_diagnostics
-                            .insert(path.clone(), (max_v, merged));
 
                         self.dirty_diagnostics = true;
                         self.last_change = None;
@@ -553,6 +738,7 @@ impl LspManager {
                     if self.ty_workspace_diag_pending == Some(*request_id) {
                         self.ty_workspace_diag_pending = None;
                     }
+                    workspace_diagnostics_done = true;
                 }
                 LspEvent::Log { name, message } => {
                     let (final_text, spans, folds) = format_lsp_log_entry(message);
@@ -574,29 +760,20 @@ impl LspManager {
         if let Some(t) = self.last_change {
             if t.elapsed().as_secs_f32() >= 3.0 {
                 if self.dirty_diagnostics {
-                    for (path, merged) in merged_diagnostics_for_all_paths(
-                        &self.instant_diagnostics,
-                        &self.ty_instant_diagnostics,
-                    ) {
-                        self.diagnostics.insert(path, merged);
-                    }
+                    self.rebuild_merged_diagnostic_indices();
                     self.dirty_diagnostics = false;
                 }
                 self.last_change = None;
             }
         } else {
             if self.dirty_diagnostics {
-                for (path, merged) in merged_diagnostics_for_all_paths(
-                    &self.instant_diagnostics,
-                    &self.ty_instant_diagnostics,
-                ) {
-                    self.diagnostics.insert(path, merged);
-                }
+                self.rebuild_merged_diagnostic_indices();
                 self.dirty_diagnostics = false;
             }
         }
 
         self.request_ty_workspace_diagnostics_if_ready();
+        trim_allocator_after_large_diagnostics(received_diagnostics, workspace_diagnostics_done);
 
         all
     }
@@ -605,19 +782,19 @@ impl LspManager {
         if path.is_absolute() {
             self.diagnostics
                 .get(path)
-                .map(|v| v.as_slice())
+                .map(|v| v.as_ref())
                 .unwrap_or(&[])
         } else if let Some(ws) = self.workspaces.first() {
             let abs_path = ws.join(path);
             self.diagnostics
                 .get(abs_path.as_path())
-                .map(|v| v.as_slice())
+                .map(|v| v.as_ref())
                 .unwrap_or(&[])
         } else {
             let abs_path = self.relative_lookup_path(path);
             self.diagnostics
                 .get(abs_path.as_path())
-                .map(|v| v.as_slice())
+                .map(|v| v.as_ref())
                 .unwrap_or(&[])
         }
     }
@@ -633,35 +810,257 @@ impl LspManager {
         self.diagnostics.remove(&abs_path);
         self.instant_diagnostics.remove(&abs_path);
         self.ty_instant_diagnostics.remove(&abs_path);
-        self.merged_instant_diagnostics.remove(&abs_path);
+        self.merged_diagnostic_indices.remove(&abs_path);
         self.ty_diag_result_ids.remove(&abs_path);
+        self.rebuild_diag_text_pool();
         self.dirty_diagnostics = false;
     }
 
-    pub fn get_instant_diagnostics_with_version(&self, path: &Path) -> (i32, &[Diagnostic]) {
+    fn compact_diagnostic_text(&mut self, items: &mut [Diagnostic]) {
+        for diag in items {
+            diag.code = self.intern_optional_diag_text(diag.code.take());
+            diag.code_href = self.intern_optional_diag_text(diag.code_href.take());
+            diag.source = self.intern_optional_diag_text(diag.source.take());
+        }
+    }
+
+    fn intern_optional_diag_text(&mut self, value: Option<Arc<str>>) -> Option<Arc<str>> {
+        let value = value?;
+        if let Some((stored, _)) = self.diag_text_pool.get_key_value(value.as_ref()) {
+            return Some(stored.clone());
+        }
+        self.diag_text_pool.insert(value.clone(), value.clone());
+        Some(value)
+    }
+
+    fn rebuild_diag_text_pool(&mut self) {
+        self.diag_text_pool.clear();
+        let mut values = Vec::new();
+        for (_, diags) in self.instant_diagnostics.values() {
+            for diag in diags.iter() {
+                if let Some(value) = &diag.code {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.code_href {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.source {
+                    values.push(value.clone());
+                }
+            }
+        }
+        for (_, diags) in self.ty_instant_diagnostics.values() {
+            for diag in diags.iter() {
+                if let Some(value) = &diag.code {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.code_href {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.source {
+                    values.push(value.clone());
+                }
+            }
+        }
+        for value in values {
+            let _ = self.intern_optional_diag_text(Some(value));
+        }
+    }
+
+    fn lookup_abs_path(&self, path: &Path) -> PathBuf {
         if path.is_absolute() {
-            self.merged_instant_diagnostics
-                .get(path)
-                .map(|(v, d)| (*v, d.as_slice()))
-                .unwrap_or((0, &[]))
+            path.to_path_buf()
+        } else if let Some(ws) = self.workspaces.first() {
+            ws.join(path)
+        } else {
+            self.relative_lookup_path(path)
+        }
+    }
+
+    fn rebuild_merged_diagnostic_indices(&mut self) {
+        let mut paths = std::collections::HashSet::new();
+        for path in self.diagnostics.keys() {
+            paths.insert(path.clone());
+        }
+        for path in self.instant_diagnostics.keys() {
+            paths.insert(path.clone());
+        }
+        for path in self.ty_instant_diagnostics.keys() {
+            paths.insert(path.clone());
+        }
+
+        self.merged_diagnostic_indices.clear();
+        for path in paths {
+            let ruff_len = self
+                .instant_diagnostics
+                .get(&path)
+                .map_or(0, |(_, diagnostics)| diagnostics.len());
+            let ty_len = self
+                .ty_instant_diagnostics
+                .get(&path)
+                .map_or(0, |(_, diagnostics)| diagnostics.len());
+            let mut indices = Vec::with_capacity(ruff_len + ty_len);
+            for index in 0..ruff_len {
+                indices.push(MergedDiagnosticIndex {
+                    source: DiagnosticSourceKind::Ruff,
+                    index,
+                });
+            }
+            for index in 0..ty_len {
+                indices.push(MergedDiagnosticIndex {
+                    source: DiagnosticSourceKind::Ty,
+                    index,
+                });
+            }
+            if indices.is_empty()
+                && let Some(diagnostics) = self.diagnostics.get(&path)
+            {
+                indices.reserve(diagnostics.len());
+                for index in 0..diagnostics.len() {
+                    indices.push(MergedDiagnosticIndex {
+                        source: DiagnosticSourceKind::Legacy,
+                        index,
+                    });
+                }
+            }
+            if !indices.is_empty() {
+                self.merged_diagnostic_indices
+                    .insert(path, Arc::from(indices.into_boxed_slice()));
+            }
+        }
+    }
+
+    fn diagnostic_by_index<'a>(
+        &'a self,
+        path: &Path,
+        index: MergedDiagnosticIndex,
+    ) -> Option<&'a Diagnostic> {
+        match index.source {
+            DiagnosticSourceKind::Legacy => self.diagnostics.get(path)?.get(index.index),
+            DiagnosticSourceKind::Ruff => self.instant_diagnostics.get(path)?.1.get(index.index),
+            DiagnosticSourceKind::Ty => self.ty_instant_diagnostics.get(path)?.1.get(index.index),
+        }
+    }
+
+    pub fn diagnostic_at(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
+        let abs_path = self.lookup_abs_path(path);
+        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+            return indices
+                .get(index)
+                .and_then(|merged| self.diagnostic_by_index(&abs_path, *merged));
+        }
+        self.diagnostics
+            .get(abs_path.as_path())
+            .and_then(|diagnostics| diagnostics.get(index))
+    }
+
+    pub fn diagnostic_count(&self, path: &Path) -> usize {
+        let abs_path = self.lookup_abs_path(path);
+        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+            return indices.len();
+        }
+        self.diagnostics
+            .get(abs_path.as_path())
+            .map_or(0, |diagnostics| diagnostics.len())
+    }
+
+    pub fn diagnostic_entries_for_path(&self, path: &Path) -> Vec<(usize, &Diagnostic)> {
+        let abs_path = self.lookup_abs_path(path);
+        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+            let mut entries = Vec::with_capacity(indices.len());
+            for (visible_index, merged) in indices.iter().enumerate() {
+                if let Some(diagnostic) = self.diagnostic_by_index(&abs_path, *merged) {
+                    entries.push((visible_index, diagnostic));
+                }
+            }
+            return entries;
+        }
+        self.diagnostics
+            .get(abs_path.as_path())
+            .map(|diagnostics| diagnostics.iter().enumerate().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn diagnostic_paths(&self) -> Vec<&PathBuf> {
+        let mut paths: Vec<&PathBuf> = self.merged_diagnostic_indices.keys().collect();
+        for path in self.diagnostics.keys() {
+            if !self.merged_diagnostic_indices.contains_key(path) {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        paths
+    }
+
+    pub fn diagnostic_counts_for_path(&self, path: &Path) -> (usize, usize) {
+        let mut errors = 0usize;
+        let mut warnings = 0usize;
+        for (_, diagnostic) in self.diagnostic_entries_for_path(path) {
+            match diagnostic.severity {
+                DiagSeverity::Error => errors += 1,
+                DiagSeverity::Warning => warnings += 1,
+                _ => {}
+            }
+        }
+        (errors, warnings)
+    }
+
+    pub fn diagnostic_severity_for_path(&self, path: &Path) -> Option<DiagSeverity> {
+        let mut has_warning = false;
+        for (_, diagnostic) in self.diagnostic_entries_for_path(path) {
+            match diagnostic.severity {
+                DiagSeverity::Error => return Some(DiagSeverity::Error),
+                DiagSeverity::Warning => has_warning = true,
+                _ => {}
+            }
+        }
+        has_warning.then_some(DiagSeverity::Warning)
+    }
+
+    pub fn diagnostic_refs_for_path(&self, path: &Path) -> Vec<&Diagnostic> {
+        self.diagnostic_entries_for_path(path)
+            .into_iter()
+            .map(|(_, diagnostic)| diagnostic)
+            .collect()
+    }
+
+    fn instant_merged_diagnostics_for_abs_path(&self, path: &Path) -> (i32, Vec<&Diagnostic>) {
+        let ruff = self.instant_diagnostics.get(path);
+        let ty = self.ty_instant_diagnostics.get(path);
+        let count = ruff.map_or(0, |(_, diags)| diags.len())
+            + ty.map_or(0, |(_, diags)| diags.len());
+        if count == 0 {
+            return (0, Vec::new());
+        }
+
+        let mut merged = Vec::with_capacity(count);
+        let mut max_v = 0;
+        if let Some((version, diagnostics)) = ruff {
+            max_v = max_v.max(*version);
+            merged.extend(diagnostics.iter());
+        }
+        if let Some((version, diagnostics)) = ty {
+            max_v = max_v.max(*version);
+            merged.extend(diagnostics.iter());
+        }
+        (max_v, merged)
+    }
+
+    pub fn instant_merged_diagnostics(&self, path: &Path) -> (i32, Vec<&Diagnostic>) {
+        if path.is_absolute() {
+            self.instant_merged_diagnostics_for_abs_path(path)
         } else if let Some(ws) = self.workspaces.first() {
             let abs_path = ws.join(path);
-            self.merged_instant_diagnostics
-                .get(abs_path.as_path())
-                .map(|(v, d)| (*v, d.as_slice()))
-                .unwrap_or((0, &[]))
+            self.instant_merged_diagnostics_for_abs_path(abs_path.as_path())
         } else {
             let abs_path = self.relative_lookup_path(path);
-            self.merged_instant_diagnostics
-                .get(abs_path.as_path())
-                .map(|(v, d)| (*v, d.as_slice()))
-                .unwrap_or((0, &[]))
+            self.instant_merged_diagnostics_for_abs_path(abs_path.as_path())
         }
     }
 
     pub fn has_stale_instant_diagnostics(&self, path: &Path, editor_version: u64) -> bool {
         if path.is_absolute() {
-            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
                 diags
                     .get(path)
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
@@ -669,7 +1068,7 @@ impl LspManager {
             is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
         } else if let Some(ws) = self.workspaces.first() {
             let abs_path = ws.join(path);
-            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
                 diags
                     .get(abs_path.as_path())
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
@@ -677,7 +1076,7 @@ impl LspManager {
             is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
         } else {
             let abs_path = self.relative_lookup_path(path);
-            let is_stale = |diags: &HashMap<PathBuf, (i32, Vec<Diagnostic>)>| {
+            let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
                 diags
                     .get(abs_path.as_path())
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
@@ -688,8 +1087,9 @@ impl LspManager {
 
     /// Диагностики для текущего файла, отфильтрованные по строке
     pub fn diagnostics_for_line(&self, path: &PathBuf, line: u32) -> Vec<&Diagnostic> {
-        self.get_diagnostics(path)
-            .iter()
+        self.diagnostic_entries_for_path(path)
+            .into_iter()
+            .map(|(_, diagnostic)| diagnostic)
             .filter(move |d| d.start_line == line)
             .collect()
     }
@@ -785,6 +1185,7 @@ pub fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize {
 /// Применяет WorkspaceEdit к строке текста (для текущего файла).
 /// Правки должны быть отсортированы с конца файла к началу, чтобы offset'ы не съехали.
 
+#[allow(dead_code)]
 pub fn format_and_highlight_json(
     raw_text: &str,
 ) -> (
@@ -893,6 +1294,7 @@ pub fn format_and_highlight_json(
     (final_string, spans, folds)
 }
 
+#[allow(dead_code)]
 fn json_container_depth(node: tree_sitter::Node<'_>) -> usize {
     let mut depth = 1;
     let mut parent = node.parent();

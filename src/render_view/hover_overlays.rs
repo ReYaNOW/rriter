@@ -8,7 +8,7 @@ impl Renderer {
     pub(crate) fn draw_lsp_squiggles_and_collect_hovered_diag(
         &mut self,
         editor: &Editor,
-        lsp_diagnostics: &[crate::lsp::Diagnostic],
+        lsp_diagnostics: &[&crate::lsp::Diagnostic],
         scroll_x: f32,
         render_scroll_y: f32,
         panel_bottom_h: f32,
@@ -51,7 +51,7 @@ impl Renderer {
             };
             for i in 0..self.lsp_diagnostic_indices.len() {
                 let idx = self.lsp_diagnostic_indices[i];
-                let diag = &lsp_diagnostics[idx];
+                let diag = lsp_diagnostics[idx];
                 // Цвет по severity
                 let color: [f32; 4] = match diag.severity {
                     crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 0.90],
@@ -232,7 +232,7 @@ impl Renderer {
     pub(crate) fn draw_hover_overlays(
         &mut self,
         editor: &Editor,
-        lsp_diagnostics: &[crate::lsp::Diagnostic],
+        lsp_diagnostics: &[&crate::lsp::Diagnostic],
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
@@ -294,7 +294,7 @@ impl Renderer {
 
                     for i in 0..self.lsp_diagnostic_indices.len() {
                         let idx = self.lsp_diagnostic_indices[i];
-                        let diag = &lsp_diagnostics[idx];
+                        let diag = lsp_diagnostics[idx];
                         if hover_line < diag.start_line as usize
                             || hover_line > diag.end_line as usize
                         {
@@ -544,7 +544,7 @@ impl Renderer {
 
         if show_error {
             self.draw_diagnostic_popup(
-                &lsp_diagnostics,
+                lsp_diagnostics,
                 ide_panel,
                 ui_registry,
                 attached_hover_w,

@@ -208,14 +208,17 @@ impl App {
                             title: qf.title.clone(),
                             kind: Some("quickfix".to_string()),
                             edit: Some(crate::lsp::WorkspaceEdit { changes }),
-                            code: d.code.clone(),
+                            code: d.code.as_ref().map(|code| code.to_string()),
                         },
                     ));
                 }
             }
 
             // Сначала "Добавить # noqa: CODES" для конкретных кодов
-            let codes: Vec<String> = diags.iter().filter_map(|d| d.code.clone()).collect();
+            let codes: Vec<String> = diags
+                .iter()
+                .filter_map(|d| d.code.as_ref().map(|code| code.to_string()))
+                .collect();
             if !codes.is_empty() {
                 items.push(crate::app::LspActionItem::AddNoqa {
                     codes: codes.clone(),

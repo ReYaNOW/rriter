@@ -7,7 +7,7 @@ BINARY_NAME = rriter
 COMMON_RUSTFLAGS = -C target-cpu=native -C llvm-args=-fp-contract=fast -C link-arg=-fuse-ld=lld
 BUILD_STD = -Z build-std=core,alloc,std,panic_abort,test
 TARGET = x86_64-unknown-linux-gnu
-CODEX_ENV = HOME=/home/reyan RUSTUP_HOME=/home/reyan/.rustup CARGO_HOME=/home/reyan/.cargo
+CODEX_ENV = HOME=/home/reyan RUSTUP_HOME=/home/reyan/.local/share/rustup CARGO_HOME=/home/reyan/.local/share/cargo
 
 # Настройки для быстрой сборки (DEBUG=2 дает трейсбеки, PANIC=abort работает с RUST_BACKTRACE)
 FAST_PROFILE_OPTS = CARGO_BUILD_JOBS=4 CARGO_PROFILE_RELEASE_LTO=off CARGO_PROFILE_RELEASE_CODEGEN_UNITS=16 CARGO_PROFILE_RELEASE_OPT_LEVEL=1 CARGO_PROFILE_RELEASE_INCREMENTAL=true CARGO_PROFILE_RELEASE_STRIP=none CARGO_PROFILE_RELEASE_DEBUG=2 CARGO_PROFILE_RELEASE_PANIC=abort

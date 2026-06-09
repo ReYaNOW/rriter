@@ -11,11 +11,10 @@ fn api_mock_ty_diagnostics_as_lsp(
             severity: crate::lsp::DiagSeverity::Error,
             code: None,
             code_href: None,
-            message: diag.message.clone(),
-            source: Some("ty".to_string()),
-            quickfixes: Vec::new(),
-            tags: Vec::new(),
-            spans: Vec::new(),
+            message: std::sync::Arc::<str>::from(diag.message.as_str()),
+            source: Some(std::sync::Arc::<str>::from("ty")),
+            quickfixes: Vec::new().into_boxed_slice(),
+            tags: Vec::new().into_boxed_slice(),
         })
         .collect()
 }
@@ -175,6 +174,7 @@ impl Renderer {
             return false;
         }
         let lsp_diagnostics = api_mock_ty_diagnostics_as_lsp(diagnostics);
+        let lsp_diagnostic_refs: Vec<&crate::lsp::Diagnostic> = lsp_diagnostics.iter().collect();
         let old_line_height = self.line_height;
         let old_left_padding = self.left_padding;
         let old_last_scroll_x = self.last_scroll_x;
@@ -237,7 +237,7 @@ impl Renderer {
         let mut wants_pointer = false;
         self.draw_hover_overlays(
             editor,
-            &lsp_diagnostics,
+            &lsp_diagnostic_refs,
             ide_panel,
             ui_registry,
             mx,

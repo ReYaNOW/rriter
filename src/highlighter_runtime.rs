@@ -1,5 +1,22 @@
 use super::*;
 
+const HIGHLIGHT_RUNTIME_TRACE_SLOW_MS: f64 = 4.0;
+
+fn highlighter_runtime_trace_elapsed_ms(start: std::time::Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn highlighter_runtime_trace_line_count(text: &str) -> usize {
+    text.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1
+}
+
+fn highlighter_runtime_trace_should_log(text_len: usize, priority: bool, elapsed_ms: f64) -> bool {
+    !cfg!(test)
+        && (text_len >= TREE_SITTER_HIGHLIGHT_MAX_BYTES
+            || priority
+            || elapsed_ms >= HIGHLIGHT_RUNTIME_TRACE_SLOW_MS)
+}
+
 impl Highlighter {
     fn shrink_sync_byte_colors_for_small_text(&mut self) {
         if self.sync_text.len() >= 512 * 1024 {
@@ -12,12 +29,23 @@ impl Highlighter {
     }
 
     pub fn restore_cached_view(&mut self, version: u64, text: String, ext: String) {
+        if highlighter_runtime_trace_should_log(text.len(), false, 0.0) {
+            eprintln!(
+                "[HL TRACE runtime:restore] ver={} bytes={} lines={} ext={} spans={}",
+                version,
+                text.len(),
+                highlighter_runtime_trace_line_count(&text),
+                ext,
+                self.spans.len(),
+            );
+        }
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         self.sync_text = text.clone();
         self.sync_ext = ext.clone();
         self.sync_tree = None;
         self.current_version = version;
         self.is_complete = true;
+        self.pending_priority_anchor = None;
         let _ = self.tx.send(HighlighterMessage::Restore {
             text,
             ext,
@@ -26,6 +54,19 @@ impl Highlighter {
     }
 
     pub fn restart_cached_view(&mut self, version: u64, text: String, ext: String, anchor: usize) {
+        let priority = should_prioritize_front_highlight(&ext, &text);
+        if highlighter_runtime_trace_should_log(text.len(), priority, 0.0) {
+            eprintln!(
+                "[HL TRACE runtime:restart] req_next={} ver={} bytes={} lines={} ext={} priority={} anchor={}",
+                self.current_request_id.wrapping_add(1).max(1),
+                version,
+                text.len(),
+                highlighter_runtime_trace_line_count(&text),
+                ext,
+                priority,
+                anchor,
+            );
+        }
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         let request_id = self.current_request_id;
         self.sync_text = text.clone();
@@ -33,6 +74,7 @@ impl Highlighter {
         self.sync_tree = None;
         self.current_version = version;
         self.is_complete = false;
+        self.pending_priority_anchor = None;
         let _ = self.tx.send(HighlighterMessage::Reset {
             request_id,
             version,
@@ -43,12 +85,28 @@ impl Highlighter {
     }
 
     pub fn reset(&mut self, version: u64, text: String, ext: String, priority_anchor: usize) {
+        let priority = should_prioritize_front_highlight(&ext, &text);
+        if highlighter_runtime_trace_should_log(text.len(), priority, 0.0) {
+            eprintln!(
+                "[HL TRACE runtime:reset] req_next={} ver={} bytes={} lines={} ext={} priority={} anchor={} old_spans={} old_complete={}",
+                self.current_request_id.wrapping_add(1).max(1),
+                version,
+                text.len(),
+                highlighter_runtime_trace_line_count(&text),
+                ext,
+                priority,
+                priority_anchor,
+                self.spans.len(),
+                self.is_complete,
+            );
+        }
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         let request_id = self.current_request_id;
         self.sync_text = text.clone();
         self.sync_ext = ext.clone();
         self.sync_tree = None;
         self.is_complete = false;
+        self.pending_priority_anchor = None;
         let _ = self.tx.send(HighlighterMessage::Reset {
             request_id,
             version,
@@ -59,7 +117,7 @@ impl Highlighter {
     }
 
     pub fn apply_edits(
-        &self,
+        &mut self,
         version: u64,
         edits: Vec<SyncEdit>,
         edit_start_byte: Option<usize>,
@@ -68,16 +126,83 @@ impl Highlighter {
         if !edits.is_empty() {
             let (invalidate_start_byte, invalidate_end_byte) =
                 sync_edit_invalidation_byte_range(&edits);
+            let worker_edit_start_byte = edit_start_byte.or(invalidate_start_byte);
+            let worker_edit_end_byte = edit_end_byte.or(invalidate_end_byte);
+            let trace = highlighter_runtime_trace_should_log(
+                self.sync_text.len(),
+                edit_start_byte.is_none() || edit_end_byte.is_none(),
+                0.0,
+            );
+            if trace {
+                let mut insert_bytes = 0usize;
+                let mut delete_bytes = 0usize;
+                for edit in &edits {
+                    match edit {
+                        SyncEdit::Insert { text, .. } => insert_bytes += text.len(),
+                        SyncEdit::Delete { len, .. } => delete_bytes += *len,
+                    }
+                }
+                eprintln!(
+                    "[HL TRACE runtime:apply_edits] req={} ver={} current_ver={} bytes={} lines={} edits={} insert_bytes={} delete_bytes={} edit_range={:?} sent_range={:?} provided_range_missing={}",
+                    self.current_request_id,
+                    version,
+                    self.current_version,
+                    self.sync_text.len(),
+                    highlighter_runtime_trace_line_count(&self.sync_text),
+                    edits.len(),
+                    insert_bytes,
+                    delete_bytes,
+                    edit_start_byte.zip(edit_end_byte),
+                    worker_edit_start_byte.zip(worker_edit_end_byte),
+                    edit_start_byte.is_none() || edit_end_byte.is_none(),
+                );
+            }
+            self.pending_priority_anchor = None;
             let _ = self.tx.send(HighlighterMessage::Edits {
                 request_id: self.current_request_id,
                 version,
                 edits,
-                edit_start_byte,
-                edit_end_byte,
+                edit_start_byte: worker_edit_start_byte,
+                edit_end_byte: worker_edit_end_byte,
                 invalidate_start_byte,
                 invalidate_end_byte,
             });
         }
+    }
+
+    pub fn request_priority_highlight(&mut self, version: u64, anchor: usize) -> bool {
+        if self.current_request_id == 0 || self.sync_text.is_empty() {
+            return false;
+        }
+        let lang_name = lang_name_for_ext_and_text(&self.sync_ext, &self.sync_text);
+        if !should_skip_full_highlight(lang_name, &self.sync_text) {
+            return false;
+        }
+        let anchor = anchor.min(self.sync_text.len());
+        if self
+            .spans
+            .iter()
+            .any(|span| span.start <= anchor && anchor < span.end)
+        {
+            return false;
+        }
+        if self
+            .pending_priority_anchor
+            .is_some_and(|pending| pending.abs_diff(anchor) < PRIORITY_HIGHLIGHT_HEAD_MIN_BYTES / 2)
+        {
+            return false;
+        }
+        self.pending_priority_anchor = Some(anchor);
+        let _ = self.tx.send(HighlighterMessage::Priority {
+            request_id: self.current_request_id,
+            version,
+            priority_anchor: anchor,
+        });
+        true
+    }
+
+    pub fn has_pending_priority_highlight(&self) -> bool {
+        self.pending_priority_anchor.is_some()
     }
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
@@ -120,10 +245,24 @@ impl Highlighter {
         tree: Option<tree_sitter::Tree>,
         is_complete: bool,
     ) -> bool {
+        let trace = highlighter_runtime_trace_should_log(self.sync_text.len(), !is_complete, 0.0);
         if request_id != self.current_request_id
             || ver != current_editor_version
             || ver < self.current_version
         {
+            if trace {
+                eprintln!(
+                    "[HL TRACE runtime:poll_drop] req={} current_req={} ver={} editor_ver={} current_ver={} spans={} completions={} complete={}",
+                    request_id,
+                    self.current_request_id,
+                    ver,
+                    current_editor_version,
+                    self.current_version,
+                    spans.len(),
+                    completions.len(),
+                    is_complete,
+                );
+            }
             return false;
         }
 
@@ -134,8 +273,23 @@ impl Highlighter {
         self.syntax_errors = syntax_errors;
         self.sync_tree = tree;
         self.is_complete = is_complete;
+        self.pending_priority_anchor = None;
         if is_complete {
             self.shrink_sync_byte_colors_for_small_text();
+        }
+        if trace {
+            eprintln!(
+                "[HL TRACE runtime:poll_apply] req={} ver={} spans={} completions={} folds={} errors={} complete={} tree={} bytes={}",
+                request_id,
+                ver,
+                self.spans.len(),
+                self.completions.len(),
+                self.foldable_ranges.len(),
+                self.syntax_errors.len(),
+                self.is_complete,
+                self.sync_tree.is_some(),
+                self.sync_text.len(),
+            );
         }
         true
     }
@@ -357,16 +511,48 @@ impl Highlighter {
         invalidate_end_byte: Option<usize>,
         timeout: std::time::Duration,
     ) -> bool {
+        let total_start = std::time::Instant::now();
         let text = self.sync_text.as_str();
-        if text.is_empty() || should_prioritize_front_highlight(&self.sync_ext, text) {
+        let priority = should_prioritize_front_highlight(&self.sync_ext, text);
+        let trace = highlighter_runtime_trace_should_log(text.len(), priority, 0.0);
+        if text.is_empty() || priority {
+            if trace {
+                eprintln!(
+                    "[HL TRACE runtime:sync_edit_skip] ver={} bytes={} lines={} ext={} reason={} edit_range={:?} invalidate={:?}",
+                    version,
+                    text.len(),
+                    highlighter_runtime_trace_line_count(text),
+                    self.sync_ext,
+                    if text.is_empty() { "empty" } else { "priority_or_large" },
+                    edit_start_byte.zip(edit_end_byte),
+                    invalidate_start_byte.zip(invalidate_end_byte),
+                );
+            }
             return false;
         }
 
         let lang_name = lang_name_for_ext_and_text(&self.sync_ext, text);
         let Some((lang, queries)) = get_ts_config(lang_name) else {
+            if trace {
+                eprintln!(
+                    "[HL TRACE runtime:sync_edit_skip] ver={} bytes={} ext={} reason=no_ts_config",
+                    version,
+                    text.len(),
+                    self.sync_ext,
+                );
+            }
             return false;
         };
         if self.sync_parser.set_language(&lang).is_err() {
+            if trace {
+                eprintln!(
+                    "[HL TRACE runtime:sync_edit_skip] ver={} bytes={} ext={} lang={} reason=set_language_failed",
+                    version,
+                    text.len(),
+                    self.sync_ext,
+                    lang_name,
+                );
+            }
             return false;
         }
 
@@ -381,12 +567,28 @@ impl Highlighter {
         let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
         let bytes = text.as_bytes();
         let len = bytes.len();
+        let parse_start = std::time::Instant::now();
         let parsed_tree = self.sync_parser.parse_with_options(
             &mut |i, _| (i < len).then(|| &bytes[i..]).unwrap_or_default(),
             self.sync_tree.as_ref(),
             Some(options),
         );
+        let parse_ms = highlighter_runtime_trace_elapsed_ms(parse_start);
         let Some(tree) = parsed_tree else {
+            let total_ms = highlighter_runtime_trace_elapsed_ms(total_start);
+            if trace || highlighter_runtime_trace_should_log(text.len(), false, total_ms) {
+                eprintln!(
+                    "[HL TRACE runtime:sync_edit_fail] ver={} bytes={} lines={} ext={} lang={} reason=parse_timeout total_ms={:.2} parse_ms={:.2} timeout_ms={}",
+                    version,
+                    text.len(),
+                    highlighter_runtime_trace_line_count(text),
+                    self.sync_ext,
+                    lang_name,
+                    total_ms,
+                    parse_ms,
+                    timeout.as_millis(),
+                );
+            }
             return false;
         };
 
@@ -396,6 +598,7 @@ impl Highlighter {
             0..text.len()
         };
         let mut spans = Vec::new();
+        let query_start = std::time::Instant::now();
         collect_query_highlight_spans(
             &lang,
             lang_name,
@@ -406,7 +609,10 @@ impl Highlighter {
             Some(range),
             &mut spans,
         );
+        let query_ms = highlighter_runtime_trace_elapsed_ms(query_start);
+        let raw_span_count = spans.len();
 
+        let merge_start = std::time::Instant::now();
         let merged_spans = merge_highlight_spans(
             self.spans.clone(),
             spans,
@@ -415,6 +621,9 @@ impl Highlighter {
             false,
             expand_highlight_invalidation_range(text, invalidate_start_byte, invalidate_end_byte),
         );
+        let merge_ms = highlighter_runtime_trace_elapsed_ms(merge_start);
+        let merged_span_count = merged_spans.len();
+        let flatten_start = std::time::Instant::now();
         let flat_spans = flatten_spans(
             merged_spans,
             text.len(),
@@ -424,12 +633,48 @@ impl Highlighter {
             !lang_name.is_empty() && lang_name != "bash",
             false,
         );
+        let flatten_ms = highlighter_runtime_trace_elapsed_ms(flatten_start);
+        let pre_mutation_total_ms = highlighter_runtime_trace_elapsed_ms(total_start);
+        let should_log_done =
+            trace || highlighter_runtime_trace_should_log(text.len(), false, pre_mutation_total_ms);
+        let text_len = text.len();
+        let line_count = if should_log_done {
+            highlighter_runtime_trace_line_count(text)
+        } else {
+            0
+        };
+        let ext_label = self.sync_ext.clone();
 
         self.sync_tree = Some(tree);
         self.current_version = version;
         self.is_complete = true;
         self.spans = flat_spans;
+        let shrink_start = std::time::Instant::now();
         self.shrink_sync_byte_colors_for_small_text();
+        let shrink_ms = highlighter_runtime_trace_elapsed_ms(shrink_start);
+        let total_ms = highlighter_runtime_trace_elapsed_ms(total_start);
+        if should_log_done || highlighter_runtime_trace_should_log(text_len, false, total_ms) {
+            eprintln!(
+                "[HL TRACE runtime:sync_edit_done] ver={} bytes={} lines={} ext={} lang={} raw_spans={} merged_spans={} flat_spans={} range={:?} invalidate={:?} total_ms={:.2} parse_ms={:.2} query_ms={:.2} merge_ms={:.2} flatten_ms={:.2} shrink_ms={:.2} timeout_ms={}",
+                version,
+                text_len,
+                line_count,
+                ext_label,
+                lang_name,
+                raw_span_count,
+                merged_span_count,
+                self.spans.len(),
+                edit_start_byte.zip(edit_end_byte),
+                invalidate_start_byte.zip(invalidate_end_byte),
+                total_ms,
+                parse_ms,
+                query_ms,
+                merge_ms,
+                flatten_ms,
+                shrink_ms,
+                timeout.as_millis(),
+            );
+        }
         true
     }
 }
@@ -911,6 +1156,22 @@ mod tests {
     }
 
     #[test]
+    fn priority_range_from_viewport_top_covers_following_minimap_window() {
+        let mut text = String::new();
+        let mut line_starts = Vec::new();
+        for idx in 0..5000 {
+            line_starts.push(text.len());
+            text.push_str(&format!("value_{idx} = {idx}\n"));
+        }
+        let anchor = line_starts[1200];
+        let lower_visible_line = line_starts[1500];
+        let range = priority_highlight_range("py", &text, anchor);
+
+        assert!(range.start <= anchor);
+        assert!(range.end > lower_visible_line);
+    }
+
+    #[test]
     fn highlighter_full_result_follows_priority_result() {
         let mut highlighter = Highlighter::new();
         let text = "def f():\n    return 'x'\n".repeat(TREE_SITTER_HIGHLIGHT_MAX_LINES + 2);
@@ -940,5 +1201,98 @@ mod tests {
             highlighter.poll(12);
         }
         assert!(highlighter.spans.iter().any(|span| span.end == text.len()));
+    }
+
+    #[test]
+    fn highlighter_huge_file_stops_after_priority_result() {
+        let mut highlighter = Highlighter::new();
+        let text = "value = 1\n".repeat(TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 10);
+        assert!(should_skip_full_highlight("py", &text));
+
+        highlighter.reset(21, text.clone(), "py".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(21, std::time::Duration::from_secs(2)));
+
+        let max_span_end = highlighter
+            .spans
+            .iter()
+            .map(|span| span.end)
+            .max()
+            .unwrap_or(0);
+        assert!(max_span_end < text.len());
+        assert!(highlighter.is_complete);
+        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+        assert!(!highlighter.poll(21));
+    }
+
+    #[test]
+    fn highlighter_huge_file_loads_visible_slice_on_priority_request() {
+        let mut highlighter = Highlighter::new();
+        let text = "value = 1\n".repeat(TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 10_000);
+        let anchor = text[..text.len() * 3 / 4]
+            .rfind('\n')
+            .map(|pos| pos + 1)
+            .unwrap_or(0);
+
+        highlighter.reset(22, text.clone(), "py".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(22, std::time::Duration::from_secs(2)));
+        assert!(!highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= anchor && anchor < span.end));
+
+        assert!(highlighter.request_priority_highlight(22, anchor));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while !highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= anchor && anchor < span.end)
+            && std::time::Instant::now() < deadline
+        {
+            highlighter.poll(22);
+            std::thread::yield_now();
+        }
+
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= anchor && anchor < span.end));
+        assert!(highlighter.is_complete);
+        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+    }
+
+    #[test]
+    fn highlighter_huge_edit_without_explicit_range_highlights_edit_slice() {
+        let mut highlighter = Highlighter::new();
+        let text = "value = 1\n".repeat(TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 10);
+        let edit_at = text[..text.len() / 2].rfind('\n').map(|pos| pos + 1).unwrap_or(0);
+
+        highlighter.reset(31, text.clone(), "py".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(31, std::time::Duration::from_secs(2)));
+        assert!(highlighter.is_complete);
+
+        highlighter.shift_insert(edit_at, 1, Some("x"));
+        highlighter.apply_edits(
+            32,
+            vec![SyncEdit::Insert {
+                offset: edit_at,
+                text: "x".to_string(),
+            }],
+            None,
+            None,
+        );
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while highlighter.current_version != 32 && std::time::Instant::now() < deadline {
+            highlighter.poll(32);
+            std::thread::yield_now();
+        }
+
+        assert_eq!(highlighter.current_version, 32);
+        assert!(highlighter.is_complete);
+        assert!(highlighter.completions.iter().any(|item| item.word == "print"));
+        assert!(highlighter
+            .spans
+            .iter()
+            .any(|span| span.start <= edit_at && span.end > edit_at));
     }
 }

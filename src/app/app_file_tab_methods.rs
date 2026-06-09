@@ -99,8 +99,10 @@ impl App {
             return;
         }
 
+        let closing_lsp = self.tab_lsp_close_identity(idx);
         if idx == self.active_tab {
             self.sync_active_tab();
+            self.notify_lsp_tab_close(closing_lsp);
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
@@ -117,6 +119,7 @@ impl App {
                 *state.borrow_mut() = crate::app::mouse::HoverState::default();
             });
         } else {
+            self.notify_lsp_tab_close(closing_lsp);
             self.tabs.remove(idx);
             if idx < self.active_tab {
                 self.active_tab -= 1;
@@ -279,6 +282,32 @@ impl App {
                     .as_ref()
                     .is_some_and(|p| self.abs_path_for_workspace(p) == abs_path)
         })
+    }
+
+    fn tab_lsp_close_identity(&self, idx: usize) -> Option<(PathBuf, String)> {
+        if idx == self.active_tab {
+            return self
+                .file_path
+                .as_ref()
+                .map(|path| (path.clone(), self.file_extension.clone()));
+        }
+        self.tabs.get(idx).and_then(|tab| {
+            tab.file_path
+                .as_ref()
+                .map(|path| (path.clone(), tab.file_extension.clone()))
+        })
+    }
+
+    fn notify_lsp_tab_close(&mut self, identity: Option<(PathBuf, String)>) {
+        let Some((path, ext)) = identity else {
+            return;
+        };
+        if !matches!(ext.as_str(), "py" | "pyi") {
+            return;
+        }
+        if let Some(lsp) = &mut self.lsp {
+            lsp.notify_close(&path, &ext);
+        }
     }
 
     pub(crate) fn jump_to_lsp_position_in_file(

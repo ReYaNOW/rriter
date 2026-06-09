@@ -62,17 +62,17 @@ impl Renderer {
 
         let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(l) = lsp {
             if let Some(p) = editor_path {
-                let (version, diagnostics) = l.get_instant_diagnostics_with_version(p);
+                let (version, diagnostics) = l.instant_merged_diagnostics(p);
                 (
                     version,
                     diagnostics,
                     l.has_stale_instant_diagnostics(p, editor.version),
                 )
             } else {
-                (0, &[] as &[crate::lsp::Diagnostic], false)
+                (0, Vec::new(), false)
             }
         } else {
-            (0, &[] as &[crate::lsp::Diagnostic], false)
+            (0, Vec::new(), false)
         };
 
         let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
@@ -112,7 +112,7 @@ impl Renderer {
         self.lsp_diagnostic_indices.clear();
         self.unused_spans_cache.clear();
         let transient_member_dot = transient_python_member_dot_byte(editor);
-        for (idx, d) in instant_raw.iter().enumerate() {
+        for (idx, &d) in instant_raw.iter().enumerate() {
             let diag_line = d.start_line as usize;
             let mut suppress = false;
 
@@ -157,17 +157,7 @@ impl Renderer {
         }
         self.unused_spans_cache.sort_unstable_by_key(|&(s, _)| s);
         let has_lsp_diagnostics = !self.lsp_diagnostic_indices.is_empty();
-        let lsp_diagnostics = instant_raw;
-
-        let delayed_diagnostics = if let Some(l) = lsp {
-            if let Some(p) = editor_path {
-                l.get_diagnostics(p)
-            } else {
-                &[]
-            }
-        } else {
-            &[]
-        };
+        let lsp_diagnostics = instant_raw.as_slice();
 
         if show_welcome && !is_ide_mode {
             return (self.draw_welcome(recent_files, ui_registry), Vec::new());
@@ -944,7 +934,7 @@ impl Renderer {
         if !is_resizing && is_ide_mode && !dialog_window_open {
             self.draw_diagnostics_ruler(
                 editor,
-                delayed_diagnostics,
+                lsp_diagnostics,
                 tab_bar_h,
                 editor_scroll_height,
                 scrollbar_width,

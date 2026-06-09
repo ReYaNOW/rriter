@@ -471,7 +471,7 @@ impl Renderer {
 
     pub fn draw_diagnostic_popup(
         &mut self,
-        lsp_diagnostics: &[Diagnostic],
+        lsp_diagnostics: &[&Diagnostic],
         ide_panel: &IdePanelState,
         ui_registry: &mut UiRegistry,
         attached_hover_w: f32,
@@ -518,7 +518,7 @@ impl Renderer {
         let has_sel = sel_anchor.is_some() && sel_cursor.is_some() && sel_start != sel_end;
 
         for (i, &(idx, _, _, _, _)) in hovered_diags_cache.iter().enumerate() {
-            let diag = &lsp_diagnostics[idx];
+            let diag = lsp_diagnostics[idx];
             let clean_msg = normalize_diagnostic_message(&diag.message);
             if i > 0 {
                 popup_text.push_str("\n\n");
@@ -810,7 +810,7 @@ impl Renderer {
         let mut current_y = by + pad - scroll_y;
 
         for (i, &(idx, _, _, _, _)) in hovered_diags_cache.iter().enumerate() {
-            let diag = &lsp_diagnostics[idx];
+            let diag = lsp_diagnostics[idx];
             let border_color = match diag.severity {
                 crate::lsp::DiagSeverity::Error => [0.96, 0.26, 0.21, 1.0],
                 crate::lsp::DiagSeverity::Warning => [0.95, 0.9, 0.3, 1.0],
@@ -909,7 +909,8 @@ impl Renderer {
                     if sfx_hovered {
                         *wants_pointer = true;
                         crate::app::mouse::HOVER_STATE.with(|state| {
-                            state.borrow_mut().diag_href = diag.code_href.clone();
+                            state.borrow_mut().diag_href =
+                                diag.code_href.as_ref().map(|href| href.to_string());
                         });
                     }
 
