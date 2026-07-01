@@ -666,7 +666,9 @@ impl App {
                             sb_w,
                             title_h,
                             panel_left_w,
-                            wh - title_h - effective_bottom_h,
+                            wh - title_h
+                                - effective_bottom_h
+                                - crate::render_view::ide_status_bar_height(s),
                         )
                     } else {
                         let ww = self.window.as_ref().unwrap().inner_size().width as f32;

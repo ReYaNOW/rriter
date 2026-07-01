@@ -1,4 +1,16 @@
 impl Renderer {
+    #[inline(always)]
+    pub(crate) fn ensure_vertex_capacity(&mut self, additional: usize) {
+        if self
+            .vertices
+            .len()
+            .saturating_add(additional)
+            > crate::renderer::MAX_VERTICES
+        {
+            self.flush();
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn resize(&mut self, w: u32, h: u32) {
         if w > 0 && h > 0 {
@@ -57,6 +69,7 @@ impl Renderer {
         color: [f32; 4],
         mode: f32,
     ) {
+        self.ensure_vertex_capacity(6);
         self.vertices
             .extend_from_slice(&quad_vertices(x, y, w, h, u, v, uw, vh, color, mode));
     }
@@ -81,6 +94,7 @@ impl Renderer {
         let y2 = y + h;
         let sdf_params = [0.0, 0.0, 0.0];
 
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[
             Vertex {
                 pos: [x1, y1],
@@ -575,6 +589,7 @@ impl Renderer {
     /// `w` — ширина участка, `color` — цвет.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn push_squiggle(&mut self, x: f32, baseline_y: f32, w: f32, color: [f32; 4]) {
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&squiggle_vertices(
             self.scale_factor,
             x,
@@ -600,6 +615,7 @@ impl Renderer {
         top_color: [f32; 4],
         bottom_color: [f32; 4],
     ) {
+        self.ensure_vertex_capacity(6);
         self.vertices
             .extend_from_slice(&rounded_rect_gradient_vertices(
                 x,

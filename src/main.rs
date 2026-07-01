@@ -1066,11 +1066,7 @@ fn print_headless_ty_mem_sample(
             .values()
             .map(|(_, items)| items.len())
             .sum();
-        let ruff_diag_count = manager
-            .instant_diagnostics
-            .values()
-            .map(|(_, items)| items.len())
-            .sum();
+        let (ruff_diag_paths, ruff_diag_count) = manager.ruff_diagnostic_storage_counts();
         let mut logs = 0usize;
         let mut log_bytes = 0usize;
         for entries in manager.server_logs.values() {
@@ -1082,7 +1078,7 @@ fn print_headless_ty_mem_sample(
             diag_count,
             manager.ty_instant_diagnostics.len(),
             ty_diag_count,
-            manager.instant_diagnostics.len(),
+            ruff_diag_paths,
             ruff_diag_count,
             logs,
             log_bytes,
@@ -1500,9 +1496,11 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         ctrl_definition: crate::app::CtrlDefinitionState::default(),
         python_inlay_hints: Vec::new(),
         python_inlay_hint_path: None,
+        python_inlay_hint_range: None,
         python_inlay_hint_version: 0,
         python_inlay_hint_pending_request_id: None,
         python_inlay_hint_pending_path: None,
+        python_inlay_hint_pending_range: None,
         python_inlay_hint_pending_version: 0,
         python_inlay_hint_cache: rustc_hash::FxHashMap::default(),
         ui_registry: crate::ui_system::UiRegistry::new(),

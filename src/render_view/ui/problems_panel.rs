@@ -114,6 +114,9 @@ impl Renderer {
 
         let list_y = header_bottom_y + 6.0 * s;
         let list_h = content_h - (list_y - content_y);
+        if list_h <= 1.0 {
+            return;
+        }
 
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -146,7 +149,7 @@ impl Renderer {
 
             for (idx, (path, diag_idx)) in ide_panel.flat_diags.iter().enumerate() {
                 if *diag_idx == usize::MAX {
-                    if current_y + item_h > content_y && current_y < content_y + content_h {
+                    if current_y + item_h > list_y && current_y < list_y + list_h {
                         ui_registry.register_rect(
                             crate::ui_system::UiId::ProblemFileToggle(idx),
                             content_x,
@@ -256,7 +259,7 @@ impl Renderer {
                 } else {
                     continue;
                 };
-                if current_y + item_h > content_y && current_y < content_y + content_h {
+                if current_y + item_h > list_y && current_y < list_y + list_h {
                     let is_all_tab = ide_panel.problems_tab == 1;
                     let indent = if is_all_tab { 24.0 * s } else { 0.0 };
                     let icon_sz = 16.0 * s;

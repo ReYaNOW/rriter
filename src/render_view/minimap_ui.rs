@@ -217,10 +217,8 @@ impl Renderer {
                                 sdf_params,
                             };
 
+                            self.ensure_vertex_capacity(6);
                             self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
-                            if self.vertices.len() >= crate::renderer::MAX_VERTICES - 6 {
-                                self.flush();
-                            }
                         }
 
                         byte_in_span += bytes_processed;

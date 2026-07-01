@@ -1,6 +1,6 @@
 use crate::render_view::{
-    cursor_line_and_character, diagnostic_error_warning_counts, ide_bottom_panel_y,
-    ide_status_bar_height, ide_status_bar_y, language_display_name_for_ext, selected_char_count,
+    cursor_line_and_character, ide_bottom_panel_y, ide_status_bar_height, ide_status_bar_y,
+    language_display_name_for_ext, selected_char_count,
 };
 use crate::renderer::Renderer;
 use crate::widgets::{Button, IconButton};

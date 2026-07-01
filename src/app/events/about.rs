@@ -820,17 +820,26 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 if app.python_inlay_hint_pending_request_id == Some(request_id) {
                     app.python_inlay_hint_pending_request_id = None;
                     let Some(path) = app.python_inlay_hint_pending_path.take() else {
+                        app.python_inlay_hint_pending_range = None;
+                        continue;
+                    };
+                    let Some(range) = app.python_inlay_hint_pending_range.take() else {
                         continue;
                     };
                     let version = app.python_inlay_hint_pending_version;
                     if app.file_path.as_ref() == Some(&path) && app.editor.version == version {
                         let text = app.editor.get_full_text();
                         let parsed =
-                            crate::app::python_positional_inlay_hints_from_lsp(&text, &hints);
+                            crate::app::python_positional_inlay_hints_from_lsp_with_offsets(
+                                &text,
+                                &app.editor.line_offsets,
+                                &hints,
+                            );
                         app.python_inlay_hint_cache
-                            .insert(path.clone(), (version, parsed.clone()));
+                            .insert(path.clone(), (version, range, parsed.clone()));
                         app.python_inlay_hints = parsed;
                         app.python_inlay_hint_path = Some(path);
+                        app.python_inlay_hint_range = Some(range);
                         app.python_inlay_hint_version = version;
                         if let Some(w) = app.window.as_ref() {
                             w.request_redraw();

@@ -88,6 +88,19 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
     assert_eq!(diag.message.as_ref(), "remove unused import\nnext");
     assert_eq!(diag.quickfixes.len(), 1);
 
+    let workspace_body = br#"{"jsonrpc":"2.0","id":7,"result":{"items":[{"uri":"file:///tmp/ws/pkg/a.py","kind":"full","resultId":"r1","version":null,"items":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":9}},"severity":2,"source":"ty","message":"Unused `ty: ignore` directive","data":{"edits":{"file:///tmp/ws/pkg/a.py":[{"range":{"start":{"line":3,"character":4},"end":{"line":3,"character":9}},"newText":""}]},"fix_title":"Remove the unused suppression comment"}}]}]}}"#;
+    let workspace_events = parse_workspace_diagnostics_frame(workspace_body, TY_SERVER.program);
+    assert_eq!(workspace_events.len(), 1);
+    match &workspace_events[0] {
+        LspEvent::Diagnostics { path, items, .. } => {
+            assert_eq!(path, &PathBuf::from("/tmp/ws/pkg/a.py"));
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0].source.as_deref(), Some("ty"));
+            assert!(items[0].quickfixes.is_empty());
+        }
+        other => panic!("unexpected event: {other:?}"),
+    }
+
     let edit_json = serde_json::json!({
         "changes": {
             "file:///tmp/a.py": [{

@@ -11,35 +11,119 @@ const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 7200.0;
 const DRAG_AUTOSCROLL_ACCEL: f32 = 0.40;
 const DRAG_AUTOSCROLL_TOP_BOOST: f32 = 1.22;
 const PYTHON_INLAY_HINT_IDLE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
+const PYTHON_INLAY_FULL_FILE_MAX_LINES: usize = 2_500;
+const PYTHON_INLAY_VISIBLE_MARGIN_LINES: usize = 80;
+
+fn clear_python_inlay_hint_state(app: &mut App) {
+    app.python_inlay_hints.clear();
+    app.python_inlay_hint_path = None;
+    app.python_inlay_hint_range = None;
+    app.python_inlay_hint_pending_request_id = None;
+    app.python_inlay_hint_pending_path = None;
+    app.python_inlay_hint_pending_range = None;
+}
+
+fn python_inlay_final_line_col(app: &App, line: usize) -> u32 {
+    app.editor
+        .line_text_owned(line)
+        .trim_end_matches(|ch| ch == '\r' || ch == '\n')
+        .chars()
+        .map(|ch| ch.len_utf16() as u32)
+        .sum()
+}
+
+fn python_inlay_hint_request_range(
+    app: &App,
+) -> Option<(u32, u32, u32, u32, crate::app::PythonInlayHintLineRange)> {
+    let line_count = app.editor.line_offsets.len().max(1);
+    if line_count <= PYTHON_INLAY_FULL_FILE_MAX_LINES {
+        let text = app.editor.get_full_text();
+        let (end_line, end_col) =
+            crate::lsp::offset_to_lsp_pos(&text, text.len(), &app.editor.line_offsets);
+        return Some((0, 0, end_line, end_col, (0, line_count as u32)));
+    }
+
+    let renderer = app.renderer.as_ref()?;
+    let s = renderer.scale_factor;
+    let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
+        0.0
+    } else {
+        44.0 * s
+    };
+    let editor_bottom_h = if app.is_ide_mode {
+        app.ide_panel.editor_reserved_bottom_height(s)
+    } else {
+        0.0
+    };
+    let editor_height = crate::render_view::editor_view_height(
+        renderer.height,
+        tab_bar_h,
+        editor_bottom_h,
+        app.is_ide_mode,
+        s,
+    );
+    let line_height = renderer.line_height.max(1.0);
+    let first_visible = (app.scroll_y.current.max(0.0) / line_height).floor() as usize;
+    let first_visible = first_visible.min(line_count.saturating_sub(1));
+    let visible_lines = (editor_height / line_height).ceil().max(1.0) as usize + 1;
+    let start_line = first_visible.saturating_sub(PYTHON_INLAY_VISIBLE_MARGIN_LINES);
+    let mut end_exclusive = first_visible
+        .saturating_add(visible_lines)
+        .saturating_add(PYTHON_INLAY_VISIBLE_MARGIN_LINES)
+        .min(line_count);
+    if end_exclusive <= start_line {
+        end_exclusive = (start_line + 1).min(line_count);
+    }
+
+    let (end_line, end_col) = if end_exclusive < line_count {
+        (end_exclusive as u32, 0)
+    } else {
+        let last_line = line_count.saturating_sub(1);
+        (last_line as u32, python_inlay_final_line_col(app, last_line))
+    };
+
+    Some((
+        start_line as u32,
+        0,
+        end_line,
+        end_col,
+        (start_line as u32, end_exclusive as u32),
+    ))
+}
 
 fn request_python_inlay_hints_if_needed(app: &mut App) {
     if !app.is_ide_mode || !matches!(app.file_extension.as_str(), "py" | "pyi") {
-        app.python_inlay_hints.clear();
-        app.python_inlay_hint_path = None;
-        app.python_inlay_hint_pending_request_id = None;
-        app.python_inlay_hint_pending_path = None;
+        clear_python_inlay_hint_state(app);
         return;
     }
     let Some(path) = app.file_path.clone() else {
-        app.python_inlay_hints.clear();
-        app.python_inlay_hint_path = None;
+        clear_python_inlay_hint_state(app);
         return;
     };
-    if let Some((version, hints)) = app.python_inlay_hint_cache.get(&path)
+    let Some((start_line, start_col, end_line, end_col, range)) =
+        python_inlay_hint_request_range(app)
+    else {
+        return;
+    };
+    if let Some((version, cached_range, hints)) = app.python_inlay_hint_cache.get(&path)
         && *version == app.editor.version
+        && *cached_range == range
     {
         if app.python_inlay_hint_path.as_ref() != Some(&path)
+            || app.python_inlay_hint_range != Some(range)
             || app.python_inlay_hint_version != app.editor.version
         {
             app.python_inlay_hints.clear();
             app.python_inlay_hints.extend_from_slice(hints);
-            app.python_inlay_hint_path = Some(path);
+            app.python_inlay_hint_path = Some(path.clone());
+            app.python_inlay_hint_range = Some(range);
             app.python_inlay_hint_version = *version;
         }
         return;
     }
     if app.python_inlay_hint_pending_request_id.is_some()
         || app.python_inlay_hint_path.as_ref() == Some(&path)
+            && app.python_inlay_hint_range == Some(range)
             && app.python_inlay_hint_version == app.editor.version
         || app.last_action.elapsed() < PYTHON_INLAY_HINT_IDLE_DELAY
     {
@@ -49,14 +133,18 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
     let Some(lsp) = app.lsp.as_mut() else {
         return;
     };
-    let text = app.editor.get_full_text();
-    let (end_line, end_col) =
-        crate::lsp::offset_to_lsp_pos(&text, text.len(), &app.editor.line_offsets);
-    if let Some(id) =
-        lsp.request_ty_inlay_hints(&path, &app.file_extension, 0, 0, end_line, end_col)
+    if let Some(id) = lsp.request_ty_inlay_hints(
+        &path,
+        &app.file_extension,
+        start_line,
+        start_col,
+        end_line,
+        end_col,
+    )
     {
         app.python_inlay_hint_pending_request_id = Some(id);
         app.python_inlay_hint_pending_path = Some(path);
+        app.python_inlay_hint_pending_range = Some(range);
         app.python_inlay_hint_pending_version = app.editor.version;
     }
 }

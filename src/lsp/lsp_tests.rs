@@ -345,6 +345,14 @@ fn lsp_manager_closing_last_workspace_file_prunes_workspace_diagnostics() {
             diag_arc(vec![test_diag("stale ty", DiagSeverity::Error, None)]),
         ),
     );
+    manager.ruff_workspace_diagnostics.insert(
+        stale.clone(),
+        diag_arc(vec![test_diag(
+            "stale workspace ruff",
+            DiagSeverity::Warning,
+            Some("F401"),
+        )]),
+    );
     manager
         .ty_diag_result_ids
         .insert(stale.clone(), "stale-r1".to_string());
@@ -358,6 +366,7 @@ fn lsp_manager_closing_last_workspace_file_prunes_workspace_diagnostics() {
     assert_eq!(manager.active_workspaces, vec![ws_b]);
     assert!(!manager.diagnostics.contains_key(&stale));
     assert!(!manager.instant_diagnostics.contains_key(&stale));
+    assert!(!manager.ruff_workspace_diagnostics.contains_key(&stale));
     assert!(!manager.ty_instant_diagnostics.contains_key(&stale));
     assert!(!manager.ty_diag_result_ids.contains_key(&stale));
     assert_eq!(manager.get_diagnostics(&keep).len(), 1);
@@ -599,6 +608,149 @@ fn instant_merged_diagnostics_lazily_combines_servers_and_handles_empty() {
     assert_eq!(merged[0].message.as_ref(), "ruff");
     assert_eq!(merged[1].message.as_ref(), "ty");
     assert!(manager.get_diagnostics(&path).is_empty());
+    assert_eq!(manager.diagnostic_count(&path), 2);
+    assert_eq!(manager.diagnostic_counts_for_path(&path), (1, 0));
+    assert_eq!(
+        manager.diagnostic_at(&path, 1).map(|diag| diag.message.as_ref()),
+        Some("ty")
+    );
+    assert!(manager.diagnostic_paths().iter().any(|p| *p == &path));
+}
+
+#[test]
+fn workspace_ruff_diagnostics_cover_closed_files_without_overriding_open_buffers() {
+    let ws = PathBuf::from("/tmp/ws");
+    let open_path = ws.join("pkg/open.py");
+    let closed_path = ws.join("pkg/closed.py");
+    let mut manager = LspManager::new(vec![ws.clone()]);
+    manager
+        .open_python_files
+        .insert(open_path.clone(), 3);
+    manager.active_workspaces = vec![ws];
+    manager.ruff_workspace_diagnostics.insert(
+        open_path.clone(),
+        diag_arc(vec![test_diag(
+            "stale disk ruff",
+            DiagSeverity::Warning,
+            Some("F401"),
+        )]),
+    );
+    manager.ruff_workspace_diagnostics.insert(
+        closed_path.clone(),
+        diag_arc(vec![test_diag(
+            "closed file ruff",
+            DiagSeverity::Warning,
+            Some("F401"),
+        )]),
+    );
+    manager.ty_instant_diagnostics.insert(
+        closed_path.clone(),
+        (
+            2,
+            diag_arc(vec![test_diag("closed file ty", DiagSeverity::Error, None)]),
+        ),
+    );
+    manager.rebuild_merged_diagnostic_indices();
+
+    assert_eq!(manager.diagnostic_count(&open_path), 0);
+    assert_eq!(
+        manager
+            .instant_merged_diagnostics(&open_path)
+            .1
+            .iter()
+            .map(|diag| diag.message.as_ref())
+            .collect::<Vec<_>>(),
+        Vec::<&str>::new()
+    );
+
+    let closed = manager.diagnostic_refs_for_path(&closed_path);
+    assert_eq!(closed.len(), 2);
+    assert_eq!(closed[0].message.as_ref(), "closed file ruff");
+    assert_eq!(closed[1].message.as_ref(), "closed file ty");
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
+        Some(DiagSeverity::Error)
+    );
+    assert!(manager
+        .diagnostic_paths()
+        .iter()
+        .any(|path| *path == &closed_path));
+
+    manager.instant_diagnostics.insert(
+        open_path.clone(),
+        (
+            4,
+            diag_arc(vec![test_diag(
+                "live buffer ruff",
+                DiagSeverity::Warning,
+                Some("F401"),
+            )]),
+        ),
+    );
+    manager.dirty_diagnostics = true;
+
+    assert_eq!(manager.diagnostic_count(&open_path), 1);
+    assert_eq!(
+        manager
+            .diagnostic_at(&open_path, 0)
+            .map(|diag| diag.message.as_ref()),
+        Some("live buffer ruff")
+    );
+    assert_eq!(manager.ruff_diagnostic_storage_counts(), (2, 3));
+}
+
+#[test]
+fn diagnostic_accessors_use_live_instant_store_while_index_is_dirty() {
+    let path = PathBuf::from("/tmp/ws/pkg/current.py");
+    let offscreen = PathBuf::from("/tmp/ws/pkg/offscreen.py");
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.instant_diagnostics.insert(
+        path.clone(),
+        (
+            1,
+            diag_arc(vec![test_diag("old", DiagSeverity::Warning, Some("W1"))]),
+        ),
+    );
+    manager.rebuild_merged_diagnostic_indices();
+    assert_eq!(manager.diagnostic_count(&path), 1);
+
+    manager.instant_diagnostics.insert(
+        path.clone(),
+        (
+            2,
+            diag_arc(vec![
+                test_diag("new warning", DiagSeverity::Warning, Some("W2")),
+                test_diag("new error", DiagSeverity::Error, Some("E1")),
+            ]),
+        ),
+    );
+    manager.ty_instant_diagnostics.insert(
+        offscreen.clone(),
+        (
+            3,
+            diag_arc(vec![test_diag("workspace", DiagSeverity::Error, Some("T1"))]),
+        ),
+    );
+    manager.dirty_diagnostics = true;
+
+    assert_eq!(manager.diagnostic_count(&path), 2);
+    assert_eq!(
+        manager.diagnostic_at(&path, 1).map(|diag| diag.message.as_ref()),
+        Some("new error")
+    );
+    assert_eq!(manager.diagnostic_counts_for_path(&path), (1, 1));
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
+        Some(DiagSeverity::Error)
+    );
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg/current.py")),
+        Some(DiagSeverity::Error)
+    );
+    assert!(manager
+        .diagnostic_paths()
+        .iter()
+        .any(|path| *path == &offscreen));
 }
 
 #[test]
@@ -613,7 +765,10 @@ fn manager_poll_moves_diagnostic_items_into_instant_store() {
             server_name: RUFF_SERVER.program,
             path: path.clone(),
             version: Some(4),
-            items: vec![test_diag("moved", DiagSeverity::Error, Some("E1"))],
+            items: vec![
+                test_diag("moved", DiagSeverity::Error, Some("E1")),
+                test_diag("warn", DiagSeverity::Warning, Some("W1")),
+            ],
             result_id: None,
         })
         .unwrap();
@@ -626,8 +781,9 @@ fn manager_poll_moves_diagnostic_items_into_instant_store() {
 
     let (version, instant) = manager.instant_merged_diagnostics(&path);
     assert_eq!(version, 4);
-    assert_eq!(instant.len(), 1);
+    assert_eq!(instant.len(), 2);
     assert_eq!(instant[0].message.as_ref(), "moved");
+    assert_eq!(manager.total_diagnostic_counts(), (1, 1));
 }
 
 #[test]
@@ -943,6 +1099,14 @@ fn lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe() {
         path.clone(),
         (2, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
     );
+    manager.ruff_workspace_diagnostics.insert(
+        path.clone(),
+        diag_arc(vec![test_diag(
+            "workspace ruff",
+            DiagSeverity::Warning,
+            Some("F401"),
+        )]),
+    );
     manager.dirty_diagnostics = true;
     manager.server_logs.insert(
         RUFF_SERVER.program,
@@ -962,6 +1126,7 @@ fn lsp_manager_disable_shutdown_and_non_python_paths_are_state_safe() {
     assert!(manager.ty_process.is_none());
     assert!(manager.diagnostics.is_empty());
     assert!(manager.instant_diagnostics.is_empty());
+    assert!(manager.ruff_workspace_diagnostics.is_empty());
     assert!(manager.ty_instant_diagnostics.is_empty());
     assert!(!manager.dirty_diagnostics);
     assert!(manager.server_logs.is_empty());
@@ -1011,11 +1176,20 @@ fn clear_diagnostics_for_path_removes_abs_and_relative_entries() {
         path.clone(),
         (2, diag_arc(vec![test_diag("ty", DiagSeverity::Info, None)])),
     );
+    manager.ruff_workspace_diagnostics.insert(
+        path.clone(),
+        diag_arc(vec![test_diag(
+            "workspace ruff",
+            DiagSeverity::Warning,
+            Some("F401"),
+        )]),
+    );
     manager.dirty_diagnostics = true;
 
     manager.clear_diagnostics_for_path(&PathBuf::from("app.py"));
 
     assert!(manager.get_diagnostics(&path).is_empty());
+    assert!(!manager.ruff_workspace_diagnostics.contains_key(&path));
     let (version, instant) = manager.instant_merged_diagnostics(&path);
     assert_eq!(version, 0);
     assert!(instant.is_empty());

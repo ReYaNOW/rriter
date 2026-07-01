@@ -190,6 +190,7 @@ pub(crate) fn language_display_name_for_ext(ext: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn diagnostic_error_warning_counts<'a>(
     diagnostic_sets: impl IntoIterator<Item = &'a [crate::lsp::Diagnostic]>,
 ) -> (usize, usize) {

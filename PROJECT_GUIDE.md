@@ -1,6 +1,8 @@
 Architecture guide for RRiter.
 
-Use this file only when broader architecture context is needed. For file selection, prefer `PROJECT_AI_MAP.txt`.
+Use this file only when broader architecture context is needed. For file selection, prefer `code-review-graph` MCP.
+
+Use `PROJECT_AI_MAP.txt` only as fallback when MCP is unavailable.
 
 ## 1. Product philosophy
 
@@ -35,7 +37,7 @@ File:
 ```text
 src/editor.rs
 src/editor_navigation.rs
-````
+```
 
 RRiter uses gap buffer storage instead of plain `String`.
 
@@ -222,16 +224,19 @@ Important constraints:
 Project commands. Main verification command:
 
 ```bash
-make fast
+make codex_test
 ```
 
-Use `make test` when tests matter.
+Use `make codex_test` when tests matter.
 
 #### `scripts/gen_project_map.py`
 
-Generates `PROJECT_AI_MAP.txt`.
+Generates fallback `PROJECT_AI_MAP.txt`.
 
-Use after source layout changes:
+Primary project index/call graph is `code-review-graph` MCP.
+Use this script only when maintaining fallback map.
+
+Use after source layout changes if fallback map must stay current:
 
 ```bash
 make api-map
@@ -239,11 +244,40 @@ make api-map
 
 #### `PROJECT_AI_MAP.txt`
 
-Compact AI navigation map.
+Fallback compact AI navigation map.
 
-Used to select source files and understand call edges.
+Use only when `code-review-graph` MCP is unavailable or broken.
 
-Not source code.
+Used to select source files and understand approximate call edges.
+
+Not source code. Never create exact patches from this map only.
+
+#### `.code-review-graph/`
+
+Generated graph database for `code-review-graph`.
+
+Do not edit manually.
+Do not commit.
+
+Regenerate with:
+
+```bash
+code-review-graph build
+```
+
+If full postprocess is too slow, usable fallback build:
+
+```bash
+code-review-graph build --skip-postprocess
+```
+
+Recommended `.code-review-graphignore`:
+
+```text
+target/
+.git/
+.code-review-graph/
+```
 
 #### `AGENTS.md`
 
@@ -866,6 +900,7 @@ Implementation is split through `include!`:
 
 * `src/lsp/lsp_process.rs` -> process spawn, supervisor, request send/log helpers.
 * `src/lsp/lsp_manager.rs` -> `LspManager` facade, diagnostics merge accessors, JSON formatting.
+* `src/lsp/ruff_workspace.rs` -> background `ruff check` workspace diagnostics parser/collector.
 
 Tests live in `src/lsp/lsp_tests.rs`.
 
@@ -1087,7 +1122,7 @@ Avoid:
 Primary verification:
 
 ```bash
-make fast
+make codex_test
 ```
 
 Use tests when behavior is test-covered:
@@ -1096,7 +1131,19 @@ Use tests when behavior is test-covered:
 make test
 ```
 
-Regenerate AI map after structural source changes:
+Regenerate `code-review-graph` after structural source changes:
+
+```bash
+code-review-graph build
+```
+
+If full postprocess is too slow, use:
+
+```bash
+code-review-graph build --skip-postprocess
+```
+
+Regenerate fallback AI map only when needed:
 
 ```bash
 python3 gen_project_ai_map.py

@@ -137,7 +137,14 @@ struct BorrowedCodeDescription<'a> {
 }
 
 #[derive(Deserialize)]
-struct BorrowedDiagnosticData<'a> {
+#[serde(untagged)]
+enum BorrowedDiagnosticData<'a> {
+    QuickFix(#[serde(borrow)] BorrowedDiagnosticQuickFixData<'a>),
+    Ignored(serde::de::IgnoredAny),
+}
+
+#[derive(Deserialize)]
+struct BorrowedDiagnosticQuickFixData<'a> {
     title: Option<&'a str>,
     #[serde(default, borrow)]
     edits: Vec<BorrowedTextEdit<'a>>,
@@ -198,7 +205,9 @@ fn parse_borrowed_diagnostic_value(v: &BorrowedDiagnostic<'_>) -> Diagnostic {
     });
 
     let mut quickfixes = Vec::new();
-    if let Some(data) = &v.data && let Some(title) = data.title {
+    if let Some(BorrowedDiagnosticData::QuickFix(data)) = &v.data
+        && let Some(title) = data.title
+    {
         let edits = data
             .edits
             .iter()

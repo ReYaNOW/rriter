@@ -649,6 +649,9 @@ pub struct PythonInlayHint {
     pub label: Arc<str>,
 }
 
+pub type PythonInlayHintLineRange = (u32, u32);
+pub type PythonInlayHintCacheEntry = (u64, PythonInlayHintLineRange, Vec<PythonInlayHint>);
+
 fn is_python_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
 }
@@ -688,8 +691,25 @@ fn python_inlay_parameter_name(label: &str) -> Option<&str> {
     Some(name)
 }
 
+#[cfg(test)]
 pub(crate) fn python_positional_inlay_hints_from_lsp(
     text: &str,
+    hints: &[crate::lsp::LspInlayHint],
+) -> Vec<PythonInlayHint> {
+    let mut line_offsets =
+        Vec::with_capacity(text.as_bytes().iter().filter(|&&b| b == b'\n').count() + 1);
+    line_offsets.push(0);
+    for (idx, &byte) in text.as_bytes().iter().enumerate() {
+        if byte == b'\n' {
+            line_offsets.push(idx + 1);
+        }
+    }
+    python_positional_inlay_hints_from_lsp_with_offsets(text, &line_offsets, hints)
+}
+
+pub(crate) fn python_positional_inlay_hints_from_lsp_with_offsets(
+    text: &str,
+    line_offsets: &[usize],
     hints: &[crate::lsp::LspInlayHint],
 ) -> Vec<PythonInlayHint> {
     let mut out = Vec::new();
@@ -697,7 +717,8 @@ pub(crate) fn python_positional_inlay_hints_from_lsp(
         let Some(name) = python_inlay_parameter_name(&hint.label) else {
             continue;
         };
-        let byte_offset = crate::lsp::lsp_pos_to_offset(text, hint.line, hint.col);
+        let byte_offset =
+            lsp_pos_to_offset_with_line_offsets(text, line_offsets, hint.line, hint.col);
         if python_named_argument_at(text, byte_offset, name) {
             continue;
         }
@@ -709,6 +730,35 @@ pub(crate) fn python_positional_inlay_hints_from_lsp(
     out.sort_unstable_by_key(|hint| hint.byte_offset);
     out.dedup_by(|a, b| a.byte_offset == b.byte_offset && a.label == b.label);
     out
+}
+
+fn lsp_pos_to_offset_with_line_offsets(
+    text: &str,
+    line_offsets: &[usize],
+    line: u32,
+    col: u32,
+) -> usize {
+    let line_idx = line as usize;
+    let Some(&line_start) = line_offsets.get(line_idx) else {
+        return text.len();
+    };
+    let line_end = line_offsets
+        .get(line_idx + 1)
+        .copied()
+        .unwrap_or_else(|| text.len())
+        .min(text.len());
+    let Some(line_text) = text.get(line_start..line_end) else {
+        return text.len();
+    };
+
+    let mut utf16_col = 0u32;
+    for (rel, ch) in line_text.char_indices() {
+        if ch == '\n' || ch == '\r' || utf16_col >= col {
+            return line_start + rel;
+        }
+        utf16_col += ch.len_utf16() as u32;
+    }
+    line_end
 }
 
 pub(crate) fn shift_python_inlay_hints_for_edits(
@@ -751,6 +801,8 @@ impl App {
             return;
         }
         shift_python_inlay_hints_for_edits(&mut self.python_inlay_hints, edits);
+        self.python_inlay_hint_range = None;
+        self.python_inlay_hint_cache.clear();
     }
 }
 
@@ -912,11 +964,13 @@ pub struct App {
     pub ctrl_definition: CtrlDefinitionState,
     pub python_inlay_hints: Vec<PythonInlayHint>,
     pub python_inlay_hint_path: Option<PathBuf>,
+    pub python_inlay_hint_range: Option<PythonInlayHintLineRange>,
     pub python_inlay_hint_version: u64,
     pub python_inlay_hint_pending_request_id: Option<i32>,
     pub python_inlay_hint_pending_path: Option<PathBuf>,
+    pub python_inlay_hint_pending_range: Option<PythonInlayHintLineRange>,
     pub python_inlay_hint_pending_version: u64,
-    pub python_inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<PythonInlayHint>)>,
+    pub python_inlay_hint_cache: FxHashMap<PathBuf, PythonInlayHintCacheEntry>,
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,

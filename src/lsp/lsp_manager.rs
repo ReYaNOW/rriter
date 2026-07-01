@@ -37,10 +37,14 @@ pub struct LspManager {
     /// Актуальные диагностики для каждого открытого файла
     pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    ruff_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
     ty_diag_result_ids: HashMap<PathBuf, String>,
     diag_text_pool: HashMap<Arc<str>, Arc<str>>,
+    ruff_workspace_diag_rx: Option<std::sync::mpsc::Receiver<ruff_workspace::RuffWorkspaceResult>>,
+    ruff_workspace_diag_pending: bool,
+    ruff_workspace_diag_dirty: bool,
     ty_workspace_diag_pending: Option<i32>,
     ty_workspace_diag_dirty: bool,
     pub dirty_diagnostics: bool,
@@ -71,10 +75,14 @@ impl LspManager {
             open_python_files: HashMap::new(),
             diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
+            ruff_workspace_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
             merged_diagnostic_indices: HashMap::new(),
             ty_diag_result_ids: HashMap::new(),
             diag_text_pool: HashMap::new(),
+            ruff_workspace_diag_rx: None,
+            ruff_workspace_diag_pending: false,
+            ruff_workspace_diag_dirty: false,
             ty_workspace_diag_pending: None,
             ty_workspace_diag_dirty: false,
             dirty_diagnostics: false,
@@ -125,17 +133,21 @@ impl LspManager {
         };
         let before = self.diagnostics.len()
             + self.instant_diagnostics.len()
+            + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
             + self.merged_diagnostic_indices.len()
             + self.ty_diag_result_ids.len();
         self.diagnostics.retain(|path, _| keep_path(path));
         self.instant_diagnostics.retain(|path, _| keep_path(path));
+        self.ruff_workspace_diagnostics
+            .retain(|path, _| keep_path(path));
         self.ty_instant_diagnostics.retain(|path, _| keep_path(path));
         self.merged_diagnostic_indices.retain(|path, _| keep_path(path));
         self.ty_diag_result_ids.retain(|path, _| keep_path(path));
         self.rebuild_diag_text_pool();
         let after = self.diagnostics.len()
             + self.instant_diagnostics.len()
+            + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
             + self.merged_diagnostic_indices.len()
             + self.ty_diag_result_ids.len();
@@ -151,6 +163,7 @@ impl LspManager {
         self.ty_workspace_diag_pending = None;
         self.ty_workspace_diag_dirty =
             !self.open_python_files.is_empty() && !self.active_workspaces.is_empty();
+        self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
     }
 
     fn sync_python_processes_after_open_set_change(&mut self, reopen_current: bool) {
@@ -167,6 +180,9 @@ impl LspManager {
             self.python_status = LspServerStatus::Disabled;
             self.ty_status = LspServerStatus::Disabled;
             self.ty_workspace_diag_dirty = false;
+            self.ruff_workspace_diag_rx = None;
+            self.ruff_workspace_diag_pending = false;
+            self.ruff_workspace_diag_dirty = false;
             return;
         }
 
@@ -258,9 +274,13 @@ impl LspManager {
         }
         self.diagnostics.clear();
         self.instant_diagnostics.clear();
+        self.ruff_workspace_diagnostics.clear();
         self.ty_instant_diagnostics.clear();
         self.ty_diag_result_ids.clear();
         self.diag_text_pool.clear();
+        self.ruff_workspace_diag_rx = None;
+        self.ruff_workspace_diag_pending = false;
+        self.ruff_workspace_diag_dirty = false;
         self.ty_workspace_diag_pending = None;
         self.ty_workspace_diag_dirty = false;
         self.dirty_diagnostics = false;
@@ -396,6 +416,8 @@ impl LspManager {
                 proc.notify_open(&abs_path, text.clone(), version, ws.as_ref());
             }
             self.ty_workspace_diag_dirty = true;
+            self.ruff_workspace_diag_dirty = true;
+            self.dirty_diagnostics = true;
         } else {
             self.current_python_file = None;
             self.current_python_lines = None;
@@ -442,6 +464,8 @@ impl LspManager {
                 }
             }
             self.ty_workspace_diag_dirty = true;
+            self.ruff_workspace_diag_dirty = true;
+            self.dirty_diagnostics = true;
         }
     }
 
@@ -589,6 +613,8 @@ impl LspManager {
             } else {
                 self.prune_inactive_workspace_diagnostics();
                 self.ty_workspace_diag_dirty = !self.active_workspaces.is_empty();
+                self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
+                self.dirty_diagnostics = true;
             }
         }
     }
@@ -727,6 +753,9 @@ impl LspManager {
                         }
                     } else {
                         self.python_status = status.clone();
+                        if *status == LspServerStatus::Running {
+                            self.ruff_workspace_diag_dirty = true;
+                        }
                     }
                 }
                 LspEvent::ConfigurationServed { name } => {
@@ -757,6 +786,12 @@ impl LspManager {
             }
         }
 
+        let ruff_workspace_received = self.poll_ruff_workspace_diagnostics();
+        if ruff_workspace_received > 0 {
+            received_diagnostics = received_diagnostics.saturating_add(ruff_workspace_received);
+            workspace_diagnostics_done = true;
+        }
+
         if let Some(t) = self.last_change {
             if t.elapsed().as_secs_f32() >= 3.0 {
                 if self.dirty_diagnostics {
@@ -773,6 +808,7 @@ impl LspManager {
         }
 
         self.request_ty_workspace_diagnostics_if_ready();
+        self.request_ruff_workspace_diagnostics_if_ready();
         trim_allocator_after_large_diagnostics(received_diagnostics, workspace_diagnostics_done);
 
         all
@@ -809,6 +845,7 @@ impl LspManager {
         };
         self.diagnostics.remove(&abs_path);
         self.instant_diagnostics.remove(&abs_path);
+        self.ruff_workspace_diagnostics.remove(&abs_path);
         self.ty_instant_diagnostics.remove(&abs_path);
         self.merged_diagnostic_indices.remove(&abs_path);
         self.ty_diag_result_ids.remove(&abs_path);
@@ -862,6 +899,19 @@ impl LspManager {
                 }
             }
         }
+        for diags in self.ruff_workspace_diagnostics.values() {
+            for diag in diags.iter() {
+                if let Some(value) = &diag.code {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.code_href {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.source {
+                    values.push(value.clone());
+                }
+            }
+        }
         for value in values {
             let _ = self.intern_optional_diag_text(Some(value));
         }
@@ -877,6 +927,30 @@ impl LspManager {
         }
     }
 
+    fn ruff_workspace_diagnostics_for_abs_path(&self, path: &Path) -> Option<&Arc<[Diagnostic]>> {
+        if self.open_python_files.contains_key(path) || self.instant_diagnostics.contains_key(path)
+        {
+            return None;
+        }
+        self.ruff_workspace_diagnostics.get(path)
+    }
+
+    fn ruff_diagnostic_len_for_abs_path(&self, path: &Path) -> usize {
+        if let Some((_, diagnostics)) = self.instant_diagnostics.get(path) {
+            return diagnostics.len();
+        }
+        self.ruff_workspace_diagnostics_for_abs_path(path)
+            .map_or(0, |diagnostics| diagnostics.len())
+    }
+
+    fn ruff_diagnostic_at_for_abs_path(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
+        if let Some((_, diagnostics)) = self.instant_diagnostics.get(path) {
+            return diagnostics.get(index);
+        }
+        self.ruff_workspace_diagnostics_for_abs_path(path)
+            .and_then(|diagnostics| diagnostics.get(index))
+    }
+
     fn rebuild_merged_diagnostic_indices(&mut self) {
         let mut paths = std::collections::HashSet::new();
         for path in self.diagnostics.keys() {
@@ -885,16 +959,16 @@ impl LspManager {
         for path in self.instant_diagnostics.keys() {
             paths.insert(path.clone());
         }
+        for path in self.ruff_workspace_diagnostics.keys() {
+            paths.insert(path.clone());
+        }
         for path in self.ty_instant_diagnostics.keys() {
             paths.insert(path.clone());
         }
 
         self.merged_diagnostic_indices.clear();
         for path in paths {
-            let ruff_len = self
-                .instant_diagnostics
-                .get(&path)
-                .map_or(0, |(_, diagnostics)| diagnostics.len());
+            let ruff_len = self.ruff_diagnostic_len_for_abs_path(&path);
             let ty_len = self
                 .ty_instant_diagnostics
                 .get(&path)
@@ -937,17 +1011,40 @@ impl LspManager {
     ) -> Option<&'a Diagnostic> {
         match index.source {
             DiagnosticSourceKind::Legacy => self.diagnostics.get(path)?.get(index.index),
-            DiagnosticSourceKind::Ruff => self.instant_diagnostics.get(path)?.1.get(index.index),
+            DiagnosticSourceKind::Ruff => self.ruff_diagnostic_at_for_abs_path(path, index.index),
             DiagnosticSourceKind::Ty => self.ty_instant_diagnostics.get(path)?.1.get(index.index),
         }
     }
 
+    fn instant_diagnostic_count_for_abs_path(&self, path: &Path) -> usize {
+        self.ruff_diagnostic_len_for_abs_path(path)
+            + self
+                .ty_instant_diagnostics
+                .get(path)
+                .map_or(0, |(_, diagnostics)| diagnostics.len())
+    }
+
+    fn instant_diagnostic_at_for_abs_path(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
+        let ruff_len = self.ruff_diagnostic_len_for_abs_path(path);
+        if index < ruff_len {
+            return self.ruff_diagnostic_at_for_abs_path(path, index);
+        }
+        self.ty_instant_diagnostics
+            .get(path)
+            .and_then(|(_, diagnostics)| diagnostics.get(index - ruff_len))
+    }
+
     pub fn diagnostic_at(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
         let abs_path = self.lookup_abs_path(path);
-        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+        if !self.dirty_diagnostics
+            && let Some(indices) = self.merged_diagnostic_indices.get(&abs_path)
+        {
             return indices
                 .get(index)
                 .and_then(|merged| self.diagnostic_by_index(&abs_path, *merged));
+        }
+        if let Some(diagnostic) = self.instant_diagnostic_at_for_abs_path(&abs_path, index) {
+            return Some(diagnostic);
         }
         self.diagnostics
             .get(abs_path.as_path())
@@ -956,8 +1053,14 @@ impl LspManager {
 
     pub fn diagnostic_count(&self, path: &Path) -> usize {
         let abs_path = self.lookup_abs_path(path);
-        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+        if !self.dirty_diagnostics
+            && let Some(indices) = self.merged_diagnostic_indices.get(&abs_path)
+        {
             return indices.len();
+        }
+        let instant_count = self.instant_diagnostic_count_for_abs_path(&abs_path);
+        if instant_count > 0 {
+            return instant_count;
         }
         self.diagnostics
             .get(abs_path.as_path())
@@ -966,10 +1069,24 @@ impl LspManager {
 
     pub fn diagnostic_entries_for_path(&self, path: &Path) -> Vec<(usize, &Diagnostic)> {
         let abs_path = self.lookup_abs_path(path);
-        if let Some(indices) = self.merged_diagnostic_indices.get(&abs_path) {
+        if !self.dirty_diagnostics
+            && let Some(indices) = self.merged_diagnostic_indices.get(&abs_path)
+        {
             let mut entries = Vec::with_capacity(indices.len());
             for (visible_index, merged) in indices.iter().enumerate() {
                 if let Some(diagnostic) = self.diagnostic_by_index(&abs_path, *merged) {
+                    entries.push((visible_index, diagnostic));
+                }
+            }
+            return entries;
+        }
+        let instant_count = self.instant_diagnostic_count_for_abs_path(&abs_path);
+        if instant_count > 0 {
+            let mut entries = Vec::with_capacity(instant_count);
+            for visible_index in 0..instant_count {
+                if let Some(diagnostic) =
+                    self.instant_diagnostic_at_for_abs_path(&abs_path, visible_index)
+                {
                     entries.push((visible_index, diagnostic));
                 }
             }
@@ -981,10 +1098,81 @@ impl LspManager {
             .unwrap_or_default()
     }
 
+    fn update_severity(summary: &mut Option<DiagSeverity>, diagnostic: &Diagnostic) -> bool {
+        match diagnostic.severity {
+            DiagSeverity::Error => {
+                *summary = Some(DiagSeverity::Error);
+                true
+            }
+            DiagSeverity::Warning => {
+                if summary.is_none() {
+                    *summary = Some(DiagSeverity::Warning);
+                }
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn diagnostic_severity_for_abs_path_direct(&self, path: &Path) -> Option<DiagSeverity> {
+        let mut summary = None;
+        if !self.dirty_diagnostics
+            && let Some(indices) = self.merged_diagnostic_indices.get(path)
+        {
+            for index in indices.iter() {
+                if let Some(diagnostic) = self.diagnostic_by_index(path, *index)
+                    && Self::update_severity(&mut summary, diagnostic)
+                {
+                    return summary;
+                }
+            }
+            return summary;
+        }
+        if let Some((_, diagnostics)) = self.instant_diagnostics.get(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        }
+        if let Some(diagnostics) = self.ruff_workspace_diagnostics_for_abs_path(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        }
+        if let Some((_, diagnostics)) = self.ty_instant_diagnostics.get(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        }
+        if summary.is_some() {
+            return summary;
+        }
+        if let Some(diagnostics) = self.diagnostics.get(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        }
+        summary
+    }
+
     pub fn diagnostic_paths(&self) -> Vec<&PathBuf> {
-        let mut paths: Vec<&PathBuf> = self.merged_diagnostic_indices.keys().collect();
-        for path in self.diagnostics.keys() {
-            if !self.merged_diagnostic_indices.contains_key(path) {
+        let mut paths: Vec<&PathBuf> = Vec::new();
+        for path in self
+            .merged_diagnostic_indices
+            .keys()
+            .chain(self.diagnostics.keys())
+            .chain(self.instant_diagnostics.keys())
+            .chain(self.ruff_workspace_diagnostics.keys())
+            .chain(self.ty_instant_diagnostics.keys())
+        {
+            if !paths.iter().any(|existing| existing.as_path() == path.as_path()) {
                 paths.push(path);
             }
         }
@@ -1005,16 +1193,57 @@ impl LspManager {
         (errors, warnings)
     }
 
+    pub fn total_diagnostic_counts(&self) -> (usize, usize) {
+        let mut errors = 0usize;
+        let mut warnings = 0usize;
+        for path in self.diagnostic_paths() {
+            let (path_errors, path_warnings) = self.diagnostic_counts_for_path(path);
+            errors += path_errors;
+            warnings += path_warnings;
+        }
+        (errors, warnings)
+    }
+
+    pub fn ruff_diagnostic_storage_counts(&self) -> (usize, usize) {
+        let mut paths = std::collections::HashSet::new();
+        let mut count = 0usize;
+        for (path, (_, diagnostics)) in &self.instant_diagnostics {
+            paths.insert(path);
+            count = count.saturating_add(diagnostics.len());
+        }
+        for (path, diagnostics) in &self.ruff_workspace_diagnostics {
+            paths.insert(path);
+            count = count.saturating_add(diagnostics.len());
+        }
+        (paths.len(), count)
+    }
+
     pub fn diagnostic_severity_for_path(&self, path: &Path) -> Option<DiagSeverity> {
-        let mut has_warning = false;
-        for (_, diagnostic) in self.diagnostic_entries_for_path(path) {
-            match diagnostic.severity {
-                DiagSeverity::Error => return Some(DiagSeverity::Error),
-                DiagSeverity::Warning => has_warning = true,
-                _ => {}
+        let abs_path = self.lookup_abs_path(path);
+        self.diagnostic_severity_for_abs_path_direct(&abs_path)
+    }
+
+    pub fn diagnostic_severity_under_path(&self, path: &Path) -> Option<DiagSeverity> {
+        let abs_path = self.lookup_abs_path(path);
+        let mut summary = None;
+        for diagnostic_path in self
+            .merged_diagnostic_indices
+            .keys()
+            .chain(self.diagnostics.keys())
+            .chain(self.instant_diagnostics.keys())
+            .chain(self.ruff_workspace_diagnostics.keys())
+            .chain(self.ty_instant_diagnostics.keys())
+        {
+            if diagnostic_path.starts_with(&abs_path)
+                && let Some(severity) = self.diagnostic_severity_for_abs_path_direct(diagnostic_path)
+            {
+                if severity == DiagSeverity::Error {
+                    return Some(DiagSeverity::Error);
+                }
+                summary = Some(DiagSeverity::Warning);
             }
         }
-        has_warning.then_some(DiagSeverity::Warning)
+        summary
     }
 
     pub fn diagnostic_refs_for_path(&self, path: &Path) -> Vec<&Diagnostic> {
@@ -1026,8 +1255,14 @@ impl LspManager {
 
     fn instant_merged_diagnostics_for_abs_path(&self, path: &Path) -> (i32, Vec<&Diagnostic>) {
         let ruff = self.instant_diagnostics.get(path);
+        let ruff_workspace = if ruff.is_none() {
+            self.ruff_workspace_diagnostics_for_abs_path(path)
+        } else {
+            None
+        };
         let ty = self.ty_instant_diagnostics.get(path);
         let count = ruff.map_or(0, |(_, diags)| diags.len())
+            + ruff_workspace.map_or(0, |diags| diags.len())
             + ty.map_or(0, |(_, diags)| diags.len());
         if count == 0 {
             return (0, Vec::new());
@@ -1037,6 +1272,9 @@ impl LspManager {
         let mut max_v = 0;
         if let Some((version, diagnostics)) = ruff {
             max_v = max_v.max(*version);
+            merged.extend(diagnostics.iter());
+        }
+        if let Some(diagnostics) = ruff_workspace {
             merged.extend(diagnostics.iter());
         }
         if let Some((version, diagnostics)) = ty {

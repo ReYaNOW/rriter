@@ -386,6 +386,7 @@ impl Renderer {
                     mode: 8.0,
                     sdf_params,
                 };
+                self.ensure_vertex_capacity(6);
                 self.vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
                 prev_u = u;
             }
@@ -447,6 +448,7 @@ impl Renderer {
             mode: 8.0,
             sdf_params,
         };
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[v0, v1, v2, v0, v2, v3]);
     }
 

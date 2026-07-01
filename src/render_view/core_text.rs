@@ -896,6 +896,7 @@ impl Renderer {
             sdf_params,
         };
 
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
@@ -944,6 +945,7 @@ impl Renderer {
             sdf_params,
         };
 
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
@@ -1071,6 +1073,7 @@ impl Renderer {
             sdf_params,
         };
 
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 
@@ -1125,6 +1128,7 @@ impl Renderer {
             sdf_params,
         };
 
+        self.ensure_vertex_capacity(6);
         self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
     }
 

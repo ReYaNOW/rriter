@@ -198,7 +198,7 @@ impl Renderer {
         );
 
         let (error_count, warning_count) = lsp
-            .map(|l| diagnostic_error_warning_counts(l.diagnostics.values().map(|v| v.as_ref())))
+            .map(crate::lsp::LspManager::total_diagnostic_counts)
             .unwrap_or((0, 0));
 
         let icon_sz = 20.0 * s;

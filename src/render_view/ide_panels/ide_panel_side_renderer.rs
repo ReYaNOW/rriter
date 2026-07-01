@@ -608,24 +608,11 @@ impl Renderer {
                         let mut has_error = false;
                         let mut has_warn = false;
                         if !node.is_ignored {
-                            if let Some(l) = lsp {
-                                for (p, diags) in &l.diagnostics {
-                                    if !diags.is_empty() && p.starts_with(&node.path) {
-                                        for d in diags.iter() {
-                                            if d.severity == crate::lsp::DiagSeverity::Error {
-                                                has_error = true;
-                                                break;
-                                            } else if d.severity
-                                                == crate::lsp::DiagSeverity::Warning
-                                            {
-                                                has_warn = true;
-                                            }
-                                        }
-                                        if has_error {
-                                            break;
-                                        }
-                                    }
-                                }
+                            if let Some(severity) =
+                                lsp.and_then(|l| l.diagnostic_severity_under_path(&node.path))
+                            {
+                                has_error = severity == crate::lsp::DiagSeverity::Error;
+                                has_warn = severity == crate::lsp::DiagSeverity::Warning;
                             }
                         }
 

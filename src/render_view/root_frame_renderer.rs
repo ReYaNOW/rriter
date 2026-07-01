@@ -440,6 +440,19 @@ impl Renderer {
                 &ide_panel.api,
                 ide_workspaces,
             );
+            if panel_bottom_h > 0.0 {
+                self.draw_ide_bottom_panel(
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    has_lsp_diagnostics,
+                    s,
+                    ui_mx,
+                    ui_my,
+                    panel_bottom_h,
+                    is_ui_disabled,
+                );
+            }
             if is_ide_mode {
                 self.draw_status_bar(
                     editor,
@@ -453,19 +466,6 @@ impl Renderer {
                     status_progress_label,
                     status_progress_elapsed,
                     status_progress_value,
-                );
-            }
-            if panel_bottom_h > 0.0 {
-                self.draw_ide_bottom_panel(
-                    ide_panel,
-                    lsp,
-                    ui_registry,
-                    has_lsp_diagnostics,
-                    s,
-                    ui_mx,
-                    ui_my,
-                    panel_bottom_h,
-                    is_ui_disabled,
                 );
             }
             if let Some((path, tx, ty)) = tab_tooltip {
@@ -1082,6 +1082,20 @@ impl Renderer {
 
         // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
+        if is_ide_mode && panel_bottom_h > 0.0 {
+            self.draw_ide_bottom_panel(
+                ide_panel,
+                lsp,
+                ui_registry,
+                has_lsp_diagnostics,
+                s,
+                ui_mx,
+                ui_my,
+                panel_bottom_h,
+                is_ui_disabled,
+            );
+        }
+
         if is_ide_mode {
             self.draw_status_bar(
                 editor,
@@ -1095,20 +1109,6 @@ impl Renderer {
                 status_progress_label,
                 status_progress_elapsed,
                 status_progress_value,
-            );
-        }
-
-        if is_ide_mode && panel_bottom_h > 0.0 {
-            self.draw_ide_bottom_panel(
-                ide_panel,
-                lsp,
-                ui_registry,
-                has_lsp_diagnostics,
-                s,
-                ui_mx,
-                ui_my,
-                panel_bottom_h,
-                is_ui_disabled,
             );
         }
 
