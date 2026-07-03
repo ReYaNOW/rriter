@@ -651,6 +651,95 @@ fn load_dracula() -> Theme {
     }
 }
 
+const EGL_VENDOR_ENV: &str = "__EGL_VENDOR_LIBRARY_FILENAMES";
+const RRITER_EGL_VENDOR_ENV: &str = "RRITER_EGL_VENDOR";
+const NVIDIA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json";
+const MESA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/50_mesa.json";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EglVendorPreference {
+    Auto,
+    System,
+    Nvidia,
+    Mesa,
+}
+
+fn parse_egl_vendor_preference(raw: Option<&str>) -> EglVendorPreference {
+    let Some(value) = raw.map(str::trim) else {
+        return EglVendorPreference::Auto;
+    };
+    if value.eq_ignore_ascii_case("auto") {
+        EglVendorPreference::Auto
+    } else if value.eq_ignore_ascii_case("system") {
+        EglVendorPreference::System
+    } else if value.eq_ignore_ascii_case("nvidia") {
+        EglVendorPreference::Nvidia
+    } else if value.eq_ignore_ascii_case("mesa") {
+        EglVendorPreference::Mesa
+    } else {
+        EglVendorPreference::System
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn prefer_egl_vendor() {
+    if env::var_os(EGL_VENDOR_ENV).is_some() {
+        return;
+    }
+
+    let preference = env::var_os(RRITER_EGL_VENDOR_ENV)
+        .and_then(|value| value.into_string().ok())
+        .map(|value| parse_egl_vendor_preference(Some(&value)))
+        .unwrap_or(EglVendorPreference::Auto);
+    let vendor_path = match preference {
+        EglVendorPreference::System => return,
+        EglVendorPreference::Nvidia => NVIDIA_EGL_VENDOR,
+        EglVendorPreference::Mesa => MESA_EGL_VENDOR,
+        EglVendorPreference::Auto => {
+            if nvidia_gpu_present() {
+                NVIDIA_EGL_VENDOR
+            } else {
+                return;
+            }
+        }
+    };
+
+    if !std::path::Path::new(vendor_path).exists() {
+        return;
+    }
+
+    // Must run before EGL/GLVND loads; main is still single-threaded here.
+    unsafe {
+        env::set_var(EGL_VENDOR_ENV, vendor_path);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn prefer_egl_vendor() {}
+
+#[cfg(target_os = "linux")]
+fn nvidia_gpu_present() -> bool {
+    if std::path::Path::new("/dev/nvidiactl").exists()
+        || std::path::Path::new("/proc/driver/nvidia/version").exists()
+    {
+        return true;
+    }
+
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let vendor_path = entry.path().join("device/vendor");
+        let Ok(vendor) = std::fs::read_to_string(vendor_path) else {
+            continue;
+        };
+        if vendor.trim().eq_ignore_ascii_case("0x10de") {
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -962,6 +1051,27 @@ mod tests {
         assert_eq!(rayon_thread_cap(4), 4);
         assert_eq!(rayon_thread_cap(128), 4);
     }
+
+    #[test]
+    fn egl_vendor_preference_parser_is_portable_and_conservative() {
+        assert_eq!(parse_egl_vendor_preference(None), EglVendorPreference::Auto);
+        assert_eq!(
+            parse_egl_vendor_preference(Some("nvidia")),
+            EglVendorPreference::Nvidia
+        );
+        assert_eq!(
+            parse_egl_vendor_preference(Some(" mesa ")),
+            EglVendorPreference::Mesa
+        );
+        assert_eq!(
+            parse_egl_vendor_preference(Some("SYSTEM")),
+            EglVendorPreference::System
+        );
+        assert_eq!(
+            parse_egl_vendor_preference(Some("bad")),
+            EglVendorPreference::System
+        );
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1211,6 +1321,8 @@ fn run_headless_ty_mem_probe(args: &[String], flag_idx: usize) {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn main() {
+    prefer_egl_vendor();
+
     #[cfg(target_os = "linux")]
     unsafe {
         // Константа M_ARENA_MAX = -8. Настраиваем glibc напрямую,

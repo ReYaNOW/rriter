@@ -16,6 +16,19 @@ use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
+#[cfg(target_os = "linux")]
+fn trim_allocator_after_gl_bootstrap() {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+    unsafe {
+        malloc_trim(0);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn trim_allocator_after_gl_bootstrap() {}
+
 mod about;
 mod source_hover;
 pub(crate) use source_hover::apply_source_hover_response_to_state;
@@ -401,6 +414,7 @@ impl ApplicationHandler for App {
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, self.editor.is_dirty());
         }
+        trim_allocator_after_gl_bootstrap();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

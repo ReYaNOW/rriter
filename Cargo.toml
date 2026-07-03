@@ -6,11 +6,6 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-winit = { version = "0.30.13", default-features = false, features = [
-    "wayland",
-] }
-glutin = "0.32.3"
-glutin-winit = "0.5.0"
 glow = "0.17.0"
 swash = "0.2.7"
 arboard = { version = "3.3", default-features = false, features = [
@@ -78,6 +73,34 @@ libc = "0.2"
 alacritty_terminal = "0.26.0"
 portable-pty = "0.9.0"
 git2 = "0.20"
+
+[features]
+default = []
+linux-x11 = [
+    "glutin/glx",
+    "glutin/x11",
+    "glutin-winit/glx",
+    "glutin-winit/x11",
+    "winit/x11",
+]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+winit = { version = "0.30.13", default-features = false, features = [
+    "wayland",
+] }
+glutin = { version = "0.32.3", default-features = false, features = [
+    "egl",
+    "wayland",
+] }
+glutin-winit = { version = "0.5.0", default-features = false, features = [
+    "egl",
+    "wayland",
+] }
+
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+winit = "0.30.13"
+glutin = "0.32.3"
+glutin-winit = "0.5.0"
 
 [[bin]]
 name = "api_fetch_bench"

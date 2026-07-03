@@ -144,6 +144,34 @@ When searching:
 
 When graph returns standard/library callees (`get`, `map`, `unwrap_or`, `clone`, `round`, etc.), ignore them unless task is specifically about those calls.
 
+### 0.1.3.1 Graph miss fallback for Rust include/impl methods
+
+`callers_of` can return false `0` for Rust methods split through `include!`/module shell files, especially `impl Type { fn method(...) }` in chunk files.
+
+If `callers_of('/abs/path/file.rs::Type.method')` returns `0` but target is an impl method or constructor:
+
+1. Do not treat `0` as proof of no callers.
+2. Use `semantic_search_nodes_tool` for exact variants:
+
+   * `Type.method`
+   * `Type::method`
+   * `method`
+   * implementation file basename
+
+3. Run `file_summary` on both:
+
+   * concrete implementation file, for example `src/renderer/renderer_init_methods.rs`
+   * include shell/module file, for example `src/renderer.rs`
+
+4. Retry `callers_of` only with canonical node ids/targets returned by graph search or `file_summary`; do not rely only on hand-written target strings.
+5. If graph still returns `0`, use exact read-only `rg` as MCP gap fallback, not as first step:
+
+   * constructors: `rg -n "Type::method\\(" src`
+   * methods: `rg -n "\\.method\\(" src`
+   * function name fallback: `rg -n "method\\(" src`
+
+6. In summary, say: `Graph callers_of returned 0 for include/impl target; verified with exact rg fallback`.
+
 ### 0.1.4 Required graph checks by task type
 
 Bug fix:
