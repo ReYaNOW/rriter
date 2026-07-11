@@ -225,13 +225,33 @@ mod tests {
             advance: 8.0,
             is_emoji: 0.0,
         };
+        let aligned_glyph = GlyphInfo {
+            height: 8.49,
+            offset_y: 10.51,
+            ..glyph
+        };
         let (x, y, w, h) = glyph_quad_rect(10.0, 100.0, glyph, 1.0);
         let vertices = quad_vertices(
             x, y, w, h, glyph.u, glyph.v, glyph.uw, glyph.vh, [1.0; 4], 0.0,
         );
+        let (aligned_x, aligned_y, aligned_w, aligned_h) =
+            glyph_quad_rect(18.0, 100.0, aligned_glyph, 1.0);
+        let aligned_vertices = quad_vertices(
+            aligned_x,
+            aligned_y,
+            aligned_w,
+            aligned_h,
+            aligned_glyph.u,
+            aligned_glyph.v,
+            aligned_glyph.uw,
+            aligned_glyph.vh,
+            [1.0; 4],
+            0.0,
+        );
 
         assert_eq!(vertices[0].pos[1], 87.0);
         assert_eq!(vertices[2].pos[1], 98.0);
+        assert_eq!(aligned_vertices[2].pos[1], vertices[2].pos[1]);
         assert_eq!(y.round() + h.round(), 97.0);
     }
 
