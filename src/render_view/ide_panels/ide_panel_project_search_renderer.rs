@@ -1,6 +1,6 @@
 use crate::app::project_search::{
     PROJECT_SEARCH_ROW_H, ProjectSearchField, ProjectSearchFlatRow, ProjectSearchLayout,
-    ProjectSearchRect,
+    ProjectSearchQueryScrollAxis, ProjectSearchRect,
 };
 use crate::editor::Editor;
 
@@ -22,24 +22,6 @@ fn project_search_label_text_y(input_y: f32, scale: f32) -> f32 {
     let row_h = (18.0 * scale).round().max(1.0);
     let gap = project_search_scaled_step(4.0, scale);
     project_search_row_text_y(input_y.round() - row_h - gap, row_h, scale)
-}
-
-fn project_search_line_end(text: &str, line_start: usize, mut line_end: usize) -> usize {
-    line_end = line_end.min(text.len());
-    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
-        line_end -= 1;
-    }
-    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
-        line_end -= 1;
-    }
-    line_end
-}
-
-fn project_search_cursor_line(editor: &Editor) -> usize {
-    editor
-        .line_offsets
-        .partition_point(|&offset| offset <= editor.cursor)
-        .saturating_sub(1)
 }
 
 fn project_search_prefix_len_for_width(
@@ -200,7 +182,7 @@ impl Renderer {
         }
     }
 
-    fn project_search_stable_text_width(&mut self, text: &str, scale: f32) -> f32 {
+    pub(crate) fn project_search_stable_text_width(&mut self, text: &str, scale: f32) -> f32 {
         text.chars()
             .filter_map(|c| self.get_ui_glyph(c))
             .map(|g| Self::snapped_text_advance(g.advance, scale))
@@ -253,6 +235,7 @@ impl Renderer {
             crate::ui_system::UiId::ProjectSearchQueryInput,
             ui_registry,
             blink_alpha,
+            Some(&ide_panel.project_search),
         );
 
         let case_btn = IconButton {
@@ -311,6 +294,7 @@ impl Renderer {
             crate::ui_system::UiId::ProjectSearchIncludeInput,
             ui_registry,
             blink_alpha,
+            None,
         );
 
         self.draw_project_search_text_stable(
@@ -329,6 +313,7 @@ impl Renderer {
             crate::ui_system::UiId::ProjectSearchExcludeInput,
             ui_registry,
             blink_alpha,
+            None,
         );
 
         self.push_rect(
@@ -360,6 +345,7 @@ impl Renderer {
             crate::ui_system::UiId::ProjectSearchFilterInput,
             ui_registry,
             blink_alpha,
+            None,
         );
 
         self.push_rect(
@@ -682,6 +668,7 @@ impl Renderer {
         id: crate::ui_system::UiId,
         ui_registry: &mut crate::ui_system::UiRegistry,
         blink_alpha: f32,
+        query_state: Option<&crate::app::project_search::ProjectSearchState>,
     ) {
         let scale = self.scale_factor;
         let border = if focused && enabled {
@@ -723,43 +710,57 @@ impl Renderer {
             );
         }
 
+        let query_viewport = query_state.map(|_| {
+            crate::app::project_search::project_search_query_viewport(rect, scale)
+        });
+        let clip_rect = query_viewport.map(|viewport| viewport.text).unwrap_or(rect);
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let sy = (self.height - (rect.y + rect.h)).round() as i32;
+            let sy = (self.height - (clip_rect.y + clip_rect.h)).round() as i32;
             self.gl.scissor(
-                rect.x.round() as i32,
+                clip_rect.x.round() as i32,
                 sy,
-                rect.w.round() as i32,
-                rect.h.round() as i32,
+                clip_rect.w.round() as i32,
+                clip_rect.h.round() as i32,
             );
         }
 
         let text = editor.get_full_text();
         let text_scale = 0.82;
-        let line_h = (18.0 * scale).round().max(1.0);
-        let visible_lines = if multiline {
-            ((rect.h - 8.0 * scale) / line_h).floor().max(1.0) as usize
-        } else {
-            1
-        };
-        let cursor_line = project_search_cursor_line(editor);
+        let line_h = crate::app::project_search::project_search_query_line_height(scale);
+        let scroll_y = query_state
+            .map(|state| state.query_scroll_y.current.round())
+            .unwrap_or(0.0);
+        let scroll_x = query_state
+            .map(|state| state.query_scroll_x.current.round())
+            .unwrap_or(0.0);
         let first_line = if multiline {
-            cursor_line.saturating_sub(visible_lines.saturating_sub(1))
+            (scroll_y / line_h).floor().max(0.0) as usize
         } else {
             0
+        };
+        let line_offset_y = scroll_y - first_line as f32 * line_h;
+        let visible_lines = if multiline {
+            (clip_rect.h / line_h).ceil().max(1.0) as usize + 1
+        } else {
+            1
         };
         let sel_anchor = editor.selection_anchor.unwrap_or(editor.cursor);
         let sel_start = sel_anchor.min(editor.cursor);
         let sel_end = sel_anchor.max(editor.cursor);
-        let draw_x = (rect.x + 7.0 * scale).round();
+        let draw_x = if let Some(viewport) = query_viewport {
+            (viewport.text.x - scroll_x).round()
+        } else {
+            (rect.x + 7.0 * scale).round()
+        };
         let max_line = editor.line_offsets.len().min(first_line + visible_lines);
 
         for line_idx in first_line..max_line {
             let Some(&line_start) = editor.line_offsets.get(line_idx) else {
                 continue;
             };
-            let line_end = project_search_line_end(
+            let line_end = crate::app::project_search::project_search_line_end(
                 &text,
                 line_start,
                 editor
@@ -769,7 +770,8 @@ impl Renderer {
                     .unwrap_or(text.len()),
             );
             let visual_idx = line_idx - first_line;
-            let text_y = project_search_input_line_y(rect.y, visual_idx, line_h, scale);
+            let text_y = project_search_input_line_y(rect.y, visual_idx, line_h, scale)
+                - line_offset_y.round();
             if let Some(line_text) = text.get(line_start..line_end) {
                 if enabled && sel_start < line_end && sel_end > line_start {
                     let row_sel_start = sel_start.max(line_start).min(line_end);
@@ -820,7 +822,8 @@ impl Renderer {
             && text.is_empty()
             && first_line == 0
         {
-            let text_y = project_search_input_line_y(rect.y, 0, line_h, scale);
+            let text_y = project_search_input_line_y(rect.y, 0, line_h, scale)
+                - line_offset_y.round();
             self.push_rect(
                 draw_x,
                 (text_y - 13.0 * scale).round(),
@@ -833,6 +836,62 @@ impl Renderer {
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
+        }
+        if let Some(state) = query_state {
+            self.draw_project_search_query_scrollbars(rect, state, ui_registry, scale);
+        }
+    }
+
+    fn draw_project_search_query_scrollbars(
+        &mut self,
+        rect: ProjectSearchRect,
+        state: &crate::app::project_search::ProjectSearchState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        scale: f32,
+    ) {
+        let viewport = crate::app::project_search::project_search_query_viewport(rect, scale);
+        for (axis, id, track) in [
+            (
+                ProjectSearchQueryScrollAxis::Vertical,
+                crate::ui_system::UiId::ProjectSearchQueryScrollbarY,
+                viewport.vertical_track,
+            ),
+            (
+                ProjectSearchQueryScrollAxis::Horizontal,
+                crate::ui_system::UiId::ProjectSearchQueryScrollbarX,
+                viewport.horizontal_track,
+            ),
+        ] {
+            let Some(thumb) = crate::app::project_search::project_search_query_scrollbar_thumb(
+                rect, state, axis, scale,
+            ) else {
+                continue;
+            };
+            ui_registry.register_rect(
+                id,
+                track.x,
+                track.y,
+                track.w,
+                track.h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+            self.push_rounded_rect(
+                track.x.round(),
+                track.y.round(),
+                track.w,
+                track.h,
+                3.0 * scale,
+                [1.0, 1.0, 1.0, 0.035],
+            );
+            self.push_rounded_rect(
+                thumb.x.round(),
+                thumb.y.round(),
+                thumb.w,
+                thumb.h,
+                3.0 * scale,
+                [0.48, 0.48, 0.56, 0.68],
+            );
         }
     }
 

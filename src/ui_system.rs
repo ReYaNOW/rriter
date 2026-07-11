@@ -258,6 +258,8 @@ pub enum UiId {
     ProjectSearchHelpPopup,
     ProjectSearchFileToggle(usize),
     ProjectSearchMatchJump(usize, usize),
+    ProjectSearchQueryScrollbarY,
+    ProjectSearchQueryScrollbarX,
     ProjectSearchScrollbar,
     ProjectSearchPanelBody,
 

@@ -301,16 +301,19 @@ pub fn project_search_scrollbar_thumb(
     if total_h <= layout.list.h || layout.list.h <= 0.0 {
         return None;
     }
-    let max_scroll = (total_h - layout.list.h).max(0.0);
-    let ratio = (state.scroll.current / max_scroll.max(1.0)).clamp(0.0, 1.0);
-    let track_h = layout.list.h;
-    let thumb_h = (layout.list.h / total_h * track_h).max(22.0 * scale);
-    let thumb_y = layout.list.y + ratio * (track_h - thumb_h);
+    let thumb = crate::scroll::scrollbar_thumb(
+        layout.list.y,
+        layout.list.h,
+        layout.list.h,
+        total_h,
+        state.scroll.current,
+        22.0 * scale,
+    )?;
     Some(ProjectSearchRect {
         x: layout.list.x + layout.list.w - 10.0 * scale,
-        y: thumb_y,
+        y: thumb.start,
         w: 5.0 * scale,
-        h: thumb_h,
+        h: thumb.len,
     })
 }
 
@@ -328,16 +331,17 @@ fn project_search_scrollbar_drag_target(
     if max_scroll <= 0.0 {
         return None;
     }
-    let offset = drag_offset.unwrap_or_else(|| {
-        if mouse_y >= thumb.y && mouse_y <= thumb.y + thumb.h {
-            mouse_y - thumb.y
-        } else {
-            thumb.h * 0.5
-        }
-    });
-    let denom = (layout.list.h - thumb.h).max(0.0001);
-    let ratio = (mouse_y - layout.list.y - offset) / denom;
-    Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
+    crate::scroll::scrollbar_drag_target(
+        mouse_y,
+        layout.list.y,
+        layout.list.h,
+        crate::scroll::ScrollbarThumb {
+            start: thumb.y,
+            len: thumb.h,
+        },
+        max_scroll,
+        drag_offset,
+    )
 }
 
 #[cfg(test)]

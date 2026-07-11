@@ -301,13 +301,24 @@ impl App {
                 app_panel_scroll_rect(self, crate::app::PanelId::Search, s, true);
             if point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if let Some(layout) = self.project_search_panel_layout() {
-                    self.ide_panel.project_search.scroll.anim_speed = 7.0;
-                    self.ide_panel.project_search.scroll.scroll_by(dy);
-                    let max_scroll = self.ide_panel.project_search.max_scroll(layout.list.h, s);
-                    self.ide_panel
-                        .project_search
-                        .scroll
-                        .clamp_target(0.0, max_scroll);
+                    if point_in_rect(
+                        mx,
+                        my,
+                        (layout.query.x, layout.query.y, layout.query.w, layout.query.h),
+                    ) {
+                        self.ide_panel
+                            .project_search
+                            .scroll_query_y_by(layout.query, s, dy);
+                    } else {
+                        self.ide_panel.project_search.scroll.anim_speed = 7.0;
+                        self.ide_panel.project_search.scroll.scroll_by(dy);
+                        let max_scroll =
+                            self.ide_panel.project_search.max_scroll(layout.list.h, s);
+                        self.ide_panel
+                            .project_search
+                            .scroll
+                            .clamp_target(0.0, max_scroll);
+                    }
                     self.window.as_ref().unwrap().request_redraw();
                 }
                 return;

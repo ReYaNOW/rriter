@@ -1,5 +1,6 @@
 use crate::app::project_search::{
-    ProjectSearchField, ProjectSearchLayout, ProjectSearchRequest, project_search_layout,
+    ProjectSearchField, ProjectSearchLayout, ProjectSearchQueryScrollAxis, ProjectSearchRequest,
+    project_search_layout, project_search_line_end, project_search_query_viewport,
     start_project_search_worker,
 };
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ impl crate::app::App {
         self.ide_panel.git.message_focused = false;
         self.ide_panel.file_tree_focused = false;
         self.ide_panel.lsp_log_filter_focused = false;
+        self.sync_project_search_query_scroll(true);
         crate::save_panel_state(&self.ide_panel);
     }
 
@@ -130,6 +132,101 @@ impl crate::app::App {
             .drag_scrollbar_to(&layout, mouse_y, renderer.scale_factor)
     }
 
+    pub(crate) fn start_project_search_query_scrollbar_drag(
+        &mut self,
+        axis: ProjectSearchQueryScrollAxis,
+        pointer: f32,
+    ) -> bool {
+        let Some(layout) = self.project_search_panel_layout() else {
+            return false;
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return false;
+        };
+        self.ide_panel.project_search.start_query_scrollbar_drag(
+            layout.query,
+            axis,
+            pointer,
+            renderer.scale_factor,
+        )
+    }
+
+    pub(crate) fn drag_project_search_query_scrollbar_to(
+        &mut self,
+        axis: ProjectSearchQueryScrollAxis,
+        pointer: f32,
+    ) -> bool {
+        let Some(layout) = self.project_search_panel_layout() else {
+            return false;
+        };
+        let Some(renderer) = self.renderer.as_ref() else {
+            return false;
+        };
+        self.ide_panel.project_search.drag_query_scrollbar_to(
+            layout.query,
+            axis,
+            pointer,
+            renderer.scale_factor,
+        )
+    }
+
+    pub(crate) fn sync_project_search_query_scroll(&mut self, refresh_content_width: bool) {
+        let Some(layout) = self.project_search_panel_layout() else {
+            return;
+        };
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+        let scale = renderer.scale_factor;
+        let state = &mut self.ide_panel.project_search;
+        let text = state.query_editor.get_full_text();
+
+        if refresh_content_width {
+            let mut max_width = 0.0f32;
+            for line_idx in 0..state.query_editor.line_offsets.len() {
+                let line_start = state
+                    .query_editor
+                    .line_offsets
+                    .get(line_idx)
+                    .copied()
+                    .unwrap_or(0);
+                let line_end = project_search_line_end(
+                    &text,
+                    line_start,
+                    state
+                        .query_editor
+                        .line_offsets
+                        .get(line_idx + 1)
+                        .copied()
+                        .unwrap_or(text.len()),
+                );
+                if let Some(line_text) = text.get(line_start..line_end) {
+                    max_width = max_width
+                        .max(renderer.project_search_stable_text_width(line_text, 0.82));
+                }
+            }
+            state.query_content_width = max_width + (2.0 * scale).max(1.0);
+        }
+
+        let cursor_line = state
+            .query_editor
+            .line_offsets
+            .partition_point(|&offset| offset <= state.query_editor.cursor)
+            .saturating_sub(1);
+        let line_start = state
+            .query_editor
+            .line_offsets
+            .get(cursor_line)
+            .copied()
+            .unwrap_or(0);
+        let cursor = state.query_editor.cursor.min(text.len());
+        let cursor_x = text
+            .get(line_start.min(cursor)..cursor)
+            .map(|prefix| renderer.project_search_stable_text_width(prefix, 0.82))
+            .unwrap_or(0.0);
+        state.reveal_query_cursor(layout.query, scale, cursor_x);
+    }
+
     pub fn project_search_panel_layout(&self) -> Option<ProjectSearchLayout> {
         if !self.is_ide_mode || !self.ide_panel.is_open(crate::app::PanelId::Search) {
             return None;
@@ -210,7 +307,12 @@ impl crate::app::App {
             ProjectSearchField::Filter => layout.filter,
         };
         let text_scale = 0.82;
-        let line_h = (18.0 * renderer.scale_factor).round().max(1.0);
+        let line_h = crate::app::project_search::project_search_query_line_height(
+            renderer.scale_factor,
+        );
+        let query_viewport = project_search_query_viewport(rect, renderer.scale_factor);
+        let query_scroll_x = self.ide_panel.project_search.query_scroll_x.current.round();
+        let query_scroll_y = self.ide_panel.project_search.query_scroll_y.current.round();
         let editor = match field {
             ProjectSearchField::Query => &mut self.ide_panel.project_search.query_editor,
             ProjectSearchField::Include => &mut self.ide_panel.project_search.include_editor,
@@ -218,42 +320,28 @@ impl crate::app::App {
             ProjectSearchField::Filter => &mut self.ide_panel.project_search.filter_editor,
         };
         let text = editor.get_full_text();
-        let visual_line = if field == ProjectSearchField::Query {
-            ((mouse_y - rect.y - 5.0 * renderer.scale_factor).max(0.0) / line_h) as usize
+        let line = if field == ProjectSearchField::Query {
+            (((mouse_y - query_viewport.text.y + query_scroll_y).max(0.0) / line_h)
+                .floor() as usize)
+                .min(editor.line_offsets.len().saturating_sub(1))
         } else {
             0
         };
-        let visible_lines = if field == ProjectSearchField::Query {
-            ((rect.h - 8.0 * renderer.scale_factor) / line_h)
-                .floor()
-                .max(1.0) as usize
-        } else {
-            1
-        };
-        let cursor_line = editor
-            .line_offsets
-            .partition_point(|&offset| offset <= editor.cursor)
-            .saturating_sub(1);
-        let first_line = if field == ProjectSearchField::Query {
-            cursor_line.saturating_sub(visible_lines.saturating_sub(1))
-        } else {
-            0
-        };
-        let line = (first_line + visual_line).min(editor.line_offsets.len().saturating_sub(1));
         let line_start = editor.line_offsets.get(line).copied().unwrap_or(0);
-        let mut line_end = editor
-            .line_offsets
-            .get(line + 1)
-            .copied()
-            .unwrap_or(text.len())
-            .min(text.len());
-        if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
-            line_end -= 1;
-        }
-        if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
-            line_end -= 1;
-        }
-        let x_offset = (mouse_x - (rect.x + 7.0 * renderer.scale_factor)).max(0.0);
+        let line_end = project_search_line_end(
+            &text,
+            line_start,
+            editor
+                .line_offsets
+                .get(line + 1)
+                .copied()
+                .unwrap_or(text.len()),
+        );
+        let x_offset = if field == ProjectSearchField::Query {
+            (mouse_x - query_viewport.text.x + query_scroll_x).max(0.0)
+        } else {
+            (mouse_x - (rect.x + 7.0 * renderer.scale_factor)).max(0.0)
+        };
         let mut current_x = 0.0;
         let mut target = line_end;
         if let Some(line_text) = text.get(line_start..line_end) {
@@ -276,6 +364,9 @@ impl crate::app::App {
         editor.cursor = target;
         if reset_anchor || editor.selection_anchor.is_none() {
             editor.selection_anchor = Some(target);
+        }
+        if field == ProjectSearchField::Query {
+            self.sync_project_search_query_scroll(false);
         }
     }
 

@@ -350,7 +350,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.explorer_scroll.update(dt) {
         needs_redraw = true;
     }
+    if let Some(layout) = app.project_search_panel_layout()
+        && let Some(scale) = app.renderer.as_ref().map(|renderer| renderer.scale_factor)
+    {
+        app.ide_panel
+            .project_search
+            .clamp_query_scrolls(layout.query, scale);
+    }
     if app.ide_panel.project_search.scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.project_search.query_scroll_y.update(dt) {
+        needs_redraw = true;
+    }
+    if app.ide_panel.project_search.query_scroll_x.update(dt) {
         needs_redraw = true;
     }
     if app.queue_visible_project_search_previews() || app.project_search_has_pending_previews() {

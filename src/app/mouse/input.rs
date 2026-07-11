@@ -116,6 +116,8 @@ fn stop_click_scroll_anims(app: &mut App) {
 
     stop_scroll_anim(&mut app.ide_panel.explorer_scroll);
     stop_scroll_anim(&mut app.ide_panel.project_search.scroll);
+    stop_scroll_anim(&mut app.ide_panel.project_search.query_scroll_y);
+    stop_scroll_anim(&mut app.ide_panel.project_search.query_scroll_x);
     stop_scroll_anim(&mut app.ide_panel.git.scroll);
     stop_scroll_anim(&mut app.ide_panel.git.graph_scroll);
     stop_scroll_anim(&mut app.ide_panel.lsp_scroll_y);
@@ -1027,6 +1029,28 @@ impl App {
                         }
                         self.handle_ui_click(clicked_id);
                     } else {
+                        if clicked_id
+                            == crate::ui_system::UiId::ProjectSearchQueryScrollbarY
+                        {
+                            if self.start_project_search_query_scrollbar_drag(
+                                crate::app::project_search::ProjectSearchQueryScrollAxis::Vertical,
+                                my,
+                            ) {
+                                self.window.as_ref().unwrap().request_redraw();
+                            }
+                            return;
+                        }
+                        if clicked_id
+                            == crate::ui_system::UiId::ProjectSearchQueryScrollbarX
+                        {
+                            if self.start_project_search_query_scrollbar_drag(
+                                crate::app::project_search::ProjectSearchQueryScrollAxis::Horizontal,
+                                mx,
+                            ) {
+                                self.window.as_ref().unwrap().request_redraw();
+                            }
+                            return;
+                        }
                         if clicked_id == crate::ui_system::UiId::ProjectSearchScrollbar {
                             if self.start_project_search_scrollbar_drag(my) {
                                 let _ = self.queue_visible_project_search_previews();
@@ -1396,6 +1420,8 @@ impl App {
             self.is_dragging_search = false;
             self.ide_panel.project_search.dragging_field = None;
             self.ide_panel.project_search.scroll.is_dragging = false;
+            self.ide_panel.project_search.query_scroll_y.is_dragging = false;
+            self.ide_panel.project_search.query_scroll_x.is_dragging = false;
             self.ide_panel.file_tree_dialog_input_drag = None;
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;

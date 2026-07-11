@@ -996,7 +996,9 @@ impl App {
                 self.handle_project_search_match_click(file_idx, match_idx);
                 self.window.as_ref().unwrap().request_redraw();
             }
-            UiId::ProjectSearchScrollbar => {}
+            UiId::ProjectSearchQueryScrollbarY
+            | UiId::ProjectSearchQueryScrollbarX
+            | UiId::ProjectSearchScrollbar => {}
 
             // Search panel
             UiId::SearchClose => {

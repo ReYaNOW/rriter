@@ -72,6 +72,56 @@ impl ScrollState {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ScrollbarThumb {
+    pub start: f32,
+    pub len: f32,
+}
+
+pub(crate) fn scrollbar_thumb(
+    track_start: f32,
+    track_len: f32,
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    min_thumb_len: f32,
+) -> Option<ScrollbarThumb> {
+    if track_len <= 0.0 || viewport_len <= 0.0 || content_len <= viewport_len {
+        return None;
+    }
+    let max_scroll = content_len - viewport_len;
+    let len = (viewport_len / content_len * track_len)
+        .max(min_thumb_len)
+        .min(track_len);
+    let ratio = (current_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
+    Some(ScrollbarThumb {
+        start: track_start + ratio * (track_len - len),
+        len,
+    })
+}
+
+pub(crate) fn scrollbar_drag_target(
+    pointer: f32,
+    track_start: f32,
+    track_len: f32,
+    thumb: ScrollbarThumb,
+    max_scroll: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    if track_len <= 0.0 || max_scroll <= 0.0 || thumb.len >= track_len {
+        return None;
+    }
+    let offset = drag_offset.unwrap_or_else(|| {
+        if pointer >= thumb.start && pointer <= thumb.start + thumb.len {
+            pointer - thumb.start
+        } else {
+            thumb.len * 0.5
+        }
+    });
+    let ratio = (pointer - track_start - offset) / (track_len - thumb.len).max(0.0001);
+    Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -104,5 +154,20 @@ mod tests {
         scroll.is_dragging = true;
         assert!(!scroll.is_settled());
         assert!(!scroll.update(0.016));
+    }
+
+    #[test]
+    fn scrollbar_geometry_reuses_same_ratio_for_both_axes() {
+        let thumb = scrollbar_thumb(10.0, 200.0, 100.0, 400.0, 150.0, 20.0)
+            .expect("scrollbar visible");
+        assert_eq!(thumb.len, 50.0);
+        assert_eq!(thumb.start, 85.0);
+
+        let (_, target) = scrollbar_drag_target(160.0, 10.0, 200.0, thumb, 300.0, None)
+            .expect("drag target");
+        assert!(target > 150.0);
+        assert!(target <= 300.0);
+
+        assert!(scrollbar_thumb(0.0, 100.0, 100.0, 100.0, 0.0, 20.0).is_none());
     }
 }

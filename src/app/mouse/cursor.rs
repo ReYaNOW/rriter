@@ -219,6 +219,22 @@ impl App {
             }
         }
 
+        if self.ide_panel.project_search.query_scroll_y.is_dragging {
+            self.drag_project_search_query_scrollbar_to(
+                crate::app::project_search::ProjectSearchQueryScrollAxis::Vertical,
+                py,
+            );
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if self.ide_panel.project_search.query_scroll_x.is_dragging {
+            self.drag_project_search_query_scrollbar_to(
+                crate::app::project_search::ProjectSearchQueryScrollAxis::Horizontal,
+                px,
+            );
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if let Some(field) = self.ide_panel.project_search.dragging_field {
             self.drag_project_search_cursor_to(field, px, py);
             self.window.as_ref().unwrap().request_redraw();

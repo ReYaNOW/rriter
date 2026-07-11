@@ -716,6 +716,12 @@ impl App {
                 crate::save_panel_state(&self.ide_panel);
             }
         }
+        if field == crate::app::project_search::ProjectSearchField::Query
+            && self.ide_panel.project_search.focused
+                == Some(crate::app::project_search::ProjectSearchField::Query)
+        {
+            self.sync_project_search_query_scroll(is_edit);
+        }
         if should_run {
             self.start_project_search();
         }

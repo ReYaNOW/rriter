@@ -25,6 +25,9 @@ pub const PROJECT_SEARCH_ROW_H: f32 = 24.0;
 pub const PROJECT_SEARCH_PAD_X: f32 = 10.0;
 pub const PROJECT_SEARCH_QUERY_H: f32 = 78.0;
 pub const PROJECT_SEARCH_SINGLE_H: f32 = 30.0;
+const PROJECT_SEARCH_QUERY_SCROLLBAR_SIZE: f32 = 10.0;
+const PROJECT_SEARCH_QUERY_TEXT_PAD_X: f32 = 7.0;
+const PROJECT_SEARCH_QUERY_TEXT_PAD_Y: f32 = 5.0;
 const PROJECT_SEARCH_PREVIEW_CHARS: usize = 220;
 const PROJECT_SEARCH_PREVIEW_CONTEXT_CHARS: usize = 60;
 const PROJECT_SEARCH_BUFFER_KEEP_BYTES: usize = 1024 * 1024;
@@ -46,6 +49,19 @@ pub enum ProjectSearchField {
     Include,
     Exclude,
     Filter,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectSearchQueryScrollAxis {
+    Horizontal,
+    Vertical,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ProjectSearchQueryViewport {
+    pub(crate) text: ProjectSearchRect,
+    pub(crate) vertical_track: ProjectSearchRect,
+    pub(crate) horizontal_track: ProjectSearchRect,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -155,6 +171,9 @@ pub struct ProjectSearchState {
     pub flat_rows: Vec<ProjectSearchFlatRow>,
     pub collapsed: FxHashSet<PathBuf>,
     pub scroll: ScrollState,
+    pub(crate) query_scroll_y: ScrollState,
+    pub(crate) query_scroll_x: ScrollState,
+    pub(crate) query_content_width: f32,
     pub has_run: bool,
     pub total_matches: usize,
     pub elapsed_ms: Option<u128>,
@@ -184,6 +203,9 @@ impl Default for ProjectSearchState {
             flat_rows: Vec::new(),
             collapsed: FxHashSet::default(),
             scroll: ScrollState::new(7.0),
+            query_scroll_y: ScrollState::new(7.0),
+            query_scroll_x: ScrollState::new(7.0),
+            query_content_width: 0.0,
             has_run: false,
             total_matches: 0,
             elapsed_ms: None,
@@ -274,9 +296,279 @@ impl ProjectSearchState {
         }
     }
 
+    pub(crate) fn query_max_scroll_y(&self, rect: ProjectSearchRect, scale: f32) -> f32 {
+        let viewport = project_search_query_viewport(rect, scale);
+        let content_h = self.query_editor.line_offsets.len() as f32
+            * project_search_query_line_height(scale);
+        (content_h - viewport.text.h).max(0.0)
+    }
+
+    pub(crate) fn query_max_scroll_x(&self, rect: ProjectSearchRect, scale: f32) -> f32 {
+        let viewport = project_search_query_viewport(rect, scale);
+        (self.query_content_width - viewport.text.w).max(0.0)
+    }
+
+    pub(crate) fn clamp_query_scrolls(&mut self, rect: ProjectSearchRect, scale: f32) {
+        let max_y = self.query_max_scroll_y(rect, scale);
+        let max_x = self.query_max_scroll_x(rect, scale);
+        self.query_scroll_y.clamp_target(0.0, max_y);
+        self.query_scroll_y.clamp_current(0.0, max_y);
+        self.query_scroll_x.clamp_target(0.0, max_x);
+        self.query_scroll_x.clamp_current(0.0, max_x);
+    }
+
+    pub(crate) fn reveal_query_cursor(
+        &mut self,
+        rect: ProjectSearchRect,
+        scale: f32,
+        cursor_x: f32,
+    ) {
+        let viewport = project_search_query_viewport(rect, scale);
+        let line_h = project_search_query_line_height(scale);
+        let cursor_line = self
+            .query_editor
+            .line_offsets
+            .partition_point(|&offset| offset <= self.query_editor.cursor)
+            .saturating_sub(1);
+        let cursor_top = cursor_line as f32 * line_h;
+        let cursor_bottom = cursor_top + line_h;
+        let mut target_y = self.query_scroll_y.current;
+        if cursor_top < target_y {
+            target_y = cursor_top;
+        } else if cursor_bottom > target_y + viewport.text.h {
+            target_y = cursor_bottom - viewport.text.h;
+        }
+
+        let cursor_w = (2.0 * scale).max(1.0);
+        let mut target_x = self.query_scroll_x.current;
+        if cursor_x < target_x {
+            target_x = cursor_x;
+        } else if cursor_x + cursor_w > target_x + viewport.text.w {
+            target_x = cursor_x + cursor_w - viewport.text.w;
+        }
+
+        let max_y = self.query_max_scroll_y(rect, scale);
+        let max_x = self.query_max_scroll_x(rect, scale);
+        set_scroll_immediate(&mut self.query_scroll_y, target_y, max_y);
+        set_scroll_immediate(&mut self.query_scroll_x, target_x, max_x);
+    }
+
+    pub(crate) fn scroll_query_y_by(
+        &mut self,
+        rect: ProjectSearchRect,
+        scale: f32,
+        delta: f32,
+    ) {
+        let max_scroll = self.query_max_scroll_y(rect, scale);
+        self.query_scroll_y.anim_speed = 7.0;
+        self.query_scroll_y.scroll_by(delta);
+        self.query_scroll_y.clamp_target(0.0, max_scroll);
+    }
+
+    pub(crate) fn start_query_scrollbar_drag(
+        &mut self,
+        rect: ProjectSearchRect,
+        axis: ProjectSearchQueryScrollAxis,
+        pointer: f32,
+        scale: f32,
+    ) -> bool {
+        let Some((drag_offset, target)) =
+            project_search_query_scrollbar_drag_target(rect, self, axis, pointer, scale, None)
+        else {
+            return false;
+        };
+        let scroll = match axis {
+            ProjectSearchQueryScrollAxis::Horizontal => &mut self.query_scroll_x,
+            ProjectSearchQueryScrollAxis::Vertical => &mut self.query_scroll_y,
+        };
+        scroll.drag_offset = drag_offset;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        scroll.anim_speed = 15.0;
+        scroll.is_dragging = true;
+        true
+    }
+
+    pub(crate) fn drag_query_scrollbar_to(
+        &mut self,
+        rect: ProjectSearchRect,
+        axis: ProjectSearchQueryScrollAxis,
+        pointer: f32,
+        scale: f32,
+    ) -> bool {
+        let drag_offset = match axis {
+            ProjectSearchQueryScrollAxis::Horizontal => self.query_scroll_x.drag_offset,
+            ProjectSearchQueryScrollAxis::Vertical => self.query_scroll_y.drag_offset,
+        };
+        let Some((_, target)) = project_search_query_scrollbar_drag_target(
+            rect,
+            self,
+            axis,
+            pointer,
+            scale,
+            Some(drag_offset),
+        ) else {
+            return false;
+        };
+        let scroll = match axis {
+            ProjectSearchQueryScrollAxis::Horizontal => &mut self.query_scroll_x,
+            ProjectSearchQueryScrollAxis::Vertical => &mut self.query_scroll_y,
+        };
+        if (scroll.target - target).abs() < 0.5 {
+            return false;
+        }
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        scroll.anim_speed = 15.0;
+        true
+    }
+
     pub fn max_scroll(&self, list_h: f32, scale: f32) -> f32 {
         let row_h = PROJECT_SEARCH_ROW_H * scale;
         (self.flat_rows.len() as f32 * row_h - list_h).max(0.0)
+    }
+}
+
+fn set_scroll_immediate(scroll: &mut ScrollState, target: f32, max_scroll: f32) {
+    let target = target.clamp(0.0, max_scroll);
+    scroll.current = target;
+    scroll.target = target;
+    scroll.velocity = 0.0;
+}
+
+pub(crate) fn project_search_query_line_height(scale: f32) -> f32 {
+    (18.0 * scale).round().max(1.0)
+}
+
+pub(crate) fn project_search_query_viewport(
+    rect: ProjectSearchRect,
+    scale: f32,
+) -> ProjectSearchQueryViewport {
+    let scrollbar = (PROJECT_SEARCH_QUERY_SCROLLBAR_SIZE * scale)
+        .round()
+        .max(6.0);
+    let pad_x = (PROJECT_SEARCH_QUERY_TEXT_PAD_X * scale).round();
+    let pad_y = (PROJECT_SEARCH_QUERY_TEXT_PAD_Y * scale).round();
+    let track_pad = (2.0 * scale).round();
+    ProjectSearchQueryViewport {
+        text: ProjectSearchRect {
+            x: rect.x + pad_x,
+            y: rect.y + pad_y,
+            w: (rect.w - pad_x * 2.0 - scrollbar).max(1.0),
+            h: (rect.h - pad_y * 2.0 - scrollbar).max(1.0),
+        },
+        vertical_track: ProjectSearchRect {
+            x: rect.x + rect.w - scrollbar,
+            y: rect.y + track_pad,
+            w: scrollbar,
+            h: (rect.h - scrollbar - track_pad * 2.0).max(1.0),
+        },
+        horizontal_track: ProjectSearchRect {
+            x: rect.x + track_pad,
+            y: rect.y + rect.h - scrollbar,
+            w: (rect.w - scrollbar - track_pad * 2.0).max(1.0),
+            h: scrollbar,
+        },
+    }
+}
+
+pub(crate) fn project_search_line_end(
+    text: &str,
+    line_start: usize,
+    mut line_end: usize,
+) -> usize {
+    line_end = line_end.min(text.len());
+    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
+        line_end -= 1;
+    }
+    if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\r') {
+        line_end -= 1;
+    }
+    line_end
+}
+
+pub(crate) fn project_search_query_scrollbar_thumb(
+    rect: ProjectSearchRect,
+    state: &ProjectSearchState,
+    axis: ProjectSearchQueryScrollAxis,
+    scale: f32,
+) -> Option<ProjectSearchRect> {
+    let viewport = project_search_query_viewport(rect, scale);
+    let thickness = (5.0 * scale).round().max(2.0);
+    let min_thumb = (18.0 * scale).round().max(8.0);
+    match axis {
+        ProjectSearchQueryScrollAxis::Vertical => {
+            let content_h = state.query_editor.line_offsets.len() as f32
+                * project_search_query_line_height(scale);
+            let thumb = crate::scroll::scrollbar_thumb(
+                viewport.vertical_track.y,
+                viewport.vertical_track.h,
+                viewport.text.h,
+                content_h,
+                state.query_scroll_y.current,
+                min_thumb,
+            )?;
+            Some(ProjectSearchRect {
+                x: viewport.vertical_track.x
+                    + (viewport.vertical_track.w - thickness) * 0.5,
+                y: thumb.start,
+                w: thickness,
+                h: thumb.len,
+            })
+        }
+        ProjectSearchQueryScrollAxis::Horizontal => {
+            let thumb = crate::scroll::scrollbar_thumb(
+                viewport.horizontal_track.x,
+                viewport.horizontal_track.w,
+                viewport.text.w,
+                state.query_content_width,
+                state.query_scroll_x.current,
+                min_thumb,
+            )?;
+            Some(ProjectSearchRect {
+                x: thumb.start,
+                y: viewport.horizontal_track.y
+                    + (viewport.horizontal_track.h - thickness) * 0.5,
+                w: thumb.len,
+                h: thickness,
+            })
+        }
+    }
+}
+
+fn project_search_query_scrollbar_drag_target(
+    rect: ProjectSearchRect,
+    state: &ProjectSearchState,
+    axis: ProjectSearchQueryScrollAxis,
+    pointer: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let viewport = project_search_query_viewport(rect, scale);
+    let thumb_rect = project_search_query_scrollbar_thumb(rect, state, axis, scale)?;
+    match axis {
+        ProjectSearchQueryScrollAxis::Vertical => crate::scroll::scrollbar_drag_target(
+            pointer,
+            viewport.vertical_track.y,
+            viewport.vertical_track.h,
+            crate::scroll::ScrollbarThumb {
+                start: thumb_rect.y,
+                len: thumb_rect.h,
+            },
+            state.query_max_scroll_y(rect, scale),
+            drag_offset,
+        ),
+        ProjectSearchQueryScrollAxis::Horizontal => crate::scroll::scrollbar_drag_target(
+            pointer,
+            viewport.horizontal_track.x,
+            viewport.horizontal_track.w,
+            crate::scroll::ScrollbarThumb {
+                start: thumb_rect.x,
+                len: thumb_rect.w,
+            },
+            state.query_max_scroll_x(rect, scale),
+            drag_offset,
+        ),
     }
 }
 
@@ -1587,5 +1879,89 @@ mod tests {
         state.apply_live_filter();
 
         assert_eq!(state.flat_rows, vec![ProjectSearchFlatRow::File(0)]);
+    }
+
+    #[test]
+    fn query_scroll_reveals_cursor_and_exposes_both_scrollbars() {
+        let mut state = ProjectSearchState::default();
+        state
+            .query_editor
+            .insert_str("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
+        state.query_editor.cursor = state.query_editor.len();
+        state.query_content_width = 420.0;
+        let rect = ProjectSearchRect {
+            x: 0.0,
+            y: 0.0,
+            w: 180.0,
+            h: PROJECT_SEARCH_QUERY_H,
+        };
+
+        state.reveal_query_cursor(rect, 1.0, 390.0);
+
+        assert!(state.query_scroll_y.current > 0.0);
+        assert!(state.query_scroll_x.current > 0.0);
+        assert!(project_search_query_scrollbar_thumb(
+            rect,
+            &state,
+            ProjectSearchQueryScrollAxis::Vertical,
+            1.0,
+        )
+        .is_some());
+        assert!(project_search_query_scrollbar_thumb(
+            rect,
+            &state,
+            ProjectSearchQueryScrollAxis::Horizontal,
+            1.0,
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn query_scrollbar_drag_reuses_shared_scroll_math() {
+        let mut state = ProjectSearchState::default();
+        state.query_editor.insert_str("a\nb\nc\nd\ne\nf\ng\nh");
+        state.query_content_width = 400.0;
+        let rect = ProjectSearchRect {
+            x: 10.0,
+            y: 20.0,
+            w: 180.0,
+            h: PROJECT_SEARCH_QUERY_H,
+        };
+        let viewport = project_search_query_viewport(rect, 1.0);
+
+        assert!(state.start_query_scrollbar_drag(
+            rect,
+            ProjectSearchQueryScrollAxis::Vertical,
+            viewport.vertical_track.y + viewport.vertical_track.h,
+            1.0,
+        ));
+        assert!(state.query_scroll_y.target > 0.0);
+
+        assert!(state.start_query_scrollbar_drag(
+            rect,
+            ProjectSearchQueryScrollAxis::Horizontal,
+            viewport.horizontal_track.x + viewport.horizontal_track.w,
+            1.0,
+        ));
+        assert!(state.query_scroll_x.target > 0.0);
+    }
+
+    #[test]
+    fn query_wheel_scroll_clamps_vertical_target() {
+        let mut state = ProjectSearchState::default();
+        state.query_editor.insert_str("a\nb\nc\nd\ne\nf\ng\nh");
+        let rect = ProjectSearchRect {
+            x: 0.0,
+            y: 0.0,
+            w: 180.0,
+            h: PROJECT_SEARCH_QUERY_H,
+        };
+        let max_scroll = state.query_max_scroll_y(rect, 1.0);
+
+        state.scroll_query_y_by(rect, 1.0, 10_000.0);
+        assert_eq!(state.query_scroll_y.target, max_scroll);
+
+        state.scroll_query_y_by(rect, 1.0, -10_000.0);
+        assert_eq!(state.query_scroll_y.target, 0.0);
     }
 }
