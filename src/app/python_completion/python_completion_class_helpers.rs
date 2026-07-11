@@ -733,13 +733,13 @@ pub(crate) fn imported_python_class_source(
 }
 
 pub(crate) fn python_member_chain_too_deep(editor: &Editor) -> bool {
+    if !python_completion_allowed_at_cursor(editor) {
+        return false;
+    }
     let text = editor.get_full_text();
     let cursor = editor.cursor.min(text.len());
     let (line_start, _) = cursor_line_bounds(&text, cursor);
     let prefix = text.get(line_start..cursor).unwrap_or("");
-    if cursor_in_python_string_or_comment(prefix) {
-        return false;
-    }
     let chain = prefix
         .rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '.'))
         .next()
@@ -748,13 +748,13 @@ pub(crate) fn python_member_chain_too_deep(editor: &Editor) -> bool {
 }
 
 pub(crate) fn cursor_after_python_member_dot(editor: &Editor) -> bool {
+    if !python_completion_allowed_at_cursor(editor) {
+        return false;
+    }
     let text = editor.get_full_text();
     let cursor = editor.cursor.min(text.len());
     let (line_start, _) = cursor_line_bounds(&text, cursor);
     let prefix = text.get(line_start..cursor).unwrap_or("");
-    if cursor_in_python_string_or_comment(prefix) {
-        return false;
-    }
     let bytes = prefix.as_bytes();
     let mut idx = bytes.len();
     while idx > 0 {
@@ -772,13 +772,13 @@ pub(crate) fn cursor_after_python_member_dot(editor: &Editor) -> bool {
 }
 
 pub(crate) fn python_member_receiver_before_cursor(editor: &Editor) -> Option<String> {
+    if !python_completion_allowed_at_cursor(editor) {
+        return None;
+    }
     let text = editor.get_full_text();
     let cursor = editor.cursor.min(text.len());
     let (line_start, _) = cursor_line_bounds(&text, cursor);
     let prefix = text.get(line_start..cursor)?;
-    if cursor_in_python_string_or_comment(prefix) {
-        return None;
-    }
     let bytes = prefix.as_bytes();
     let mut idx = bytes.len();
     while idx > 0 && is_python_ident_byte(bytes[idx - 1]) {
@@ -796,13 +796,11 @@ pub(crate) fn python_member_receiver_before_cursor(editor: &Editor) -> Option<St
 }
 
 pub(crate) fn cursor_inside_python_call_parens(editor: &Editor) -> bool {
-    let text = editor.get_full_text();
-    let cursor = editor.cursor.min(text.len());
-    let (line_start, _) = cursor_line_bounds(&text, cursor);
-    let prefix = text.get(line_start..cursor).unwrap_or("");
-    if cursor_in_python_string_or_comment(prefix) {
+    if !python_completion_allowed_at_cursor(editor) {
         return false;
     }
+    let text = editor.get_full_text();
+    let cursor = editor.cursor.min(text.len());
     let bytes = text.as_bytes();
     let mut depth = 0usize;
     for idx in (0..cursor).rev() {

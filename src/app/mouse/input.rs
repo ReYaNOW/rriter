@@ -201,6 +201,14 @@ impl App {
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             stop_click_scroll_anims(self);
+            if self
+                .ui_registry
+                .find_at(mx, my)
+                .and_then(crate::app::project_search_app::project_search_field_for_ui_id)
+                .is_none()
+            {
+                self.ide_panel.project_search.focused = None;
+            }
         }
         if state == ElementState::Released && self.autocomplete_detail_selecting {
             self.autocomplete_detail_selecting = false;
@@ -1058,21 +1066,11 @@ impl App {
                             }
                             return;
                         }
-                        if let Some(field) = match clicked_id {
-                            crate::ui_system::UiId::ProjectSearchQueryInput => {
-                                Some(crate::app::project_search::ProjectSearchField::Query)
-                            }
-                            crate::ui_system::UiId::ProjectSearchIncludeInput => {
-                                Some(crate::app::project_search::ProjectSearchField::Include)
-                            }
-                            crate::ui_system::UiId::ProjectSearchExcludeInput => {
-                                Some(crate::app::project_search::ProjectSearchField::Exclude)
-                            }
-                            crate::ui_system::UiId::ProjectSearchFilterInput => {
-                                Some(crate::app::project_search::ProjectSearchField::Filter)
-                            }
-                            _ => None,
-                        } {
+                        if let Some(field) =
+                            crate::app::project_search_app::project_search_field_for_ui_id(
+                                clicked_id,
+                            )
+                        {
                             if field != crate::app::project_search::ProjectSearchField::Filter
                                 || self.ide_panel.project_search.filter_enabled()
                             {

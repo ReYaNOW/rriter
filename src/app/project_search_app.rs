@@ -5,6 +5,18 @@ use crate::app::project_search::{
 };
 use std::path::PathBuf;
 
+pub(crate) fn project_search_field_for_ui_id(
+    id: crate::ui_system::UiId,
+) -> Option<ProjectSearchField> {
+    match id {
+        crate::ui_system::UiId::ProjectSearchQueryInput => Some(ProjectSearchField::Query),
+        crate::ui_system::UiId::ProjectSearchIncludeInput => Some(ProjectSearchField::Include),
+        crate::ui_system::UiId::ProjectSearchExcludeInput => Some(ProjectSearchField::Exclude),
+        crate::ui_system::UiId::ProjectSearchFilterInput => Some(ProjectSearchField::Filter),
+        _ => None,
+    }
+}
+
 impl crate::app::App {
     pub fn open_project_search_panel(&mut self) {
         self.ide_panel.open(crate::app::PanelId::Search);
@@ -429,4 +441,37 @@ fn ceil_char_boundary_for_project_search(text: &str, mut idx: usize) -> usize {
         idx += 1;
     }
     idx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_search_field_ui_ids_are_the_only_focus_targets() {
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchQueryInput),
+            Some(ProjectSearchField::Query)
+        );
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchIncludeInput),
+            Some(ProjectSearchField::Include)
+        );
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchExcludeInput),
+            Some(ProjectSearchField::Exclude)
+        );
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchFilterInput),
+            Some(ProjectSearchField::Filter)
+        );
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchPanelBody),
+            None
+        );
+        assert_eq!(
+            project_search_field_for_ui_id(crate::ui_system::UiId::ProjectSearchRun),
+            None
+        );
+    }
 }

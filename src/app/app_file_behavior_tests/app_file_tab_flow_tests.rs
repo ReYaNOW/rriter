@@ -154,6 +154,125 @@ fn python_completion_context_detects_member_dot_and_call_parens() {
     assert!(!cursor_inside_python_call_parens(&plain));
 }
 
+fn python_editor_at_marker(source: &str) -> Editor {
+    let marker = source
+        .find('|')
+        .expect("test source must contain cursor marker");
+    let mut text = source.to_string();
+    text.remove(marker);
+    let mut editor = editor_with(&text);
+    editor.cursor = marker;
+    editor
+}
+
+#[test]
+fn python_completion_guard_rejects_all_string_literal_forms() {
+    for source in [
+        "'text| remaining'",
+        "\"text| remaining\"",
+        "r'raw\\|text'",
+        "R\"raw|text\"",
+        "b'bytes|text'",
+        "u'unicode|text'",
+        "br'raw bytes|text'",
+        "RB\"raw bytes|text\"",
+        "'''multi\nline| text'''",
+        "\"\"\"multi\nline| text\"\"\"",
+        "'escaped \\' quote| text'",
+        "\"hash # stays|string\"",
+        "# comment| text",
+    ] {
+        let editor = python_editor_at_marker(source);
+        assert!(
+            !python_completion_allowed_at_cursor(&editor),
+            "completion unexpectedly allowed for {source:?}"
+        );
+    }
+
+    for source in [
+        "'closed'|",
+        "\"closed\" + na|me",
+        "'''closed'''\nna|me",
+        "'unterminated\nna|me",
+        "name| # later comment",
+    ] {
+        let editor = python_editor_at_marker(source);
+        assert!(
+            python_completion_allowed_at_cursor(&editor),
+            "completion unexpectedly blocked for {source:?}"
+        );
+    }
+}
+
+#[test]
+fn python_completion_guard_allows_only_f_string_replacement_fields() {
+    for source in [
+        "f'literal| {value}'",
+        "f'{value} literal|'",
+        "f'escaped {{literal|}}'",
+        "rf'raw literal| {value}'",
+        "f'''multi\nliteral| {value}'''",
+        "f'{outer:{width}} literal|'",
+        "f'{value!r:>10} literal|'",
+        "f'{call(\"nested|string\")}'",
+    ] {
+        let editor = python_editor_at_marker(source);
+        assert!(
+            !python_completion_allowed_at_cursor(&editor),
+            "completion unexpectedly allowed in f-string text for {source:?}"
+        );
+    }
+
+    for source in [
+        "f'{val|ue}'",
+        "F\"{obj.at|tr}\"",
+        "rf'{call(ar|g)}'",
+        "rf'\\{val|ue}'",
+        "fr'{mapping[{key|: value}]}'",
+        "f'{outer:{wid|th}}'",
+        "f'{\"nested\" + val|ue}'",
+        "f'''multi\n{obj.at|tr}\nline'''",
+    ] {
+        let editor = python_editor_at_marker(source);
+        assert!(
+            python_completion_allowed_at_cursor(&editor),
+            "completion unexpectedly blocked in replacement field for {source:?}"
+        );
+    }
+
+    let member_literal = python_editor_at_marker("f'obj.at|tr'");
+    assert!(!cursor_after_python_member_dot(&member_literal));
+    let member_field = python_editor_at_marker("f'{obj.at|tr}'");
+    assert!(cursor_after_python_member_dot(&member_field));
+
+    let call_literal = python_editor_at_marker("f'call(ar|g)'");
+    assert!(!cursor_inside_python_call_parens(&call_literal));
+    let call_field = python_editor_at_marker("f'{call(ar|g)}'");
+    assert!(cursor_inside_python_call_parens(&call_field));
+}
+
+#[test]
+fn python_tree_sitter_completion_closes_in_string_and_opens_in_f_string_field() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.highlighter.completions = vec![completion("print", SymbolKind::Function, 0, usize::MAX)];
+    app.editor = python_editor_at_marker("message = 'pri|'");
+    app.autocomplete_active = true;
+
+    app.update_autocomplete();
+
+    assert!(!app.autocomplete_active);
+    assert!(app.autocomplete_options.is_empty());
+
+    app.editor = python_editor_at_marker("message = f'{pri|}'");
+    app.update_autocomplete();
+
+    assert!(app.autocomplete_active);
+    assert_eq!(app.autocomplete_options[0].0.word, "print");
+}
+
 #[test]
 fn python_completion_closes_for_implausibly_deep_member_chain() {
     let Some(mut app) = test_app() else {

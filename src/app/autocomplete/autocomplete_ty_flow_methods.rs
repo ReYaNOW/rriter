@@ -920,6 +920,13 @@ impl App {
             self.trace_autocomplete_state("request_ty:no_source");
             return;
         };
+        if python_completion_context(&snapshot.file_extension, &snapshot.analysis_text)
+            && !python_completion_allowed_at_cursor(self.autocomplete_editor_for_source(source))
+        {
+            self.close_autocomplete();
+            self.trace_autocomplete_state("request_ty:python_string");
+            return;
+        }
         let prefix = snapshot.current_word_prefix();
         if mode == AutocompleteMode::TyContext
             && self.source_member_dot_receiver_is_unavailable_self(source, &snapshot)
@@ -1148,6 +1155,13 @@ impl App {
             self.trace_autocomplete_state("update_ty:no_source");
             return;
         };
+        if python_completion_context(&snapshot.file_extension, &snapshot.analysis_text)
+            && !python_completion_allowed_at_cursor(self.autocomplete_editor_for_source(source))
+        {
+            self.close_autocomplete();
+            self.trace_autocomplete_state("update_ty:python_string");
+            return;
+        }
         let prefix = snapshot.current_word_prefix();
         if self.autocomplete_mode == AutocompleteMode::TyContext
             && (self.source_member_chain_too_deep(source)

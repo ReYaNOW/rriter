@@ -187,6 +187,168 @@ pub(crate) fn cursor_line_bounds(text: &str, cursor: usize) -> (usize, usize) {
     (start, end)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PythonCursorContext {
+    Code,
+    String,
+    Comment,
+}
+
+#[derive(Clone, Copy)]
+enum PythonLexFrame {
+    String {
+        quote: u8,
+        triple: bool,
+        formatted: bool,
+    },
+    FStringExpression {
+        brace_depth: usize,
+    },
+}
+
+fn python_string_prefix_before(bytes: &[u8], quote_at: usize) -> &[u8] {
+    let mut start = quote_at;
+    while start > 0 && quote_at - start < 3 && bytes[start - 1].is_ascii_alphabetic() {
+        start -= 1;
+    }
+    let prefix = &bytes[start..quote_at];
+    let valid = !prefix.is_empty()
+        && prefix
+            .iter()
+            .all(|b| matches!(b.to_ascii_lowercase(), b'r' | b'u' | b'b' | b'f'))
+        && (start == 0 || !is_python_ident_byte(bytes[start - 1]));
+    if valid {
+        prefix
+    } else {
+        &bytes[quote_at..quote_at]
+    }
+}
+
+fn python_cursor_context(text: &str, cursor: usize) -> PythonCursorContext {
+    let bytes = text.as_bytes();
+    let end = cursor.min(bytes.len());
+    let mut frames = Vec::with_capacity(2);
+    let mut i = 0usize;
+    let mut in_comment = false;
+
+    while i < end {
+        if in_comment {
+            if bytes[i] == b'\n' {
+                in_comment = false;
+            }
+            i += 1;
+            continue;
+        }
+
+        match frames.last().copied() {
+            Some(PythonLexFrame::String {
+                quote,
+                triple,
+                formatted,
+            }) => {
+                if bytes[i] == b'\\'
+                    && !(formatted && matches!(bytes.get(i + 1), Some(b'{' | b'}')))
+                {
+                    i = (i + 2).min(end);
+                    continue;
+                }
+                if formatted && bytes[i] == b'{' {
+                    if bytes.get(i + 1) == Some(&b'{') {
+                        i += 2;
+                    } else {
+                        frames.push(PythonLexFrame::FStringExpression { brace_depth: 1 });
+                        i += 1;
+                    }
+                    continue;
+                }
+                if formatted && bytes[i] == b'}' && bytes.get(i + 1) == Some(&b'}') {
+                    i += 2;
+                    continue;
+                }
+                let closes = bytes[i] == quote
+                    && (!triple
+                        || bytes.get(i + 1) == Some(&quote) && bytes.get(i + 2) == Some(&quote));
+                if closes {
+                    frames.pop();
+                    i += if triple { 3 } else { 1 };
+                } else if !triple && bytes[i] == b'\n' {
+                    frames.pop();
+                    i += 1;
+                } else {
+                    i += 1;
+                }
+            }
+            Some(PythonLexFrame::FStringExpression { brace_depth }) => match bytes[i] {
+                b'#' => {
+                    in_comment = true;
+                    i += 1;
+                }
+                quote @ (b'\'' | b'"') => {
+                    let triple =
+                        bytes.get(i + 1) == Some(&quote) && bytes.get(i + 2) == Some(&quote);
+                    let prefix = python_string_prefix_before(bytes, i);
+                    frames.push(PythonLexFrame::String {
+                        quote,
+                        triple,
+                        formatted: prefix.iter().any(|b| b.eq_ignore_ascii_case(&b'f')),
+                    });
+                    i += if triple { 3 } else { 1 };
+                }
+                b'{' => {
+                    if let Some(PythonLexFrame::FStringExpression { brace_depth }) =
+                        frames.last_mut()
+                    {
+                        *brace_depth += 1;
+                    }
+                    i += 1;
+                }
+                b'}' => {
+                    if brace_depth == 1 {
+                        frames.pop();
+                    } else if let Some(PythonLexFrame::FStringExpression { brace_depth }) =
+                        frames.last_mut()
+                    {
+                        *brace_depth -= 1;
+                    }
+                    i += 1;
+                }
+                _ => i += 1,
+            },
+            None => match bytes[i] {
+                b'#' => {
+                    in_comment = true;
+                    i += 1;
+                }
+                quote @ (b'\'' | b'"') => {
+                    let triple =
+                        bytes.get(i + 1) == Some(&quote) && bytes.get(i + 2) == Some(&quote);
+                    let prefix = python_string_prefix_before(bytes, i);
+                    frames.push(PythonLexFrame::String {
+                        quote,
+                        triple,
+                        formatted: prefix.iter().any(|b| b.eq_ignore_ascii_case(&b'f')),
+                    });
+                    i += if triple { 3 } else { 1 };
+                }
+                _ => i += 1,
+            },
+        }
+    }
+
+    if in_comment {
+        PythonCursorContext::Comment
+    } else if matches!(frames.last(), Some(PythonLexFrame::String { .. })) {
+        PythonCursorContext::String
+    } else {
+        PythonCursorContext::Code
+    }
+}
+
+pub(crate) fn python_completion_allowed_at_cursor(editor: &Editor) -> bool {
+    let text = editor.get_full_text();
+    python_cursor_context(&text, editor.cursor) == PythonCursorContext::Code
+}
+
 pub(crate) fn cursor_in_python_string_or_comment(line_prefix: &str) -> bool {
     let mut single = false;
     let mut double = false;

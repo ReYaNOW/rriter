@@ -530,6 +530,13 @@ impl App {
             self.trace_autocomplete_state("update_ts:no_source");
             return;
         };
+        if python_completion_context(&snapshot.file_extension, &snapshot.analysis_text)
+            && !python_completion_allowed_at_cursor(self.autocomplete_editor_for_source(source))
+        {
+            self.close_autocomplete();
+            self.trace_autocomplete_state("update_ts:python_string");
+            return;
+        }
         let prefix = snapshot.current_word_prefix();
         if self.autocomplete_active && self.autocomplete_mode != AutocompleteMode::TreeSitter {
             let after_member_dot = self.source_after_python_member_dot(source);
