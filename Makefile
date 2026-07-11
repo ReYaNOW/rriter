@@ -21,7 +21,7 @@ TEST ?=
 TEST_THREADS ?= 1
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time clean
+.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench clean
 
 all: max
 
@@ -40,6 +40,11 @@ fast:
 run:
 	@$(MAKE) fast
 	@RUST_BACKTRACE=full target/x86_64-unknown-linux-gnu/release/$(BINARY_NAME)
+
+scroll-bench:
+	@$(MAKE) fast
+	@rustc --edition=2021 -O tests/perf_scroll_motion.rs -o /tmp/rriter_scroll_bench
+	@/tmp/rriter_scroll_bench tests/perf_large_realistic_15000.py 22
 
 # 2. Версия MAX (Ультимативная)
 # Для финального использования. Медленная сборка, максимальный FPS

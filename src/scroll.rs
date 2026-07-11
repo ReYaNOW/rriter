@@ -45,6 +45,10 @@ impl ScrollState {
         false
     }
 
+    pub fn is_settled(&self) -> bool {
+        !self.is_dragging && self.current == self.target
+    }
+
     pub fn clamp_target(&mut self, min: f32, max: f32) {
         self.target = self.target.clamp(min, max);
     }
@@ -83,6 +87,7 @@ mod tests {
         assert!(scroll.update(0.016));
         assert!(scroll.current > 0.0);
         assert!(scroll.current < 80.0);
+        assert!(!scroll.is_settled());
 
         scroll.current = 90.0;
         scroll.clamp_current(0.0, 80.0);
@@ -94,6 +99,10 @@ mod tests {
         assert_eq!(scroll.current, 12.0);
         assert_eq!(scroll.target, 12.0);
         assert_eq!(scroll.velocity, 0.0);
+        assert!(scroll.is_settled());
+
+        scroll.is_dragging = true;
+        assert!(!scroll.is_settled());
         assert!(!scroll.update(0.016));
     }
 }

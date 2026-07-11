@@ -212,6 +212,29 @@ thread_local! {
     static TELEMETRY: RefCell<Telemetry> = RefCell::new(Telemetry::default());
 }
 
+pub(crate) fn record_swap_telemetry(elapsed: f32, scrolling: bool) {
+    if !TELEMETRY_ENABLED.load(Ordering::Relaxed) {
+        return;
+    }
+    TELEMETRY.with(|telemetry| {
+        let mut telemetry = telemetry.borrow_mut();
+        let now = Instant::now();
+        if let Some(previous) = telemetry.last_present.replace(now)
+            && scrolling
+            && telemetry.previous_present_was_scrolling
+        {
+            let interval = now.duration_since(previous).as_secs_f32();
+            telemetry.scroll_present_interval_time += interval;
+            telemetry.scroll_present_interval_count += 1;
+            telemetry.max_scroll_present_interval =
+                telemetry.max_scroll_present_interval.max(interval);
+        }
+        telemetry.previous_present_was_scrolling = scrolling;
+        telemetry.swap_time += elapsed;
+        telemetry.swap_count += 1;
+    });
+}
+
 struct Telemetry {
     render_time: f32,
     render_count: u32,
@@ -219,6 +242,29 @@ struct Telemetry {
     scroll_count: u32,
     type_time: f32,
     type_count: u32,
+    editor_time: f32,
+    editor_count: u32,
+    minimap_time: f32,
+    minimap_count: u32,
+    side_panel_time: f32,
+    side_panel_count: u32,
+    swap_time: f32,
+    swap_count: u32,
+    scroll_present_interval_time: f32,
+    scroll_present_interval_count: u32,
+    max_scroll_present_interval: f32,
+    last_present: Option<Instant>,
+    previous_present_was_scrolling: bool,
+    root_other_time: f32,
+    root_other_count: u32,
+    root_phase_time: [f32; 5],
+    root_phase_count: [u32; 5],
+    flush_time: f32,
+    flush_count: u32,
+    flush_max_time: f32,
+    flush_vertices: u64,
+    chrome_detail_time: [f32; 6],
+    chrome_detail_count: [u32; 6],
     last_print: Instant,
 }
 
@@ -231,6 +277,29 @@ impl Default for Telemetry {
             scroll_count: 0,
             type_time: 0.0,
             type_count: 0,
+            editor_time: 0.0,
+            editor_count: 0,
+            minimap_time: 0.0,
+            minimap_count: 0,
+            side_panel_time: 0.0,
+            side_panel_count: 0,
+            swap_time: 0.0,
+            swap_count: 0,
+            scroll_present_interval_time: 0.0,
+            scroll_present_interval_count: 0,
+            max_scroll_present_interval: 0.0,
+            last_present: None,
+            previous_present_was_scrolling: false,
+            root_other_time: 0.0,
+            root_other_count: 0,
+            root_phase_time: [0.0; 5],
+            root_phase_count: [0; 5],
+            flush_time: 0.0,
+            flush_count: 0,
+            flush_max_time: 0.0,
+            flush_vertices: 0,
+            chrome_detail_time: [0.0; 6],
+            chrome_detail_count: [0; 6],
             last_print: Instant::now(),
         }
     }
@@ -297,6 +366,25 @@ mod tests {
         assert_eq!(telemetry.scroll_count, 0);
         assert_eq!(telemetry.type_time, 0.0);
         assert_eq!(telemetry.type_count, 0);
+        assert_eq!(telemetry.editor_time, 0.0);
+        assert_eq!(telemetry.minimap_time, 0.0);
+        assert_eq!(telemetry.side_panel_time, 0.0);
+        assert_eq!(telemetry.swap_time, 0.0);
+        assert_eq!(telemetry.scroll_present_interval_time, 0.0);
+        assert_eq!(telemetry.scroll_present_interval_count, 0);
+        assert_eq!(telemetry.max_scroll_present_interval, 0.0);
+        assert!(telemetry.last_present.is_none());
+        assert!(!telemetry.previous_present_was_scrolling);
+        assert_eq!(telemetry.root_other_time, 0.0);
+        assert_eq!(telemetry.root_other_count, 0);
+        assert_eq!(telemetry.root_phase_time, [0.0; 5]);
+        assert_eq!(telemetry.root_phase_count, [0; 5]);
+        assert_eq!(telemetry.flush_time, 0.0);
+        assert_eq!(telemetry.flush_count, 0);
+        assert_eq!(telemetry.flush_max_time, 0.0);
+        assert_eq!(telemetry.flush_vertices, 0);
+        assert_eq!(telemetry.chrome_detail_time, [0.0; 6]);
+        assert_eq!(telemetry.chrome_detail_count, [0; 6]);
         assert!(telemetry.last_print >= before);
         assert!(telemetry.last_print <= after);
         assert!(!TELEMETRY_ENABLED.load(Ordering::Relaxed));

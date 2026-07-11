@@ -40,6 +40,8 @@ pub struct LspManager {
     ruff_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
+    diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
+    diagnostic_total_counts: (usize, usize),
     ty_diag_result_ids: HashMap<PathBuf, String>,
     diag_text_pool: HashMap<Arc<str>, Arc<str>>,
     ruff_workspace_diag_rx: Option<std::sync::mpsc::Receiver<ruff_workspace::RuffWorkspaceResult>>,
@@ -78,6 +80,8 @@ impl LspManager {
             ruff_workspace_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
             merged_diagnostic_indices: HashMap::new(),
+            diagnostic_ancestor_severities: HashMap::new(),
+            diagnostic_total_counts: (0, 0),
             ty_diag_result_ids: HashMap::new(),
             diag_text_pool: HashMap::new(),
             ruff_workspace_diag_rx: None,
@@ -152,6 +156,7 @@ impl LspManager {
             + self.merged_diagnostic_indices.len()
             + self.ty_diag_result_ids.len();
         if before != after {
+            self.rebuild_merged_diagnostic_indices();
             self.dirty_diagnostics = false;
         }
     }
@@ -159,7 +164,10 @@ impl LspManager {
     fn reset_ty_workspace_state(&mut self) {
         self.ty_diag_result_ids.clear();
         self.merged_diagnostic_indices.clear();
+        self.diagnostic_ancestor_severities.clear();
+        self.diagnostic_total_counts = (0, 0);
         self.diag_text_pool.clear();
+        self.dirty_diagnostics = true;
         self.ty_workspace_diag_pending = None;
         self.ty_workspace_diag_dirty =
             !self.open_python_files.is_empty() && !self.active_workspaces.is_empty();
@@ -277,6 +285,9 @@ impl LspManager {
         self.ruff_workspace_diagnostics.clear();
         self.ty_instant_diagnostics.clear();
         self.ty_diag_result_ids.clear();
+        self.merged_diagnostic_indices.clear();
+        self.diagnostic_ancestor_severities.clear();
+        self.diagnostic_total_counts = (0, 0);
         self.diag_text_pool.clear();
         self.ruff_workspace_diag_rx = None;
         self.ruff_workspace_diag_pending = false;
@@ -850,6 +861,7 @@ impl LspManager {
         self.merged_diagnostic_indices.remove(&abs_path);
         self.ty_diag_result_ids.remove(&abs_path);
         self.rebuild_diag_text_pool();
+        self.rebuild_merged_diagnostic_indices();
         self.dirty_diagnostics = false;
     }
 
@@ -1002,6 +1014,37 @@ impl LspManager {
                     .insert(path, Arc::from(indices.into_boxed_slice()));
             }
         }
+
+        let mut ancestor_severities = HashMap::new();
+        let mut total_counts = (0usize, 0usize);
+        for (path, indices) in &self.merged_diagnostic_indices {
+            let mut summary = None;
+            for index in indices.iter() {
+                if let Some(diagnostic) = self.diagnostic_by_index(path, *index) {
+                    match diagnostic.severity {
+                        DiagSeverity::Error => total_counts.0 += 1,
+                        DiagSeverity::Warning => total_counts.1 += 1,
+                        _ => {}
+                    }
+                    Self::update_severity(&mut summary, diagnostic);
+                }
+            }
+            let Some(severity) = summary else {
+                continue;
+            };
+            if let Some(parent) = path.parent() {
+                for ancestor in parent.ancestors() {
+                    let entry = ancestor_severities
+                        .entry(ancestor.to_path_buf())
+                        .or_insert(severity);
+                    if severity == DiagSeverity::Error {
+                        *entry = DiagSeverity::Error;
+                    }
+                }
+            }
+        }
+        self.diagnostic_ancestor_severities = ancestor_severities;
+        self.diagnostic_total_counts = total_counts;
     }
 
     fn diagnostic_by_index<'a>(
@@ -1194,14 +1237,7 @@ impl LspManager {
     }
 
     pub fn total_diagnostic_counts(&self) -> (usize, usize) {
-        let mut errors = 0usize;
-        let mut warnings = 0usize;
-        for path in self.diagnostic_paths() {
-            let (path_errors, path_warnings) = self.diagnostic_counts_for_path(path);
-            errors += path_errors;
-            warnings += path_warnings;
-        }
-        (errors, warnings)
+        self.diagnostic_total_counts
     }
 
     pub fn ruff_diagnostic_storage_counts(&self) -> (usize, usize) {
@@ -1225,6 +1261,13 @@ impl LspManager {
 
     pub fn diagnostic_severity_under_path(&self, path: &Path) -> Option<DiagSeverity> {
         let abs_path = self.lookup_abs_path(path);
+        if !self.dirty_diagnostics {
+            return self
+                .diagnostic_ancestor_severities
+                .get(&abs_path)
+                .copied()
+                .or_else(|| self.diagnostic_severity_for_abs_path_direct(&abs_path));
+        }
         let mut summary = None;
         for diagnostic_path in self
             .merged_diagnostic_indices

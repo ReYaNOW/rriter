@@ -104,7 +104,11 @@ impl App {
             self.active_tab = 0;
         }
 
-        let (saved_tabs, saved_active) = crate::load_open_tabs(true);
+        let (saved_tabs, saved_active) = if self.scroll_render_bench.is_some() {
+            (Vec::new(), 0)
+        } else {
+            crate::load_open_tabs(true)
+        };
 
         if !saved_tabs.is_empty() {
             let mut loaded_any = false;

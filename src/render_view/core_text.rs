@@ -146,16 +146,33 @@ impl Renderer {
         let (first, second) = editor.text_parts();
         let first_len = first.len();
 
-        let mut current_y = 0.0;
+        let view_top = (scroll_y - self.line_height * 5.0).max(0.0);
+        let view_bottom = scroll_y + self.height + self.line_height * 5.0;
         let mut phys_line = 0;
+        let mut current_y = 0.0;
+        if self.line_height > 0.0 && self.phys_to_visual.len() == editor.line_offsets.len() {
+            let first_visible = (view_top / self.line_height).floor() as usize;
+            phys_line = self
+                .phys_to_visual
+                .partition_point(|&visual_line| visual_line < first_visible)
+                .min(editor.line_offsets.len());
+            current_y = self
+                .phys_to_visual
+                .get(phys_line)
+                .copied()
+                .unwrap_or(first_visible) as f32
+                * self.line_height;
+        }
 
         while phys_line < editor.line_offsets.len() {
             let is_folded = editor.folded_lines.contains(&phys_line)
                 && editor.foldable_lines.contains_key(&phys_line);
 
-            if current_y + self.line_height > scroll_y - self.line_height * 5.0
-                && current_y < scroll_y + self.height + self.line_height * 5.0
-            {
+            if current_y > view_bottom {
+                break;
+            }
+
+            if current_y + self.line_height > view_top && current_y < view_bottom {
                 let start_byte = editor.line_offsets[phys_line];
                 let mut end_byte = if phys_line + 1 < editor.line_offsets.len() {
                     editor.line_offsets[phys_line + 1]
@@ -816,6 +833,9 @@ impl Renderer {
         }
 
         let vertex_count = self.vertices.len().min(crate::renderer::MAX_VERTICES);
+        let telemetry_start = super::TELEMETRY_ENABLED
+            .load(std::sync::atomic::Ordering::Relaxed)
+            .then(std::time::Instant::now);
 
         unsafe {
             let proj = [
@@ -847,6 +867,16 @@ impl Renderer {
             );
 
             self.gl.draw_arrays(glow::TRIANGLES, 0, vertex_count as i32);
+        }
+        if let Some(start) = telemetry_start {
+            super::TELEMETRY.with(|telemetry| {
+                let mut telemetry = telemetry.borrow_mut();
+                let elapsed = start.elapsed().as_secs_f32();
+                telemetry.flush_time += elapsed;
+                telemetry.flush_count += 1;
+                telemetry.flush_max_time = telemetry.flush_max_time.max(elapsed);
+                telemetry.flush_vertices += vertex_count as u64;
+            });
         }
         self.vertices.clear();
     }

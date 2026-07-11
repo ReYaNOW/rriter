@@ -671,6 +671,7 @@ fn workspace_ruff_diagnostics_cover_closed_files_without_overriding_open_buffers
         manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
         Some(DiagSeverity::Error)
     );
+    assert_eq!(manager.total_diagnostic_counts(), (1, 1));
     assert!(manager
         .diagnostic_paths()
         .iter()
@@ -751,6 +752,50 @@ fn diagnostic_accessors_use_live_instant_store_while_index_is_dirty() {
         .diagnostic_paths()
         .iter()
         .any(|path| *path == &offscreen));
+}
+
+#[test]
+fn diagnostic_ancestor_severity_cache_rebuilds_and_clears() {
+    let warning_path = PathBuf::from("/tmp/ws/pkg/warning.py");
+    let error_path = PathBuf::from("/tmp/ws/pkg/nested/error.py");
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.instant_diagnostics.insert(
+        warning_path.clone(),
+        (
+            1,
+            diag_arc(vec![test_diag("warning", DiagSeverity::Warning, Some("W1"))]),
+        ),
+    );
+    manager.ty_instant_diagnostics.insert(
+        error_path.clone(),
+        (
+            1,
+            diag_arc(vec![test_diag("error", DiagSeverity::Error, Some("E1"))]),
+        ),
+    );
+    manager.rebuild_merged_diagnostic_indices();
+
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
+        Some(DiagSeverity::Error)
+    );
+    assert_eq!(
+        manager.diagnostic_severity_under_path(&warning_path),
+        Some(DiagSeverity::Warning)
+    );
+
+    manager.clear_diagnostics_for_path(&error_path);
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
+        Some(DiagSeverity::Warning)
+    );
+    assert_eq!(manager.total_diagnostic_counts(), (0, 1));
+    manager.clear_diagnostics_for_path(&warning_path);
+    assert_eq!(
+        manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg")),
+        None
+    );
+    assert_eq!(manager.total_diagnostic_counts(), (0, 0));
 }
 
 #[test]

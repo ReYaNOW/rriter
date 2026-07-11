@@ -301,6 +301,9 @@ impl App {
         {
             return false;
         }
+        if !self.scroll_y.is_settled() {
+            return false;
+        }
         let Some(renderer) = self.renderer.as_ref() else {
             return false;
         };

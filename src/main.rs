@@ -1361,8 +1361,15 @@ fn main() {
         run_headless_ty_mem_probe(&args, idx);
         return;
     }
-    let run_ide_on_startup = args.iter().any(|a| a == "--ide" || a == "ide");
-    let has_file_arg = args.iter().skip(1).any(|a| *a != "--ide" && *a != "ide");
+    let scroll_bench_idx = args.iter().position(|arg| arg == "--bench-scroll-render");
+    let scroll_bench_seconds = scroll_bench_idx
+        .and_then(|idx| args.get(idx + 2))
+        .and_then(|value| value.parse::<f32>().ok())
+        .unwrap_or(22.0);
+    let run_ide_on_startup =
+        scroll_bench_idx.is_some() || args.iter().any(|a| a == "--ide" || a == "ide");
+    let has_file_arg = scroll_bench_idx.and_then(|idx| args.get(idx + 1)).is_some()
+        || args.iter().skip(1).any(|a| *a != "--ide" && *a != "ide");
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
@@ -1371,11 +1378,14 @@ fn main() {
     let mut recent_files = load_recent_files();
 
     if has_file_arg {
-        let path = args
-            .iter()
-            .skip(1)
-            .find(|a| *a != "--ide" && *a != "ide")
-            .unwrap();
+        let path = if let Some(idx) = scroll_bench_idx {
+            args.get(idx + 1).unwrap()
+        } else {
+            args.iter()
+                .skip(1)
+                .find(|a| *a != "--ide" && *a != "ide")
+                .unwrap()
+        };
         if let Ok(content) = std::fs::read_to_string(path) {
             initial_text = content;
             let f_path = std::path::Path::new(path);
@@ -1390,10 +1400,12 @@ fn main() {
                 ext = e.to_string_lossy().to_string();
             }
 
-            recent_files.retain(|p| p != &abs_path);
-            recent_files.insert(0, abs_path);
-            recent_files.truncate(10);
-            save_recent_files(&recent_files);
+            if scroll_bench_idx.is_none() {
+                recent_files.retain(|p| p != &abs_path);
+                recent_files.insert(0, abs_path);
+                recent_files.truncate(10);
+                save_recent_files(&recent_files);
+            }
         }
     }
 
@@ -1460,7 +1472,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
 
     let config = load_config();
     crate::render_view::TELEMETRY_ENABLED.store(
-        config.enable_telemetry,
+        config.enable_telemetry || scroll_bench_idx.is_some(),
         std::sync::atomic::Ordering::Relaxed,
     );
     let highlighter = Highlighter::new();
@@ -1468,6 +1480,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     let show_welcome = !has_file_arg && !run_ide_on_startup;
 
     let mut app = App {
+        scroll_render_bench: scroll_bench_idx
+            .map(|_| crate::app::ScrollRenderBench::new(scroll_bench_seconds)),
         pending_key_log: None,
         gl_config: None,
         gl_context: None,

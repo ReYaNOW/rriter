@@ -331,9 +331,24 @@ fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Inst
     }
 }
 
+#[inline(always)]
+fn needs_continuous_poll(
+    autocomplete_animating: bool,
+    git_progress_animating: bool,
+    scroll_animating: bool,
+) -> bool {
+    autocomplete_animating || git_progress_animating || scroll_animating
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_scroll_keeps_event_loop_polling() {
+        assert!(needs_continuous_poll(false, false, true));
+        assert!(!needs_continuous_poll(false, false, false));
+    }
 
     #[test]
     fn sticky_animation_add_remove_and_equal_length_are_pure_state_transitions() {

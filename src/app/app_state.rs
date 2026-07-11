@@ -11,6 +11,28 @@ use std::time::Instant;
 use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
+pub struct ScrollRenderBench {
+    pub started_at: Option<Instant>,
+    pub duration_secs: f32,
+    pub next_impulse_secs: f32,
+    pub direction: f32,
+    pub impulses: u64,
+    pub announced: bool,
+}
+
+impl ScrollRenderBench {
+    pub fn new(duration_secs: f32) -> Self {
+        Self {
+            started_at: None,
+            duration_secs: duration_secs.max(12.0),
+            next_impulse_secs: 0.0,
+            direction: 1.0,
+            impulses: 0,
+            announced: false,
+        }
+    }
+}
+
 pub struct EditorTab {
     pub editor: crate::editor::Editor,
     pub file_path: Option<PathBuf>,
@@ -807,6 +829,7 @@ impl App {
 }
 
 pub struct App {
+    pub scroll_render_bench: Option<ScrollRenderBench>,
     pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,
     pub gl_context: Option<PossiblyCurrentContext>,

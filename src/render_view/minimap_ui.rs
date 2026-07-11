@@ -63,20 +63,41 @@ impl Renderer {
             view_border,
         );
         self.push_rect(minimap_x, viewport_y, 2.0, viewport_h, view_border);
-        self.flush();
-
         let map_bg = self.theme.minimap_bg;
-        let mut current_y: f32 = 0.0;
-        let mut phys_line = 0;
         let rect_h = minimap_line_h.ceil().max(1.0);
 
         let view_top = current_minimap_scroll;
         let view_bottom = current_minimap_scroll + editor_height;
+        let mut phys_line = 0;
+        let mut current_y: f32 = 0.0;
+        if minimap_line_h > 0.0 && self.phys_to_visual.len() == editor.line_offsets.len() {
+            let first_visible = ((view_top / minimap_line_h).floor() as usize).saturating_sub(1);
+            phys_line = self
+                .phys_to_visual
+                .partition_point(|&visual_line| visual_line < first_visible)
+                .min(editor.line_offsets.len());
+            current_y = self
+                .phys_to_visual
+                .get(phys_line)
+                .copied()
+                .unwrap_or(first_visible) as f32
+                * minimap_line_h;
+        }
 
         let (first, second) = editor.text_parts();
         let first_bytes = first.as_bytes();
         let second_bytes = second.as_bytes();
         let first_len = first.len();
+        let first_visible_byte = editor
+            .line_offsets
+            .get(phys_line)
+            .copied()
+            .unwrap_or(editor.len());
+        let mut span_idx_mini = match spans.binary_search_by_key(&first_visible_byte, |s| s.start)
+        {
+            Ok(idx) => idx,
+            Err(idx) => idx.saturating_sub(1),
+        };
 
         while phys_line < editor.line_offsets.len() {
             let start_byte = editor.line_offsets[phys_line];
@@ -107,11 +128,6 @@ impl Renderer {
 
                 let mut cur_byte_abs = start_byte;
                 let mut cur_char_idx = 0;
-
-                let mut span_idx_mini = match spans.binary_search_by_key(&start_byte, |s| s.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
-                };
 
                 while cur_byte_abs < end_byte {
                     // Find current span and color

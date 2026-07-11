@@ -608,9 +608,14 @@ impl Renderer {
                         let mut has_error = false;
                         let mut has_warn = false;
                         if !node.is_ignored {
-                            if let Some(severity) =
-                                lsp.and_then(|l| l.diagnostic_severity_under_path(&node.path))
-                            {
+                            let severity = lsp.and_then(|l| {
+                                if node.is_dir {
+                                    l.diagnostic_severity_under_path(&node.path)
+                                } else {
+                                    l.diagnostic_severity_for_path(&node.path)
+                                }
+                            });
+                            if let Some(severity) = severity {
                                 has_error = severity == crate::lsp::DiagSeverity::Error;
                                 has_warn = severity == crate::lsp::DiagSeverity::Warning;
                             }

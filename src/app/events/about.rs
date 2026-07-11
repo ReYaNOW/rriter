@@ -26,6 +26,66 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     let mut hover_poll_pending = false;
     let mut api_mock_hover_request_due = false;
 
+    if app.scroll_render_bench.is_some() && app.is_ready {
+        let max_scroll = app.renderer.as_ref().map_or(0.0, |renderer| {
+            (app.editor.line_offsets.len() as f32 * renderer.line_height - renderer.height).max(0.0)
+        });
+        let mut finished = false;
+        let scrolling_phase;
+        {
+            let bench = app.scroll_render_bench.as_mut().unwrap();
+            let started_at = *bench.started_at.get_or_insert(now);
+            let elapsed = now.duration_since(started_at).as_secs_f32();
+            if !bench.announced {
+                bench.announced = true;
+                println!(
+                    "SCROLL_BENCH_START duration={:.1}s lines={} bytes={} spans={}",
+                    bench.duration_secs,
+                    app.editor.line_offsets.len(),
+                    app.editor.len(),
+                    app.highlighter.spans.len(),
+                );
+            }
+            let first_scroll_end = (bench.duration_secs - 2.0) * 0.5;
+            let second_scroll_start = first_scroll_end + 2.0;
+            scrolling_phase = elapsed < first_scroll_end || elapsed >= second_scroll_start;
+            if elapsed >= bench.duration_secs {
+                finished = true;
+            } else if scrolling_phase {
+                while bench.next_impulse_secs <= elapsed {
+                    app.scroll_y.scroll_by(36.0 * bench.direction);
+                    if app.scroll_y.target >= max_scroll {
+                        app.scroll_y.target = max_scroll;
+                        bench.direction = -1.0;
+                    } else if app.scroll_y.target <= 0.0 {
+                        app.scroll_y.target = 0.0;
+                        bench.direction = 1.0;
+                    }
+                    bench.next_impulse_secs += 1.0 / 120.0;
+                    bench.impulses += 1;
+                }
+            } else {
+                bench.next_impulse_secs = elapsed + 1.0 / 120.0;
+            }
+        }
+        if finished {
+            let bench = app.scroll_render_bench.as_ref().unwrap();
+            println!(
+                "SCROLL_BENCH_DONE duration={:.1}s impulses={} spans={} highlight_complete={}",
+                bench.duration_secs,
+                bench.impulses,
+                app.highlighter.spans.len(),
+                app.highlighter.is_complete,
+            );
+            event_loop.exit();
+            return;
+        }
+        needs_redraw = true;
+        if scrolling_phase {
+            app.last_action = now;
+        }
+    }
+
     needs_redraw |= update_sticky_animation(
         &mut app.current_sticky_lines,
         &app.target_sticky_lines,
@@ -1185,6 +1245,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         !app.is_highlighted_once || app.highlighter.has_pending_priority_highlight();
     let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
     let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
+    let scroll_animating = !app.scroll_y.is_settled() || !app.scroll_x.is_settled();
     match compute_about_wait_plan(
         now,
         app.last_action,
@@ -1203,7 +1264,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if let Some(w) = app.window.as_ref() {
                 w.request_redraw();
             }
-            if autocomplete_animating || git_progress_animating {
+            if needs_continuous_poll(
+                autocomplete_animating,
+                git_progress_animating,
+                scroll_animating,
+            ) {
                 event_loop.set_control_flow(ControlFlow::Poll);
             } else {
                 event_loop.set_control_flow(ControlFlow::Wait);

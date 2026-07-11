@@ -1377,11 +1377,20 @@ impl ApplicationHandler for App {
                     None
                 };
 
+                let telemetry_swap_start = crate::render_view::TELEMETRY_ENABLED
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .then(Instant::now);
                 self.gl_surface
                     .as_ref()
                     .unwrap()
                     .swap_buffers(self.gl_context.as_ref().unwrap())
                     .unwrap();
+                if let Some(swap_start) = telemetry_swap_start {
+                    crate::render_view::record_swap_telemetry(
+                        swap_start.elapsed().as_secs_f32(),
+                        !self.scroll_y.is_settled() || !self.scroll_x.is_settled(),
+                    );
+                }
 
                 if let (Some(frame_start), Some(swap_start), Some(metrics)) = (
                     autocomplete_frame_start,

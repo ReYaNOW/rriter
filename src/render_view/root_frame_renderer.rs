@@ -54,6 +54,11 @@ impl Renderer {
             (self.last_scroll_y - scroll_y).abs() > 0.1
                 || (self.last_scroll_x - scroll_x).abs() > 0.1,
         );
+        let mut telemetry_editor_time = 0.0;
+        let mut telemetry_minimap_time = 0.0;
+        let mut telemetry_side_panel_time = 0.0;
+        let mut telemetry_root_phases = [0.0; 5];
+        let mut telemetry_chrome_details = [0.0; 6];
 
         let cursor_phys_line = editor
             .line_offsets
@@ -191,40 +196,71 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
-        self.phys_to_visual.clear();
-        self.phys_to_visual.resize(editor.line_offsets.len(), 0);
+        let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
+            let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
+            let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let end_hash = (fold_end as u64).rotate_left(32);
+            acc ^ line_hash ^ end_hash
+        });
+        let phys_to_visual_stale = self.phys_to_visual_editor_version != editor.version
+            || self.phys_to_visual_line_count != editor.line_offsets.len()
+            || self.phys_to_visual_fold_count != editor.folded_lines.len()
+            || self.phys_to_visual_fold_checksum != fold_checksum
+            || self.phys_to_visual.len() != editor.line_offsets.len();
 
-        let mut visible_lines_count = 0;
-        let mut visible_cursor_line = 0;
-        let mut temp_phys = 0;
-        while temp_phys < editor.line_offsets.len() {
-            self.phys_to_visual[temp_phys] = visible_lines_count;
-            if temp_phys == cursor_phys_line {
-                visible_cursor_line = visible_lines_count;
-            }
-            let is_folded = editor.folded_lines.contains(&temp_phys)
-                && editor.foldable_lines.contains_key(&temp_phys);
-            let fold_end = if is_folded {
-                editor.foldable_lines.get(&temp_phys).copied()
-            } else {
-                None
-            };
-            visible_lines_count += 1;
-            if let Some(end) = fold_end {
-                if cursor_phys_line > temp_phys && cursor_phys_line <= end {
-                    visible_cursor_line = visible_lines_count - 1;
+        let (total_lines, visible_cursor_line) = if phys_to_visual_stale {
+            self.phys_to_visual.clear();
+            self.phys_to_visual.resize(editor.line_offsets.len(), 0);
+
+            let mut visible_lines_count = 0;
+            let mut visible_cursor_line = 0;
+            let mut temp_phys = 0;
+            while temp_phys < editor.line_offsets.len() {
+                self.phys_to_visual[temp_phys] = visible_lines_count;
+                if temp_phys == cursor_phys_line {
+                    visible_cursor_line = visible_lines_count;
                 }
-                while temp_phys < end {
-                    temp_phys += 1;
-                    if temp_phys < editor.line_offsets.len() {
-                        self.phys_to_visual[temp_phys] = visible_lines_count - 1;
+                let is_folded = editor.folded_lines.contains(&temp_phys)
+                    && editor.foldable_lines.contains_key(&temp_phys);
+                let fold_end = if is_folded {
+                    editor.foldable_lines.get(&temp_phys).copied()
+                } else {
+                    None
+                };
+                visible_lines_count += 1;
+                if let Some(end) = fold_end {
+                    if cursor_phys_line > temp_phys && cursor_phys_line <= end {
+                        visible_cursor_line = visible_lines_count - 1;
+                    }
+                    while temp_phys < end {
+                        temp_phys += 1;
+                        if temp_phys < editor.line_offsets.len() {
+                            self.phys_to_visual[temp_phys] = visible_lines_count - 1;
+                        }
                     }
                 }
+                temp_phys += 1;
             }
-            temp_phys += 1;
-        }
-
-        let total_lines = visible_lines_count.max(1);
+            self.phys_to_visual_editor_version = editor.version;
+            self.phys_to_visual_line_count = editor.line_offsets.len();
+            self.phys_to_visual_fold_count = editor.folded_lines.len();
+            self.phys_to_visual_fold_checksum = fold_checksum;
+            (visible_lines_count.max(1), visible_cursor_line)
+        } else {
+            let total_lines = self
+                .phys_to_visual
+                .last()
+                .copied()
+                .map(|line| line + 1)
+                .unwrap_or(1)
+                .max(1);
+            let visible_cursor_line = self
+                .phys_to_visual
+                .get(cursor_phys_line)
+                .copied()
+                .unwrap_or(cursor_phys_line);
+            (total_lines, visible_cursor_line)
+        };
         let s = self.scale_factor;
         let mx = if show_settings || dialog_window_open {
             -1.0
@@ -323,7 +359,11 @@ impl Renderer {
 
         // self.height = real_height — текст рендерится на полную высоту окна,
         // включая зону нижней панели (нужно для работы прозрачности панели).
+        let cache_start = telemetry_frame_start.map(|_| Instant::now());
         self.update_cache(editor, scroll_x, scroll_y, is_resizing);
+        if let Some(cache_start) = cache_start {
+            telemetry_root_phases[1] = cache_start.elapsed().as_secs_f32();
+        }
 
         let render_scroll_x = scroll_x.round();
         let render_scroll_y = scroll_y.round() - tab_bar_h;
@@ -381,7 +421,12 @@ impl Renderer {
             }
             _ => None,
         });
+        if let Some(frame_start) = telemetry_frame_start {
+            telemetry_root_phases[0] =
+                (frame_start.elapsed().as_secs_f32() - telemetry_root_phases[1]).max(0.0);
+        }
         if is_ide_mode {
+            let stage_start = telemetry_frame_start.map(|_| Instant::now());
             self.draw_ide_side_panels(
                 ide_panel,
                 lsp,
@@ -396,7 +441,11 @@ impl Renderer {
                 blink_alpha,
                 active_api_route,
             );
+            if let Some(stage_start) = stage_start {
+                telemetry_side_panel_time = stage_start.elapsed().as_secs_f32();
+            }
         }
+        let pre_editor_start = telemetry_frame_start.map(|_| Instant::now());
         if is_ide_mode
             && !show_welcome
             && let Some(crate::app::EditorTabKind::ApiClient(tab_meta, tab_state)) =
@@ -625,6 +674,10 @@ impl Renderer {
         let editor_clip_w = (scrollbar_x - editor_clip_x).round().max(0.0);
         let editor_clip_h = editor_height.round().max(0.0);
         if editor_clip_w > 0.0 && editor_clip_h > 0.0 {
+            if let Some(pre_editor_start) = pre_editor_start {
+                telemetry_root_phases[2] = pre_editor_start.elapsed().as_secs_f32();
+            }
+            let stage_start = telemetry_frame_start.map(|_| Instant::now());
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
@@ -668,8 +721,12 @@ impl Renderer {
             unsafe {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
+            if let Some(stage_start) = stage_start {
+                telemetry_editor_time = stage_start.elapsed().as_secs_f32();
+            }
         }
 
+        let overlays_start = telemetry_frame_start.map(|_| Instant::now());
         self.flush();
         let mouse_in_popup = crate::app::mouse::HOVER_STATE.with(|s| {
             s.borrow()
@@ -854,6 +911,10 @@ impl Renderer {
             solid_minimap_bg,
         );
 
+        if let Some(overlays_start) = overlays_start {
+            telemetry_root_phases[3] = overlays_start.elapsed().as_secs_f32();
+        }
+        let stage_start = telemetry_frame_start.map(|_| Instant::now());
         self.draw_minimap(
             editor,
             spans,
@@ -864,6 +925,11 @@ impl Renderer {
             editor_scroll_height,
             tab_bar_h,
         );
+        if let Some(stage_start) = stage_start {
+            telemetry_minimap_time = stage_start.elapsed().as_secs_f32();
+        }
+        let chrome_start = telemetry_frame_start.map(|_| Instant::now());
+        let mut chrome_detail_start = chrome_start;
 
         ui_registry.register_rect(
             crate::ui_system::UiId::EditorMinimap,
@@ -911,6 +977,9 @@ impl Renderer {
                 ide_workspaces,
             );
             self.flush();
+        }
+        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+            telemetry_chrome_details[0] = start.elapsed().as_secs_f32();
         }
 
         let target_sticky_lines = if show_welcome {
@@ -1035,6 +1104,9 @@ impl Renderer {
             self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
             self.fps_string = fps_text;
         }
+        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+            telemetry_chrome_details[1] = start.elapsed().as_secs_f32();
+        }
 
         self.draw_inline_git_popup_panel(
             editor,
@@ -1079,6 +1151,9 @@ impl Renderer {
             scrollbar_width,
             ui_registry,
         );
+        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+            telemetry_chrome_details[2] = start.elapsed().as_secs_f32();
+        }
 
         // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
@@ -1110,6 +1185,9 @@ impl Renderer {
                 status_progress_elapsed,
                 status_progress_value,
             );
+        }
+        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+            telemetry_chrome_details[3] = start.elapsed().as_secs_f32();
         }
 
         self.draw_dialog_dim_if_open(dialog_window_open);
@@ -1209,7 +1287,13 @@ impl Renderer {
             self.draw_readonly_notice(tab_bar_h, s);
         }
 
+        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+            telemetry_chrome_details[4] = start.elapsed().as_secs_f32();
+        }
         self.flush();
+        if let Some(start) = chrome_detail_start {
+            telemetry_chrome_details[5] = start.elapsed().as_secs_f32();
+        }
 
         // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
         // Блокируем resize, когда терминал в фокусе
@@ -1230,6 +1314,9 @@ impl Renderer {
 
         if let Some(frame_start_time) = telemetry_frame_start {
             let elapsed = frame_start_time.elapsed().as_secs_f32();
+            if let Some(chrome_start) = chrome_start {
+                telemetry_root_phases[4] = chrome_start.elapsed().as_secs_f32();
+            }
             TELEMETRY.with(|t| {
                 let mut t = t.borrow_mut();
                 if telemetry_was_typing.unwrap_or(false) {
@@ -1241,6 +1328,26 @@ impl Renderer {
                 } else {
                     t.render_time += elapsed;
                     t.render_count += 1;
+                }
+                t.editor_time += telemetry_editor_time;
+                t.editor_count += u32::from(telemetry_editor_time > 0.0);
+                t.minimap_time += telemetry_minimap_time;
+                t.minimap_count += u32::from(telemetry_minimap_time > 0.0);
+                t.side_panel_time += telemetry_side_panel_time;
+                t.side_panel_count += u32::from(telemetry_side_panel_time > 0.0);
+                t.root_other_time += (elapsed
+                    - telemetry_editor_time
+                    - telemetry_minimap_time
+                    - telemetry_side_panel_time)
+                    .max(0.0);
+                t.root_other_count += 1;
+                for (index, elapsed) in telemetry_root_phases.into_iter().enumerate() {
+                    t.root_phase_time[index] += elapsed;
+                    t.root_phase_count[index] += 1;
+                }
+                for (index, elapsed) in telemetry_chrome_details.into_iter().enumerate() {
+                    t.chrome_detail_time[index] += elapsed;
+                    t.chrome_detail_count[index] += 1;
                 }
 
                 if t.last_print.elapsed().as_secs() >= 10 {
@@ -1263,6 +1370,60 @@ impl Renderer {
                         "📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms",
                         r_avg, s_avg, ty_avg
                     );
+                    let stage_avg = |time: f32, count: u32| {
+                        if count > 0 { time / count as f32 * 1000.0 } else { 0.0 }
+                    };
+                    println!(
+                        "📊 Frame split: Editor {:.2}ms | Minimap {:.2}ms | Side {:.2}ms | Swap {:.2}ms",
+                        stage_avg(t.editor_time, t.editor_count),
+                        stage_avg(t.minimap_time, t.minimap_count),
+                        stage_avg(t.side_panel_time, t.side_panel_count),
+                        stage_avg(t.swap_time, t.swap_count),
+                    );
+                    println!(
+                        "📊 Root other: {:.2}ms",
+                        stage_avg(t.root_other_time, t.root_other_count),
+                    );
+                    println!(
+                        "📊 Root phases: Prep {:.2}ms | Cache {:.2}ms | Pre-editor {:.2}ms | Overlays {:.2}ms | Chrome {:.2}ms",
+                        stage_avg(t.root_phase_time[0], t.root_phase_count[0]),
+                        stage_avg(t.root_phase_time[1], t.root_phase_count[1]),
+                        stage_avg(t.root_phase_time[2], t.root_phase_count[2]),
+                        stage_avg(t.root_phase_time[3], t.root_phase_count[3]),
+                        stage_avg(t.root_phase_time[4], t.root_phase_count[4]),
+                    );
+                    let measured_frames = t.render_count + t.scroll_count + t.type_count;
+                    println!(
+                        "📊 Flush: Avg {:.3}ms | Max {:.2}ms | Calls/frame {:.1} | Vertices/frame {:.0}",
+                        stage_avg(t.flush_time, t.flush_count),
+                        t.flush_max_time * 1000.0,
+                        t.flush_count as f32 / measured_frames.max(1) as f32,
+                        t.flush_vertices as f32 / measured_frames.max(1) as f32,
+                    );
+                    println!(
+                        "📊 Chrome detail: Tabs {:.2}ms | Sticky-scroll {:.2}ms | Popups {:.2}ms | Bottom-status {:.2}ms | Overlays {:.2}ms | Final-flush {:.2}ms",
+                        stage_avg(t.chrome_detail_time[0], t.chrome_detail_count[0]),
+                        stage_avg(t.chrome_detail_time[1], t.chrome_detail_count[1]),
+                        stage_avg(t.chrome_detail_time[2], t.chrome_detail_count[2]),
+                        stage_avg(t.chrome_detail_time[3], t.chrome_detail_count[3]),
+                        stage_avg(t.chrome_detail_time[4], t.chrome_detail_count[4]),
+                        stage_avg(t.chrome_detail_time[5], t.chrome_detail_count[5]),
+                    );
+                    let present_fps = if t.scroll_present_interval_time > 0.0 {
+                        t.scroll_present_interval_count as f32 / t.scroll_present_interval_time
+                    } else {
+                        0.0
+                    };
+                    println!(
+                        "📊 Scroll present: {:.0} FPS | Avg gap {:.2}ms | Max gap {:.2}ms | Frames {}",
+                        present_fps,
+                        stage_avg(
+                            t.scroll_present_interval_time,
+                            t.scroll_present_interval_count,
+                        ),
+                        t.max_scroll_present_interval * 1000.0,
+                        t.scroll_present_interval_count,
+                    );
 
                     t.render_time = 0.0;
                     t.render_count = 0;
@@ -1270,6 +1431,27 @@ impl Renderer {
                     t.scroll_count = 0;
                     t.type_time = 0.0;
                     t.type_count = 0;
+                    t.editor_time = 0.0;
+                    t.editor_count = 0;
+                    t.minimap_time = 0.0;
+                    t.minimap_count = 0;
+                    t.side_panel_time = 0.0;
+                    t.side_panel_count = 0;
+                    t.swap_time = 0.0;
+                    t.swap_count = 0;
+                    t.scroll_present_interval_time = 0.0;
+                    t.scroll_present_interval_count = 0;
+                    t.max_scroll_present_interval = 0.0;
+                    t.root_other_time = 0.0;
+                    t.root_other_count = 0;
+                    t.root_phase_time = [0.0; 5];
+                    t.root_phase_count = [0; 5];
+                    t.flush_time = 0.0;
+                    t.flush_count = 0;
+                    t.flush_max_time = 0.0;
+                    t.flush_vertices = 0;
+                    t.chrome_detail_time = [0.0; 6];
+                    t.chrome_detail_count = [0; 6];
                     t.last_print = Instant::now();
                 }
             });
