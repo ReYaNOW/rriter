@@ -1,10 +1,125 @@
+use std::ops::Range;
+
 use crate::editor::Editor;
 use crate::highlighter::ColorSpan;
-use crate::render_view::editor_bottom_blank_lines;
+use crate::render_view::{editor_bottom_blank_lines, editor_max_scroll_for_lines};
 use crate::renderer::{Renderer, Vertex};
+
+const MINIMAP_MAX_VISIBLE_LINES: usize = 900;
+const MINIMAP_MIN_LINE_HEIGHT: f32 = 1.5;
+
+#[derive(Clone, Copy, Debug)]
+struct MinimapViewMetrics {
+    line_height: f32,
+    scroll: f32,
+    view_top: f32,
+    view_bottom: f32,
+}
+
+fn minimap_view_metrics(
+    total_lines: usize,
+    editor_height: f32,
+    editor_line_height: f32,
+    render_scroll_y: f32,
+    max_scroll: f32,
+) -> MinimapViewMetrics {
+    let total_lines_f32 = total_lines as f32;
+    let bottom_blank_lines = editor_bottom_blank_lines(editor_height, editor_line_height);
+    let visible_minimap_lines = total_lines_f32.min(MINIMAP_MAX_VISIBLE_LINES as f32);
+    let line_height =
+        (editor_height / (visible_minimap_lines + bottom_blank_lines).max(1.0))
+            .max(MINIMAP_MIN_LINE_HEIGHT);
+    let max_minimap_scroll =
+        ((total_lines_f32 + bottom_blank_lines) * line_height - editor_height).max(0.0);
+    let scroll_ratio_y = if max_scroll > 0.0 {
+        (render_scroll_y / max_scroll).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let scroll = (scroll_ratio_y * max_minimap_scroll).round();
+
+    MinimapViewMetrics {
+        line_height,
+        scroll,
+        view_top: scroll,
+        view_bottom: scroll + editor_height,
+    }
+}
+
+fn minimap_visible_visual_line_range(
+    total_lines: usize,
+    metrics: MinimapViewMetrics,
+) -> Range<usize> {
+    if total_lines == 0 || metrics.line_height <= 0.0 {
+        return 0..0;
+    }
+    let start = ((metrics.view_top / metrics.line_height).floor() as usize)
+        .saturating_sub(1)
+        .min(total_lines);
+    let end = ((metrics.view_bottom / metrics.line_height).ceil() as usize)
+        .saturating_add(2)
+        .min(total_lines);
+    start..end.max(start.saturating_add(1).min(total_lines))
+}
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn minimap_visible_physical_line_range(
+        &self,
+        editor: &Editor,
+        render_scroll_y: f32,
+        editor_height: f32,
+    ) -> Range<usize> {
+        let physical_line_count = editor.line_offsets.len();
+        if physical_line_count == 0 {
+            return 0..0;
+        }
+        let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
+            let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
+            let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+            let end_hash = (fold_end as u64).rotate_left(32);
+            acc ^ line_hash ^ end_hash
+        });
+        let mapping_ready = self.phys_to_visual_editor_version == editor.version
+            && self.phys_to_visual_line_count == physical_line_count
+            && self.phys_to_visual_fold_count == editor.folded_lines.len()
+            && self.phys_to_visual_fold_checksum == fold_checksum
+            && self.phys_to_visual.len() == physical_line_count;
+        let total_visual_lines = if mapping_ready {
+            self.phys_to_visual
+                .last()
+                .copied()
+                .map(|line| line + 1)
+                .unwrap_or(1)
+        } else {
+            physical_line_count
+        };
+        let max_scroll =
+            editor_max_scroll_for_lines(total_visual_lines, self.line_height, editor_height);
+        let metrics = minimap_view_metrics(
+            total_visual_lines,
+            editor_height,
+            self.line_height,
+            render_scroll_y.min(max_scroll),
+            max_scroll,
+        );
+        let visual_range = minimap_visible_visual_line_range(total_visual_lines, metrics);
+        if !mapping_ready {
+            return visual_range.start.min(physical_line_count)
+                ..visual_range.end.min(physical_line_count);
+        }
+
+        let start = self
+            .phys_to_visual
+            .partition_point(|&visual_line| visual_line < visual_range.start)
+            .min(physical_line_count);
+        let end = self
+            .phys_to_visual
+            .partition_point(|&visual_line| visual_line < visual_range.end)
+            .min(physical_line_count);
+        start..end.max(start.saturating_add(1).min(physical_line_count))
+    }
+
     pub fn draw_minimap(
         &mut self,
         editor: &Editor,
@@ -16,24 +131,17 @@ impl Renderer {
         editor_height: f32,
         tab_bar_h: f32,
     ) {
-        let scroll_ratio_y = if max_scroll > 0.0 {
-            (render_scroll_y / max_scroll).clamp(0.0, 1.0)
-        } else {
-            0.0
-        };
-
         let minimap_w = self.minimap_width;
         let minimap_x = self.width - minimap_w;
-        let total_lines_f32 = total_lines as f32;
-        let bottom_blank_lines = editor_bottom_blank_lines(editor_height, self.line_height);
-
-        let visible_minimap_lines = total_lines_f32.min(900.0);
-        let minimap_line_h =
-            (editor_height / (visible_minimap_lines + bottom_blank_lines).max(1.0)).max(1.5);
-
-        let max_minimap_scroll =
-            ((total_lines_f32 + bottom_blank_lines) * minimap_line_h - editor_height).max(0.0);
-        let current_minimap_scroll = (scroll_ratio_y * max_minimap_scroll).round();
+        let metrics = minimap_view_metrics(
+            total_lines,
+            editor_height,
+            self.line_height,
+            render_scroll_y,
+            max_scroll,
+        );
+        let minimap_line_h = metrics.line_height;
+        let current_minimap_scroll = metrics.scroll;
 
         let current_visible_top_line = render_scroll_y / self.line_height;
         let viewport_y = tab_bar_h
@@ -66,8 +174,8 @@ impl Renderer {
         let map_bg = self.theme.minimap_bg;
         let rect_h = minimap_line_h.ceil().max(1.0);
 
-        let view_top = current_minimap_scroll;
-        let view_bottom = current_minimap_scroll + editor_height;
+        let view_top = metrics.view_top;
+        let view_bottom = metrics.view_bottom;
         let mut phys_line = 0;
         let mut current_y: f32 = 0.0;
         if minimap_line_h > 0.0 && self.phys_to_visual.len() == editor.line_offsets.len() {
@@ -268,5 +376,57 @@ impl Renderer {
             2.0,
             self.theme.minimap_cursor,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn minimap_visible_range_covers_top_middle_and_bottom_windows() {
+        let total_lines = 20_000;
+        let editor_height = 1_440.0;
+        let editor_line_height = 26.0;
+        let max_scroll = total_lines as f32 * editor_line_height - editor_height;
+
+        let top = minimap_visible_visual_line_range(
+            total_lines,
+            minimap_view_metrics(
+                total_lines,
+                editor_height,
+                editor_line_height,
+                0.0,
+                max_scroll,
+            ),
+        );
+        let middle = minimap_visible_visual_line_range(
+            total_lines,
+            minimap_view_metrics(
+                total_lines,
+                editor_height,
+                editor_line_height,
+                max_scroll * 0.5,
+                max_scroll,
+            ),
+        );
+        let bottom = minimap_visible_visual_line_range(
+            total_lines,
+            minimap_view_metrics(
+                total_lines,
+                editor_height,
+                editor_line_height,
+                max_scroll,
+                max_scroll,
+            ),
+        );
+
+        assert_eq!(top.start, 0);
+        assert!(top.end - top.start <= 1_024);
+        assert!(middle.start < total_lines / 2);
+        assert!(middle.end > total_lines / 2);
+        assert!(middle.end - middle.start <= 1_024);
+        assert_eq!(bottom.end, total_lines);
+        assert!(bottom.end - bottom.start <= 1_024);
     }
 }

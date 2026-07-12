@@ -170,6 +170,64 @@ impl Highlighter {
         }
     }
 
+    pub(crate) fn is_byte_highlighted(&self, byte: usize) -> bool {
+        if self.spans.is_empty() || self.sync_text.is_empty() {
+            return false;
+        }
+        let byte = byte.min(self.sync_text.len().saturating_sub(1));
+        let idx = self.spans.partition_point(|span| span.end <= byte);
+        self.spans
+            .get(idx)
+            .is_some_and(|span| span.start <= byte && byte < span.end)
+    }
+
+    pub(crate) fn unhighlighted_anchor_in_range(
+        &self,
+        start: usize,
+        end: usize,
+        prefer_end: bool,
+    ) -> Option<usize> {
+        let text_len = self.sync_text.len();
+        let start = start.min(text_len);
+        let end = end.min(text_len);
+        if start >= end {
+            return None;
+        }
+        if self.spans.is_empty() {
+            return Some(if prefer_end { end - 1 } else { start });
+        }
+
+        if prefer_end {
+            let mut cursor = end;
+            let mut idx = self.spans.partition_point(|span| span.start < cursor);
+            while cursor > start {
+                let Some(span) = idx.checked_sub(1).and_then(|idx| self.spans.get(idx)) else {
+                    return Some(cursor - 1);
+                };
+                if span.end < cursor {
+                    return Some(cursor - 1);
+                }
+                cursor = cursor.min(span.start);
+                idx -= 1;
+            }
+            None
+        } else {
+            let mut cursor = start;
+            let mut idx = self.spans.partition_point(|span| span.end <= cursor);
+            while cursor < end {
+                let Some(span) = self.spans.get(idx) else {
+                    return Some(cursor);
+                };
+                if span.start > cursor {
+                    return Some(cursor);
+                }
+                cursor = cursor.max(span.end);
+                idx += 1;
+            }
+            None
+        }
+    }
+
     pub fn request_priority_highlight(&mut self, version: u64, anchor: usize) -> bool {
         if self.current_request_id == 0 || self.sync_text.is_empty() {
             return false;
@@ -178,12 +236,8 @@ impl Highlighter {
         if !should_skip_full_highlight(lang_name, &self.sync_text) {
             return false;
         }
-        let anchor = anchor.min(self.sync_text.len());
-        if self
-            .spans
-            .iter()
-            .any(|span| span.start <= anchor && anchor < span.end)
-        {
+        let anchor = anchor.min(self.sync_text.len().saturating_sub(1));
+        if self.is_byte_highlighted(anchor) {
             return false;
         }
         if self
@@ -273,7 +327,12 @@ impl Highlighter {
         self.syntax_errors = syntax_errors;
         self.sync_tree = tree;
         self.is_complete = is_complete;
-        self.pending_priority_anchor = None;
+        if self
+            .pending_priority_anchor
+            .is_some_and(|anchor| self.is_byte_highlighted(anchor))
+        {
+            self.pending_priority_anchor = None;
+        }
         if is_complete {
             self.shrink_sync_byte_colors_for_small_text();
         }
@@ -1156,19 +1215,20 @@ mod tests {
     }
 
     #[test]
-    fn priority_range_from_viewport_top_covers_following_minimap_window() {
+    fn priority_range_covers_minimap_window_in_both_directions() {
         let mut text = String::new();
         let mut line_starts = Vec::new();
         for idx in 0..5000 {
             line_starts.push(text.len());
             text.push_str(&format!("value_{idx} = {idx}\n"));
         }
-        let anchor = line_starts[1200];
-        let lower_visible_line = line_starts[1500];
+        let anchor = line_starts[2500];
+        let upper_minimap_line = line_starts[1550];
+        let lower_minimap_line = line_starts[3450];
         let range = priority_highlight_range("py", &text, anchor);
 
-        assert!(range.start <= anchor);
-        assert!(range.end > lower_visible_line);
+        assert!(range.start <= upper_minimap_line);
+        assert!(range.end > lower_minimap_line);
     }
 
     #[test]
@@ -1225,13 +1285,89 @@ mod tests {
     }
 
     #[test]
+    fn newer_pending_priority_anchor_survives_older_partial_result() {
+        let mut highlighter = Highlighter::new();
+        highlighter.current_request_id = 7;
+        highlighter.current_version = 1;
+        highlighter.sync_text = "x".repeat(200);
+        highlighter.pending_priority_anchor = Some(150);
+
+        assert!(highlighter.apply_poll_result(
+            7,
+            1,
+            1,
+            vec![ColorSpan {
+                start: 0,
+                end: 100,
+                color: DRACULA_FG,
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            true,
+        ));
+        assert_eq!(highlighter.pending_priority_anchor, Some(150));
+
+        assert!(highlighter.apply_poll_result(
+            7,
+            1,
+            1,
+            vec![ColorSpan {
+                start: 100,
+                end: 200,
+                color: DRACULA_FG,
+            }],
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            None,
+            true,
+        ));
+        assert_eq!(highlighter.pending_priority_anchor, None);
+    }
+
+    #[test]
+    fn unhighlighted_range_anchor_finds_gaps_in_scroll_direction() {
+        let mut highlighter = Highlighter::new();
+        highlighter.sync_text = "x".repeat(400);
+        highlighter.spans = vec![
+            ColorSpan {
+                start: 0,
+                end: 100,
+                color: DRACULA_FG,
+            },
+            ColorSpan {
+                start: 200,
+                end: 300,
+                color: DRACULA_FG,
+            },
+        ];
+
+        assert_eq!(
+            highlighter.unhighlighted_anchor_in_range(50, 250, false),
+            Some(100)
+        );
+        assert_eq!(
+            highlighter.unhighlighted_anchor_in_range(50, 250, true),
+            Some(199)
+        );
+        assert_eq!(
+            highlighter.unhighlighted_anchor_in_range(0, 100, false),
+            None
+        );
+    }
+
+    #[test]
     fn highlighter_huge_file_loads_visible_slice_on_priority_request() {
         let mut highlighter = Highlighter::new();
-        let text = "value = 1\n".repeat(TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 10_000);
-        let anchor = text[..text.len() * 3 / 4]
-            .rfind('\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
+        let line = "value = 1\n";
+        let line_count = TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 10_000;
+        let text = line.repeat(line_count);
+        let anchor_line = line_count * 3 / 4;
+        let anchor = anchor_line * line.len();
+        let minimap_start = (anchor_line - 900) * line.len();
+        let minimap_end = (anchor_line + 900) * line.len();
 
         highlighter.reset(22, text.clone(), "py".to_string(), 0);
         assert!(highlighter.wait_for_first_result(22, std::time::Duration::from_secs(2)));
@@ -1252,10 +1388,9 @@ mod tests {
             std::thread::yield_now();
         }
 
-        assert!(highlighter
-            .spans
-            .iter()
-            .any(|span| span.start <= anchor && anchor < span.end));
+        assert!(highlighter.is_byte_highlighted(minimap_start));
+        assert!(highlighter.is_byte_highlighted(anchor));
+        assert!(highlighter.is_byte_highlighted(minimap_end));
         assert!(highlighter.is_complete);
         assert!(highlighter.completions.iter().any(|item| item.word == "print"));
     }

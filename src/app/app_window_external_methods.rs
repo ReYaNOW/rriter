@@ -298,28 +298,67 @@ impl App {
         if self.show_welcome
             || self.active_tab_is_api_client()
             || self.active_tab_is_git_diff()
+            || self.editor.len() == 0
         {
             return false;
         }
-        if !self.scroll_y.is_settled() {
+
+        let window_height = self
+            .window
+            .as_ref()
+            .map(|window| window.inner_size().height as f32)
+            .unwrap_or(self.window_height as f32);
+        let target_scroll = self.scroll_y.target.max(0.0);
+        let moving_down = target_scroll >= self.scroll_y.current;
+        let line_range = {
+            let Some(renderer) = self.renderer.as_ref() else {
+                return false;
+            };
+            let scale = renderer.scale_factor;
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                0.0
+            } else {
+                44.0 * scale
+            };
+            let editor_bottom_h = if self.is_ide_mode {
+                self.ide_panel.editor_reserved_bottom_height(scale)
+            } else {
+                0.0
+            };
+            let visible_h = crate::render_view::editor_view_height(
+                window_height,
+                tab_bar_h,
+                editor_bottom_h,
+                self.is_ide_mode,
+                scale,
+            )
+            .max(renderer.line_height);
+            renderer.minimap_visible_physical_line_range(
+                &self.editor,
+                target_scroll,
+                visible_h,
+            )
+        };
+        if line_range.is_empty() {
             return false;
         }
-        let Some(renderer) = self.renderer.as_ref() else {
-            return false;
-        };
-        let line_height = renderer.line_height.max(1.0);
-        let Some(&last_line_start) = self.editor.line_offsets.last() else {
-            return false;
-        };
-        let top_line = (self.scroll_y.target.max(0.0) / line_height).floor() as usize;
-        let anchor_line = top_line.min(self.editor.line_offsets.len().saturating_sub(1));
-        let anchor = self
+
+        let first_line = line_range.start.min(self.editor.line_offsets.len() - 1);
+        let range_start = self.editor.line_offsets[first_line].min(self.editor.len() - 1);
+        let range_end = self
             .editor
             .line_offsets
-            .get(anchor_line)
+            .get(line_range.end)
             .copied()
-            .unwrap_or(last_line_start)
+            .unwrap_or_else(|| self.editor.len())
             .min(self.editor.len());
+        let Some(anchor) = self.highlighter.unhighlighted_anchor_in_range(
+            range_start,
+            range_end,
+            moving_down,
+        ) else {
+            return false;
+        };
         self.highlighter
             .request_priority_highlight(self.editor.version, anchor)
     }
