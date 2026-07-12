@@ -508,6 +508,23 @@ impl crate::app::App {
                     }
                 }
             }
+            crate::ui_system::UiId::ApiRouteFilterInput => {
+                self.focus_api_input(ApiFocus::RouteFilter);
+            }
+            crate::ui_system::UiId::ApiRouteFilterClear => {
+                self.ide_panel.api.route_filter.clear();
+                if matches!(self.ide_panel.api.focused, Some(ApiFocus::RouteFilter)) {
+                    let old_version = self.ide_panel.api.input_editor.version;
+                    self.ide_panel.api.input_editor.set_text_clean("");
+                    self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                    self.ide_panel.api.input_editor.cursor = 0;
+                    self.ide_panel.api.input_editor.selection_anchor = None;
+                    self.ide_panel.api.input_scroll_x.current = 0.0;
+                    self.ide_panel.api.input_scroll_x.target = 0.0;
+                    self.ide_panel.api.input_scroll_x.velocity = 0.0;
+                    self.pulse_api_cursor_blink();
+                }
+            }
             crate::ui_system::UiId::ApiRouteRow(route_idx) => {
                 if let Some(spec_id) = self.ide_panel.api.selected_spec {
                     if self.modifiers.control_key() {

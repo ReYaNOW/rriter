@@ -78,6 +78,8 @@ pub enum UiId {
     ApiSpecRemoveCancel,
     ApiAuthRoot,
     ApiRoutesRoot,
+    ApiRouteFilterInput,
+    ApiRouteFilterClear,
     ApiRouteTag(usize),
     ApiRouteRow(usize),
     ApiServerSelect(usize),

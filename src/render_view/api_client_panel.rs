@@ -1,6 +1,7 @@
 use crate::app::api_client::{
-    ApiMethod, ApiSpecSource, api_mock_guide_max_scroll, api_mock_server_log_max_scroll,
-    api_timing_visible_at, format_api_secs, format_last_loaded_at, now_epoch_secs,
+    ApiFocus, ApiMethod, ApiSpecSource, api_mock_guide_max_scroll,
+    api_mock_server_log_max_scroll, api_route_matches_filter, api_timing_visible_at,
+    format_api_secs, format_last_loaded_at, now_epoch_secs,
 };
 use crate::app::api_mock::types::{ApiMockMode, ApiMockServerStatus, ApiPythonRuntimeMode};
 use crate::render_view::tree_ui::{TREE_INDENT_W, TREE_ROW_H, TREE_TEXT_SCALE};

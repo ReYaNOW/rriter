@@ -111,6 +111,8 @@ impl App {
             | UiId::ApiSpecRemoveCancel
             | UiId::ApiAuthRoot
             | UiId::ApiRoutesRoot
+            | UiId::ApiRouteFilterInput
+            | UiId::ApiRouteFilterClear
             | UiId::ApiRouteTag(_)
             | UiId::ApiRouteRow(_)
             | UiId::ApiServerSelect(_)

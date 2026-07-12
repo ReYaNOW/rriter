@@ -663,8 +663,19 @@ fn parse_parameters(value: Option<&Value>, root: &Value) -> Vec<ApiParam> {
 }
 
 fn resolve_schema_ref<'a>(schema: &'a Value, root: &'a Value) -> Option<&'a Value> {
-    let ref_s = schema.get("$ref").and_then(Value::as_str)?;
-    root.pointer(ref_s.strip_prefix('#')?)
+    let mut current = schema;
+    for _ in 0..=API_SCHEMA_MAX_DEPTH {
+        let ref_s = current.get("$ref").and_then(Value::as_str)?;
+        let target = root.pointer(ref_s.strip_prefix('#')?)?;
+        if std::ptr::eq(target, current) {
+            return None;
+        }
+        if target.get("$ref").and_then(Value::as_str).is_none() {
+            return Some(target);
+        }
+        current = target;
+    }
+    None
 }
 
 fn parameter_examples(

@@ -558,7 +558,7 @@ impl crate::app::App {
         }
         if matches!(
             self.ide_panel.api.focused,
-            Some(ApiFocus::MockContractField { .. })
+            Some(ApiFocus::RouteFilter | ApiFocus::MockContractField { .. })
         ) && self.ide_panel.api.input_editor.version != input_version_before
         {
             self.commit_api_focus();

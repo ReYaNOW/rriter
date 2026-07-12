@@ -576,6 +576,9 @@ impl crate::app::App {
     fn api_focus_ui_target(&self, focus: &ApiFocus) -> Option<(crate::ui_system::UiId, bool)> {
         match focus {
             ApiFocus::ImportUrl => Some((crate::ui_system::UiId::ApiImportUrlInput, false)),
+            ApiFocus::RouteFilter => {
+                Some((crate::ui_system::UiId::ApiRouteFilterInput, false))
+            }
             ApiFocus::MockProxyBase => Some((crate::ui_system::UiId::ApiMockProxyBaseInput, false)),
             ApiFocus::MockPythonUvPath => {
                 Some((crate::ui_system::UiId::ApiMockPythonUvPathInput, false))

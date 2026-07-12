@@ -64,6 +64,7 @@ impl crate::app::App {
     fn api_focus_text(&self, focus: &ApiFocus) -> String {
         match focus {
             ApiFocus::ImportUrl => self.ide_panel.api.input_editor.get_full_text(),
+            ApiFocus::RouteFilter => self.ide_panel.api.route_filter.clone(),
             ApiFocus::MockProxyBase => self.ide_panel.api.mock.proxy_base_url.clone(),
             ApiFocus::MockPythonUvPath => self
                 .ide_panel
@@ -373,6 +374,9 @@ impl crate::app::App {
         }
         match focus {
             ApiFocus::ImportUrl => {}
+            ApiFocus::RouteFilter => {
+                self.ide_panel.api.route_filter = text;
+            }
             ApiFocus::MockProxyBase => {
                 self.ide_panel.api.mock.proxy_base_url = text.trim().to_string();
                 self.ide_panel.api.persist();

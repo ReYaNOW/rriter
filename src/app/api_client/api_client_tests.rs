@@ -1077,6 +1077,18 @@ mod tests {
     }
 
     #[test]
+    fn route_filter_matches_route_metadata_case_insensitively() {
+        let model = parse_openapi_model(ApiSpecId(1), &sample_spec()).expect("parse");
+        let route = &model.routes[0];
+        let display_path = &model.route_display_paths[0];
+
+        assert!(api_route_matches_filter(route, display_path, "PETS"));
+        assert!(api_route_matches_filter(route, display_path, "get"));
+        assert!(api_route_matches_filter(route, display_path, "{id}"));
+        assert!(!api_route_matches_filter(route, display_path, "missing-route"));
+    }
+
+    #[test]
     fn json_validator_catches_trailing_comma() {
         assert!(json_body_is_valid(r#"{"a": 1}"#));
         assert!(!json_body_is_valid(r#"{"a": 1,}"#));
@@ -1317,6 +1329,187 @@ mod tests {
         assert!(schema_text.contains("\"id\"*"));
         assert!(schema_text.contains("\"payload\"*"));
         assert!(schema_text.contains("minLength=2"));
+    }
+
+    #[test]
+    fn late_response_schema_with_nested_ref_is_not_dropped_in_large_spec() {
+        let mut paths = serde_json::Map::new();
+        for idx in 0..400 {
+            paths.insert(
+                format!("/before/{idx:04}"),
+                serde_json::json!({
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "description": "ok",
+                                "content": {
+                                    "application/json": {
+                                        "schema": {
+                                            "type": "object",
+                                            "properties": {
+                                                "value": {"type": "string"}
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }),
+            );
+        }
+        paths.insert(
+            "/cars/show_car_models_by_bt".to_string(),
+            serde_json::json!({
+                "get": {
+                    "responses": {
+                        "200": {
+                            "description": "Request fulfilled, document follows",
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "$ref": "#/components/schemas/CarModelsResponse"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }),
+        );
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Cars", "version": "1"},
+            "components": {
+                "schemas": {
+                    "CarModelsResponse": {
+                        "type": "object",
+                        "required": [
+                            "body_type",
+                            "body_type_id",
+                            "current",
+                            "data",
+                            "total"
+                        ],
+                        "properties": {
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            },
+                            "total": {"type": "integer"},
+                            "current": {"type": "integer"},
+                            "previous": {"type": "integer"},
+                            "next": {"type": "integer"},
+                            "body_type_id": {"type": "integer"},
+                            "body_type": {
+                                "$ref": "#/components/schemas/BodyTypeReadResponse"
+                            }
+                        }
+                    },
+                    "BodyTypeReadResponse": {
+                        "type": "object",
+                        "required": ["id", "name"],
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "name": {"type": "string"}
+                        }
+                    }
+                }
+            },
+            "paths": paths
+        });
+        let model = parse_openapi_model(ApiSpecId(42), &spec).expect("parse");
+        let route = model
+            .routes
+            .iter()
+            .find(|route| route.path == "/cars/show_car_models_by_bt")
+            .expect("cars route");
+        let response = route.responses.first().expect("200 response");
+        let media = response.media.first().expect("application/json media");
+        assert!(media.schema.is_some(), "late response schema was dropped");
+
+        let schema_text =
+            api_route_output_schema_text_for(route, &model, 0, 0, &FxHashSet::default());
+        assert!(!schema_text.contains("not described"), "{schema_text}");
+        assert!(schema_text.contains("\"body_type\"*"));
+        assert!(schema_text.contains("\"id\"*"));
+        assert!(schema_text.contains("\"name\"*"));
+        assert!(schema_text.contains("\"data\"*"));
+    }
+
+    #[test]
+    fn nested_schema_ref_chains_are_resolved_in_response_output() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Cars", "version": "1"},
+            "components": {
+                "schemas": {
+                    "CarModelsResponse": {
+                        "$ref": "#/components/schemas/CarModelsResponseAlias"
+                    },
+                    "CarModelsResponseAlias": {
+                        "type": "object",
+                        "required": ["body_type", "data"],
+                        "properties": {
+                            "data": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            },
+                            "body_type": {
+                                "$ref": "#/components/schemas/BodyTypeAlias"
+                            }
+                        }
+                    },
+                    "BodyTypeAlias": {
+                        "$ref": "#/components/schemas/BodyTypeReadResponse"
+                    },
+                    "BodyTypeReadResponse": {
+                        "type": "object",
+                        "required": ["id", "name"],
+                        "properties": {
+                            "id": {"type": "integer"},
+                            "name": {"type": "string"}
+                        }
+                    }
+                },
+                "responses": {
+                    "CarModelsOk": {
+                        "$ref": "#/components/responses/CarModelsOkAlias"
+                    },
+                    "CarModelsOkAlias": {
+                        "description": "ok",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/CarModelsResponse"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "paths": {
+                "/cars/show_car_models_by_bt": {
+                    "get": {
+                        "responses": {
+                            "200": {
+                                "$ref": "#/components/responses/CarModelsOk"
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(41), &spec).expect("parse");
+        let route = &model.routes[0];
+        let schema_text =
+            api_route_output_schema_text_for(route, &model, 0, 0, &FxHashSet::default());
+
+        assert!(!schema_text.contains("not described"), "{schema_text}");
+        assert!(schema_text.contains("\"body_type\"*"));
+        assert!(schema_text.contains("\"id\"*"));
+        assert!(schema_text.contains("\"name\"*"));
+        assert!(schema_text.contains("\"data\"*"));
     }
 
     #[test]
@@ -1832,6 +2025,9 @@ mod tests {
         state.models.insert(model.id, model.clone());
 
         let expanded = api_panel_max_scroll(&state, 120.0, 1.0);
+        state.route_filter = "missing-route".to_string();
+        let filtered = api_panel_max_scroll(&state, 120.0, 1.0);
+        state.route_filter.clear();
         state
             .collapsed_tags
             .entry(model.id)
@@ -1839,7 +2035,9 @@ mod tests {
             .insert("pets".to_string());
         let collapsed = api_panel_max_scroll(&state, 120.0, 1.0);
         assert!(expanded.is_finite());
+        assert!(filtered.is_finite());
         assert!(collapsed.is_finite());
+        assert!(filtered < expanded);
         assert!(collapsed < expanded);
 
         let tab_state = ApiClientTabState {

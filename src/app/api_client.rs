@@ -34,7 +34,7 @@ pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub const API_MANUAL_MOCK_SPEC_ID: ApiSpecId = ApiSpecId(0);
 const API_MAX_MULTIPART_BODY_BYTES: usize = 64 * 1024 * 1024;
 const API_SCHEMA_MAX_DEPTH: usize = 12;
-const API_SCHEMA_MAX_COUNT: usize = 768;
+const API_SCHEMA_MAX_COUNT: usize = 16_384;
 const API_SCHEMA_MAX_PROPERTIES: usize = 160;
 const API_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const API_REACH_TIMEOUT: Duration = Duration::from_millis(1200);
@@ -136,6 +136,40 @@ impl ApiSpecModel {
             start = end;
         }
     }
+}
+
+pub(crate) fn api_route_matches_filter(
+    route: &ApiRouteRow,
+    display_path: &str,
+    filter: &str,
+) -> bool {
+    let filter = filter.trim();
+    if filter.is_empty() {
+        return true;
+    }
+    [
+        display_path,
+        route.path.as_str(),
+        route.tag.as_str(),
+        route.summary.as_str(),
+        route.operation_id.as_str(),
+        route.method.chip_str(),
+    ]
+    .into_iter()
+    .any(|text| contains_ascii_case_insensitive(text, filter))
+}
+
+fn contains_ascii_case_insensitive(text: &str, needle: &str) -> bool {
+    if needle.is_empty() {
+        return true;
+    }
+    if !needle.is_ascii() {
+        return text.contains(needle);
+    }
+    let needle = needle.as_bytes();
+    text.as_bytes()
+        .windows(needle.len())
+        .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -842,6 +876,7 @@ impl Eq for ApiClientTabState {}
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ApiFocus {
     ImportUrl,
+    RouteFilter,
     MockProxyBase,
     MockPythonUvPath,
     MockPythonVersion,
@@ -996,6 +1031,7 @@ pub struct ApiClientState {
     pub loading: FxHashSet<ApiSpecId>,
     pub collapsed_tags: FxHashMap<ApiSpecId, FxHashSet<String>>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
+    pub route_filter: String,
     pub expanded_mock_routes: FxHashSet<(ApiSpecId, usize)>,
     pub panel_scroll: ScrollState,
     pub route_scroll: ScrollState,
@@ -1175,6 +1211,7 @@ impl Default for ApiClientState {
             loading: FxHashSet::default(),
             collapsed_tags: FxHashMap::default(),
             collapsed_route_roots: FxHashSet::default(),
+            route_filter: String::new(),
             expanded_mock_routes: FxHashSet::default(),
             panel_scroll: ScrollState::new(7.0),
             route_scroll: ScrollState::new(7.0),
@@ -1443,6 +1480,7 @@ fn api_focus_targets_active_tab(
 ) -> bool {
     match focus {
         ApiFocus::ImportUrl => true,
+        ApiFocus::RouteFilter => true,
         ApiFocus::MockProxyBase => true,
         ApiFocus::MockPythonUvPath => true,
         ApiFocus::MockPythonVersion => true,

@@ -864,10 +864,84 @@ impl Renderer {
                 }
                 return;
             }
+            let filter_focused = matches!(api.focused, Some(ApiFocus::RouteFilter));
+            let filter_h = 30.0 * s;
+            let filter_gap = 8.0 * s;
+            let clear_size = filter_h;
+            let filter_x = x + pad + indent_w;
+            let clear_x = x + w - pad - clear_size;
+            let filter_w = (clear_x - filter_x - filter_gap).max(40.0 * s);
+            let filter_empty = api.route_filter.is_empty();
+            self.draw_api_one_line_input(
+                filter_x,
+                cy + 2.0 * s,
+                filter_w,
+                filter_h,
+                s,
+                if filter_empty {
+                    "Поиск routes..."
+                } else {
+                    api.route_filter.as_str()
+                },
+                if filter_empty {
+                    self.theme.line_num
+                } else {
+                    self.theme.fg
+                },
+                filter_focused,
+                api.input_scroll_x.current,
+                &api.input_editor,
+                blink_alpha,
+                crate::ui_system::UiId::ApiRouteFilterInput,
+                ui_registry,
+                mx,
+                my,
+                0.78,
+            );
+            let clear = IconButton {
+                x: clear_x,
+                y: cy + 2.0 * s,
+                size: clear_size,
+                icon: Some(IconType::Close),
+                is_active: false,
+                icon_size: Some(17.0 * s),
+                active_square_width: None,
+                custom_color: if filter_empty {
+                    Some([1.0, 1.0, 1.0, 0.28])
+                } else {
+                    None
+                },
+            };
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::ApiRouteFilterClear,
+                &clear,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+            cy += filter_h + 8.0 * s;
+            let filter = api.route_filter.trim();
+            let filtering = !filter.is_empty();
             for (group_idx, group) in model.route_groups.iter().enumerate() {
                 let Some(first_route) = model.routes.get(group.start) else {
                     continue;
                 };
+                let route_end = group.start.saturating_add(group.len).min(model.routes.len());
+                if filtering
+                    && !(group.start..route_end).any(|route_idx| {
+                        let route = &model.routes[route_idx];
+                        let display_path = model
+                            .route_display_paths
+                            .get(route_idx)
+                            .map(String::as_str)
+                            .unwrap_or(route.path.as_str());
+                        api_route_matches_filter(route, display_path, filter)
+                    })
+                {
+                    continue;
+                }
                 let tag = first_route.tag.as_str();
                 let collapsed = api.tag_collapsed(model.id, tag);
                 let tag_hovered = hover_settled
@@ -893,10 +967,17 @@ impl Renderer {
                     TREE_TEXT_SCALE,
                 );
                 cy += tag_h;
-                if !collapsed {
-                    let route_end = group.start.saturating_add(group.len).min(model.routes.len());
+                if !collapsed || filtering {
                     for route_idx in group.start..route_end {
                         let route = &model.routes[route_idx];
+                        let display_path = model
+                            .route_display_paths
+                            .get(route_idx)
+                            .map(String::as_str)
+                            .unwrap_or(route.path.as_str());
+                        if filtering && !api_route_matches_filter(route, display_path, filter) {
+                            continue;
+                        }
                         ui_registry.register_rect(
                             crate::ui_system::UiId::ApiRouteRow(route_idx),
                             x,
@@ -928,11 +1009,6 @@ impl Renderer {
                             s,
                             0.62,
                         );
-                        let display_path = model
-                            .route_display_paths
-                            .get(route_idx)
-                            .map(String::as_str)
-                            .unwrap_or(route.path.as_str());
                         self.draw_string_scaled_stable(
                             display_path,
                             route_x + chip_w + 8.0 * s,

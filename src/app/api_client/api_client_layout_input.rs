@@ -19,13 +19,35 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
         content_h += 28.0 * scale;
         content_h += 34.0 * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
+            content_h += 38.0 * scale;
+            let filter = api.route_filter.trim();
+            let filtering = !filter.is_empty();
             for group in &model.route_groups {
                 let Some(route) = model.routes.get(group.start) else {
                     continue;
                 };
+                let route_end = group.start.saturating_add(group.len).min(model.routes.len());
+                let matching_routes = if filtering {
+                    (group.start..route_end)
+                        .filter(|route_idx| {
+                            let route = &model.routes[*route_idx];
+                            let display_path = model
+                                .route_display_paths
+                                .get(*route_idx)
+                                .map(String::as_str)
+                                .unwrap_or(route.path.as_str());
+                            api_route_matches_filter(route, display_path, filter)
+                        })
+                        .count()
+                } else {
+                    route_end.saturating_sub(group.start)
+                };
+                if matching_routes == 0 {
+                    continue;
+                }
                 content_h += 28.0 * scale;
-                if !api.tag_collapsed(model.id, route.tag.as_str()) {
-                    content_h += group.len as f32 * 30.0 * scale;
+                if filtering || !api.tag_collapsed(model.id, route.tag.as_str()) {
+                    content_h += matching_routes as f32 * 30.0 * scale;
                 }
             }
         }
