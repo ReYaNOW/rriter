@@ -615,7 +615,9 @@ impl Renderer {
         let mut label_scratch = String::new();
         if crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel) {
             ui_registry.mark_overlay_start();
-            ui_registry.reset_cursor_state();
+            if crate::app::file_tree::file_tree_modal_overlay_active_for_panel(ide_panel) {
+                ui_registry.reset_cursor_state();
+            }
         }
 
         if let Some(menu) = &ide_panel.file_tree_context_menu {

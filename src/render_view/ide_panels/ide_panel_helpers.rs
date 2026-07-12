@@ -46,9 +46,12 @@ fn file_tree_menu_group(action: crate::app::file_tree::FileTreeMenuAction) -> u8
         | crate::app::file_tree::FileTreeMenuAction::Copy
         | crate::app::file_tree::FileTreeMenuAction::Cut
         | crate::app::file_tree::FileTreeMenuAction::Rename => 1,
+        crate::app::file_tree::FileTreeMenuAction::ShowInExplorer => 2,
         crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder
         | crate::app::file_tree::FileTreeMenuAction::CopyAbsolutePath
-        | crate::app::file_tree::FileTreeMenuAction::CopyRelativePath => 2,
+        | crate::app::file_tree::FileTreeMenuAction::CopyRelativePath
+        | crate::app::file_tree::FileTreeMenuAction::CopyTargetAbsolutePath
+        | crate::app::file_tree::FileTreeMenuAction::CopyTargetRelativePath => 3,
     }
 }
 

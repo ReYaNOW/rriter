@@ -1178,7 +1178,15 @@ impl ApplicationHandler for App {
                         }
                         _ => winit::window::CursorIcon::Default,
                     }
-                } else if self.file_tree_overlay_active() {
+                } else if self.ide_panel.file_tree_context_menu.is_some() {
+                    let (mx, my) = {
+                        let r = self.renderer.as_ref().unwrap();
+                        (r.last_mouse_x, r.last_mouse_y)
+                    };
+                    crate::app::file_tree::file_tree_context_menu_cursor(
+                        self.ui_registry.find_overlay_at(mx, my),
+                    )
+                } else if self.file_tree_modal_overlay_active() {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();
                         (r.last_mouse_x, r.last_mouse_y)

@@ -913,3 +913,117 @@ fn closing_single_python_file_uses_old_extension_and_clears_lsp_diagnostics() {
     assert!(app.tabs.is_empty());
     assert_eq!(app.file_extension, "");
 }
+
+#[test]
+fn tab_context_menu_targets_clicked_tab_with_path_actions() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let workspace = PathBuf::from("/tmp/rriter-tab-context-workspace");
+    let active_path = workspace.join("src/active.rs");
+    let inactive_path = workspace.join("tests/inactive.rs");
+    app.is_ide_mode = true;
+    app.ide_workspaces = vec![workspace];
+    app.tabs = vec![
+        tab_with("active.rs", Some("/tmp/stale-active.rs"), "active"),
+        tab_with(
+            "inactive.rs",
+            Some(inactive_path.to_str().unwrap()),
+            "inactive",
+        ),
+    ];
+    app.active_tab = 0;
+    app.file_path = Some(active_path.clone());
+    assert!(app.open_tab_context_menu(0, 120.0, 48.0));
+    let menu = app.ide_panel.file_tree_context_menu.as_ref().unwrap();
+    assert_eq!(menu.x, 130.0);
+    assert_eq!(menu.y, 58.0);
+    assert!(!app.popup_blocks_background_at(menu.x, menu.y));
+    assert_eq!(menu.target_path.as_ref(), Some(&active_path));
+    assert_eq!(menu.target_dir.as_deref(), active_path.parent());
+    assert_eq!(
+        menu.entries,
+        vec![
+            crate::app::file_tree::FileTreeMenuAction::ShowInExplorer,
+            crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
+            crate::app::file_tree::FileTreeMenuAction::CopyTargetAbsolutePath,
+            crate::app::file_tree::FileTreeMenuAction::CopyTargetRelativePath,
+        ]
+    );
+
+    assert!(app.open_tab_context_menu_for_hit(
+        crate::ui_system::UiId::EditorTabClose(1),
+        320.0,
+        48.0,
+    ));
+    let menu = app.ide_panel.file_tree_context_menu.as_ref().unwrap();
+    assert_eq!(menu.target_path.as_ref(), Some(&inactive_path));
+    assert!(!app.open_tab_context_menu_for_hit(
+        crate::ui_system::UiId::WelcomeNewFile,
+        0.0,
+        0.0,
+    ));
+    assert!(!app.open_tab_context_menu(2, 0.0, 0.0));
+}
+
+#[test]
+fn show_tab_path_in_explorer_opens_expands_selects_and_centers_file() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-tab-reveal-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let workspace = std::env::temp_dir().join(unique);
+    let src_dir = workspace.join("src");
+    let path = src_dir.join("main.rs");
+    std::fs::create_dir_all(&src_dir).unwrap();
+    std::fs::write(&path, "fn main() {}\n").unwrap();
+
+    app.is_ide_mode = true;
+    app.ide_workspaces = vec![workspace.clone()];
+    app.ide_panel.open(crate::app::PanelId::Search);
+    app.ide_panel.file_tree_nodes = vec![crate::app::file_tree::FileNode {
+        path: path.clone(),
+        name: "main.rs".to_string(),
+        depth: 2,
+        is_dir: false,
+        is_expanded: false,
+        icon_key: "rust",
+        is_ignored: false,
+    }];
+    app.ide_panel.explorer_scroll.current = 90.0;
+    app.ide_panel.explorer_scroll.target = 90.0;
+    let menu = crate::app::file_tree::FileTreeContextMenu {
+        x: 0.0,
+        y: 0.0,
+        target_path: Some(path.clone()),
+        target_is_dir: false,
+        target_dir: Some(src_dir.clone()),
+        entries: vec![crate::app::file_tree::FileTreeMenuAction::ShowInExplorer],
+        opened_at: Instant::now(),
+    };
+
+    app.handle_file_tree_menu_action(
+        crate::app::file_tree::FileTreeMenuAction::ShowInExplorer,
+        menu,
+    );
+
+    assert!(app.ide_panel.is_open(crate::app::PanelId::Explorer));
+    assert!(!app.ide_panel.is_open(crate::app::PanelId::Search));
+    assert!(app.ide_panel.file_tree_focused);
+    assert_eq!(app.ide_panel.file_tree_selection.len(), 1);
+    assert!(app.ide_panel.file_tree_selection.contains(&path));
+    assert!(app.ide_panel.file_tree_expanded.contains(&workspace));
+    assert!(app.ide_panel.file_tree_expanded.contains(&src_dir));
+    assert_eq!(app.ide_panel.explorer_scroll.current, 0.0);
+    assert_eq!(app.ide_panel.explorer_scroll.target, 0.0);
+
+    drop(app);
+    std::fs::remove_dir_all(workspace).unwrap();
+}

@@ -307,7 +307,7 @@ impl App {
     }
 
     pub fn popup_blocks_background_at(&self, x: f32, y: f32) -> bool {
-        self.file_tree_overlay_active() || self.autocomplete_window_contains(x, y)
+        self.file_tree_modal_overlay_active() || self.autocomplete_window_contains(x, y)
     }
 
     pub fn refresh_autocomplete_detail_popup(&mut self) {

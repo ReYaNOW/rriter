@@ -11,6 +11,7 @@ use std::time::Instant;
 mod file_tree_ops;
 #[path = "file_tree_scan.rs"]
 mod file_tree_scan;
+pub(crate) use file_tree_ops::relative_path_for_workspace;
 use file_tree_ops::*;
 pub use file_tree_scan::*;
 
@@ -44,7 +45,13 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "*.swo",
 ];
 pub const FILE_TREE_CONTEXT_MENU_ANIM_SECS: f32 = 0.28;
+const FILE_TREE_CONTEXT_MENU_CURSOR_OFFSET: f32 = 10.0;
 const FILE_TREE_UNDO_LIMIT: usize = 64;
+
+pub(crate) fn file_tree_context_menu_anchor(mx: f32, my: f32, scale: f32) -> (f32, f32) {
+    let offset = FILE_TREE_CONTEXT_MENU_CURSOR_OFFSET * scale;
+    (mx + offset, my + offset)
+}
 
 /// Проверяет, должен ли узел быть скрыт по паттернам.
 /// Поддерживает:
@@ -126,8 +133,11 @@ pub enum FileTreeMenuAction {
     Cut,
     Rename,
     OpenContainedFolder,
+    ShowInExplorer,
     CopyAbsolutePath,
     CopyRelativePath,
+    CopyTargetAbsolutePath,
+    CopyTargetRelativePath,
 }
 
 impl FileTreeMenuAction {
@@ -141,8 +151,13 @@ impl FileTreeMenuAction {
             Self::Cut => "Вырезать",
             Self::Rename => "Переименовать",
             Self::OpenContainedFolder => "Открыть папку с файлом",
-            Self::CopyAbsolutePath => "Скопировать абсолютный путь",
-            Self::CopyRelativePath => "Скопировать относительный путь",
+            Self::ShowInExplorer => "Показать в проводнике",
+            Self::CopyAbsolutePath | Self::CopyTargetAbsolutePath => {
+                "Скопировать абсолютный путь"
+            }
+            Self::CopyRelativePath | Self::CopyTargetRelativePath => {
+                "Скопировать относительный путь"
+            }
         }
     }
 }
@@ -156,6 +171,19 @@ pub struct FileTreeContextMenu {
     pub target_dir: Option<PathBuf>,
     pub entries: Vec<FileTreeMenuAction>,
     pub opened_at: Instant,
+}
+
+pub(crate) fn file_tree_context_menu_cursor(
+    hovered_overlay: Option<crate::ui_system::UiId>,
+) -> winit::window::CursorIcon {
+    if matches!(
+        hovered_overlay,
+        Some(crate::ui_system::UiId::FileTreeMenuItem(_))
+    ) {
+        winit::window::CursorIcon::Pointer
+    } else {
+        winit::window::CursorIcon::Default
+    }
 }
 
 pub fn file_tree_context_menu_anim_progress(opened_at: Instant, now: Instant) -> f32 {
@@ -283,9 +311,10 @@ pub fn file_tree_delete_dialog_message(paths: &[PathBuf]) -> String {
     }
 }
 
-pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState) -> bool {
-    ide_panel.file_tree_context_menu.is_some()
-        || ide_panel.file_tree_create_dialog.is_some()
+pub fn file_tree_modal_overlay_active_for_panel(
+    ide_panel: &crate::app::IdePanelState,
+) -> bool {
+    ide_panel.file_tree_create_dialog.is_some()
         || ide_panel.file_tree_rename_dialog.is_some()
         || ide_panel.file_tree_move_dialog.is_some()
         || ide_panel.file_tree_delete_dialog.is_some()
@@ -293,6 +322,11 @@ pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState)
         || ide_panel.api.spec_remove_dialog.is_some()
         || ide_panel.api.mock_route_reset_dialog.is_some()
         || ide_panel.api.mock_contract_field_delete_dialog.is_some()
+}
+
+pub fn file_tree_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState) -> bool {
+    ide_panel.file_tree_context_menu.is_some()
+        || file_tree_modal_overlay_active_for_panel(ide_panel)
 }
 
 const FILE_TREE_NAME_INPUT_MAX_BYTES: usize = 255;
@@ -659,14 +693,36 @@ impl App {
     pub fn poll_file_tree(&mut self) -> bool {
         let mut updated = false;
         let mut disconnected = false;
+        let mut reveal_path = None;
         if let Some(rx) = &self.file_tree_rx {
             loop {
                 match rx.try_recv() {
                     Ok(crate::app::file_tree::FileTreeScanMessage::Nodes(nodes)) => {
+                        let selected_path = if self.ide_panel.file_tree_selection.len() == 1 {
+                            self.ide_panel.file_tree_selection.iter().next().cloned()
+                        } else {
+                            None
+                        };
+                        let selected_was_visible = selected_path.as_ref().is_some_and(|path| {
+                            self.ide_panel
+                                .file_tree_nodes
+                                .iter()
+                                .any(|node| node.path == *path)
+                        });
                         self.ide_panel.file_tree_nodes = nodes;
                         self.ide_panel
                             .file_tree_selection
                             .retain(|path| path.exists());
+                        if !selected_was_visible
+                            && selected_path.as_ref().is_some_and(|path| {
+                                self.ide_panel
+                                    .file_tree_nodes
+                                    .iter()
+                                    .any(|node| node.path == *path)
+                            })
+                        {
+                            reveal_path = selected_path;
+                        }
                         updated = true;
                     }
                     Ok(crate::app::file_tree::FileTreeScanMessage::IconsReady) => {
@@ -683,7 +739,43 @@ impl App {
         if disconnected {
             self.file_tree_rx = None;
         }
+        if let Some(path) = reveal_path {
+            self.center_file_tree_path(&path);
+        }
         updated
+    }
+
+    fn center_file_tree_path(&mut self, path: &Path) -> bool {
+        let Some(node_idx) = self
+            .ide_panel
+            .file_tree_nodes
+            .iter()
+            .position(|node| node.path == path)
+        else {
+            return false;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let viewport_h = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.height)
+            .unwrap_or(self.window_height as f32)
+            - 32.0 * scale;
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * scale;
+        let total_h = self.ide_panel.file_tree_nodes.len() as f32 * row_h;
+        let max_scroll = (total_h - viewport_h.max(row_h)).max(0.0);
+        let row_center = node_idx as f32 * row_h + row_h * 0.5;
+        let target = (row_center - viewport_h * 0.5)
+            .clamp(0.0, max_scroll)
+            .round();
+        self.ide_panel.explorer_scroll.current = target;
+        self.ide_panel.explorer_scroll.target = target;
+        self.ide_panel.explorer_scroll.velocity = 0.0;
+        true
     }
 
     fn file_tree_open_file_parent_dirs(&self) -> Vec<PathBuf> {
@@ -837,6 +929,12 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn open_file_tree_context_menu(&mut self, mx: f32, my: f32) {
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let (menu_x, menu_y) = file_tree_context_menu_anchor(mx, my, scale);
         let target_idx = self.file_tree_node_at(mx, my);
         let target = target_idx.and_then(|idx| self.ide_panel.file_tree_nodes.get(idx).cloned());
         if let Some(node) = &target {
@@ -885,8 +983,8 @@ impl App {
         }
 
         self.ide_panel.file_tree_context_menu = Some(FileTreeContextMenu {
-            x: mx,
-            y: my,
+            x: menu_x,
+            y: menu_y,
             target_path,
             target_is_dir,
             target_dir,
@@ -955,9 +1053,19 @@ impl App {
                     self.open_contained_folder(&target_path, menu.target_is_dir);
                 }
             }
-            FileTreeMenuAction::CopyAbsolutePath => {
+            FileTreeMenuAction::ShowInExplorer => {
                 if let Some(target_path) = menu.target_path {
-                    let paths = self.file_tree_selected_paths_for(&target_path);
+                    self.show_path_in_file_tree(&target_path);
+                }
+            }
+            action @ (FileTreeMenuAction::CopyAbsolutePath
+                | FileTreeMenuAction::CopyTargetAbsolutePath) => {
+                if let Some(target_path) = menu.target_path {
+                    let paths = if action == FileTreeMenuAction::CopyTargetAbsolutePath {
+                        vec![target_path]
+                    } else {
+                        self.file_tree_selected_paths_for(&target_path)
+                    };
                     let text = paths
                         .iter()
                         .map(|p| p.to_string_lossy())
@@ -966,9 +1074,14 @@ impl App {
                     self.set_clipboard_text(text);
                 }
             }
-            FileTreeMenuAction::CopyRelativePath => {
+            action @ (FileTreeMenuAction::CopyRelativePath
+                | FileTreeMenuAction::CopyTargetRelativePath) => {
                 if let Some(target_path) = menu.target_path {
-                    let paths = self.file_tree_selected_paths_for(&target_path);
+                    let paths = if action == FileTreeMenuAction::CopyTargetRelativePath {
+                        vec![target_path]
+                    } else {
+                        self.file_tree_selected_paths_for(&target_path)
+                    };
                     let text = paths
                         .iter()
                         .map(|p| {
@@ -1316,6 +1429,42 @@ impl App {
         let _ = std::process::Command::new("xdg-open").arg(folder).spawn();
     }
 
+    pub(crate) fn show_path_in_file_tree(&mut self, path: &Path) {
+        let path = self.abs_path_for_workspace(path);
+        self.ide_panel.open(crate::app::PanelId::Explorer);
+        self.ide_panel.file_tree_focused = true;
+
+        let Some(workspace) = self
+            .ide_workspaces
+            .iter()
+            .find(|workspace| path.starts_with(workspace))
+            .cloned()
+        else {
+            return;
+        };
+
+        self.ide_panel.file_tree_selection.clear();
+        self.ide_panel.file_tree_selection.insert(path.clone());
+        let mut expansion_changed = false;
+        let mut parent = path.parent();
+        while let Some(dir) = parent {
+            if !dir.starts_with(&workspace) {
+                break;
+            }
+            expansion_changed |= self.ide_panel.file_tree_expanded.insert(dir.to_path_buf());
+            if dir == workspace {
+                break;
+            }
+            parent = dir.parent();
+        }
+
+        let target_visible = self.center_file_tree_path(&path);
+        if expansion_changed || !target_visible {
+            self.refresh_file_tree();
+        }
+        self.start_file_watcher();
+    }
+
     /// Возвращает индекс узла дерева под экранными координатами (mx, my),
     /// или None если курсор не над областью дерева файлов.
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1388,6 +1537,10 @@ impl App {
 
     pub fn file_tree_overlay_active(&self) -> bool {
         file_tree_overlay_active_for_panel(&self.ide_panel)
+    }
+
+    pub fn file_tree_modal_overlay_active(&self) -> bool {
+        file_tree_modal_overlay_active_for_panel(&self.ide_panel)
     }
 
     pub fn ui_id_is_file_tree_overlay(id: crate::ui_system::UiId) -> bool {

@@ -358,7 +358,7 @@ mod tests {
     fn file_tree_context_menu_groups_insert_logical_separators() {
         use crate::app::file_tree::FileTreeMenuAction;
 
-        let entries = [
+        let file_tree_entries = [
             FileTreeMenuAction::CreateFile,
             FileTreeMenuAction::CreateDirectory,
             FileTreeMenuAction::Paste,
@@ -368,10 +368,20 @@ mod tests {
             FileTreeMenuAction::CopyRelativePath,
         ];
 
-        assert!(!file_tree_menu_separator_before(&entries, 0));
-        assert!(!file_tree_menu_separator_before(&entries, 2));
-        assert!(file_tree_menu_separator_before(&entries, 3));
-        assert!(file_tree_menu_separator_before(&entries, 5));
-        assert_eq!(file_tree_menu_separator_count(&entries), 2);
+        assert!(!file_tree_menu_separator_before(&file_tree_entries, 0));
+        assert!(!file_tree_menu_separator_before(&file_tree_entries, 2));
+        assert!(file_tree_menu_separator_before(&file_tree_entries, 3));
+        assert!(file_tree_menu_separator_before(&file_tree_entries, 5));
+        assert_eq!(file_tree_menu_separator_count(&file_tree_entries), 2);
+
+        let tab_entries = [
+            FileTreeMenuAction::ShowInExplorer,
+            FileTreeMenuAction::OpenContainedFolder,
+            FileTreeMenuAction::CopyTargetAbsolutePath,
+            FileTreeMenuAction::CopyTargetRelativePath,
+        ];
+        assert!(file_tree_menu_separator_before(&tab_entries, 1));
+        assert!(!file_tree_menu_separator_before(&tab_entries, 2));
+        assert_eq!(file_tree_menu_separator_count(&tab_entries), 1);
     }
 }

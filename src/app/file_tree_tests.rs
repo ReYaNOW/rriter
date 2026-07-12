@@ -328,6 +328,7 @@ fn file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids() {
     let mut panel = crate::app::IdePanelState::default();
 
     assert!(!file_tree_overlay_active_for_panel(&panel));
+    assert!(!file_tree_modal_overlay_active_for_panel(&panel));
 
     panel.file_tree_context_menu = Some(FileTreeContextMenu {
         x: 1.0,
@@ -339,6 +340,7 @@ fn file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids() {
         opened_at: Instant::now(),
     });
     assert!(file_tree_overlay_active_for_panel(&panel));
+    assert!(!file_tree_modal_overlay_active_for_panel(&panel));
     panel.file_tree_context_menu = None;
 
     panel.file_tree_create_dialog = Some(FileTreeCreateDialog {
@@ -348,6 +350,7 @@ fn file_tree_overlay_state_covers_menu_dialogs_and_overlay_ids() {
         error: None,
     });
     assert!(file_tree_overlay_active_for_panel(&panel));
+    assert!(file_tree_modal_overlay_active_for_panel(&panel));
     panel.file_tree_create_dialog = None;
 
     panel.file_tree_rename_dialog = Some(FileTreeRenameDialog {
@@ -447,12 +450,42 @@ fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
         FileTreeMenuAction::CopyRelativePath.label(),
         "Скопировать относительный путь"
     );
+    assert_eq!(
+        FileTreeMenuAction::CopyTargetAbsolutePath.label(),
+        "Скопировать абсолютный путь"
+    );
+    assert_eq!(
+        FileTreeMenuAction::CopyTargetRelativePath.label(),
+        "Скопировать относительный путь"
+    );
+    assert_eq!(
+        FileTreeMenuAction::ShowInExplorer.label(),
+        "Показать в проводнике"
+    );
 
     let start = Instant::now();
     assert_eq!(file_tree_context_menu_anim_progress(start, start), 0.0);
     assert_eq!(
         file_tree_context_menu_anim_progress(start, start + std::time::Duration::from_secs(1)),
         1.0
+    );
+    assert_eq!(file_tree_context_menu_anchor(100.0, 80.0, 1.0), (110.0, 90.0));
+    assert_eq!(
+        file_tree_context_menu_anchor(100.0, 80.0, 1.5),
+        (115.0, 95.0)
+    );
+
+    assert_eq!(
+        file_tree_context_menu_cursor(None),
+        winit::window::CursorIcon::Default
+    );
+    assert_eq!(
+        file_tree_context_menu_cursor(Some(crate::ui_system::UiId::EditorTab(0))),
+        winit::window::CursorIcon::Default
+    );
+    assert_eq!(
+        file_tree_context_menu_cursor(Some(crate::ui_system::UiId::FileTreeMenuItem(0))),
+        winit::window::CursorIcon::Pointer
     );
 }
 

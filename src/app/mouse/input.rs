@@ -366,6 +366,15 @@ impl App {
 
         if state == ElementState::Pressed
             && button == winit::event::MouseButton::Right
+            && let Some(id) = self.ui_registry.find_at(mx, my)
+            && self.open_tab_context_menu_for_hit(id, mx, my)
+        {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Right
             && self.file_tree_panel_contains(mx, my)
         {
             self.open_file_tree_context_menu(mx, my);

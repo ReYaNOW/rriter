@@ -88,6 +88,55 @@ impl App {
         self.save_tabs_state();
     }
 
+    pub(crate) fn open_tab_context_menu(&mut self, idx: usize, mx: f32, my: f32) -> bool {
+        if idx >= self.tabs.len() {
+            return false;
+        }
+        let Some(path) = tab_effective_path(&self.tabs, idx, self.active_tab, self.file_path.as_ref())
+        else {
+            return false;
+        };
+        let target_path = self.abs_path_for_workspace(path);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map(|renderer| renderer.scale_factor)
+            .unwrap_or(1.0);
+        let (menu_x, menu_y) =
+            crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
+        self.ide_panel.file_tree_context_menu =
+            Some(crate::app::file_tree::FileTreeContextMenu {
+                x: menu_x,
+                y: menu_y,
+                target_dir: target_path.parent().map(Path::to_path_buf),
+                target_path: Some(target_path),
+                target_is_dir: false,
+                entries: vec![
+                    crate::app::file_tree::FileTreeMenuAction::ShowInExplorer,
+                    crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
+                    crate::app::file_tree::FileTreeMenuAction::CopyTargetAbsolutePath,
+                    crate::app::file_tree::FileTreeMenuAction::CopyTargetRelativePath,
+                ],
+                opened_at: std::time::Instant::now(),
+            });
+        true
+    }
+
+    pub(crate) fn open_tab_context_menu_for_hit(
+        &mut self,
+        id: crate::ui_system::UiId,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        match id {
+            crate::ui_system::UiId::EditorTab(idx)
+            | crate::ui_system::UiId::EditorTabClose(idx) => {
+                self.open_tab_context_menu(idx, mx, my)
+            }
+            _ => false,
+        }
+    }
+
     pub fn close_tab_at(&mut self, idx: usize) {
         if !self.is_ide_mode {
             self.close_current_file();
