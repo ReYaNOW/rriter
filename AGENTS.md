@@ -509,6 +509,15 @@ In draw/render/frame paths:
 
 * DO not create files larger than 1600 lines of code. Move logic blocks to new files if that happens. Add info about new files in both .md files. Do not create files with less than 200 lines.
 
+### Platform and filesystem invariants
+
+* Route OS-specific directories, path identity, persistence, atomic replacement, dialogs, Clipboard, Trash, URL/file-manager actions, and background process flags through `src/platform.rs` and `src/platform/*`.
+* Keep original `PathBuf` values for I/O/display and use `platform::PathKey` or the platform path helpers for equality, deduplication, containment, watcher keys, and open-tab identity.
+* Never persist arbitrary paths through `to_string_lossy`; use `encode_persisted_path` and `decode_persisted_path`.
+* Decode editor files through `read_text_file` and preserve `TextFileFormat` when saving, so BOM/UTF-16 and LF/CRLF/CR are not silently rewritten.
+* Persist editor/application state through atomic sibling-temp replacement. Do not add direct state-file `fs::write` calls.
+* Keep Linux-only crates and code (`io-uring`, Wayland extensions, XDG-specific behavior) behind target gates; missing non-Linux tools must degrade to an explicit disabled/error state, never a restart loop.
+
 Good:
 
 ```rust
@@ -740,6 +749,9 @@ Root:
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> build-time resource/platform setup.
+* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic writes, dialogs/Clipboard/Trash/openers, process helpers.
+* `src/platform/windows.rs` -> Windows WTF-16 case-insensitive path identity plus UNC/extended-length Win32 path handling.
+* `src/platform/tests.rs` -> platform/path/encoding/atomic-write regression tests.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -766,6 +778,8 @@ Entrypoints/state:
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
+* `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
+* `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
 * `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, fallback scanning, and results.
 * `src/app/project_search_grep.rs` -> grep-searcher streaming backend and line-level match building for fast project search.
 * `src/app/project_search_preview.rs` -> lazy visible-row preview worker and project-search scrollbar drag math.

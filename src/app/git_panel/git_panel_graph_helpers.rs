@@ -80,18 +80,7 @@ fn run_git_action(action: GitAction) -> GitActionOutcome {
 }
 
 fn open_url_async(url: &str) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd")
-        .args(["/C", "start", "", url])
-        .spawn();
-
-    #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(url).spawn();
-
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let result = std::process::Command::new("xdg-open").arg(url).spawn();
-
-    result.map(|_| ()).map_err(|err| err.to_string())
+    crate::platform::open_url(url).map_err(|error| error.to_string())
 }
 
 fn git_snapshot_has_visible_rows(snapshot: &GitStatusSnapshot) -> bool {

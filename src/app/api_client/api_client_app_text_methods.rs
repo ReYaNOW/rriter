@@ -1417,6 +1417,8 @@ impl crate::app::App {
         if self.tabs.is_empty() {
             self.editor = Editor::new(16);
             self.file_path = None;
+            self.file_key = None;
+            self.text_file_format = crate::platform::TextFileFormat::default();
             self.base_title = tab.base_title.clone();
             self.file_extension.clear();
             self.scroll_y = ScrollState::new(7.0);
@@ -1479,6 +1481,8 @@ impl crate::app::App {
         let tab = crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: title.clone(),
             file_extension: String::new(),
             scroll_y: ScrollState::new(7.0),
@@ -1563,6 +1567,8 @@ impl crate::app::App {
         let tab = crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: title.clone(),
             file_extension: String::new(),
             scroll_y: ScrollState::new(7.0),
@@ -1727,6 +1733,8 @@ impl crate::app::App {
         let tab = crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: title.clone(),
             file_extension: String::new(),
             scroll_y: ScrollState::new(7.0),
@@ -1756,6 +1764,8 @@ impl crate::app::App {
         if self.tabs.is_empty() {
             self.editor = Editor::new(16);
             self.file_path = None;
+            self.file_key = None;
+            self.text_file_format = crate::platform::TextFileFormat::default();
             self.base_title = tab.base_title.clone();
             self.file_extension.clear();
             self.scroll_y = ScrollState::new(7.0);

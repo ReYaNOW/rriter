@@ -383,22 +383,38 @@ impl crate::app::App {
     }
 
     pub fn handle_project_search_match_click(&mut self, file_idx: usize, match_idx: usize) {
-        let Some((path, byte_start, byte_end)) = self
+        let Some((path, start_line, start_col, end_line, end_col)) = self
             .ide_panel
             .project_search
             .results
             .get(file_idx)
             .and_then(|file| {
-                file.matches
-                    .get(match_idx)
-                    .map(|mat| (file.path.clone(), mat.byte_start, mat.byte_end))
+                file.matches.get(match_idx).map(|mat| {
+                    (
+                        file.path.clone(),
+                        mat.start_line,
+                        mat.start_col,
+                        mat.end_line,
+                        mat.end_col,
+                    )
+                })
             })
         else {
             return;
         };
-        let was_active =
-            self.current_abs_path().as_ref() == Some(&self.abs_path_for_workspace(&path));
-        self.jump_to_project_search_byte_range(path, true, byte_start, byte_end);
+        let absolute = self.abs_path_for_workspace(&path);
+        let was_active = self
+            .current_abs_path()
+            .as_ref()
+            .is_some_and(|current| crate::platform::paths_equal(current, &absolute));
+        self.jump_to_project_search_position(
+            path,
+            true,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        );
         if !was_active {
             self.scroll_y.current = self.scroll_y.target;
             self.scroll_y.velocity = 0.0;
@@ -407,20 +423,28 @@ impl crate::app::App {
         }
     }
 
-    fn jump_to_project_search_byte_range(
+    #[allow(clippy::too_many_arguments)]
+    fn jump_to_project_search_position(
         &mut self,
         path: PathBuf,
         add_to_history: bool,
-        byte_start: usize,
-        byte_end: usize,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
     ) {
         let was_open = self.path_is_open_in_tabs(&path);
         self.open_file_in_tab_internal_options(path, add_to_history, was_open, was_open);
         let text = self.editor.get_full_text();
-        let start = floor_char_boundary_for_project_search(&text, byte_start.min(text.len()));
-        let end = ceil_char_boundary_for_project_search(&text, byte_end.min(text.len()));
-        self.editor.selection_anchor = Some(start.min(end));
-        self.editor.cursor = end.max(start);
+        let (start, end) = project_search_offsets_for_position(
+            &text,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        );
+        self.editor.selection_anchor = Some(start);
+        self.editor.cursor = end;
         if !was_open {
             self.reprioritize_highlighter_around_cursor();
             self.wait_for_current_highlight();
@@ -429,23 +453,32 @@ impl crate::app::App {
     }
 }
 
-fn floor_char_boundary_for_project_search(text: &str, mut idx: usize) -> usize {
-    while idx > 0 && !text.is_char_boundary(idx) {
-        idx -= 1;
-    }
-    idx
-}
-
-fn ceil_char_boundary_for_project_search(text: &str, mut idx: usize) -> usize {
-    while idx < text.len() && !text.is_char_boundary(idx) {
-        idx += 1;
-    }
-    idx
+fn project_search_offsets_for_position(
+    text: &str,
+    start_line: u32,
+    start_col: u32,
+    end_line: u32,
+    end_col: u32,
+) -> (usize, usize) {
+    let start = crate::lsp::lsp_pos_to_offset(text, start_line, start_col);
+    let end = crate::lsp::lsp_pos_to_offset(text, end_line, end_col);
+    (start.min(end), start.max(end))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn project_search_positions_map_utf16_columns_in_normalized_text() {
+        let text = "first\na😀needle\nlast";
+        let (start, end) = project_search_offsets_for_position(text, 1, 3, 1, 9);
+        assert_eq!(&text[start..end], "needle");
+
+        let (start, end) = project_search_offsets_for_position(text, 2, 4, 1, 3);
+        assert!(start <= end);
+        assert_eq!(start, crate::lsp::lsp_pos_to_offset(text, 1, 3));
+    }
 
     #[test]
     fn project_search_field_ui_ids_are_the_only_focus_targets() {

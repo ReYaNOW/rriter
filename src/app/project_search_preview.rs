@@ -1,4 +1,3 @@
-use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender, channel};
@@ -10,7 +9,6 @@ use super::{
 
 const PROJECT_SEARCH_PREVIEW_REQUEST_BUDGET: usize = 96;
 const PROJECT_SEARCH_PREVIEW_PREFETCH_ROWS: usize = 80;
-const PROJECT_SEARCH_PREVIEW_LINE_CAP_BYTES: u64 = 256 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ProjectSearchPreviewKey {
@@ -23,9 +21,10 @@ pub struct ProjectSearchPreviewRequest {
     pub generation: u64,
     pub key: ProjectSearchPreviewKey,
     pub path: PathBuf,
-    pub line_byte_start: usize,
-    pub byte_start: usize,
-    pub byte_end: usize,
+    pub start_line: u32,
+    pub start_col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -210,9 +209,10 @@ fn preview_request_for_match(
         generation,
         key,
         path,
-        line_byte_start: mat.line_byte_start,
-        byte_start: mat.byte_start,
-        byte_end: mat.byte_end,
+        start_line: mat.start_line,
+        start_col: mat.start_col,
+        end_line: mat.end_line,
+        end_col: mat.end_col,
     }
 }
 
@@ -220,9 +220,30 @@ fn run_project_search_preview_worker(
     rx: Receiver<ProjectSearchPreviewRequest>,
     tx: Sender<ProjectSearchPreviewWorkerMessage>,
 ) {
+    let mut cached_path: Option<PathBuf> = None;
+    let mut cached_text = String::new();
     while let Ok(request) = rx.recv() {
-        let (preview, preview_match_start, preview_match_end) =
-            build_project_search_preview(&request).unwrap_or_else(fallback_project_search_preview);
+        let cache_matches = cached_path
+            .as_ref()
+            .is_some_and(|path| crate::platform::paths_equal(path, &request.path));
+        if !cache_matches {
+            match read_project_search_preview_text(&request.path) {
+                Some(text) => {
+                    cached_path = Some(request.path.clone());
+                    cached_text = text;
+                }
+                None => {
+                    cached_path = None;
+                    cached_text.clear();
+                }
+            }
+        }
+        let (preview, preview_match_start, preview_match_end) = if cached_path.is_some() {
+            build_project_search_preview(&request, &cached_text)
+                .unwrap_or_else(fallback_project_search_preview)
+        } else {
+            fallback_project_search_preview()
+        };
         let _ = tx.send(ProjectSearchPreviewWorkerMessage::Preview {
             generation: request.generation,
             key: request.key,
@@ -233,40 +254,56 @@ fn run_project_search_preview_worker(
     }
 }
 
+fn read_project_search_preview_text(path: &std::path::Path) -> Option<String> {
+    crate::platform::read_text_file(path)
+        .ok()
+        .map(|decoded| decoded.text)
+}
+
 fn fallback_project_search_preview() -> (String, usize, usize) {
     ("...".to_string(), 0, 0)
 }
 
 fn build_project_search_preview(
     request: &ProjectSearchPreviewRequest,
+    text: &str,
 ) -> Option<(String, usize, usize)> {
-    if request.byte_end < request.byte_start || request.byte_start < request.line_byte_start {
-        return None;
-    }
-    let mut file = std::fs::File::open(&request.path).ok()?;
-    file.seek(SeekFrom::Start(request.line_byte_start as u64))
-        .ok()?;
-    let mut bytes = Vec::new();
-    file.take(PROJECT_SEARCH_PREVIEW_LINE_CAP_BYTES)
-        .read_to_end(&mut bytes)
-        .ok()?;
-    let line_len = project_search_preview_line_len(&bytes);
-    bytes.truncate(line_len);
-    let line = std::str::from_utf8(&bytes).ok()?;
-    let local_start = request.byte_start.saturating_sub(request.line_byte_start);
-    let local_end = request.byte_end.saturating_sub(request.line_byte_start);
-    if local_start > line.len() {
-        return None;
-    }
-    Some(preview_line_with_match(line, local_start, local_end))
+    let (line_start, line_end) = project_search_line_bounds(text, request.start_line)?;
+    let line = text.get(line_start..line_end)?;
+    let local_start = utf16_column_to_byte(line, request.start_col);
+    let local_end = if request.end_line == request.start_line {
+        utf16_column_to_byte(line, request.end_col)
+    } else {
+        line.len()
+    };
+    Some(preview_line_with_match(
+        line,
+        local_start,
+        local_end.max(local_start),
+    ))
 }
 
-fn project_search_preview_line_len(bytes: &[u8]) -> usize {
-    let mut len = memchr::memchr(b'\n', bytes).unwrap_or(bytes.len());
-    if len > 0 && bytes.get(len - 1) == Some(&b'\r') {
-        len -= 1;
+fn project_search_line_bounds(text: &str, line: u32) -> Option<(usize, usize)> {
+    let mut start = 0usize;
+    for _ in 0..line {
+        let next = memchr::memchr(b'\n', text.as_bytes().get(start..)?)?;
+        start = start.saturating_add(next).saturating_add(1);
     }
-    len
+    let end = memchr::memchr(b'\n', text.as_bytes().get(start..)?)
+        .map(|offset| start + offset)
+        .unwrap_or(text.len());
+    Some((start, end))
+}
+
+fn utf16_column_to_byte(line: &str, column: u32) -> usize {
+    let mut utf16 = 0u32;
+    for (idx, ch) in line.char_indices() {
+        if utf16 >= column {
+            return idx;
+        }
+        utf16 = utf16.saturating_add(ch.len_utf16() as u32);
+    }
+    line.len()
 }
 
 fn visible_preview_row_range(
@@ -359,10 +396,58 @@ mod tests {
     }
 
     #[test]
-    fn project_search_preview_line_len_trims_newline_and_crlf() {
-        assert_eq!(project_search_preview_line_len(b"abc\nnext"), 3);
-        assert_eq!(project_search_preview_line_len(b"abc\r\nnext"), 3);
-        assert_eq!(project_search_preview_line_len(b"abc"), 3);
+    fn preview_line_bounds_follow_normalized_lines() {
+        assert_eq!(project_search_line_bounds("abc\nnext", 0), Some((0, 3)));
+        assert_eq!(project_search_line_bounds("abc\nnext", 1), Some((4, 8)));
+        assert_eq!(project_search_line_bounds("abc\n", 1), Some((4, 4)));
+        assert_eq!(project_search_line_bounds("abc", 1), None);
+    }
+
+    #[test]
+    fn preview_uses_utf16_columns_and_multiline_extent() {
+        let request = ProjectSearchPreviewRequest {
+            generation: 1,
+            key: ProjectSearchPreviewKey {
+                file_idx: 0,
+                match_idx: 0,
+            },
+            path: PathBuf::from("unused"),
+            start_line: 1,
+            start_col: 3,
+            end_line: 1,
+            end_col: 9,
+        };
+        let (preview, start, end) =
+            build_project_search_preview(&request, "first\na😀needle tail").unwrap();
+        assert_eq!(&preview[start..end], "needle");
+
+        let multiline = ProjectSearchPreviewRequest {
+            end_line: 2,
+            end_col: 2,
+            ..request
+        };
+        let (preview, start, end) =
+            build_project_search_preview(&multiline, "first\na😀needle tail\nxx").unwrap();
+        assert_eq!(&preview[start..end], "needle tail");
+    }
+
+    #[test]
+    fn preview_reader_decodes_utf16_and_normalizes_crlf() {
+        let path = std::env::temp_dir().join(format!(
+            "rriter_project_search_preview_{}_{}.txt",
+            std::process::id(),
+            crate::platform::CURRENT_PLATFORM as u8
+        ));
+        let format = crate::platform::TextFileFormat {
+            encoding: crate::platform::TextEncoding::Utf16Le,
+            line_ending: crate::platform::LineEnding::CrLf,
+        };
+        std::fs::write(&path, crate::platform::encode_text("first\nneedle", format)).unwrap();
+        assert_eq!(
+            read_project_search_preview_text(&path).as_deref(),
+            Some("first\nneedle")
+        );
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

@@ -21,12 +21,11 @@ impl App {
             return;
         }
 
-        let attrs = winit::window::Window::default_attributes()
+        let attrs = crate::platform::apply_window_attributes(winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
             .with_inner_size(winit::dpi::LogicalSize::new(660.0, 260.0))
-            .with_name("rriter", "rriter")
             .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
-            .with_resizable(false);
+            .with_resizable(false));
 
         if let Ok(window) = event_loop.create_window(attrs) {
             use glutin::display::GlDisplay;
@@ -69,6 +68,8 @@ impl App {
         }
 
         let path_to_close = self.file_path.take();
+        self.file_key = None;
+        self.text_file_format = crate::platform::TextFileFormat::default();
         let old_ext = self.file_extension.clone();
         self.base_title = "Добро пожаловать".to_string();
         let old_version = self.editor.version;
@@ -114,7 +115,7 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
         std::thread::spawn(move || {
-            let file = rfd::FileDialog::new().set_title("Открыть файл").pick_file();
+            let file = crate::platform::pick_file("Открыть файл");
             let _ = tx.send(file);
         });
     }
@@ -124,9 +125,7 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
         std::thread::spawn(move || {
-            let folder = rfd::FileDialog::new()
-                .set_title("Выбрать папку")
-                .pick_folder();
+            let folder = crate::platform::pick_folder("Выбрать папку");
             let _ = tx.send(folder);
         });
     }
@@ -136,10 +135,7 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
         std::thread::spawn(move || {
-            let file = rfd::FileDialog::new()
-                .set_title("Сохранить файл как...")
-                .set_file_name("Безымянный.txt")
-                .save_file();
+            let file = crate::platform::save_file("Сохранить файл как...", "Безымянный.txt");
             let _ = tx.send(file);
         });
     }
@@ -150,35 +146,10 @@ impl App {
         }
         if let Some(path) = self.file_path.clone() {
             let content = self.editor.get_full_text();
-            match std::fs::write(&path, &content) {
-                Ok(_) => {
-                    self.editor.mark_saved();
-                    self.save_tabs_state();
-                    return true;
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                    use std::io::Write;
-                    use std::process::{Command, Stdio};
-                    if let Ok(mut child) = Command::new("pkexec")
-                        .arg("tee")
-                        .arg(&path)
-                        .stdin(Stdio::piped())
-                        .stdout(Stdio::null())
-                        .spawn()
-                    {
-                        if let Some(mut stdin) = child.stdin.take() {
-                            let _ = stdin.write_all(content.as_bytes());
-                        }
-                        if let Ok(status) = child.wait() {
-                            if status.success() {
-                                self.editor.mark_saved();
-                                self.save_tabs_state();
-                                return true;
-                            }
-                        }
-                    }
-                }
-                Err(_) => {}
+            if self.write_current_text_to_path(&path, &content) {
+                self.editor.mark_saved();
+                self.save_tabs_state();
+                return true;
             }
         } else {
             self.trigger_save_as_picker();
@@ -186,8 +157,76 @@ impl App {
         false
     }
 
+    fn write_current_text_to_path(&self, path: &Path, content: &str) -> bool {
+        match crate::platform::write_text_file(path, content, self.text_file_format) {
+            Ok(()) => true,
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                crate::platform::write_text_file_elevated(
+                    path,
+                    content,
+                    self.text_file_format,
+                )
+                .is_ok()
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Saves to a new path and changes the active document identity only after
+    /// the replacement has completed successfully.
+    pub fn save_current_file_as(&mut self, path: PathBuf) -> bool {
+        if self.active_tab_is_git_diff() {
+            return false;
+        }
+
+        let requested_path = crate::platform::canonicalize_or_absolutize(&path);
+        let content = self.editor.get_full_text();
+        if !self.write_current_text_to_path(&requested_path, &content) {
+            return false;
+        }
+
+        let path = crate::platform::canonicalize_or_absolutize(&requested_path);
+        let old_path = self.file_path.clone();
+        let old_extension = self.file_extension.clone();
+        self.file_path = Some(path.clone());
+        self.file_key = Some(crate::platform::PathKey::new(&path));
+        self.base_title = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        self.file_extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        self.editor.mark_saved();
+
+        if self.is_ide_mode
+            && let Some(lsp) = &mut self.lsp
+        {
+            if let Some(old_path) = old_path.as_ref()
+                && !crate::platform::paths_equal(old_path, &path)
+            {
+                lsp.notify_close(old_path, &old_extension);
+            }
+            lsp.notify_open(
+                &path,
+                &self.file_extension,
+                &content,
+                self.editor.version as i32,
+            );
+        }
+
+        self.add_recent_file(path);
+        self.refresh_current_editor_git_base();
+        self.save_tabs_state();
+        self.start_file_watcher();
+        true
+    }
+
     pub fn add_recent_file(&mut self, path: PathBuf) {
-        self.recent_files.retain(|p| p != &path);
+        self.recent_files
+            .retain(|existing| !crate::platform::paths_equal(existing, &path));
         self.recent_files.insert(0, path);
         self.recent_files.truncate(10);
         crate::save_recent_files(&self.recent_files);
@@ -379,8 +418,10 @@ impl App {
         wait_highlight: bool,
         start_highlighter: bool,
     ) {
-        match std::fs::read_to_string(&path) {
-            Ok(content) => {
+        let path = crate::platform::canonicalize_or_absolutize(&path);
+        match crate::platform::read_text_file(&path) {
+            Ok(decoded) => {
+                let content = decoded.text;
                 self.show_welcome = false;
                 if add_to_history {
                     self.add_recent_file(path.clone());
@@ -391,6 +432,8 @@ impl App {
                 self.editor.version = old_version + 1;
                 self.editor.set_clean_text(&content);
                 self.file_path = Some(path.clone());
+                self.file_key = Some(crate::platform::PathKey::new(&path));
+                self.text_file_format = decoded.format;
                 self.refresh_current_editor_git_base();
                 let file_name = path.file_name().unwrap_or_default().to_string_lossy();
                 self.base_title = file_name.into_owned();
@@ -442,7 +485,8 @@ impl App {
                 self.save_tabs_state();
             }
             Err(_) => {
-                self.recent_files.retain(|p| p != &path);
+                self.recent_files
+                    .retain(|recent| !crate::platform::paths_equal(recent, &path));
                 crate::save_recent_files(&self.recent_files);
                 if let Some(w) = self.window.as_ref() {
                     w.request_redraw();
@@ -465,7 +509,8 @@ impl App {
                     EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) => None,
                 };
                 if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref()) {
-                    if let Ok(disk_text) = std::fs::read_to_string(path) {
+                    if let Ok(decoded) = crate::platform::read_text_file(path) {
+                        let disk_text = decoded.text;
                         if let EditorTabKind::GitDiff(_, state) = &tab.kind {
                             if disk_text != state.worktree_text {
                                 diff_reloads.push(idx);
@@ -482,6 +527,7 @@ impl App {
                             tab.editor.clear_history();
                             tab.editor.set_original_text();
                             tab.editor.sync_edits.clear();
+                            tab.text_file_format = decoded.format;
                             tab.completions.clear();
                             tab.foldable_ranges.clear();
                             tab.is_highlighted_once = false;
@@ -555,11 +601,12 @@ impl App {
         std::thread::spawn(move || {
             let mut changes = Vec::new();
             for (tab_idx, path) in clean_tabs {
-                if let Ok(disk_text) = std::fs::read_to_string(&path) {
+                if let Ok(decoded) = crate::platform::read_text_file(&path) {
                     changes.push(crate::app::ExternalFileChange {
                         tab_idx,
                         path,
-                        disk_text,
+                        disk_text: decoded.text,
+                        text_file_format: decoded.format,
                     });
                 }
             }
@@ -595,7 +642,12 @@ impl App {
                 continue;
             };
             if let EditorTabKind::GitDiff(meta, state) = &tab.kind {
-                if tab.editor.is_dirty() || meta.repo_root.join(&meta.rel_path) != change.path {
+                if tab.editor.is_dirty()
+                    || !crate::platform::paths_equal(
+                        &meta.repo_root.join(&meta.rel_path),
+                        &change.path,
+                    )
+                {
                     continue;
                 }
                 if change.disk_text != state.worktree_text {
@@ -604,7 +656,12 @@ impl App {
                 }
                 continue;
             }
-            if tab.file_path.as_ref() != Some(&change.path) || tab.editor.is_dirty() {
+            if !tab
+                .file_path
+                .as_deref()
+                .is_some_and(|path| crate::platform::paths_equal(path, &change.path))
+                || tab.editor.is_dirty()
+            {
                 continue;
             }
             if tab.editor.text_equals(&change.disk_text) {
@@ -618,6 +675,8 @@ impl App {
             tab.editor.clear_history();
             tab.editor.set_original_text();
             tab.editor.sync_edits.clear();
+            tab.text_file_format = change.text_file_format;
+            tab.file_key = Some(crate::platform::PathKey::new(&change.path));
             tab.completions.clear();
             tab.foldable_ranges.clear();
             tab.is_highlighted_once = false;

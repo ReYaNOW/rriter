@@ -8,9 +8,6 @@ edition = "2024"
 [dependencies]
 glow = "0.17.0"
 swash = "0.2.7"
-arboard = { version = "3.3", default-features = false, features = [
-    "wayland-data-control",
-] }
 bytemuck = "1.14"
 rustc-hash = "2.1.2"
 
@@ -19,10 +16,6 @@ image = { version = "0.25.1", default-features = false, features = ["png"] }
 resvg = { version = "0.47.0", default-features = false }
 usvg = { version = "0.47.0", default-features = false }
 tiny-skia = "0.12"
-rfd = { version = "0.17", default-features = false, features = [
-    "xdg-portal",
-    "pollster",
-] }
 
 # Синтаксическая подсветка
 tree-sitter = "0.26.9"
@@ -68,14 +61,13 @@ reqwest = { version = "0.12", default-features = false, features = [
     "json",
 ] }
 memmap2 = "0.9.10"
-io-uring = "0.7"
-libc = "0.2"
 alacritty_terminal = "0.26.0"
 portable-pty = "0.9.0"
 git2 = "0.20"
 
 [features]
 default = []
+linux-io-uring-bench = []
 linux-x11 = [
     "glutin/glx",
     "glutin/x11",
@@ -85,6 +77,15 @@ linux-x11 = [
 ]
 
 [target.'cfg(target_os = "linux")'.dependencies]
+arboard = { version = "3.3", default-features = false, features = [
+    "wayland-data-control",
+] }
+rfd = { version = "0.17", default-features = false, features = [
+    "xdg-portal",
+    "pollster",
+] }
+io-uring = "0.7"
+libc = "0.2"
 winit = { version = "0.30.13", default-features = false, features = [
     "wayland",
 ] }
@@ -98,13 +99,29 @@ glutin-winit = { version = "0.5.0", default-features = false, features = [
 ] }
 
 [target.'cfg(not(target_os = "linux"))'.dependencies]
+arboard = { version = "3.3", default-features = false }
+rfd = { version = "0.17", default-features = false }
 winit = "0.30.13"
 glutin = "0.32.3"
 glutin-winit = "0.5.0"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60.2", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [[bin]]
 name = "api_fetch_bench"
 path = "src/bin/api_fetch_bench.rs"
+
+[[bin]]
+name = "project_search_io_uring_bench"
+path = "src/bin/project_search_io_uring_bench.rs"
+required-features = ["linux-io-uring-bench"]
 
 [profile.release]
 opt-level = 3

@@ -60,6 +60,8 @@ impl App {
         if was_welcome && self.base_title == "Добро пожаловать" {
             self.base_title = "Безымянный".to_string();
             self.file_path = None;
+            self.file_key = None;
+            self.text_file_format = crate::platform::TextFileFormat::default();
         }
 
         self.ide_panel = crate::load_panel_state();
@@ -85,6 +87,8 @@ impl App {
             self.tabs.push(EditorTab {
                 editor: crate::editor::Editor::new(128),
                 file_path: self.file_path.clone(),
+                file_key: self.file_key.clone(),
+                text_file_format: self.text_file_format,
                 base_title: self.base_title.clone(),
                 file_extension: self.file_extension.clone(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -224,6 +228,11 @@ impl App {
             &mut self.tabs[ai].syntax_errors,
         );
         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
+        std::mem::swap(&mut self.file_key, &mut self.tabs[ai].file_key);
+        std::mem::swap(
+            &mut self.text_file_format,
+            &mut self.tabs[ai].text_file_format,
+        );
         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
         std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
         std::mem::swap(&mut self.scroll_y, &mut self.tabs[ai].scroll_y);
@@ -469,6 +478,8 @@ mod tests {
         EditorTab {
             editor: crate::editor::Editor::new(16),
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: "large.rs".to_string(),
             file_extension: "rs".to_string(),
             scroll_y: crate::scroll::ScrollState::new(15.0),

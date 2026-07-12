@@ -6,6 +6,7 @@ mod editor;
 mod highlighter;
 mod languages;
 mod lsp;
+mod platform;
 mod queries;
 mod render_view;
 mod renderer;
@@ -17,7 +18,6 @@ use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
-use arboard::Clipboard;
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -48,10 +48,7 @@ impl Default for Config {
 
 #[cfg(not(test))]
 fn rriter_config_dir() -> PathBuf {
-    let mut path = PathBuf::from(env::var_os("HOME").unwrap_or_default());
-    path.push(".config");
-    path.push("RRiter");
-    path
+    crate::platform::config_dir()
 }
 
 #[cfg(not(test))]
@@ -75,17 +72,18 @@ fn config_path() -> PathBuf {
 }
 
 fn parse_recent_files(content: &str) -> Vec<PathBuf> {
-    content
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(PathBuf::from)
-        .collect()
+    crate::platform::dedup_paths(content.lines().filter_map(|line| {
+        let line = line.strip_prefix("P\t").unwrap_or(line);
+        (!line.trim().is_empty())
+            .then(|| crate::platform::decode_persisted_path(line))
+            .flatten()
+    }))
 }
 
 fn format_recent_files(files: &[PathBuf]) -> String {
     files
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|path| format!("P\t{}", crate::platform::encode_persisted_path(path)))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -98,8 +96,8 @@ pub fn load_recent_files() -> Vec<PathBuf> {
 #[cfg(not(test))]
 pub fn load_recent_files() -> Vec<PathBuf> {
     let path = recent_files_path();
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        parse_recent_files(&content)
+    if let Ok(content) = crate::platform::read_text_file(&path) {
+        parse_recent_files(&content.text)
     } else {
         Vec::new()
     }
@@ -112,7 +110,10 @@ pub fn save_recent_files(_files: &[PathBuf]) {}
 pub fn save_recent_files(files: &[PathBuf]) {
     let dir = rriter_config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("recent.txt"), format_recent_files(files));
+    let _ = crate::platform::atomic_write(
+        &dir.join("recent.txt"),
+        format_recent_files(files).as_bytes(),
+    );
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -134,8 +135,12 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
         active = first.parse().unwrap_or(0);
     }
     for line in lines {
-        if line.is_empty() {
+        if line == "EMPTY" || line.is_empty() {
             tabs.push(OpenTabSnapshot::Empty);
+        } else if let Some(record) = line.strip_prefix("FILE\t") {
+            if let Some(path) = crate::platform::decode_persisted_path(record) {
+                tabs.push(OpenTabSnapshot::File(path));
+            }
         } else if let Some(rest) = line.strip_prefix("API\t") {
             let mut parts = rest.splitn(2, '\t');
             let spec_id = parts
@@ -156,7 +161,9 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
                 });
             }
         } else {
-            tabs.push(OpenTabSnapshot::File(PathBuf::from(line)));
+            if let Some(path) = crate::platform::decode_persisted_path(line) {
+                tabs.push(OpenTabSnapshot::File(path));
+            }
         }
     }
     (tabs, active)
@@ -188,8 +195,13 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
         crate::app::EditorTabKind::Normal => Some(
             tab.file_path
                 .as_ref()
-                .map(|p| p.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+                .map(|path| {
+                    format!(
+                        "FILE\t{}",
+                        crate::platform::encode_persisted_path(path)
+                    )
+                })
+                .unwrap_or_else(|| "EMPTY".to_string()),
         ),
         crate::app::EditorTabKind::ApiClient(meta, state) => {
             if matches!(
@@ -223,8 +235,8 @@ pub fn load_open_tabs(_is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
 #[cfg(not(test))]
 pub fn load_open_tabs(is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
     let path = open_tabs_path(is_ide);
-    if let Ok(content) = std::fs::read_to_string(&path) {
-        parse_open_tabs_content(&content)
+    if let Ok(content) = crate::platform::read_text_file(&path) {
+        parse_open_tabs_content(&content.text)
     } else {
         (Vec::new(), 0)
     }
@@ -237,9 +249,9 @@ pub fn save_open_tabs(_tabs: &[crate::app::EditorTab], _active_tab: usize, _is_i
 pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
     let dir = rriter_config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(
-        open_tabs_path(is_ide),
-        format_open_tabs_content(tabs, active_tab),
+    let _ = crate::platform::atomic_write(
+        &open_tabs_path(is_ide),
+        format_open_tabs_content(tabs, active_tab).as_bytes(),
     );
 }
 
@@ -328,7 +340,10 @@ pub fn save_panel_state(_state: &crate::app::IdePanelState) {}
 pub fn save_panel_state(state: &crate::app::IdePanelState) {
     let dir = rriter_config_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(panel_state_path(), format_panel_state_content(state));
+    let _ = crate::platform::atomic_write(
+        &panel_state_path(),
+        format_panel_state_content(state).as_bytes(),
+    );
 }
 
 fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
@@ -404,30 +419,31 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
 #[cfg(not(test))]
 pub fn load_panel_state() -> crate::app::IdePanelState {
     let path = panel_state_path();
-    match std::fs::read_to_string(&path) {
-        Ok(content) => parse_panel_state_content(&content),
+    match crate::platform::read_text_file(&path) {
+        Ok(content) => parse_panel_state_content(&content.text),
         Err(_) => crate::app::IdePanelState::default(),
     }
 }
 
 fn format_config_content(config: &Config) -> String {
-    let paths_str = config
+    let workspaces = config
         .ide_workspaces
         .iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .join("|");
-    let ignore_str = config.ide_ignore_patterns.join("|");
-    let content = format!(
-        "{{\n  \"window_width\": {:.1},\n  \"window_height\": {:.1},\n  \"maximized\": {},\n  \"ide_workspaces\": \"{}\",\n  \"ide_ignore_patterns\": \"{}\",\n  \"enable_telemetry\": {}\n}}\n",
-        config.window_width,
-        config.window_height,
-        config.maximized,
-        paths_str,
-        ignore_str,
-        config.enable_telemetry
-    );
-    content
+        .map(|path| crate::platform::encode_persisted_path(path))
+        .collect::<Vec<_>>();
+    let value = serde_json::json!({
+        "schema_version": 2,
+        "window_width": config.window_width,
+        "window_height": config.window_height,
+        "maximized": config.maximized,
+        "ide_workspaces": workspaces,
+        "ide_ignore_patterns": config.ide_ignore_patterns,
+        "enable_telemetry": config.enable_telemetry,
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&value).expect("config value is serializable")
+    )
 }
 
 #[cfg(test)]
@@ -439,60 +455,57 @@ pub fn save_config(config: &Config) {
     let _ = std::fs::create_dir_all(&dir);
     let path = config_path();
     let content = format_config_content(config);
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        if existing == content {
+    if let Ok(existing) = crate::platform::read_text_file(&path) {
+        if existing.text == content {
             return;
         }
     }
-    let _ = std::fs::write(&path, content);
+    let _ = crate::platform::atomic_write(&path, content.as_bytes());
 }
 
 fn parse_config_content(content: &str, mut config: Config) -> Config {
-    for line in content.lines() {
-        if line.contains("\"window_width\"") {
-            if let Some(val) = line.split(':').nth(1) {
-                if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
-                    config.window_width = v;
-                }
-            }
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
+        return config;
+    };
+    if let Some(value) = value.get("window_width").and_then(serde_json::Value::as_f64) {
+        config.window_width = value;
+    }
+    if let Some(value) = value.get("window_height").and_then(serde_json::Value::as_f64) {
+        config.window_height = value;
+    }
+    if let Some(value) = value.get("maximized").and_then(serde_json::Value::as_bool) {
+        config.maximized = value;
+    }
+    if let Some(value) = value.get("ide_workspaces") {
+        if let Some(values) = value.as_array() {
+            config.ide_workspaces = crate::platform::dedup_paths(
+                values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .filter_map(crate::platform::decode_persisted_path)
+                .collect::<Vec<_>>(),
+            );
+        } else if let Some(legacy) = value.as_str().filter(|value| !value.is_empty()) {
+            config.ide_workspaces =
+                crate::platform::dedup_paths(legacy.split('|').map(PathBuf::from));
         }
-        if line.contains("\"window_height\"") {
-            if let Some(val) = line.split(':').nth(1) {
-                if let Ok(v) = val.trim().trim_matches(',').parse::<f64>() {
-                    config.window_height = v;
-                }
-            }
+    }
+    if let Some(value) = value.get("ide_ignore_patterns") {
+        if let Some(values) = value.as_array() {
+            config.ide_ignore_patterns = values
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+        } else if let Some(legacy) = value.as_str().filter(|value| !value.is_empty()) {
+            config.ide_ignore_patterns = legacy.split('|').map(str::to_string).collect();
         }
-        if line.contains("\"maximized\"") {
-            if let Some(val) = line.split(':').nth(1) {
-                if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
-                    config.maximized = v;
-                }
-            }
-        }
-        if line.contains("\"ide_workspaces\"") {
-            if let Some(val) = line.split("\": \"").nth(1) {
-                let paths = val.trim().trim_matches(',').trim_matches('"');
-                if !paths.is_empty() {
-                    config.ide_workspaces = paths.split('|').map(PathBuf::from).collect();
-                }
-            }
-        }
-        if line.contains("\"ide_ignore_patterns\"") {
-            if let Some(val) = line.split("\": \"").nth(1) {
-                let pats = val.trim().trim_matches(',').trim_matches('"');
-                if !pats.is_empty() {
-                    config.ide_ignore_patterns = pats.split('|').map(|s| s.to_string()).collect();
-                }
-            }
-        }
-        if line.contains("\"enable_telemetry\"") {
-            if let Some(val) = line.split(':').nth(1) {
-                if let Ok(v) = val.trim().trim_matches(',').parse::<bool>() {
-                    config.enable_telemetry = v;
-                }
-            }
-        }
+    }
+    if let Some(value) = value
+        .get("enable_telemetry")
+        .and_then(serde_json::Value::as_bool)
+    {
+        config.enable_telemetry = value;
     }
     config
 }
@@ -513,8 +526,8 @@ fn load_config() -> Config {
 
     path.push("config.json");
     if path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&path) {
-            config = parse_config_content(&content, config);
+        if let Ok(content) = crate::platform::read_text_file(&path) {
+            config = parse_config_content(&content.text, config);
         }
     } else {
         // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
@@ -613,10 +626,22 @@ fn run_project_search_probe(args: &[String], idx: usize) {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
-    let path = PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config/kdeglobals");
+    let path = std::env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| {
+            PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config")
+        })
+        .join("kdeglobals");
     let content = std::fs::read_to_string(path).ok()?;
     parse_kde_color(&content, target_group, target_key)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_kde_color(_target_group: &str, _target_key: &str) -> Option<[f32; 4]> {
+    None
 }
 
 fn rayon_thread_cap(available: usize) -> usize {
@@ -748,6 +773,8 @@ mod tests {
         crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: path.map(PathBuf::from),
+            file_key: path.map(PathBuf::from).as_deref().map(crate::platform::PathKey::new),
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: path.unwrap_or("Безымянный").to_string(),
             file_extension: String::new(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -773,10 +800,9 @@ mod tests {
             recent,
             vec![PathBuf::from("/tmp/a.py"), PathBuf::from("rel.rs")]
         );
-        assert_eq!(
-            format_recent_files(&recent),
-            format!("{}{}{}", "/tmp/a.py", "\n", "rel.rs")
-        );
+        let formatted_recent = format_recent_files(&recent);
+        assert!(formatted_recent.lines().all(|line| line.starts_with("P\t")));
+        assert_eq!(parse_recent_files(&formatted_recent), recent);
 
         let (tabs, active) = parse_open_tabs_content("2\n/tmp/a.py\n\nrel.rs\n");
         assert_eq!(active, 2);
@@ -790,7 +816,78 @@ mod tests {
         );
 
         let formatted = format_open_tabs_content(&[tab(Some("/tmp/a.py")), tab(None)], 1);
-        assert_eq!(formatted, "1\n/tmp/a.py\n");
+        let (tabs, active) = parse_open_tabs_content(&formatted);
+        assert_eq!(active, 1);
+        assert_eq!(
+            tabs,
+            vec![
+                OpenTabSnapshot::File(PathBuf::from("/tmp/a.py")),
+                OpenTabSnapshot::Empty,
+            ]
+        );
+        assert!(formatted.lines().nth(1).unwrap().starts_with("FILE\t"));
+    }
+
+    #[test]
+    fn recent_open_tabs_and_config_preserve_delimiters_and_empty_arrays() {
+        let paths = vec![
+            PathBuf::from(r"C:\Work|spaces\tab\tname.py"),
+            PathBuf::from("relative\nname.rs"),
+        ];
+        let recent = format_recent_files(&paths);
+        assert_eq!(parse_recent_files(&recent), paths);
+
+        let formatted_tabs = format_open_tabs_content(
+            &[tab(Some(r"C:\Work|spaces\tab\tname.py")), tab(Some("relative\nname.rs"))],
+            1,
+        );
+        let (tabs, active) = parse_open_tabs_content(&formatted_tabs);
+        assert_eq!(active, 1);
+        assert_eq!(
+            tabs,
+            vec![
+                OpenTabSnapshot::File(PathBuf::from(r"C:\Work|spaces\tab\tname.py")),
+                OpenTabSnapshot::File(PathBuf::from("relative\nname.rs")),
+            ]
+        );
+
+        let mut defaults = Config::default();
+        defaults.ide_workspaces = vec![PathBuf::from("/keep")];
+        defaults.ide_ignore_patterns = vec!["keep".to_string()];
+        let parsed = parse_config_content(
+            r#"{
+  "ide_workspaces": [],
+  "ide_ignore_patterns": []
+}"#,
+            defaults,
+        );
+        assert!(parsed.ide_workspaces.is_empty());
+        assert!(parsed.ide_ignore_patterns.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn persisted_path_records_roundtrip_non_utf8_names() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let path = PathBuf::from(std::ffi::OsString::from_vec(vec![
+            b'/', b't', b'm', b'p', b'/', b'n', b'a', b'm', b'e', 0xff,
+        ]));
+        let recent = format_recent_files(&[path.clone()]);
+        assert_eq!(parse_recent_files(&recent), vec![path.clone()]);
+
+        let formatted = format_open_tabs_content(
+            &[crate::app::EditorTab {
+                file_path: Some(path.clone()),
+                file_key: Some(crate::platform::PathKey::new(&path)),
+                ..tab(None)
+            }],
+            0,
+        );
+        assert_eq!(
+            parse_open_tabs_content(&formatted).0,
+            vec![OpenTabSnapshot::File(path)]
+        );
     }
 
     #[test]
@@ -814,7 +911,19 @@ mod tests {
         );
 
         let formatted = format_open_tabs_content(&[tab(Some("/tmp/a.py")), api_tab], 1);
-        assert_eq!(formatted, "1\n/tmp/a.py\nAPI\t42\t7");
+        let (formatted_tabs, formatted_active) = parse_open_tabs_content(&formatted);
+        assert_eq!(formatted_active, 1);
+        assert_eq!(
+            formatted_tabs,
+            vec![
+                OpenTabSnapshot::File(PathBuf::from("/tmp/a.py")),
+                OpenTabSnapshot::Api {
+                    spec_id: crate::app::api_client::ApiSpecId(42),
+                    route_idx: Some(7),
+                    auth_view: false,
+                },
+            ]
+        );
 
         let (tabs, active) = parse_open_tabs_content("1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n");
         assert_eq!(active, 1);
@@ -1033,7 +1142,12 @@ mod tests {
 
         let formatted = format_config_content(&config);
         assert!(formatted.contains("\"window_width\": 1280.5"));
-        assert!(formatted.contains("\"ide_workspaces\": \"/tmp/a|rel\""));
+        let value: serde_json::Value = serde_json::from_str(&formatted).unwrap();
+        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["ide_workspaces"].as_array().unwrap().len(), 2);
+        let reparsed = parse_config_content(&formatted, Config::default());
+        assert_eq!(reparsed.ide_workspaces, config.ide_workspaces);
+        assert_eq!(reparsed.ide_ignore_patterns, config.ide_ignore_patterns);
 
         let color = parse_kde_color(
             "[Colors:Window]\nBackgroundNormal=1,2,3\n[Colors:Selection]\nBackgroundNormal=128,64,255\n",
@@ -1374,6 +1488,7 @@ fn main() {
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
     let mut file_path = None;
+    let mut text_file_format = crate::platform::TextFileFormat::default();
 
     let mut recent_files = load_recent_files();
 
@@ -1386,8 +1501,9 @@ fn main() {
                 .find(|a| *a != "--ide" && *a != "ide")
                 .unwrap()
         };
-        if let Ok(content) = std::fs::read_to_string(path) {
-            initial_text = content;
+        if let Ok(decoded) = crate::platform::read_text_file(std::path::Path::new(path)) {
+            initial_text = decoded.text;
+            text_file_format = decoded.format;
             let f_path = std::path::Path::new(path);
 
             let abs_path = std::fs::canonicalize(f_path).unwrap_or_else(|_| f_path.to_path_buf());
@@ -1401,7 +1517,7 @@ fn main() {
             }
 
             if scroll_bench_idx.is_none() {
-                recent_files.retain(|p| p != &abs_path);
+                recent_files.retain(|path| !crate::platform::paths_equal(path, &abs_path));
                 recent_files.insert(0, abs_path);
                 recent_files.truncate(10);
                 save_recent_files(&recent_files);
@@ -1479,6 +1595,9 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
 
     let show_welcome = !has_file_arg && !run_ide_on_startup;
 
+    let file_key = file_path
+        .as_deref()
+        .map(crate::platform::PathKey::new);
     let mut app = App {
         scroll_render_bench: scroll_bench_idx
             .map(|_| crate::app::ScrollRenderBench::new(scroll_bench_seconds)),
@@ -1493,10 +1612,12 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         tab_scroll: crate::scroll::ScrollState::new(15.0),
         renderer: None,
         editor,
-        clipboard: Clipboard::new().ok(),
+        clipboard: crate::platform::Clipboard::new().ok(),
         theme: load_dracula(),
         base_title: title,
         file_path,
+        file_key,
+        text_file_format,
         file_extension: ext,
         highlighter,
         last_sent_version: u64::MAX,

@@ -1017,7 +1017,10 @@ impl Renderer {
             );
         }
 
-        let collapsed = ide_panel.project_search.collapsed.contains(&file.path);
+        let collapsed = ide_panel
+            .project_search
+            .collapsed
+            .contains(&crate::platform::PathKey::new(&file.path));
         let arrow = if collapsed {
             crate::widgets::IconType::Up
         } else {

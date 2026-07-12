@@ -582,7 +582,10 @@ impl Renderer {
                             && !file_tree_overlay_open
                             && ui_registry.hovered()
                                 == Some(crate::ui_system::UiId::FileTreeNode(i));
-                        let is_selected = ide_panel.file_tree_selection.contains(&node.path);
+                        let is_selected = ide_panel
+                            .file_tree_selection
+                            .iter()
+                            .any(|path| crate::platform::paths_equal(path, &node.path));
 
                         if is_selected {
                             self.push_rect(

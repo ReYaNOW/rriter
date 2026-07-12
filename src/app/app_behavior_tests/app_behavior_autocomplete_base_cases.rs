@@ -1,5 +1,5 @@
 use super::*;
-use arboard::Clipboard;
+use crate::platform::Clipboard;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn test_theme() -> crate::renderer::Theme {
@@ -32,6 +32,8 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
     EditorTab {
         editor: editor_with(text),
         file_path: path.map(PathBuf::from),
+        file_key: path.map(PathBuf::from).as_deref().map(crate::platform::PathKey::new),
+        text_file_format: crate::platform::TextFileFormat::default(),
         base_title: title.to_string(),
         file_extension: path
             .and_then(|p| std::path::Path::new(p).extension())
@@ -72,6 +74,8 @@ fn test_app() -> Option<App> {
         theme: test_theme(),
         base_title: "Безымянный".to_string(),
         file_path: None,
+        file_key: None,
+        text_file_format: crate::platform::TextFileFormat::default(),
         file_extension: String::new(),
         highlighter: crate::highlighter::Highlighter::new(),
         last_sent_version: u64::MAX,

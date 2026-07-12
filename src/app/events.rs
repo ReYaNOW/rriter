@@ -12,7 +12,6 @@ use std::time::Instant;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowId};
 
@@ -347,15 +346,16 @@ impl ApplicationHandler for App {
             winit::window::Icon::from_rgba(icon_image.into_raw(), icon_w, icon_h).ok();
 
         let display_builder = DisplayBuilder::new().with_window_attributes(Some(
-            Window::default_attributes()
+            crate::platform::apply_window_attributes(
+                Window::default_attributes()
                 .with_title(format!("{} — RRiter", self.base_title))
                 .with_inner_size(winit::dpi::LogicalSize::new(
                     self.window_width,
                     self.window_height,
                 ))
-                .with_name("rriter", "rriter")
                 .with_window_icon(window_icon)
                 .with_transparent(false),
+            ),
         ));
 
         let (window_opt, gl_config) = display_builder

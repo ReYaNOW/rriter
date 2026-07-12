@@ -677,7 +677,10 @@ impl App {
             .map(|n| n.path.clone())
             .collect();
         for root in &roots {
-            if !existing_roots.contains(root) {
+            if !existing_roots
+                .iter()
+                .any(|existing| crate::platform::paths_equal(existing, root))
+            {
                 self.ide_panel.file_tree_expanded.insert(root.clone());
             }
         }
@@ -707,7 +710,7 @@ impl App {
                             self.ide_panel
                                 .file_tree_nodes
                                 .iter()
-                                .any(|node| node.path == *path)
+                                .any(|node| crate::platform::paths_equal(&node.path, path))
                         });
                         self.ide_panel.file_tree_nodes = nodes;
                         self.ide_panel
@@ -718,7 +721,7 @@ impl App {
                                 self.ide_panel
                                     .file_tree_nodes
                                     .iter()
-                                    .any(|node| node.path == *path)
+                                    .any(|node| crate::platform::paths_equal(&node.path, path))
                             })
                         {
                             reveal_path = selected_path;
@@ -750,7 +753,7 @@ impl App {
             .ide_panel
             .file_tree_nodes
             .iter()
-            .position(|node| node.path == path)
+            .position(|node| crate::platform::paths_equal(&node.path, path))
         else {
             return false;
         };
@@ -815,7 +818,9 @@ impl App {
             &self.ide_panel.file_tree_expanded,
             &open_dirs,
         );
-        if paths == self.file_tree_watched_dirs && self.file_tree_notify_rx.is_some() {
+        if path_lists_equal(&paths, &self.file_tree_watched_dirs)
+            && self.file_tree_notify_rx.is_some()
+        {
             return;
         }
         if let Some(stop_tx) = self.file_tree_watcher_stop_tx.take() {
@@ -844,7 +849,7 @@ impl App {
             return;
         }
         if node.is_expanded {
-            self.ide_panel.file_tree_expanded.remove(&node.path);
+            path_set_remove(&mut self.ide_panel.file_tree_expanded, &node.path);
         } else {
             self.ide_panel.file_tree_expanded.insert(node.path.clone());
         }
@@ -883,7 +888,7 @@ impl App {
 
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         if ctrl {
-            if !self.ide_panel.file_tree_selection.remove(&node.path) {
+            if !path_set_remove(&mut self.ide_panel.file_tree_selection, &node.path) {
                 self.ide_panel.file_tree_selection.insert(node.path.clone());
             }
         } else {
@@ -938,7 +943,7 @@ impl App {
         let target_idx = self.file_tree_node_at(mx, my);
         let target = target_idx.and_then(|idx| self.ide_panel.file_tree_nodes.get(idx).cloned());
         if let Some(node) = &target {
-            if !self.ide_panel.file_tree_selection.contains(&node.path) {
+            if !selection_contains_path(&self.ide_panel.file_tree_selection, &node.path) {
                 self.ide_panel.file_tree_selection.clear();
                 self.ide_panel.file_tree_selection.insert(node.path.clone());
             }
@@ -1148,7 +1153,7 @@ impl App {
             return;
         }
         let path = dialog.parent_dir.join(&name);
-        if path.exists() {
+        if crate::platform::path_entry_exists(&path) {
             dialog.error = Some("Уже существует".to_string());
             return;
         }
@@ -1202,6 +1207,7 @@ impl App {
                     .unwrap_or("")
                     .to_string();
                 self.file_path = Some(updated.clone());
+                self.file_key = Some(crate::platform::PathKey::new(&updated));
                 self.base_title = updated
                     .file_name()
                     .map(|name| name.to_string_lossy().into_owned())
@@ -1233,6 +1239,7 @@ impl App {
             if let Some(path) = tab.file_path.clone() {
                 if let Some(updated) = path_after_rename(&path, old_path, new_path) {
                     tab.file_path = Some(updated.clone());
+                    tab.file_key = Some(crate::platform::PathKey::new(&updated));
                     tab.base_title = updated
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
@@ -1246,9 +1253,27 @@ impl App {
             }
         }
 
-        if let Some(w) = self.window.as_ref() {
-            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-            w.request_redraw();
+        if remap_paths_after_rename(&mut self.recent_files, old_path, new_path) {
+            self.recent_files = crate::platform::dedup_paths(std::mem::take(&mut self.recent_files));
+            crate::save_recent_files(&self.recent_files);
+        }
+        remap_path_set_after_rename(&mut self.ide_panel.file_tree_selection, old_path, new_path);
+        remap_path_set_after_rename(&mut self.ide_panel.file_tree_expanded, old_path, new_path);
+        if let Some(clipboard) = &mut self.ide_panel.file_tree_clipboard {
+            remap_paths_after_rename(&mut clipboard.paths, old_path, new_path);
+            clipboard.paths = crate::platform::dedup_paths(std::mem::take(&mut clipboard.paths));
+        }
+        remap_paths_after_rename(&mut self.file_tree_watched_dirs, old_path, new_path);
+        for path in [
+            &mut self.autocomplete_pending_request_path, &mut self.autocomplete_detail_request_path,
+            &mut self.python_inlay_hint_path, &mut self.python_inlay_hint_pending_path,
+        ] {
+            remap_optional_path_after_rename(path, old_path, new_path);
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+            window.request_redraw();
         }
         self.save_tabs_state();
     }
@@ -1347,7 +1372,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_default_paste_dir(&self) -> Option<PathBuf> {
         for node in &self.ide_panel.file_tree_nodes {
-            if self.ide_panel.file_tree_selection.contains(&node.path) {
+            if selection_contains_path(&self.ide_panel.file_tree_selection, &node.path) {
                 if node.is_dir {
                     return Some(node.path.clone());
                 }
@@ -1421,12 +1446,7 @@ impl App {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| path.to_path_buf())
         };
-        #[cfg(target_os = "windows")]
-        let _ = std::process::Command::new("explorer").arg(folder).spawn();
-        #[cfg(target_os = "macos")]
-        let _ = std::process::Command::new("open").arg(folder).spawn();
-        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-        let _ = std::process::Command::new("xdg-open").arg(folder).spawn();
+        let _ = crate::platform::reveal_path(&folder);
     }
 
     pub(crate) fn show_path_in_file_tree(&mut self, path: &Path) {
@@ -1437,7 +1457,7 @@ impl App {
         let Some(workspace) = self
             .ide_workspaces
             .iter()
-            .find(|workspace| path.starts_with(workspace))
+            .find(|workspace| crate::platform::path_is_within(&path, workspace))
             .cloned()
         else {
             return;
@@ -1448,11 +1468,11 @@ impl App {
         let mut expansion_changed = false;
         let mut parent = path.parent();
         while let Some(dir) = parent {
-            if !dir.starts_with(&workspace) {
+            if !crate::platform::path_is_within(dir, &workspace) {
                 break;
             }
             expansion_changed |= self.ide_panel.file_tree_expanded.insert(dir.to_path_buf());
-            if dir == workspace {
+            if crate::platform::paths_equal(dir, &workspace) {
                 break;
             }
             parent = dir.parent();

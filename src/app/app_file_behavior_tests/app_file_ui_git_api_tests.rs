@@ -480,6 +480,8 @@ fn undo_redo_rebuilds_diff_decorations() {
     app.tabs.push(EditorTab {
         editor: editor_with(&text),
         file_path: None,
+        file_key: None,
+        text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "Diff: main.rs".to_string(),
         file_extension: "rs".to_string(),
         scroll_y: crate::scroll::ScrollState::new(15.0),

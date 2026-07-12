@@ -365,6 +365,8 @@ impl App {
                     self.open_new_tab();
                 } else {
                     self.file_path = None;
+                    self.file_key = None;
+                    self.text_file_format = crate::platform::TextFileFormat::default();
                     self.base_title = "Безымянный".to_string();
                     let old_version = self.editor.version;
                     self.editor = Editor::new(8192);
@@ -398,12 +400,7 @@ impl App {
 
             // Dialog
             UiId::DialogSave => {
-                if let Some(path) = self.file_path.clone() {
-                    let _ = std::fs::write(&path, self.editor.get_full_text());
-                    self.editor.set_original_text();
-                } else {
-                    self.trigger_save_as_picker();
-                }
+                let _ = self.save_current_file();
                 self.dialog_window = None;
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -1523,14 +1520,7 @@ impl App {
                 if let Some(href) =
                     crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_href.clone())
                 {
-                    #[cfg(target_os = "windows")]
-                    let _ = std::process::Command::new("cmd")
-                        .args(["/c", "start", "", &href])
-                        .spawn();
-                    #[cfg(target_os = "macos")]
-                    let _ = std::process::Command::new("open").arg(&href).spawn();
-                    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-                    let _ = std::process::Command::new("xdg-open").arg(&href).spawn();
+                    let _ = crate::platform::open_url(&href);
                 }
             }
             UiId::ProblemUrl(idx) => {
@@ -1538,18 +1528,7 @@ impl App {
                     if let Some(lsp) = &self.lsp {
                         if let Some(diag) = lsp.diagnostic_at(path, *diag_idx) {
                             if let Some(href) = &diag.code_href {
-                                #[cfg(target_os = "windows")]
-                                let _ = std::process::Command::new("cmd")
-                                    .args(["/c", "start", "", href.as_ref()])
-                                    .spawn();
-                                #[cfg(target_os = "macos")]
-                                let _ = std::process::Command::new("open")
-                                    .arg(href.as_ref())
-                                    .spawn();
-                                #[cfg(not(any(target_os = "windows", target_os = "macos")))]
-                                let _ = std::process::Command::new("xdg-open")
-                                    .arg(href.as_ref())
-                                    .spawn();
+                                let _ = crate::platform::open_url(href.as_ref());
                             }
                         }
                     }

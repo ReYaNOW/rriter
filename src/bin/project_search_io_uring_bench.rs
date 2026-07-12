@@ -1,3 +1,16 @@
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("project_search_io_uring_bench is available only on Linux");
+    std::process::exit(2);
+}
+
+#[cfg(target_os = "linux")]
+fn main() {
+    linux_impl::run();
+}
+
+#[cfg(target_os = "linux")]
+mod linux_impl {
 use io_uring::{IoUring, opcode, squeue, types};
 use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
@@ -55,7 +68,7 @@ const OP_OPEN: u64 = 0;
 const OP_READ: u64 = 1;
 const OP_CLOSE: u64 = 2;
 
-fn main() {
+pub(super) fn run() {
     let args = std::env::args().skip(1).collect::<Vec<_>>();
     let iters = args
         .first()
@@ -578,4 +591,6 @@ fn is_binary_by_extension(path: &Path) -> bool {
             | "obj"
             | "wasm"
     )
+}
+
 }

@@ -1,10 +1,12 @@
 use crate::editor::Editor;
+use crate::platform::{self, PathKey};
 use crate::scroll::ScrollState;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use grep_regex::RegexMatcherBuilder;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use memchr::memmem::Finder;
 use rustc_hash::FxHashSet;
+use std::borrow::Cow;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -169,7 +171,7 @@ pub struct ProjectSearchState {
     pub preview_pending: FxHashSet<project_search_preview::ProjectSearchPreviewKey>,
     pub results: Vec<ProjectSearchFile>,
     pub flat_rows: Vec<ProjectSearchFlatRow>,
-    pub collapsed: FxHashSet<PathBuf>,
+    pub collapsed: FxHashSet<PathKey>,
     pub scroll: ScrollState,
     pub(crate) query_scroll_y: ScrollState,
     pub(crate) query_scroll_x: ScrollState,
@@ -235,7 +237,7 @@ impl ProjectSearchState {
                 continue;
             }
             self.flat_rows.push(ProjectSearchFlatRow::File(file_idx));
-            if !self.collapsed.contains(&file.path) {
+            if !self.collapsed.contains(&PathKey::new(&file.path)) {
                 for match_idx in 0..file.matches.len() {
                     self.flat_rows
                         .push(ProjectSearchFlatRow::Match(file_idx, match_idx));
@@ -248,8 +250,9 @@ impl ProjectSearchState {
         let Some(path) = self.results.get(file_idx).map(|file| file.path.clone()) else {
             return;
         };
-        if !self.collapsed.remove(&path) {
-            self.collapsed.insert(path);
+        let key = PathKey::new(&path);
+        if !self.collapsed.remove(&key) {
+            self.collapsed.insert(key);
         }
         self.rebuild_flat_rows();
     }
@@ -1086,60 +1089,32 @@ fn search_project_file(
             return None;
         }
     };
+    let text = project_search_text(buf)?;
+    let mut ranges = Vec::new();
+    let scan_started = Instant::now();
     if unicode_case_fallback {
-        let Some(text) = project_search_text(buf) else {
-            return None;
-        };
-        let mut ranges = Vec::new();
-        let scan_started = Instant::now();
-        collect_unicode_case_insensitive_matches(text, needle, |start, end| {
+        collect_unicode_case_insensitive_matches(&text, needle, |start, end| {
             ranges.push((start, end));
             ranges.len() < room
         });
-        profile
-            .scan_ms
-            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
-        if ranges.is_empty() {
-            return None;
-        }
-        push_project_search_ranges(text, &ranges, &mut matches, profile);
     } else if case_sensitive {
-        let mut ranges = Vec::new();
-        let scan_started = Instant::now();
-        let Some(finder) = case_finder else {
-            return None;
-        };
-        for start in finder.find_iter(buf) {
+        let finder = case_finder?;
+        for start in finder.find_iter(text.as_bytes()) {
             ranges.push((start, start + needle.len()));
             if ranges.len() >= room {
                 break;
             }
         }
-        profile
-            .scan_ms
-            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
-        if ranges.is_empty() {
-            return None;
-        }
-        let Some(text) = project_search_text(buf) else {
-            return None;
-        };
-        push_project_search_ranges(text, &ranges, &mut matches, profile);
     } else {
-        let mut ranges = Vec::new();
-        let scan_started = Instant::now();
-        collect_ascii_case_insensitive_matches(buf, needle, room, &mut ranges);
-        profile
-            .scan_ms
-            .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
-        if ranges.is_empty() {
-            return None;
-        }
-        let Some(text) = project_search_text(buf) else {
-            return None;
-        };
-        push_project_search_ranges(text, &ranges, &mut matches, profile);
+        collect_ascii_case_insensitive_matches(text.as_bytes(), needle, room, &mut ranges);
     }
+    profile
+        .scan_ms
+        .fetch_add(elapsed_ms_u64(scan_started), Ordering::Relaxed);
+    if ranges.is_empty() {
+        return None;
+    }
+    push_project_search_ranges(&text, &ranges, &mut matches, profile);
     if matches.is_empty() {
         return None;
     }
@@ -1193,11 +1168,19 @@ fn search_project_file(
     })
 }
 
-fn project_search_text(buf: &[u8]) -> Option<&str> {
-    if memchr::memchr(b'\0', buf).is_some() {
+fn project_search_text(buf: &[u8]) -> Option<Cow<'_, str>> {
+    let has_text_bom = buf.starts_with(&[0xef, 0xbb, 0xbf])
+        || buf.starts_with(&[0xff, 0xfe])
+        || buf.starts_with(&[0xfe, 0xff]);
+    if !has_text_bom && memchr::memchr(b'\0', buf).is_some() {
         return None;
     }
-    std::str::from_utf8(buf).ok()
+    if !has_text_bom && memchr::memchr(b'\r', buf).is_none() {
+        return std::str::from_utf8(buf).ok().map(Cow::Borrowed);
+    }
+    platform::decode_text_bytes(buf)
+        .ok()
+        .map(|decoded| Cow::Owned(decoded.text))
 }
 
 fn collect_ascii_case_insensitive_matches(
@@ -1303,7 +1286,7 @@ impl SearchIgnoreMatcher {
         }
         let Some(rel) = workspaces
             .iter()
-            .find_map(|workspace| path.strip_prefix(workspace).ok())
+            .find_map(|workspace| platform::relative_to(path, workspace))
         else {
             return false;
         };
@@ -1518,41 +1501,50 @@ impl SearchPatternPlan {
             return false;
         };
         if !self.include_all && self.include_has_glob {
-            let prefix_match = self.include_roots.iter().any(|root| path.starts_with(root));
+            let prefix_match = self
+                .include_roots
+                .iter()
+                .any(|root| platform::path_is_within(path, root));
             let glob_match = self
                 .include_globs
                 .as_ref()
-                .is_some_and(|set| set.is_match(to_slash(rel)));
+                .is_some_and(|set| set.is_match(to_slash(&rel)));
             if !prefix_match && !glob_match {
                 return false;
             }
-        } else if !self.include_all && !self.include_roots.iter().any(|root| path.starts_with(root))
+        } else if !self.include_all
+            && !self
+                .include_roots
+                .iter()
+                .any(|root| platform::path_is_within(path, root))
         {
             return false;
         }
-        if !path.starts_with(workspace) {
+        if !platform::path_is_within(path, workspace) {
             return false;
         }
-        if self.exclude_roots.iter().any(|root| path.starts_with(root)) {
+        if self
+            .exclude_roots
+            .iter()
+            .any(|root| platform::path_is_within(path, root))
+        {
             return false;
         }
         if self
             .exclude_globs
             .as_ref()
-            .is_some_and(|set| set.is_match(to_slash(rel)))
+            .is_some_and(|set| set.is_match(to_slash(&rel)))
         {
             return false;
         }
         true
     }
 
-    fn workspace_relative<'a>(&'a self, path: &'a Path) -> Option<(&'a Path, &'a Path)> {
-        for workspace in &self.workspaces {
-            if let Ok(rel) = path.strip_prefix(workspace) {
-                return Some((workspace.as_path(), rel));
-            }
-        }
-        None
+    fn workspace_relative<'a>(&'a self, path: &Path) -> Option<(&'a Path, PathBuf)> {
+        self.workspaces.iter().find_map(|workspace| {
+            platform::relative_to(path, workspace)
+                .map(|relative| (workspace.as_path(), relative))
+        })
     }
 
     fn relative_display(&self, path: &Path) -> String {
@@ -1561,7 +1553,7 @@ impl SearchPatternPlan {
                 .file_name()
                 .and_then(|name| name.to_str())
                 .unwrap_or("workspace");
-            let rel = to_slash(rel);
+            let rel = to_slash(&rel);
             if rel.is_empty() {
                 workspace_name.to_string()
             } else {
@@ -1576,9 +1568,7 @@ impl SearchPatternPlan {
 fn normalized_workspaces(workspaces: &[PathBuf]) -> Vec<PathBuf> {
     let mut out = Vec::new();
     for workspace in workspaces {
-        let path = workspace
-            .canonicalize()
-            .unwrap_or_else(|_| workspace.to_path_buf());
+        let path = platform::canonicalize_or_absolutize(workspace);
         if path.is_dir() {
             push_unique_path(&mut out, path);
         }
@@ -1605,11 +1595,11 @@ fn expand_path_token(token: &str, workspaces: &[PathBuf]) -> Vec<PathBuf> {
         return Vec::new();
     }
     let raw = Path::new(token);
-    if raw.is_absolute() {
-        let path = raw.canonicalize().unwrap_or_else(|_| raw.to_path_buf());
+    if platform::is_absolute(raw) {
+        let path = platform::canonicalize_or_absolutize(raw);
         if workspaces
             .iter()
-            .any(|workspace| path.starts_with(workspace))
+            .any(|workspace| platform::path_is_within(&path, workspace))
         {
             return vec![path];
         }
@@ -1619,18 +1609,18 @@ fn expand_path_token(token: &str, workspaces: &[PathBuf]) -> Vec<PathBuf> {
     let rel = if rel == "." { "" } else { rel };
     workspaces
         .iter()
-        .map(|workspace| workspace.join(rel))
+        .map(|workspace| platform::canonicalize_or_absolutize(&workspace.join(rel)))
         .collect()
 }
 
 fn glob_patterns_for_token(token: &str, workspaces: &[PathBuf]) -> Vec<String> {
     let token = token.trim();
     let raw = Path::new(token);
-    if raw.is_absolute() {
+    if platform::is_absolute(raw) {
         let mut out = Vec::new();
         for workspace in workspaces {
-            if let Ok(rel) = raw.strip_prefix(workspace) {
-                let pattern = to_slash(rel);
+            if let Some(rel) = platform::relative_to(raw, workspace) {
+                let pattern = to_slash(&rel);
                 if !pattern.is_empty() {
                     out.push(pattern);
                 }
@@ -1645,7 +1635,10 @@ fn glob_patterns_for_token(token: &str, workspaces: &[PathBuf]) -> Vec<String> {
 }
 
 fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
-    if !paths.iter().any(|existing| existing == &path) {
+    if !paths
+        .iter()
+        .any(|existing| platform::paths_equal(existing, &path))
+    {
         paths.push(path);
     }
 }
@@ -1753,6 +1746,69 @@ mod tests {
         });
         assert_eq!(multi.total_matches, 1);
         assert_eq!(multi.files[0].matches[0].extra_lines, 1);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_search_preserves_positions_for_crlf_bom_and_utf16_files() {
+        let root = temp_workspace("text_formats");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("crlf.txt"), "zero\r\na😀needle\r\n").unwrap();
+        std::fs::write(
+            root.join("utf8_bom.txt"),
+            crate::platform::encode_text(
+                "zero\nneedle",
+                crate::platform::TextFileFormat {
+                    encoding: crate::platform::TextEncoding::Utf8Bom,
+                    line_ending: crate::platform::LineEnding::Lf,
+                },
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("utf16.txt"),
+            crate::platform::encode_text(
+                "zero\n😀needle",
+                crate::platform::TextFileFormat {
+                    encoding: crate::platform::TextEncoding::Utf16Le,
+                    line_ending: crate::platform::LineEnding::CrLf,
+                },
+            ),
+        )
+        .unwrap();
+
+        let result = run_project_search(ProjectSearchRequest {
+            generation: 7,
+            query: "needle".to_string(),
+            include: ".".to_string(),
+            exclude: String::new(),
+            case_sensitive: true,
+            workspaces: vec![root.clone()],
+            ignore_patterns: Vec::new(),
+        });
+
+        assert_eq!(result.error, None);
+        assert_eq!(result.total_matches, 3);
+        let by_name = |name: &str| {
+            result
+                .files
+                .iter()
+                .find(|file| file.path.file_name().and_then(|part| part.to_str()) == Some(name))
+                .and_then(|file| file.matches.first())
+                .unwrap()
+        };
+        let crlf = by_name("crlf.txt");
+        assert_eq!((crlf.start_line, crlf.start_col, crlf.end_col), (1, 3, 9));
+        let utf8_bom = by_name("utf8_bom.txt");
+        assert_eq!(
+            (utf8_bom.start_line, utf8_bom.start_col, utf8_bom.end_col),
+            (1, 0, 6)
+        );
+        let utf16 = by_name("utf16.txt");
+        assert_eq!(
+            (utf16.start_line, utf16.start_col, utf16.end_col),
+            (1, 2, 8)
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

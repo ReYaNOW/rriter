@@ -105,6 +105,7 @@ impl GitDiffState {
 pub struct GitDiffPayload {
     pub base_text: String,
     pub worktree_text: String,
+    pub worktree_format: crate::platform::TextFileFormat,
 }
 
 #[derive(Clone, Debug)]
@@ -354,7 +355,12 @@ pub fn rollback_hunk_text(current_new_text: &str, hunk: &DiffHunk) -> String {
     next
 }
 
-fn read_head_blob(repo: &git2::Repository, rel_path: &str) -> Result<String, String> {
+fn decode_git_text(bytes: &[u8], source: &str) -> Result<crate::platform::DecodedTextFile, String> {
+    crate::platform::decode_text_bytes(bytes)
+        .map_err(|error| format!("{source}: {error}"))
+}
+
+fn read_head_blob(repo: &git2::Repository, rel_path: &Path) -> Result<String, String> {
     let head = match repo.head() {
         Ok(head) => head,
         Err(_) => return Ok(String::new()),
@@ -362,7 +368,7 @@ fn read_head_blob(repo: &git2::Repository, rel_path: &str) -> Result<String, Str
     let tree = head
         .peel_to_tree()
         .map_err(|err| format!("HEAD tree: {}", err.message()))?;
-    let entry = match tree.get_path(Path::new(rel_path)) {
+    let entry = match tree.get_path(rel_path) {
         Ok(entry) => entry,
         Err(_) => return Ok(String::new()),
     };
@@ -372,37 +378,45 @@ fn read_head_blob(repo: &git2::Repository, rel_path: &str) -> Result<String, Str
     let blob = object
         .peel_to_blob()
         .map_err(|err| format!("HEAD blob: {}", err.message()))?;
-    Ok(String::from_utf8_lossy(blob.content()).into_owned())
+    Ok(decode_git_text(blob.content(), "HEAD blob")?.text)
 }
 
 pub(crate) fn load_head_text_for_worktree_path(abs_path: &Path) -> Option<String> {
     let repo = git2::Repository::discover(abs_path).ok()?;
     let repo_root = repo.workdir()?.to_path_buf();
-    let rel_path = abs_path.strip_prefix(&repo_root).ok()?;
-    let rel_path = rel_path.to_string_lossy();
+    let rel_path = crate::platform::relative_to(abs_path, &repo_root)?;
     read_head_blob(&repo, &rel_path).ok()
 }
 
-fn read_index_blob(repo: &git2::Repository, rel_path: &str) -> Result<Option<String>, String> {
+fn read_index_blob(
+    repo: &git2::Repository,
+    rel_path: &Path,
+) -> Result<Option<crate::platform::DecodedTextFile>, String> {
     let index = repo.index().map_err(|err| err.message().to_string())?;
-    let Some(entry) = index.get_path(Path::new(rel_path), 0) else {
+    let Some(entry) = index.get_path(rel_path, 0) else {
         return Ok(None);
     };
     let blob = repo
         .find_blob(entry.id)
         .map_err(|err| format!("index blob: {}", err.message()))?;
-    Ok(Some(String::from_utf8_lossy(blob.content()).into_owned()))
+    Ok(Some(decode_git_text(blob.content(), "index blob")?))
 }
 
 fn read_worktree_or_index(
     repo: &git2::Repository,
     repo_root: &Path,
-    rel_path: &str,
-) -> Result<String, String> {
+    rel_path: &Path,
+) -> Result<crate::platform::DecodedTextFile, String> {
     let path = repo_root.join(rel_path);
-    match std::fs::read_to_string(path) {
-        Ok(text) => Ok(text),
-        Err(_) => Ok(read_index_blob(repo, rel_path)?.unwrap_or_default()),
+    match crate::platform::read_text_file(&path) {
+        Ok(decoded) => Ok(decoded),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(read_index_blob(repo, rel_path)?.unwrap_or(crate::platform::DecodedTextFile {
+                text: String::new(),
+                format: crate::platform::TextFileFormat::default(),
+            }))
+        }
+        Err(error) => Err(format!("worktree file {}: {error}", path.display())),
     }
 }
 
@@ -423,22 +437,33 @@ fn load_git_diff_with_side(
     staged: bool,
 ) -> Result<GitDiffPayload, String> {
     let repo = git2::Repository::open(&repo_root).map_err(|err| err.message().to_string())?;
-    let old_path = old_rel_path.as_deref().unwrap_or(rel_path.as_str());
+    let rel_path = Path::new(&rel_path);
+    let old_path = old_rel_path
+        .as_deref()
+        .map(Path::new)
+        .unwrap_or(rel_path);
     let base_text = if matches!(status, GitFileStatus::Added | GitFileStatus::Untracked) {
         String::new()
     } else {
         read_head_blob(&repo, old_path)?
     };
-    let worktree_text = if matches!(status, GitFileStatus::Deleted) {
-        String::new()
+    let worktree = if matches!(status, GitFileStatus::Deleted) {
+        crate::platform::DecodedTextFile {
+            text: String::new(),
+            format: crate::platform::TextFileFormat::default(),
+        }
     } else if staged {
-        read_index_blob(&repo, &rel_path)?.unwrap_or_default()
+        read_index_blob(&repo, rel_path)?.unwrap_or(crate::platform::DecodedTextFile {
+            text: String::new(),
+            format: crate::platform::TextFileFormat::default(),
+        })
     } else {
-        read_worktree_or_index(&repo, &repo_root, &rel_path)?
+        read_worktree_or_index(&repo, &repo_root, rel_path)?
     };
     Ok(GitDiffPayload {
         base_text,
-        worktree_text,
+        worktree_text: worktree.text,
+        worktree_format: worktree.format,
     })
 }
 
@@ -501,7 +526,12 @@ impl App {
                 workspace
                     .files
                     .iter()
-                    .find(|file| repo_root.join(file.rel_path.as_ref()) == abs_path)
+                    .find(|file| {
+                        crate::platform::paths_equal(
+                            &repo_root.join(file.rel_path.as_ref()),
+                            &abs_path,
+                        )
+                    })
                     .cloned()
                     .map(|file| (repo_root.clone(), file))
             })
@@ -516,7 +546,7 @@ impl App {
         if !self
             .ide_workspaces
             .iter()
-            .any(|workspace| abs_path.starts_with(workspace))
+            .any(|workspace| crate::platform::path_is_within(&abs_path, workspace))
         {
             return None;
         }
@@ -584,7 +614,7 @@ impl App {
 
         if let Some(idx) = self.tabs.iter().position(|tab| match &tab.kind {
             EditorTabKind::GitDiff(existing, _) => {
-                existing.repo_root == meta.repo_root
+                crate::platform::paths_equal(&existing.repo_root, &meta.repo_root)
                     && existing.rel_path == meta.rel_path
                     && existing.old_rel_path == meta.old_rel_path
             }
@@ -606,6 +636,8 @@ impl App {
         let tab = EditorTab {
             editor: new_editor_with_text(&state.displayed_text, version),
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: title,
             file_extension: Path::new(file.rel_path.as_ref())
                 .extension()
@@ -683,7 +715,7 @@ impl App {
                 .find(|workspace| workspace.workspace_idx == meta.workspace_idx)
                 .and_then(|workspace| {
                     let repo_root = workspace.repo_root.as_ref()?;
-                    if repo_root != &meta.repo_root {
+                    if !crate::platform::paths_equal(repo_root, &meta.repo_root) {
                         return None;
                     }
                     workspace.files.iter().find(|file| {
@@ -771,9 +803,15 @@ impl App {
         }) else {
             return;
         };
-        let mut state = match event.result {
-            Ok(payload) => build_diff_view(payload.base_text, payload.worktree_text),
-            Err(err) => GitDiffState::error(err, event.version),
+        let (mut state, worktree_format) = match event.result {
+            Ok(payload) => (
+                build_diff_view(payload.base_text, payload.worktree_text),
+                payload.worktree_format,
+            ),
+            Err(err) => (
+                GitDiffState::error(err, event.version),
+                crate::platform::TextFileFormat::default(),
+            ),
         };
         state.version = event.version;
         let text = state.displayed_text.clone();
@@ -781,6 +819,7 @@ impl App {
             *tab_state = state;
         }
         if tab_idx == self.active_tab {
+            self.text_file_format = worktree_format;
             self.editor.set_text_preserve_history(&text);
             self.editor.clear_history();
             self.editor.set_original_text();
@@ -789,6 +828,7 @@ impl App {
             self.scroll_x.current = 0.0;
             self.scroll_x.target = 0.0;
         } else {
+            self.tabs[tab_idx].text_file_format = worktree_format;
             self.tabs[tab_idx].editor = new_editor_with_text(&text, event.version);
             self.tabs[tab_idx].spans.clear();
             self.tabs[tab_idx].is_highlighted_once = false;
@@ -1097,6 +1137,7 @@ impl App {
                 GitDiffPayload {
                     base_text,
                     worktree_text: current_text,
+                    worktree_format: self.text_file_format,
                 },
                 self.file_extension.clone(),
                 target_hunk.after_start,
@@ -1482,76 +1523,19 @@ impl App {
         };
         let text = extract_worktree_text(&self.editor.get_full_text(), &line_kinds);
         let path = repo_root.join(rel_path);
-        match std::fs::write(path, text) {
-            Ok(()) => {
-                self.editor.mark_saved();
-                self.refresh_git_panel();
-                true
+        if self.write_current_text_to_path(&path, &text) {
+            self.editor.mark_saved();
+            if let Some(state) = self.active_git_diff_state_mut() {
+                state.worktree_text = text;
             }
-            Err(_) => false,
+            self.refresh_git_panel();
+            true
+        } else {
+            false
         }
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn git_diff_build_added_deleted_modified_order() {
-        let state = build_diff_view(
-            "same\nold\nremove\n".to_string(),
-            "same\nnew\nadd\n".to_string(),
-        );
-        assert_eq!(state.displayed_text, "same\nold\nremove\nnew\nadd\n");
-        assert_eq!(
-            state.line_kinds,
-            vec![
-                DiffLineKind::Context,
-                DiffLineKind::ModifiedOld,
-                DiffLineKind::ModifiedOld,
-                DiffLineKind::ModifiedNew,
-                DiffLineKind::ModifiedNew,
-            ]
-        );
-    }
-
-    #[test]
-    fn git_diff_rollback_added_deletes_new_lines() {
-        let state = build_diff_view("a\n".to_string(), "a\nb\n".to_string());
-        let hunk = state.hunks.first().unwrap();
-        assert_eq!(rollback_hunk_text(&state.worktree_text, hunk), "a\n");
-    }
-
-    #[test]
-    fn git_diff_rollback_deleted_restores_old_lines() {
-        let state = build_diff_view("a\nb\n".to_string(), "a\n".to_string());
-        let hunk = state.hunks.first().unwrap();
-        assert_eq!(rollback_hunk_text(&state.worktree_text, hunk), "a\nb\n");
-    }
-
-    #[test]
-    fn git_diff_rollback_modified_replaces_new_with_old() {
-        let state = build_diff_view("a\nold\n".to_string(), "a\nnew\n".to_string());
-        let hunk = state.hunks.first().unwrap();
-        assert_eq!(rollback_hunk_text(&state.worktree_text, hunk), "a\nold\n");
-    }
-
-    #[test]
-    fn inline_diff_hunk_match_prefers_line_ranges() {
-        let state = build_diff_view(
-            "a\nold\nb\nbefore\n".to_string(),
-            "a\nnew\nb\nafter\n".to_string(),
-        );
-        let target = LineDiffHunk {
-            before_start: 3,
-            before_end: 4,
-            after_start: 3,
-            after_end: 4,
-        };
-        assert_eq!(
-            App::inline_diff_hunk_index_for_target(&state, target, 0),
-            Some(1)
-        );
-    }
-}
+#[path = "git_diff_tests.rs"]
+mod tests;

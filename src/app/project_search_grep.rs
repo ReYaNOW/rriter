@@ -9,7 +9,7 @@ use std::time::Instant;
 use super::{
     PROJECT_SEARCH_FILE_CAP_BYTES, PROJECT_SEARCH_FILE_RESULT_CAP, PROJECT_SEARCH_MATCH_CAP,
     ProjectSearchFile, ProjectSearchMatch, SearchCaps, SearchPatternPlan, SearchProfile,
-    elapsed_ms_u64, is_definitely_binary_project_search_file,
+    elapsed_ms_u64, is_definitely_binary_project_search_file, utf16_units_between,
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -236,13 +236,37 @@ fn push_line_match(
         byte_end: line_start_abs.saturating_add(end),
         line_byte_start: line_start_abs,
         start_line: line_number,
-        start_col: 0,
+        start_col: utf16_units_between(line, 0, start),
         end_line: line_number,
-        end_col: 0,
+        end_col: utf16_units_between(line, 0, end),
         preview: String::new(),
         preview_match_start: 0,
         preview_match_end: 0,
         preview_ready: false,
         extra_lines: 0,
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grep_match_tracks_utf16_columns_and_crlf_disk_offsets() {
+        let mut matches = Vec::new();
+        push_line_match("a😀needle", 9, 4, 5, 11, &mut matches);
+        let mat = &matches[0];
+        assert_eq!(mat.byte_start, 14);
+        assert_eq!(mat.byte_end, 20);
+        assert_eq!(mat.start_line, 4);
+        assert_eq!(mat.start_col, 3);
+        assert_eq!(mat.end_col, 9);
+    }
+
+    #[test]
+    fn trim_line_term_handles_lf_crlf_and_unterminated_lines() {
+        assert_eq!(trim_project_search_line_term(b"abc\n"), b"abc");
+        assert_eq!(trim_project_search_line_term(b"abc\r\n"), b"abc");
+        assert_eq!(trim_project_search_line_term(b"abc"), b"abc");
+    }
 }

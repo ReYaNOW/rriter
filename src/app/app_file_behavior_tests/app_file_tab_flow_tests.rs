@@ -15,6 +15,10 @@ fn closing_definition_tab_resets_transient_editor_state() {
     app.tabs.push(EditorTab {
         editor: editor_with("box.id"),
         file_path: Some(PathBuf::from("/tmp/main.py")),
+        file_key: Some(crate::platform::PathKey::new(std::path::Path::new(
+            "/tmp/main.py",
+        ))),
+        text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "main.py".to_string(),
         file_extension: "py".to_string(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -35,6 +39,10 @@ fn closing_definition_tab_resets_transient_editor_state() {
     app.tabs.push(EditorTab {
         editor: editor_with("class BoxReadPublic:\n    id: int\n"),
         file_path: Some(PathBuf::from("/tmp/output.py")),
+        file_key: Some(crate::platform::PathKey::new(std::path::Path::new(
+            "/tmp/output.py",
+        ))),
+        text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "output.py".to_string(),
         file_extension: "py".to_string(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -396,6 +404,128 @@ fn file_loading_saving_and_missing_file_cleanup_update_state_without_window() {
 
     std::fs::remove_file(path).ok();
     std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn file_open_and_atomic_save_preserve_encoding_bom_and_line_endings() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-text-format-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let formats = [
+        (
+            "utf8-bom.txt",
+            crate::platform::TextFileFormat {
+                encoding: crate::platform::TextEncoding::Utf8Bom,
+                line_ending: crate::platform::LineEnding::CrLf,
+            },
+        ),
+        (
+            "utf16-le.txt",
+            crate::platform::TextFileFormat {
+                encoding: crate::platform::TextEncoding::Utf16Le,
+                line_ending: crate::platform::LineEnding::CrLf,
+            },
+        ),
+        (
+            "utf16-be.txt",
+            crate::platform::TextFileFormat {
+                encoding: crate::platform::TextEncoding::Utf16Be,
+                line_ending: crate::platform::LineEnding::Cr,
+            },
+        ),
+    ];
+
+    for (name, format) in formats {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            crate::platform::encode_text("first\n😀second\n", format),
+        )
+        .unwrap();
+
+        app.load_file_internal(path.clone(), false, false);
+        assert_eq!(app.editor.get_full_text(), "first\n😀second\n");
+        assert_eq!(app.text_file_format, format);
+        assert_eq!(app.file_key, Some(crate::platform::PathKey::new(&path)));
+
+        app.editor = editor_with("first\n😀changed\n");
+        app.file_path = Some(path.clone());
+        app.file_key = Some(crate::platform::PathKey::new(&path));
+        assert!(app.save_current_file());
+
+        let decoded = crate::platform::read_text_file(&path).unwrap();
+        assert_eq!(decoded.text, "first\n😀changed\n");
+        assert_eq!(decoded.format, format);
+    }
+
+    let leftovers = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|entry| entry.file_name().to_string_lossy().contains("rriter-tmp"))
+        .count();
+    assert_eq!(leftovers, 0);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn save_as_changes_document_identity_only_after_successful_atomic_write() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-save-as-transaction-test-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let old_path = dir.join("old.txt");
+    std::fs::write(&old_path, "old\n").unwrap();
+    app.file_path = Some(old_path.clone());
+    app.file_key = Some(crate::platform::PathKey::new(&old_path));
+    app.base_title = "old.txt".to_string();
+    app.file_extension = "txt".to_string();
+    app.text_file_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Utf16Le,
+        line_ending: crate::platform::LineEnding::CrLf,
+    };
+    app.editor = editor_with("new\n😀value\n");
+
+    let missing_target = dir.join("missing").join("new.md");
+    assert!(!app.save_current_file_as(missing_target.clone()));
+    assert_eq!(app.file_path.as_deref(), Some(old_path.as_path()));
+    assert_eq!(app.file_key, Some(crate::platform::PathKey::new(&old_path)));
+    assert_eq!(app.base_title, "old.txt");
+    assert_eq!(app.file_extension, "txt");
+    assert!(!missing_target.exists());
+
+    let target = dir.join("new.md");
+    assert!(app.save_current_file_as(target.clone()));
+    let target = crate::platform::canonicalize_or_absolutize(&target);
+    assert_eq!(app.file_path.as_deref(), Some(target.as_path()));
+    assert_eq!(app.file_key, Some(crate::platform::PathKey::new(&target)));
+    assert_eq!(app.base_title, "new.md");
+    assert_eq!(app.file_extension, "md");
+    assert!(!app.editor.is_dirty());
+    assert_eq!(app.recent_files.first(), Some(&target));
+    let decoded = crate::platform::read_text_file(&target).unwrap();
+    assert_eq!(decoded.text, "new\n😀value\n");
+    assert_eq!(decoded.format, app.text_file_format);
+
+    std::fs::remove_dir_all(dir).ok();
 }
 
 #[test]

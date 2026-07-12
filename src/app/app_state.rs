@@ -1,7 +1,6 @@
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
-use arboard::Clipboard;
 use glutin::context::PossiblyCurrentContext;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -36,6 +35,8 @@ impl ScrollRenderBench {
 pub struct EditorTab {
     pub editor: crate::editor::Editor,
     pub file_path: Option<PathBuf>,
+    pub file_key: Option<crate::platform::PathKey>,
+    pub text_file_format: crate::platform::TextFileFormat,
     pub base_title: String,
     pub file_extension: String,
     pub scroll_y: crate::scroll::ScrollState,
@@ -81,6 +82,7 @@ pub struct ExternalFileChange {
     pub tab_idx: usize,
     pub path: PathBuf,
     pub disk_text: String,
+    pub text_file_format: crate::platform::TextFileFormat,
 }
 
 #[derive(Clone, Debug)]
@@ -841,10 +843,12 @@ pub struct App {
     pub tab_scroll: crate::scroll::ScrollState,
     pub renderer: Option<Renderer>,
     pub editor: Editor,
-    pub clipboard: Option<Clipboard>,
+    pub clipboard: Option<crate::platform::Clipboard>,
     pub theme: Theme,
     pub base_title: String,
     pub file_path: Option<PathBuf>,
+    pub file_key: Option<crate::platform::PathKey>,
+    pub text_file_format: crate::platform::TextFileFormat,
 
     pub file_extension: String,
     pub highlighter: Highlighter,

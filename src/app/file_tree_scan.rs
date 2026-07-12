@@ -34,7 +34,7 @@ struct GitignoreCacheEntry {
 }
 
 static GITIGNORE_CACHE: once_cell::sync::Lazy<
-    std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, GitignoreCacheEntry>>,
+    std::sync::Mutex<rustc_hash::FxHashMap<crate::platform::PathKey, GitignoreCacheEntry>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
 
 fn trim_rasterized_icon_cache(
@@ -99,13 +99,13 @@ fn gitignore_fingerprint(gitignore_path: &Path) -> GitignoreFingerprint {
 }
 
 fn trim_gitignore_cache(
-    cache: &mut rustc_hash::FxHashMap<PathBuf, GitignoreCacheEntry>,
-    keep_root: &Path,
+    cache: &mut rustc_hash::FxHashMap<crate::platform::PathKey, GitignoreCacheEntry>,
+    keep_root: &crate::platform::PathKey,
 ) {
     while cache.len() >= GITIGNORE_CACHE_LIMIT {
         let victim = cache
             .keys()
-            .find(|path| path.as_path() != keep_root)
+            .find(|path| *path != keep_root)
             .cloned();
         let Some(victim) = victim else {
             break;
@@ -115,11 +115,12 @@ fn trim_gitignore_cache(
 }
 
 pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignore> {
+    let root_key = crate::platform::PathKey::new(root);
     let gitignore_path = root.join(".gitignore");
     let fingerprint = gitignore_fingerprint(&gitignore_path);
 
     if let Ok(cache) = GITIGNORE_CACHE.lock() {
-        if let Some(entry) = cache.get(root) {
+        if let Some(entry) = cache.get(&root_key) {
             if entry.fingerprint == fingerprint {
                 return Arc::clone(&entry.gitignore);
             }
@@ -137,9 +138,9 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
     );
 
     if let Ok(mut cache) = GITIGNORE_CACHE.lock() {
-        trim_gitignore_cache(&mut cache, root);
+        trim_gitignore_cache(&mut cache, &root_key);
         cache.insert(
-            root.to_path_buf(),
+            root_key,
             GitignoreCacheEntry {
                 fingerprint,
                 gitignore: Arc::clone(&gitignore),
@@ -230,13 +231,14 @@ pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(Stri
         for entry in entries.flatten() {
             let path = entry.path();
             let name = entry.file_name();
-            let name_str = name.to_string_lossy();
 
             // Игнорируем только самую тяжелую папку .git.
             // Остальные (типа .env, .idea) показываем.
-            if name_str == ".git" {
+            if os_name_is_git_dir(&name, crate::platform::CURRENT_PLATFORM) {
                 continue;
             }
+
+            let name_str = name.to_string_lossy();
 
             let is_dir = entry
                 .file_type()
@@ -262,6 +264,17 @@ pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(Stri
     }
 
     (dirs, files)
+}
+
+fn os_name_is_git_dir(
+    name: &std::ffi::OsStr,
+    platform: crate::platform::PlatformKind,
+) -> bool {
+    if platform == crate::platform::PlatformKind::Windows {
+        name.as_encoded_bytes().eq_ignore_ascii_case(b".git")
+    } else {
+        name == std::ffi::OsStr::new(".git")
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +349,9 @@ fn push_scan_dir_nodes(
                 depth,
                 is_root,
             }) => {
-                let is_expanded = expanded.contains(&path);
+                let is_expanded = expanded
+                    .iter()
+                    .any(|expanded_path| crate::platform::paths_equal(expanded_path, &path));
                 let icon_key = crate::app::file_icons::folder_icon_key_for_name(&name);
                 let is_ignored = if is_root {
                     false
@@ -507,6 +522,20 @@ pub fn spawn_scan(
 }
 
 pub(super) fn path_has_git_dir(path: &std::path::Path) -> bool {
+    path_has_git_dir_for_platform(path, crate::platform::CURRENT_PLATFORM)
+}
+
+fn path_has_git_dir_for_platform(
+    path: &std::path::Path,
+    platform: crate::platform::PlatformKind,
+) -> bool {
+    if platform == crate::platform::PlatformKind::Windows {
+        return path
+            .as_os_str()
+            .as_encoded_bytes()
+            .split(|byte| matches!(byte, b'/' | b'\\'))
+            .any(|component| component.eq_ignore_ascii_case(b".git"));
+    }
     path.components().any(|component| {
         matches!(component, Component::Normal(name) if name == std::ffi::OsStr::new(".git"))
     })
@@ -518,16 +547,22 @@ pub(super) fn notify_paths_need_file_tree_refresh<'a>(
     paths.into_iter().any(|path| !path_has_git_dir(path))
 }
 
-fn push_watch_path(path: &Path, seen: &mut FxHashSet<PathBuf>, out: &mut Vec<PathBuf>) {
-    if seen.insert(path.to_path_buf()) {
+fn push_watch_path(
+    path: &Path,
+    platform: crate::platform::PlatformKind,
+    seen: &mut FxHashSet<crate::platform::PathKey>,
+    out: &mut Vec<PathBuf>,
+) {
+    if seen.insert(crate::platform::PathKey::for_platform(path, platform)) {
         out.push(path.to_path_buf());
     }
 }
 
-pub(crate) fn build_file_tree_watch_paths(
+fn build_file_tree_watch_paths_for_platform(
     roots: &[PathBuf],
     expanded_dirs: &FxHashSet<PathBuf>,
     open_file_parent_dirs: &[PathBuf],
+    platform: crate::platform::PlatformKind,
 ) -> Vec<PathBuf> {
     let mut seen = FxHashSet::default();
     let mut out = Vec::with_capacity(
@@ -538,26 +573,39 @@ pub(crate) fn build_file_tree_watch_paths(
     );
 
     for root in roots {
-        push_watch_path(root, &mut seen, &mut out);
+        push_watch_path(root, platform, &mut seen, &mut out);
     }
     let mut expanded = expanded_dirs
         .iter()
         .filter(|dir| {
-            roots
-                .iter()
-                .any(|root| *dir == root || dir.starts_with(root))
+            roots.iter().any(|root| {
+                crate::platform::path_is_within_for_platform(dir, root, platform)
+            })
         })
         .collect::<Vec<_>>();
     expanded.sort();
     for dir in expanded {
-        push_watch_path(dir, &mut seen, &mut out);
+        push_watch_path(dir, platform, &mut seen, &mut out);
     }
     let mut open_dirs = open_file_parent_dirs.iter().collect::<Vec<_>>();
     open_dirs.sort();
     for dir in open_dirs {
-        push_watch_path(dir, &mut seen, &mut out);
+        push_watch_path(dir, platform, &mut seen, &mut out);
     }
     out
+}
+
+pub(crate) fn build_file_tree_watch_paths(
+    roots: &[PathBuf],
+    expanded_dirs: &FxHashSet<PathBuf>,
+    open_file_parent_dirs: &[PathBuf],
+) -> Vec<PathBuf> {
+    build_file_tree_watch_paths_for_platform(
+        roots,
+        expanded_dirs,
+        open_file_parent_dirs,
+        crate::platform::CURRENT_PLATFORM,
+    )
 }
 
 /// Запускает фоновый поток watcher-а через `notify-debouncer-mini`.
@@ -647,6 +695,54 @@ mod tests {
             paths,
             vec![root.clone(), root.join("src"), PathBuf::from("/tmp"),]
         );
+    }
+
+    #[test]
+    fn windows_git_paths_and_watch_keys_are_case_insensitive() {
+        assert!(path_has_git_dir_for_platform(
+            Path::new(r"C:\Work\.GIT\index"),
+            crate::platform::PlatformKind::Windows,
+        ));
+        assert!(!path_has_git_dir_for_platform(
+            Path::new(r"C:\Work\not.git\index"),
+            crate::platform::PlatformKind::Windows,
+        ));
+
+        let roots = vec![PathBuf::from(r"C:\Work")];
+        let mut expanded = FxHashSet::default();
+        expanded.insert(PathBuf::from(r"c:/work"));
+        expanded.insert(PathBuf::from(r"C:\WORK\src"));
+        let open_dirs = vec![
+            PathBuf::from(r"c:\work\SRC"),
+            PathBuf::from(r"D:\shared"),
+        ];
+        let paths = build_file_tree_watch_paths_for_platform(
+            &roots,
+            &expanded,
+            &open_dirs,
+            crate::platform::PlatformKind::Windows,
+        );
+
+        assert_eq!(paths.len(), 3);
+        assert!(crate::platform::paths_equal(&paths[0], &roots[0]) || paths[0] == roots[0]);
+        let keys = paths
+            .iter()
+            .map(|path| {
+                crate::platform::PathKey::for_platform(
+                    path,
+                    crate::platform::PlatformKind::Windows,
+                )
+            })
+            .collect::<FxHashSet<_>>();
+        assert_eq!(keys.len(), paths.len());
+        assert!(keys.contains(&crate::platform::PathKey::for_platform(
+            Path::new(r"C:\work\src"),
+            crate::platform::PlatformKind::Windows,
+        )));
+        assert!(keys.contains(&crate::platform::PathKey::for_platform(
+            Path::new(r"D:\shared"),
+            crate::platform::PlatformKind::Windows,
+        )));
     }
 
     #[test]

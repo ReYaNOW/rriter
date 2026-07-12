@@ -10,6 +10,8 @@ impl App {
             self.editor = crate::editor::Editor::new(8192);
             self.editor.version = old_version + 1;
             self.file_path = None;
+            self.file_key = None;
+            self.text_file_format = crate::platform::TextFileFormat::default();
             self.base_title = "Безымянный".to_string();
             self.file_extension = String::new();
 
@@ -18,6 +20,8 @@ impl App {
             self.tabs.push(EditorTab {
                 editor: tab_editor,
                 file_path: None,
+                file_key: None,
+                text_file_format: crate::platform::TextFileFormat::default(),
                 base_title: String::new(),
                 file_extension: String::new(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -54,6 +58,8 @@ impl App {
         let new_tab = EditorTab {
             editor: new_editor,
             file_path: None,
+            file_key: None,
+            text_file_format: crate::platform::TextFileFormat::default(),
             base_title: "Безымянный".to_string(),
             file_extension: String::new(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -214,6 +220,8 @@ impl App {
         wait_highlight: bool,
         start_highlighter: bool,
     ) {
+        let path = crate::platform::canonicalize_or_absolutize(&path);
+        let path_key = crate::platform::PathKey::new(&path);
         if !self.is_ide_mode {
             if start_highlighter {
                 self.load_file_internal(path, add_to_history, wait_highlight);
@@ -226,15 +234,23 @@ impl App {
         let mut matching_tab = None;
         for (i, tab) in self.tabs.iter().enumerate() {
             if i == self.active_tab {
-                if self.file_path.as_ref() == Some(&path) {
+                if self.file_key.as_ref() == Some(&path_key)
+                    || self
+                        .file_path
+                        .as_deref()
+                        .is_some_and(|open| crate::platform::paths_equal(open, &path))
+                {
                     matching_tab = Some(i);
                     break;
                 }
-            } else {
-                if tab.file_path.as_ref() == Some(&path) {
-                    matching_tab = Some(i);
-                    break;
-                }
+            } else if tab.file_key.as_ref() == Some(&path_key)
+                || tab
+                    .file_path
+                    .as_deref()
+                    .is_some_and(|open| crate::platform::paths_equal(open, &path))
+            {
+                matching_tab = Some(i);
+                break;
             }
         }
 
@@ -304,7 +320,7 @@ impl App {
     }
 
     fn abs_path_for_workspace(&self, path: &Path) -> PathBuf {
-        if path.is_absolute() {
+        if crate::platform::is_absolute(path) {
             path.to_path_buf()
         } else if let Some(ws) = self.ide_workspaces.first() {
             ws.join(path)
@@ -321,7 +337,11 @@ impl App {
 
     fn path_is_open_in_tabs(&self, path: &Path) -> bool {
         let abs_path = self.abs_path_for_workspace(path);
-        if self.current_abs_path().as_ref() == Some(&abs_path) {
+        if self
+            .current_abs_path()
+            .as_deref()
+            .is_some_and(|current| crate::platform::paths_equal(current, &abs_path))
+        {
             return true;
         }
         self.tabs.iter().enumerate().any(|(i, tab)| {
@@ -329,7 +349,12 @@ impl App {
                 && tab
                     .file_path
                     .as_ref()
-                    .is_some_and(|p| self.abs_path_for_workspace(p) == abs_path)
+                    .is_some_and(|p| {
+                        crate::platform::paths_equal(
+                            &self.abs_path_for_workspace(p),
+                            &abs_path,
+                        )
+                    })
         })
     }
 
@@ -501,7 +526,11 @@ impl App {
             return;
         };
         let source_range = crate::app::mouse::hover_token_bounds(&self.editor, byte_offset);
-        if self.ctrl_definition.source_path.as_ref() == Some(&source_path)
+        if self
+            .ctrl_definition
+            .source_path
+            .as_deref()
+            .is_some_and(|path| crate::platform::paths_equal(path, &source_path))
             && self.ctrl_definition.source_range == Some(source_range)
         {
             return;
@@ -539,7 +568,10 @@ impl App {
         let target = target?;
         let source_path = self.ctrl_definition.source_path.as_ref()?;
         let source_range = self.ctrl_definition.source_range?;
-        if self.abs_path_for_workspace(&target.path) == *source_path {
+        if crate::platform::paths_equal(
+            &self.abs_path_for_workspace(&target.path),
+            source_path,
+        ) {
             let text = self.editor.get_full_text();
             let target_offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
             if target_offset >= source_range.0 && target_offset <= source_range.1 {

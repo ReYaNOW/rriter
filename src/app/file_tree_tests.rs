@@ -445,6 +445,30 @@ fn file_tree_trash_single_path_and_restore_roundtrip() {
 }
 
 #[test]
+fn file_tree_managed_trash_metadata_restores_paths_without_utf8_assumptions() {
+    let root = test_root("file_tree_managed_trash");
+    let _ = std::fs::remove_dir_all(&root);
+    let workspace = root.join("workspace");
+    let files_dir = root.join("trash").join("files");
+    let info_dir = root.join("trash").join("info");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&files_dir).unwrap();
+    std::fs::create_dir_all(&info_dir).unwrap();
+    let path = workspace.join("booking.py");
+    std::fs::write(&path, "box\n").unwrap();
+
+    let entry = trash_single_path_with_layout(&path, &files_dir, &info_dir, false).unwrap();
+    let info = std::fs::read_to_string(&entry.info_path).unwrap();
+    assert!(info.contains("[RRiter Trash]"));
+    assert!(info.contains("Path=rriter-path-v1:"));
+    assert!(!path.exists());
+
+    assert_eq!(restore_trash_entries(&[entry]).unwrap(), vec![path.clone()]);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "box\n");
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
     assert_eq!(
         FileTreeMenuAction::CopyRelativePath.label(),
@@ -528,6 +552,74 @@ fn file_tree_copy_move_delete_paths_end_to_end() {
 }
 
 #[test]
+fn file_tree_prunes_duplicate_and_nested_paths_before_batch_operations() {
+    let root = PathBuf::from("/tmp/ws");
+    let paths = vec![
+        root.join("src/main.rs"),
+        root.join("src"),
+        root.join("src/main.rs"),
+        root.join("tests"),
+    ];
+
+    assert_eq!(
+        prune_nested_paths(&paths),
+        vec![root.join("src"), root.join("tests")]
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn file_tree_copy_preserves_symlinks_without_following_cycles() {
+    use std::os::unix::fs::symlink;
+
+    let root = test_root("file_tree_symlink_copy");
+    let _ = std::fs::remove_dir_all(&root);
+    let source = root.join("source");
+    let destination = root.join("destination");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("value.txt"), "value").unwrap();
+    symlink(".", source.join("cycle")).unwrap();
+
+    copy_path_recursive(&source, &destination).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join("value.txt")).unwrap(),
+        "value"
+    );
+    assert!(std::fs::symlink_metadata(destination.join("cycle"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(
+        std::fs::read_link(destination.join("cycle")).unwrap(),
+        PathBuf::from(".")
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn file_tree_copy_supports_non_utf8_file_names() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let root = test_root("file_tree_non_utf8_copy");
+    let _ = std::fs::remove_dir_all(&root);
+    let source = root.join("source");
+    let destination = root.join("destination");
+    std::fs::create_dir_all(&source).unwrap();
+    let name = std::ffi::OsString::from_vec(vec![b'n', b'a', b'm', b'e', 0xff]);
+    std::fs::write(source.join(&name), "value").unwrap();
+
+    copy_path_recursive(&source, &destination).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(destination.join(&name)).unwrap(),
+        "value"
+    );
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
 fn file_tree_rename_path_updates_file_and_rejects_workspace_root() {
     let root = test_root("file_tree_rename");
     let _ = std::fs::remove_dir_all(&root);
@@ -591,4 +683,43 @@ fn file_tree_selected_paths_preserve_visible_tree_order() {
         selected_paths(&[], &FxHashSet::default(), &root),
         vec![root]
     );
+}
+
+#[test]
+fn file_tree_cross_volume_move_removes_staging_on_success() {
+    let root = test_root("file_tree_cross_volume_move_success");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.txt");
+    let destination = root.join("destination.txt");
+    std::fs::write(&source, "value").unwrap();
+
+    cross_volume_move(&source, &destination).unwrap();
+
+    assert!(!source.exists());
+    assert_eq!(std::fs::read_to_string(&destination).unwrap(), "value");
+    assert!(!std::fs::read_dir(&root)
+        .unwrap()
+        .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".rriter-move-")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn file_tree_cross_volume_move_restores_source_after_copy_failure() {
+    let root = test_root("file_tree_cross_volume_move_rollback");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.txt");
+    let destination = root.join("missing").join("destination.txt");
+    std::fs::write(&source, "value").unwrap();
+
+    let error = cross_volume_move(&source, &destination).unwrap_err();
+
+    assert!(!error.is_empty());
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "value");
+    assert!(!destination.exists());
+    assert!(!std::fs::read_dir(&root)
+        .unwrap()
+        .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".rriter-move-")));
+    let _ = std::fs::remove_dir_all(root);
 }

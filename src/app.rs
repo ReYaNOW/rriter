@@ -33,7 +33,6 @@ use python_completion::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use winit::event_loop::ActiveEventLoop;
-use winit::platform::wayland::WindowAttributesExtWayland;
 use winit::window::Window;
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);

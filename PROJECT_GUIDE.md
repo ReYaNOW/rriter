@@ -26,9 +26,30 @@ src/bin/project_search_grep_searcher_bench.rs
 src/bin/project_search_io_uring_bench.rs
 ```
 
-These standalone Cargo binaries benchmark project substring search backends against fixed IDE workspaces without spawning external search processes.
+These standalone Cargo binaries benchmark project substring search backends against fixed IDE workspaces without spawning external search processes. The `io_uring` binary is Linux-only and is built only with the `linux-io-uring-bench` feature; it must not enter Windows or macOS all-target builds.
 
 ## 2. Core architecture
+
+### Platform and filesystem boundary
+
+Files:
+
+```text
+src/platform.rs
+src/platform/windows.rs
+src/platform/tests.rs
+```
+
+`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, executable discovery, Trash layout, atomic replacement, text-file decoding/encoding, and path identity.
+
+Important invariants:
+
+* Keep the original `PathBuf` for filesystem calls and user-visible spelling.
+* Use `PathKey` for equality, deduplication, containment caches, open tabs, watchers, and workspaces. Windows keys are case-insensitive WTF-16 and understand drive, UNC, and extended-length prefixes.
+* Persist paths with `encode_persisted_path`/`decode_persisted_path`; never serialize arbitrary paths as lossy UTF-8.
+* Editor text is normalized to LF internally, while `TextFileFormat` preserves UTF-8/BOM/UTF-16 and the original LF/CRLF/CR style on save.
+* Mutable state files and editor saves use sibling-temp atomic replacement. Do not add direct `fs::write` paths for persisted application state.
+* Linux-specific Wayland, XDG, FreeDesktop Trash, and `io_uring` behavior stays behind target gates. `src/platform/windows.rs` owns non-lossy Windows path normalization and extended-length Win32 paths.
 
 ### Text engine
 
@@ -287,6 +308,15 @@ Main coding-agent rules.
 
 This architecture guide.
 
+### `src/platform.rs` and `src/platform/*`
+
+Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, and process-launch primitives.
+
+* `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling.
+* `src/platform/tests.rs` -> platform/path/text/atomic-write regression tests that can run on Linux, plus target-gated Windows tests.
+
+Use these APIs instead of introducing platform checks or lossy path strings in feature modules.
+
 ### `src/main.rs`
 
 Application entrypoint.
@@ -322,6 +352,8 @@ Large app files use thin include shells to keep source chunks small:
 * `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
 * `src/app/app_file_behavior_tests/*` -> file/tab flow, IDE definition jumps, UI/Git/API cases.
 * `src/app/git_panel/*` -> Git panel types, `App` graph/actions, graph helpers, status/tests.
+* `src/app/git_diff.rs` -> diff loading/render state and format-preserving worktree save flow.
+* `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, CRLF, and invalid-text regressions.
 
 ### `src/app/app_state.rs`
 

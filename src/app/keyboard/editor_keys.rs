@@ -252,6 +252,8 @@ impl App {
                     self.tabs.clear();
                     self.active_tab = 0;
                     self.file_path = None;
+                    self.file_key = None;
+                    self.text_file_format = crate::platform::TextFileFormat::default();
                     self.base_title = "Добро пожаловать".to_string();
                     self.editor = Editor::new(8192);
                     self.editor.set_original_text();
