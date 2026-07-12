@@ -82,6 +82,9 @@ pub enum UiId {
     ApiRouteFilterClear,
     ApiRouteTag(usize),
     ApiRouteRow(usize),
+    ApiRoutePathText(usize),
+    ApiRouteSummaryText(usize),
+    ApiRouteDescriptionText(usize),
     ApiServerSelect(usize),
     ApiAuthValue(usize),
     ApiAuthRefreshToken(usize),
@@ -537,6 +540,29 @@ impl UiRegistry {
         hovered
     }
 
+    /// Регистрирует выделяемую текстовую область.
+    pub fn register_text_region(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+
+        self.elements.push(UiElement::Rect { id, x, y, w, h });
+
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = false;
+            self.wants_text = true;
+        }
+        hovered
+    }
+
     /// Регистрирует область-блокировщик: поглощает клики, но не меняет курсор.
     /// Используется для непрозрачных панелей, перекрывающих редактор.
     pub fn register_blocker(
@@ -676,6 +702,24 @@ mod tests {
         assert!(registry.register_text_input(UiId::SearchInput, 5.0, 5.0, 50.0, 20.0, 10.0, 10.0));
         assert_eq!(registry.find_at(10.0, 10.0), Some(UiId::SearchInput));
         assert!(registry.wants_text());
+        assert_eq!(registry.cursor_code(), 2);
+
+        registry.reset_cursor_state();
+        assert!(registry.register_text_region(
+            UiId::ApiRouteDescriptionText(3),
+            0.0,
+            0.0,
+            100.0,
+            40.0,
+            10.0,
+            10.0,
+        ));
+        assert_eq!(
+            registry.find_at(10.0, 10.0),
+            Some(UiId::ApiRouteDescriptionText(3))
+        );
+        assert!(registry.wants_text());
+        assert!(!registry.wants_pointer());
         assert_eq!(registry.cursor_code(), 2);
 
         registry.mark_overlay_start();

@@ -55,6 +55,16 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     (content_h + pad + 36.0 * scale - visible_h).max(0.0)
 }
 
+pub(crate) fn api_route_description_height(text: &str, scale: f32) -> f32 {
+    text.split('\n')
+        .map(|line| match api_description_line_parts(line.trim_end_matches('\r')).0 {
+            ApiDescriptionLineKind::Heading => 25.0 * scale,
+            ApiDescriptionLineKind::ListItem => 20.0 * scale,
+            ApiDescriptionLineKind::Text => 19.0 * scale,
+        })
+        .sum()
+}
+
 pub fn api_tab_max_scroll(
     model: Option<&ApiSpecModel>,
     tab_state: &ApiClientTabState,
@@ -105,6 +115,9 @@ pub fn api_tab_max_scroll(
     let mut content_h = pad + 42.0 * scale;
     if !route.summary.is_empty() {
         content_h += 30.0 * scale;
+    }
+    if !route.description.trim().is_empty() {
+        content_h += api_route_description_height(&route.description, scale) + 8.0 * scale;
     }
     content_h += 558.0 * scale;
     content_h += 28.0 * scale;

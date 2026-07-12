@@ -152,6 +152,7 @@ pub(crate) fn api_route_matches_filter(
         route.path.as_str(),
         route.tag.as_str(),
         route.summary.as_str(),
+        route.description.as_str(),
         route.operation_id.as_str(),
         route.method.chip_str(),
     ]
@@ -191,12 +192,239 @@ pub struct ApiRouteRow {
     pub method: ApiMethod,
     pub path: String,
     pub summary: String,
+    pub description: String,
     pub operation_id: String,
     pub security: Option<Vec<ApiSecurityRequirement>>,
     pub path_params: Vec<ApiParam>,
     pub query_params: Vec<ApiParam>,
     pub request_body: Option<ApiRequestBody>,
     pub responses: Vec<ApiResponseSummary>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApiRouteTextField {
+    Path,
+    Summary,
+    Description,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ApiRouteTextSelection {
+    pub(crate) field: ApiRouteTextField,
+    pub(crate) anchor: usize,
+    pub(crate) cursor: usize,
+    pub(crate) selecting: bool,
+}
+
+impl ApiRouteTextSelection {
+    pub(crate) fn range(self, text: &str) -> Option<(usize, usize)> {
+        let start = self.anchor.min(self.cursor).min(text.len());
+        let end = self.anchor.max(self.cursor).min(text.len());
+        if start >= end || !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+            None
+        } else {
+            Some((start, end))
+        }
+    }
+}
+
+pub(crate) fn api_route_selected_text<'a>(
+    selection: ApiRouteTextSelection,
+    text: &'a str,
+) -> Option<&'a str> {
+    let (start, end) = selection.range(text)?;
+    text.get(start..end)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApiDescriptionLineKind {
+    Text,
+    Heading,
+    ListItem,
+}
+
+pub(crate) const API_DESCRIPTION_LIST_MARKER: &str = "•";
+pub(crate) const API_DESCRIPTION_LIST_MARKER_INDENT: f32 = 10.0;
+pub(crate) const API_DESCRIPTION_LIST_CONTENT_INDENT: f32 = 26.0;
+
+pub(crate) fn api_description_line_color(
+    kind: ApiDescriptionLineKind,
+    primary: [f32; 4],
+) -> [f32; 4] {
+    match kind {
+        ApiDescriptionLineKind::Text
+        | ApiDescriptionLineKind::Heading
+        | ApiDescriptionLineKind::ListItem => primary,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ApiDescriptionInlineKind {
+    Text,
+    Bold,
+    Code,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ApiDescriptionInlineSpan<'a> {
+    pub(crate) kind: ApiDescriptionInlineKind,
+    pub(crate) text: &'a str,
+    pub(crate) source_start: usize,
+    pub(crate) source_end: usize,
+}
+
+pub(crate) struct ApiDescriptionInlineSpans<'a> {
+    text: &'a str,
+    cursor: usize,
+    bold: bool,
+}
+
+impl<'a> Iterator for ApiDescriptionInlineSpans<'a> {
+    type Item = ApiDescriptionInlineSpan<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.cursor < self.text.len() {
+            if self.text[self.cursor..].starts_with("**") {
+                if self.bold {
+                    self.bold = false;
+                    self.cursor += 2;
+                    continue;
+                }
+                if self.text[self.cursor + 2..].contains("**") {
+                    self.bold = true;
+                    self.cursor += 2;
+                    continue;
+                }
+            }
+
+            if self.text.as_bytes()[self.cursor] == b'`' {
+                let delimiter_len = self.text.as_bytes()[self.cursor..]
+                    .iter()
+                    .take_while(|byte| **byte == b'`')
+                    .count();
+                let content_start = self.cursor + delimiter_len;
+                let delimiter = &self.text[self.cursor..content_start];
+                if let Some(relative_end) = self.text[content_start..].find(delimiter) {
+                    let content_end = content_start + relative_end;
+                    if content_end > content_start {
+                        self.cursor = content_end + delimiter_len;
+                        return Some(ApiDescriptionInlineSpan {
+                            kind: ApiDescriptionInlineKind::Code,
+                            text: &self.text[content_start..content_end],
+                            source_start: content_start,
+                            source_end: content_end,
+                        });
+                    }
+                }
+            }
+
+            let source_start = self.cursor;
+            let kind = if self.bold {
+                ApiDescriptionInlineKind::Bold
+            } else {
+                ApiDescriptionInlineKind::Text
+            };
+            let mut source_end = self.text.len();
+            let mut scan = self.cursor;
+            while scan < self.text.len() {
+                if self.text[scan..].starts_with("**") {
+                    if self.bold || self.text[scan + 2..].contains("**") {
+                        source_end = scan;
+                        break;
+                    }
+                }
+                if self.text.as_bytes()[scan] == b'`' {
+                    let delimiter_len = self.text.as_bytes()[scan..]
+                        .iter()
+                        .take_while(|byte| **byte == b'`')
+                        .count();
+                    let content_start = scan + delimiter_len;
+                    let delimiter = &self.text[scan..content_start];
+                    if self.text[content_start..].find(delimiter).is_some() {
+                        source_end = scan;
+                        break;
+                    }
+                }
+                scan += self.text[scan..].chars().next().map(char::len_utf8).unwrap_or(1);
+            }
+            if source_end == source_start {
+                continue;
+            }
+            self.cursor = source_end;
+            return Some(ApiDescriptionInlineSpan {
+                kind,
+                text: &self.text[source_start..source_end],
+                source_start,
+                source_end,
+            });
+        }
+        None
+    }
+}
+
+pub(crate) fn api_description_inline_spans(text: &str) -> ApiDescriptionInlineSpans<'_> {
+    ApiDescriptionInlineSpans {
+        text,
+        cursor: 0,
+        bold: false,
+    }
+}
+
+pub(crate) fn api_route_force_emoji_presentation(next: Option<char>) -> bool {
+    next == Some('\u{FE0F}')
+}
+
+pub(crate) fn api_description_line_parts(line: &str) -> (ApiDescriptionLineKind, usize, &str) {
+    let leading = line.len().saturating_sub(line.trim_start().len());
+    let trimmed = &line[leading..];
+
+    let mut hashes = 0usize;
+    for byte in trimmed.as_bytes().iter().copied() {
+        if byte == b'#' && hashes < 6 {
+            hashes += 1;
+        } else {
+            break;
+        }
+    }
+    if hashes > 0
+        && (hashes == trimmed.len()
+            || trimmed
+                .as_bytes()
+                .get(hashes)
+                .is_some_and(|byte| byte.is_ascii_whitespace()))
+    {
+        let mut content_start = leading + hashes;
+        while line
+            .as_bytes()
+            .get(content_start)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            content_start += 1;
+        }
+        return (
+            ApiDescriptionLineKind::Heading,
+            content_start,
+            &line[content_start..],
+        );
+    }
+
+    if trimmed == "-" || trimmed.starts_with("- ") || trimmed.starts_with("-	") {
+        let mut content_start = leading + 1;
+        while line
+            .as_bytes()
+            .get(content_start)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+        {
+            content_start += 1;
+        }
+        return (
+            ApiDescriptionLineKind::ListItem,
+            content_start,
+            &line[content_start..],
+        );
+    }
+
+    (ApiDescriptionLineKind::Text, 0, line)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -652,6 +880,7 @@ pub struct ApiClientTabState {
     pub response_scroll: ScrollState,
     pub response_scroll_x: ScrollState,
     pub focused_schema_pane: Option<ApiSchemaPaneFocus>,
+    pub(crate) route_text_selection: Option<ApiRouteTextSelection>,
     pub view_scrolls: Vec<ApiViewScrollMemory>,
     pub route_states: Vec<ApiRouteStateMemory>,
 }
@@ -719,6 +948,7 @@ impl Default for ApiClientTabState {
             response_scroll: ScrollState::new(7.0),
             response_scroll_x: ScrollState::new(7.0),
             focused_schema_pane: None,
+            route_text_selection: None,
             view_scrolls: Vec::new(),
             route_states: Vec::new(),
         }
@@ -806,6 +1036,7 @@ impl ApiClientTabState {
         self.response_scroll_x.current = 0.0;
         self.response_scroll_x.target = 0.0;
         self.focused_schema_pane = None;
+        self.route_text_selection = None;
         true
     }
 

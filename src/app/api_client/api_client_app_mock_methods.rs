@@ -1411,6 +1411,7 @@ impl crate::app::App {
             .api_mock_python_focus_target()
             .is_some_and(|(focused_route, _)| focused_route == route_idx);
         let mut disabled_active_script = false;
+        let enabled_route;
         if let Some(override_route) =
             self.ide_panel
                 .api
@@ -1426,6 +1427,7 @@ impl crate::app::App {
             let will_enable = !override_route.enabled;
             override_route.enabled = will_enable;
             override_route.proxy_when_disabled = !will_enable;
+            enabled_route = will_enable;
             if !will_enable && let Some(script) = override_route.python.as_mut() {
                 disabled_active_script = script.enabled;
                 script.enabled = false;
@@ -1444,6 +1446,11 @@ impl crate::app::App {
                     extra_output_fields: Vec::new(),
                 },
             );
+            enabled_route = true;
+        }
+        if enabled_route {
+            self.ide_panel.api.mock.mode =
+                crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
         }
         if disabled_active_script && focused_this_route {
             self.stash_active_api_mock_editor();
@@ -1495,6 +1502,10 @@ impl crate::app::App {
             if disabled_active_script && focused_this_route {
                 self.stash_active_api_mock_editor();
                 self.ide_panel.api.focused = None;
+            }
+            if enabled_script {
+                self.ide_panel.api.mock.mode =
+                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
             }
             self.ide_panel.api.persist();
             self.refresh_api_mock_server_snapshot();
@@ -1593,6 +1604,10 @@ impl crate::app::App {
         if disabled_active_script && focused_this_route {
             self.stash_active_api_mock_editor();
             self.ide_panel.api.focused = None;
+        }
+        if enabled_script {
+            self.ide_panel.api.mock.mode =
+                crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
         }
         self.ide_panel.api.persist();
         self.refresh_api_mock_server_snapshot();
@@ -1766,6 +1781,8 @@ impl crate::app::App {
 
     pub fn add_api_manual_route(&mut self) {
         self.commit_api_focus();
+        self.ide_panel.api.mock.mode =
+            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
         let next = self
             .ide_panel
             .api

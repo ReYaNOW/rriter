@@ -225,7 +225,8 @@ impl crate::app::App {
             && key_event.physical_key
                 == winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC)
             && self.active_tab_is_api_client()
-            && self.copy_hover_popup_selection_or_diagnostic()
+            && (self.copy_api_route_text_selection()
+                || self.copy_hover_popup_selection_or_diagnostic())
         {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();

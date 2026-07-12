@@ -215,6 +215,9 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if state == ElementState::Released && self.finish_api_route_text_selection() {
+            self.window.as_ref().unwrap().request_redraw();
+        }
         if state == ElementState::Released {
             if let Some(popup) = &mut self.autocomplete_detail_popup {
                 popup.scroll.is_dragging = false;

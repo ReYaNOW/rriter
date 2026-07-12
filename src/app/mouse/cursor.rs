@@ -290,6 +290,12 @@ impl App {
             return;
         }
 
+        if self.drag_api_route_text_selection_from_last_mouse() {
+            clear_hover_popup(self.renderer.as_mut());
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if self.is_editor_drag_pending
             && !self.ide_panel.is_dragging_terminal
             && !self.show_settings

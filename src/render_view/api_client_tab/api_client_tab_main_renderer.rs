@@ -36,7 +36,490 @@ impl Renderer {
         text.chars().map(|ch| self.char_advance(ch)).sum()
     }
 
+    fn api_route_glyph(
+        &mut self,
+        ch: char,
+        force_emoji: bool,
+    ) -> Option<crate::renderer::GlyphInfo> {
+        if force_emoji {
+            self.get_glyph_for_color_preference(ch, Some(true))
+                .or_else(|| self.get_ui_glyph(ch))
+        } else {
+            self.get_ui_glyph(ch)
+        }
+    }
+
+    fn api_route_text_width(&mut self, text: &str, scale: f32) -> f32 {
+        let mut width = 0.0;
+        let mut chars = text.char_indices().peekable();
+        while let Some((_, ch)) = chars.next() {
+            if matches!(ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}') {
+                continue;
+            }
+            let force_emoji = api_route_force_emoji_presentation(chars.peek().map(|(_, next)| *next));
+            if let Some(glyph) = self.api_route_glyph(ch, force_emoji) {
+                width += Self::snapped_text_advance(glyph.advance, scale);
+            }
+        }
+        width
+    }
+
     #[allow(clippy::too_many_arguments)]
+    fn draw_api_route_text_run(
+        &mut self,
+        text: &str,
+        x: f32,
+        baseline_y: f32,
+        line_top: f32,
+        line_h: f32,
+        color: [f32; 4],
+        scale: f32,
+        bold: bool,
+        source_base: usize,
+        selection: Option<(usize, usize)>,
+    ) -> f32 {
+        let mut draw_x = x.round();
+        let baseline_y = baseline_y.round();
+        let mut chars = text.char_indices().peekable();
+        while let Some((byte_idx, ch)) = chars.next() {
+            if matches!(ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}') {
+                continue;
+            }
+            let force_emoji = api_route_force_emoji_presentation(chars.peek().map(|(_, next)| *next));
+            let mut source_end = source_base + byte_idx + ch.len_utf8();
+            if force_emoji {
+                source_end = source_end.saturating_add('\u{FE0F}'.len_utf8());
+            }
+            let source_start = source_base + byte_idx;
+            let Some(glyph) = self.api_route_glyph(ch, force_emoji) else {
+                continue;
+            };
+            let advance = Self::snapped_text_advance(glyph.advance, scale);
+            if selection.is_some_and(|(start, end)| source_start < end && source_end > start) {
+                self.push_rect(
+                    draw_x,
+                    line_top.round(),
+                    advance.max(1.0),
+                    line_h.round(),
+                    self.theme.sel,
+                );
+            }
+            let q_x = (draw_x + glyph.offset_x * scale).round();
+            let q_y = (baseline_y - glyph.offset_y * scale).round();
+            let q_w = (glyph.width * scale).round().max(1.0);
+            let q_h = (glyph.height * scale).round().max(1.0);
+            self.push_quad(
+                q_x,
+                q_y,
+                q_w,
+                q_h,
+                glyph.u,
+                glyph.v,
+                glyph.uw,
+                glyph.vh,
+                color,
+                glyph.is_emoji,
+            );
+            if bold && glyph.is_emoji == 0.0 && glyph.width > 0.0 {
+                self.push_quad(
+                    q_x + 1.0,
+                    q_y,
+                    q_w,
+                    q_h,
+                    glyph.u,
+                    glyph.v,
+                    glyph.uw,
+                    glyph.vh,
+                    color,
+                    glyph.is_emoji,
+                );
+            }
+            draw_x += advance;
+        }
+        draw_x - x.round()
+    }
+
+    fn api_route_markdown_next_nonspace(text: &str, from: usize) -> usize {
+        for span in api_description_inline_spans(text) {
+            if span.source_end <= from {
+                continue;
+            }
+            let start = span.source_start.max(from);
+            for (relative, ch) in text[start..span.source_end].char_indices() {
+                let source = start + relative;
+                if !ch.is_whitespace() {
+                    return source;
+                }
+            }
+        }
+        text.len()
+    }
+
+    fn api_route_markdown_wrap_range(
+        &mut self,
+        text: &str,
+        start: usize,
+        available_w: f32,
+        scale: f32,
+    ) -> (usize, usize) {
+        let mut width = 0.0;
+        let mut last_soft = None;
+        let mut saw_visible = false;
+
+        for span in api_description_inline_spans(text) {
+            if span.source_end <= start {
+                continue;
+            }
+            let span_start = span.source_start.max(start);
+            let mut chars = text[span_start..span.source_end].char_indices().peekable();
+            while let Some((relative, ch)) = chars.next() {
+                if matches!(ch, '\r' | '\u{FE0F}' | '\u{200D}') {
+                    continue;
+                }
+                let source_start = span_start + relative;
+                let force_emoji =
+                    api_route_force_emoji_presentation(chars.peek().map(|(_, next)| *next));
+                let mut source_end = source_start + ch.len_utf8();
+                if force_emoji {
+                    source_end = source_end.saturating_add('\u{FE0F}'.len_utf8());
+                }
+                let advance = self
+                    .api_route_glyph(ch, force_emoji)
+                    .map(|glyph| Self::snapped_text_advance(glyph.advance, scale))
+                    .unwrap_or(8.0);
+                if saw_visible && width + advance > available_w {
+                    let end = last_soft.unwrap_or(source_start);
+                    let next = Self::api_route_markdown_next_nonspace(text, end);
+                    return (end, next.max(end));
+                }
+                width += advance;
+                saw_visible = true;
+                if matches!(ch, ' ' | ',' | '·' | '|') {
+                    last_soft = Some(source_end.min(text.len()));
+                }
+            }
+        }
+        (text.len(), text.len())
+    }
+
+    fn api_route_markdown_byte_at_range(
+        &mut self,
+        text: &str,
+        start: usize,
+        end: usize,
+        x: f32,
+        mouse_x: f32,
+        scale: f32,
+    ) -> usize {
+        let target = (mouse_x - x).max(0.0);
+        let mut width = 0.0;
+        let mut last_boundary = start.min(text.len());
+
+        for span in api_description_inline_spans(text) {
+            let span_start = span.source_start.max(start);
+            let span_end = span.source_end.min(end);
+            if span_start >= span_end {
+                continue;
+            }
+            let mut chars = text[span_start..span_end].char_indices().peekable();
+            while let Some((relative, ch)) = chars.next() {
+                if matches!(ch, '\r' | '\u{FE0F}' | '\u{200D}') {
+                    continue;
+                }
+                let source_start = span_start + relative;
+                let force_emoji =
+                    api_route_force_emoji_presentation(chars.peek().map(|(_, next)| *next));
+                let mut source_end = source_start + ch.len_utf8();
+                if force_emoji {
+                    source_end = source_end.saturating_add('\u{FE0F}'.len_utf8());
+                }
+                let advance = self
+                    .api_route_glyph(ch, force_emoji)
+                    .map(|glyph| Self::snapped_text_advance(glyph.advance, scale))
+                    .unwrap_or(8.0);
+                if target < width + advance * 0.5 {
+                    return source_start;
+                }
+                width += advance;
+                last_boundary = source_end.min(text.len());
+                if target < width {
+                    return last_boundary;
+                }
+            }
+        }
+        last_boundary
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_api_route_markdown_range(
+        &mut self,
+        text: &str,
+        start: usize,
+        end: usize,
+        x: f32,
+        baseline_y: f32,
+        line_top: f32,
+        line_h: f32,
+        color: [f32; 4],
+        scale: f32,
+        source_base: usize,
+        selection: Option<(usize, usize)>,
+        heading: bool,
+    ) -> f32 {
+        let mut draw_x = x.round();
+        for span in api_description_inline_spans(text) {
+            let span_start = span.source_start.max(start);
+            let span_end = span.source_end.min(end);
+            if span_start >= span_end {
+                continue;
+            }
+            let visible = &text[span_start..span_end];
+            let width = self.api_route_text_width(visible, scale);
+            if span.kind == ApiDescriptionInlineKind::Code && width > 0.0 {
+                self.push_rounded_rect(
+                    draw_x - 2.0,
+                    line_top.round() + 2.0,
+                    width + 4.0,
+                    (line_h.round() - 4.0).max(1.0),
+                    3.0,
+                    [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.34],
+                );
+            }
+            let advanced = self.draw_api_route_text_run(
+                visible,
+                draw_x,
+                baseline_y,
+                line_top,
+                line_h,
+                color,
+                scale,
+                heading || span.kind == ApiDescriptionInlineKind::Bold,
+                source_base + span_start,
+                selection,
+            );
+            draw_x += advanced;
+        }
+        draw_x - x.round()
+    }
+
+    fn api_route_one_line_byte_at(
+        &mut self,
+        text: &str,
+        x: f32,
+        mouse_x: f32,
+        scale: f32,
+    ) -> usize {
+        let target = (mouse_x - x).max(0.0);
+        let mut width = 0.0;
+        let mut chars = text.char_indices().peekable();
+        while let Some((byte_idx, ch)) = chars.next() {
+            if matches!(ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}') {
+                continue;
+            }
+            let force_emoji = api_route_force_emoji_presentation(chars.peek().map(|(_, next)| *next));
+            let advance = self
+                .api_route_glyph(ch, force_emoji)
+                .map(|glyph| Self::snapped_text_advance(glyph.advance, scale))
+                .unwrap_or(8.0);
+            if target < width + advance * 0.5 {
+                return byte_idx;
+            }
+            width += advance;
+            let mut boundary = byte_idx + ch.len_utf8();
+            if force_emoji {
+                boundary = boundary.saturating_add('\u{FE0F}'.len_utf8());
+            }
+            if target < width {
+                return boundary.min(text.len());
+            }
+        }
+        text.len()
+    }
+
+    pub(crate) fn api_route_text_byte_at(
+        &mut self,
+        field: ApiRouteTextField,
+        text: &str,
+        rect: (f32, f32, f32, f32),
+        mouse_x: f32,
+        mouse_y: f32,
+        scale: f32,
+    ) -> usize {
+        match field {
+            ApiRouteTextField::Path => {
+                self.api_route_one_line_byte_at(text, rect.0, mouse_x, 1.14)
+            }
+            ApiRouteTextField::Summary => {
+                self.api_route_one_line_byte_at(text, rect.0, mouse_x, 0.92)
+            }
+            ApiRouteTextField::Description => {
+                self.api_route_description_byte_at(text, rect, mouse_x, mouse_y, scale)
+            }
+        }
+    }
+
+    fn api_route_description_byte_at(
+        &mut self,
+        text: &str,
+        rect: (f32, f32, f32, f32),
+        mouse_x: f32,
+        mouse_y: f32,
+        scale: f32,
+    ) -> usize {
+        if mouse_y <= rect.1 {
+            return 0;
+        }
+        if mouse_y >= rect.1 + rect.3 {
+            return text.len();
+        }
+
+        let mut top = rect.1;
+        let mut source_offset = 0usize;
+        for source_line in text.split('\n') {
+            let line = source_line.trim_end_matches('\r');
+            let (kind, content_start, content) = api_description_line_parts(line);
+            let (text_scale, line_h, content_x, available_w) = match kind {
+                ApiDescriptionLineKind::Heading => (1.02, 25.0 * scale, rect.0, rect.2),
+                ApiDescriptionLineKind::ListItem => (
+                    0.84,
+                    20.0 * scale,
+                    rect.0 + API_DESCRIPTION_LIST_CONTENT_INDENT * scale,
+                    (rect.2 - API_DESCRIPTION_LIST_CONTENT_INDENT * scale).max(1.0),
+                ),
+                ApiDescriptionLineKind::Text => (0.82, 19.0 * scale, rect.0, rect.2),
+            };
+            if content.trim().is_empty() {
+                if mouse_y < top + line_h {
+                    return (source_offset + content_start).min(text.len());
+                }
+                top += line_h;
+                source_offset = source_offset.saturating_add(source_line.len() + 1);
+                continue;
+            }
+
+            let mut visual_start = 0usize;
+            loop {
+                let (visual_end, next_start) = self.api_route_markdown_wrap_range(
+                    content,
+                    visual_start,
+                    available_w,
+                    text_scale,
+                );
+                if mouse_y < top + line_h {
+                    return source_offset
+                        + content_start
+                        + self.api_route_markdown_byte_at_range(
+                            content,
+                            visual_start,
+                            visual_end,
+                            content_x,
+                            mouse_x,
+                            text_scale,
+                        );
+                }
+                top += line_h;
+                if next_start >= content.len() {
+                    break;
+                }
+                if next_start <= visual_start {
+                    break;
+                }
+                visual_start = next_start;
+            }
+            source_offset = source_offset.saturating_add(source_line.len() + 1);
+        }
+        text.len()
+    }
+
+    fn draw_api_route_description(
+        &mut self,
+        text: &str,
+        x: f32,
+        top_y: f32,
+        w: f32,
+        s: f32,
+        selection: Option<ApiRouteTextSelection>,
+    ) -> f32 {
+        let selected = selection
+            .filter(|selection| selection.field == ApiRouteTextField::Description)
+            .and_then(|selection| selection.range(text));
+        let mut top = top_y;
+        let mut source_offset = 0usize;
+
+        for source_line in text.split('\n') {
+            let line = source_line.trim_end_matches('\r');
+            let (kind, content_start, content) = api_description_line_parts(line);
+            let color = api_description_line_color(kind, self.theme.fg);
+            let (text_scale, line_h, baseline_offset, content_x, available_w) = match kind {
+                ApiDescriptionLineKind::Heading => (1.02, 25.0 * s, 19.0 * s, x, w),
+                ApiDescriptionLineKind::ListItem => (
+                    0.84,
+                    20.0 * s,
+                    16.0 * s,
+                    x + API_DESCRIPTION_LIST_CONTENT_INDENT * s,
+                    (w - API_DESCRIPTION_LIST_CONTENT_INDENT * s).max(1.0),
+                ),
+                ApiDescriptionLineKind::Text => (0.82, 19.0 * s, 15.0 * s, x, w),
+            };
+            if content.trim().is_empty() {
+                top += line_h;
+                source_offset = source_offset.saturating_add(source_line.len() + 1);
+                continue;
+            }
+
+            let mut visual_start = 0usize;
+            let mut first_visual = true;
+            loop {
+                let (visual_end, next_start) = self.api_route_markdown_wrap_range(
+                    content,
+                    visual_start,
+                    available_w,
+                    text_scale,
+                );
+                if kind == ApiDescriptionLineKind::ListItem && first_visual {
+                    self.draw_api_route_text_run(
+                        API_DESCRIPTION_LIST_MARKER,
+                        x + API_DESCRIPTION_LIST_MARKER_INDENT * s,
+                        top + baseline_offset,
+                        top,
+                        line_h,
+                        color,
+                        0.84,
+                        false,
+                        usize::MAX / 2,
+                        None,
+                    );
+                }
+                self.draw_api_route_markdown_range(
+                    content,
+                    visual_start,
+                    visual_end,
+                    content_x,
+                    top + baseline_offset,
+                    top,
+                    line_h,
+                    color,
+                    text_scale,
+                    source_offset + content_start,
+                    selected,
+                    kind == ApiDescriptionLineKind::Heading,
+                );
+                top += line_h;
+                first_visual = false;
+                if next_start >= content.len() {
+                    break;
+                }
+                if next_start <= visual_start {
+                    break;
+                }
+                visual_start = next_start;
+            }
+            source_offset = source_offset.saturating_add(source_line.len() + 1);
+        }
+
+        top - top_y
+    }
+
     pub(crate) fn draw_api_client_tab(
         &mut self,
         x: f32,
@@ -281,23 +764,81 @@ impl Renderer {
         self.draw_api_method_chip(route.method, x + pad, cy, method_w, 34.0 * s, s, 0.88);
         let mut display_path = String::new();
         write_api_path_display(&route.path, &mut display_path);
-        self.draw_string_scaled_stable(
+        let path_x = x + pad + method_w + 12.0 * s;
+        let path_selection = tab_state
+            .route_text_selection
+            .filter(|selection| selection.field == ApiRouteTextField::Path)
+            .and_then(|selection| selection.range(&display_path));
+        self.draw_api_route_text_run(
             &display_path,
-            x + pad + method_w + 12.0 * s,
+            path_x,
             cy + 23.0 * s,
+            cy,
+            34.0 * s,
             self.theme.fg,
             1.14,
+            false,
+            0,
+            path_selection,
+        );
+        ui_registry.register_text_region(
+            crate::ui_system::UiId::ApiRoutePathText(route_idx),
+            path_x,
+            cy,
+            (x + pad + content_w - path_x).max(1.0),
+            34.0 * s,
+            mx,
+            my,
         );
         cy += 42.0 * s;
         if !route.summary.is_empty() {
-            self.draw_string_scaled_stable(
+            let summary_selection = tab_state
+                .route_text_selection
+                .filter(|selection| selection.field == ApiRouteTextField::Summary)
+                .and_then(|selection| selection.range(&route.summary));
+            self.draw_api_route_text_run(
                 &route.summary,
                 x + pad,
                 cy + 18.0 * s,
+                cy,
+                28.0 * s,
                 [0.68, 0.70, 0.78, 1.0],
                 0.92,
+                false,
+                0,
+                summary_selection,
+            );
+            ui_registry.register_text_region(
+                crate::ui_system::UiId::ApiRouteSummaryText(route_idx),
+                x + pad,
+                cy,
+                content_w,
+                28.0 * s,
+                mx,
+                my,
             );
             cy += 28.0 * s;
+        }
+        if !route.description.trim().is_empty() {
+            let description_y = cy;
+            let description_h = self.draw_api_route_description(
+                &route.description,
+                x + pad,
+                description_y,
+                content_w,
+                s,
+                tab_state.route_text_selection,
+            );
+            ui_registry.register_text_region(
+                crate::ui_system::UiId::ApiRouteDescriptionText(route_idx),
+                x + pad,
+                description_y,
+                content_w,
+                description_h.max(1.0),
+                mx,
+                my,
+            );
+            cy += description_h + 8.0 * s;
         }
 
         self.draw_api_section_title("Мок", x + pad, cy + 18.0 * s, s);

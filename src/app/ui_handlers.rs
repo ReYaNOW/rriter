@@ -115,6 +115,9 @@ impl App {
             | UiId::ApiRouteFilterClear
             | UiId::ApiRouteTag(_)
             | UiId::ApiRouteRow(_)
+            | UiId::ApiRoutePathText(_)
+            | UiId::ApiRouteSummaryText(_)
+            | UiId::ApiRouteDescriptionText(_)
             | UiId::ApiServerSelect(_)
             | UiId::ApiAuthValue(_)
             | UiId::ApiAuthRefreshToken(_)

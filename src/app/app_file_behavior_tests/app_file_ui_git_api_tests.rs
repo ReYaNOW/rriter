@@ -620,6 +620,7 @@ fn api_mock_test_route() -> crate::app::api_client::ApiRouteRow {
         method: crate::app::api_client::ApiMethod::Get,
         path: "/users".to_string(),
         summary: String::new(),
+        description: String::new(),
         operation_id: String::new(),
         security: None,
         path_params: Vec::new(),
@@ -879,8 +880,13 @@ fn api_mock_python_toggle_preserves_code_and_enables_openapi_mock() {
         return;
     };
     let spec_id = open_api_mock_test_route(&mut app);
+    app.ide_panel.api.mock.mode = crate::app::api_mock::types::ApiMockMode::MockAll;
 
     app.toggle_api_route_python(0);
+    assert_eq!(
+        app.ide_panel.api.mock.mode,
+        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+    );
     let override_route = app.ide_panel.api.mock.route_overrides.first().unwrap();
     assert!(override_route.enabled);
     assert!(!override_route.proxy_when_disabled);
@@ -921,6 +927,37 @@ fn api_mock_python_toggle_preserves_code_and_enables_openapi_mock() {
             .input_editor
             .get_full_text()
             .contains("value = 42")
+    );
+}
+
+#[test]
+fn api_route_specific_mock_switches_from_mock_all_to_selected_mode() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    open_api_mock_test_route(&mut app);
+    app.ide_panel.api.mock.mode = crate::app::api_mock::types::ApiMockMode::MockAll;
+
+    app.toggle_api_route_mock(0);
+
+    assert_eq!(
+        app.ide_panel.api.mock.mode,
+        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
+    );
+}
+
+#[test]
+fn api_manual_mock_route_keeps_other_routes_in_selected_mode() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.ide_panel.api.mock.mode = crate::app::api_mock::types::ApiMockMode::MockAll;
+
+    app.add_api_manual_route();
+
+    assert_eq!(
+        app.ide_panel.api.mock.mode,
+        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
     );
 }
 

@@ -1,4 +1,191 @@
 impl crate::app::App {
+    fn api_route_row_text(route: &ApiRouteRow, field: ApiRouteTextField) -> String {
+        match field {
+            ApiRouteTextField::Path => {
+                let mut display = String::with_capacity(route.path.len().saturating_add(8));
+                write_api_path_display(&route.path, &mut display);
+                display
+            }
+            ApiRouteTextField::Summary => route.summary.clone(),
+            ApiRouteTextField::Description => route.description.clone(),
+        }
+    }
+
+    fn active_api_route_text(&self, field: ApiRouteTextField) -> Option<String> {
+        let (meta, state) = self.active_api_tab()?;
+        match &meta.route_identity {
+            Some(ApiClientRouteIdentity::Manual { stable_id }) => {
+                let route = self
+                    .ide_panel
+                    .api
+                    .mock
+                    .manual_routes
+                    .iter()
+                    .find(|route| route.stable_id == *stable_id)?;
+                Some(match field {
+                    ApiRouteTextField::Path => {
+                        let mut display = String::with_capacity(route.path.len().saturating_add(8));
+                        write_api_path_display(&route.path, &mut display);
+                        display
+                    }
+                    ApiRouteTextField::Summary => "Manual mock route".to_string(),
+                    ApiRouteTextField::Description => String::new(),
+                })
+            }
+            Some(ApiClientRouteIdentity::OpenApi { spec_id, route_idx }) => self
+                .ide_panel
+                .api
+                .models
+                .get(spec_id)
+                .and_then(|model| model.routes.get(*route_idx))
+                .map(|route| Self::api_route_row_text(route, field)),
+            None => self
+                .ide_panel
+                .api
+                .models
+                .get(&meta.spec_id)
+                .and_then(|model| state.route_idx.and_then(|idx| model.routes.get(idx)))
+                .map(|route| Self::api_route_row_text(route, field)),
+        }
+    }
+
+    fn api_route_text_ui_id(
+        field: ApiRouteTextField,
+        route_idx: usize,
+    ) -> crate::ui_system::UiId {
+        match field {
+            ApiRouteTextField::Path => crate::ui_system::UiId::ApiRoutePathText(route_idx),
+            ApiRouteTextField::Summary => crate::ui_system::UiId::ApiRouteSummaryText(route_idx),
+            ApiRouteTextField::Description => {
+                crate::ui_system::UiId::ApiRouteDescriptionText(route_idx)
+            }
+        }
+    }
+
+    pub(crate) fn begin_api_route_text_selection(
+        &mut self,
+        field: ApiRouteTextField,
+        route_idx: usize,
+    ) -> bool {
+        let Some(text) = self.active_api_route_text(field) else {
+            return false;
+        };
+        let id = Self::api_route_text_ui_id(field, route_idx);
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let (mx, my, scale) = self
+            .renderer
+            .as_ref()
+            .map(|renderer| {
+                (
+                    renderer.last_mouse_x,
+                    renderer.last_mouse_y,
+                    renderer.scale_factor,
+                )
+            })
+            .unwrap_or((0.0, 0.0, 1.0));
+        let Some(byte) = self.renderer.as_mut().map(|renderer| {
+            renderer.api_route_text_byte_at(field, &text, rect, mx, my, scale)
+        }) else {
+            return false;
+        };
+        let Some(spec_id) = self.active_api_tab().map(|(meta, _)| meta.spec_id) else {
+            return false;
+        };
+        let Some((_, state)) = self.active_api_tab_mut_for(spec_id) else {
+            return false;
+        };
+        if state.route_idx != Some(route_idx) {
+            return false;
+        }
+        state.route_text_selection = Some(ApiRouteTextSelection {
+            field,
+            anchor: byte,
+            cursor: byte,
+            selecting: true,
+        });
+        self.is_dragging = false;
+        self.is_editor_drag_pending = false;
+        self.ide_panel.is_dragging_terminal = false;
+        true
+    }
+
+    pub(crate) fn drag_api_route_text_selection_from_last_mouse(&mut self) -> bool {
+        let Some((route_idx, selection)) = self.active_api_tab().and_then(|(_, state)| {
+            let route_idx = state.route_idx?;
+            let selection = state.route_text_selection?;
+            selection.selecting.then_some((route_idx, selection))
+        }) else {
+            return false;
+        };
+        let Some(text) = self.active_api_route_text(selection.field) else {
+            return false;
+        };
+        let id = Self::api_route_text_ui_id(selection.field, route_idx);
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let (mx, my, scale) = self
+            .renderer
+            .as_ref()
+            .map(|renderer| {
+                (
+                    renderer.last_mouse_x,
+                    renderer.last_mouse_y,
+                    renderer.scale_factor,
+                )
+            })
+            .unwrap_or((0.0, 0.0, 1.0));
+        let Some(byte) = self.renderer.as_mut().map(|renderer| {
+            renderer.api_route_text_byte_at(selection.field, &text, rect, mx, my, scale)
+        }) else {
+            return false;
+        };
+        let spec_id = self.active_api_tab().map(|(meta, _)| meta.spec_id);
+        if let Some(spec_id) = spec_id
+            && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
+            && let Some(selection) = state.route_text_selection.as_mut()
+        {
+            selection.cursor = byte;
+        }
+        true
+    }
+
+    pub(crate) fn finish_api_route_text_selection(&mut self) -> bool {
+        let Some(spec_id) = self.active_api_tab().map(|(meta, _)| meta.spec_id) else {
+            return false;
+        };
+        let Some((_, state)) = self.active_api_tab_mut_for(spec_id) else {
+            return false;
+        };
+        let Some(selection) = state.route_text_selection.as_mut() else {
+            return false;
+        };
+        if !selection.selecting {
+            return false;
+        }
+        selection.selecting = false;
+        true
+    }
+
+    pub(crate) fn copy_api_route_text_selection(&mut self) -> bool {
+        let Some(selection) = self
+            .active_api_tab()
+            .and_then(|(_, state)| state.route_text_selection)
+        else {
+            return false;
+        };
+        let Some(text) = self.active_api_route_text(selection.field) else {
+            return false;
+        };
+        let Some(selected) = api_route_selected_text(selection, &text) else {
+            return false;
+        };
+        self.set_clipboard_text(selected.to_string());
+        true
+    }
+
     fn pulse_api_cursor_blink(&mut self) {
         self.last_action = std::time::Instant::now();
         self.last_blink_state = true;
@@ -1444,6 +1631,7 @@ impl crate::app::App {
             }
             if !state.restore_route_state(route_idx) {
                 state.route_idx = Some(route_idx);
+                state.route_text_selection = None;
                 state.response = None;
                 state.response_view = ApiResponseView::Body;
                 state.input_doc_view = ApiInputDocView::Input;
@@ -1514,6 +1702,7 @@ impl crate::app::App {
                 meta.route_method = Some(route.method);
                 meta.route_path = route.path.clone();
                 state.route_idx = Some(manual_idx);
+                state.route_text_selection = None;
             }
             self.ide_panel
                 .api
@@ -1620,6 +1809,9 @@ impl crate::app::App {
                 meta.title = "Mock".to_string();
                 meta.route_method = Some(*method);
                 meta.route_path = path.clone();
+                if state.route_idx != Some(*manual_idx) {
+                    state.route_text_selection = None;
+                }
                 state.route_idx = Some(*manual_idx);
                 tab.base_title = title.clone();
                 if tab_idx == self.active_tab {
@@ -1630,6 +1822,7 @@ impl crate::app::App {
                 meta.route_method = None;
                 meta.route_path.clear();
                 state.route_idx = None;
+                state.route_text_selection = None;
                 tab.base_title = meta.title.clone();
                 if tab_idx == self.active_tab {
                     self.base_title = meta.title.clone();

@@ -300,6 +300,7 @@ mod tests {
             method,
             path: path.to_string(),
             summary: String::new(),
+            description: String::new(),
             operation_id: String::new(),
             security: None,
             path_params: Vec::new(),
@@ -311,7 +312,10 @@ mod tests {
 
     #[test]
     fn mock_all_uses_generated_openapi_route() {
-        let state = ApiMockState::default();
+        let state = ApiMockState {
+            mode: ApiMockMode::MockAll,
+            ..Default::default()
+        };
         let entry = entry();
         let model = model(route(ApiMethod::Get, "/users/{id}"));
         let routes = build_api_mock_routes([(&entry, &model)], &state);
@@ -326,7 +330,10 @@ mod tests {
     fn mock_all_hard_disabled_openapi_route_still_mocks() {
         let entry = entry();
         let model = model(route(ApiMethod::Get, "/users"));
-        let mut state = ApiMockState::default();
+        let mut state = ApiMockState {
+            mode: ApiMockMode::MockAll,
+            ..Default::default()
+        };
         state
             .route_overrides
             .push(super::super::types::ApiMockRouteOverride {
@@ -351,7 +358,10 @@ mod tests {
     fn mock_all_python_override_still_mocks_without_route_enable() {
         let entry = entry();
         let model = model(route(ApiMethod::Get, "/users"));
-        let mut state = ApiMockState::default();
+        let mut state = ApiMockState {
+            mode: ApiMockMode::MockAll,
+            ..Default::default()
+        };
         state
             .route_overrides
             .push(super::super::types::ApiMockRouteOverride {

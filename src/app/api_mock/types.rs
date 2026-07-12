@@ -27,7 +27,7 @@ impl Default for ApiMockState {
             enabled: false,
             bind_host: "0.0.0.0".to_string(),
             port: 4010,
-            mode: ApiMockMode::MockAll,
+            mode: ApiMockMode::MockSelectedProxyRest,
             proxy_base_url: String::new(),
             server_status: ApiMockServerStatus::Stopped,
             check_status: ApiMockCheckStatus::Idle,
@@ -752,6 +752,14 @@ pub fn api_mock_route_key(source_key: &str, method: ApiMethod, path: &str) -> St
 mod tests {
     use super::*;
     use crate::app::api_client::{ApiSpecId, ApiUrlStatus};
+
+    #[test]
+    fn default_mode_keeps_unselected_routes_on_real_server() {
+        assert_eq!(
+            ApiMockState::default().mode,
+            ApiMockMode::MockSelectedProxyRest
+        );
+    }
 
     #[test]
     fn url_source_key_drops_fragment_for_refresh_stability() {

@@ -1,6 +1,11 @@
 use crate::app::api_client::{
-    API_BODY_TEXT_SCALE, ApiFocus, ApiInputDocView, ApiOutputDocView, ApiParam,
-    ApiResponseView, ApiSchema, ApiSchemaKind, ApiSecuritySchemeKind, api_array_edit_parts,
+    API_BODY_TEXT_SCALE, ApiDescriptionInlineKind, ApiDescriptionLineKind, ApiFocus,
+    ApiInputDocView, ApiOutputDocView,
+    ApiParam, ApiResponseView, ApiRouteTextField, ApiRouteTextSelection, ApiSchema,
+    ApiSchemaKind, ApiSecuritySchemeKind, API_DESCRIPTION_LIST_CONTENT_INDENT,
+    API_DESCRIPTION_LIST_MARKER, API_DESCRIPTION_LIST_MARKER_INDENT, api_array_edit_parts,
+    api_description_inline_spans, api_description_line_color, api_description_line_parts,
+    api_route_force_emoji_presentation,
     api_array_value_parts, api_route_input_media_count, api_route_input_media_label,
     api_mock_input_schema_summary, api_mock_input_schema_text, api_route_input_schema_summary,
     api_route_input_schema_text,

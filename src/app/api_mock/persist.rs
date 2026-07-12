@@ -5,7 +5,7 @@ use super::types::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-const API_MOCK_PERSIST_VERSION: u32 = 2;
+const API_MOCK_PERSIST_VERSION: u32 = 3;
 const API_MOCK_LAN_BIND_HOST: &str = "0.0.0.0";
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -37,11 +37,19 @@ impl From<&ApiMockState> for ApiMockPersist {
 
 impl From<ApiMockPersist> for ApiMockState {
     fn from(saved: ApiMockPersist) -> Self {
+        let mode = if saved.version < API_MOCK_PERSIST_VERSION
+            && saved.mode.canonical() == ApiMockMode::MockAll
+            && (!saved.route_overrides.is_empty() || !saved.manual_routes.is_empty())
+        {
+            ApiMockMode::MockSelectedProxyRest
+        } else {
+            saved.mode.canonical()
+        };
         Self {
             enabled: false,
             bind_host: lan_bind_host(&saved.bind_host).to_string(),
             port: saved.port.max(1),
-            mode: saved.mode.canonical(),
+            mode,
             proxy_base_url: saved.proxy_base_url,
             server_status: ApiMockServerStatus::Stopped,
             check_status: super::types::ApiMockCheckStatus::Idle,
@@ -168,6 +176,58 @@ mod tests {
         });
 
         assert_eq!(loaded.mode, ApiMockMode::MockSelectedProxyRest);
+    }
+
+    #[test]
+    fn legacy_implicit_mock_all_with_route_migrates_to_selected_proxy() {
+        let loaded = ApiMockState::from(ApiMockPersist {
+            version: 2,
+            bind_host: "0.0.0.0".to_string(),
+            port: 4010,
+            mode: ApiMockMode::MockAll,
+            proxy_base_url: String::new(),
+            uv: ApiUvState::default(),
+            route_overrides: vec![ApiMockRouteOverride {
+                source_key: "https://example.test/openapi.json".to_string(),
+                method: ApiMethod::Get,
+                path: "/users".to_string(),
+                enabled: true,
+                proxy_when_disabled: false,
+                response: ApiMockResponse::Generated,
+                python: None,
+                extra_input_fields: Vec::new(),
+                extra_output_fields: Vec::new(),
+            }],
+            manual_routes: Vec::new(),
+        });
+
+        assert_eq!(loaded.mode, ApiMockMode::MockSelectedProxyRest);
+    }
+
+    #[test]
+    fn current_explicit_mock_all_with_route_stays_mock_all() {
+        let loaded = ApiMockState::from(ApiMockPersist {
+            version: API_MOCK_PERSIST_VERSION,
+            bind_host: "0.0.0.0".to_string(),
+            port: 4010,
+            mode: ApiMockMode::MockAll,
+            proxy_base_url: String::new(),
+            uv: ApiUvState::default(),
+            route_overrides: vec![ApiMockRouteOverride {
+                source_key: "https://example.test/openapi.json".to_string(),
+                method: ApiMethod::Get,
+                path: "/users".to_string(),
+                enabled: true,
+                proxy_when_disabled: false,
+                response: ApiMockResponse::Generated,
+                python: None,
+                extra_input_fields: Vec::new(),
+                extra_output_fields: Vec::new(),
+            }],
+            manual_routes: Vec::new(),
+        });
+
+        assert_eq!(loaded.mode, ApiMockMode::MockAll);
     }
 
     #[test]

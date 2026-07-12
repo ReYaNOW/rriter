@@ -1,5 +1,14 @@
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_fps_overlay(&mut self, minimap_w: f32) {
+        let center_x = (self.width - minimap_w) / 2.0;
+        self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
+
+        let fps_text = std::mem::take(&mut self.fps_string);
+        self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
+        self.fps_string = fps_text;
+    }
+
     pub fn draw(
         &mut self,
         editor: &mut Editor,
@@ -523,6 +532,9 @@ impl Renderer {
             wants_pointer |=
                 self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
             self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha);
+            if show_fps {
+                self.draw_fps_overlay(self.minimap_width);
+            }
             self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
@@ -1097,12 +1109,7 @@ impl Renderer {
         );
 
         if show_fps {
-            let center_x = (self.width - minimap_w) / 2.0;
-            self.push_rect(center_x - 45.0, 5.0, 90.0, 25.0, [0.1, 0.1, 0.1, 0.8]);
-
-            let fps_text = std::mem::take(&mut self.fps_string);
-            self.draw_string(&fps_text, center_x - 40.0, 24.0, [0.0, 1.0, 0.0, 1.0]);
-            self.fps_string = fps_text;
+            self.draw_fps_overlay(minimap_w);
         }
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {
             telemetry_chrome_details[1] = start.elapsed().as_secs_f32();

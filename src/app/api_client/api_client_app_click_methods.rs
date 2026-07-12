@@ -534,6 +534,21 @@ impl crate::app::App {
                     }
                 }
             }
+            crate::ui_system::UiId::ApiRoutePathText(route_idx) => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                self.begin_api_route_text_selection(ApiRouteTextField::Path, route_idx);
+            }
+            crate::ui_system::UiId::ApiRouteSummaryText(route_idx) => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                self.begin_api_route_text_selection(ApiRouteTextField::Summary, route_idx);
+            }
+            crate::ui_system::UiId::ApiRouteDescriptionText(route_idx) => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                self.begin_api_route_text_selection(ApiRouteTextField::Description, route_idx);
+            }
             crate::ui_system::UiId::ApiServerSelect(idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
@@ -1274,6 +1289,7 @@ impl crate::app::App {
                     && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                 {
                     state.focused_schema_pane = None;
+                    state.route_text_selection = None;
                 }
             }
             _ => return false,

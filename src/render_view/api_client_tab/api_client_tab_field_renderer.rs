@@ -1032,12 +1032,21 @@ impl Renderer {
     }
 
     fn api_schema_wrap_split(&mut self, line: &str, available_w: f32) -> (usize, usize) {
+        self.api_text_wrap_split(line, available_w, API_BODY_TEXT_SCALE)
+    }
+
+    fn api_text_wrap_split(
+        &mut self,
+        line: &str,
+        available_w: f32,
+        text_scale: f32,
+    ) -> (usize, usize) {
         let mut x = 0.0;
         let mut last_soft = None;
         for (byte_idx, ch) in line.char_indices() {
             let mut buf = [0u8; 4];
             let part = ch.encode_utf8(&mut buf);
-            let adv = self.measure_ui_width(part, API_BODY_TEXT_SCALE);
+            let adv = self.measure_ui_width(part, text_scale);
             if x + adv > available_w && byte_idx > 0 {
                 let end = last_soft.unwrap_or(byte_idx);
                 let mut next = end;

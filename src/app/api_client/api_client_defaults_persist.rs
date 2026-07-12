@@ -224,6 +224,7 @@ pub(crate) fn api_manual_route_row(
         method: route.method,
         path: route.path.clone(),
         summary: "Manual mock route".to_string(),
+        description: String::new(),
         operation_id: route.stable_id.clone(),
         security: None,
         path_params: crate::app::api_mock::types::api_mock_path_param_names(&route.path)

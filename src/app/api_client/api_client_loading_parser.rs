@@ -376,11 +376,15 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         .to_string();
                     let summary = op
                         .get("summary")
-                        .or_else(|| op.get("description"))
                         .and_then(Value::as_str)
                         .unwrap_or("")
                         .lines()
                         .next()
+                        .unwrap_or("")
+                        .to_string();
+                    let description = op
+                        .get("description")
+                        .and_then(Value::as_str)
                         .unwrap_or("")
                         .to_string();
                     let operation_id = op
@@ -405,6 +409,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         method,
                         path: path.to_string(),
                         summary,
+                        description,
                         operation_id,
                         security: parse_security_requirements(op.get("security")),
                         path_params,

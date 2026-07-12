@@ -141,6 +141,7 @@ mod tests {
                     "get": {
                         "tags": ["pets"],
                         "summary": "Read pet",
+                        "description": "Returns one pet.\nRequires the pets:read role.",
                         "parameters": [
                             {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
                             {"name": "verbose", "in": "query", "schema": {"type": "boolean"}}
@@ -583,6 +584,11 @@ mod tests {
         assert_eq!(model.routes.len(), 2);
         assert_eq!(model.routes[0].tag, "pets");
         assert_eq!(model.routes[0].method, ApiMethod::Get);
+        assert_eq!(model.routes[0].summary, "Read pet");
+        assert_eq!(
+            model.routes[0].description,
+            "Returns one pet.\nRequires the pets:read role."
+        );
         assert_eq!(model.routes[1].method, ApiMethod::Post);
         assert_eq!(model.routes[0].path_params[0].name, "id");
         assert_eq!(model.routes[0].query_params[0].name, "verbose");
@@ -2063,7 +2069,119 @@ mod tests {
         let tab_max = api_tab_max_scroll(Some(&model), &tab_state, None, 180.0, 1.0);
         assert!(tab_max.is_finite());
         assert!(tab_max > 0.0);
+        let mut without_description = model.clone();
+        without_description.routes[0].description.clear();
+        let without_description_max =
+            api_tab_max_scroll(Some(&without_description), &tab_state, None, 180.0, 1.0);
+        assert!(tab_max > without_description_max);
         assert_eq!(api_tab_max_scroll(None, &tab_state, None, 180.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn api_description_markdown_lines_expose_heading_and_list_content() {
+        let (kind, offset, content) = api_description_line_parts("### ⚙️ Настройки");
+        assert_eq!(kind, ApiDescriptionLineKind::Heading);
+        assert_eq!(content, "⚙️ Настройки");
+        assert_eq!(&"### ⚙️ Настройки"[offset..], content);
+
+        let (kind, offset, content) = api_description_line_parts("  - первый пункт");
+        assert_eq!(kind, ApiDescriptionLineKind::ListItem);
+        assert_eq!(content, "первый пункт");
+        assert_eq!(&"  - первый пункт"[offset..], content);
+
+        let (kind, offset, content) = api_description_line_parts("обычный текст");
+        assert_eq!(kind, ApiDescriptionLineKind::Text);
+        assert_eq!(offset, 0);
+        assert_eq!(content, "обычный текст");
+    }
+
+    #[test]
+    fn api_description_inline_markdown_exposes_bold_and_code_without_delimiters() {
+        let text = "🪪  **Roles**: Requires `Admin` and ```Manager```";
+        let spans = api_description_inline_spans(text).collect::<Vec<_>>();
+        assert_eq!(
+            spans.iter().map(|span| (span.kind, span.text)).collect::<Vec<_>>(),
+            vec![
+                (ApiDescriptionInlineKind::Text, "🪪  "),
+                (ApiDescriptionInlineKind::Bold, "Roles"),
+                (ApiDescriptionInlineKind::Text, ": Requires "),
+                (ApiDescriptionInlineKind::Code, "Admin"),
+                (ApiDescriptionInlineKind::Text, " and "),
+                (ApiDescriptionInlineKind::Code, "Manager"),
+            ]
+        );
+        for span in spans {
+            assert_eq!(&text[span.source_start..span.source_end], span.text);
+        }
+    }
+
+    #[test]
+    fn api_description_inline_markdown_keeps_code_inside_bold_context() {
+        let text = "**own `car wash` only**";
+        assert_eq!(
+            api_description_inline_spans(text)
+                .map(|span| (span.kind, span.text))
+                .collect::<Vec<_>>(),
+            vec![
+                (ApiDescriptionInlineKind::Bold, "own "),
+                (ApiDescriptionInlineKind::Code, "car wash"),
+                (ApiDescriptionInlineKind::Bold, " only"),
+            ]
+        );
+    }
+
+    #[test]
+    fn api_description_visual_style_uses_primary_text_and_indented_centered_marker() {
+        let primary = [0.91, 0.92, 0.93, 1.0];
+        for kind in [
+            ApiDescriptionLineKind::Heading,
+            ApiDescriptionLineKind::Text,
+            ApiDescriptionLineKind::ListItem,
+        ] {
+            assert_eq!(api_description_line_color(kind, primary), primary);
+        }
+        assert_eq!(API_DESCRIPTION_LIST_MARKER, "•");
+        assert!(API_DESCRIPTION_LIST_MARKER_INDENT > 0.0);
+        assert!(API_DESCRIPTION_LIST_CONTENT_INDENT > API_DESCRIPTION_LIST_MARKER_INDENT);
+    }
+
+    #[test]
+    fn api_route_text_selection_copies_path_summary_and_description() {
+        let cases = [
+            (ApiRouteTextField::Path, "/cars/{id}", 0, 5, "/cars"),
+            (ApiRouteTextField::Summary, "ListCars", 4, 8, "Cars"),
+            (
+                ApiRouteTextField::Description,
+                "⚙️ route description",
+                0,
+                "⚙️".len(),
+                "⚙️",
+            ),
+        ];
+        for (field, text, anchor, cursor, expected) in cases {
+            let selection = ApiRouteTextSelection {
+                field,
+                anchor,
+                cursor,
+                selecting: false,
+            };
+            assert_eq!(api_route_selected_text(selection, text), Some(expected));
+        }
+
+        let invalid = ApiRouteTextSelection {
+            field: ApiRouteTextField::Description,
+            anchor: 0,
+            cursor: 1,
+            selecting: false,
+        };
+        assert_eq!(api_route_selected_text(invalid, "⚙️"), None);
+    }
+
+    #[test]
+    fn api_route_emoji_presentation_is_forced_only_by_variation_selector() {
+        assert!(api_route_force_emoji_presentation(Some('\u{FE0F}')));
+        assert!(!api_route_force_emoji_presentation(Some('a')));
+        assert!(!api_route_force_emoji_presentation(None));
     }
 
     #[test]
