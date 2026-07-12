@@ -24,36 +24,6 @@ fn project_search_label_text_y(input_y: f32, scale: f32) -> f32 {
     project_search_row_text_y(input_y.round() - row_h - gap, row_h, scale)
 }
 
-fn project_search_label_glyph_rect(
-    draw_x: f32,
-    baseline_y: f32,
-    offset_x: f32,
-    offset_y: f32,
-    width: f32,
-    height: f32,
-    scale: f32,
-) -> Option<(f32, f32, f32, f32)> {
-    let glyph_w = if width > 0.0 {
-        (width * scale).round().max(1.0)
-    } else {
-        0.0
-    };
-    let glyph_h = if height > 0.0 {
-        (height * scale).round().max(1.0)
-    } else {
-        0.0
-    };
-    if glyph_w <= 0.0 || glyph_h <= 0.0 {
-        return None;
-    }
-    Some((
-        (draw_x + (offset_x * scale).round()).round(),
-        (baseline_y - (offset_y * scale).round()).round(),
-        glyph_w,
-        glyph_h,
-    ))
-}
-
 fn project_search_prefix_len_for_width(
     text: &str,
     max_w: f32,
@@ -196,21 +166,7 @@ impl Renderer {
         color: [f32; 4],
         scale: f32,
     ) {
-        let mut draw_x = x.round();
-        let baseline_y = y.round();
-        for c in text.chars() {
-            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                continue;
-            }
-            if let Some(g) = self.get_ui_glyph(c) {
-                if let Some((q_x, q_y, q_w, q_h)) = project_search_label_glyph_rect(
-                    draw_x, baseline_y, g.offset_x, g.offset_y, g.width, g.height, scale,
-                ) {
-                    self.push_quad(q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji);
-                }
-                draw_x += Self::snapped_text_advance(g.advance, scale);
-            }
-        }
+        self.draw_string_scaled_pixel_snapped(text, x, y, color, scale);
     }
 
     pub(crate) fn project_search_stable_text_width(&mut self, text: &str, scale: f32) -> f32 {
@@ -1290,26 +1246,6 @@ impl Renderer {
             thumb.h,
             3.0 * scale,
             [0.48, 0.48, 0.56, 0.55],
-        );
-    }
-}
-
-#[cfg(test)]
-mod project_search_label_render_tests {
-    use super::project_search_label_glyph_rect;
-
-    #[test]
-    fn compact_label_glyphs_snap_offsets_and_sizes_independently() {
-        let rect = project_search_label_glyph_rect(10.0, 100.0, 0.4, 12.4, 7.4, 10.4, 0.74);
-
-        assert_eq!(rect, Some((10.0, 91.0, 5.0, 8.0)));
-    }
-
-    #[test]
-    fn compact_label_glyphs_skip_empty_quads() {
-        assert_eq!(
-            project_search_label_glyph_rect(10.0, 100.0, 0.0, 0.0, 0.0, 10.0, 0.74),
-            None
         );
     }
 }

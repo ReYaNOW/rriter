@@ -309,7 +309,7 @@ impl Renderer {
             false,
         );
         cy += btn_h + 8.0 * s;
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             "Доступен устройствам в сети",
             x + pad,
             api_panel_row_text_y(cy, 22.0 * s, s),
@@ -324,7 +324,7 @@ impl Renderer {
             ApiMockServerStatus::Running { url } => url.clone(),
             ApiMockServerStatus::Failed(err) => format!("ошибка: {}", err),
         };
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             &status,
             x + pad,
             api_panel_row_text_y(cy, 26.0 * s, s),
@@ -428,7 +428,7 @@ impl Renderer {
             false,
         );
         cy += btn_h + 8.0 * s;
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             "Базовый URL прокси для немокнутых запросов",
             x + pad,
             api_panel_row_text_y(cy, 20.0 * s, s),
@@ -492,7 +492,7 @@ impl Renderer {
                 format!("Свой Python · {}", runtime_status_label)
             }
         };
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             &runtime_status,
             x + pad,
             api_panel_row_text_y(cy, 24.0 * s, s),
@@ -739,7 +739,7 @@ impl Renderer {
                 0.74,
             );
             let loaded = format_last_loaded_at(spec.last_loaded, now);
-            self.draw_string_scaled_stable(
+            self.draw_string_scaled_pixel_snapped(
                 &loaded,
                 card_x + 10.0 * s,
                 api_panel_row_text_y(card_y + 66.0 * s, 18.0 * s, s),
