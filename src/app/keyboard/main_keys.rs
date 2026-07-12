@@ -61,6 +61,17 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
+        let editor_was_focused = self.editor_has_input_focus();
+        self.handle_main_keyboard_input_inner(event_loop, key_event);
+        self.autosave_after_editor_focus_change(editor_was_focused);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn handle_main_keyboard_input_inner(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        key_event: KeyEvent,
+    ) {
         let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
         let alt = self.modifiers.alt_key();
 

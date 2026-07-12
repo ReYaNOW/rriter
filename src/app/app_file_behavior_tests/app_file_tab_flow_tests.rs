@@ -430,6 +430,44 @@ fn autosave_only_runs_in_ide_mode() {
 }
 
 #[test]
+fn internal_editor_focus_loss_autosaves_dirty_file() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-autosave-focus-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("focus.py");
+    std::fs::write(&path, "old\n").unwrap();
+
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.file_path = Some(path.clone());
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("old\n");
+    app.editor.insert_str("changed\n");
+    assert!(app.editor_has_input_focus());
+    assert!(app.editor.is_dirty());
+
+    let editor_was_focused = app.editor_has_input_focus();
+    app.ide_panel.terminal_focused = true;
+    assert!(app.autosave_after_editor_focus_change(editor_was_focused));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nchanged\n");
+    assert!(!app.editor.is_dirty());
+
+    app.editor.insert_str("again\n");
+    assert!(!app.autosave_after_editor_focus_change(false));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nchanged\n");
+
+    std::fs::remove_file(path).ok();
+    std::fs::remove_dir(dir).ok();
+}
+
+#[test]
 fn file_open_waits_for_tree_sitter_and_applies_folds_before_return() {
     let Some(mut app) = test_app() else {
         return;

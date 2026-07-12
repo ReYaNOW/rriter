@@ -193,6 +193,18 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_input(
         &mut self,
+        event_loop: &ActiveEventLoop,
+        state: ElementState,
+        button: winit::event::MouseButton,
+    ) {
+        let editor_was_focused = self.editor_has_input_focus();
+        self.handle_main_mouse_input_inner(event_loop, state, button);
+        self.autosave_after_editor_focus_change(editor_was_focused);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn handle_main_mouse_input_inner(
+        &mut self,
         _event_loop: &ActiveEventLoop,
         state: ElementState,
         button: winit::event::MouseButton,

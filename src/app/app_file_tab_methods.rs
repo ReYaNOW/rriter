@@ -474,6 +474,15 @@ impl App {
         saved
     }
 
+    pub(crate) fn autosave_after_editor_focus_change(
+        &mut self,
+        editor_was_focused: bool,
+    ) -> bool {
+        editor_was_focused
+            && !self.editor_has_input_focus()
+            && self.autosave_current_file_if_dirty()
+    }
+
     pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
         if !self.modifiers.control_key()
             || !matches!(self.file_extension.as_str(), "py" | "pyi")

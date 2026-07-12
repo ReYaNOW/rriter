@@ -12,7 +12,7 @@
 //   initialize + didOpen для текущего файла.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, BufWriter};
+use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -41,6 +41,27 @@ const LSP_LOG_MAX_ENTRIES: usize = 64;
 const LSP_LOG_MAX_BYTES: usize = 512 * 1024;
 const LSP_LOG_ENTRY_MAX_BYTES: usize = 64 * 1024;
 const LSP_LOG_HIGHLIGHT_MAX_BYTES: usize = 8 * 1024;
+const LSP_MAX_CONSECUTIVE_ATTEMPTS: u8 = 4;
+const LSP_STABLE_RUNTIME: Duration = Duration::from_secs(30);
+
+#[derive(Default)]
+struct LspRestartBudget {
+    consecutive_attempts: u8,
+}
+
+impl LspRestartBudget {
+    fn begin_attempt(&mut self) -> Option<u8> {
+        if self.consecutive_attempts >= LSP_MAX_CONSECUTIVE_ATTEMPTS {
+            return None;
+        }
+        self.consecutive_attempts += 1;
+        Some(self.consecutive_attempts)
+    }
+
+    fn mark_stable(&mut self) {
+        self.consecutive_attempts = 0;
+    }
+}
 
 #[inline(always)]
 fn next_id() -> i32 {
@@ -178,15 +199,31 @@ struct SpawnedProcess {
     out_tx: Sender<Vec<u8>>,
 }
 
+fn abort_spawned_child(child: &mut Child, error: io::Error) -> io::Error {
+    let _ = child.kill();
+    let _ = child.wait();
+    error
+}
+
+fn missing_process_pipe(child: &mut Child, pipe: &'static str) -> io::Error {
+    abort_spawned_child(
+        child,
+        io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            format!("spawned LSP process has no {pipe} pipe"),
+        ),
+    )
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn spawn_server(
     def: &'static LspServerDef,
     workspace: Option<&Path>,
     event_tx: Sender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
-) -> Option<SpawnedProcess> {
+) -> io::Result<SpawnedProcess> {
     let mut cmd = Command::new(def.program);
-    if let Some(ws) = workspace {
+    if let Some(ws) = workspace.filter(|ws| ws.is_dir()) {
         cmd.current_dir(ws);
     }
     for arg in def.args {
@@ -196,19 +233,27 @@ fn spawn_server(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
+        .spawn()?;
 
-    let stdin = child.stdin.take()?;
-    let stdout = child.stdout.take()?;
-    let stderr = child.stderr.take()?;
+    let stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => return Err(missing_process_pipe(&mut child, "stdin")),
+    };
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => return Err(missing_process_pipe(&mut child, "stdout")),
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => return Err(missing_process_pipe(&mut child, "stderr")),
+    };
 
     let (out_tx, out_rx) = mpsc::channel::<Vec<u8>>();
     let reader_out_tx = out_tx.clone();
 
     let err_tx = event_tx.clone();
     let srv_name = def.program;
-    thread::Builder::new()
+    if let Err(error) = thread::Builder::new()
         .name(format!("lsp-stderr-{}", srv_name))
         .spawn(move || {
             let reader = BufReader::new(stderr);
@@ -221,10 +266,12 @@ fn spawn_server(
                 }
             }
         })
-        .ok()?;
+    {
+        return Err(abort_spawned_child(&mut child, error));
+    }
 
     // Тред-писатель: получает байты, оборачивает в Content-Length фрейм
-    thread::Builder::new()
+    if let Err(error) = thread::Builder::new()
         .name("lsp-writer".into())
         .spawn(move || {
             let mut writer = BufWriter::with_capacity(128 * 1024, stdin);
@@ -234,10 +281,12 @@ fn spawn_server(
                 }
             }
         })
-        .ok()?;
+    {
+        return Err(abort_spawned_child(&mut child, error));
+    }
 
     // Тред-читатель: парсит stdout и шлёт события
-    thread::Builder::new()
+    if let Err(error) = thread::Builder::new()
         .name("lsp-reader".into())
         .spawn(move || {
             let mut reader = BufReader::with_capacity(128 * 1024, stdout);
@@ -294,9 +343,11 @@ fn spawn_server(
                 );
             }
         })
-        .ok()?;
+    {
+        return Err(abort_spawned_child(&mut child, error));
+    }
 
-    Some(SpawnedProcess { child, out_tx })
+    Ok(SpawnedProcess { child, out_tx })
 }
 
 // ── Supervisor тред ───────────────────────────────────────────────────────────
@@ -371,6 +422,21 @@ fn remove_json_text_fields(value: &mut serde_json::Value) -> bool {
     }
 }
 
+fn disable_lsp_server(
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    message: String,
+) {
+    let _ = event_tx.send(LspEvent::Log {
+        name: server_name,
+        message,
+    });
+    let _ = event_tx.send(LspEvent::StatusChanged {
+        name: server_name,
+        status: LspServerStatus::Disabled,
+    });
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn run_supervisor(
     def: &'static LspServerDef,
@@ -381,10 +447,26 @@ fn run_supervisor(
     let mut open_file: Option<OpenFile> = None;
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
+    let mut restart_budget = LspRestartBudget::default();
     let pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
     'outer: loop {
+        let Some(attempt) = restart_budget.begin_attempt() else {
+            disable_lsp_server(
+                &event_tx,
+                def.program,
+                format!(
+                    "[LSP] '{}' disabled after {} consecutive start/crash attempts; fix the server and use Restart to try again",
+                    def.program, LSP_MAX_CONSECUTIVE_ATTEMPTS
+                ),
+            );
+            return;
+        };
+        if attempt > 1 {
+            thread::sleep(restart_delay);
+            restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
+        }
         if let Ok(mut pending) = pending_requests.lock() {
             pending.clear();
         }
@@ -399,18 +481,33 @@ fn run_supervisor(
             event_tx.clone(),
             pending_requests.clone(),
         ) {
-            Some(p) => p,
-            None => {
+            Ok(p) => p,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                disable_lsp_server(
+                    &event_tx,
+                    def.program,
+                    format!(
+                        "[LSP] '{}' was not found in PATH and has been disabled: {}",
+                        def.program, error
+                    ),
+                );
+                return;
+            }
+            Err(error) => {
+                let _ = event_tx.send(LspEvent::Log {
+                    name: def.program,
+                    message: format!(
+                        "[LSP] failed to start '{}' (attempt {}/{}): {}",
+                        def.program, attempt, LSP_MAX_CONSECUTIVE_ATTEMPTS, error
+                    ),
+                });
                 let _ = event_tx.send(LspEvent::StatusChanged {
                     name: def.program,
                     status: LspServerStatus::Crashed,
                 });
-                thread::sleep(restart_delay);
-                restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
                 continue 'outer;
             }
         };
-        restart_delay = Duration::from_millis(500); // сброс на удачный запуск
 
         // ── Handshake: initialize ─────────────────────────────────────────
         init_id = next_id();
@@ -449,6 +546,7 @@ fn run_supervisor(
             name: def.program,
             status: LspServerStatus::Running,
         });
+        let running_since = Instant::now();
 
         // Если был открыт файл — reopenуем после рестарта
         if let Some(ref of) = open_file {
@@ -460,18 +558,43 @@ fn run_supervisor(
 
         // ── Основной цикл supervisor ──────────────────────────────────────
         'inner: loop {
+            if restart_budget.consecutive_attempts != 0
+                && running_since.elapsed() >= LSP_STABLE_RUNTIME
+            {
+                restart_budget.mark_stable();
+                restart_delay = Duration::from_millis(500);
+            }
             // Проверяем краш процесса
             match proc.child.try_wait() {
-                Ok(Some(_)) => {
+                Ok(Some(status)) => {
+                    let _ = event_tx.send(LspEvent::Log {
+                        name: def.program,
+                        message: format!(
+                            "[LSP] '{}' exited unexpectedly with status {}",
+                            def.program, status
+                        ),
+                    });
                     let _ = event_tx.send(LspEvent::StatusChanged {
                         name: def.program,
                         status: LspServerStatus::Crashed,
                     });
-                    thread::sleep(Duration::from_millis(1000));
                     break 'inner; // рестарт
                 }
                 Ok(None) => {}
-                Err(_) => break 'inner,
+                Err(error) => {
+                    let _ = event_tx.send(LspEvent::Log {
+                        name: def.program,
+                        message: format!(
+                            "[LSP] failed to query '{}' process status: {}",
+                            def.program, error
+                        ),
+                    });
+                    let _ = event_tx.send(LspEvent::StatusChanged {
+                        name: def.program,
+                        status: LspServerStatus::Crashed,
+                    });
+                    break 'inner;
+                }
             }
 
             // Обрабатываем команды от главного треда

@@ -59,6 +59,8 @@ pub struct LspManager {
     pub ty_status: LspServerStatus,
     /// Отключён ли ruff вручную
     pub python_disabled: bool,
+    ruff_unavailable: bool,
+    ty_unavailable: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
     pub suppress_diagnostics: bool,
 }
@@ -97,6 +99,8 @@ impl LspManager {
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
             python_disabled: false,
+            ruff_unavailable: false,
+            ty_unavailable: false,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
         }
@@ -174,6 +178,32 @@ impl LspManager {
         self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
     }
 
+    fn start_ruff_process_if_available(&mut self, workspaces: &[PathBuf]) -> bool {
+        if self.python.is_some() {
+            return false;
+        }
+        if self.ruff_unavailable {
+            self.python_status = LspServerStatus::Disabled;
+            return false;
+        }
+        self.python_status = LspServerStatus::Starting;
+        self.python = Some(LspProcess::start(&RUFF_SERVER, workspaces.to_vec()));
+        true
+    }
+
+    fn start_ty_process_if_available(&mut self, workspaces: &[PathBuf]) -> bool {
+        if self.ty_process.is_some() {
+            return false;
+        }
+        if self.ty_unavailable {
+            self.ty_status = LspServerStatus::Disabled;
+            return false;
+        }
+        self.ty_status = LspServerStatus::Starting;
+        self.ty_process = Some(LspProcess::start(&TY_SERVER, workspaces.to_vec()));
+        true
+    }
+
     fn sync_python_processes_after_open_set_change(&mut self, reopen_current: bool) {
         self.prune_inactive_workspace_diagnostics();
         self.reset_ty_workspace_state();
@@ -205,10 +235,8 @@ impl LspManager {
         if let Some(p) = self.ty_process.take() {
             p.shutdown();
         }
-        self.python_status = LspServerStatus::Starting;
-        self.ty_status = LspServerStatus::Starting;
-        self.python = Some(LspProcess::start(&RUFF_SERVER, workspaces.clone()));
-        self.ty_process = Some(LspProcess::start(&TY_SERVER, workspaces));
+        self.start_ruff_process_if_available(&workspaces);
+        self.start_ty_process_if_available(&workspaces);
         self.reset_ty_workspace_state();
 
         if reopen_current {
@@ -244,19 +272,12 @@ impl LspManager {
         if self.open_python_files.is_empty() {
             return;
         }
-        if self.python.is_none() && !self.python_disabled {
-            self.python_status = LspServerStatus::Starting;
-            self.python = Some(LspProcess::start(
-                &RUFF_SERVER,
-                self.active_workspaces.clone(),
-            ));
+        if self.python_disabled {
+            return;
         }
-        if self.ty_process.is_none() && !self.python_disabled {
-            self.ty_status = LspServerStatus::Starting;
-            self.ty_process = Some(LspProcess::start(
-                &TY_SERVER,
-                self.active_workspaces.clone(),
-            ));
+        let workspaces = self.active_workspaces.clone();
+        self.start_ruff_process_if_available(&workspaces);
+        if self.start_ty_process_if_available(&workspaces) {
             self.reset_ty_workspace_state();
         }
     }
@@ -266,6 +287,8 @@ impl LspManager {
         if self.open_python_files.is_empty() || self.python_disabled {
             return;
         }
+        self.ruff_unavailable = false;
+        self.ty_unavailable = false;
         self.sync_python_processes_after_open_set_change(true);
     }
 
@@ -301,21 +324,16 @@ impl LspManager {
     /// Включить ruff обратно
     pub fn enable_python(&mut self) {
         self.python_disabled = false;
+        self.ruff_unavailable = false;
+        self.ty_unavailable = false;
         if self.open_python_files.is_empty() {
             self.python_status = LspServerStatus::Disabled;
             self.ty_status = LspServerStatus::Disabled;
             return;
         }
-        self.python_status = LspServerStatus::Starting;
-        self.ty_status = LspServerStatus::Starting;
-        self.python = Some(LspProcess::start(
-            &RUFF_SERVER,
-            self.active_workspaces.clone(),
-        ));
-        self.ty_process = Some(LspProcess::start(
-            &TY_SERVER,
-            self.active_workspaces.clone(),
-        ));
+        let workspaces = self.active_workspaces.clone();
+        self.start_ruff_process_if_available(&workspaces);
+        self.start_ty_process_if_available(&workspaces);
         self.reset_ty_workspace_state();
         self.current_python_lines = self
             .current_python_file
@@ -755,17 +773,29 @@ impl LspManager {
                     if *name == TY_SERVER.program {
                         self.ty_status = status.clone();
                         if *status == LspServerStatus::Running {
+                            self.ty_unavailable = false;
                             self.ty_workspace_diag_dirty = true;
                         } else if *status == LspServerStatus::Starting
                             || *status == LspServerStatus::Crashed
                             || *status == LspServerStatus::Disabled
                         {
                             self.ty_workspace_diag_pending = None;
+                            if *status == LspServerStatus::Disabled {
+                                self.ty_unavailable = true;
+                                self.ty_process = None;
+                            }
                         }
                     } else {
                         self.python_status = status.clone();
                         if *status == LspServerStatus::Running {
+                            self.ruff_unavailable = false;
                             self.ruff_workspace_diag_dirty = true;
+                        } else if *status == LspServerStatus::Disabled {
+                            self.ruff_unavailable = true;
+                            self.python = None;
+                            self.ruff_workspace_diag_rx = None;
+                            self.ruff_workspace_diag_pending = false;
+                            self.ruff_workspace_diag_dirty = false;
                         }
                     }
                 }

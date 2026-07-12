@@ -75,6 +75,7 @@ impl super::LspManager {
         if !self.ruff_workspace_diag_dirty
             || self.ruff_workspace_diag_pending
             || self.python_disabled
+            || self.python_status != super::LspServerStatus::Running
             || self.suppress_diagnostics
             || self.active_workspaces.is_empty()
         {

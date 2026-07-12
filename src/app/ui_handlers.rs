@@ -96,7 +96,6 @@ impl App {
     /// Обрабатывает клик по UI элементу
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
-        let editor_was_focused = self.editor_has_input_focus();
         match id {
             UiId::ApiImportAdd
             | UiId::ApiImportFile
@@ -1651,9 +1650,6 @@ impl App {
                     window.request_redraw();
                 }
             }
-        }
-        if editor_was_focused && !self.editor_has_input_focus() {
-            self.autosave_current_file_if_dirty();
         }
     }
 }

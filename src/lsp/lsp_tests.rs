@@ -64,6 +64,114 @@ fn python_text_with_lines(lines: usize) -> String {
 }
 
 #[test]
+fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
+    static MISSING_SERVER: LspServerDef = LspServerDef {
+        program: "rriter-definitely-missing-lsp-server",
+        args: &[],
+        language_id: "python",
+        extensions: &["py"],
+    };
+    let (_cmd_tx, cmd_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::channel();
+    let started = Instant::now();
+
+    run_supervisor(&MISSING_SERVER, Vec::new(), cmd_rx, event_tx);
+
+    assert!(started.elapsed() < Duration::from_secs(1));
+    let events = event_rx.try_iter().collect::<Vec<_>>();
+    assert!(events.iter().any(|event| matches!(
+        event,
+        LspEvent::StatusChanged {
+            name,
+            status: LspServerStatus::Starting,
+        } if *name == MISSING_SERVER.program
+    )));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        LspEvent::StatusChanged {
+            name,
+            status: LspServerStatus::Disabled,
+        } if *name == MISSING_SERVER.program
+    )));
+    assert!(!events.iter().any(|event| matches!(
+        event,
+        LspEvent::StatusChanged {
+            status: LspServerStatus::Crashed,
+            ..
+        }
+    )));
+    let logs = events
+        .iter()
+        .filter_map(|event| match event {
+            LspEvent::Log { message, .. } => Some(message.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(logs.len(), 1);
+    assert!(logs[0].contains(MISSING_SERVER.program));
+    assert!(logs[0].contains("PATH"));
+    assert!(logs[0].contains("disabled"));
+}
+
+#[test]
+fn lsp_restart_budget_is_bounded_and_resets_after_stable_run() {
+    let mut budget = LspRestartBudget::default();
+    for attempt in 1..=LSP_MAX_CONSECUTIVE_ATTEMPTS {
+        assert_eq!(budget.begin_attempt(), Some(attempt));
+    }
+    assert_eq!(budget.begin_attempt(), None);
+
+    budget.mark_stable();
+    assert_eq!(budget.begin_attempt(), Some(1));
+}
+
+#[test]
+fn unavailable_python_servers_stay_disabled_until_explicit_retry() {
+    let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
+    let (ty, _ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.python = Some(ruff);
+    manager.ty_process = Some(ty);
+
+    ruff_tx
+        .send(LspEvent::StatusChanged {
+            name: RUFF_SERVER.program,
+            status: LspServerStatus::Disabled,
+        })
+        .unwrap();
+    ty_tx
+        .send(LspEvent::StatusChanged {
+            name: TY_SERVER.program,
+            status: LspServerStatus::Disabled,
+        })
+        .unwrap();
+    manager.poll();
+
+    assert!(manager.ruff_unavailable);
+    assert!(manager.ty_unavailable);
+    assert_eq!(manager.python_status, LspServerStatus::Disabled);
+    assert_eq!(manager.ty_status, LspServerStatus::Disabled);
+    assert!(manager.python.is_none());
+    assert!(manager.ty_process.is_none());
+
+    manager
+        .open_python_files
+        .insert(PathBuf::from("/tmp/ws/app.py"), 1);
+    manager.active_workspaces = vec![PathBuf::from("/tmp/ws")];
+    manager.ensure_python();
+
+    assert!(manager.python.is_none());
+    assert!(manager.ty_process.is_none());
+    assert_eq!(manager.python_status, LspServerStatus::Disabled);
+    assert_eq!(manager.ty_status, LspServerStatus::Disabled);
+
+    manager.ruff_workspace_diag_dirty = true;
+    manager.request_ruff_workspace_diagnostics_if_ready();
+    assert!(manager.ruff_workspace_diag_rx.is_none());
+    assert!(!manager.ruff_workspace_diag_pending);
+}
+
+#[test]
 fn lsp_position_and_log_formatting_end_to_end() {
     let text = "one\nemoji 😀\nlast";
     assert_eq!(lsp_pos_to_offset(text, 1, 6), text.find("😀").unwrap());
