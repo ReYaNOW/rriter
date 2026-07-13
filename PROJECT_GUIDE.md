@@ -44,7 +44,7 @@ src/platform/macos.rs
 src/platform/tests.rs
 ```
 
-`platform.rs` is the public boundary for behavior that differs by operating system. `platform/integration.rs` owns native config/data/cache/state directories, configured tool discovery, native trust/proxy hooks, and process memory. `platform/process.rs` owns executable discovery, cancelable captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup. `platform/elevated_save.rs` owns the validated helper protocol used for protected atomic saves. Windows and macOS native APIs remain in their target-specific modules.
+`platform.rs` is the public boundary for behavior that differs by operating system. `platform/integration.rs` owns native config/data/cache/state directories, configured tool discovery, shared native-root/proxy HTTP builders, and process memory. `platform/process.rs` owns executable discovery, cancelable captured and line-streaming command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup. `platform/elevated_save.rs` owns the validated helper protocol used for protected atomic saves. Windows and macOS native APIs remain in their target-specific modules.
 
 Important invariants:
 
@@ -60,6 +60,7 @@ Important invariants:
 * Windows and macOS HTTP clients add user-installed native trust roots and native static proxy settings while preserving explicit proxy environment overrides.
 * Application shortcuts, terminal Control, and word-navigation modifiers are separate policies. This preserves Windows AltGr text and native macOS Command/Option behavior.
 * Tool overrides are persisted as native paths in `ToolPaths`, resolved without changing global environment variables, and surfaced in settings together with their source and availability.
+* uv, Ruff, and Ty can be installed or updated from settings into RRiter-owned user data directories. The bootstrap never edits shell profiles, never requests elevation, exposes bounded logs/cancellation, and records the resulting native executable paths in `ToolPaths`.
 * macOS native dialogs stay on the main event-loop thread. Windows uses a DPI-aware, long-path-aware manifest and application identity; macOS uses a regular AppKit application lifecycle and default menu.
 * OpenGL context policy is explicit: macOS 4.1 Core only, Windows 4.1 Core then 3.3 Core, Linux desktop 4.1/3.3 then GLES 3.0. Renderer diagnostics retain the requested profile, actual GL/GLSL versions, GPU identity, and scale factor.
 
@@ -77,6 +78,17 @@ Git graph queries and fetch/pull/push commands use the shared managed-process la
 
 Repository identity and graph caches use `PathKey`, so drive-letter/case aliases do not duplicate Windows repositories. Status/stage tests cover `core.autocrlf`, `core.filemode=false`, and case-only renames.
 
+### Managed tool bootstrap
+
+Files:
+
+```text
+src/app/tool_installer.rs
+src/app/tool_installer_tests.rs
+```
+
+Settings can install/update uv, Ruff, and Ty on Linux, Windows, and macOS. uv is downloaded through the shared platform HTTP builder and executed with `UV_UNMANAGED_INSTALL` plus `UV_NO_MODIFY_PATH`, placing its binaries under RRiter's data directory without modifying the user's shell. Ruff and Ty are installed as explicit `ruff@latest` / `ty@latest` packages with `uv tool install --force` into isolated environments, with executable, environment, cache, and any automatically downloaded managed-Python roots explicitly owned by RRiter. Windows Python registration and global Python links are disabled for this bootstrap. Each install uses a fresh transactional generation and switches the configured executable only after `--version` succeeds; the previous generation remains available for rollback and failed/cancelled generations are removed. A single worker exists only while an install is active; stdout/stderr are streamed through the managed process layer, logs are bounded, cancellation terminates the complete process tree, and failures never auto-retry.
+
 ### API Client and API Mock platform runtime
 
 Files:
@@ -91,7 +103,7 @@ src/app/api_mock/server.rs
 src/app/api_mock/persist.rs
 ```
 
-Blocking API requests and the asynchronous API Mock proxy share builders that apply the same trust roots and proxy policy. Direct server-reach timing uses a bounded TCP connect instead of platform-specific `ping`; it is suppressed when proxy routing is active because a direct probe would be misleading.
+Blocking API requests, the asynchronous API Mock proxy, and tool bootstrap share platform builders that apply the same trust roots and proxy policy. Direct server-reach timing uses a bounded TCP connect instead of platform-specific `ping`; it is suppressed when proxy routing is active because a direct probe would be misleading.
 
 Authentication is stored separately through the platform secret envelope and atomic secret writer. Ordinary specs, mock state, caches, and OpenAPI exports use atomic replacement. Multipart picker results stay as native `PathBuf` values, including Windows paths with spaces/UNC paths and non-UTF Unix paths; lossy display text is never used as the selected upload path. Copied cURL commands use POSIX quoting on Linux/macOS and explicit `curl.exe` plus PowerShell quoting/continuations on Windows.
 
@@ -376,14 +388,22 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
-* `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, native trust/proxy dispatch, and process memory.
-* `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
+* `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, native trust/proxy HTTP builders, and process memory.
+* `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
 * `src/platform/elevated_save.rs` -> non-shell validated helper request, elevated atomic replacement, result propagation, and Linux `pkexec` compatibility.
 * `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling, AppUserModelID, DPAPI, native certificate/proxy discovery, elevation, and process memory.
 * `src/platform/macos.rs` -> Keychain secrets, Finder/URL integration, `scutil` proxy parsing, Keychain certificates, Mach memory, and administrator authorization helper.
 * `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier/tool-resolution regression tests that can run on Linux, plus target-gated native tests.
 
 Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules. Native tool paths are configured from settings through `ToolPaths`; feature code must not rewrite process-wide environment variables.
+
+### `src/app/tool_installer.rs`
+
+Owns the settings-driven uv/Ruff/Ty install lifecycle for all three desktop platforms: fixed official uv installer URLs, native PowerShell or `/bin/sh` invocation without shell interpolation, RRiter-owned data/cache layout, isolated `uv tool` environments, native proxy/trust integration, live bounded logs, explicit cancellation, executable validation, tool-resolution refresh, and LSP/API Mock activation after success.
+
+### `src/app/tool_installer_tests.rs`
+
+Covers platform command plans, isolated generations, rollback/pruning, bounded live logs, cancellation semantics, and network-free pre-cancel behavior for the managed installer.
 
 ### Window, graphics, and native input bootstrap
 

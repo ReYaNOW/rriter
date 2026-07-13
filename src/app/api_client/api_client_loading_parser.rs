@@ -71,74 +71,8 @@ fn api_client_key(
     }
 }
 
-fn apply_native_roots_blocking(
-    mut builder: reqwest::blocking::ClientBuilder,
-) -> reqwest::blocking::ClientBuilder {
-    for der in crate::platform::native_root_certificates_der() {
-        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
-            builder = builder.add_root_certificate(certificate);
-        }
-    }
-    builder
-}
-
-fn apply_native_roots_async(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
-    for der in crate::platform::native_root_certificates_der() {
-        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
-            builder = builder.add_root_certificate(certificate);
-        }
-    }
-    builder
-}
-
-fn reqwest_native_proxies(
-    config: &crate::platform::SystemProxyConfig,
-) -> Vec<reqwest::Proxy> {
-    let no_proxy = config
-        .bypass
-        .as_deref()
-        .and_then(reqwest::NoProxy::from_string);
-    let mut proxies = Vec::new();
-    if let Some(url) = config.http.as_deref()
-        && let Ok(proxy) = reqwest::Proxy::http(url)
-    {
-        proxies.push(proxy.no_proxy(no_proxy.clone()));
-    }
-    if let Some(url) = config.https.as_deref()
-        && let Ok(proxy) = reqwest::Proxy::https(url)
-    {
-        proxies.push(proxy.no_proxy(no_proxy.clone()));
-    }
-    if let Some(url) = config.all.as_deref()
-        && let Ok(proxy) = reqwest::Proxy::all(url)
-    {
-        proxies.push(proxy.no_proxy(no_proxy));
-    }
-    proxies
-}
-
-fn api_blocking_client_builder_with_proxy(
-    proxy_config: Option<&crate::platform::SystemProxyConfig>,
-) -> reqwest::blocking::ClientBuilder {
-    let mut builder = apply_native_roots_blocking(
-        reqwest::blocking::Client::builder().use_rustls_tls(),
-    );
-    if let Some(config) = proxy_config {
-        for proxy in reqwest_native_proxies(config) {
-            builder = builder.proxy(proxy);
-        }
-    }
-    builder
-}
-
 pub(crate) fn api_async_client_builder() -> reqwest::ClientBuilder {
-    let mut builder = apply_native_roots_async(reqwest::Client::builder().use_rustls_tls());
-    if let Some(config) = crate::platform::system_proxy_config() {
-        for proxy in reqwest_native_proxies(&config) {
-            builder = builder.proxy(proxy);
-        }
-    }
-    builder
+    crate::platform::async_http_client_builder()
 }
 
 fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Client {
@@ -148,7 +82,7 @@ fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Cli
         if let Some(client) = clients.get(&key) {
             return client.clone();
         }
-        let mut builder = api_blocking_client_builder_with_proxy(native_proxy.as_ref())
+        let mut builder = crate::platform::blocking_http_client_builder()
             .timeout(API_FETCH_TIMEOUT)
             .pool_idle_timeout(API_POOL_IDLE_TIMEOUT);
         if let Some(resolved) = resolved {
@@ -159,7 +93,7 @@ fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Cli
             return client;
         }
     }
-    api_blocking_client_builder_with_proxy(native_proxy.as_ref())
+    crate::platform::blocking_http_client_builder()
         .timeout(API_FETCH_TIMEOUT)
         .build()
         .unwrap_or_else(|_| reqwest::blocking::Client::new())

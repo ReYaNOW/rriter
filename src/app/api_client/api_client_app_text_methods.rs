@@ -1318,61 +1318,43 @@ impl crate::app::App {
             });
         std::thread::spawn(move || {
             let mut command = Command::new(uv_path);
-            command
-                .arg("python")
-                .arg("install")
-                .arg(&version)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let mut child = match crate::platform::ManagedChild::spawn(&mut command) {
-                Ok(child) => child,
-                Err(err) => {
-                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
-                        "Ошибка запуска uv: {err}"
-                    ))));
-                    return;
-                }
-            };
-            let mut readers = Vec::new();
-            if let Some(stdout) = child.take_stdout() {
-                readers.push(spawn_api_python_log_reader(
-                    stdout,
-                    tx.clone(),
-                    ApiPythonInstallLogKind::Info,
-                ));
-            }
-            if let Some(stderr) = child.take_stderr() {
-                readers.push(spawn_api_python_log_reader(
-                    stderr,
-                    tx.clone(),
-                    ApiPythonInstallLogKind::Error,
-                ));
-            }
-            let deadline = Instant::now() + API_PYTHON_INSTALL_TIMEOUT;
-            let result = loop {
-                if cancel.load(Ordering::Acquire) {
-                    let _ = child.terminate(Duration::from_secs(1));
-                    break Err("Установка Python отменена.".to_string());
-                }
-                match child.try_wait() {
-                    Ok(Some(status)) if status.success() => break Ok(()),
-                    Ok(Some(status)) => {
-                        break Err(format!("uv завершился с кодом {:?}", status.code()));
+            command.arg("python").arg("install").arg(&version);
+            let result = crate::platform::run_command_streaming_cancelable(
+                &mut command,
+                API_PYTHON_INSTALL_TIMEOUT,
+                &cancel,
+                |stream, line| {
+                    if line.trim().is_empty() {
+                        return;
                     }
-                    Ok(None) if Instant::now() >= deadline => {
-                        let _ = child.terminate(Duration::from_secs(1));
-                        break Err("uv python install превысил лимит времени.".to_string());
-                    }
-                    Ok(None) => std::thread::sleep(Duration::from_millis(25)),
-                    Err(err) => {
-                        let _ = child.terminate(Duration::from_secs(1));
-                        break Err(format!("Ошибка ожидания uv: {err}"));
-                    }
+                    let kind = match stream {
+                        crate::platform::ProcessOutputStream::Stdout => {
+                            ApiPythonInstallLogKind::Info
+                        }
+                        crate::platform::ProcessOutputStream::Stderr => {
+                            ApiPythonInstallLogKind::Error
+                        }
+                    };
+                    let _ = tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
+                        text: line,
+                        kind,
+                    }));
+                },
+            )
+            .map_err(|error| match error.kind() {
+                std::io::ErrorKind::Interrupted => "Установка Python отменена.".to_string(),
+                std::io::ErrorKind::TimedOut => {
+                    "uv python install превысил лимит времени.".to_string()
                 }
-            };
-            for reader in readers {
-                let _ = reader.join();
-            }
+                _ => format!("Ошибка запуска uv: {error}"),
+            })
+            .and_then(|status| {
+                if status.success() {
+                    Ok(())
+                } else {
+                    Err(format!("uv завершился с кодом {:?}", status.code()))
+                }
+            });
             let _ = tx.send(ApiPythonInstallEvent::Done(result));
         });
     }

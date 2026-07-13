@@ -43,7 +43,7 @@ impl Renderer {
         (total_h - content_h).max(0.0)
     }
 
-    pub fn draw_settings(
+    pub(crate) fn draw_settings(
         &mut self,
         anim_progress: f32,
         active_tab: usize,
@@ -57,6 +57,7 @@ impl Renderer {
         ide_scroll_y: f32,
         blink_alpha: f32,
         tool_paths: &crate::platform::ToolPaths,
+        tool_installer: &crate::app::tool_installer::ToolInstaller,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
@@ -729,15 +730,16 @@ impl Renderer {
                 );
             }
         } else if active_tab == 1 {
-            self.draw_string_scaled(
+            content_y = content_y.round();
+            self.draw_string_scaled_stable(
                 "Внешние инструменты",
-                content_x,
+                content_x.round(),
                 content_y,
                 [0.82, 0.82, 0.86, 1.0],
                 1.0,
             );
-            let refresh_x = content_x + 350.0 * s;
-            let refresh_y = content_y - 18.0 * s;
+            let refresh_x = (content_x + 350.0 * s).round();
+            let refresh_y = (content_y - 18.0 * s).round();
             ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsRefreshTools,
                 refresh_x,
@@ -758,35 +760,45 @@ impl Renderer {
                 icon_size: 14.0 * s,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            content_y += 24.0 * s;
-            self.draw_string_scaled(
+            content_y = (content_y + (24.0 * s).round()).round();
+            self.draw_string_scaled_stable(
                 "Явный путь имеет приоритет над PATH. Переменные RRITER_*_PATH — выше настроек.",
-                content_x,
+                content_x.round(),
                 content_y,
                 [0.44, 0.46, 0.54, 1.0],
                 0.76,
             );
-            content_y += 18.0 * s;
+            content_y = (content_y + (18.0 * s).round()).round();
+            self.draw_string_scaled_stable(
+                "uv, Ruff и Ty ставятся в каталог RRiter без изменения PATH и профиля shell.",
+                content_x.round(),
+                content_y,
+                [0.44, 0.46, 0.54, 1.0],
+                0.72,
+            );
+            content_y = (content_y + (18.0 * s).round()).round();
 
             for kind in crate::platform::ToolKind::ALL {
-                let row_h = 47.0 * s;
+                let row_y = content_y.round();
+                let row_h = (47.0 * s).round().max(1.0);
                 let resolution = crate::platform::resolve_tool_kind(kind);
                 let configured = tool_paths.get(kind);
+                let compact_path_chars = if kind.supports_managed_install() { 24 } else { 47 };
                 let status = if resolution.is_ready() {
                     let path = resolution.path.as_deref().unwrap_or(std::path::Path::new(""));
                     let source = resolution
                         .source
                         .map(|source| source.label())
                         .unwrap_or("авто");
-                    format!("Готов ({source}): {}", compact_settings_path(path, 47))
+                    format!("{source}: {}", compact_settings_path(path, compact_path_chars))
                 } else if resolution.is_invalid_override() {
                     let path = resolution
                         .configured_path
                         .as_deref()
                         .unwrap_or(std::path::Path::new(""));
-                    format!("Не найден: {}", compact_settings_path(path, 50))
+                    format!("Не найден: {}", compact_settings_path(path, compact_path_chars))
                 } else {
-                    "Не найден в PATH".to_string()
+                    "Не найден".to_string()
                 };
                 let status_color = if resolution.is_ready() {
                     [0.46, 0.82, 0.58, 1.0]
@@ -796,38 +808,82 @@ impl Renderer {
 
                 self.push_rounded_rect(
                     content_x,
-                    content_y,
-                    460.0 * s,
-                    row_h - 4.0 * s,
+                    row_y,
+                    (460.0 * s).round(),
+                    (row_h - (4.0 * s).round()).max(1.0),
                     5.0 * s,
                     [0.12, 0.13, 0.17, 1.0],
                 );
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     kind.label(),
-                    content_x + 10.0 * s,
-                    content_y + 17.0 * s,
+                    (content_x + 10.0 * s).round(),
+                    (row_y + (17.0 * s).round()).round(),
                     [0.88, 0.88, 0.92, 1.0],
                     0.88,
                 );
-                self.draw_string_scaled(
+                self.draw_string_scaled_stable(
                     &status,
-                    content_x + 10.0 * s,
-                    content_y + 35.0 * s,
+                    (content_x + 10.0 * s).round(),
+                    (row_y + (35.0 * s).round()).round(),
                     status_color,
                     0.70,
                 );
 
-                let choose_x = content_x + 338.0 * s;
-                let button_y = content_y + 7.0 * s;
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::SettingsToolPick(kind.index()),
-                    choose_x,
-                    button_y,
-                    72.0 * s,
-                    29.0 * s,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
-                );
+                if kind.supports_managed_install() {
+                    let install_x = (content_x + 238.0 * s).round();
+                    let install_disabled = tool_installer.is_running()
+                        && !tool_installer.is_running_for(kind);
+                    let install_text = if tool_installer.is_running_for(kind) {
+                        "Отмена"
+                    } else if resolution.is_ready() {
+                        "Обновить"
+                    } else {
+                        "Установить"
+                    };
+                    if !install_disabled {
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::SettingsToolInstall(kind.index()),
+                            install_x,
+                            (row_y + 7.0 * s).round(),
+                            94.0 * s,
+                            29.0 * s,
+                            self.last_mouse_x,
+                            self.last_mouse_y,
+                        );
+                    }
+                    crate::widgets::ButtonView {
+                        x: install_x,
+                        y: (row_y + 7.0 * s).round(),
+                        w: 94.0 * s,
+                        h: 29.0 * s,
+                        text: install_text,
+                        icon: None,
+                        text_scale: 0.68,
+                        icon_size: 0.0,
+                    }
+                    .render(
+                        self,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                        s,
+                        install_disabled,
+                    );
+                }
+
+                let choose_x = (content_x + 338.0 * s).round();
+                let button_y = (row_y + 7.0 * s).round();
+                let path_controls_disabled = tool_installer.is_running();
+                if !path_controls_disabled {
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::SettingsToolPick(kind.index()),
+                        choose_x,
+                        button_y,
+                        72.0 * s,
+                        29.0 * s,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                }
                 crate::widgets::ButtonView {
                     x: choose_x,
                     y: button_y,
@@ -838,19 +894,27 @@ impl Renderer {
                     text_scale: 0.72,
                     icon_size: 0.0,
                 }
-                .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                .render(
+                    self,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                    s,
+                    path_controls_disabled,
+                );
 
                 if configured.is_some() {
-                    let clear_x = content_x + 416.0 * s;
-                    ui_registry.register_rect(
-                        crate::ui_system::UiId::SettingsToolClear(kind.index()),
-                        clear_x,
-                        button_y,
-                        36.0 * s,
-                        29.0 * s,
-                        self.last_mouse_x,
-                        self.last_mouse_y,
-                    );
+                    let clear_x = (content_x + 416.0 * s).round();
+                    if !path_controls_disabled {
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::SettingsToolClear(kind.index()),
+                            clear_x,
+                            button_y,
+                            36.0 * s,
+                            29.0 * s,
+                            self.last_mouse_x,
+                            self.last_mouse_y,
+                        );
+                    }
                     crate::widgets::ButtonView {
                         x: clear_x,
                         y: button_y,
@@ -861,13 +925,125 @@ impl Renderer {
                         text_scale: 0.92,
                         icon_size: 0.0,
                     }
-                    .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                    .render(
+                        self,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                        s,
+                        path_controls_disabled,
+                    );
                 }
-                content_y += row_h;
+                content_y = (row_y + row_h).round();
             }
 
-            content_y += 5.0 * s;
-            self.draw_string_scaled(
+            if let Some(target) = tool_installer.target() {
+                content_y = (content_y + (3.0 * s).round()).round();
+                let panel_h = (102.0 * s).round();
+                self.push_rounded_rect(
+                    content_x,
+                    content_y,
+                    (460.0 * s).round(),
+                    panel_h,
+                    5.0 * s,
+                    [0.10, 0.11, 0.15, 1.0],
+                );
+                let heading = format!(
+                    "{} · {}",
+                    target.label(),
+                    tool_installer.phase().label()
+                );
+                self.draw_string_scaled_stable(
+                    &heading,
+                    (content_x + 10.0 * s).round(),
+                    (content_y + (18.0 * s).round()).round(),
+                    [0.84, 0.84, 0.90, 1.0],
+                    0.80,
+                );
+                self.draw_string_scaled_stable(
+                    &compact_settings_text(tool_installer.detail(), 58),
+                    (content_x + 10.0 * s).round(),
+                    (content_y + (36.0 * s).round()).round(),
+                    [0.56, 0.58, 0.68, 1.0],
+                    0.70,
+                );
+                let logs = tool_installer.logs();
+                let start = logs.len().saturating_sub(3);
+                let preview_step = (14.0 * s).round().max(1.0);
+                let preview_y = (content_y + (55.0 * s).round()).round();
+                for (line_idx, line) in logs[start..].iter().enumerate() {
+                    let color = match line.kind {
+                        crate::app::tool_installer::ToolInstallLogKind::Error => {
+                            [0.92, 0.50, 0.50, 1.0]
+                        }
+                        crate::app::tool_installer::ToolInstallLogKind::Success => {
+                            [0.46, 0.82, 0.58, 1.0]
+                        }
+                        crate::app::tool_installer::ToolInstallLogKind::Info => {
+                            [0.62, 0.64, 0.72, 1.0]
+                        }
+                        crate::app::tool_installer::ToolInstallLogKind::Output => {
+                            [0.74, 0.74, 0.78, 1.0]
+                        }
+                    };
+                    self.draw_string_scaled_stable(
+                        &compact_settings_text(&line.text, 58),
+                        (content_x + 10.0 * s).round(),
+                        (preview_y + line_idx as f32 * preview_step).round(),
+                        color,
+                        0.65,
+                    );
+                }
+                if !logs.is_empty() {
+                    let button_y = (content_y + 7.0 * s).round();
+                    let open_log_x = (content_x + 242.0 * s).round();
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::SettingsOpenToolInstallLog,
+                        open_log_x,
+                        button_y,
+                        100.0 * s,
+                        29.0 * s,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                    crate::widgets::ButtonView {
+                        x: open_log_x,
+                        y: button_y,
+                        w: 100.0 * s,
+                        h: 29.0 * s,
+                        text: "Открыть лог",
+                        icon: None,
+                        text_scale: 0.66,
+                        icon_size: 0.0,
+                    }
+                    .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
+                    let copy_log_x = (content_x + 348.0 * s).round();
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::SettingsCopyToolInstallLog,
+                        copy_log_x,
+                        button_y,
+                        104.0 * s,
+                        29.0 * s,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                    crate::widgets::ButtonView {
+                        x: copy_log_x,
+                        y: button_y,
+                        w: 104.0 * s,
+                        h: 29.0 * s,
+                        text: "Копировать",
+                        icon: None,
+                        text_scale: 0.66,
+                        icon_size: 0.0,
+                    }
+                    .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                }
+                content_y = (content_y + panel_h + (3.0 * s).round()).round();
+            }
+
+            content_y = (content_y + (5.0 * s).round()).round();
+            self.draw_string_scaled_stable(
                 "Каталоги RRiter",
                 content_x,
                 content_y,
@@ -1126,6 +1302,10 @@ impl Renderer {
             }
         }
 
+        if tool_installer.is_log_open() {
+            self.draw_tool_install_log_modal(tool_installer, ui_registry);
+        }
+
         self.flush();
         if ui_registry.wants_text() {
             2
@@ -1133,6 +1313,237 @@ impl Renderer {
             1
         } else {
             0
+        }
+    }
+
+    fn draw_tool_install_log_modal(
+        &mut self,
+        tool_installer: &crate::app::tool_installer::ToolInstaller,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let s = self.scale_factor;
+        let modal_w = (720.0 * s)
+            .min((self.width - 32.0 * s).max(320.0 * s))
+            .round();
+        let modal_h = crate::app::tool_installer::log_modal_height(self.height, s);
+        let modal_x = ((self.width - modal_w) * 0.5).round();
+        let modal_y = ((self.height - modal_h) * 0.5).round();
+
+        self.flush();
+        ui_registry.reset_cursor_state();
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::SettingsToolInstallLogBackdrop,
+            0.0,
+            0.0,
+            self.width,
+            self.height,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.70]);
+        self.push_rounded_rect(
+            modal_x - 1.0,
+            modal_y - 1.0,
+            modal_w + 2.0,
+            modal_h + 2.0,
+            9.0 * s,
+            [0.38, 0.30, 0.52, 1.0],
+        );
+        self.push_rounded_rect(
+            modal_x,
+            modal_y,
+            modal_w,
+            modal_h,
+            9.0 * s,
+            [0.095, 0.102, 0.14, 1.0],
+        );
+
+        let target = tool_installer
+            .target()
+            .map(crate::platform::ToolKind::label)
+            .unwrap_or("Инструмент");
+        let heading = format!("{target} · {}", tool_installer.phase().label());
+        self.draw_string_scaled_stable(
+            &heading,
+            (modal_x + 18.0 * s).round(),
+            (modal_y + 28.0 * s).round(),
+            [0.92, 0.92, 0.96, 1.0],
+            0.95,
+        );
+        self.draw_string_scaled_stable(
+            &compact_settings_text(tool_installer.detail(), 86),
+            (modal_x + 18.0 * s).round(),
+            (modal_y + 50.0 * s).round(),
+            [0.60, 0.62, 0.72, 1.0],
+            0.72,
+        );
+
+        let log_x = (modal_x + 18.0 * s).round();
+        let log_y = (modal_y + 66.0 * s).round();
+        let log_w = (modal_w - 36.0 * s).round();
+        let log_h = crate::app::tool_installer::log_viewport_height(self.height, s);
+        self.push_rounded_rect(
+            log_x - 1.0,
+            log_y - 1.0,
+            log_w + 2.0,
+            log_h + 2.0,
+            5.0 * s,
+            [0.22, 0.23, 0.30, 1.0],
+        );
+        self.push_rounded_rect(
+            log_x,
+            log_y,
+            log_w,
+            log_h,
+            5.0 * s,
+            [0.055, 0.060, 0.083, 1.0],
+        );
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::SettingsToolInstallLogBody,
+            log_x,
+            log_y,
+            log_w,
+            log_h,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                log_x.round() as i32,
+                (self.height - log_y - log_h).round() as i32,
+                log_w.round().max(0.0) as i32,
+                log_h.round().max(0.0) as i32,
+            );
+        }
+
+        let line_h = crate::app::tool_installer::log_line_height(s);
+        let scroll = tool_installer.log_scroll_y().max(0.0).round();
+        let first = (scroll / line_h).floor() as usize;
+        let mut draw_y =
+            (log_y + (15.0 * s).round() - (scroll % line_h)).round();
+        let visible = (log_h / line_h).ceil() as usize + 2;
+        let max_chars = ((log_w / (7.0 * s)).floor() as usize).max(24);
+        for line in tool_installer.logs().iter().skip(first).take(visible) {
+            let (prefix, color) = match line.kind {
+                crate::app::tool_installer::ToolInstallLogKind::Info => {
+                    ("[info] ", [0.62, 0.66, 0.76, 1.0])
+                }
+                crate::app::tool_installer::ToolInstallLogKind::Output => {
+                    ("[out] ", [0.80, 0.81, 0.84, 1.0])
+                }
+                crate::app::tool_installer::ToolInstallLogKind::Error => {
+                    ("[error] ", [0.96, 0.52, 0.52, 1.0])
+                }
+                crate::app::tool_installer::ToolInstallLogKind::Success => {
+                    ("[ok] ", [0.48, 0.86, 0.60, 1.0])
+                }
+            };
+            let text = format!("{prefix}{}", line.text);
+            self.draw_string_scaled_stable(
+                &compact_settings_text(&text, max_chars),
+                (log_x + 10.0 * s).round(),
+                draw_y.round(),
+                color,
+                0.70,
+            );
+            draw_y = (draw_y + line_h).round();
+        }
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        let content_h = (tool_installer.logs().len().max(1) as f32 * line_h
+            + (12.0 * s).round())
+        .round();
+        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+            log_y + 6.0 * s,
+            log_h - 12.0 * s,
+            log_h,
+            content_h,
+            scroll,
+            28.0 * s,
+        ) {
+            self.push_rounded_rect(
+                (log_x + log_w - 7.0 * s).round(),
+                thumb.start.round(),
+                4.0 * s,
+                thumb.len,
+                2.0 * s,
+                [0.56, 0.38, 0.70, 0.95],
+            );
+        }
+
+        let button_y = (modal_y + modal_h - 43.0 * s).round();
+        let close_x = (modal_x + modal_w - 96.0 * s).round();
+        ui_registry.register_rect(
+            crate::ui_system::UiId::SettingsCloseToolInstallLog,
+            close_x,
+            button_y,
+            78.0 * s,
+            29.0 * s,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        crate::widgets::ButtonView {
+            x: close_x,
+            y: button_y,
+            w: 78.0 * s,
+            h: 29.0 * s,
+            text: "Закрыть",
+            icon: None,
+            text_scale: 0.72,
+            icon_size: 0.0,
+        }
+        .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
+        let copy_x = (close_x - 120.0 * s).round();
+        ui_registry.register_rect(
+            crate::ui_system::UiId::SettingsCopyToolInstallLog,
+            copy_x,
+            button_y,
+            108.0 * s,
+            29.0 * s,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        crate::widgets::ButtonView {
+            x: copy_x,
+            y: button_y,
+            w: 108.0 * s,
+            h: 29.0 * s,
+            text: "Копировать",
+            icon: None,
+            text_scale: 0.70,
+            icon_size: 0.0,
+        }
+        .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
+        if tool_installer.is_running() {
+            let cancel_x = (copy_x - 102.0 * s).round();
+            ui_registry.register_rect(
+                crate::ui_system::UiId::SettingsCancelToolInstall,
+                cancel_x,
+                button_y,
+                90.0 * s,
+                29.0 * s,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+            crate::widgets::ButtonView {
+                x: cancel_x,
+                y: button_y,
+                w: 90.0 * s,
+                h: 29.0 * s,
+                text: "Отменить",
+                icon: None,
+                text_scale: 0.70,
+                icon_size: 0.0,
+            }
+            .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
         }
     }
 }

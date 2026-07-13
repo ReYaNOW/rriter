@@ -78,6 +78,18 @@ impl ToolKind {
             Self::Shell => "RRITER_SHELL",
         }
     }
+
+    pub const fn supports_managed_install(self) -> bool {
+        matches!(self, Self::Ruff | Self::Ty | Self::Uv)
+    }
+
+    pub const fn managed_package(self) -> Option<&'static str> {
+        match self {
+            Self::Ruff => Some("ruff"),
+            Self::Ty => Some("ty"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -327,6 +339,60 @@ pub fn system_proxy_config() -> Option<SystemProxyConfig> {
     {
         None
     }
+}
+
+fn reqwest_native_proxies(config: &SystemProxyConfig) -> Vec<reqwest::Proxy> {
+    let no_proxy = config
+        .bypass
+        .as_deref()
+        .and_then(reqwest::NoProxy::from_string);
+    let mut proxies = Vec::new();
+    if let Some(url) = config.http.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::http(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy.clone()));
+    }
+    if let Some(url) = config.https.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::https(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy.clone()));
+    }
+    if let Some(url) = config.all.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::all(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy));
+    }
+    proxies
+}
+
+pub fn blocking_http_client_builder() -> reqwest::blocking::ClientBuilder {
+    let mut builder = reqwest::blocking::Client::builder().use_rustls_tls();
+    for der in native_root_certificates_der() {
+        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
+    if let Some(config) = system_proxy_config() {
+        for proxy in reqwest_native_proxies(&config) {
+            builder = builder.proxy(proxy);
+        }
+    }
+    builder
+}
+
+pub fn async_http_client_builder() -> reqwest::ClientBuilder {
+    let mut builder = reqwest::Client::builder().use_rustls_tls();
+    for der in native_root_certificates_der() {
+        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
+    if let Some(config) = system_proxy_config() {
+        for proxy in reqwest_native_proxies(&config) {
+            builder = builder.proxy(proxy);
+        }
+    }
+    builder
 }
 
 pub fn proxy_routing_is_configured() -> bool {

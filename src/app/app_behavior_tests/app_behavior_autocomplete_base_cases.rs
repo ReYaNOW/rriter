@@ -117,6 +117,7 @@ fn test_app() -> Option<App> {
         open_folder_rx: None,
         tool_paths: crate::platform::ToolPaths::default(),
         settings_tool_picker_rx: None,
+        tool_installer: crate::app::tool_installer::ToolInstaller::default(),
         show_search: false,
         search_anim_y: -120.0,
         search_editor: Editor::new(256),

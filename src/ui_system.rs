@@ -52,6 +52,13 @@ pub enum UiId {
     // Settings platform/tooling
     SettingsToolPick(usize),
     SettingsToolClear(usize),
+    SettingsToolInstall(usize),
+    SettingsOpenToolInstallLog,
+    SettingsCloseToolInstallLog,
+    SettingsCancelToolInstall,
+    SettingsCopyToolInstallLog,
+    SettingsToolInstallLogBackdrop,
+    SettingsToolInstallLogBody,
     SettingsOpenDirectory(usize),
     SettingsCopyGraphicsDiagnostics,
     SettingsRefreshTools,

@@ -87,6 +87,30 @@ impl App {
             }
         }
 
+        if self.show_settings && self.tool_installer.is_log_open() {
+            if key_event.state == ElementState::Pressed {
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::Escape) => {
+                        self.tool_installer.close_log();
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                        let log = self.tool_installer.full_log();
+                        if !log.is_empty() {
+                            self.set_clipboard_text(log);
+                        }
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            return;
+        }
+
         if self.handle_file_tree_modal_keyboard(&key_event) {
             return;
         }

@@ -30,7 +30,22 @@ xcrun --find clang
 codesign --version
 ```
 
-## 2. Native build, tests, bundle, DMG, and launch
+
+## 2. Runtime tools
+
+Open **Настройки → Внешние инструменты** and press **Установить** next to
+`uv`, `Ruff`, or `Ty`. RRiter uses Astral's official standalone uv installer,
+keeps uv, isolated Ruff/Ty environments, and any Python runtime downloaded by
+uv below the user's RRiter Application Support/cache directories, leaves shell
+profiles and `PATH` unchanged, streams a live log, and supports cancellation.
+Installing Ruff or Ty bootstraps uv first when needed. Every update is built in
+a fresh generation and becomes active only after its executable passes a version
+check; cancelling or failing leaves the previously configured version untouched.
+
+Manual Homebrew or standalone installations are still detected through settings,
+`RRITER_*_PATH`, or `PATH` and can be selected explicitly.
+
+## 3. Native build, tests, bundle, DMG, and launch
 
 ```bash
 python3 scripts/build_macos.py --arch native --install-targets --test --run
@@ -50,7 +65,7 @@ A debug app without DMG:
 python3 scripts/build_macos.py --arch native --debug --no-dmg --run
 ```
 
-## 3. Universal 2 build
+## 4. Universal 2 build
 
 ```bash
 python3 scripts/build_macos.py --arch universal --install-targets --test
@@ -60,7 +75,7 @@ The script builds both `aarch64-apple-darwin` and `x86_64-apple-darwin`, combine
 them with `lipo`, creates a normal `.app`, signs nested code before the bundle,
 and creates a compressed DMG.
 
-## 4. Developer ID signing and notarization
+## 5. Developer ID signing and notarization
 
 Create a notarytool keychain profile once:
 
@@ -85,7 +100,7 @@ python3 scripts/build_macos.py \
 The script verifies the code signature, runs Gatekeeper assessment, submits the
 application ZIP and DMG through `notarytool`, and validates stapled tickets.
 
-## 5. Diagnostics
+## 6. Diagnostics
 
 Packaging self-test, available on any OS:
 

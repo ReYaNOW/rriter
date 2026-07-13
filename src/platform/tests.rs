@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::HashMap;
 #[cfg(unix)]
+use std::sync::atomic::AtomicBool;
+#[cfg(unix)]
 use std::process::Stdio;
 
 fn paths_for(platform: PlatformKind, values: &[(&str, &str)]) -> AppPaths {
@@ -481,6 +483,81 @@ fn managed_command_collects_stdout_stderr_and_status() {
     assert_eq!(output.status.code(), Some(7));
     assert_eq!(output.stdout, b"out");
     assert_eq!(output.stderr, b"err");
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_streaming_command_forwards_stdout_and_stderr_lines() {
+    let cancel = AtomicBool::new(false);
+    let mut command = command_for("sh").unwrap();
+    command.args([
+        "-c",
+        "printf 'first\\n'; printf 'problem\\r\\n' >&2; printf 'last'",
+    ]);
+    let mut lines = Vec::new();
+    let status = run_command_streaming_cancelable(
+        &mut command,
+        Duration::from_secs(2),
+        &cancel,
+        |stream, line| lines.push((stream, line)),
+    )
+    .unwrap();
+    assert!(status.success());
+    assert!(lines.contains(&(ProcessOutputStream::Stdout, "first".to_string())));
+    assert!(lines.contains(&(ProcessOutputStream::Stderr, "problem".to_string())));
+    assert!(lines.contains(&(ProcessOutputStream::Stdout, "last".to_string())));
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_streaming_command_bounds_a_single_unterminated_line() {
+    let cancel = AtomicBool::new(false);
+    let mut command = command_for("sh").unwrap();
+    command.args([
+        "-c",
+        "i=0; while [ $i -lt 20000 ]; do printf x; i=$((i + 1)); done",
+    ]);
+    let mut lines = Vec::new();
+    let status = run_command_streaming_cancelable(
+        &mut command,
+        Duration::from_secs(3),
+        &cancel,
+        |stream, line| lines.push((stream, line)),
+    )
+    .unwrap();
+    assert!(status.success());
+    assert_eq!(lines.len(), 1);
+    assert_eq!(lines[0].0, ProcessOutputStream::Stdout);
+    assert!(lines[0].1.ends_with("[output line truncated]"));
+    assert!(lines[0].1.len() < 17_000);
+}
+
+#[cfg(unix)]
+#[test]
+fn cancelled_streaming_command_terminates_the_process_tree() {
+    use std::sync::Arc;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_thread = Arc::clone(&cancel);
+    let trigger = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(70));
+        cancel_for_thread.store(true, Ordering::Release);
+    });
+    let mut command = command_for("sh").unwrap();
+    command.args(["-c", "printf 'started\\n'; sleep 30 & wait"]);
+    let mut lines = Vec::new();
+    let started = std::time::Instant::now();
+    let error = run_command_streaming_cancelable(
+        &mut command,
+        Duration::from_secs(5),
+        &cancel,
+        |stream, line| lines.push((stream, line)),
+    )
+    .unwrap_err();
+    trigger.join().unwrap();
+    assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    assert!(started.elapsed() < Duration::from_secs(3));
+    assert!(lines.contains(&(ProcessOutputStream::Stdout, "started".to_string())));
 }
 
 #[test]

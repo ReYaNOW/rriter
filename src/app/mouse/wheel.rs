@@ -170,6 +170,14 @@ impl App {
         let (dx, dy) = wheel_delta(delta, lh);
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        if self.show_settings && self.tool_installer.is_log_open() {
+            let max_scroll = self.tool_install_log_max_scroll();
+            self.tool_installer.scroll_log_by(dy, max_scroll);
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
         if self.ide_panel.project_search.help_open {
             self.window.as_ref().unwrap().request_redraw();
             return;

@@ -149,12 +149,21 @@ RRiter discovers Git, Ruff, Ty, uv, Python, and the preferred terminal shell
 through its settings page, explicit `RRITER_*_PATH` environment variables, or
 `PATH`, in that order. Missing tools remain disabled without restart spam.
 
-A convenient Python tool setup is:
+Open **Настройки → Внешние инструменты** and press **Установить** next to
+`uv`, `Ruff`, or `Ty`. RRiter downloads the official uv installer, keeps uv,
+isolated Ruff/Ty environments, and any Python runtime downloaded by uv under
+the current user's RRiter data/cache directories, does not modify `PATH`, the
+Windows Python registry, or PowerShell profiles, shows a live log, and supports
+cancellation. Installing Ruff or Ty automatically bootstraps uv when it is
+missing.
+
+The equivalent manual setup remains optional:
 
 ```powershell
 winget install --id astral-sh.uv -e --source winget
 uv tool install ruff@latest
 uv tool install ty@latest
+uv tool update-shell
 ```
 
 PowerShell 7 is optional; RRiter otherwise falls back to Windows PowerShell or
@@ -164,7 +173,7 @@ PowerShell 7 is optional; RRiter otherwise falls back to Windows PowerShell or
 winget install --id Microsoft.PowerShell -e --source winget
 ```
 
-After installing tools, open RRiter's settings and press **Обновить поиск** or
+For manually installed tools, open RRiter's settings and press **Обновить** or
 select each executable explicitly. Typical locations include:
 
 ```text

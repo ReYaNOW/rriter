@@ -18,10 +18,10 @@ mod process;
 mod integration;
 mod elevated_save;
 pub use integration::{
-    SystemProxyConfig, ToolKind, ToolPaths, app_paths, configure_tool_paths,
-    configured_tool_path, current_process_memory_kb, native_root_certificates_der,
-    proxy_routing_is_configured, refresh_tool_resolutions, resolve_tool_kind,
-    system_proxy_config, user_cache_root,
+    SystemProxyConfig, ToolKind, ToolPaths, app_paths, async_http_client_builder,
+    blocking_http_client_builder, configure_tool_paths, configured_tool_path,
+    current_process_memory_kb, proxy_routing_is_configured, refresh_tool_resolutions,
+    resolve_tool_kind, system_proxy_config, user_cache_root,
 };
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
@@ -54,8 +54,9 @@ pub(crate) use integration::{
 };
 pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
 pub use process::{
-    ManagedChild, ProcessTree, command_for_tool, resolve_executable, resolve_tool_executable,
-    run_command_output, run_command_output_cancelable,
+    ManagedChild, ProcessOutputStream, ProcessTree, command_for_tool, resolve_executable,
+    resolve_tool_executable, run_command_output, run_command_output_cancelable,
+    run_command_streaming_cancelable,
 };
 #[cfg(test)]
 pub use process::command_for;

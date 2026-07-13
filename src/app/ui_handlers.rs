@@ -480,15 +480,58 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::SettingsToolPick(idx) => {
-                if let Some(kind) = crate::platform::ToolKind::from_index(idx) {
+                if !self.tool_installer.is_running()
+                    && let Some(kind) = crate::platform::ToolKind::from_index(idx)
+                {
                     self.trigger_settings_tool_picker(kind);
                 }
             }
             UiId::SettingsToolClear(idx) => {
-                if let Some(kind) = crate::platform::ToolKind::from_index(idx) {
+                if !self.tool_installer.is_running()
+                    && let Some(kind) = crate::platform::ToolKind::from_index(idx)
+                {
                     self.apply_tool_path_selection(kind, None);
                 }
             }
+            UiId::SettingsToolInstall(idx) => {
+                if let Some(kind) = crate::platform::ToolKind::from_index(idx) {
+                    self.trigger_tool_install(kind);
+                }
+            }
+            UiId::SettingsOpenToolInstallLog => {
+                self.tool_installer.open_log();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsCloseToolInstallLog => {
+                self.tool_installer.close_log();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsCancelToolInstall => {
+                self.tool_installer.cancel();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsCopyToolInstallLog => {
+                let log = self.tool_installer.full_log();
+                if !log.is_empty() {
+                    self.set_clipboard_text(log);
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsToolInstallLogBackdrop => {
+                self.tool_installer.close_log();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsToolInstallLogBody => {}
             UiId::SettingsOpenDirectory(idx) => {
                 let paths = crate::platform::app_paths();
                 let path = match idx {

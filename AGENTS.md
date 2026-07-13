@@ -523,11 +523,12 @@ In draw/render/frame paths:
 * Every long-lived child must belong to the Unix process group or Windows Job Object owned by RRiter. Shutdown must be bounded: graceful request first, then terminate the complete process tree after a timeout.
 * Resolve optional tools through `platform::resolve_executable`/`command_for_tool`, including Windows `PATHEXT` and configured path overrides. A missing tool is a stable `Missing`/disabled state and must not cause automatic restart or repeated log spam.
 * Route Git CLI work through `src/app/git_panel/git_process.rs`. Preserve Git Credential Manager, ssh-agent, `core.sshCommand`, proxy configuration, and bounded process-tree shutdown; never build Git commands through a shell string.
-* Build API Client/API Mock HTTP clients through the shared builders in `api_client_loading_parser.rs`, so native Windows trust roots, environment/native proxy settings, timeouts, and cache identity remain consistent.
+* Build network clients through `platform::blocking_http_client_builder` / `platform::async_http_client_builder`, so API Client, API Mock, and tool bootstrap share native trust roots and environment/native proxy policy. Feature code may add its own bounded timeout and cache identity.
 * Keep API credentials out of ordinary JSON state. Read/write them through `platform::open_user_secret`, `seal_user_secret`, and `atomic_write_secret`; preserve plaintext loading only as a migration path.
 * Keep native multipart selections as `PathBuf` values until filesystem access. Display strings are not the source of truth for uploads.
 * Keep application shortcuts, terminal Control, and word-navigation modifiers separate. Windows AltGr must remain text input; macOS Command is the application shortcut modifier and Option is word navigation/text input.
 * Persist Git/Ruff/Ty/uv/Python/shell overrides through `platform::ToolPaths`; do not mutate process-wide environment variables from settings. Refresh the shared resolution cache after a setting changes.
+* Install uv/Ruff/Ty only through `src/app/tool_installer.rs`. Managed installs belong under RRiter data/cache directories, must not edit shell profiles or require elevation, must expose cancelable progress/logs, and must use the managed process-tree API without automatic retry loops.
 * Native dialogs on macOS are main-thread operations. Route them through App/event-loop handlers instead of spawning an arbitrary worker thread.
 * macOS must request OpenGL 4.1 Core only. Windows may fall back from OpenGL 4.1 Core to 3.3 Core. Keep GLES shaders and desktop GLSL preambles distinct.
 * Windows/macOS protected-save elevation must use the validated `--rriter-elevated-save` helper request; never interpolate arbitrary editor paths into a shell command.
@@ -769,8 +770,8 @@ Root:
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
-* `src/platform/integration.rs` -> platform directories, configured tool resolution, native proxy/trust roots, and process memory.
-* `src/platform/process.rs` -> executable resolution, cancelable captured commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
+* `src/platform/integration.rs` -> platform directories, configured tool resolution, shared native-root/proxy HTTP builders, and process memory.
+* `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
 * `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
@@ -784,13 +785,15 @@ Entrypoints/state:
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
 * `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
 * `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
+* `src/app/tool_installer.rs` -> cross-platform managed uv/Ruff/Ty bootstrap, isolated install layout, progress/log state, cancellation, validation, and App integration.
+* `src/app/tool_installer_tests.rs` -> managed-install command/layout, rollback, cancellation, log bounding, and platform-plan regression tests.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close, scale-factor and IME routing.
 * `src/app/events/window_runtime.rs` -> platform GL-context plans, window/surface bootstrap, graphics diagnostics, and persisted shutdown.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.
 * `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
 * `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
-* `src/app/api_client/api_client_loading_parser.rs` -> shared blocking/async HTTP builders with native roots, proxy handling, DNS pinning/cache keys, and OpenAPI loading.
+* `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
 * `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
 * `src/app/api_client/*` -> API client request runtime, layout/input, App methods, parser/loading, persistence, and tests.
 * `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
@@ -862,7 +865,7 @@ Rendering:
 * `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search panel controls/results rendering.
 * `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
 * `src/render_view/search.rs` -> search panel UI.
-* `src/render_view/settings_ui.rs` -> tool executable configuration, native directory actions, graphics diagnostics, and appearance settings UI.
+* `src/render_view/settings_ui.rs` -> tool executable configuration and managed install controls/logs, native directory actions, graphics diagnostics, and appearance settings UI.
 * `src/render_view/minimap_ui.rs` -> minimap content/viewport. Hot path.
 * `src/render_view/sticky.rs` -> sticky headers.
 * `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.

@@ -994,6 +994,7 @@ impl ApplicationHandler for App {
                         self.settings_ide_scroll.current,
                         blink_alpha,
                         &self.tool_paths,
+                        &self.tool_installer,
                         &mut self.ui_registry,
                     );
                     if settings_cursor_mode == 1 {

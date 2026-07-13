@@ -4,11 +4,20 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const DROP_GRACE_PERIOD: Duration = Duration::from_millis(200);
+const PROCESS_OUTPUT_CHANNEL_CAPACITY: usize = 256;
+const PROCESS_OUTPUT_LINE_LIMIT: usize = 16 * 1024;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProcessOutputStream {
+    Stdout,
+    Stderr,
+}
 
 /// A child process whose complete descendant tree is owned by RRiter.
 ///
@@ -459,6 +468,74 @@ pub fn run_command_output_cancelable(
     run_command_output_inner(command, timeout, Some(cancel))
 }
 
+/// Runs a managed process while forwarding complete output lines as soon as
+/// they are available. Cancellation and timeout terminate the complete process
+/// tree, not only the direct child.
+pub fn run_command_streaming_cancelable<F>(
+    command: &mut Command,
+    timeout: Duration,
+    cancel: &AtomicBool,
+    mut on_line: F,
+) -> io::Result<ExitStatus>
+where
+    F: FnMut(ProcessOutputStream, String),
+{
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = ManagedChild::spawn(command)?;
+    let stdout = child
+        .take_stdout()
+        .ok_or_else(|| io::Error::other("child stdout was not piped"))?;
+    let stderr = child
+        .take_stderr()
+        .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
+    let (tx, rx) = mpsc::sync_channel(PROCESS_OUTPUT_CHANNEL_CAPACITY);
+    let stdout_reader = spawn_line_reader(stdout, ProcessOutputStream::Stdout, tx.clone());
+    let stderr_reader = spawn_line_reader(stderr, ProcessOutputStream::Stderr, tx);
+    let deadline = Instant::now() + timeout;
+
+    let result = loop {
+        drain_process_lines(&rx, &mut on_line);
+        if cancel.load(Ordering::Acquire) {
+            let _ = child.terminate(DROP_GRACE_PERIOD);
+            break Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "process was cancelled",
+            ));
+        }
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.terminate(DROP_GRACE_PERIOD);
+                break Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("process exceeded timeout of {} ms", timeout.as_millis()),
+                ));
+            }
+            Ok(None) => thread::sleep(
+                PROCESS_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+            ),
+            Err(error) => {
+                let _ = child.terminate(DROP_GRACE_PERIOD);
+                break Err(error);
+            }
+        }
+    };
+
+    while !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+        drain_process_lines(&rx, &mut on_line);
+        thread::sleep(Duration::from_millis(1));
+    }
+    drain_process_lines(&rx, &mut on_line);
+    let stdout_result = join_line_reader(stdout_reader);
+    let stderr_result = join_line_reader(stderr_reader);
+    stdout_result?;
+    stderr_result?;
+    result
+}
+
 fn run_command_output_inner(
     command: &mut Command,
     timeout: Duration,
@@ -527,4 +604,74 @@ fn join_pipe_reader(
     handle
         .join()
         .map_err(|_| io::Error::other("process output reader panicked"))?
+}
+
+fn spawn_line_reader<R>(
+    mut stream: R,
+    output_stream: ProcessOutputStream,
+    tx: mpsc::SyncSender<(ProcessOutputStream, String)>,
+) -> thread::JoinHandle<io::Result<()>>
+where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let mut read_buffer = [0u8; 4096];
+        let mut line = Vec::with_capacity(256);
+        let mut truncated = false;
+        loop {
+            let read = stream.read(&mut read_buffer)?;
+            if read == 0 {
+                break;
+            }
+            for byte in &read_buffer[..read] {
+                if *byte == b'\n' {
+                    emit_process_line(&tx, output_stream, &mut line, truncated)?;
+                    truncated = false;
+                } else if line.len() < PROCESS_OUTPUT_LINE_LIMIT {
+                    line.push(*byte);
+                } else {
+                    truncated = true;
+                }
+            }
+        }
+        if !line.is_empty() || truncated {
+            emit_process_line(&tx, output_stream, &mut line, truncated)?;
+        }
+        Ok(())
+    })
+}
+
+fn emit_process_line(
+    tx: &mpsc::SyncSender<(ProcessOutputStream, String)>,
+    output_stream: ProcessOutputStream,
+    line: &mut Vec<u8>,
+    truncated: bool,
+) -> io::Result<()> {
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    let mut text = String::from_utf8_lossy(line).into_owned();
+    if truncated {
+        text.push_str(" … [output line truncated]");
+    }
+    line.clear();
+    tx.send((output_stream, text))
+        .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "output receiver closed"))
+}
+
+fn drain_process_lines<F>(
+    rx: &mpsc::Receiver<(ProcessOutputStream, String)>,
+    on_line: &mut F,
+) where
+    F: FnMut(ProcessOutputStream, String),
+{
+    while let Ok((stream, line)) = rx.try_recv() {
+        on_line(stream, line);
+    }
+}
+
+fn join_line_reader(handle: thread::JoinHandle<io::Result<()>>) -> io::Result<()> {
+    handle
+        .join()
+        .map_err(|_| io::Error::other("process line reader panicked"))?
 }

@@ -715,7 +715,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         match rx.try_recv() {
             Ok((kind, path)) => {
                 app.settings_tool_picker_rx = None;
-                if path.is_some() {
+                if path.is_some() && !app.tool_installer.is_running() {
                     app.apply_tool_path_selection(kind, path);
                     needs_redraw = true;
                 }
@@ -724,6 +724,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 app.settings_tool_picker_rx = None;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+    }
+
+    if app.poll_tool_installer() {
+        needs_redraw = true;
+    }
+    if app.tool_installer.is_log_open() {
+        let max_scroll = app.tool_install_log_max_scroll();
+        if app.tool_installer.update_log_scroll(dt, max_scroll) {
+            needs_redraw = true;
         }
     }
 

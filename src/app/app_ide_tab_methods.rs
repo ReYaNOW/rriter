@@ -43,6 +43,7 @@ impl App {
     }
 
     pub(crate) fn shutdown_background_services(&mut self) {
+        self.tool_installer.shutdown();
         for terminal in &mut self.ide_panel.terminals {
             terminal.shutdown();
         }

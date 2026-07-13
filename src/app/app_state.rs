@@ -909,6 +909,7 @@ pub struct App {
     pub settings_tool_picker_rx: Option<
         std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>,
     >,
+    pub(crate) tool_installer: crate::app::tool_installer::ToolInstaller,
 
     pub show_search: bool,
     pub search_anim_y: f32,

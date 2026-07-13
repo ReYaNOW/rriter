@@ -1524,28 +1524,6 @@ fn parse_uv_python_list(raw: &str) -> Vec<ApiPythonVersionRow> {
     rows
 }
 
-fn spawn_api_python_log_reader<R>(
-    stream: R,
-    tx: mpsc::Sender<ApiPythonInstallEvent>,
-    kind: ApiPythonInstallLogKind,
-) -> std::thread::JoinHandle<()>
-where
-    R: std::io::Read + Send + 'static,
-{
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stream);
-        for line in reader.lines().map_while(Result::ok) {
-            if line.trim().is_empty() {
-                continue;
-            }
-            let _ = tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
-                text: line,
-                kind,
-            }));
-        }
-    })
-}
-
 fn push_api_python_install_log(api: &mut ApiClientState, line: ApiPythonInstallLogLine) {
     api.mock_python_install_log.push(line);
     if api.mock_python_install_log.len() > 24 {

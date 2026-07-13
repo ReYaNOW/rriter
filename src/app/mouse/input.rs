@@ -1122,6 +1122,22 @@ impl App {
             return;
         }
 
+        if self.show_settings && self.tool_installer.is_log_open() {
+            if state == ElementState::Pressed
+                && let Some(renderer) = self.renderer.as_ref()
+            {
+                let mx = renderer.last_mouse_x;
+                let my = renderer.last_mouse_y;
+                if let Some(clicked_id) = self.ui_registry.find_overlay_at(mx, my) {
+                    self.handle_ui_click(clicked_id);
+                }
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
         if self.show_settings {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;

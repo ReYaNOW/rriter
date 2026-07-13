@@ -1772,6 +1772,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         open_folder_rx: None,
         tool_paths: config.tool_paths.clone(),
         settings_tool_picker_rx: None,
+        tool_installer: crate::app::tool_installer::ToolInstaller::default(),
 
         show_search: false,
         search_anim_y: -120.0,
