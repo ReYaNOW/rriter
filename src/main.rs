@@ -1,5 +1,6 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(windows, allow(linker_messages))]
 
 mod app;
 mod editor;
@@ -19,6 +20,7 @@ use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
+#[cfg(target_os = "linux")]
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -682,9 +684,20 @@ fn init_rayon_global_pool() {
         .build_global();
 }
 
+fn selection_color(
+    desktop_color: Option<[f32; 4]>,
+    system_color: Option<[f32; 4]>,
+) -> [f32; 4] {
+    desktop_color
+        .or(system_color)
+        .unwrap_or(crate::platform::DEFAULT_ACCENT_COLOR)
+}
+
 fn load_dracula() -> Theme {
-    let sel_color =
-        get_kde_color("Colors:Selection", "BackgroundNormal").unwrap_or([0.55, 0.55, 0.55, 1.0]);
+    let sel_color = selection_color(
+        get_kde_color("Colors:Selection", "BackgroundNormal"),
+        crate::platform::system_accent_color(),
+    );
 
     Theme {
         bg: [0.156, 0.164, 0.211, 1.0],
@@ -701,9 +714,13 @@ fn load_dracula() -> Theme {
     }
 }
 
+#[cfg(target_os = "linux")]
 const EGL_VENDOR_ENV: &str = "__EGL_VENDOR_LIBRARY_FILENAMES";
+#[cfg(target_os = "linux")]
 const RRITER_EGL_VENDOR_ENV: &str = "RRITER_EGL_VENDOR";
+#[cfg(target_os = "linux")]
 const NVIDIA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/10_nvidia.json";
+#[cfg(target_os = "linux")]
 const MESA_EGL_VENDOR: &str = "/usr/share/glvnd/egl_vendor.d/50_mesa.json";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -793,6 +810,18 @@ fn nvidia_gpu_present() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selection_color_prefers_desktop_then_system_and_uses_requested_purple_fallback() {
+        let desktop = [0.1, 0.2, 0.3, 1.0];
+        let system = [0.4, 0.5, 0.6, 1.0];
+        assert_eq!(selection_color(Some(desktop), Some(system)), desktop);
+        assert_eq!(selection_color(None, Some(system)), system);
+        assert_eq!(
+            selection_color(None, None),
+            [114.0 / 255.0, 89.0 / 255.0, 175.0 / 255.0, 1.0]
+        );
+    }
 
     #[test]
     fn initial_file_argument_skips_ide_mode_and_honors_benchmark_position() {

@@ -21,7 +21,7 @@ pub(crate) fn tab_path_is_external(
         && path.is_absolute()
         && !workspaces
             .iter()
-            .any(|workspace| path.starts_with(workspace))
+            .any(|workspace| crate::platform::path_is_within(path, workspace))
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -577,14 +577,15 @@ mod tests {
 
     #[test]
     fn tab_path_external_detection_requires_absolute_outside_workspace() {
-        let workspaces = vec![std::path::PathBuf::from("/work/app")];
+        let root = std::env::temp_dir().join("rriter-tab-workspace");
+        let workspaces = vec![root.clone()];
 
         assert!(!tab_path_is_external(
-            std::path::Path::new("/work/app/pkg/file.py"),
+            &root.join("pkg/file.py"),
             &workspaces
         ));
         assert!(tab_path_is_external(
-            std::path::Path::new("/tmp/site-packages/lib.py"),
+            &std::env::temp_dir().join("rriter-external-site-packages/lib.py"),
             &workspaces
         ));
         assert!(!tab_path_is_external(
@@ -592,7 +593,7 @@ mod tests {
             &workspaces
         ));
         assert!(!tab_path_is_external(
-            std::path::Path::new("/tmp/file.py"),
+            &std::env::temp_dir().join("rriter-no-workspace-file.py"),
             &[]
         ));
     }

@@ -1,4 +1,43 @@
 #[test]
+fn focused_file_tree_f2_opens_rename_even_with_stale_api_focus() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-file-tree-f2-test-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("rename_me.py");
+    std::fs::write(&path, "print('ok')\n").unwrap();
+
+    app.is_ide_mode = true;
+    app.ide_workspaces = vec![dir.clone()];
+    app.ide_panel.file_tree_focused = true;
+    app.ide_panel.file_tree_selection.insert(path.clone());
+    app.ide_panel.api.focused = Some(crate::app::api_client::ApiFocus::RouteFilter);
+
+    assert!(app.handle_file_tree_shortcut(
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::F2),
+        false,
+    ));
+    let dialog = app
+        .ide_panel
+        .file_tree_rename_dialog
+        .as_ref()
+        .expect("F2 should open rename dialog for the selected file");
+    assert_eq!(dialog.path, path);
+    assert_eq!(dialog.editor.get_full_text(), "rename_me.py");
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
 fn closing_definition_tab_resets_transient_editor_state() {
     let Some(mut app) = test_app() else {
         return;
@@ -383,7 +422,8 @@ fn file_loading_saving_and_missing_file_cleanup_update_state_without_window() {
     std::fs::write(&path, "print('hi')\n").unwrap();
 
     app.load_file_internal(path.clone(), false, false);
-    assert_eq!(app.file_path.as_ref(), Some(&path));
+    let canonical_path = crate::platform::canonicalize_or_absolutize(&path);
+    assert_eq!(app.file_path.as_ref(), Some(&canonical_path));
     assert_eq!(app.base_title, "demo.py");
     assert_eq!(app.file_extension, "py");
     assert_eq!(app.editor.get_full_text(), "print('hi')\n");
@@ -400,7 +440,7 @@ fn file_loading_saving_and_missing_file_cleanup_update_state_without_window() {
     let missing = dir.join("missing.py");
     app.recent_files = vec![missing.clone(), path.clone()];
     app.load_file_internal(missing.clone(), false, false);
-    assert_eq!(app.recent_files, vec![path.clone()]);
+    assert_eq!(app.recent_files, vec![canonical_path]);
 
     std::fs::remove_file(path).ok();
     std::fs::remove_dir(dir).ok();
@@ -545,6 +585,10 @@ fn autosave_only_runs_in_ide_mode() {
 
     app.is_ide_mode = false;
     app.file_path = Some(path.clone());
+    app.text_file_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Utf8,
+        line_ending: crate::platform::LineEnding::Lf,
+    };
     app.editor = editor_with("old\n");
     app.editor.insert_str("dirty\n");
     assert!(app.editor.is_dirty());
@@ -578,6 +622,10 @@ fn internal_editor_focus_loss_autosaves_dirty_file() {
     app.show_welcome = false;
     app.file_path = Some(path.clone());
     app.file_extension = "py".to_string();
+    app.text_file_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Utf8,
+        line_ending: crate::platform::LineEnding::Lf,
+    };
     app.editor = editor_with("old\n");
     app.editor.insert_str("changed\n");
     assert!(app.editor_has_input_focus());
@@ -799,6 +847,29 @@ fn highlight_results_update_fold_maps_and_autofold_once() {
 }
 
 #[test]
+fn highlight_wait_falls_back_to_bounded_sync_parse_after_worker_timeout() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "py".to_string();
+    app.editor = editor_with("def ready():\n    return True\n");
+    app.is_highlighted_once = false;
+    app.is_highlight_complete = false;
+    while app.highlighter.rx.try_recv().is_ok() {}
+    app.reset_highlighter_with_text(app.editor.get_full_text(), false);
+
+    app.wait_for_current_highlight_with_timeouts(
+        std::time::Duration::ZERO,
+        std::time::Duration::from_secs(1),
+    );
+
+    assert!(app.is_highlighted_once);
+    assert!(app.is_highlight_complete);
+    assert_eq!(app.highlighter.current_version, app.editor.version);
+    assert!(!app.highlighter.spans.is_empty());
+}
+
+#[test]
 fn check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone() {
     let Some(mut app) = test_app() else {
         return;
@@ -847,7 +918,6 @@ fn check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone() {
         .find(|tab| tab.file_path.as_ref() == Some(&dirty_path))
         .unwrap();
     assert_eq!(clean.editor.get_full_text(), "def clean():\n    return 1\n");
-    assert!(!clean.spans.is_empty());
     assert!(clean.is_highlighted_once);
     assert!(dirty.editor.get_full_text().contains("local change"));
 

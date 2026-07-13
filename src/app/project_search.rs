@@ -1696,10 +1696,15 @@ mod tests {
     fn project_search_pattern_plan_clamps_absolute_paths_to_workspace() {
         let root = temp_workspace("pattern");
         std::fs::create_dir_all(root.join("src")).unwrap();
+        let outside = root
+            .parent()
+            .unwrap_or_else(|| Path::new(std::path::MAIN_SEPARATOR_STR))
+            .join("rriter-not-in-workspace");
+        let excluded = outside.join("also-outside");
         let plan = SearchPatternPlan::new(
             &[root.clone()],
-            &format!("{}, /tmp/not-in-workspace", root.join("src").display()),
-            "/tmp/also-outside",
+            &format!("{}, {}", root.join("src").display(), outside.display()),
+            &excluded.to_string_lossy(),
         )
         .unwrap();
 

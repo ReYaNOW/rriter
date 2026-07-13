@@ -267,7 +267,8 @@ Important ideas:
 * PTY spawn errors are rendered in the terminal instead of panicking.
 * I/O thread reads terminal output in batches.
 * Grid is shared with renderer.
-* Render path reads visible cells.
+* Render path reads visible cells and reserves symmetric top/bottom text padding so a full grid never clips the first row.
+* Terminal scroll geometry is shared by rendering, wheel clamping, selection hit-testing, track clicks, and thumb dragging; the thumb stays inset from the focus frame.
 * Terminal focused state captures keyboard input.
 * Closing a tab or RRiter performs bounded PTY/process-tree shutdown.
 * Physical Control is distinct from application shortcuts, so terminal interrupts, Windows AltGr, and macOS Command copy/paste keep native behavior.
@@ -298,7 +299,7 @@ Standard-library-only Windows release driver. It discovers Visual Studio Build T
 
 #### `scripts/build_macos.py`
 
-Standard-library-only macOS release driver. It builds native or Universal 2 executables, creates a Retina `.app` and ICNS, signs nested code before the bundle under hardened runtime, optionally notarizes/staples, creates a DMG, verifies Gatekeeper, and can launch RRiter. Run `python3 scripts/build_macos.py --self-test` on any platform.
+Standard-library-only macOS release driver. It builds native or Universal 2 executables, runs the project test suite once on the native architecture with the serial-test policy, applies the selected deployment target to both Cargo and `Info.plist`, creates a Retina `.app` and ICNS, signs nested code before the bundle under hardened runtime, optionally notarizes/staples, creates a DMG, verifies Gatekeeper, and can launch RRiter. Run `python3 scripts/build_macos.py --self-test` on any platform.
 
 Full operator commands live in `WINDOWS_BUILD.md` and `MACOS_BUILD.md`.
 
@@ -409,7 +410,9 @@ Covers platform command plans, isolated generations, rollback/pruning, bounded l
 
 `src/app/events/window_runtime.rs` selects the platform GL context plan and owns window/display/surface creation. macOS requests OpenGL 4.1 Core only; Windows falls back from 4.1 Core to 3.3 Core; Linux additionally permits GLES 3.0. `Renderer::new` validates the actual context, selects desktop or GLES shader preambles, and records copyable diagnostics. `ScaleFactorChanged` rebuilds scale-sensitive atlases/caches rather than stretching stale glyph data. IME commits are routed to the active editor/API/modal target as one logical edit.
 
-macOS runs as a regular AppKit application with the default application menu. File dialogs are dispatched on the event-loop thread. Windows startup applies the stable application identity in addition to the embedded DPI/long-path manifest.
+The FPS counter samples completed presentation intervals rather than CPU draw submissions. Windows additionally waits for DWM presentation after buffer swap, which keeps continuous scrolling/animation paced by the compositor instead of allowing a misleading high submit rate. Animation delta preserves real high-refresh intervals and caps only long stalls.
+
+macOS runs as a regular AppKit application with the default application menu. File dialogs are dispatched on the event-loop thread. Windows startup applies the stable application identity in addition to the embedded DPI/long-path manifest, reads the DWM accent color, and falls back to RRiter purple when no desktop accent is available.
 
 ### `src/main.rs`
 

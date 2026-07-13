@@ -560,6 +560,13 @@ fn cancelled_streaming_command_terminates_the_process_tree() {
     assert!(lines.contains(&(ProcessOutputStream::Stdout, "started".to_string())));
 }
 
+#[cfg(windows)]
+#[test]
+fn windows_background_command_configuration_is_available() {
+    let mut command = std::process::Command::new("cmd.exe");
+    process::configure_background_command(&mut command);
+}
+
 #[test]
 fn windows_proxy_parser_supports_per_scheme_and_bypass_values() {
     let parsed = parse_windows_proxy_config(

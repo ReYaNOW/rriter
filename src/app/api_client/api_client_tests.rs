@@ -911,7 +911,10 @@ mod tests {
             resolved_host: None,
         };
 
-        let curl = format_api_curl_command(&job);
+        let curl = format_api_curl_command_for_platform(
+            &job,
+            crate::platform::PlatformKind::Linux,
+        );
 
         assert!(curl.contains("curl \\\n  -X POST"));
         assert!(curl.contains("  'https://api.example.test/pets?debug=true'"));

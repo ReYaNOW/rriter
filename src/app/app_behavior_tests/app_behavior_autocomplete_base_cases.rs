@@ -33,7 +33,10 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
         editor: editor_with(text),
         file_path: path.map(PathBuf::from),
         file_key: path.map(PathBuf::from).as_deref().map(crate::platform::PathKey::new),
-        text_file_format: crate::platform::TextFileFormat::default(),
+        text_file_format: crate::platform::TextFileFormat {
+            encoding: crate::platform::TextEncoding::Utf8,
+            line_ending: crate::platform::LineEnding::Lf,
+        },
         base_title: title.to_string(),
         file_extension: path
             .and_then(|p| std::path::Path::new(p).extension())
@@ -75,7 +78,10 @@ fn test_app() -> Option<App> {
         base_title: "Безымянный".to_string(),
         file_path: None,
         file_key: None,
-        text_file_format: crate::platform::TextFileFormat::default(),
+        text_file_format: crate::platform::TextFileFormat {
+            encoding: crate::platform::TextEncoding::Utf8,
+            line_ending: crate::platform::LineEnding::Lf,
+        },
         file_extension: String::new(),
         highlighter: crate::highlighter::Highlighter::new(),
         last_sent_version: u64::MAX,

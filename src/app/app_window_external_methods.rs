@@ -374,10 +374,28 @@ impl App {
         } else {
             FILE_OPEN_HIGHLIGHT_TIMEOUT
         };
-        if self
+        self.wait_for_current_highlight_with_timeouts(timeout, FILE_OPEN_HIGHLIGHT_TIMEOUT);
+    }
+
+    fn wait_for_current_highlight_with_timeouts(
+        &mut self,
+        worker_timeout: std::time::Duration,
+        sync_fallback_timeout: std::time::Duration,
+    ) {
+        let version = self.editor.version;
+        let worker_ready = self
             .highlighter
-            .wait_for_first_result(self.editor.version, timeout)
-        {
+            .wait_for_first_result(version, worker_timeout);
+        let sync_ready = !worker_ready
+            && self.highlighter.sync_highlight_after_edit(
+                version,
+                None,
+                None,
+                None,
+                None,
+                sync_fallback_timeout,
+            );
+        if worker_ready || sync_ready {
             self.apply_highlight_results();
         }
     }

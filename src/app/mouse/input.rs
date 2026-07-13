@@ -47,8 +47,9 @@ fn terminal_mouse_cell_y(
     scale: f32,
     visible_rows: usize,
 ) -> usize {
+    let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(scale);
     let offset_from_bottom =
-        (term_content_y + term_content_h - 8.0 * scale - my + scroll_offset) / char_h;
+        (term_content_y + term_content_h - bottom_pad - my + scroll_offset) / char_h;
     visible_rows
         .saturating_sub(1)
         .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
@@ -522,8 +523,10 @@ impl App {
                     let is_pressed = state == ElementState::Pressed;
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let panel_x = 48.0 * s + 10.0 * s;
-                    let char_w = self.renderer.as_mut().unwrap().char_advance('A') * 1.05;
-                    let char_h = self.renderer.as_ref().unwrap().line_height * 1.05;
+                    let char_w = self.renderer.as_mut().unwrap().char_advance('A')
+                        * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                    let char_h = self.renderer.as_ref().unwrap().line_height
+                        * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                     let bottom_h = self.ide_panel.bottom_height * s;
                     let tab_h = 32.0 * s;
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
@@ -550,7 +553,12 @@ impl App {
                         let max_scroll = if grid.is_alt {
                             0.0
                         } else {
-                            ((total_lines as f32 * char_h) - term_content_h).max(0.0)
+                            crate::render_view::terminal_ui::terminal_max_scroll(
+                                total_lines,
+                                char_h,
+                                term_content_h,
+                                s,
+                            )
                         };
                         let scroll_offset = if grid.is_alt {
                             0.0
@@ -1055,6 +1063,23 @@ impl App {
                             {
                                 self.load_more_git_graph_commits();
                             }
+                        }
+                        self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::TerminalScrollY {
+                        let layout = active_terminal_scrollbar_layout(self);
+                        let active = self.ide_panel.active_terminal;
+                        if let (Some(layout), Some(term)) =
+                            (layout, self.ide_panel.terminals.get_mut(active))
+                            && let Some((drag_offset, target)) =
+                                crate::render_view::terminal_ui::terminal_scrollbar_drag_target(
+                                    my, layout, None,
+                                )
+                        {
+                            term.scroll_y.drag_offset = drag_offset;
+                            term.scroll_y.current = target;
+                            term.scroll_y.target = target;
+                            term.scroll_y.velocity = 0.0;
+                            term.scroll_y.is_dragging = true;
                         }
                         self.handle_ui_click(clicked_id);
                     } else {

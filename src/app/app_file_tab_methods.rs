@@ -665,7 +665,8 @@ impl App {
                     grid.selection = Some((sx, sy, ex, ey));
                     if let Some(r) = self.renderer.as_ref() {
                         let s = r.scale_factor;
-                        let char_h = r.line_height * 1.05;
+                        let char_h = r.line_height
+                            * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                         let total_lines = if grid.is_alt {
                             grid.lines.len()
                         } else {
@@ -674,11 +675,28 @@ impl App {
                         let offset_from_bottom = total_lines.saturating_sub(1).saturating_sub(sy);
 
                         let bottom_h = self.ide_panel.bottom_height * s;
-                        let term_content_h = bottom_h - 1.0 * s - 32.0 * s - 32.0 * s;
+                        let panel_y = crate::render_view::ide_bottom_panel_y(
+                            r.height,
+                            bottom_h,
+                            s,
+                        );
+                        let content_y = panel_y + 1.0 + 32.0 * s;
+                        let content_h = bottom_h - 1.0 - 32.0 * s;
+                        let (_, term_content_h) =
+                            crate::render_view::terminal_ui::terminal_body_rect(
+                                content_y,
+                                content_h,
+                                s,
+                            );
                         let max_scroll = if grid.is_alt {
                             0.0
                         } else {
-                            ((total_lines as f32 * char_h) - term_content_h).max(0.0)
+                            crate::render_view::terminal_ui::terminal_max_scroll(
+                                total_lines,
+                                char_h,
+                                term_content_h,
+                                s,
+                            )
                         };
 
                         term.scroll_y.target =

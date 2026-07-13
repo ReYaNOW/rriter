@@ -18,7 +18,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let raw_dt = (now - app.last_frame).as_secs_f32();
-    let dt = raw_dt.min(0.016);
+    let dt = animation_dt(raw_dt);
     app.last_frame = now;
 
     let mut needs_redraw = false;
@@ -577,8 +577,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 let mx = r.last_mouse_x;
                 let my = r.last_mouse_y;
                 let panel_x = 48.0 * s + 10.0 * s;
-                let char_w = r.char_advance('A') * 1.05;
-                let char_h = r.line_height * 1.05;
+                let char_w = r.char_advance('A')
+                    * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                let char_h = r.line_height
+                    * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                 let (term_y, term_h) = terminal_content_bounds(wh, app.ide_panel.bottom_height, s);
                 let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
                 let drag_delta = drag_autoscroll_delta(my, term_y, term_y + term_h, edge);
@@ -589,7 +591,13 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         let mut grid = term.grid.lock().unwrap();
                         if !grid.is_alt {
                             let total_lines = grid.scrollback.len() + grid.lines.len();
-                            let max_scroll = ((total_lines as f32 * char_h) - term_h).max(0.0);
+                            let max_scroll =
+                                crate::render_view::terminal_ui::terminal_max_scroll(
+                                    total_lines,
+                                    char_h,
+                                    term_h,
+                                    s,
+                                );
                             if max_scroll > 0.0 && total_lines > 0 {
                                 let speed = drag_autoscroll_speed(drag_delta, drag_delta < 0.0);
                                 term.scroll_y.target = (term.scroll_y.target

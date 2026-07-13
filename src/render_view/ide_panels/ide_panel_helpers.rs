@@ -326,14 +326,14 @@ fn compact_home_path(path: &std::path::Path, home: Option<&std::path::Path>) -> 
         if rest.as_os_str().is_empty() {
             return "~".to_string();
         }
-        let rest = rest.to_string_lossy();
+        let rest = rest.to_string_lossy().replace('\\', "/");
         return if rest.starts_with('/') {
             format!("~{rest}")
         } else {
             format!("~/{rest}")
         };
     }
-    path.to_string_lossy().into_owned()
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn git_file_tooltip_text(

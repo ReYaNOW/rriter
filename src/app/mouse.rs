@@ -30,6 +30,47 @@ fn git_graph_rows_bounds(
     Some((rows_y, (graph_h - 34.0 * scale).max(0.0)))
 }
 
+fn active_terminal_scrollbar_layout(
+    app: &App,
+) -> Option<crate::render_view::terminal_ui::TerminalScrollbarLayout> {
+    if !app.ide_panel.is_open(crate::app::PanelId::Terminal) {
+        return None;
+    }
+    let renderer = app.renderer.as_ref()?;
+    let terminal = app
+        .ide_panel
+        .terminals
+        .get(app.ide_panel.active_terminal)?;
+    let grid = terminal.grid.lock().ok()?;
+    if grid.is_alt {
+        return None;
+    }
+    let total_lines = grid.scrollback.len() + grid.lines.len();
+    drop(grid);
+
+    let scale = renderer.scale_factor;
+    let panel_x = 48.0 * scale;
+    let panel_w = (renderer.width - panel_x).max(0.0);
+    let bottom_h = app.ide_panel.bottom_height * scale;
+    let panel_y = crate::render_view::ide_bottom_panel_y(renderer.height, bottom_h, scale);
+    let panel_tab_h = 32.0 * scale;
+    let content_y = panel_y + 1.0 + panel_tab_h;
+    let content_h = bottom_h - 1.0 - panel_tab_h;
+    let (term_y, term_h) =
+        crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, scale);
+    let char_h = renderer.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+    crate::render_view::terminal_ui::terminal_scrollbar_layout(
+        panel_x,
+        panel_w,
+        term_y,
+        term_h,
+        scale,
+        char_h,
+        total_lines,
+        terminal.scroll_y.current,
+    )
+}
+
 mod cursor;
 mod hover_mouse_logic;
 #[cfg(test)]

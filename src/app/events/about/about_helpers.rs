@@ -14,6 +14,11 @@ const PYTHON_INLAY_HINT_IDLE_DELAY: std::time::Duration = std::time::Duration::f
 const PYTHON_INLAY_FULL_FILE_MAX_LINES: usize = 2_500;
 const PYTHON_INLAY_VISIBLE_MARGIN_LINES: usize = 80;
 
+#[inline(always)]
+fn animation_dt(raw_dt: f32) -> f32 {
+    raw_dt.clamp(0.0, 1.0 / 30.0)
+}
+
 fn clear_python_inlay_hint_state(app: &mut App) {
     app.python_inlay_hints.clear();
     app.python_inlay_hint_path = None;
@@ -246,8 +251,9 @@ fn terminal_drag_cell(
     cols: usize,
     total_lines: usize,
 ) -> (usize, usize) {
+    let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(scale);
     let offset_from_bottom =
-        (term_y + term_h - 8.0 * scale - my + scroll_offset) / char_h.max(0.0001);
+        (term_y + term_h - bottom_pad - my + scroll_offset) / char_h.max(0.0001);
     let cell_y = total_lines
         .saturating_sub(1)
         .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
@@ -348,6 +354,14 @@ mod tests {
     fn active_scroll_keeps_event_loop_polling() {
         assert!(needs_continuous_poll(false, false, true));
         assert!(!needs_continuous_poll(false, false, false));
+    }
+
+    #[test]
+    fn animation_dt_keeps_real_sixty_hz_time_and_bounds_long_stalls() {
+        assert!((animation_dt(1.0 / 60.0) - 1.0 / 60.0).abs() < f32::EPSILON);
+        assert!((animation_dt(1.0 / 240.0) - 1.0 / 240.0).abs() < f32::EPSILON);
+        assert_eq!(animation_dt(0.5), 1.0 / 30.0);
+        assert_eq!(animation_dt(-1.0), 0.0);
     }
 
     #[test]

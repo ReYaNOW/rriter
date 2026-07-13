@@ -58,8 +58,8 @@ pub use process::{
     resolve_tool_executable, run_command_output, run_command_output_cancelable,
     run_command_streaming_cancelable,
 };
-#[cfg(test)]
-pub use process::command_for;
+#[cfg(all(test, unix))]
+use process::command_for;
 
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";
@@ -92,6 +92,30 @@ pub const CURRENT_PLATFORM: PlatformKind = if cfg!(target_os = "linux") {
 } else {
     PlatformKind::Other
 };
+
+pub const DEFAULT_ACCENT_COLOR: [f32; 4] = [
+    114.0 / 255.0,
+    89.0 / 255.0,
+    175.0 / 255.0,
+    1.0,
+];
+
+pub fn system_accent_color() -> Option<[f32; 4]> {
+    #[cfg(windows)]
+    {
+        return windows::system_accent_color();
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+#[inline(always)]
+pub fn finish_present() {
+    #[cfg(windows)]
+    windows::finish_present();
+}
 
 pub fn primary_shortcut_modifier(modifiers: winit::keyboard::ModifiersState) -> bool {
     primary_shortcut_for_platform(
@@ -324,9 +348,15 @@ pub fn is_absolute(path: &Path) -> bool {
 
 pub fn canonicalize_or_absolutize(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
+        #[cfg(windows)]
+        return windows::without_extended_prefix(&path);
+        #[cfg(not(windows))]
         return path;
     }
     if is_absolute(path) {
+        #[cfg(windows)]
+        return windows::without_extended_prefix(path);
+        #[cfg(not(windows))]
         return path.to_path_buf();
     }
     std::env::current_dir()
@@ -370,7 +400,7 @@ fn normalized_bytes_to_path(bytes: &[u8]) -> Option<PathBuf> {
     Some(PathBuf::from(OsString::from_vec(bytes.to_vec())))
 }
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 fn normalized_bytes_to_path(bytes: &[u8]) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8(bytes.to_vec()).ok()?))
 }
@@ -409,6 +439,7 @@ fn normalize_unix_path_bytes(raw: &[u8]) -> Vec<u8> {
     out
 }
 
+#[cfg(not(windows))]
 fn normalize_windows_path(raw: &str) -> String {
     let mut path = raw.replace('/', "\\");
     if let Some(rest) = path.strip_prefix("\\\\?\\UNC\\") {
@@ -1305,7 +1336,7 @@ pub fn reveal_path(path: &Path) -> io::Result<Child> {
         } else {
             command.arg("/select,").arg(path);
         }
-        configure_background_command(&mut command);
+        process::configure_background_command(&mut command);
         return command.spawn();
     }
     #[cfg(target_os = "macos")]

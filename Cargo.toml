@@ -112,6 +112,7 @@ glutin-winit = "0.5.0"
 windows-sys = { version = "0.60.2", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_Graphics_Dwm",
     "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Security_Cryptography",

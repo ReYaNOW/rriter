@@ -3,7 +3,7 @@ use super::types::{
     ApiUvState,
 };
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const API_MOCK_PERSIST_VERSION: u32 = 3;
 const API_MOCK_LAN_BIND_HOST: &str = "0.0.0.0";
@@ -65,7 +65,11 @@ fn lan_bind_host(_bind_host: &str) -> &'static str {
 }
 
 pub fn load_api_mocks() -> ApiMockState {
-    std::fs::read_to_string(api_mocks_path())
+    load_api_mocks_from(&api_mocks_path())
+}
+
+fn load_api_mocks_from(path: &Path) -> ApiMockState {
+    std::fs::read_to_string(path)
         .ok()
         .and_then(|content| serde_json::from_str::<ApiMockPersist>(&content).ok())
         .map(ApiMockState::from)
@@ -73,11 +77,15 @@ pub fn load_api_mocks() -> ApiMockState {
 }
 
 pub fn save_api_mocks(state: &ApiMockState) {
+    save_api_mocks_to(&api_mocks_path(), state);
+}
+
+fn save_api_mocks_to(path: &Path, state: &ApiMockState) {
     let saved = ApiMockPersist::from(state);
     let Ok(content) = serde_json::to_vec_pretty(&saved) else {
         return;
     };
-    let _ = crate::platform::atomic_write(&api_mocks_path(), &content);
+    let _ = crate::platform::atomic_write(path, &content);
 }
 
 pub fn api_mocks_path() -> PathBuf {
@@ -102,10 +110,29 @@ mod tests {
     use crate::app::api_mock::types::{
         ApiMockResponse, ApiPythonRuntimeMode, ApiUvStatus, default_api_mock_python_script,
     };
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    fn test_persist_path(name: &str) -> PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "rriter-api-mock-{name}-{}-{}",
+                std::process::id(),
+                TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("api_mocks.json")
+    }
+
+    fn cleanup_test_path(path: &Path) {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::remove_dir_all(parent);
+        }
+    }
 
     #[test]
     fn persist_roundtrip_keeps_routes_and_uv_settings() {
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let path = test_persist_path("roundtrip");
         let mut state = ApiMockState {
             bind_host: "0.0.0.0".to_string(),
             port: 4101,
@@ -137,8 +164,8 @@ mod tests {
             output_fields: Vec::new(),
         });
 
-        save_api_mocks(&state);
-        let loaded = load_api_mocks();
+        save_api_mocks_to(&path, &state);
+        let loaded = load_api_mocks_from(&path);
 
         assert!(!loaded.enabled);
         assert_eq!(loaded.bind_host, "0.0.0.0");
@@ -154,7 +181,7 @@ mod tests {
         assert_eq!(loaded.route_overrides.len(), 1);
         assert_eq!(loaded.manual_routes.len(), 1);
 
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        cleanup_test_path(&path);
     }
 
     #[test]
@@ -227,14 +254,14 @@ mod tests {
 
     #[test]
     fn custom_python_runtime_config_persists() {
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let path = test_persist_path("custom-python");
         let mut state = ApiMockState::default();
         state.uv.mode = ApiPythonRuntimeMode::CustomPython;
         state.uv.custom_python_path = Some(PathBuf::from("/opt/python/bin/python"));
         state.uv.python_version = "3.12".to_string();
 
-        save_api_mocks(&state);
-        let loaded = load_api_mocks();
+        save_api_mocks_to(&path, &state);
+        let loaded = load_api_mocks_from(&path);
 
         assert_eq!(loaded.uv.mode, ApiPythonRuntimeMode::CustomPython);
         assert_eq!(
@@ -243,12 +270,12 @@ mod tests {
         );
         assert_eq!(loaded.uv.python_version, "3.12");
 
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        cleanup_test_path(&path);
     }
 
     #[test]
     fn persisted_local_bind_migrates_to_lan() {
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let path = test_persist_path("local-bind");
         let saved = ApiMockPersist {
             version: API_MOCK_PERSIST_VERSION,
             bind_host: "127.0.0.1".to_string(),
@@ -259,24 +286,24 @@ mod tests {
             route_overrides: Vec::new(),
             manual_routes: Vec::new(),
         };
-        if let Some(dir) = api_mocks_path().parent() {
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         std::fs::write(
-            api_mocks_path(),
+            &path,
             serde_json::to_string_pretty(&saved).expect("serialize"),
         )
         .expect("write mock persist");
 
-        let loaded = load_api_mocks();
+        let loaded = load_api_mocks_from(&path);
 
         assert_eq!(loaded.bind_host, "0.0.0.0");
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        cleanup_test_path(&path);
     }
 
     #[test]
     fn old_python_mock_without_contract_loads_with_empty_contract() {
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let path = test_persist_path("legacy-contract");
         let legacy = serde_json::json!({
             "version": 1,
             "bind_host": "0.0.0.0",
@@ -301,25 +328,25 @@ mod tests {
             }],
             "manual_routes": []
         });
-        if let Some(dir) = api_mocks_path().parent() {
+        if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
         std::fs::write(
-            api_mocks_path(),
+            &path,
             serde_json::to_string_pretty(&legacy).unwrap(),
         )
         .expect("write legacy");
 
-        let loaded = load_api_mocks();
+        let loaded = load_api_mocks_from(&path);
         let script = loaded.route_overrides[0].python.as_ref().expect("script");
 
         assert!(script.contract.is_empty());
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        cleanup_test_path(&path);
     }
 
     #[test]
     fn new_python_mock_contract_roundtrips() {
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        let path = test_persist_path("new-contract");
         let mut state = ApiMockState::default();
         let mut script = default_api_mock_python_script();
         script.contract.query.enabled = true;
@@ -344,12 +371,12 @@ mod tests {
             extra_output_fields: Vec::new(),
         });
 
-        save_api_mocks(&state);
-        let loaded = load_api_mocks();
+        save_api_mocks_to(&path, &state);
+        let loaded = load_api_mocks_from(&path);
         let script = loaded.route_overrides[0].python.as_ref().expect("script");
 
         assert!(script.contract.query.enabled);
         assert_eq!(script.contract.query.fields[0].name, "page");
-        let _ = std::fs::remove_dir_all(api_mock_data_dir());
+        cleanup_test_path(&path);
     }
 }

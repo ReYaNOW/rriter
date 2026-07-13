@@ -110,7 +110,20 @@ def ensure_rust_target(target: str, install: bool) -> None:
     run(["rustup", "target", "add", target, "--toolchain", "nightly"])
 
 
-def targets_for_architecture(architecture: str) -> list[str]:
+def native_target(machine: str | None = None) -> str:
+    machine = machine or os.uname().machine
+    if machine == "arm64":
+        return TARGET_ARM64
+    if machine == "x86_64":
+        return TARGET_X86_64
+    raise BuildError(f"unsupported native macOS architecture: {machine}")
+
+
+def targets_for_architecture(
+    architecture: str,
+    *,
+    machine: str | None = None,
+) -> list[str]:
     if architecture == "arm64":
         return [TARGET_ARM64]
     if architecture == "x86_64":
@@ -118,31 +131,55 @@ def targets_for_architecture(architecture: str) -> list[str]:
     if architecture == "universal":
         return [TARGET_ARM64, TARGET_X86_64]
     if architecture == "native":
-        machine = os.uname().machine
-        if machine == "arm64":
-            return [TARGET_ARM64]
-        if machine == "x86_64":
-            return [TARGET_X86_64]
-        raise BuildError(f"unsupported native macOS architecture: {machine}")
+        return [native_target(machine)]
     raise BuildError(f"unsupported architecture mode: {architecture}")
+
+
+def validate_minimum_system(value: str) -> str:
+    if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value):
+        raise BuildError(
+            "--minimum-system must be a numeric macOS version such as 12.0 or 14.5"
+        )
+    return value
+
+
+def cargo_environment(minimum_system: str) -> dict[str, str]:
+    environment = os.environ.copy()
+    environment["MACOSX_DEPLOYMENT_TARGET"] = validate_minimum_system(minimum_system)
+    return environment
+
+
+def cargo_test_command(target: str) -> list[str]:
+    return [
+        "cargo",
+        "+nightly",
+        "test",
+        "--locked",
+        "--target",
+        target,
+        "--",
+        "--test-threads=1",
+    ]
+
+
+def cargo_build_command(target: str, *, release: bool) -> list[str]:
+    command = ["cargo", "+nightly", "build", "--locked", "--target", target]
+    if release:
+        command.append("--release")
+    return command
 
 
 def build_target(
     target: str,
     *,
     release: bool,
-    run_tests: bool,
     install_target: bool,
+    minimum_system: str,
 ) -> Path:
     ensure_rust_target(target, install_target)
-    if run_tests:
-        run(["cargo", "+nightly", "test", "--locked", "--target", target])
-    command = ["cargo", "+nightly", "build", "--locked", "--target", target]
-    profile = "debug"
-    if release:
-        command.append("--release")
-        profile = "release"
-    run(command)
+    command = cargo_build_command(target, release=release)
+    profile = "release" if release else "debug"
+    run(command, env=cargo_environment(minimum_system))
     executable = ROOT / "target" / target / profile / "rriter"
     if not executable.is_file():
         raise BuildError(f"built executable not found: {executable}")
@@ -155,14 +192,22 @@ def build_executable(
     release: bool,
     run_tests: bool,
     install_targets: bool,
+    minimum_system: str,
 ) -> tuple[Path, str]:
     targets = targets_for_architecture(architecture)
+    if run_tests:
+        test_target = native_target()
+        ensure_rust_target(test_target, install_targets)
+        run(
+            cargo_test_command(test_target),
+            env=cargo_environment(minimum_system),
+        )
     binaries = [
         build_target(
             target,
             release=release,
-            run_tests=run_tests,
             install_target=install_targets,
+            minimum_system=minimum_system,
         )
         for target in targets
     ]
@@ -366,9 +411,14 @@ def notarize(
     run(["xcrun", "stapler", "validate", staple_target])
 
 
-def verify_gatekeeper(app: Path) -> None:
+def verify_gatekeeper(app: Path, *, required: bool) -> None:
     require_commands(["spctl"])
-    run(["spctl", "--assess", "--type", "execute", "--verbose=4", app], check=False)
+    result = run(
+        ["spctl", "--assess", "--type", "execute", "--verbose=4", app],
+        check=False,
+    )
+    if required and result.returncode != 0:
+        raise BuildError("Gatekeeper rejected the signed and notarized app bundle")
 
 
 def artifact_digest(path: Path) -> str:
@@ -397,7 +447,7 @@ def package_bundle(
         if notary_profile:
             notarize(dmg, profile=notary_profile, staple_target=dmg)
         log(f"DMG SHA-256: {artifact_digest(dmg)}")
-    verify_gatekeeper(app)
+    verify_gatekeeper(app, required=notary_profile is not None)
     return BundleArtifacts(app=app, dmg=dmg, notarization_upload=upload)
 
 
@@ -413,6 +463,24 @@ def self_test() -> None:
     for key, expected in required.items():
         if value.get(key) != expected:
             raise BuildError(f"Info.plist self-test failed for {key}")
+    if targets_for_architecture("native", machine="arm64") != [TARGET_ARM64]:
+        raise BuildError("native arm64 target selection failed")
+    if targets_for_architecture("native", machine="x86_64") != [TARGET_X86_64]:
+        raise BuildError("native x86_64 target selection failed")
+    if targets_for_architecture("universal") != [TARGET_ARM64, TARGET_X86_64]:
+        raise BuildError("Universal 2 target selection failed")
+    if cargo_test_command(TARGET_ARM64)[-2:] != ["--", "--test-threads=1"]:
+        raise BuildError("macOS tests must follow the project serial-test policy")
+    if cargo_build_command(TARGET_ARM64, release=True)[-1] != "--release":
+        raise BuildError("release cargo command self-test failed")
+    if cargo_environment("12.0").get("MACOSX_DEPLOYMENT_TARGET") != "12.0":
+        raise BuildError("deployment target was not applied to Cargo")
+    try:
+        validate_minimum_system("latest")
+    except BuildError:
+        pass
+    else:
+        raise BuildError("invalid deployment targets must be rejected")
     with tempfile.TemporaryDirectory(prefix="rriter-macos-selftest-") as directory:
         plist = Path(directory) / "Info.plist"
         write_info_plist(plist, version, "12.0")
@@ -469,21 +537,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise BuildError("macOS build must run on macOS; use --self-test elsewhere")
     require_commands(["cargo", "rustup", "xcrun", "codesign", "sips", "iconutil"])
     version = cargo_version()
+    minimum_system = validate_minimum_system(args.minimum_system)
     executable, architecture_label = build_executable(
         args.arch,
         release=not args.debug,
         run_tests=args.test,
         install_targets=args.install_targets,
+        minimum_system=minimum_system,
     )
     app = create_bundle(
         executable,
         version=version,
         architecture_label=architecture_label,
-        minimum_system=args.minimum_system,
+        minimum_system=minimum_system,
     )
     hardened_runtime = not args.no_hardened_runtime
     if args.sign_identity == "-" and args.notary_profile:
         raise BuildError("notarization requires a Developer ID Application identity")
+    if args.no_hardened_runtime and args.notary_profile:
+        raise BuildError("notarization requires the hardened runtime")
     sign_bundle(
         app,
         identity=args.sign_identity,

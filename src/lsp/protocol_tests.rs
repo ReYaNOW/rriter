@@ -11,8 +11,9 @@ fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
         (1, 3)
     );
 
-    let uri = path_to_uri(Path::new("/tmp/rriter file.py"));
-    assert_eq!(uri_to_path(&uri), PathBuf::from("/tmp/rriter file.py"));
+    let path = crate::platform::canonicalize_or_absolutize(Path::new("/tmp/rriter file.py"));
+    let uri = path_to_uri(&path);
+    assert_eq!(uri_to_path(&uri), path);
 
     let hover = String::from_utf8(make_hover(7, &uri, 1, 3)).unwrap();
     assert!(hover.contains(r#""id":7"#));
@@ -127,7 +128,7 @@ fn lsp_protocol_parses_diagnostics_workspace_edits_hover_and_actions() {
     assert_eq!(workspace_events.len(), 1);
     match &workspace_events[0] {
         LspEvent::Diagnostics { path, items, .. } => {
-            assert_eq!(path, &PathBuf::from("/tmp/ws/pkg/a.py"));
+            assert_eq!(path, &uri_to_path("file:///tmp/ws/pkg/a.py"));
             assert_eq!(items.len(), 1);
             assert_eq!(items[0].source.as_deref(), Some("ty"));
             assert!(items[0].quickfixes.is_empty());
@@ -602,7 +603,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
     assert_eq!(
         parse_definition_target(&serde_json::json!([{"targetUri": "file:///tmp/target.py"}]))
             .map(|target| target.path),
-        Some(PathBuf::from("/tmp/target.py"))
+        Some(uri_to_path("file:///tmp/target.py"))
     );
     let target = parse_definition_target(&serde_json::json!([{
         "targetUri": "file:///tmp/target.py",
@@ -612,7 +613,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
         }
     }]))
     .unwrap();
-    assert_eq!(target.path, PathBuf::from("/tmp/target.py"));
+    assert_eq!(target.path, uri_to_path("file:///tmp/target.py"));
     assert_eq!(target.line, 12);
     assert_eq!(target.col, 4);
 
@@ -681,7 +682,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
             result_id,
         } => {
             assert_eq!(server_name, "ruff");
-            assert_eq!(path, PathBuf::from("/tmp/a.py"));
+            assert_eq!(path, uri_to_path("file:///tmp/a.py"));
             assert_eq!(version, Some(3));
             assert_eq!(result_id, None);
             assert_eq!(items.len(), 1);
@@ -772,7 +773,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             assert_eq!(actions[0].title, "Apply");
             assert_eq!(actions[0].code.as_deref(), Some("F401"));
             let edit = actions[0].edit.as_ref().unwrap();
-            assert_eq!(edit.changes[&PathBuf::from("/tmp/doc.py")][0].new_text, "x");
+            assert_eq!(edit.changes[&uri_to_path("file:///tmp/doc.py")][0].new_text, "x");
         }
         other => panic!("unexpected event: {other:?}"),
     }
@@ -788,7 +789,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
         LspEvent::DefinitionResponse { request_id, target } => {
             assert_eq!(request_id, 2);
             let target = target.unwrap();
-            assert_eq!(target.path, PathBuf::from("/tmp/definition.py"));
+            assert_eq!(target.path, uri_to_path("file:///tmp/definition.py"));
             assert_eq!(target.line, 0);
             assert_eq!(target.col, 0);
         }
@@ -842,7 +843,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             result_id,
         } => {
             assert_eq!(server_name, "ty");
-            assert_eq!(path, PathBuf::from("/tmp/workspace.py"));
+            assert_eq!(path, uri_to_path("file:///tmp/workspace.py"));
             assert_eq!(version, Some(4));
             assert_eq!(items[0].message.as_ref(), "workspace boom");
             assert_eq!(result_id.as_deref(), Some("r1"));
@@ -856,7 +857,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             result_id,
             ..
         } => {
-            assert_eq!(path, PathBuf::from("/tmp/related.py"));
+            assert_eq!(path, uri_to_path("file:///tmp/related.py"));
             assert_eq!(items[0].message.as_ref(), "related boom");
             assert_eq!(result_id.as_deref(), Some("r2"));
         }

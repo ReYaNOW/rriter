@@ -126,6 +126,16 @@ fn collect_workspace_status_with_cache(
         });
     }
 
+    #[cfg(windows)]
+    append_case_only_renames(
+        &repo,
+        &repo_root,
+        rel_root.as_deref(),
+        workspace_idx,
+        root,
+        &mut files,
+    );
+
     files.sort_by(|a, b| a.display_path.cmp(&b.display_path));
     merge_git_status_files(&mut files);
     let tree = build_git_tree(&files);
@@ -339,6 +349,115 @@ fn git_status_display_path(
         .as_deref()
         .and_then(git_status_path_string)
         .or_else(|| git_status_path_string(rel_path))
+}
+
+#[cfg(windows)]
+fn append_case_only_renames(
+    repo: &git2::Repository,
+    repo_root: &Path,
+    rel_root: Option<&Path>,
+    workspace_idx: usize,
+    workspace_root: &Path,
+    files: &mut Vec<GitFileEntry>,
+) {
+    let Ok(index) = repo.index() else {
+        return;
+    };
+    let mut directory_entries: FxHashMap<PathBuf, Vec<std::ffi::OsString>> =
+        FxHashMap::default();
+
+    for entry in index.iter() {
+        let Ok(index_path) = std::str::from_utf8(&entry.path) else {
+            continue;
+        };
+        let index_rel = PathBuf::from(index_path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        if let Some(rel_root) = rel_root
+            && !crate::platform::path_is_within(&index_rel, rel_root)
+        {
+            continue;
+        }
+        let Some(actual_rel) = actual_case_relative_path(
+            repo_root,
+            &index_rel,
+            &mut directory_entries,
+        ) else {
+            continue;
+        };
+        if actual_rel == index_rel || !crate::platform::paths_equal(&actual_rel, &index_rel) {
+            continue;
+        }
+
+        files.retain(|file| {
+            let current = Path::new(file.rel_path.as_ref());
+            let old = file.old_rel_path.as_deref().map(Path::new);
+            !crate::platform::paths_equal(current, &index_rel)
+                && !crate::platform::paths_equal(current, &actual_rel)
+                && !old.is_some_and(|old| {
+                    crate::platform::paths_equal(old, &index_rel)
+                        || crate::platform::paths_equal(old, &actual_rel)
+                })
+        });
+
+        let Some(display_path) = git_status_display_path(
+            &actual_rel,
+            rel_root,
+            workspace_root,
+            repo_root,
+        ) else {
+            continue;
+        };
+        let rel_path = actual_rel.to_string_lossy().replace('\\', "/");
+        let old_rel_path = index_rel.to_string_lossy().replace('\\', "/");
+        let depth = display_path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .count()
+            .saturating_sub(1);
+        files.push(GitFileEntry {
+            workspace_idx,
+            rel_path: rel_path.into_boxed_str(),
+            old_rel_path: Some(old_rel_path.into_boxed_str()),
+            display_path: display_path.into_boxed_str(),
+            depth: depth.min(u16::MAX as usize) as u16,
+            staged: false,
+            status: GitFileStatus::Renamed,
+        });
+    }
+}
+
+#[cfg(windows)]
+fn actual_case_relative_path(
+    repo_root: &Path,
+    relative: &Path,
+    directory_entries: &mut FxHashMap<PathBuf, Vec<std::ffi::OsString>>,
+) -> Option<PathBuf> {
+    let mut directory = repo_root.to_path_buf();
+    let mut actual = PathBuf::new();
+    for component in relative.components() {
+        let std::path::Component::Normal(expected) = component else {
+            return None;
+        };
+        let entries = directory_entries.entry(directory.clone()).or_insert_with(|| {
+            std::fs::read_dir(&directory)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                .collect()
+        });
+        let name = entries
+            .iter()
+            .find(|name| name.as_os_str() == expected)
+            .or_else(|| {
+                entries.iter().find(|name| {
+                    crate::platform::paths_equal(Path::new(name), Path::new(expected))
+                })
+            })?
+            .clone();
+        actual.push(&name);
+        directory.push(name);
+    }
+    Some(actual)
 }
 
 fn merge_git_status_files(files: &mut Vec<GitFileEntry>) {

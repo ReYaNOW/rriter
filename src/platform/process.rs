@@ -343,7 +343,7 @@ fn configure_managed_command(command: &mut Command) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub fn command_for(program: impl AsRef<OsStr>) -> io::Result<Command> {
     let program = program.as_ref();
     resolve_executable(program)

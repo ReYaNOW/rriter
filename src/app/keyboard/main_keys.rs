@@ -373,6 +373,12 @@ impl App {
                 return;
             }
 
+            // File-tree focus is exclusive. Handle F2/Delete/clipboard shortcuts
+            // before stale editor/API focus can consume the key on another OS.
+            if self.handle_file_tree_shortcut(key_event.physical_key, ctrl) {
+                return;
+            }
+
             if self.ide_panel.lsp_log_filter_focused {
                 self.handle_lsp_log_filter_keyboard_input(key_event);
                 return;
@@ -460,8 +466,6 @@ impl App {
                 && self.ide_panel.is_open(crate::app::PanelId::Terminal)
             {
                 self.handle_terminal_keyboard_input(key_event);
-            } else if self.handle_file_tree_shortcut(key_event.physical_key, ctrl) {
-                return;
             } else {
                 self.handle_editor_keyboard_input(event_loop, key_event);
             }

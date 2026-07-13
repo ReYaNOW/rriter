@@ -534,6 +534,11 @@ impl ApplicationHandler for App {
                         .unwrap()
                         .swap_buffers(self.gl_context.as_ref().unwrap())
                         .unwrap();
+                    crate::platform::finish_present();
+                    self.renderer
+                        .as_mut()
+                        .unwrap()
+                        .record_presented_frame(self.show_fps, Instant::now());
 
                     self.is_ready = true;
                     // Применяем максимизацию, если сохранено
@@ -1297,17 +1302,23 @@ impl ApplicationHandler for App {
                     None
                 };
 
-                let telemetry_swap_start = crate::render_view::TELEMETRY_ENABLED
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                    .then(Instant::now);
+                let present_start = Instant::now();
                 self.gl_surface
                     .as_ref()
                     .unwrap()
                     .swap_buffers(self.gl_context.as_ref().unwrap())
                     .unwrap();
-                if let Some(swap_start) = telemetry_swap_start {
+                crate::platform::finish_present();
+                let present_elapsed = present_start.elapsed().as_secs_f32();
+                self.renderer
+                    .as_mut()
+                    .unwrap()
+                    .record_presented_frame(self.show_fps, Instant::now());
+                if crate::render_view::TELEMETRY_ENABLED
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
                     crate::render_view::record_swap_telemetry(
-                        swap_start.elapsed().as_secs_f32(),
+                        present_elapsed,
                         !self.scroll_y.is_settled() || !self.scroll_x.is_settled(),
                     );
                 }

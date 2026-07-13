@@ -205,6 +205,7 @@ fn git_diff_staged_loader_reads_index_instead_of_worktree() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let repo = git2::Repository::init(&root).unwrap();
+    repo.config().unwrap().set_bool("core.autocrlf", false).unwrap();
     let format = crate::platform::TextFileFormat {
         encoding: crate::platform::TextEncoding::Utf8Bom,
         line_ending: crate::platform::LineEnding::CrLf,

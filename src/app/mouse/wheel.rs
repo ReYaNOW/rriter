@@ -512,12 +512,16 @@ impl App {
                         term.scroll_y.scroll_by(-dy); // -dy because scroll_y=0 is bottom
 
                         let lh = self.renderer.as_ref().unwrap().line_height;
-                        let term_scale = 1.05;
-                        let char_h = lh * term_scale;
+                        let char_h = lh * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
 
                         let (_, term_content_h) =
                             crate::render_view::terminal_ui::terminal_body_rect(cy, ch, s);
-                        let max_scroll = ((total_lines as f32 * char_h) - term_content_h).max(0.0);
+                        let max_scroll = crate::render_view::terminal_ui::terminal_max_scroll(
+                            total_lines,
+                            char_h,
+                            term_content_h,
+                            s,
+                        );
 
                         term.scroll_y.clamp_target(0.0, max_scroll);
                         self.window.as_ref().unwrap().request_redraw();

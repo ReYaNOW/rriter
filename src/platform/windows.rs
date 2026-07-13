@@ -1,5 +1,30 @@
 use std::path::{Path, PathBuf};
 
+fn colorization_argb_to_rgba(color: u32) -> [f32; 4] {
+    [
+        ((color >> 16) & 0xff) as f32 / 255.0,
+        ((color >> 8) & 0xff) as f32 / 255.0,
+        (color & 0xff) as f32 / 255.0,
+        1.0,
+    ]
+}
+
+pub(super) fn system_accent_color() -> Option<[f32; 4]> {
+    use windows_sys::Win32::Graphics::Dwm::DwmGetColorizationColor;
+
+    let mut color = 0u32;
+    let mut opaque_blend = 0;
+    let result = unsafe { DwmGetColorizationColor(&mut color, &mut opaque_blend) };
+    (result >= 0).then(|| colorization_argb_to_rgba(color))
+}
+
+#[inline(always)]
+pub(super) fn finish_present() {
+    use windows_sys::Win32::Graphics::Dwm::DwmFlush;
+
+    let _ = unsafe { DwmFlush() };
+}
+
 pub(super) fn extended_length_path(path: &Path) -> Vec<u16> {
     use std::os::windows::ffi::OsStrExt;
 
@@ -23,6 +48,34 @@ pub(super) fn extended_length_path(path: &Path) -> Vec<u16> {
 fn nul_terminated(mut units: Vec<u16>) -> Vec<u16> {
     units.push(0);
     units
+}
+
+
+pub(super) fn without_extended_prefix(path: &Path) -> PathBuf {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    const BACKSLASH: u16 = b'\\' as u16;
+    let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
+    let extended_unc = [
+        BACKSLASH, BACKSLASH, b'?' as u16, BACKSLASH,
+        b'U' as u16, b'N' as u16, b'C' as u16, BACKSLASH,
+    ];
+    let extended = [BACKSLASH, BACKSLASH, b'?' as u16, BACKSLASH];
+    let native = [BACKSLASH, b'?' as u16, b'?' as u16, BACKSLASH];
+
+    let normal = if starts_with_ascii_case_insensitive(&units, &extended_unc) {
+        let mut normal = vec![BACKSLASH, BACKSLASH];
+        normal.extend_from_slice(&units[extended_unc.len()..]);
+        normal
+    } else if starts_with_ascii_case_insensitive(&units, &extended) {
+        units[extended.len()..].to_vec()
+    } else if starts_with_ascii_case_insensitive(&units, &native) {
+        units[native.len()..].to_vec()
+    } else {
+        return path.to_path_buf();
+    };
+
+    PathBuf::from(std::ffi::OsString::from_wide(&normal))
 }
 
 pub(super) fn normalized_path_bytes(path: &Path) -> Vec<u8> {
@@ -378,6 +431,26 @@ mod tests {
         assert_eq!(encoded.last(), Some(&0));
         assert_eq!(path.as_os_str().encode_wide().last(), Some(0xd800));
     }
+
+    #[test]
+    fn visible_paths_drop_extended_prefix_without_changing_case() {
+        assert_eq!(
+            without_extended_prefix(Path::new(r"\\?\C:\Users\ReYaN\Project")),
+            PathBuf::from(r"C:\Users\ReYaN\Project")
+        );
+        assert_eq!(
+            without_extended_prefix(Path::new(r"\\?\UNC\Server\Share\File.txt")),
+            PathBuf::from(r"\\Server\Share\File.txt")
+        );
+    }
+
+    #[test]
+    fn colorization_argb_is_decoded_as_aarrggbb() {
+        assert_eq!(
+            colorization_argb_to_rgba(0x7f7259af),
+            [114.0 / 255.0, 89.0 / 255.0, 175.0 / 255.0, 1.0]
+        );
+    }
 }
 
 pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Result<Vec<u8>> {
@@ -386,7 +459,7 @@ pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Resul
         CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
     };
 
-    let mut input = CRYPT_INTEGER_BLOB {
+    let input = CRYPT_INTEGER_BLOB {
         cbData: u32::try_from(bytes.len()).map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret is too large")
         })?,
@@ -420,7 +493,6 @@ pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Resul
     unsafe {
         LocalFree(output.pbData.cast());
     }
-    input.pbData = std::ptr::null_mut();
     Ok(protected)
 }
 

@@ -1169,7 +1169,7 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
             previous_result_ids_json,
             ..
         } => {
-            assert!(previous_result_ids_json.contains("file:///tmp/ws/pkg/offscreen.py"));
+            assert!(previous_result_ids_json.contains(&path_to_uri(&path)));
             assert!(previous_result_ids_json.contains("next-r1"));
         }
         _ => panic!("expected second workspace diagnostic command"),

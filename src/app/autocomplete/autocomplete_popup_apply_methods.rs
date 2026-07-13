@@ -233,7 +233,7 @@ pub(crate) fn tree_sitter_completion_options(
             } else {
                 let scope_size = comp.scope_end.saturating_sub(comp.scope_start);
                 let sz = scope_size.min(i64::MAX as usize) as i64;
-                10_000_000 / (sz + 1).max(1)
+                10_000_000 / sz.saturating_add(1).max(1)
             };
             score += scope_bonus;
             score -= (comp.word.len() as i64) * 10;

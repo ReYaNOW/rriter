@@ -25,6 +25,51 @@ pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
 pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 30.0;
 
+fn update_present_fps_counter(
+    frame_count: &mut u32,
+    time_acc: &mut f32,
+    dt: f32,
+) -> Option<f32> {
+    if !dt.is_finite() || dt <= 0.0 {
+        return None;
+    }
+    *frame_count = frame_count.saturating_add(1);
+    *time_acc += dt;
+    if *time_acc < 0.5 {
+        return None;
+    }
+    let fps = *frame_count as f32 / *time_acc;
+    *frame_count = 0;
+    *time_acc = 0.0;
+    Some(fps)
+}
+
+impl Renderer {
+    pub(crate) fn record_presented_frame(&mut self, enabled: bool, now: Instant) {
+        if !enabled {
+            self.last_frame_time = None;
+            self.frame_count = 0;
+            self.time_acc = 0.0;
+            self.fps_string.clear();
+            return;
+        }
+
+        if let Some(last) = self.last_frame_time
+            && let Some(fps) = update_present_fps_counter(
+                &mut self.frame_count,
+                &mut self.time_acc,
+                now.duration_since(last).as_secs_f32(),
+            )
+        {
+            self.fps = fps;
+            use std::fmt::Write;
+            self.fps_string.clear();
+            let _ = write!(&mut self.fps_string, "FPS: {:.0}", self.fps);
+        }
+        self.last_frame_time = Some(now);
+    }
+}
+
 fn decimal_usize_buf(buf: &mut [u8; 20], mut n: usize) -> &str {
     let mut idx = buf.len();
     if n == 0 {
@@ -353,6 +398,21 @@ fn should_draw_empty_ide_file_tree_overlay(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fps_counter_reports_completed_present_cadence() {
+        let mut frames = 0;
+        let mut elapsed = 0.0;
+        let mut measured = None;
+        for _ in 0..30 {
+            measured = update_present_fps_counter(&mut frames, &mut elapsed, 1.0 / 60.0)
+                .or(measured);
+        }
+        let measured = measured.expect("half-second sample");
+        assert!((measured - 60.0).abs() < 0.01);
+        assert_eq!(frames, 0);
+        assert_eq!(elapsed, 0.0);
+    }
 
     #[test]
     fn telemetry_default_starts_with_empty_counters_and_fresh_print_time() {

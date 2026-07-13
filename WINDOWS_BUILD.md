@@ -72,7 +72,13 @@ folder, enter that folder before building.
 The project script discovers Visual Studio Build Tools with `vswhere.exe`,
 imports the x64 MSVC environment, embeds the DPI/long-path manifest and native
 icon/version resources, runs the Windows test suite, builds release RRiter,
-creates a portable ZIP, and launches the executable:
+creates a portable ZIP, and launches the executable. MSVC activation prefers
+`vcvars64.bat`, falls back to `vcvarsall.bat x64` and then `VsDevCmd.bat`, and
+accepts a non-zero setup exit only after `cl.exe`, `link.exe`, and `rc.exe` are
+all verified in the captured environment. The temporary capture batch is run
+by its plain filename with its directory passed separately as the process
+working directory. This avoids `cmd.exe /c` nested-quote corruption for user
+profiles and temporary paths containing spaces or non-ASCII characters:
 
 ```powershell
 py -3 .\scripts\build_windows.py --install-target --test --run
@@ -192,20 +198,46 @@ Run the packaging self-test without compiling Rust:
 py -3 .\scripts\build_windows.py --self-test
 ```
 
-If the script cannot find MSVC, confirm the workload is installed, then rerun
-from a fresh PowerShell window. The script imports `VsDevCmd.bat` itself; it is
-not necessary to use Developer PowerShell.
+If MSVC activation fails, the script prints the diagnostic tail from every
+available setup script and lists which of `cl.exe`, `link.exe`, or `rc.exe` is
+still missing. A healthy capture command is logged in this shape:
 
-If `cargo` cannot find `link.exe`, verify:
+```text
+[rriter-windows] $ C:\Windows\System32\cmd.exe /d /q /c capture-msvc-env.cmd
+```
+
+The command must not contain `call "%RRITER_MSVC_CAPTURE%"` or an escaped full
+temporary path. Those forms are from an older broken script and are parsed by
+`cmd.exe` as a literal command name. If the current script still reports
+missing tools, open **Visual Studio Installer → Build Tools → Modify**, enable
+**Desktop development with C++**, and ensure both the latest MSVC x64/x86 tools
+and a Windows 11 SDK are selected. Restart PowerShell after modifying the
+installation.
+
+Verify which installation `vswhere.exe` selects:
 
 ```powershell
 & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" `
-  -latest -products * `
+  -latest -prerelease -products * `
   -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
   -property installationPath
 ```
+
+As a manual diagnostic, open **x64 Native Tools Command Prompt** from the Start
+menu and run:
+
+```cmd
+where cl.exe
+where link.exe
+where rc.exe
+```
+
+All three commands must resolve. The normal RRiter build may still be started
+from plain PowerShell; the project script imports the native environment itself.
 
 RRiter logs the selected OpenGL context, GPU vendor, renderer, GL/GLSL versions,
 and DPI scale at startup. The same report can be copied from settings. Windows
 requires a desktop OpenGL 3.3 or newer driver; RRiter first requests 4.1 Core and
 then falls back to 3.3 Core.
+
+Windows test suite runs with `--test-threads=1`, matching Linux `make test`. Bounded highlighter/LSP worker tests intentionally share process resources and must not compete under Cargo default parallel test scheduling.

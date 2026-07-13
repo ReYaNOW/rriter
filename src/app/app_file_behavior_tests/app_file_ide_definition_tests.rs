@@ -75,7 +75,10 @@ fn open_file_in_tab_reuses_existing_tabs_and_loads_into_empty_slot() {
     app.switch_to_tab(1);
     app.open_file_in_tab(second.clone(), false);
     assert_eq!(app.tabs.len(), 2);
-    assert_eq!(app.file_path.as_ref(), Some(&second));
+    assert_eq!(
+        app.file_path.as_ref(),
+        Some(&crate::platform::canonicalize_or_absolutize(&second))
+    );
     assert_eq!(app.editor.get_full_text(), "second\n");
 
     std::fs::remove_file(first).ok();
@@ -106,7 +109,10 @@ fn ide_file_opens_do_not_update_recent_files_but_non_ide_opens_do() {
 
     app.is_ide_mode = false;
     app.open_file_in_tab(plain_path.clone(), true);
-    assert_eq!(app.recent_files, vec![plain_path.clone()]);
+    assert_eq!(
+        app.recent_files,
+        vec![crate::platform::canonicalize_or_absolutize(&plain_path)]
+    );
 
     std::fs::remove_file(ide_path).ok();
     std::fs::remove_file(plain_path).ok();
@@ -337,7 +343,8 @@ fn ctrl_definition_same_declaration_target_redirects_to_usage() {
     };
     app.is_ide_mode = true;
     app.file_extension = "py".to_string();
-    app.file_path = Some(PathBuf::from("/tmp/ctrl_def.py"));
+    let path = std::env::temp_dir().join("rriter-ctrl-def.py");
+    app.file_path = Some(path.clone());
     app.editor = editor_with("value = build()\nprint(value)\n");
 
     let source_start = app.editor.get_full_text().find("value").unwrap();
@@ -352,13 +359,13 @@ fn ctrl_definition_same_declaration_target_redirects_to_usage() {
 
     let target = app
         .ctrl_definition_target_from_lsp(Some(DefinitionJumpTarget {
-            path: PathBuf::from("/tmp/ctrl_def.py"),
+            path: path.clone(),
             line,
             col,
         }))
         .expect("expected usage target");
 
-    assert_eq!(target.path, PathBuf::from("/tmp/ctrl_def.py"));
+    assert_eq!(target.path, path);
     assert_eq!(target.line, 1);
     assert_eq!(target.col, 6);
 }
@@ -370,8 +377,12 @@ fn definition_jump_to_open_file_does_not_restart_highlighter() {
     };
     app.is_ide_mode = true;
     app.show_welcome = false;
-    app.tabs
-        .push(tab_with("main.py", Some("/tmp/main.py"), "first\nsecond\n"));
+    let path = std::env::temp_dir().join("rriter-definition-open.py");
+    app.tabs.push(tab_with(
+        "main.py",
+        path.to_str(),
+        "first\nsecond\n",
+    ));
     app.active_tab = 0;
     app.sync_active_tab();
     app.editor.version = 41;
@@ -379,7 +390,7 @@ fn definition_jump_to_open_file_does_not_restart_highlighter() {
     app.is_highlighted_once = true;
 
     app.jump_to_definition_target(DefinitionJumpTarget {
-        path: PathBuf::from("/tmp/main.py"),
+        path,
         line: 1,
         col: 0,
     });
@@ -492,12 +503,12 @@ fn problem_jump_to_open_file_does_not_restart_highlighter() {
     let Some(mut app) = test_app() else {
         return;
     };
-    let path = PathBuf::from("/tmp/problem-open.py");
+    let path = std::env::temp_dir().join("rriter-problem-open.py");
     app.is_ide_mode = true;
     app.show_welcome = false;
     app.tabs.push(tab_with(
         "problem-open.py",
-        Some("/tmp/problem-open.py"),
+        path.to_str(),
         "first\nsecond\n",
     ));
     app.active_tab = 0;

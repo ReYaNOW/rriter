@@ -407,7 +407,7 @@ fn file_tree_path_input_layout_clips_parent_and_preserves_input_width() {
         file_tree_path_input_layout(100.0, 460.0, 1.0, &parent, |text| text.len() as f32 * 8.0);
 
     assert!(prefix.starts_with("..."));
-    assert!(prefix.ends_with("bookings/"));
+    assert!(prefix.ends_with(&format!("bookings{}", std::path::MAIN_SEPARATOR)));
     assert!(input_x > 100.0 + FILE_TREE_DIALOG_SIDE_PAD);
     assert!(input_w >= FILE_TREE_PATH_INPUT_MIN_W);
 
@@ -434,8 +434,13 @@ fn file_tree_trash_single_path_and_restore_roundtrip() {
     assert!(!path.exists());
     assert!(entry.trash_path.exists());
     let info = std::fs::read_to_string(&entry.info_path).unwrap();
-    assert!(info.contains("[Trash Info]"));
-    assert!(info.contains("Path=/"));
+    if cfg!(target_os = "linux") {
+        assert!(info.contains("[Trash Info]"));
+        assert!(info.contains("Path=/"));
+    } else {
+        assert!(info.contains("[RRiter Trash]"));
+        assert!(info.contains("Path=rriter-path-v1:"));
+    }
 
     let restored = restore_trash_entries(&[entry]).unwrap();
     assert_eq!(restored, vec![path.clone()]);

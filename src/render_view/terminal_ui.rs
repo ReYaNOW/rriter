@@ -3,12 +3,115 @@ use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 use glow::HasContext;
 
+pub(crate) const TERMINAL_TEXT_SCALE: f32 = 1.05;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TerminalScrollbarLayout {
+    pub track_x: f32,
+    pub track_y: f32,
+    pub track_w: f32,
+    pub track_h: f32,
+    pub thumb_y: f32,
+    pub thumb_h: f32,
+    pub max_scroll: f32,
+}
+
 pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> (f32, f32) {
     let tab_top_pad = 6.0 * scale;
     let tab_h = 32.0 * scale;
     let tab_bottom_gap = 4.0 * scale;
     let body_offset = tab_top_pad + tab_h + tab_bottom_gap;
     (content_y + body_offset, (content_h - body_offset).max(0.0))
+}
+
+#[inline(always)]
+pub(crate) fn terminal_text_padding(scale: f32) -> (f32, f32) {
+    (8.0 * scale, 8.0 * scale)
+}
+
+#[inline(always)]
+pub(crate) fn terminal_text_viewport_height(term_h: f32, scale: f32) -> f32 {
+    let (top, bottom) = terminal_text_padding(scale);
+    (term_h - top - bottom).max(0.0)
+}
+
+#[inline(always)]
+pub(crate) fn terminal_visible_rows(term_h: f32, char_h: f32, scale: f32) -> usize {
+    (terminal_text_viewport_height(term_h, scale) / char_h.max(0.0001))
+        .floor()
+        .max(2.0) as usize
+}
+
+#[inline(always)]
+pub(crate) fn terminal_max_scroll(
+    total_lines: usize,
+    char_h: f32,
+    term_h: f32,
+    scale: f32,
+) -> f32 {
+    (total_lines as f32 * char_h - terminal_text_viewport_height(term_h, scale)).max(0.0)
+}
+
+pub(crate) fn terminal_scrollbar_layout(
+    panel_x: f32,
+    panel_w: f32,
+    term_y: f32,
+    term_h: f32,
+    scale: f32,
+    char_h: f32,
+    total_lines: usize,
+    current_scroll: f32,
+) -> Option<TerminalScrollbarLayout> {
+    let max_scroll = terminal_max_scroll(total_lines, char_h, term_h, scale);
+    if max_scroll <= 0.0 {
+        return None;
+    }
+
+    let frame_inset = 4.0 * scale;
+    let track_w = 8.0 * scale;
+    let track_x = panel_x + panel_w - frame_inset - track_w;
+    let track_y = term_y + frame_inset;
+    let track_h = (term_h - frame_inset * 2.0).max(1.0);
+    let viewport_h = terminal_text_viewport_height(term_h, scale);
+    let content_h = total_lines as f32 * char_h;
+    let scroll_from_top = max_scroll - current_scroll.clamp(0.0, max_scroll);
+    let thumb = crate::scroll::scrollbar_thumb(
+        track_y,
+        track_h,
+        viewport_h,
+        content_h,
+        scroll_from_top,
+        20.0 * scale,
+    )?;
+    Some(TerminalScrollbarLayout {
+        track_x,
+        track_y,
+        track_w,
+        track_h,
+        thumb_y: thumb.start,
+        thumb_h: thumb.len,
+        max_scroll,
+    })
+}
+
+pub(crate) fn terminal_scrollbar_drag_target(
+    pointer_y: f32,
+    layout: TerminalScrollbarLayout,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let thumb = crate::scroll::ScrollbarThumb {
+        start: layout.thumb_y,
+        len: layout.thumb_h,
+    };
+    let (offset, scroll_from_top) = crate::scroll::scrollbar_drag_target(
+        pointer_y,
+        layout.track_y,
+        layout.track_h,
+        thumb,
+        layout.max_scroll,
+        drag_offset,
+    )?;
+    Some((offset, layout.max_scroll - scroll_from_top))
 }
 
 fn terminal_glyph_anchor(
@@ -187,17 +290,26 @@ impl Renderer {
 
         let (term_content_y, term_content_h) = terminal_body_rect(content_y, content_h, s);
 
+        if ide_panel.terminal_focused {
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::TerminalBody,
+                panel_x,
+                term_content_y,
+                panel_w,
+                term_content_h,
+                mx,
+                my,
+            );
+        }
+
         let active = ide_panel.active_terminal;
         if let Some(term) = ide_panel.terminals.get(active) {
             let mut grid = term.grid.lock().unwrap();
-            let term_scale = 1.05;
+            let term_scale = TERMINAL_TEXT_SCALE;
             let char_w = self.char_advance('A') * term_scale;
             let char_h = self.line_height * term_scale;
             let new_cols = ((panel_w - 20.0 * s) / char_w).floor().max(10.0) as usize;
-            let term_pad_bottom = 8.0 * s;
-            let new_rows = ((term_content_h - term_pad_bottom) / char_h)
-                .floor()
-                .max(2.0) as usize;
+            let new_rows = terminal_visible_rows(term_content_h, char_h, s);
 
             if grid.cols != new_cols || grid.visible_rows != new_rows {
                 grid.resize(new_cols, new_rows);
@@ -233,7 +345,7 @@ impl Renderer {
             let max_scroll = if grid.is_alt {
                 0.0
             } else {
-                ((total_lines as f32 * char_h) - term_content_h).max(0.0)
+                terminal_max_scroll(total_lines, char_h, term_content_h, s)
             };
 
             let scroll_offset = if grid.is_alt {
@@ -242,6 +354,7 @@ impl Renderer {
                 term.scroll_y.current.min(max_scroll).round()
             };
             let draw_x = panel_x + 10.0 * s;
+            let (_, term_pad_bottom) = terminal_text_padding(s);
 
             self.flush();
             unsafe {
@@ -260,7 +373,7 @@ impl Renderer {
             for i in 0..total_lines {
                 let offset_from_bottom = total_lines - 1 - i;
                 let draw_y = term_content_y + term_content_h
-                    - 8.0 * s
+                    - term_pad_bottom
                     - char_h
                     - (offset_from_bottom as f32 * char_h)
                     + scroll_offset;
@@ -397,7 +510,7 @@ impl Renderer {
                     .saturating_sub(1)
                     .saturating_sub(grid.cur_y);
                 let cursor_px_y = term_content_y + term_content_h
-                    - 8.0 * s
+                    - term_pad_bottom
                     - char_h
                     - (cursor_offset_from_bottom as f32 * char_h)
                     + scroll_offset;
@@ -441,30 +554,30 @@ impl Renderer {
                 );
             }
 
-            if max_scroll > 0.0 {
-                let track_h = term_content_h;
-                let handle_h = (term_content_h / (total_lines as f32 * char_h)) * track_h;
-                let handle_h = handle_h.max(20.0 * s);
-                let scroll_progress = term.scroll_y.current / max_scroll;
-                let handle_y = term_content_y + term_content_h
-                    - handle_h
-                    - scroll_progress * (track_h - handle_h);
-                let sb_w = 10.0 * s;
-                let thumb_w = sb_w - 2.0 * s;
+            if let Some(scrollbar) = terminal_scrollbar_layout(
+                panel_x,
+                panel_w,
+                term_content_y,
+                term_content_h,
+                s,
+                char_h,
+                total_lines,
+                term.scroll_y.current,
+            ) {
                 self.push_rounded_rect(
-                    panel_x + panel_w - sb_w + 1.0 * s,
-                    handle_y,
-                    thumb_w,
-                    handle_h,
-                    thumb_w / 2.0,
+                    scrollbar.track_x,
+                    scrollbar.thumb_y,
+                    scrollbar.track_w,
+                    scrollbar.thumb_h,
+                    scrollbar.track_w / 2.0,
                     [0.7, 0.33, 0.54, 0.8],
                 );
                 ui_registry.register_rect(
                     crate::ui_system::UiId::TerminalScrollY,
-                    panel_x + panel_w - sb_w,
-                    term_content_y,
-                    sb_w,
-                    term_content_h,
+                    scrollbar.track_x,
+                    scrollbar.track_y,
+                    scrollbar.track_w,
+                    scrollbar.track_h,
                     mx,
                     my,
                 );
@@ -474,18 +587,6 @@ impl Renderer {
             unsafe {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
-        }
-
-        if ide_panel.terminal_focused {
-            ui_registry.register_blocker(
-                crate::ui_system::UiId::TerminalBody,
-                panel_x,
-                term_content_y,
-                panel_w,
-                term_content_h,
-                mx,
-                my,
-            );
         }
 
         if ide_panel.term_show_search {
@@ -804,6 +905,74 @@ mod tests {
         assert_eq!(
             terminal_glyph_anchor('✅', emoji, 10.0, 20.0, 12.0, 28.0, 40.0, 1.05),
             (10.0, 40.0, 1.05)
+        );
+    }
+
+    #[test]
+    fn terminal_rows_keep_padding_above_the_first_full_screen_row() {
+        let term_h = 300.0;
+        let char_h = 26.0;
+        let rows = terminal_visible_rows(term_h, char_h, 1.0);
+        let (top, bottom) = terminal_text_padding(1.0);
+        let first_row_y = term_h - bottom - rows as f32 * char_h;
+
+        assert!(first_row_y >= top);
+        assert!(first_row_y < top + char_h);
+        assert_eq!(terminal_max_scroll(rows, char_h, term_h, 1.0), 0.0);
+    }
+
+    #[test]
+    fn terminal_scrollbar_is_inset_from_focus_frame_and_drags_without_jumping() {
+        let layout = terminal_scrollbar_layout(
+            48.0, 952.0, 400.0, 300.0, 1.0, 26.0, 40, 260.0,
+        )
+        .expect("scrollbar");
+        assert!(layout.track_x > 48.0);
+        assert!(layout.track_x + layout.track_w < 1000.0 - 2.0);
+        assert!(layout.track_y > 400.0 + 2.0);
+        assert!(layout.track_y + layout.track_h < 700.0 - 2.0);
+
+        let pointer = layout.thumb_y + layout.thumb_h * 0.25;
+        let (offset, target) = terminal_scrollbar_drag_target(pointer, layout, None).unwrap();
+        assert!((offset - layout.thumb_h * 0.25).abs() < 0.001);
+        assert!((target - 260.0).abs() < 0.001);
+
+        let (_, top_target) =
+            terminal_scrollbar_drag_target(layout.track_y, layout, Some(0.0)).unwrap();
+        let (_, bottom_target) = terminal_scrollbar_drag_target(
+            layout.track_y + layout.track_h,
+            layout,
+            Some(layout.thumb_h),
+        )
+        .unwrap();
+        assert!((top_target - layout.max_scroll).abs() < 0.001);
+        assert!(bottom_target.abs() < 0.001);
+    }
+
+    #[test]
+    fn terminal_scrollbar_registered_after_body_wins_hit_testing() {
+        let mut registry = crate::ui_system::UiRegistry::new();
+        registry.register_blocker(
+            crate::ui_system::UiId::TerminalBody,
+            0.0,
+            0.0,
+            200.0,
+            100.0,
+            190.0,
+            50.0,
+        );
+        registry.register_rect(
+            crate::ui_system::UiId::TerminalScrollY,
+            184.0,
+            4.0,
+            8.0,
+            92.0,
+            190.0,
+            50.0,
+        );
+        assert_eq!(
+            registry.find_at(190.0, 50.0),
+            Some(crate::ui_system::UiId::TerminalScrollY)
         );
     }
 }

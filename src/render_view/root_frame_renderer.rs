@@ -179,27 +179,6 @@ impl Renderer {
 
         let mut wants_pointer = false;
 
-        if show_fps {
-            let now = std::time::Instant::now();
-            if let Some(last) = self.last_frame_time {
-                let dt = now.duration_since(last).as_secs_f32();
-                self.frame_count += 1;
-                self.time_acc += dt;
-                if self.time_acc >= 0.5 {
-                    self.fps = self.frame_count as f32 / self.time_acc;
-                    self.frame_count = 0;
-                    self.time_acc = 0.0;
-
-                    use std::fmt::Write;
-                    self.fps_string.clear();
-                    let _ = write!(&mut self.fps_string, "FPS: {:.0}", self.fps);
-                }
-            }
-            self.last_frame_time = Some(now);
-        } else {
-            self.last_frame_time = None;
-        }
-
         let cursor_phys_line = editor
             .line_offsets
             .partition_point(|&o| o <= editor.cursor)
