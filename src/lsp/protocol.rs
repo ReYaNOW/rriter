@@ -200,6 +200,7 @@ pub struct LspInlayHint {
 
 pub(super) struct LspServerDef {
     pub(super) program: &'static str,
+    pub(super) override_env: &'static str,
     pub(super) args: &'static [&'static str],
     pub(super) language_id: &'static str,
     #[allow(dead_code)]
@@ -208,6 +209,7 @@ pub(super) struct LspServerDef {
 
 pub(super) const RUFF_SERVER: LspServerDef = LspServerDef {
     program: "ruff",
+    override_env: "RRITER_RUFF_PATH",
     args: &["server"],
     language_id: "python",
     extensions: &["py"],
@@ -215,6 +217,7 @@ pub(super) const RUFF_SERVER: LspServerDef = LspServerDef {
 
 pub(super) const TY_SERVER: LspServerDef = LspServerDef {
     program: "ty",
+    override_env: "RRITER_TY_PATH",
     args: &["server"],
     language_id: "python",
     extensions: &["py"],

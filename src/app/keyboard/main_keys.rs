@@ -72,7 +72,7 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
 
         if key_event.state == ElementState::Pressed
@@ -103,10 +103,7 @@ impl App {
                     has_terminal,
                 );
                 if needs_terminal {
-                    self.ide_panel
-                        .terminals
-                        .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                    self.ide_panel.active_terminal = 0;
+                    self.add_terminal();
                 }
 
                 self.last_action = std::time::Instant::now();
@@ -172,7 +169,8 @@ impl App {
             // ── Ввод в поле игнора настроек ──────────────────────────────
             if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
                 self.last_action = std::time::Instant::now();
-                let ctrl = self.modifiers.control_key();
+                let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+                let word = crate::platform::word_navigation_modifier(self.modifiers);
                 let shift = self.modifiers.shift_key();
                 match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::Escape) => {
@@ -226,7 +224,7 @@ impl App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Backspace) => {
-                        if ctrl {
+                        if word {
                             self.settings_ignore_editor.delete_word_backward();
                         } else {
                             self.settings_ignore_editor.backspace();
@@ -235,7 +233,7 @@ impl App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Delete) => {
-                        if ctrl {
+                        if word {
                             self.settings_ignore_editor.delete_word_forward();
                         } else {
                             self.settings_ignore_editor.delete_forward();
@@ -244,7 +242,7 @@ impl App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                        if ctrl {
+                        if word {
                             self.settings_ignore_editor.move_word_left(shift);
                         } else {
                             self.settings_ignore_editor.move_left(shift);
@@ -253,7 +251,7 @@ impl App {
                         return;
                     }
                     PhysicalKey::Code(KeyCode::ArrowRight) => {
-                        if ctrl {
+                        if word {
                             self.settings_ignore_editor.move_word_right(shift);
                         } else {
                             self.settings_ignore_editor.move_right(shift);
@@ -272,7 +270,7 @@ impl App {
                         return;
                     }
                     _ => {
-                        if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                        if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                             if let Some(txt) = key_event.logical_key.to_text() {
                                 let clean_txt = txt.replace('\n', "");
                                 if !clean_txt.is_empty() {
@@ -386,7 +384,8 @@ impl App {
 
             if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
                 if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(&focused_name) {
-                    let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+                    let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+                    let word = crate::platform::word_navigation_modifier(self.modifiers);
                     let shift = self.modifiers.shift_key();
                     match key_event.physical_key {
                         PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
@@ -401,7 +400,7 @@ impl App {
                             return;
                         }
                         PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                            if ctrl {
+                            if word {
                                 ed.move_word_left(shift);
                             } else {
                                 ed.move_left(shift);
@@ -410,7 +409,7 @@ impl App {
                             return;
                         }
                         PhysicalKey::Code(KeyCode::ArrowRight) => {
-                            if ctrl {
+                            if word {
                                 ed.move_word_right(shift);
                             } else {
                                 ed.move_right(shift);

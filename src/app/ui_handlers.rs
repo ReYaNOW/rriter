@@ -260,10 +260,7 @@ impl App {
                 if idx < self.ide_panel.terminals.len() {
                     self.ide_panel.terminals.remove(idx);
                     if self.ide_panel.terminals.is_empty() {
-                        self.ide_panel
-                            .terminals
-                            .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                        self.ide_panel.active_terminal = 0;
+                        self.add_terminal();
                     } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
                         self.ide_panel.active_terminal =
                             self.ide_panel.terminals.len().saturating_sub(1);
@@ -271,10 +268,7 @@ impl App {
                 }
             }
             UiId::TerminalAdd => {
-                self.ide_panel
-                    .terminals
-                    .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                self.ide_panel.active_terminal = self.ide_panel.terminals.len() - 1;
+                self.add_terminal();
             }
             UiId::TerminalSearchClose => {
                 self.ide_panel.term_show_search = false;
@@ -499,6 +493,7 @@ impl App {
                     let is_disabled = matches!(
                         self.ide_panel.lsp_servers[idx].status,
                         crate::lsp::LspServerStatus::Disabled
+                            | crate::lsp::LspServerStatus::Missing
                     );
                     if let Some(lsp) = &mut self.lsp {
                         if is_disabled {
@@ -861,10 +856,7 @@ impl App {
                     self.ide_panel.terminal_focused = true;
                     self.ide_panel.term_search_focused = false;
                     if self.ide_panel.terminals.is_empty() {
-                        self.ide_panel
-                            .terminals
-                            .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-                        self.ide_panel.active_terminal = 0;
+                        self.add_terminal();
                     }
                 }
                 if panel_id == crate::app::PanelId::Explorer && self.ide_panel.is_open(panel_id) {

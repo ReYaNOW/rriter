@@ -579,10 +579,7 @@ impl App {
                     if !is_drag {
                         let seq = terminal_mouse_sgr_sequence(btn_code, cell_x, cell_y, is_pressed);
                         if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                            if let Ok(mut w) = term.writer.lock() {
-                                let _ = w.write_all(seq.as_bytes());
-                                let _ = w.flush();
-                            }
+                            let _ = term.write_input(seq.as_bytes());
                         }
                     }
                 }

@@ -19,40 +19,136 @@ pub(super) fn json_escape(s: &str) -> String {
     out
 }
 
-/// Сериализует путь → file:// URI
-pub(super) fn path_to_uri(path: &str) -> String {
-    let p = std::path::Path::new(path);
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        std::env::current_dir().unwrap_or_default().join(p)
-    };
-    let mut s = abs.to_string_lossy().replace('\\', "/");
-    if !s.starts_with('/') {
-        s.insert(0, '/');
+/// Сериализует путь в стандартный file URI без ручной замены разделителей.
+pub(super) fn path_to_uri(path: &std::path::Path) -> String {
+    path_to_uri_for_platform(path, crate::platform::CURRENT_PLATFORM)
+}
+
+pub(super) fn path_to_uri_for_platform(
+    path: &std::path::Path,
+    platform: crate::platform::PlatformKind,
+) -> String {
+    if platform == crate::platform::PlatformKind::Windows {
+        return windows_path_to_uri(path);
     }
-    format!("file://{}", s)
+
+    let absolute = crate::platform::canonicalize_or_absolutize(path);
+    url::Url::from_file_path(&absolute)
+        .map(|url| url.to_string())
+        .unwrap_or_else(|_| {
+            let mut url = url::Url::parse("file:///").expect("static file URL is valid");
+            url.set_path(&absolute.to_string_lossy());
+            url.to_string()
+        })
+}
+
+fn windows_path_to_uri(path: &std::path::Path) -> String {
+    let mut raw = path.to_string_lossy().replace('/', "\\");
+    if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+        raw = format!(r"\\{rest}");
+    } else if let Some(rest) = raw.strip_prefix(r"\\?\") {
+        raw = rest.to_string();
+    }
+
+    if let Some(unc) = raw.strip_prefix(r"\\") {
+        let mut parts = unc.splitn(2, '\\');
+        let host = parts.next().unwrap_or_default();
+        let tail = parts.next().unwrap_or_default().replace('\\', "/");
+        let mut url = url::Url::parse("file://placeholder/").expect("static file URL is valid");
+        if url.set_host(Some(host)).is_ok() {
+            set_file_url_path(&mut url, &format!("/{tail}"));
+            return url.to_string();
+        }
+    }
+
+    if !crate::platform::windows_path_is_absolute(&raw) {
+        let absolute = crate::platform::canonicalize_or_absolutize(path);
+        if let Ok(url) = url::Url::from_file_path(absolute) {
+            return url.to_string();
+        }
+    }
+
+    let slash_path = raw.replace('\\', "/");
+    let mut url = url::Url::parse("file:///").expect("static file URL is valid");
+    set_file_url_path(
+        &mut url,
+        &format!("/{}", slash_path.trim_start_matches('/')),
+    );
+    url.to_string()
+}
+
+fn set_file_url_path(url: &mut url::Url, path: &str) {
+    // `Url::set_path` intentionally preserves percent triplets. A filesystem
+    // percent sign is data, so escape it first to keep `%`, `%20`, and malformed
+    // sequences round-trippable instead of interpreting them as URL escapes.
+    let escaped_percent = path.replace('%', "%25");
+    url.set_path(&escaped_percent);
 }
 
 pub(super) fn uri_to_path(uri: &str) -> PathBuf {
-    let mut s = uri.strip_prefix("file://").unwrap_or(uri);
-    // Для Windows (file:///C:/...) убираем первый слеш
-    if s.starts_with('/') && s.chars().nth(2) == Some(':') {
-        s = &s[1..];
+    uri_to_path_for_platform(uri, crate::platform::CURRENT_PLATFORM)
+}
+
+pub(super) fn uri_to_path_for_platform(
+    uri: &str,
+    platform: crate::platform::PlatformKind,
+) -> PathBuf {
+    let Ok(url) = url::Url::parse(uri) else {
+        return PathBuf::from(uri);
+    };
+    if url.scheme() != "file" {
+        return PathBuf::from(uri);
     }
-    PathBuf::from(s)
+
+    if platform != crate::platform::PlatformKind::Windows {
+        return url.to_file_path().unwrap_or_else(|_| PathBuf::from(uri));
+    }
+
+    let decoded = decode_percent_encoded_path(url.path()).unwrap_or_else(|| url.path().to_string());
+    let path = decoded.trim_start_matches('/').replace('/', "\\");
+    if let Some(host) = url.host_str().filter(|host| !host.eq_ignore_ascii_case("localhost")) {
+        return PathBuf::from(format!(r"\\{host}\{path}"));
+    }
+    PathBuf::from(path)
+}
+
+fn decode_percent_encoded_path(path: &str) -> Option<String> {
+    let bytes = path.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            let high = hex_value(bytes[index + 1])?;
+            let low = hex_value(bytes[index + 2])?;
+            decoded.push((high << 4) | low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
 
 pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
     let (root_uri_json, workspace_json) = if let Some(first_ws) = workspaces.first() {
-        let root_uri = path_to_uri(&first_ws.to_string_lossy());
+        let root_uri = path_to_uri(first_ws);
         let escaped_root = json_escape(&root_uri);
 
         let mut folders = Vec::new();
         for (i, ws) in workspaces.iter().enumerate() {
-            let uri = path_to_uri(&ws.to_string_lossy());
+            let uri = path_to_uri(ws);
             folders.push(format!(
                 r#"{{"uri":"{}","name":"workspace_{}"}}"#,
                 json_escape(&uri),

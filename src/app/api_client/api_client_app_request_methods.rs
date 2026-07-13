@@ -219,7 +219,8 @@ impl crate::app::App {
     }
 
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+        let word = crate::platform::word_navigation_modifier(self.modifiers);
         if key_event.state == winit::event::ElementState::Pressed
             && ctrl
             && key_event.physical_key
@@ -414,12 +415,13 @@ impl crate::app::App {
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
                 if is_readonly {
-                } else if is_array && !ctrl {
+                } else if is_array && !word {
                     backspace_api_array_editor(&mut self.ide_panel.api.input_editor);
-                } else if !ctrl && matches!(mock_python_target, Some((_, ApiMockSourcePart::Body)))
+                } else if !word
+                    && matches!(mock_python_target, Some((_, ApiMockSourcePart::Body)))
                 {
                     backspace_api_mock_body_editor(&mut self.ide_panel.api.input_editor);
-                } else if !ctrl
+                } else if !word
                     && self.ide_panel.api.input_editor.cursor == 0
                     && self
                         .ide_panel
@@ -430,7 +432,7 @@ impl crate::app::App {
                     && let Some((route_idx, part)) = mock_python_target
                     && self.focus_previous_api_mock_python_part(route_idx, part)
                 {
-                } else if ctrl {
+                } else if word {
                     self.ide_panel.api.input_editor.delete_word_backward();
                 } else {
                     self.ide_panel.api.input_editor.backspace();
@@ -438,21 +440,21 @@ impl crate::app::App {
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) => {
                 if is_readonly {
-                } else if ctrl {
+                } else if word {
                     self.ide_panel.api.input_editor.delete_word_forward();
                 } else {
                     self.ide_panel.api.input_editor.delete_forward();
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowLeft) => {
-                if ctrl {
+                if word {
                     self.ide_panel.api.input_editor.move_word_left(shift);
                 } else {
                     self.ide_panel.api.input_editor.move_left(shift);
                 }
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) => {
-                if ctrl {
+                if word {
                     self.ide_panel.api.input_editor.move_word_right(shift);
                 } else {
                     self.ide_panel.api.input_editor.move_right(shift);
@@ -495,9 +497,7 @@ impl crate::app::App {
                 self.ide_panel.api.input_editor.move_end(shift);
             }
             _ if !is_readonly
-                && !ctrl
-                && !self.modifiers.alt_key()
-                && !self.modifiers.super_key() =>
+                && crate::platform::text_input_modifiers_allowed(self.modifiers) =>
             {
                 if let Some(text) = key_event
                     .text

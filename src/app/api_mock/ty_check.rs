@@ -4,6 +4,7 @@ use super::contract::{
     api_mock_type_source_suffix, enabled_fields,
 };
 use super::python_env::api_mock_python_dir;
+use super::python_bootstrap::python_command;
 use super::types::{
     ApiMockClassSpec, ApiMockPythonContract, ApiMockPythonScript, ApiPythonRuntimeConfig,
     ApiPythonRuntimeMode, api_mock_effective_contract,
@@ -12,6 +13,9 @@ use crate::app::api_client::{ApiMethod, ApiRouteRow, ApiSpecModel};
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::mpsc::{self, Receiver};
+use std::time::Duration;
+
+const TY_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ApiMockTyCheckResult {
@@ -203,8 +207,7 @@ fn run_ty(
     script: &ApiMockPythonScript,
 ) -> ApiMockTyCheckResult {
     let output = api_mock_ty_command(runtime, file).and_then(|mut command| {
-        command
-            .output()
+        crate::platform::run_command_output(&mut command, TY_CHECK_TIMEOUT)
             .map_err(|err| format!("ty not available: {err}"))
     });
     match output {
@@ -275,7 +278,7 @@ fn api_mock_ty_command(
                 .custom_python_path
                 .as_ref()
                 .ok_or_else(|| "Python path is not configured".to_string())?;
-            let mut command = Command::new(python_path);
+            let mut command = python_command(python_path);
             command.arg("-m").arg("ty").arg("check").arg(file);
             Ok(command)
         }
@@ -967,5 +970,48 @@ mod tests {
 
         assert_eq!(command.get_program(), "/opt/python/bin/python");
         assert_eq!(args, vec!["-m", "ty", "check", "/tmp/mock_route_0.py"]);
+    }
+
+    #[test]
+    fn ty_check_command_supports_windows_python_launcher() {
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::CustomPython,
+            uv_path: None,
+            custom_python_path: Some(PathBuf::from(r"C:\Windows\py.exe")),
+            python_version: "3.13".to_string(),
+        };
+        let command = api_mock_ty_command(
+            &runtime,
+            &PathBuf::from(r"C:\work\project\mock_route_0.py"),
+        )
+        .unwrap();
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+
+        assert_eq!(command.get_program(), r"C:\Windows\py.exe");
+        assert_eq!(
+            args,
+            vec![
+                "-3",
+                "-m",
+                "ty",
+                "check",
+                r"C:\work\project\mock_route_0.py"
+            ]
+        );
+    }
+
+    #[test]
+    fn ty_location_parser_ignores_windows_drive_colon() {
+        assert_eq!(
+            parse_ty_line_col(r"  --> C:\work\project\mock_route_0.py:12:34"),
+            Some((12, 34))
+        );
+        assert_eq!(
+            parse_ty_line_col(r"  --> \\server\share\mock_route_0.py:7:9"),
+            Some((7, 9))
+        );
     }
 }

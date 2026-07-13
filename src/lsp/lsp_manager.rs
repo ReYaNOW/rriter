@@ -12,6 +12,12 @@ fn python_line_count(text: &str) -> usize {
         .saturating_add(1)
 }
 
+#[derive(Clone, Debug)]
+struct OpenPythonFile {
+    path: PathBuf,
+    _lines: usize,
+}
+
 #[cfg(target_os = "linux")]
 fn trim_allocator_after_large_diagnostics(count: usize, workspace_done: bool) {
     if count < 1024 && !workspace_done {
@@ -33,7 +39,7 @@ pub struct LspManager {
     ty_process: Option<LspProcess>,
     workspaces: Vec<PathBuf>,
     active_workspaces: Vec<PathBuf>,
-    open_python_files: HashMap<PathBuf, usize>,
+    open_python_files: HashMap<crate::platform::PathKey, OpenPythonFile>,
     /// Актуальные диагностики для каждого открытого файла
     pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
@@ -74,7 +80,7 @@ impl LspManager {
         LspManager {
             python: None,
             ty_process: None,
-            workspaces,
+            workspaces: crate::platform::dedup_paths(workspaces),
             active_workspaces: Vec::new(),
             open_python_files: HashMap::new(),
             diagnostics: HashMap::new(),
@@ -115,17 +121,30 @@ impl LspManager {
     }
 
     fn configured_workspace_for_path(&self, path: &Path) -> Option<&PathBuf> {
-        self.workspaces.iter().find(|ws| path.starts_with(ws))
+        self.workspaces
+            .iter()
+            .filter(|ws| crate::platform::path_is_within(path, ws))
+            .max_by_key(|ws| ws.components().count())
     }
 
     fn refresh_active_workspaces(&mut self) -> bool {
         let mut next = Vec::new();
         for ws in &self.workspaces {
-            if self.open_python_files.keys().any(|path| path.starts_with(ws)) {
+            if self
+                .open_python_files
+                .values()
+                .any(|open| crate::platform::path_is_within(&open.path, ws))
+            {
                 next.push(ws.clone());
             }
         }
-        if self.active_workspaces == next {
+        if self.active_workspaces.len() == next.len()
+            && self
+                .active_workspaces
+                .iter()
+                .zip(&next)
+                .all(|(left, right)| crate::platform::paths_equal(left, right))
+        {
             return false;
         }
         self.active_workspaces = next;
@@ -134,10 +153,16 @@ impl LspManager {
 
     fn prune_inactive_workspace_diagnostics(&mut self) {
         let active_workspaces = self.active_workspaces.clone();
-        let open_python_files = self.open_python_files.clone();
+        let open_python_files = self
+            .open_python_files
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let keep_path = |path: &PathBuf| {
-            active_workspaces.iter().any(|ws| path.starts_with(ws))
-                || open_python_files.contains_key(path)
+            active_workspaces
+                .iter()
+                .any(|ws| crate::platform::path_is_within(path, ws))
+                || open_python_files.contains(&crate::platform::PathKey::new(path))
         };
         let before = self.diagnostics.len()
             + self.instant_diagnostics.len()
@@ -183,7 +208,6 @@ impl LspManager {
             return false;
         }
         if self.ruff_unavailable {
-            self.python_status = LspServerStatus::Disabled;
             return false;
         }
         self.python_status = LspServerStatus::Starting;
@@ -196,7 +220,6 @@ impl LspManager {
             return false;
         }
         if self.ty_unavailable {
-            self.ty_status = LspServerStatus::Disabled;
             return false;
         }
         self.ty_status = LspServerStatus::Starting;
@@ -246,20 +269,27 @@ impl LspManager {
 
     fn note_open_python_file(&mut self, path: PathBuf, lines: usize) -> bool {
         let had_open = !self.open_python_files.is_empty();
-        self.open_python_files.insert(path, lines);
+        self.open_python_files.insert(
+            crate::platform::PathKey::new(&path),
+            OpenPythonFile {
+                path,
+                _lines: lines,
+            },
+        );
         let active_changed = self.refresh_active_workspaces();
         active_changed || had_open != !self.open_python_files.is_empty()
     }
 
     fn note_close_python_file(&mut self, path: &PathBuf) -> bool {
         let had_open = !self.open_python_files.is_empty();
-        self.open_python_files.remove(path);
+        self.open_python_files
+            .remove(&crate::platform::PathKey::new(path));
         let active_changed = self.refresh_active_workspaces();
         active_changed || had_open != !self.open_python_files.is_empty()
     }
 
     pub fn set_workspaces(&mut self, workspaces: Vec<PathBuf>) {
-        self.workspaces = workspaces;
+        self.workspaces = crate::platform::dedup_paths(workspaces);
         if self.refresh_active_workspaces() {
             self.sync_python_processes_after_open_set_change(true);
         } else {
@@ -468,7 +498,9 @@ impl LspManager {
             self.current_path = Some(abs_path.clone());
             let text = Arc::<str>::from(text);
             let lines = python_line_count(text.as_ref());
-            let was_open = self.open_python_files.contains_key(&abs_path);
+            let was_open = self
+                .open_python_files
+                .contains_key(&crate::platform::PathKey::new(&abs_path));
             self.current_python_file = Some((abs_path.clone(), text.clone(), version));
             self.current_python_lines = Some(lines);
             let open_set_changed = self.note_open_python_file(abs_path.clone(), lines);
@@ -655,7 +687,7 @@ impl LspManager {
 
         let mut items = Vec::with_capacity(self.ty_diag_result_ids.len());
         for (path, value) in &self.ty_diag_result_ids {
-            let uri = path_to_uri(&path.to_string_lossy());
+            let uri = path_to_uri(path);
             items.push(format!(
                 r#"{{"uri":"{}","value":"{}"}}"#,
                 json_escape(&uri),
@@ -777,10 +809,14 @@ impl LspManager {
                             self.ty_workspace_diag_dirty = true;
                         } else if *status == LspServerStatus::Starting
                             || *status == LspServerStatus::Crashed
+                            || *status == LspServerStatus::Missing
                             || *status == LspServerStatus::Disabled
                         {
                             self.ty_workspace_diag_pending = None;
-                            if *status == LspServerStatus::Disabled {
+                            if matches!(
+                                status,
+                                LspServerStatus::Disabled | LspServerStatus::Missing
+                            ) {
                                 self.ty_unavailable = true;
                                 self.ty_process = None;
                             }
@@ -790,7 +826,10 @@ impl LspManager {
                         if *status == LspServerStatus::Running {
                             self.ruff_unavailable = false;
                             self.ruff_workspace_diag_dirty = true;
-                        } else if *status == LspServerStatus::Disabled {
+                        } else if matches!(
+                            status,
+                            LspServerStatus::Disabled | LspServerStatus::Missing
+                        ) {
                             self.ruff_unavailable = true;
                             self.python = None;
                             self.ruff_workspace_diag_rx = None;
@@ -970,7 +1009,10 @@ impl LspManager {
     }
 
     fn ruff_workspace_diagnostics_for_abs_path(&self, path: &Path) -> Option<&Arc<[Diagnostic]>> {
-        if self.open_python_files.contains_key(path) || self.instant_diagnostics.contains_key(path)
+        if self
+            .open_python_files
+            .contains_key(&crate::platform::PathKey::new(path))
+            || self.instant_diagnostics.contains_key(path)
         {
             return None;
         }
@@ -1307,7 +1349,7 @@ impl LspManager {
             .chain(self.ruff_workspace_diagnostics.keys())
             .chain(self.ty_instant_diagnostics.keys())
         {
-            if diagnostic_path.starts_with(&abs_path)
+            if crate::platform::path_is_within(diagnostic_path, &abs_path)
                 && let Some(severity) = self.diagnostic_severity_for_abs_path_direct(diagnostic_path)
             {
                 if severity == DiagSeverity::Error {
@@ -1416,7 +1458,7 @@ impl LspManager {
         };
         let proc = self.process_for_ext(ext)?;
         let id = next_id();
-        let uri = path_to_uri(&abs_path.to_string_lossy());
+        let uri = path_to_uri(&abs_path);
         let _ = proc.cmd_tx.send(Cmd::CodeAction {
             id,
             uri,
@@ -1440,7 +1482,7 @@ impl LspManager {
         };
         let proc = self.process_for_ext(ext)?;
         let id = next_id();
-        let uri = path_to_uri(&abs_path.to_string_lossy());
+        let uri = path_to_uri(&abs_path);
         let _ = proc.cmd_tx.send(Cmd::CodeAction {
             id,
             uri,
@@ -1454,8 +1496,7 @@ impl LspManager {
         Some(id)
     }
 
-    #[allow(dead_code)]
-    pub fn shutdown(mut self) {
+    fn stop_processes(&mut self) {
         self.python_disabled = true;
         if let Some(p) = self.python.take() {
             p.shutdown();
@@ -1463,6 +1504,17 @@ impl LspManager {
         if let Some(p) = self.ty_process.take() {
             p.shutdown();
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn shutdown(mut self) {
+        self.stop_processes();
+    }
+}
+
+impl Drop for LspManager {
+    fn drop(&mut self) {
+        self.stop_processes();
     }
 }
 

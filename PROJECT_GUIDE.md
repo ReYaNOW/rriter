@@ -36,11 +36,12 @@ Files:
 
 ```text
 src/platform.rs
+src/platform/process.rs
 src/platform/windows.rs
 src/platform/tests.rs
 ```
 
-`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, executable discovery, Trash layout, atomic replacement, text-file decoding/encoding, and path identity.
+`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, Trash layout, atomic replacement, text-file decoding/encoding, path identity, keyboard-modifier policy, and the public process API. `platform/process.rs` owns executable discovery, captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 
 Important invariants:
 
@@ -50,6 +51,9 @@ Important invariants:
 * Editor text is normalized to LF internally, while `TextFileFormat` preserves UTF-8/BOM/UTF-16 and the original LF/CRLF/CR style on save.
 * Mutable state files and editor saves use sibling-temp atomic replacement. Do not add direct `fs::write` paths for persisted application state.
 * Linux-specific Wayland, XDG, FreeDesktop Trash, and `io_uring` behavior stays behind target gates. `src/platform/windows.rs` owns non-lossy Windows path normalization and extended-length Win32 paths.
+* Long-lived tools and captured commands use the managed process API. Child processes must not outlive RRiter; graceful shutdown is followed by a bounded full-tree termination.
+* Optional executable lookup honors configured overrides, `PATH`, and Windows `PATHEXT`. Missing tools enter a stable disabled state rather than a restart loop.
+* Application shortcuts, terminal Control, and word-navigation modifiers are separate policies. This preserves Windows AltGr text and native macOS Command/Option behavior.
 
 ### Text engine
 
@@ -181,9 +185,12 @@ LSP client is async and lightweight.
 
 Important ideas:
 
-* Supervisor owns server process.
+* Supervisor owns a managed server process and its complete process tree.
 * Reader/writer threads handle JSON-RPC I/O.
 * Main thread receives `LspEvent`.
+* Missing Ruff/Ty binaries produce one stable `Missing` state; crashes use bounded exponential restart and explicit retry resets suppression.
+* Shutdown sends the LSP `shutdown`/`exit` sequence, waits briefly, then terminates the process tree if necessary.
+* File URIs are generated and parsed through `url::Url`, including Windows drive paths, UNC shares, Unicode, spaces, `#`, and `%`.
 * Hover/diagnostic text is normalized and highlighted separately.
 * Python-specific formatting lives under `languages/python.rs`.
 
@@ -193,6 +200,7 @@ Files:
 
 ```text
 src/app/terminal.rs
+src/app/terminal_process.rs
 src/render_view/terminal_ui.rs
 ```
 
@@ -200,11 +208,15 @@ Integrated terminal uses PTY and Alacritty terminal grid.
 
 Important ideas:
 
-* PTY process runs outside UI.
-* I/O thread reads terminal output.
+* `Terminal` owns the grid facade while `TerminalProcess` owns the PTY and process tree.
+* Shell selection is platform-aware: PowerShell/cmd on Windows, the configured shell with zsh fallback on macOS, and the configured shell with bash/sh fallback on Linux.
+* PTY spawn errors are rendered in the terminal instead of panicking.
+* I/O thread reads terminal output in batches.
 * Grid is shared with renderer.
 * Render path reads visible cells.
 * Terminal focused state captures keyboard input.
+* Closing a tab or RRiter performs bounded PTY/process-tree shutdown.
+* Physical Control is distinct from application shortcuts, so terminal interrupts, Windows AltGr, and macOS Command copy/paste keep native behavior.
 
 ### Scroll and animation
 
@@ -310,12 +322,13 @@ This architecture guide.
 
 ### `src/platform.rs` and `src/platform/*`
 
-Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, and process-launch primitives.
+Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, and managed processes.
 
+* `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, captured output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
 * `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling.
-* `src/platform/tests.rs` -> platform/path/text/atomic-write regression tests that can run on Linux, plus target-gated Windows tests.
+* `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier regression tests that can run on Linux, plus target-gated Windows tests.
 
-Use these APIs instead of introducing platform checks or lossy path strings in feature modules.
+Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules.
 
 ### `src/main.rs`
 
@@ -533,15 +546,26 @@ Use when changing code actions, go-to-definition, diagnostics actions, or LSP-tr
 
 ### `src/app/terminal.rs`
 
-Terminal backend.
+Terminal state facade.
 
 Responsibilities:
 
-* PTY spawn.
-* Shell I/O.
 * Terminal grid.
-* Keyboard bytes to PTY.
-* Dirty/redraw signaling.
+* Delegated keyboard bytes, resize, and dirty/redraw state.
+* Ownership of terminal shutdown.
+
+### `src/app/terminal_process.rs`
+
+Managed terminal backend.
+
+Responsibilities:
+
+* Platform-aware shell discovery and arguments.
+* Workspace/current-file working directory selection.
+* PTY spawn and batched output reader.
+* Keyboard bytes and resize requests to PTY.
+* Unix process-group/Windows Job Object ownership.
+* Bounded graceful shutdown followed by complete-tree termination.
 
 Use when terminal backend/input/output behavior changes.
 
@@ -930,9 +954,9 @@ Use when LSP process behavior, restart, request dispatch, or manager state chang
 
 Implementation is split through `include!`:
 
-* `src/lsp/lsp_process.rs` -> process spawn, supervisor, request send/log helpers.
-* `src/lsp/lsp_manager.rs` -> `LspManager` facade, diagnostics merge accessors, JSON formatting.
-* `src/lsp/ruff_workspace.rs` -> background `ruff check` workspace diagnostics parser/collector.
+* `src/lsp/lsp_process.rs` -> managed process spawn, protocol shutdown, bounded restart supervisor, request send/log helpers, and missing-tool state.
+* `src/lsp/lsp_manager.rs` -> `LspManager` facade, platform-aware workspace identity, explicit retry, diagnostics merge accessors, and JSON formatting.
+* `src/lsp/ruff_workspace.rs` -> timeout-bounded managed `ruff check` workspace diagnostics parser/collector.
 
 Tests live in `src/lsp/lsp_tests.rs`.
 

@@ -1,21 +1,21 @@
 // src/lsp.rs
 // Быстрый LSP-клиент для RRiter.
-// Поддерживает: ruff (Python). Расширяется через LspServerDef.
+// Поддерживает Ruff и Ty; новые серверы описываются через LspServerDef.
 //
 // Архитектура:
 //   Main Thread ──Cmd──▶ Supervisor Thread ──bytes──▶ Writer Thread ──▶ stdin
 //                  ◀──LspEvent──   ◀──LspEvent── Reader Thread ◀── stdout
 //
-// Supervisor: владеет Child-процессом, при краше — перезапускает (с delay).
-// Writer/Reader: легковесные треды, по одному на I/O направление.
-// При рестарте: supervisor пересоздаёт writer+reader, заново отправляет
-//   initialize + didOpen для текущего файла.
+// Supervisor владеет полным деревом процесса. После краша он использует
+// ограниченный exponential backoff; отсутствующий сервер отключается без
+// restart-spam. При рестарте заново отправляются initialize и didOpen.
+// Writer/Reader — легковесные треды, по одному на направление I/O.
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::{Arc, Mutex};
 use tree_sitter::StreamingIterator;
@@ -31,7 +31,10 @@ pub use protocol::{
     highlight_diagnostic_message, offset_to_lsp_pos,
 };
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+use crate::platform::{self, ManagedChild};
 
 // ── Atomic request ID ─────────────────────────────────────────────────────────
 
@@ -130,6 +133,7 @@ pub enum LspServerStatus {
     Starting,
     Running,
     Crashed,
+    Missing,
     Disabled,
 }
 
@@ -195,17 +199,16 @@ struct MergedDiagnosticIndex {
 }
 
 struct SpawnedProcess {
-    child: Child,
+    child: ManagedChild,
     out_tx: Sender<Vec<u8>>,
 }
 
-fn abort_spawned_child(child: &mut Child, error: io::Error) -> io::Error {
-    let _ = child.kill();
-    let _ = child.wait();
+fn abort_spawned_child(child: &mut ManagedChild, error: io::Error) -> io::Error {
+    let _ = child.terminate(Duration::from_millis(100));
     error
 }
 
-fn missing_process_pipe(child: &mut Child, pipe: &'static str) -> io::Error {
+fn missing_process_pipe(child: &mut ManagedChild, pipe: &'static str) -> io::Error {
     abort_spawned_child(
         child,
         io::Error::new(
@@ -222,28 +225,27 @@ fn spawn_server(
     event_tx: Sender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) -> io::Result<SpawnedProcess> {
-    let mut cmd = Command::new(def.program);
+    let mut cmd = platform::command_for_tool(def.program.as_ref(), def.override_env)?;
     if let Some(ws) = workspace.filter(|ws| ws.is_dir()) {
         cmd.current_dir(ws);
     }
     for arg in def.args {
         cmd.arg(arg);
     }
-    let mut child = cmd
-        .stdin(Stdio::piped())
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
+        .stderr(Stdio::piped());
+    let mut child = ManagedChild::spawn(&mut cmd)?;
 
-    let stdin = match child.stdin.take() {
+    let stdin = match child.take_stdin() {
         Some(stdin) => stdin,
         None => return Err(missing_process_pipe(&mut child, "stdin")),
     };
-    let stdout = match child.stdout.take() {
+    let stdout = match child.take_stdout() {
         Some(stdout) => stdout,
         None => return Err(missing_process_pipe(&mut child, "stdout")),
     };
-    let stderr = match child.stderr.take() {
+    let stderr = match child.take_stderr() {
         Some(stderr) => stderr,
         None => return Err(missing_process_pipe(&mut child, "stderr")),
     };
@@ -437,12 +439,62 @@ fn disable_lsp_server(
     });
 }
 
+fn report_missing_lsp_server(
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    override_env: &'static str,
+    error: &io::Error,
+) {
+    let _ = event_tx.send(LspEvent::Log {
+        name: server_name,
+        message: format!(
+            "[LSP] '{server_name}' was not found; install it, add it to PATH, or set {override_env}: {error}"
+        ),
+    });
+    let _ = event_tx.send(LspEvent::StatusChanged {
+        name: server_name,
+        status: LspServerStatus::Missing,
+    });
+}
+
+fn wait_interruptibly(stop: &AtomicBool, duration: Duration) -> bool {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
+        if stop.load(Ordering::Acquire) {
+            return false;
+        }
+        thread::sleep(
+            Duration::from_millis(10)
+                .min(deadline.saturating_duration_since(Instant::now())),
+        );
+    }
+    !stop.load(Ordering::Acquire)
+}
+
+fn shutdown_spawned_process(
+    proc: &mut SpawnedProcess,
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+) {
+    let sid = next_id();
+    let _ = send_and_log(&proc.out_tx, event_tx, server_name, make_shutdown(sid));
+    thread::sleep(Duration::from_millis(100));
+    let _ = send_and_log(&proc.out_tx, event_tx, server_name, make_exit());
+    match proc.child.wait_timeout(Duration::from_millis(750)) {
+        Ok(Some(_)) => {}
+        Ok(None) | Err(_) => {
+            let _ = proc.child.terminate(Duration::from_millis(150));
+        }
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn run_supervisor(
     def: &'static LspServerDef,
     workspaces: Vec<PathBuf>,
     cmd_rx: Receiver<Cmd>,
     event_tx: Sender<LspEvent>,
+    stop: Arc<AtomicBool>,
 ) {
     let mut open_file: Option<OpenFile> = None;
     let mut init_id;
@@ -452,6 +504,9 @@ fn run_supervisor(
         Arc::new(Mutex::new(HashMap::new()));
 
     'outer: loop {
+        if stop.load(Ordering::Acquire) {
+            return;
+        }
         let Some(attempt) = restart_budget.begin_attempt() else {
             disable_lsp_server(
                 &event_tx,
@@ -464,7 +519,9 @@ fn run_supervisor(
             return;
         };
         if attempt > 1 {
-            thread::sleep(restart_delay);
+            if !wait_interruptibly(&stop, restart_delay) {
+                return;
+            }
             restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
         }
         if let Ok(mut pending) = pending_requests.lock() {
@@ -483,13 +540,11 @@ fn run_supervisor(
         ) {
             Ok(p) => p,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                disable_lsp_server(
+                report_missing_lsp_server(
                     &event_tx,
                     def.program,
-                    format!(
-                        "[LSP] '{}' was not found in PATH and has been disabled: {}",
-                        def.program, error
-                    ),
+                    def.override_env,
+                    &error,
                 );
                 return;
             }
@@ -520,6 +575,10 @@ fn run_supervisor(
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         let mut initialized = false;
         while std::time::Instant::now() < deadline {
+            if stop.load(Ordering::Acquire) {
+                shutdown_spawned_process(&mut proc, &event_tx, def.program);
+                return;
+            }
             // Проверяем crash
             match proc.child.try_wait() {
                 Ok(Some(_)) => continue 'outer,
@@ -529,7 +588,10 @@ fn run_supervisor(
             // Ждём немного - initialize ответ придёт через reader тред в event_tx
             // Но нам нужно знать когда сервер готов — используем специальный подход:
             // просто ждём 200мс (ruff server стартует быстро), потом шлём initialized
-            thread::sleep(Duration::from_millis(200));
+            if !wait_interruptibly(&stop, Duration::from_millis(200)) {
+                shutdown_spawned_process(&mut proc, &event_tx, def.program);
+                return;
+            }
             initialized = true;
             break;
         }
@@ -558,6 +620,10 @@ fn run_supervisor(
 
         // ── Основной цикл supervisor ──────────────────────────────────────
         'inner: loop {
+            if stop.load(Ordering::Acquire) {
+                shutdown_spawned_process(&mut proc, &event_tx, def.program);
+                return;
+            }
             if restart_budget.consecutive_attempts != 0
                 && running_since.elapsed() >= LSP_STABLE_RUNTIME
             {
@@ -739,16 +805,15 @@ fn run_supervisor(
                         }
                     }
                     Ok(Cmd::Shutdown) => {
-                        let sid = next_id();
-                        let _ =
-                            send_and_log(&proc.out_tx, &event_tx, def.program, make_shutdown(sid));
-                        thread::sleep(Duration::from_millis(200));
-                        let _ = send_and_log(&proc.out_tx, &event_tx, def.program, make_exit());
-                        let _ = proc.child.wait();
+                        stop.store(true, Ordering::Release);
+                        shutdown_spawned_process(&mut proc, &event_tx, def.program);
                         return; // выходим из supervisor насовсем
                     }
                     Err(TryRecvError::Empty) => break,
-                    Err(TryRecvError::Disconnected) => return, // App завершился
+                    Err(TryRecvError::Disconnected) => {
+                        shutdown_spawned_process(&mut proc, &event_tx, def.program);
+                        return;
+                    }
                 }
             }
 
@@ -765,6 +830,8 @@ pub struct LspProcess {
     current_uri: Option<String>,
     def: &'static LspServerDef,
     pub open_file_data: Option<(String, Arc<str>)>, // (lang, text) for re-open after restart
+    stop: Arc<AtomicBool>,
+    supervisor: Option<JoinHandle<()>>,
 }
 
 impl LspProcess {
@@ -773,11 +840,30 @@ impl LspProcess {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let ws = workspaces.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let supervisor_stop = stop.clone();
 
-        thread::Builder::new()
+        let supervisor_event_tx = event_tx.clone();
+        let supervisor = match thread::Builder::new()
             .name(format!("lsp-supervisor-{}", def.program))
-            .spawn(move || run_supervisor(def, ws, cmd_rx, event_tx))
-            .expect("failed to start LSP supervisor");
+            .spawn(move || {
+                run_supervisor(def, ws, cmd_rx, supervisor_event_tx, supervisor_stop)
+            })
+        {
+            Ok(supervisor) => Some(supervisor),
+            Err(error) => {
+                let _ = event_tx.send(LspEvent::Log {
+                    name: def.program,
+                    message: format!("[LSP] failed to start supervisor thread: {error}"),
+                });
+                let _ = event_tx.send(LspEvent::StatusChanged {
+                    name: def.program,
+                    status: LspServerStatus::Disabled,
+                });
+                stop.store(true, Ordering::Release);
+                None
+            }
+        };
 
         LspProcess {
             cmd_tx,
@@ -785,6 +871,8 @@ impl LspProcess {
             current_uri: None,
             def,
             open_file_data: None,
+            stop,
+            supervisor,
         }
     }
 
@@ -797,7 +885,7 @@ impl LspProcess {
         version: i32,
         _workspace: Option<&PathBuf>,
     ) {
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         self.current_uri = Some(uri.clone());
         self.open_file_data = Some((self.def.language_id.to_string(), text.clone()));
         let _ = self.cmd_tx.send(Cmd::Open {
@@ -811,7 +899,7 @@ impl LspProcess {
     /// textDocument/didChange — полный текст (Full Sync).
     /// Вызывать когда editor.sync_edits непуст.
     pub fn notify_change(&mut self, path: &PathBuf, text: Arc<str>, version: i32) {
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         self.current_uri = Some(uri.clone());
         let _ = self.cmd_tx.send(Cmd::Change {
             uri,
@@ -822,14 +910,14 @@ impl LspProcess {
 
     pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         let _ = self.cmd_tx.send(Cmd::Hover { id, uri, line, col });
         id
     }
 
     pub fn request_definition(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         let _ = self.cmd_tx.send(Cmd::Definition { id, uri, line, col });
         id
     }
@@ -842,7 +930,7 @@ impl LspProcess {
         trigger: Option<&str>,
     ) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         let _ = self.cmd_tx.send(Cmd::Completion {
             id,
             uri,
@@ -861,7 +949,7 @@ impl LspProcess {
         trigger: Option<&str>,
     ) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         let _ = self.cmd_tx.send(Cmd::SignatureHelp {
             id,
             uri,
@@ -881,7 +969,7 @@ impl LspProcess {
         end_col: u32,
     ) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         let _ = self.cmd_tx.send(Cmd::InlayHint {
             id,
             uri,
@@ -904,7 +992,7 @@ impl LspProcess {
 
     /// textDocument/didClose
     pub fn notify_close(&mut self, path: &PathBuf) {
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
         if self.current_uri.as_deref() == Some(uri.as_str()) {
             let _ = self.cmd_tx.send(Cmd::Close { uri });
             self.current_uri = None;
@@ -925,7 +1013,7 @@ impl LspProcess {
         only: Option<Vec<String>>,
     ) -> i32 {
         let id = next_id();
-        let uri = path_to_uri(&path.to_string_lossy());
+        let uri = path_to_uri(path);
 
         // Кодируем диагностики в JSON для контекста запроса
         let diag_json = encode_diagnostics_json(diagnostics);
@@ -953,8 +1041,23 @@ impl LspProcess {
         }
     }
 
-    pub fn shutdown(self) {
-        let _ = self.cmd_tx.send(Cmd::Shutdown);
+    fn stop_and_join(&mut self) {
+        if !self.stop.swap(true, Ordering::AcqRel) {
+            let _ = self.cmd_tx.send(Cmd::Shutdown);
+        }
+        if let Some(supervisor) = self.supervisor.take() {
+            let _ = supervisor.join();
+        }
+    }
+
+    pub fn shutdown(mut self) {
+        self.stop_and_join();
+    }
+}
+
+impl Drop for LspProcess {
+    fn drop(&mut self) {
+        self.stop_and_join();
     }
 }
 

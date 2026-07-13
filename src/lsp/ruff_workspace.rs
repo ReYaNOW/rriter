@@ -1,8 +1,9 @@
 use super::{DiagSeverity, Diagnostic};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::Output;
 use std::sync::Arc;
+use std::time::Duration;
 
 pub(super) struct RuffWorkspaceResult {
     pub(super) workspaces: Vec<PathBuf>,
@@ -42,9 +43,9 @@ impl super::LspManager {
     fn apply_ruff_workspace_diagnostics(&mut self, result: &mut RuffWorkspaceResult) -> usize {
         for workspace in &result.workspaces {
             self.ruff_workspace_diagnostics
-                .retain(|path, _| !path.starts_with(workspace));
+                .retain(|path, _| !crate::platform::path_is_within(path, workspace));
             self.merged_diagnostic_indices
-                .retain(|path, _| !path.starts_with(workspace));
+                .retain(|path, _| !crate::platform::path_is_within(path, workspace));
         }
 
         let mut received = 0usize;
@@ -52,7 +53,7 @@ impl super::LspManager {
         for (path, items) in result.diagnostics.drain() {
             if !active_workspaces
                 .iter()
-                .any(|workspace| path.starts_with(workspace))
+                .any(|workspace| crate::platform::path_is_within(&path, workspace))
             {
                 continue;
             }
@@ -126,14 +127,14 @@ fn run_ruff_workspace_check(workspaces: &[PathBuf]) -> HashMap<PathBuf, Vec<Diag
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn run_ruff_check_command(workspaces: &[PathBuf]) -> Option<Output> {
-    let mut cmd = Command::new("ruff");
+    let mut cmd = crate::platform::command_for_tool("ruff".as_ref(), "RRITER_RUFF_PATH").ok()?;
     cmd.arg("check")
         .arg("--output-format=json")
         .arg("--force-exclude");
     for workspace in workspaces {
         cmd.arg(workspace);
     }
-    cmd.output().ok()
+    crate::platform::run_command_output(&mut cmd, Duration::from_secs(120)).ok()
 }
 
 pub(super) fn parse_ruff_check_json(

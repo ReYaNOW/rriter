@@ -16,6 +16,8 @@ fn test_process_with_events(
         current_uri: None,
         def,
         open_file_data: None,
+        stop: Arc::new(AtomicBool::new(false)),
+        supervisor: None,
     };
     (proc, cmd_rx, event_tx)
 }
@@ -67,6 +69,7 @@ fn python_text_with_lines(lines: usize) -> String {
 fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
     static MISSING_SERVER: LspServerDef = LspServerDef {
         program: "rriter-definitely-missing-lsp-server",
+        override_env: "RRITER_TEST_MISSING_LSP_PATH",
         args: &[],
         language_id: "python",
         extensions: &["py"],
@@ -75,7 +78,13 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
     let (event_tx, event_rx) = mpsc::channel();
     let started = Instant::now();
 
-    run_supervisor(&MISSING_SERVER, Vec::new(), cmd_rx, event_tx);
+    run_supervisor(
+        &MISSING_SERVER,
+        Vec::new(),
+        cmd_rx,
+        event_tx,
+        Arc::new(AtomicBool::new(false)),
+    );
 
     assert!(started.elapsed() < Duration::from_secs(1));
     let events = event_rx.try_iter().collect::<Vec<_>>();
@@ -90,7 +99,7 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
         event,
         LspEvent::StatusChanged {
             name,
-            status: LspServerStatus::Disabled,
+            status: LspServerStatus::Missing,
         } if *name == MISSING_SERVER.program
     )));
     assert!(!events.iter().any(|event| matches!(
@@ -110,7 +119,7 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
     assert_eq!(logs.len(), 1);
     assert!(logs[0].contains(MISSING_SERVER.program));
     assert!(logs[0].contains("PATH"));
-    assert!(logs[0].contains("disabled"));
+    assert!(logs[0].contains(MISSING_SERVER.override_env));
 }
 
 #[test]
@@ -126,7 +135,7 @@ fn lsp_restart_budget_is_bounded_and_resets_after_stable_run() {
 }
 
 #[test]
-fn unavailable_python_servers_stay_disabled_until_explicit_retry() {
+fn unavailable_python_servers_preserve_missing_or_disabled_state_until_retry() {
     let (ruff, _ruff_rx, ruff_tx) = test_process_with_events(&RUFF_SERVER);
     let (ty, _ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
@@ -136,7 +145,7 @@ fn unavailable_python_servers_stay_disabled_until_explicit_retry() {
     ruff_tx
         .send(LspEvent::StatusChanged {
             name: RUFF_SERVER.program,
-            status: LspServerStatus::Disabled,
+            status: LspServerStatus::Missing,
         })
         .unwrap();
     ty_tx
@@ -149,20 +158,18 @@ fn unavailable_python_servers_stay_disabled_until_explicit_retry() {
 
     assert!(manager.ruff_unavailable);
     assert!(manager.ty_unavailable);
-    assert_eq!(manager.python_status, LspServerStatus::Disabled);
+    assert_eq!(manager.python_status, LspServerStatus::Missing);
     assert_eq!(manager.ty_status, LspServerStatus::Disabled);
     assert!(manager.python.is_none());
     assert!(manager.ty_process.is_none());
 
-    manager
-        .open_python_files
-        .insert(PathBuf::from("/tmp/ws/app.py"), 1);
+    manager.note_open_python_file(PathBuf::from("/tmp/ws/app.py"), 1);
     manager.active_workspaces = vec![PathBuf::from("/tmp/ws")];
     manager.ensure_python();
 
     assert!(manager.python.is_none());
     assert!(manager.ty_process.is_none());
-    assert_eq!(manager.python_status, LspServerStatus::Disabled);
+    assert_eq!(manager.python_status, LspServerStatus::Missing);
     assert_eq!(manager.ty_status, LspServerStatus::Disabled);
 
     manager.ruff_workspace_diag_dirty = true;
@@ -230,7 +237,7 @@ fn lsp_manager_keeps_and_reopens_saved_python_file_after_disable() {
     manager.ty_process = Some(ty);
     manager.reopen_current_python_file();
     for cmd in [open_cmd(&ruff_rx), open_cmd(&ty_rx)] {
-        assert_eq!(cmd.0, path_to_uri(&path.to_string_lossy()));
+        assert_eq!(cmd.0, path_to_uri(&path));
         assert_eq!(cmd.1, "python");
         assert_eq!(cmd.2, 9);
         assert_eq!(cmd.3.as_ref(), "print(2)\n");
@@ -244,7 +251,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
 
     proc.notify_open(&path, Arc::from("print(1)\n"), 3, None);
     let opened = open_cmd(&rx);
-    assert_eq!(opened.0, path_to_uri(&path.to_string_lossy()));
+    assert_eq!(opened.0, path_to_uri(&path));
     assert_eq!(opened.1, "python");
     assert_eq!(opened.2, 3);
     assert_eq!(opened.3.as_ref(), "print(1)\n");
@@ -257,7 +264,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     proc.notify_change(&path, Arc::from("print(2)\n"), 4);
     match rx.try_recv().unwrap() {
         Cmd::Change { uri, version, text } => {
-            assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+            assert_eq!(uri, path_to_uri(&path));
             assert_eq!(version, 4);
             assert_eq!(text.as_ref(), "print(2)\n");
         }
@@ -268,7 +275,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     match rx.try_recv().unwrap() {
         Cmd::Hover { id, uri, line, col } => {
             assert_eq!(id, hover_id);
-            assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+            assert_eq!(uri, path_to_uri(&path));
             assert_eq!((line, col), (5, 6));
         }
         _ => panic!("expected hover command"),
@@ -278,7 +285,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     match rx.try_recv().unwrap() {
         Cmd::Definition { id, uri, line, col } => {
             assert_eq!(id, def_id);
-            assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+            assert_eq!(uri, path_to_uri(&path));
             assert_eq!((line, col), (7, 8));
         }
         _ => panic!("expected definition command"),
@@ -305,7 +312,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
             only,
         } => {
             assert_eq!(id, action_id);
-            assert_eq!(uri, path_to_uri(&path.to_string_lossy()));
+            assert_eq!(uri, path_to_uri(&path));
             assert_eq!((start_line, start_col, end_line, end_col), (1, 2, 3, 4));
             assert!(diagnostics_json.contains("F401"));
             assert_eq!(only, Some(vec!["quickfix".to_string()]));
@@ -333,7 +340,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
 
     proc.notify_close(&path);
     match rx.try_recv().unwrap() {
-        Cmd::Close { uri } => assert_eq!(uri, path_to_uri(&path.to_string_lossy())),
+        Cmd::Close { uri } => assert_eq!(uri, path_to_uri(&path)),
         _ => panic!("expected close command"),
     }
     assert!(proc.current_uri.is_none());
@@ -352,7 +359,7 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
     let mut manager = LspManager::new(vec![ws.clone()]);
     manager.python = Some(ruff);
     manager.ty_process = Some(ty);
-    manager.open_python_files.insert(abs.clone(), 2);
+    manager.note_open_python_file(abs.clone(), 2);
     manager.active_workspaces = vec![ws.clone()];
 
     manager.notify_open(&rel, "py", "x = 1\n", 11);
@@ -394,6 +401,27 @@ fn lsp_manager_tracks_python_reopen_state_across_open_change_and_close() {
     assert!(manager.current_python_file.is_none());
     assert!(matches!(ruff_rx.try_recv().unwrap(), Cmd::Close { .. }));
     assert!(matches!(ty_rx.try_recv().unwrap(), Cmd::Close { .. }));
+}
+
+#[test]
+fn lsp_manager_chooses_the_deepest_platform_aware_workspace() {
+    let root = PathBuf::from("/tmp/workspace");
+    let nested = root.join("packages").join("api");
+    let manager = LspManager::new(vec![root.clone(), nested.clone()]);
+
+    assert_eq!(
+        manager.configured_workspace_for_path(&nested.join("src/app.py")),
+        Some(&nested)
+    );
+    assert_eq!(
+        manager.configured_workspace_for_path(&root.join("README.py")),
+        Some(&root)
+    );
+    assert!(
+        manager
+            .configured_workspace_for_path(Path::new("/tmp/workspace-old/app.py"))
+            .is_none()
+    );
 }
 
 #[test]
@@ -731,9 +759,7 @@ fn workspace_ruff_diagnostics_cover_closed_files_without_overriding_open_buffers
     let open_path = ws.join("pkg/open.py");
     let closed_path = ws.join("pkg/closed.py");
     let mut manager = LspManager::new(vec![ws.clone()]);
-    manager
-        .open_python_files
-        .insert(open_path.clone(), 3);
+    manager.note_open_python_file(open_path.clone(), 3);
     manager.active_workspaces = vec![ws];
     manager.ruff_workspace_diagnostics.insert(
         open_path.clone(),
@@ -1090,9 +1116,7 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
     let path = PathBuf::from("/tmp/ws/pkg/offscreen.py");
     let (ty, ty_rx, ty_tx) = test_process_with_events(&TY_SERVER);
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
-    manager
-        .open_python_files
-        .insert(PathBuf::from("/tmp/ws/current.py"), 1);
+    manager.note_open_python_file(PathBuf::from("/tmp/ws/current.py"), 1);
     manager.active_workspaces = vec![PathBuf::from("/tmp/ws")];
     manager.ty_process = Some(ty);
     manager.ty_status = LspServerStatus::Running;

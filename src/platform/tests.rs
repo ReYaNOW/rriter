@@ -57,6 +57,42 @@ fn platform_directories_follow_native_conventions() {
 }
 
 #[test]
+fn user_cache_root_follows_tool_cache_conventions() {
+    let values = [
+        ("USERPROFILE".to_string(), OsString::from(r"C:\Users\Reyan")),
+        (
+            "LOCALAPPDATA".to_string(),
+            OsString::from(r"C:\Users\Reyan\AppData\Local"),
+        ),
+    ]
+    .into_iter()
+    .collect::<HashMap<_, _>>();
+    assert_eq!(
+        user_cache_root_with(PlatformKind::Windows, |name| values.get(name).cloned()),
+        PathBuf::from(r"C:\Users\Reyan\AppData\Local")
+    );
+
+    let values = [("HOME".to_string(), OsString::from("/Users/reyan"))]
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+    assert_eq!(
+        user_cache_root_with(PlatformKind::Macos, |name| values.get(name).cloned()),
+        PathBuf::from("/Users/reyan/Library/Caches")
+    );
+
+    let values = [
+        ("HOME".to_string(), OsString::from("/home/reyan")),
+        ("XDG_CACHE_HOME".to_string(), OsString::from("/cache")),
+    ]
+    .into_iter()
+    .collect::<HashMap<_, _>>();
+    assert_eq!(
+        user_cache_root_with(PlatformKind::Linux, |name| values.get(name).cloned()),
+        PathBuf::from("/cache")
+    );
+}
+
+#[test]
 fn windows_path_keys_handle_drive_unc_case_and_extended_prefixes() {
     let key = |path: &str| PathKey::for_platform(Path::new(path), PlatformKind::Windows);
     assert_eq!(key(r"C:\Work\RRiter\src\main.rs"), key(r"c:/work/rriter/src/MAIN.rs"));
@@ -295,4 +331,121 @@ fn windows_absolute_path_detection_distinguishes_drive_relative_paths() {
     assert!(windows_path_is_absolute(r"\\server\share\file.rs"));
     assert!(!windows_path_is_absolute(r"C:project\file.rs"));
     assert!(!windows_path_is_absolute(r"project\file.rs"));
+}
+
+#[test]
+fn altgr_is_not_forwarded_as_terminal_ctrl_alt() {
+    assert_eq!(
+        terminal_modifiers_for_platform(PlatformKind::Windows, true, true),
+        (false, false)
+    );
+    assert_eq!(
+        terminal_modifiers_for_platform(PlatformKind::Windows, true, false),
+        (true, false)
+    );
+    assert_eq!(
+        terminal_modifiers_for_platform(PlatformKind::Linux, true, true),
+        (true, true)
+    );
+}
+
+#[test]
+fn shortcut_modifiers_follow_platform_conventions() {
+    assert!(primary_modifier_for_platform(PlatformKind::Windows, true, false));
+    assert!(!primary_modifier_for_platform(PlatformKind::Windows, false, true));
+    assert!(primary_modifier_for_platform(PlatformKind::Macos, false, true));
+    assert!(!primary_modifier_for_platform(PlatformKind::Macos, true, false));
+
+    assert!(word_modifier_for_platform(PlatformKind::Windows, true, false));
+    assert!(!word_modifier_for_platform(PlatformKind::Windows, false, true));
+    assert!(!word_modifier_for_platform(PlatformKind::Windows, true, true));
+    assert!(word_modifier_for_platform(PlatformKind::Macos, false, true));
+
+    assert!(text_input_modifiers_allowed_for_platform(
+        PlatformKind::Windows,
+        true,
+        true,
+        false,
+    ));
+    assert!(!text_input_modifiers_allowed_for_platform(
+        PlatformKind::Windows,
+        true,
+        false,
+        false,
+    ));
+    assert!(text_input_modifiers_allowed_for_platform(
+        PlatformKind::Macos,
+        false,
+        true,
+        false,
+    ));
+}
+
+#[test]
+fn windows_executable_resolution_uses_pathext_without_shelling_out() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-platform-executable-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    fs::write(root.join("ruff.EXE"), b"").unwrap();
+    let search_path = std::env::join_paths([&root]).unwrap();
+    let resolved = process::resolve_executable_with(
+        OsStr::new("ruff"),
+        Some(search_path.as_os_str()),
+        Some(OsStr::new(".EXE;.CMD")),
+        PlatformKind::Windows,
+    );
+    assert_eq!(resolved, Some(root.join("ruff.EXE")));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_command_timeout_kills_the_process_group() {
+    let mut command = command_for("sh").unwrap();
+    command.args(["-c", "sleep 30 & wait"]);
+    let started = std::time::Instant::now();
+    let error = run_command_output(&mut command, Duration::from_millis(80)).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_child_exit_reaps_background_descendants() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-platform-process-tree-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let marker = root.join("orphan-marker");
+
+    let mut command = command_for("sh").unwrap();
+    command
+        .arg("-c")
+        .arg(r#"(sleep 0.2; printf orphan > "$1") & exit 0"#)
+        .arg("rriter-process-test")
+        .arg(&marker)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = ManagedChild::spawn(&mut command).unwrap();
+    assert!(child.wait_timeout(Duration::from_secs(1)).unwrap().is_some());
+
+    std::thread::sleep(Duration::from_millis(350));
+    assert!(!marker.exists());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn managed_command_collects_stdout_stderr_and_status() {
+    let mut command = command_for("sh").unwrap();
+    command.args(["-c", "printf out; printf err >&2; exit 7"]);
+    let output = run_command_output(&mut command, Duration::from_secs(2)).unwrap();
+    assert_eq!(output.status.code(), Some(7));
+    assert_eq!(output.stdout, b"out");
+    assert_eq!(output.stderr, b"err");
 }

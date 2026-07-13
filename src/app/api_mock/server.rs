@@ -1,5 +1,5 @@
 use super::merge::{api_mock_path_params, resolve_api_mock_route};
-use super::python_worker::{PythonMockRequest, call_python_route};
+use super::python_worker::{PythonMockRequest, call_python_route, stop_python_worker};
 use super::types::{
     ApiMockContractField, ApiMockContractFieldKind, ApiMockRouteDecision, ApiMockRuntimeRoute,
     ApiMockServerEvent, ApiMockServerSnapshot, ApiMockServerStatus,
@@ -15,6 +15,9 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::mpsc::Receiver;
+use std::thread::JoinHandle;
+use std::time::Duration;
 use tokio::sync::oneshot;
 
 static SERVER: LazyLock<Mutex<Option<ApiMockServerHandle>>> = LazyLock::new(|| Mutex::new(None));
@@ -23,6 +26,8 @@ static EVENTS: LazyLock<Mutex<Vec<ApiMockServerEvent>>> = LazyLock::new(|| Mutex
 struct ApiMockServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
     snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
+    finished: Receiver<()>,
+    thread: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone)]
@@ -60,13 +65,19 @@ pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), Stri
     let (shutdown_tx, shutdown_rx) = oneshot::channel();
     let snapshot = Arc::new(Mutex::new(snapshot));
     let thread_snapshot = Arc::clone(&snapshot);
-    std::thread::Builder::new()
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+    let thread = std::thread::Builder::new()
         .name("rriter-api-mock".to_string())
-        .spawn(move || run_server_thread(thread_snapshot, shutdown_rx))
+        .spawn(move || {
+            run_server_thread(thread_snapshot, shutdown_rx);
+            let _ = finished_tx.send(());
+        })
         .map_err(|err| err.to_string())?;
     *server = Some(ApiMockServerHandle {
         shutdown: Some(shutdown_tx),
         snapshot,
+        finished: finished_rx,
+        thread: Some(thread),
     });
     Ok(())
 }
@@ -91,12 +102,18 @@ pub fn update_api_mock_server_snapshot(snapshot: ApiMockServerSnapshot) -> Resul
 }
 
 pub fn stop_api_mock_server() {
-    if let Ok(mut server) = SERVER.lock()
-        && let Some(mut handle) = server.take()
-        && let Some(shutdown) = handle.shutdown.take()
-    {
-        let _ = shutdown.send(());
+    let mut handle = SERVER.lock().ok().and_then(|mut server| server.take());
+    if let Some(handle) = handle.as_mut() {
+        if let Some(shutdown) = handle.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        if handle.finished.recv_timeout(Duration::from_secs(2)).is_ok()
+            && let Some(thread) = handle.thread.take()
+        {
+            let _ = thread.join();
+        }
     }
+    stop_python_worker();
 }
 
 pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiMockServerEvent) {

@@ -2,59 +2,133 @@ pub(crate) fn module_path_from_definition_path(
     path: &std::path::Path,
     workspaces: &[std::path::PathBuf],
 ) -> Option<String> {
-    fn sanitize_module_path_parts<'a>(parts: impl IntoIterator<Item = &'a str>) -> Option<String> {
-        let mut out: Vec<&str> = parts
-            .into_iter()
+    module_path_from_definition_path_for_platform(
+        path,
+        workspaces,
+        crate::platform::CURRENT_PLATFORM,
+    )
+}
+
+fn module_path_from_definition_path_for_platform(
+    path: &std::path::Path,
+    workspaces: &[std::path::PathBuf],
+    platform: crate::platform::PlatformKind,
+) -> Option<String> {
+    fn sanitize_module_path(rel: &str) -> Option<String> {
+        let rel = rel
+            .strip_suffix(".pyi")
+            .or_else(|| rel.strip_suffix(".py"))
+            .unwrap_or(rel);
+        let mut parts = rel
+            .split('/')
             .map(str::trim)
-            .filter(|p| !p.is_empty() && *p != "__init__" && *p != "/")
-            .collect();
-        if let Some(site_idx) = out.iter().position(|p| *p == "site-packages") {
-            out = out.into_iter().skip(site_idx + 1).collect();
+            .filter(|part| !part.is_empty() && *part != ".")
+            .collect::<Vec<_>>();
+        if parts.last() == Some(&"__init__") {
+            parts.pop();
         }
-        if out.is_empty() {
-            None
+        if let Some(site_idx) = parts.iter().position(|part| *part == "site-packages") {
+            parts.drain(..=site_idx);
+        }
+        (!parts.is_empty()).then(|| parts.join("."))
+    }
+
+    fn normalized(path: &std::path::Path) -> String {
+        let mut text = path.to_string_lossy().replace('\\', "/");
+        if let Some(rest) = text.strip_prefix("//?/UNC/") {
+            text = format!("//{rest}");
+        } else if let Some(rest) = text.strip_prefix("//?/") {
+            text = rest.to_string();
+        }
+        text
+    }
+
+    fn component_eq(
+        left: &str,
+        right: &str,
+        platform: crate::platform::PlatformKind,
+    ) -> bool {
+        if platform == crate::platform::PlatformKind::Windows {
+            left.to_lowercase() == right.to_lowercase()
         } else {
-            Some(out.join("."))
+            left == right
         }
     }
 
-    let path_str = path.to_string_lossy();
-    if let Some(std_idx) = path_str.rfind("/lib/python") {
-        let stdlib_rel = &path_str[std_idx + "/lib/python".len()..];
-        let after_version = stdlib_rel
+    fn relative_components(
+        path: &str,
+        root: &str,
+        platform: crate::platform::PlatformKind,
+    ) -> Option<String> {
+        let path_parts = path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let root_parts = root
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        if root_parts.len() > path_parts.len()
+            || !root_parts
+                .iter()
+                .zip(&path_parts)
+                .all(|(root, path)| component_eq(root, path, platform))
+        {
+            return None;
+        }
+        Some(path_parts[root_parts.len()..].join("/"))
+    }
+
+    fn suffix_after_marker<'a>(path: &'a str, marker: &str) -> Option<&'a str> {
+        let lower = path.to_ascii_lowercase();
+        let index = lower.rfind(&marker.to_ascii_lowercase())?;
+        path.get(index + marker.len()..)
+    }
+
+    let path_text = normalized(path);
+    let workspace_rel = workspaces
+        .iter()
+        .filter_map(|workspace| {
+            let workspace_text = normalized(workspace);
+            relative_components(&path_text, &workspace_text, platform)
+                .map(|relative| (workspace_text.split('/').count(), relative))
+        })
+        .max_by_key(|(depth, _)| *depth)
+        .map(|(_, relative)| relative);
+
+    if let Some(relative) = suffix_after_marker(&path_text, "/site-packages/") {
+        return sanitize_module_path(relative);
+    }
+
+    if let Some(after_python) = suffix_after_marker(&path_text, "/lib/python") {
+        let relative = after_python
             .split_once('/')
             .map(|(_, tail)| tail)
-            .unwrap_or(stdlib_rel);
-        let trimmed = after_version
-            .strip_suffix(".pyi")
-            .or_else(|| after_version.strip_suffix(".py"))
-            .unwrap_or(after_version);
-        if !trimmed.is_empty() && trimmed != "__init__" {
-            return sanitize_module_path_parts(trimmed.trim_start_matches('/').split('/'));
+            .unwrap_or(after_python);
+        if !relative.is_empty() {
+            return sanitize_module_path(relative);
         }
     }
-    if !workspaces.iter().any(|ws| path.starts_with(ws)) {
-        if let Some(ts_idx) = path_str.find("/stdlib/") {
-            let rel = &path_str[ts_idx + "/stdlib/".len()..];
-            let trimmed = rel.strip_suffix(".pyi").unwrap_or(rel);
-            return sanitize_module_path_parts(trimmed.split('/'));
+
+    if workspace_rel.is_none() {
+        if let Some(relative) = suffix_after_marker(&path_text, "/stdlib/") {
+            return sanitize_module_path(relative);
         }
-        if let Some(ts_idx) = path_str.find("/stubs/") {
-            let rel = &path_str[ts_idx + "/stubs/".len()..];
-            let after_pkg = rel.split_once('/').map(|(_, tail)| tail).unwrap_or(rel);
-            let trimmed = after_pkg.strip_suffix(".pyi").unwrap_or(after_pkg);
-            return sanitize_module_path_parts(trimmed.split('/'));
+        if let Some(relative) = suffix_after_marker(&path_text, "/stubs/") {
+            let after_package = relative
+                .split_once('/')
+                .map(|(_, tail)| tail)
+                .unwrap_or(relative);
+            return sanitize_module_path(after_package);
+        }
+        if platform == crate::platform::PlatformKind::Windows {
+            if let Some(relative) = suffix_after_marker(&path_text, "/lib/") {
+                return sanitize_module_path(relative);
+            }
         }
     }
-    let rel = workspaces.iter().find_map(|ws| path.strip_prefix(ws).ok());
-    if let Some(rel_path) = rel {
-        let mut no_ext = rel_path.to_path_buf();
-        no_ext.set_extension("");
-        return sanitize_module_path_parts(
-            no_ext.iter().filter_map(|c| c.to_str()).collect::<Vec<_>>(),
-        );
-    }
-    None
+
+    workspace_rel.and_then(|relative| sanitize_module_path(&relative))
 }
 
 pub(super) const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
@@ -888,7 +962,8 @@ pub(super) fn wrap_signature_after_first_param(
 #[cfg(test)]
 mod tests {
     use super::{
-        HOVER_MODULE_PREFIX, module_path_from_definition_path, prepend_hover_module_path,
+        HOVER_MODULE_PREFIX, module_path_from_definition_path,
+        module_path_from_definition_path_for_platform, prepend_hover_module_path,
         should_replace_hover_with_source_signature, source_attribute_hover_from_definition_file,
         source_class_signature_from_definition_file, source_line, source_signature_for_hover,
         symbol_at_offset, wrap_signature_after_first_param,
@@ -1083,6 +1158,39 @@ mod tests {
         assert_eq!(
             module_path_from_definition_path(empty, &[std::path::PathBuf::from("/work/app")]),
             None
+        );
+    }
+
+    #[test]
+    fn module_path_supports_windows_venv_stdlib_and_workspace_paths() {
+        use crate::platform::PlatformKind;
+
+        let package = std::path::Path::new(
+            r"C:\work\app\.venv\Lib\site-packages\litestar\routing\__init__.py",
+        );
+        assert_eq!(
+            module_path_from_definition_path_for_platform(package, &[], PlatformKind::Windows)
+                .as_deref(),
+            Some("litestar.routing")
+        );
+
+        let stdlib = std::path::Path::new(r"C:\Python313\Lib\pathlib.py");
+        assert_eq!(
+            module_path_from_definition_path_for_platform(stdlib, &[], PlatformKind::Windows)
+                .as_deref(),
+            Some("pathlib")
+        );
+
+        let workspace = std::path::PathBuf::from(r"C:\WORK\App");
+        let local = std::path::Path::new(r"c:\work\app\pkg\service.py");
+        assert_eq!(
+            module_path_from_definition_path_for_platform(
+                local,
+                &[workspace],
+                PlatformKind::Windows,
+            )
+            .as_deref(),
+            Some("pkg.service")
         );
     }
 

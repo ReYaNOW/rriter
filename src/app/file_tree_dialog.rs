@@ -279,7 +279,10 @@ impl App {
                 return true;
             }
 
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+            let word = crate::platform::word_navigation_modifier(self.modifiers);
+            let text_input_allowed =
+                crate::platform::text_input_modifiers_allowed(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut submit = false;
             let mut cancel = false;
@@ -309,9 +312,9 @@ impl App {
                             key_event.physical_key,
                             key_event.logical_key.to_text(),
                             ctrl,
+                            word,
                             shift,
-                            self.modifiers.alt_key(),
-                            self.modifiers.super_key(),
+                            text_input_allowed,
                             paste_text,
                         );
                     }
@@ -343,7 +346,9 @@ impl App {
             return true;
         }
 
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+        let word = crate::platform::word_navigation_modifier(self.modifiers);
+        let text_input_allowed = crate::platform::text_input_modifiers_allowed(self.modifiers);
         let shift = self.modifiers.shift_key();
         let mut submit = false;
         let mut cancel = false;
@@ -373,9 +378,9 @@ impl App {
                         key_event.physical_key,
                         key_event.logical_key.to_text(),
                         ctrl,
+                        word,
                         shift,
-                        self.modifiers.alt_key(),
-                        self.modifiers.super_key(),
+                        text_input_allowed,
                         paste_text,
                     );
                 }

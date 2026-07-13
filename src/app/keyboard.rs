@@ -3,7 +3,6 @@ use crate::app::{
     cursor_after_python_member_dot, cursor_inside_python_call_parens,
 };
 use crate::editor::Editor;
-use std::io::Write;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -202,10 +201,12 @@ fn terminal_function_key(code: u8, ss3_final: u8, shift: bool, alt: bool, ctrl: 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
+        let terminal_ctrl = crate::platform::terminal_control_modifier(self.modifiers);
+        let terminal_alt = crate::platform::terminal_alt_modifier(self.modifiers);
 
         if key_event.state == winit::event::ElementState::Pressed
-            && ctrl
+            && primary
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyF)
         {
             self.ide_panel.term_show_search = true;
@@ -219,86 +220,51 @@ impl App {
             return;
         }
 
-        let active = self.ide_panel.active_terminal;
-        if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-            let mut grid = term.grid.lock().unwrap();
-            if key_event.state == winit::event::ElementState::Pressed {
-                let mut w = term.writer.lock().unwrap();
-                match key_event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                        if let Some((sx, sy, ex, ey)) = grid.selection {
-                            let mut res = String::new();
-                            let scrollback_len = if grid.is_alt {
-                                0
-                            } else {
-                                grid.scrollback.len()
-                            };
-                            let total_lines = scrollback_len + grid.lines.len();
-                            let (start_x, start_y, end_x, end_y) =
-                                crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
-
-                            for y in start_y..=end_y {
-                                if y >= total_lines {
-                                    continue;
-                                }
-                                let row = if grid.is_alt {
-                                    &grid.lines[y]
-                                } else {
-                                    if y < grid.scrollback.len() {
-                                        &grid.scrollback[y]
-                                    } else {
-                                        &grid.lines[y - grid.scrollback.len()]
-                                    }
-                                };
-                                let line_start = if y == start_y { start_x } else { 0 };
-                                let line_end = if y == end_y {
-                                    end_x
-                                } else {
-                                    grid.cols.saturating_sub(1)
-                                };
-
-                                for x in line_start..=line_end {
-                                    if x < row.len() {
-                                        res.push(row[x].c);
-                                    }
-                                }
-                                if y != end_y {
-                                    res.push('\n');
-                                }
-                            }
-
-                            if let Some(clipboard) = self.clipboard.as_mut() {
-                                let _ = clipboard.set_text(res.trim_end().to_string());
-                            }
+        if key_event.state == winit::event::ElementState::Pressed {
+            let paste = if primary
+                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV)
+            {
+                self.get_clipboard_text()
+            } else {
+                None
+            };
+            let active = self.ide_panel.active_terminal;
+            let mut clipboard_text = None;
+            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+                let mut grid = term.grid.lock().unwrap();
+                let input = match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
+                        if primary && grid.selection.is_some() {
+                            clipboard_text =
+                                crate::app::terminal::terminal_selection_text(&grid);
                             grid.selection = None;
+                            None
+                        } else if terminal_ctrl {
+                            Some(vec![0x03])
                         } else {
-                            let _ = w.write_all(b"\x03");
+                            None
                         }
                     }
-                    PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
-                        if let Some(text) = self
-                            .clipboard
-                            .as_mut()
-                            .and_then(|clipboard| clipboard.get_text().ok())
-                        {
-                            let _ = w.write_all(text.as_bytes());
-                        }
+                    PhysicalKey::Code(KeyCode::KeyV) if primary => {
+                        paste.map(|text| text.into_bytes())
                     }
-                    _ => {
-                        if let Some(bytes) = terminal_key_sequence(
-                            key_event.physical_key,
-                            key_event.logical_key.to_text(),
-                            self.modifiers.shift_key(),
-                            ctrl,
-                            self.modifiers.alt_key(),
-                            self.modifiers.super_key(),
-                            grid.app_cursor_keys,
-                        ) {
-                            let _ = w.write_all(&bytes);
-                        }
-                    }
+                    _ => terminal_key_sequence(
+                        key_event.physical_key,
+                        key_event.logical_key.to_text(),
+                        self.modifiers.shift_key(),
+                        terminal_ctrl,
+                        terminal_alt,
+                        self.modifiers.super_key(),
+                        grid.app_cursor_keys,
+                    ),
+                };
+                drop(grid);
+                if let Some(input) = input {
+                    let _ = term.write_input(&input);
                 }
-                w.flush().ok();
+            }
+            if let Some(text) = clipboard_text {
+                self.set_clipboard_text(text);
             }
         }
         self.last_action = std::time::Instant::now();
@@ -308,7 +274,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == winit::event::ElementState::Pressed {
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+            let word = crate::platform::word_navigation_modifier(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut is_edit = false;
 
@@ -365,14 +332,14 @@ impl App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.term_search_editor.move_word_left(shift);
                     } else {
                         self.ide_panel.term_search_editor.move_left(shift);
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowRight) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.term_search_editor.move_word_right(shift);
                     } else {
                         self.ide_panel.term_search_editor.move_right(shift);
@@ -416,7 +383,7 @@ impl App {
                     }
                 }
                 _ => {
-                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                    if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                         if let Some(txt) = key_event.logical_key.to_text() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
@@ -440,7 +407,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == ElementState::Pressed {
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+            let word = crate::platform::word_navigation_modifier(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut is_edit = false;
 
@@ -493,14 +461,14 @@ impl App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                    if ctrl {
+                    if word {
                         self.search_editor.move_word_left(shift);
                     } else {
                         self.search_editor.move_left(shift);
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowRight) => {
-                    if ctrl {
+                    if word {
                         self.search_editor.move_word_right(shift);
                     } else {
                         self.search_editor.move_right(shift);
@@ -544,7 +512,7 @@ impl App {
                     }
                 }
                 _ => {
-                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                    if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                         if let Some(txt) = key_event.logical_key.to_text() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
@@ -579,7 +547,8 @@ impl App {
             self.ide_panel.project_search.focused = None;
             return;
         }
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+        let word = crate::platform::word_navigation_modifier(self.modifiers);
         let shift = self.modifiers.shift_key();
         let mut is_edit = false;
         let mut should_run = false;
@@ -601,7 +570,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
                 let editor = self.project_search_editor_mut(field);
-                if ctrl {
+                if word {
                     editor.move_word_left(shift);
                 } else {
                     editor.move_left(shift);
@@ -609,7 +578,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
                 let editor = self.project_search_editor_mut(field);
-                if ctrl {
+                if word {
                     editor.move_word_right(shift);
                 } else {
                     editor.move_right(shift);
@@ -662,7 +631,7 @@ impl App {
                 }
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
-                let changed = if ctrl {
+                let changed = if word {
                     self.project_search_editor_mut(field)
                         .delete_word_backward()
                         .is_some()
@@ -672,7 +641,7 @@ impl App {
                 is_edit |= changed;
             }
             PhysicalKey::Code(KeyCode::Delete) => {
-                let changed = if ctrl {
+                let changed = if word {
                     self.project_search_editor_mut(field)
                         .delete_word_forward()
                         .is_some()
@@ -684,7 +653,7 @@ impl App {
                 is_edit |= changed;
             }
             _ => {
-                if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                     if let Some(text) = key_event.logical_key.to_text() {
                         let text = if field == crate::app::project_search::ProjectSearchField::Query
                         {
@@ -795,7 +764,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == ElementState::Pressed {
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+            let word = crate::platform::word_navigation_modifier(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut is_edit = false;
 
@@ -804,14 +774,14 @@ impl App {
                     self.ide_panel.lsp_log_filter_focused = false;
                 }
                 PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.lsp_log_filter_editor.move_word_left(shift);
                     } else {
                         self.ide_panel.lsp_log_filter_editor.move_left(shift);
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowRight) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.lsp_log_filter_editor.move_word_right(shift);
                     } else {
                         self.ide_panel.lsp_log_filter_editor.move_right(shift);
@@ -860,7 +830,7 @@ impl App {
                     }
                 }
                 _ => {
-                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                    if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                         if let Some(txt) = key_event.logical_key.to_text() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
@@ -886,7 +856,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyEvent) {
         if key_event.state == ElementState::Pressed {
-            let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+            let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+            let word = crate::platform::word_navigation_modifier(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut is_edit = false;
 
@@ -898,14 +869,14 @@ impl App {
                     self.commit_git_panel();
                 }
                 PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.git.message_editor.move_word_left(shift);
                     } else {
                         self.ide_panel.git.message_editor.move_left(shift);
                     }
                 }
                 PhysicalKey::Code(KeyCode::ArrowRight) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.git.message_editor.move_word_right(shift);
                     } else {
                         self.ide_panel.git.message_editor.move_right(shift);
@@ -940,7 +911,7 @@ impl App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::Backspace) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.git.message_editor.delete_word_backward();
                         is_edit = true;
                     } else if self.ide_panel.git.message_editor.backspace().is_some() {
@@ -948,7 +919,7 @@ impl App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::Delete) => {
-                    if ctrl {
+                    if word {
                         self.ide_panel.git.message_editor.delete_word_forward();
                         is_edit = true;
                     } else if self.ide_panel.git.message_editor.delete_forward().is_some() {
@@ -956,7 +927,7 @@ impl App {
                     }
                 }
                 _ => {
-                    if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                    if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                         if let Some(txt) = key_event.logical_key.to_text() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
@@ -1072,6 +1043,28 @@ mod tests {
                 false,
             ),
             None
+        );
+    }
+
+    #[test]
+    fn windows_altgr_composed_text_reaches_the_terminal_without_ctrl_or_escape() {
+        let (ctrl, alt) = crate::platform::terminal_modifiers_for_platform(
+            crate::platform::PlatformKind::Windows,
+            true,
+            true,
+        );
+        assert_eq!((ctrl, alt), (false, false));
+        assert_eq!(
+            terminal_key_sequence(
+                PhysicalKey::Code(KeyCode::KeyE),
+                Some("€"),
+                false,
+                ctrl,
+                alt,
+                false,
+                false,
+            ),
+            Some("€".as_bytes().to_vec())
         );
     }
 

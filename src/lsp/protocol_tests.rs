@@ -11,7 +11,7 @@ fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
         (1, 3)
     );
 
-    let uri = path_to_uri("/tmp/rriter file.py");
+    let uri = path_to_uri(Path::new("/tmp/rriter file.py"));
     assert_eq!(uri_to_path(&uri), PathBuf::from("/tmp/rriter file.py"));
 
     let hover = String::from_utf8(make_hover(7, &uri, 1, 3)).unwrap();
@@ -28,6 +28,40 @@ fn lsp_protocol_encodes_positions_paths_and_requests_end_to_end() {
     let parsed: serde_json::Value = serde_json::from_str(&open).unwrap();
     assert_eq!(parsed["params"]["textDocument"]["languageId"], "python");
     assert_eq!(parsed["params"]["textDocument"]["text"], "x = \"q\"\n");
+}
+
+#[test]
+fn file_uri_roundtrips_windows_drive_unc_unicode_and_reserved_characters() {
+    let drive = Path::new(r"C:\Users\Re YaN\проект\a#b%.py");
+    let drive_uri = path_to_uri_for_platform(drive, crate::platform::PlatformKind::Windows);
+    assert_eq!(
+        drive_uri,
+        "file:///C:/Users/Re%20YaN/%D0%BF%D1%80%D0%BE%D0%B5%D0%BA%D1%82/a%23b%25.py"
+    );
+    assert_eq!(
+        uri_to_path_for_platform(&drive_uri, crate::platform::PlatformKind::Windows),
+        drive
+    );
+
+    let unc = Path::new(r"\\server\shared folder\pkg\main.py");
+    let unc_uri = path_to_uri_for_platform(unc, crate::platform::PlatformKind::Windows);
+    assert_eq!(unc_uri, "file://server/shared%20folder/pkg/main.py");
+    assert_eq!(
+        uri_to_path_for_platform(&unc_uri, crate::platform::PlatformKind::Windows),
+        unc
+    );
+}
+
+#[test]
+fn non_file_and_malformed_uris_are_not_misinterpreted_as_paths() {
+    assert_eq!(
+        uri_to_path_for_platform("https://example.invalid/a.py", crate::platform::PlatformKind::Windows),
+        PathBuf::from("https://example.invalid/a.py")
+    );
+    assert_eq!(
+        uri_to_path_for_platform("not a uri", crate::platform::PlatformKind::Linux),
+        PathBuf::from("not a uri")
+    );
 }
 
 #[test]
@@ -448,7 +482,7 @@ fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
         serde_json::from_slice(&make_initialize(42, &workspaces)).unwrap();
     assert_eq!(init["id"], 42);
     assert_eq!(init["method"], "initialize");
-    assert_eq!(init["params"]["rootUri"], path_to_uri("/tmp/ws one"));
+    assert_eq!(init["params"]["rootUri"], path_to_uri(Path::new("/tmp/ws one")));
     assert_eq!(
         init["params"]["workspaceFolders"]
             .as_array()

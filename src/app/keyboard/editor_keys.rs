@@ -93,7 +93,8 @@ impl App {
         event_loop: &ActiveEventLoop,
         key_event: KeyEvent,
     ) {
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
+        let word = crate::platform::word_navigation_modifier(self.modifiers);
         let shift = self.modifiers.shift_key();
         let physical_key = key_event.physical_key;
 
@@ -124,6 +125,7 @@ impl App {
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);
                     }
+                    self.shutdown_background_services();
                     event_loop.exit();
                 }
                 _ => {}
@@ -194,9 +196,7 @@ impl App {
         let is_git_diff_tab = self.active_tab_is_git_diff();
 
         if is_git_diff_tab {
-            let text_insert = !ctrl
-                && !self.modifiers.alt_key()
-                && !self.modifiers.super_key()
+            let text_insert = crate::platform::text_input_modifiers_allowed(self.modifiers)
                 && key_text_for_editor_insert(
                     physical_key,
                     key_event.text.as_deref(),
@@ -390,7 +390,7 @@ impl App {
                 }
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                if ctrl {
+                if word {
                     self.editor.move_word_left(shift);
                 } else {
                     self.editor.move_left(shift);
@@ -398,7 +398,7 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
-                if ctrl {
+                if word {
                     self.editor.move_word_right(shift);
                 } else {
                     self.editor.move_right(shift);
@@ -444,7 +444,7 @@ impl App {
                     .move_page_down(self.renderer.as_mut().unwrap(), shift, step);
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Backspace) if ctrl => {
+            PhysicalKey::Code(KeyCode::Backspace) if word => {
                 let before_cursor = self.editor.cursor;
                 let before_lines = self.editor.line_offsets.clone();
                 if let Some((offset, len)) = self.editor.delete_word_backward() {
@@ -465,7 +465,7 @@ impl App {
                 }
                 cursor_moved = true;
             }
-            PhysicalKey::Code(KeyCode::Delete) if ctrl => {
+            PhysicalKey::Code(KeyCode::Delete) if word => {
                 if let Some((offset, len)) = self.editor.delete_word_forward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
@@ -618,7 +618,7 @@ impl App {
                 self.close_autocomplete();
             }
             _ => {
-                if !ctrl && !self.modifiers.alt_key() && !self.modifiers.super_key() {
+                if crate::platform::text_input_modifiers_allowed(self.modifiers) {
                     if let Some(txt) = key_text_for_editor_insert(
                         physical_key,
                         key_event.text.as_deref(),

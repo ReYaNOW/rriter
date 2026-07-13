@@ -298,7 +298,7 @@ fn autocomplete_detail_placement(
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
+fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
     let w = app.window.as_ref().unwrap();
     let maximized = w.is_maximized();
     let (width, height) = if maximized {
@@ -321,7 +321,7 @@ fn save_state_and_exit(app: &App, event_loop: &ActiveEventLoop) {
         app.ide_panel.api.persist();
         crate::save_panel_state(&app.ide_panel);
     }
-    crate::app::api_mock::server::stop_api_mock_server();
+    app.shutdown_background_services();
     event_loop.exit();
 }
 

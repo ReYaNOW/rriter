@@ -1,6 +1,5 @@
 use alacritty_terminal::vte::{Params, Parser, Perform};
-use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
-use std::io::{Read, Write};
+use std::io;
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -65,6 +64,43 @@ pub(crate) fn normalized_selection_bounds(
         sx.max(ex)
     };
     (start_x, start_y, end_x, end_y)
+}
+
+pub(crate) fn terminal_selection_text(grid: &TermGrid) -> Option<String> {
+    let (sx, sy, ex, ey) = grid.selection?;
+    let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+    let total_lines = scrollback_len + grid.lines.len();
+    let (start_x, start_y, end_x, end_y) = normalized_selection_bounds(sx, sy, ex, ey);
+    let mut result = String::new();
+
+    for y in start_y..=end_y {
+        if y >= total_lines {
+            continue;
+        }
+        let row = if grid.is_alt {
+            &grid.lines[y]
+        } else if y < grid.scrollback.len() {
+            &grid.scrollback[y]
+        } else {
+            &grid.lines[y - grid.scrollback.len()]
+        };
+        let line_start = if y == start_y { start_x } else { 0 };
+        let line_end = if y == end_y {
+            end_x
+        } else {
+            grid.cols.saturating_sub(1)
+        };
+        for x in line_start..=line_end {
+            if let Some(cell) = row.get(x) {
+                result.push(cell.c);
+            }
+        }
+        if y != end_y {
+            result.push('\n');
+        }
+    }
+
+    Some(result.trim_end().to_string())
 }
 
 pub struct TermGrid {
@@ -1274,134 +1310,74 @@ impl Perform for TermGrid {
 
 pub struct Terminal {
     pub grid: Arc<Mutex<TermGrid>>,
-    pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    pub master_pty: Arc<Mutex<Box<dyn portable_pty::MasterPty + Send>>>,
-    pub child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
+    process: Option<crate::app::terminal_process::TerminalProcess>,
     pub scroll_y: crate::scroll::ScrollState,
     pub title: String,
 }
 
 impl Terminal {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn spawn(window: Option<std::sync::Arc<winit::window::Window>>) -> Self {
-        let pty_system = NativePtySystem::default();
-        let pair = pty_system
-            .openpty(PtySize {
-                rows: 60,
-                cols: 200,
-                pixel_width: 0,
-                pixel_height: 0,
-            })
-            .unwrap();
-
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        let shell_name = std::path::Path::new(&shell)
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_else(|| "term".to_string());
-        let mut cmd = CommandBuilder::new(shell);
-        cmd.env("TERM", "xterm-256color");
-        let child = pair.slave.spawn_command(cmd).unwrap();
-
-        // КРИТИЧНО для Linux: освобождаем дескриптор slave в родительском процессе
-        drop(pair.slave);
-
-        let reader = pair.master.try_clone_reader().unwrap();
-        let writer = pair.master.take_writer().unwrap();
-        let writer_arc = Arc::new(Mutex::new(writer));
-
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-        let writer_for_reply = writer_arc.clone();
-        std::thread::spawn(move || {
-            while let Ok(msg) = reply_rx.recv() {
-                if let Ok(mut w) = writer_for_reply.lock() {
-                    let _ = w.write_all(&msg);
-                    let _ = w.flush();
+    pub fn spawn(
+        window: Option<std::sync::Arc<winit::window::Window>>,
+        cwd: Option<&std::path::Path>,
+    ) -> Self {
+        let grid = Arc::new(Mutex::new(TermGrid::new(200, 60)));
+        let result = crate::app::terminal_process::TerminalProcess::spawn(
+            grid.clone(),
+            window,
+            cwd,
+        );
+        let (process, title) = match result {
+            Ok((process, shell)) => (Some(process), shell.title),
+            Err(error) => {
+                let message = format!("RRiter terminal error: {error}\r\n");
+                if let Ok(mut grid) = grid.lock() {
+                    let mut parser = Parser::new();
+                    parser.advance(&mut *grid, message.as_bytes());
+                    grid.dirty = true;
                 }
+                (None, "terminal error".to_string())
             }
-        });
-
-        let mut grid_obj = TermGrid::new(200, 60);
-        grid_obj.reply_tx = Some(reply_tx);
-        let grid = Arc::new(Mutex::new(grid_obj));
-        let grid_clone = grid.clone();
-
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
-
-        std::thread::spawn(move || {
-            let mut reader = reader;
-            let mut buf = [0u8; 65536];
-            while let Ok(n) = reader.read(&mut buf) {
-                if n == 0 {
-                    break;
-                }
-                if tx.send(buf[..n].to_vec()).is_err() {
-                    break;
-                }
-            }
-        });
-
-        std::thread::spawn(move || {
-            let mut parser = Parser::new();
-            while let Ok(chunk) = rx.recv() {
-                let mut chunks = vec![chunk];
-                let start = std::time::Instant::now();
-
-                // Умный Nagle-буфер: собираем микро-куски, пока труба не замолчит на 8мс
-                loop {
-                    match rx.recv_timeout(std::time::Duration::from_millis(8)) {
-                        Ok(more) => {
-                            chunks.push(more);
-                            // Предохранитель от зависания при бесконечном потоке (например, команда yes)
-                            if start.elapsed().as_millis() >= 32 {
-                                break;
-                            }
-                        }
-                        Err(_) => break, // Вывод завершен
-                    }
-                }
-
-                let mut g = grid_clone.lock().unwrap();
-                for c in &chunks {
-                    parser.advance(&mut *g, c);
-                }
-                g.dirty = true;
-                drop(g);
-
-                if let Some(w) = window.as_ref() {
-                    w.request_redraw();
-                }
-            }
-        });
-
-        let master_pty = Arc::new(Mutex::new(pair.master));
-
-        let scroll_y = crate::scroll::ScrollState::new(7.0);
+        };
 
         Self {
             grid,
-            writer: writer_arc,
-            master_pty,
-            child: Arc::new(Mutex::new(child)),
-            scroll_y,
-            title: shell_name,
+            process,
+            scroll_y: crate::scroll::ScrollState::new(7.0),
+            title,
         }
+    }
+
+    pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
+        self.process
+            .as_ref()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotConnected, "terminal is not running"))?
+            .write_input(bytes)
+    }
+
+    pub fn is_closed(&mut self) -> bool {
+        self.process
+            .as_mut()
+            .is_some_and(|process| process.try_wait().unwrap_or(true))
+    }
+
+    pub fn shutdown(&mut self) {
+        if let Some(process) = self.process.as_mut() {
+            process.shutdown();
+        }
+        self.process = None;
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn resize_pty(&self, cols: u16, rows: u16) {
-        if cols == 0 || rows == 0 {
-            return;
+        if let Some(process) = self.process.as_ref() {
+            let _ = process.resize(cols, rows);
         }
-        // Call synchronously: shell must get SIGWINCH immediately after grid resize,
-        // otherwise cursor positions diverge (fish/zsh redraw prompt at wrong row).
-        if let Ok(master) = self.master_pty.lock() {
-            let _ = master.resize(PtySize {
-                rows,
-                cols,
-                pixel_width: 0,
-                pixel_height: 0,
-            });
-        }
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        self.shutdown();
     }
 }

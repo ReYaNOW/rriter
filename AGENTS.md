@@ -517,6 +517,10 @@ In draw/render/frame paths:
 * Decode editor files through `read_text_file` and preserve `TextFileFormat` when saving, so BOM/UTF-16 and LF/CRLF/CR are not silently rewritten.
 * Persist editor/application state through atomic sibling-temp replacement. Do not add direct state-file `fs::write` calls.
 * Keep Linux-only crates and code (`io-uring`, Wayland extensions, XDG-specific behavior) behind target gates; missing non-Linux tools must degrade to an explicit disabled/error state, never a restart loop.
+* Launch external tools through `platform::ManagedChild`, `platform::run_command_output`, or a feature wrapper built on those APIs. Do not add unmanaged long-lived `Command::spawn` calls.
+* Every long-lived child must belong to the Unix process group or Windows Job Object owned by RRiter. Shutdown must be bounded: graceful request first, then terminate the complete process tree after a timeout.
+* Resolve optional tools through `platform::resolve_executable`/`command_for_tool`, including Windows `PATHEXT` and configured path overrides. A missing tool is a stable `Missing`/disabled state and must not cause automatic restart or repeated log spam.
+* Keep application shortcuts, terminal Control, and word-navigation modifiers separate. Windows AltGr must remain text input; macOS Command is the application shortcut modifier and Option is word navigation/text input.
 
 Good:
 
@@ -749,9 +753,10 @@ Root:
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> build-time resource/platform setup.
-* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic writes, dialogs/Clipboard/Trash/openers, process helpers.
+* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic writes, dialogs/Clipboard/Trash/openers, modifier policy, and process API reexports.
+* `src/platform/process.rs` -> executable resolution, captured commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/windows.rs` -> Windows WTF-16 case-insensitive path identity plus UNC/extended-length Win32 path handling.
-* `src/platform/tests.rs` -> platform/path/encoding/atomic-write regression tests.
+* `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier regression tests.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -861,8 +866,9 @@ Syntax/languages:
 LSP:
 
 * `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
-* `src/lsp/lsp_process.rs`, `src/lsp/lsp_manager.rs` -> split process/supervisor code and manager facade.
-* `src/lsp/ruff_workspace.rs` -> background `ruff check` workspace diagnostics parser/collector.
+* `src/lsp/lsp_process.rs` -> managed server spawn, protocol shutdown, bounded restart supervisor, and missing-tool state.
+* `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, diagnostics/log state, and explicit retry.
+* `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
 * `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.
 * `src/lsp/protocol/*` -> protocol wire encoding/dispatch and value parser chunks.
@@ -882,7 +888,8 @@ Project tree/files:
 
 Terminal:
 
-* `src/app/terminal.rs` -> PTY spawn, grid, input/output, dirty redraw.
+* `src/app/terminal.rs` -> terminal grid facade, input/output access, resize, dirty redraw, and shutdown ownership.
+* `src/app/terminal_process.rs` -> platform shell selection, PTY spawn, batched reader, process-tree ownership, and bounded terminal shutdown.
 * `src/render_view/terminal_ui.rs` -> terminal visuals only.
 
 Assets:

@@ -333,24 +333,39 @@ fn autocomplete_module_source_path_in_root(root: &std::path::Path, rel: &str) ->
 }
 
 fn autocomplete_venv_module_source_path(root: &std::path::Path, rel: &str) -> Option<PathBuf> {
-    let lib = root.join(".venv/lib");
-    let entries = std::fs::read_dir(lib).ok()?;
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        if !name.to_string_lossy().starts_with("python") {
+    let venv = root.join(".venv");
+    let windows_site_packages = venv.join("Lib").join("site-packages");
+    if let Some(path) = autocomplete_module_source_path_in_root(&windows_site_packages, rel) {
+        return Some(path);
+    }
+
+    for lib_name in ["lib", "lib64"] {
+        let Ok(entries) = std::fs::read_dir(venv.join(lib_name)) else {
             continue;
-        }
-        let site_packages = entry.path().join("site-packages");
-        if let Some(path) = autocomplete_module_source_path_in_root(&site_packages, rel) {
-            return Some(path);
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            if !name.to_string_lossy().starts_with("python") {
+                continue;
+            }
+            let site_packages = entry.path().join("site-packages");
+            if let Some(path) = autocomplete_module_source_path_in_root(&site_packages, rel) {
+                return Some(path);
+            }
         }
     }
     None
 }
 
 fn autocomplete_ty_typeshed_source_path(rel: &str) -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")?;
-    let typeshed = PathBuf::from(home).join(".cache/ty/vendored/typeshed");
+    autocomplete_ty_typeshed_source_path_in_cache(&crate::platform::user_cache_root(), rel)
+}
+
+fn autocomplete_ty_typeshed_source_path_in_cache(
+    cache_root: &std::path::Path,
+    rel: &str,
+) -> Option<PathBuf> {
+    let typeshed = cache_root.join("ty").join("vendored").join("typeshed");
     let entries = std::fs::read_dir(typeshed).ok()?;
     for entry in entries.flatten() {
         let stdlib = entry.path().join("stdlib");
@@ -1058,4 +1073,60 @@ fn infer_python_member_owner(
         }
     }
     best
+}
+
+#[cfg(test)]
+mod cross_platform_source_path_tests {
+    use super::*;
+    use std::fs;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    fn temp_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "rriter-autocomplete-{label}-{}-{}",
+            std::process::id(),
+            TEST_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    }
+
+    #[test]
+    fn resolves_windows_virtualenv_site_packages_layout() {
+        let root = temp_root("windows-venv");
+        let source = root
+            .join(".venv")
+            .join("Lib")
+            .join("site-packages")
+            .join("demo")
+            .join("module.py");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "VALUE = 1\n").unwrap();
+
+        assert_eq!(
+            autocomplete_venv_module_source_path(&root, "demo/module"),
+            Some(source)
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_ty_typeshed_under_platform_cache_root() {
+        let cache = temp_root("ty-cache");
+        let source = cache
+            .join("ty")
+            .join("vendored")
+            .join("typeshed")
+            .join("2026.1")
+            .join("stdlib")
+            .join("pathlib.pyi");
+        fs::create_dir_all(source.parent().unwrap()).unwrap();
+        fs::write(&source, "class Path: ...\n").unwrap();
+
+        assert_eq!(
+            autocomplete_ty_typeshed_source_path_in_cache(&cache, "pathlib"),
+            Some(source)
+        );
+        let _ = fs::remove_dir_all(cache);
+    }
 }

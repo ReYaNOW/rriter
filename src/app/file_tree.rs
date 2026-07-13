@@ -517,49 +517,51 @@ fn handle_file_tree_name_editor_input(
     editor: &mut Editor,
     physical_key: winit::keyboard::PhysicalKey,
     logical_text: Option<&str>,
-    ctrl: bool,
+    primary: bool,
+    word: bool,
     shift: bool,
-    alt: bool,
-    super_key: bool,
+    text_input_allowed: bool,
     paste_text: Option<String>,
 ) -> Option<String> {
     match physical_key {
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl && shift => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
+            if primary && shift =>
+        {
             editor.redo();
             None
         }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if ctrl => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if primary => {
             editor.undo();
             None
         }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY) if ctrl => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY) if primary => {
             editor.redo();
             None
         }
         winit::keyboard::PhysicalKey::Code(
             winit::keyboard::KeyCode::KeyA | winit::keyboard::KeyCode::KeyF,
-        ) if ctrl => {
+        ) if primary => {
             editor.select_all();
             None
         }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC) if ctrl => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC) if primary => {
             editor.get_selection()
         }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) if ctrl => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) if primary => {
             let copy_text = editor.get_selection();
             if copy_text.is_some() {
                 editor.delete_selection();
             }
             copy_text
         }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if ctrl => {
+        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if primary => {
             if let Some(text) = paste_text {
                 insert_file_tree_name_text(editor, &text);
             }
             None
         }
         winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
-            if ctrl {
+            if word {
                 editor.delete_word_backward();
             } else {
                 editor.backspace();
@@ -567,7 +569,7 @@ fn handle_file_tree_name_editor_input(
             None
         }
         winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) => {
-            if ctrl {
+            if word {
                 editor.delete_word_forward();
             } else {
                 editor.delete_forward();
@@ -575,7 +577,7 @@ fn handle_file_tree_name_editor_input(
             None
         }
         winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowLeft) => {
-            if ctrl {
+            if word {
                 editor.move_word_left(shift);
             } else {
                 editor.move_left(shift);
@@ -583,7 +585,7 @@ fn handle_file_tree_name_editor_input(
             None
         }
         winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) => {
-            if ctrl {
+            if word {
                 editor.move_word_right(shift);
             } else {
                 editor.move_right(shift);
@@ -598,7 +600,7 @@ fn handle_file_tree_name_editor_input(
             editor.move_end(shift);
             None
         }
-        _ if !ctrl && !alt && !super_key => {
+        _ if text_input_allowed => {
             if let Some(txt) = logical_text {
                 insert_file_tree_name_text(editor, txt);
             }
@@ -886,7 +888,7 @@ impl App {
             return;
         }
 
-        let ctrl = self.modifiers.control_key() || self.modifiers.super_key();
+        let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         if ctrl {
             if !path_set_remove(&mut self.ide_panel.file_tree_selection, &node.path) {
                 self.ide_panel.file_tree_selection.insert(node.path.clone());

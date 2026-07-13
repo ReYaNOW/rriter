@@ -22,6 +22,36 @@ fn compact_tab_highlight_cache(tab: &mut EditorTab) {
 }
 
 impl App {
+    pub(crate) fn terminal_working_directory(&self) -> Option<PathBuf> {
+        crate::app::terminal_process::select_terminal_working_directory(
+            self.file_path.as_deref(),
+            &self.ide_workspaces,
+        )
+        .filter(|path| path.is_dir())
+        .or_else(|| std::env::current_dir().ok())
+    }
+
+    pub(crate) fn add_terminal(&mut self) -> usize {
+        let cwd = self.terminal_working_directory();
+        let terminal = crate::app::terminal::Terminal::spawn(
+            self.window.clone(),
+            cwd.as_deref(),
+        );
+        self.ide_panel.terminals.push(terminal);
+        self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
+        self.ide_panel.active_terminal
+    }
+
+    pub(crate) fn shutdown_background_services(&mut self) {
+        for terminal in &mut self.ide_panel.terminals {
+            terminal.shutdown();
+        }
+        if let Some(lsp) = self.lsp.take() {
+            lsp.shutdown();
+        }
+        crate::app::api_mock::server::stop_api_mock_server();
+    }
+
     pub(crate) fn save_current_config(&self) {
         let config = crate::Config {
             window_width: self.window_width,
@@ -69,10 +99,7 @@ impl App {
         self.ide_panel.enforce_single_open_per_group();
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
-            self.ide_panel
-                .terminals
-                .push(crate::app::terminal::Terminal::spawn(self.window.clone()));
-            self.ide_panel.active_terminal = 0;
+            self.add_terminal();
             self.ide_panel.terminal_focused = true;
         }
 

@@ -7,13 +7,7 @@ pub fn api_mock_python_dir() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
-            })
-            .unwrap_or_default();
-        base.join("rriter").join("python")
+        crate::platform::data_dir().join("python-v1")
     }
 }
 
@@ -26,7 +20,7 @@ pub fn write_api_mock_worker() -> std::io::Result<PathBuf> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(&path, WORKER_SCRIPT.as_bytes())?;
+    crate::platform::atomic_write(&path, WORKER_SCRIPT.as_bytes())?;
     Ok(path)
 }
 

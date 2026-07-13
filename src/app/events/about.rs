@@ -77,6 +77,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 app.highlighter.spans.len(),
                 app.highlighter.is_complete,
             );
+            app.shutdown_background_services();
             event_loop.exit();
             return;
         }
@@ -470,11 +471,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
 
     if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Terminal) {
         let mut closed_terminals = Vec::new();
-        for (i, term) in app.ide_panel.terminals.iter().enumerate() {
-            if let Ok(mut child) = term.child.lock() {
-                if let Ok(Some(_)) = child.try_wait() {
-                    closed_terminals.push(i);
-                }
+        for (i, term) in app.ide_panel.terminals.iter_mut().enumerate() {
+            if term.is_closed() {
+                closed_terminals.push(i);
             }
         }
 
@@ -482,20 +481,14 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             app.ide_panel.terminals.remove(idx);
             needs_redraw = true;
             if app.ide_panel.terminals.is_empty() {
-                app.ide_panel
-                    .terminals
-                    .push(crate::app::terminal::Terminal::spawn(app.window.clone()));
-                app.ide_panel.active_terminal = 0;
+                app.add_terminal();
             } else if app.ide_panel.active_terminal >= app.ide_panel.terminals.len() {
                 app.ide_panel.active_terminal = app.ide_panel.terminals.len().saturating_sub(1);
             }
         }
 
         if app.ide_panel.terminals.is_empty() {
-            app.ide_panel
-                .terminals
-                .push(crate::app::terminal::Terminal::spawn(app.window.clone()));
-            app.ide_panel.active_terminal = 0;
+            app.add_terminal();
             app.ide_panel.terminal_focused = true;
         }
         let active = app.ide_panel.active_terminal;

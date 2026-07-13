@@ -14,6 +14,7 @@ pub mod project_search;
 mod project_search_app;
 mod python_completion;
 pub mod terminal;
+mod terminal_process;
 pub mod ui_handlers;
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_BYTES};

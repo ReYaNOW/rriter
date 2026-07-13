@@ -10,6 +10,11 @@ use winit::window::WindowAttributes;
 
 #[cfg(windows)]
 mod windows;
+mod process;
+pub use process::{
+    ManagedChild, ProcessTree, command_for, command_for_tool, resolve_executable,
+    resolve_tool_executable, run_command_output,
+};
 
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";
@@ -40,6 +45,118 @@ pub const CURRENT_PLATFORM: PlatformKind = if cfg!(target_os = "linux") {
     PlatformKind::Other
 };
 
+pub fn primary_shortcut_modifier(modifiers: winit::keyboard::ModifiersState) -> bool {
+    primary_shortcut_for_platform(
+        CURRENT_PLATFORM,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+        modifiers.super_key(),
+    )
+}
+
+pub fn word_navigation_modifier(modifiers: winit::keyboard::ModifiersState) -> bool {
+    word_modifier_for_platform(
+        CURRENT_PLATFORM,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+    )
+}
+
+pub fn terminal_control_modifier(modifiers: winit::keyboard::ModifiersState) -> bool {
+    terminal_modifiers_for_platform(
+        CURRENT_PLATFORM,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+    )
+    .0
+}
+
+pub fn terminal_alt_modifier(modifiers: winit::keyboard::ModifiersState) -> bool {
+    terminal_modifiers_for_platform(
+        CURRENT_PLATFORM,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+    )
+    .1
+}
+
+pub fn text_input_modifiers_allowed(modifiers: winit::keyboard::ModifiersState) -> bool {
+    text_input_modifiers_allowed_for_platform(
+        CURRENT_PLATFORM,
+        modifiers.control_key(),
+        modifiers.alt_key(),
+        modifiers.super_key(),
+    )
+}
+
+pub(crate) fn primary_modifier_for_platform(
+    platform: PlatformKind,
+    control: bool,
+    super_key: bool,
+) -> bool {
+    if platform == PlatformKind::Macos {
+        super_key
+    } else {
+        control
+    }
+}
+
+pub(crate) fn primary_shortcut_for_platform(
+    platform: PlatformKind,
+    control: bool,
+    alt: bool,
+    super_key: bool,
+) -> bool {
+    // Windows reports AltGr as Ctrl+Alt. Treating that as the application
+    // shortcut modifier would consume characters on many keyboard layouts.
+    if platform == PlatformKind::Windows && control && alt {
+        return false;
+    }
+    primary_modifier_for_platform(platform, control, super_key)
+}
+
+pub(crate) fn word_modifier_for_platform(
+    platform: PlatformKind,
+    control: bool,
+    alt: bool,
+) -> bool {
+    match platform {
+        PlatformKind::Macos => alt,
+        PlatformKind::Windows => control && !alt,
+        PlatformKind::Linux | PlatformKind::Other => control,
+    }
+}
+
+pub(crate) fn terminal_modifiers_for_platform(
+    platform: PlatformKind,
+    control: bool,
+    alt: bool,
+) -> (bool, bool) {
+    // Windows exposes AltGr as Ctrl+Alt. ConPTY must receive the composed
+    // character, not Ctrl-letter plus an ESC prefix.
+    if platform == PlatformKind::Windows && control && alt {
+        (false, false)
+    } else {
+        (control, alt)
+    }
+}
+
+pub(crate) fn text_input_modifiers_allowed_for_platform(
+    platform: PlatformKind,
+    control: bool,
+    alt: bool,
+    super_key: bool,
+) -> bool {
+    match platform {
+        // AltGr is reported as Ctrl+Alt by Windows. It must remain available
+        // for text input instead of being consumed as an application shortcut.
+        PlatformKind::Windows => (!control && !alt && !super_key) || (control && alt && !super_key),
+        // Option participates in normal text/dead-key input on macOS.
+        PlatformKind::Macos => !control && !super_key,
+        PlatformKind::Linux | PlatformKind::Other => !control && !alt && !super_key,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppPaths {
     pub config: PathBuf,
@@ -69,6 +186,35 @@ pub fn cache_dir() -> PathBuf {
 
 pub fn state_dir() -> PathBuf {
     app_paths().state
+}
+
+/// Returns the platform's shared user cache root rather than RRiter's own
+/// cache directory. Third-party tools such as `ty` keep their caches here.
+pub fn user_cache_root() -> PathBuf {
+    user_cache_root_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
+}
+
+fn user_cache_root_with(
+    platform: PlatformKind,
+    mut env_value: impl FnMut(&str) -> Option<OsString>,
+) -> PathBuf {
+    let home = env_value("HOME")
+        .or_else(|| env_value("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    match platform {
+        PlatformKind::Windows => env_value("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| home.join("AppData").join("Local")),
+        PlatformKind::Macos => home.join("Library").join("Caches"),
+        PlatformKind::Linux | PlatformKind::Other => env_value("XDG_CACHE_HOME")
+            .map(PathBuf::from)
+            .filter(|path| !path.as_os_str().is_empty())
+            .unwrap_or_else(|| home.join(".cache")),
+    }
 }
 
 fn app_paths_with(
@@ -387,7 +533,7 @@ fn normalize_windows_path(raw: &str) -> String {
     out
 }
 
-fn windows_path_is_absolute(raw: &str) -> bool {
+pub(crate) fn windows_path_is_absolute(raw: &str) -> bool {
     let raw = raw.as_bytes();
     raw.starts_with(b"\\\\")
         || raw.starts_with(b"//")
@@ -1238,62 +1384,6 @@ pub fn open_url(url: &str) -> io::Result<()> {
     ))
 }
 
-#[cfg(windows)]
-#[allow(dead_code)]
-pub fn configure_background_command(command: &mut Command) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    command.creation_flags(CREATE_NO_WINDOW);
-}
-
-#[cfg(not(windows))]
-#[allow(dead_code)]
-pub fn configure_background_command(_command: &mut Command) {}
-
-#[allow(dead_code)]
-pub fn resolve_executable(program: &OsStr) -> Option<PathBuf> {
-    let candidate = Path::new(program);
-    if candidate.components().count() > 1 || candidate.is_absolute() {
-        return candidate.is_file().then(|| candidate.to_path_buf());
-    }
-    let path = std::env::var_os("PATH")?;
-    let extensions = executable_extensions();
-    for directory in std::env::split_paths(&path) {
-        if CURRENT_PLATFORM == PlatformKind::Windows && candidate.extension().is_none() {
-            for extension in &extensions {
-                let mut file_name = candidate.as_os_str().to_os_string();
-                file_name.push(extension);
-                let file = directory.join(file_name);
-                if file.is_file() {
-                    return Some(file);
-                }
-            }
-        }
-        let file = directory.join(candidate);
-        if file.is_file() {
-            return Some(file);
-        }
-    }
-    None
-}
-
-#[allow(dead_code)]
-fn executable_extensions() -> Vec<OsString> {
-    if CURRENT_PLATFORM != PlatformKind::Windows {
-        return vec![OsString::new()];
-    }
-    std::env::var_os("PATHEXT")
-        .map(|value| {
-            value
-                .to_string_lossy()
-                .split(';')
-                .filter(|extension| !extension.is_empty())
-                .map(OsString::from)
-                .collect()
-        })
-        .filter(|extensions: &Vec<OsString>| !extensions.is_empty())
-        .unwrap_or_else(|| [".COM", ".EXE", ".BAT", ".CMD"].map(OsString::from).to_vec())
-}
 
 pub fn copy_symlink(source: &Path, destination: &Path) -> io::Result<()> {
     let target = fs::read_link(source)?;

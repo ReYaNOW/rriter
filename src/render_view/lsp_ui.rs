@@ -256,6 +256,7 @@ impl Renderer {
                     crate::lsp::LspServerStatus::Running => ([0.28, 0.85, 0.45, 1.0], "Работает"),
                     crate::lsp::LspServerStatus::Starting => ([0.85, 0.75, 0.25, 1.0], "Запуск..."),
                     crate::lsp::LspServerStatus::Crashed => ([0.90, 0.30, 0.30, 1.0], "Упал"),
+                    crate::lsp::LspServerStatus::Missing => ([0.95, 0.45, 0.30, 1.0], "Не найден"),
                     crate::lsp::LspServerStatus::Disabled => ([0.45, 0.45, 0.45, 1.0], "Отключён"),
                 };
                 self.push_rounded_rect(
@@ -290,10 +291,10 @@ impl Renderer {
                 let btn_pad = 10.0 * s;
 
                 let label_restart = "Перезапуск";
-                let label_toggle = if matches!(info.status, crate::lsp::LspServerStatus::Disabled) {
-                    "Включить"
-                } else {
-                    "Отключить"
+                let label_toggle = match info.status {
+                    crate::lsp::LspServerStatus::Disabled => "Включить",
+                    crate::lsp::LspServerStatus::Missing => "Повторить",
+                    _ => "Отключить",
                 };
                 let label_stop = "Остановить";
                 let label_logs = if is_expanded {
@@ -339,7 +340,9 @@ impl Renderer {
                 );
                 let is_stopped = matches!(
                     info.status,
-                    crate::lsp::LspServerStatus::Disabled | crate::lsp::LspServerStatus::Crashed
+                    crate::lsp::LspServerStatus::Disabled
+                        | crate::lsp::LspServerStatus::Missing
+                        | crate::lsp::LspServerStatus::Crashed
                 );
                 let hover_stop = if !is_stopped {
                     ui_registry.register_rect(

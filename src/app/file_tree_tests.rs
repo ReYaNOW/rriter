@@ -40,7 +40,7 @@ fn file_tree_name_input_edit_keys_cover_undo_redo_and_copy() {
         false,
         false,
         false,
-        false,
+        true,
         None,
     );
     handle_file_tree_name_editor_input(
@@ -50,7 +50,7 @@ fn file_tree_name_input_edit_keys_cover_undo_redo_and_copy() {
         false,
         false,
         false,
-        false,
+        true,
         None,
     );
     assert_eq!(editor.get_full_text(), "ab");
@@ -94,8 +94,8 @@ fn file_tree_name_input_edit_keys_cover_undo_redo_and_copy() {
         winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ),
         None,
         true,
-        true,
         false,
+        true,
         false,
         None,
     );

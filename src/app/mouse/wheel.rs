@@ -476,27 +476,27 @@ impl App {
                         drop(grid);
 
                         if is_alt {
-                            if let Ok(mut w) = term.writer.lock() {
-                                if mouse_tracking {
-                                    let btn = if dy < 0.0 { 64 } else { 65 };
-                                    let seq = format!("\x1b[<{};1;1M", btn);
-                                    let steps = (dy.abs() / 20.0).max(1.0) as usize;
-                                    for _ in 0..steps.min(3) {
-                                        let _ = w.write_all(seq.as_bytes());
-                                    }
-                                } else {
-                                    let seq = if dy < 0.0 {
-                                        if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
-                                    } else {
-                                        if app_cursor { b"\x1BOB" } else { b"\x1B[B" }
-                                    };
-                                    let steps = (dy.abs() / 20.0).max(1.0) as usize;
-                                    for _ in 0..steps.min(3) {
-                                        let _ = w.write_all(seq);
-                                    }
+                            let steps = (dy.abs() / 20.0).max(1.0) as usize;
+                            let mut input = Vec::new();
+                            if mouse_tracking {
+                                let button = if dy < 0.0 { 64 } else { 65 };
+                                let sequence = format!("\x1b[<{button};1;1M");
+                                for _ in 0..steps.min(3) {
+                                    input.extend_from_slice(sequence.as_bytes());
                                 }
-                                let _ = w.flush();
+                            } else {
+                                let sequence = if dy < 0.0 {
+                                    if app_cursor { b"\x1BOA" } else { b"\x1B[A" }
+                                } else if app_cursor {
+                                    b"\x1BOB"
+                                } else {
+                                    b"\x1B[B"
+                                };
+                                for _ in 0..steps.min(3) {
+                                    input.extend_from_slice(sequence);
+                                }
                             }
+                            let _ = term.write_input(&input);
                             return;
                         }
 
