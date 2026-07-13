@@ -5,15 +5,54 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::LazyLock;
 use std::time::Duration;
 use winit::window::WindowAttributes;
 
+#[cfg(target_os = "macos")]
+mod macos;
 #[cfg(windows)]
 mod windows;
 mod process;
+mod integration;
+mod elevated_save;
+pub use integration::{
+    SystemProxyConfig, ToolKind, ToolPaths, app_paths, configure_tool_paths,
+    configured_tool_path, current_process_memory_kb, native_root_certificates_der,
+    proxy_routing_is_configured, refresh_tool_resolutions, resolve_tool_kind,
+    system_proxy_config, user_cache_root,
+};
+#[cfg(test)]
+pub(crate) type AppPaths = integration::AppPaths;
+
+#[cfg_attr(test, allow(dead_code))]
+pub fn config_dir() -> PathBuf {
+    integration::config_dir()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+pub fn data_dir() -> PathBuf {
+    integration::data_dir()
+}
+
+#[allow(dead_code)]
+pub fn cache_dir() -> PathBuf {
+    integration::cache_dir()
+}
+
+#[cfg_attr(test, allow(dead_code))]
+pub fn state_dir() -> PathBuf {
+    integration::state_dir()
+}
+pub(crate) use integration::configured_tool_path_for_env;
+#[cfg(any(windows, test))]
+pub(crate) use integration::parse_windows_proxy_config;
+#[cfg(test)]
+pub(crate) use integration::{
+    app_paths_with, parse_macos_proxy_config, parse_pem_certificates, user_cache_root_with,
+};
+pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
 pub use process::{
     ManagedChild, ProcessTree, command_for_tool, resolve_executable, resolve_tool_executable,
     run_command_output, run_command_output_cancelable,
@@ -24,6 +63,7 @@ pub use process::command_for;
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";
 const DPAPI_RECORD_PREFIX: &[u8] = b"rriter-dpapi-v1:";
+const KEYCHAIN_RECORD_PREFIX: &[u8] = b"rriter-keychain-v1:";
 const CLIPBOARD_RETRY_COUNT: usize = 5;
 const CLIPBOARD_RETRY_DELAY: Duration = Duration::from_millis(8);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -40,6 +80,7 @@ pub enum PlatformKind {
     Macos,
     Other,
 }
+
 
 pub const CURRENT_PLATFORM: PlatformKind = if cfg!(target_os = "linux") {
     PlatformKind::Linux
@@ -163,265 +204,14 @@ pub(crate) fn text_input_modifiers_allowed_for_platform(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppPaths {
-    pub config: PathBuf,
-    pub data: PathBuf,
-    pub cache: PathBuf,
-    pub state: PathBuf,
-}
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub struct SystemProxyConfig {
-    pub all: Option<String>,
-    pub http: Option<String>,
-    pub https: Option<String>,
-    pub bypass: Option<String>,
-}
-
-impl SystemProxyConfig {
-    #[cfg(any(windows, test))]
-    pub fn is_empty(&self) -> bool {
-        self.all.is_none() && self.http.is_none() && self.https.is_none()
-    }
-}
-
-pub fn app_paths() -> AppPaths {
-    app_paths_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
-}
-
-#[cfg_attr(test, allow(dead_code))]
-pub fn config_dir() -> PathBuf {
-    app_paths().config
-}
-
-#[allow(dead_code)]
-pub fn data_dir() -> PathBuf {
-    app_paths().data
-}
-
-#[allow(dead_code)]
-pub fn cache_dir() -> PathBuf {
-    app_paths().cache
-}
-
-pub fn state_dir() -> PathBuf {
-    app_paths().state
-}
-
-/// Returns the platform's shared user cache root rather than RRiter's own
-/// cache directory. Third-party tools such as `ty` keep their caches here.
-pub fn user_cache_root() -> PathBuf {
-    user_cache_root_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
-}
-
-fn user_cache_root_with(
-    platform: PlatformKind,
-    mut env_value: impl FnMut(&str) -> Option<OsString>,
-) -> PathBuf {
-    let home = env_value("HOME")
-        .or_else(|| env_value("USERPROFILE"))
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    match platform {
-        PlatformKind::Windows => env_value("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| home.join("AppData").join("Local")),
-        PlatformKind::Macos => home.join("Library").join("Caches"),
-        PlatformKind::Linux | PlatformKind::Other => env_value("XDG_CACHE_HOME")
-            .map(PathBuf::from)
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| home.join(".cache")),
-    }
-}
-
-fn explicit_proxy_environment_configured() -> bool {
-    [
-        "ALL_PROXY",
-        "all_proxy",
-        "HTTPS_PROXY",
-        "https_proxy",
-        "HTTP_PROXY",
-        "http_proxy",
-    ]
-    .iter()
-    .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
-}
-
-pub fn system_proxy_config() -> Option<SystemProxyConfig> {
-    // Reqwest already honors explicit proxy environment variables. Native
-    // Windows settings are only a fallback so a user override always wins.
-    if explicit_proxy_environment_configured() {
-        return None;
-    }
-
+pub fn initialize_gui_application() {
     #[cfg(windows)]
-    {
-        let (proxy, bypass) = windows::raw_system_proxy_config()?;
-        return parse_windows_proxy_config(&proxy, bypass.as_deref());
-    }
-    #[cfg(not(windows))]
-    {
-        None
-    }
+    windows::initialize_gui_application();
 }
 
-pub fn proxy_routing_is_configured() -> bool {
-    explicit_proxy_environment_configured() || system_proxy_config().is_some()
-}
-
-#[cfg(any(windows, test))]
-pub(crate) fn parse_windows_proxy_config(
-    proxy: &str,
-    bypass: Option<&str>,
-) -> Option<SystemProxyConfig> {
-    fn normalized_proxy_url(value: &str) -> Option<String> {
-        let value = value.trim();
-        if value.is_empty() {
-            return None;
-        }
-        if value.contains("://") {
-            Some(value.to_string())
-        } else {
-            Some(format!("http://{value}"))
-        }
-    }
-
-    let mut config = SystemProxyConfig::default();
-    let mut tokens = Vec::new();
-    for segment in proxy.split(';') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-        if segment.matches('=').count() > 1 || (segment.contains('=') && segment.contains(' ')) {
-            tokens.extend(segment.split_whitespace().filter(|part| !part.is_empty()));
-        } else {
-            tokens.push(segment);
-        }
-    }
-    for token in tokens {
-        if let Some((kind, value)) = token.split_once('=') {
-            let value = normalized_proxy_url(value);
-            match kind.trim().to_ascii_lowercase().as_str() {
-                "http" => config.http = value,
-                "https" => config.https = value,
-                "proxy" | "all" | "socks" => config.all = value,
-                _ => {}
-            }
-        } else if config.all.is_none() {
-            config.all = normalized_proxy_url(token);
-        }
-    }
-    config.bypass = bypass
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.replace(';', ","));
-    (!config.is_empty()).then_some(config)
-}
-
-static NATIVE_ROOT_CERTIFICATES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
-    #[cfg(windows)]
-    {
-        windows::native_root_certificates_der().unwrap_or_default()
-    }
-    #[cfg(not(windows))]
-    {
-        Vec::new()
-    }
-});
-
-/// Additional certificates from the native OS trust store. Reqwest's bundled
-/// WebPKI roots stay enabled; these roots add corporate and user-installed CAs
-/// on Windows without replacing the portable baseline.
-pub fn native_root_certificates_der() -> &'static [Vec<u8>] {
-    NATIVE_ROOT_CERTIFICATES.as_slice()
-}
-
-pub fn current_process_memory_kb() -> Option<usize> {
-    #[cfg(windows)]
-    {
-        return windows::current_process_memory_kb();
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let status = std::fs::read_to_string("/proc/self/status").ok()?;
-        return status.lines().find_map(|line| {
-            let rest = line.strip_prefix("VmRSS:")?;
-            rest.split_whitespace().next()?.parse::<usize>().ok()
-        });
-    }
-    #[cfg(not(any(windows, target_os = "linux")))]
-    {
-        None
-    }
-}
-
-fn app_paths_with(
-    platform: PlatformKind,
-    mut env_value: impl FnMut(&str) -> Option<OsString>,
-) -> AppPaths {
-    let home = env_value("HOME")
-        .or_else(|| env_value("USERPROFILE"))
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| PathBuf::from("."));
-
-    match platform {
-        PlatformKind::Windows => {
-            let roaming = env_value("APPDATA")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join("AppData").join("Roaming"));
-            let local = env_value("LOCALAPPDATA")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join("AppData").join("Local"));
-            let local_app = local.join(APP_DIR_NAME);
-            AppPaths {
-                config: roaming.join(APP_DIR_NAME),
-                data: local_app.clone(),
-                cache: local_app.join("cache"),
-                state: local_app.join("state"),
-            }
-        }
-        PlatformKind::Macos => {
-            let app_support = home.join("Library").join("Application Support");
-            AppPaths {
-                config: app_support.join(APP_DIR_NAME),
-                data: app_support.join(APP_DIR_NAME),
-                cache: home.join("Library").join("Caches").join(APP_DIR_NAME),
-                state: app_support.join(APP_DIR_NAME).join("state"),
-            }
-        }
-        PlatformKind::Linux | PlatformKind::Other => {
-            let config_root = env_value("XDG_CONFIG_HOME")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join(".config"));
-            let data_root = env_value("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join(".local").join("share"));
-            let cache_root = env_value("XDG_CACHE_HOME")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join(".cache"));
-            let state_root = env_value("XDG_STATE_HOME")
-                .map(PathBuf::from)
-                .filter(|path| !path.as_os_str().is_empty())
-                .unwrap_or_else(|| home.join(".local").join("state"));
-            AppPaths {
-                config: config_root.join(APP_DIR_NAME),
-                data: data_root.join(APP_DIR_NAME),
-                cache: cache_root.join(APP_DIR_NAME),
-                state: state_root.join(APP_DIR_NAME),
-            }
-        }
-    }
+pub const fn native_dialog_requires_main_thread() -> bool {
+    cfg!(target_os = "macos")
 }
 
 pub fn apply_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
@@ -812,7 +602,12 @@ pub fn seal_user_secret(bytes: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
         record.extend_from_slice(hex_encode(&protected).as_bytes());
         return Ok(record);
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        macos::store_keychain_secret(purpose, bytes)?;
+        return Ok(KEYCHAIN_RECORD_PREFIX.to_vec());
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = purpose;
         Ok(bytes.to_vec())
@@ -820,9 +615,22 @@ pub fn seal_user_secret(bytes: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
 }
 
 pub fn open_user_secret(record: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
+    if record == KEYCHAIN_RECORD_PREFIX {
+        #[cfg(target_os = "macos")]
+        {
+            return macos::load_keychain_secret(purpose);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "macOS Keychain record cannot be opened on this platform",
+            ));
+        }
+    }
     let Some(encoded) = record.strip_prefix(DPAPI_RECORD_PREFIX) else {
-        // Migration path for auth files created before DPAPI support. The next
-        // successful save replaces this plaintext record atomically.
+        // Migration path for auth files created before native secure storage.
+        // The next successful save replaces this plaintext record atomically.
         return Ok(record.to_vec());
     };
     let encoded = std::str::from_utf8(encoded)
@@ -1226,44 +1034,6 @@ fn sync_parent_directory(parent: Option<&Path>) {
 #[cfg(not(unix))]
 fn sync_parent_directory(_parent: Option<&Path>) {}
 
-pub fn write_text_file_elevated(
-    path: &Path,
-    text: &str,
-    format: TextFileFormat,
-) -> io::Result<()> {
-    let bytes = encode_text(text, format);
-    #[cfg(target_os = "linux")]
-    {
-        let mut command = Command::new("pkexec");
-        command
-            .arg("tee")
-            .arg(path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let mut child = command.spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&bytes)?;
-        }
-        let status = child.wait()?;
-        if status.success() {
-            return Ok(());
-        }
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "elevated file replacement was rejected",
-        ));
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = bytes;
-        Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "elevated file replacement is not available on this platform yet",
-        ))
-    }
-}
-
 pub fn validate_child_name(name: &str) -> Result<(), &'static str> {
     validate_child_name_for_platform(name, CURRENT_PLATFORM)
 }
@@ -1539,13 +1309,7 @@ pub fn reveal_path(path: &Path) -> io::Result<Child> {
     }
     #[cfg(target_os = "macos")]
     {
-        let mut command = Command::new("open");
-        if path.is_dir() {
-            command.arg(path);
-        } else {
-            command.arg("-R").arg(path);
-        }
-        return command.spawn();
+        return macos::reveal_path(path);
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -1607,10 +1371,7 @@ pub fn open_url(url: &str) -> io::Result<()> {
     }
     #[cfg(target_os = "macos")]
     {
-        return Command::new("open")
-            .arg(parsed.as_str())
-            .spawn()
-            .map(|_| ());
+        return macos::open_url(parsed.as_str());
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {

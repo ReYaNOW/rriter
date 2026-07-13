@@ -115,6 +115,8 @@ fn test_app() -> Option<App> {
         settings_ignore_scroll_x: 0.0,
         is_dragging_settings_ignore: false,
         open_folder_rx: None,
+        tool_paths: crate::platform::ToolPaths::default(),
+        settings_tool_picker_rx: None,
         show_search: false,
         search_anim_y: -120.0,
         search_editor: Editor::new(256),

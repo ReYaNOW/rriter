@@ -66,6 +66,7 @@ impl App {
             ide_ignore_patterns: self.ide_ignore_patterns.clone(),
             enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                 .load(std::sync::atomic::Ordering::Relaxed),
+            tool_paths: self.tool_paths.clone(),
         };
         crate::save_config(&config);
     }

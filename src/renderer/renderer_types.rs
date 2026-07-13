@@ -70,6 +70,31 @@ fn center_alpha_bbox_y(data: &mut [u8], width: usize, height: usize) {
     }
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GraphicsDiagnostics {
+    pub vendor: String,
+    pub renderer: String,
+    pub version: String,
+    pub shading_language: String,
+    pub requested_context: String,
+    pub scale_factor: f32,
+    pub is_gles: bool,
+}
+
+impl GraphicsDiagnostics {
+    pub fn report(&self) -> String {
+        format!(
+            "Context: {}\nOpenGL: {}\nGLSL: {}\nGPU: {} / {}\nScale factor: {:.2}",
+            self.requested_context,
+            self.version,
+            self.shading_language,
+            self.vendor,
+            self.renderer,
+            self.scale_factor,
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Theme {
     pub bg: [f32; 4],
@@ -226,6 +251,7 @@ pub struct IconAtlasEntry {
 
 pub struct Renderer {
     pub gl: glow::Context,
+    pub graphics_diagnostics: GraphicsDiagnostics,
     pub program: glow::Program,
     pub proj_loc: Option<glow::UniformLocation>,
     pub vao: glow::VertexArray,

@@ -3,6 +3,7 @@ use crate::app::{
     cursor_after_python_member_dot, cursor_inside_python_call_parens,
 };
 use crate::editor::Editor;
+use std::borrow::Cow;
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -198,7 +199,151 @@ fn terminal_function_key(code: u8, ss3_final: u8, shift: bool, alt: bool, ctrl: 
     out
 }
 
+fn single_line_ime_text(text: &str) -> Cow<'_, str> {
+    if text.contains(['\n', '\r']) {
+        Cow::Owned(text.replace(['\n', '\r'], ""))
+    } else {
+        Cow::Borrowed(text)
+    }
+}
+
 impl App {
+    pub fn handle_main_ime_commit(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let editor_was_focused = self.editor_has_input_focus();
+        let consumed = self.handle_main_ime_commit_inner(text);
+        if consumed {
+            self.last_action = Instant::now();
+            self.last_blink_state = true;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        }
+        self.autosave_after_editor_focus_change(editor_was_focused);
+    }
+
+    fn handle_main_ime_commit_inner(&mut self, text: &str) -> bool {
+        if self.handle_file_tree_modal_ime_commit(text)
+            || self.dialog_window.is_some()
+            || self.ide_panel.project_search.help_open
+        {
+            return true;
+        }
+
+        if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() {
+                self.settings_ignore_editor.insert_str(&clean);
+                self.settings_ignore_editor.sync_edits.clear();
+            }
+            return true;
+        }
+        if self.show_settings {
+            return true;
+        }
+
+        if let Some(field) = self.ide_panel.project_search.focused {
+            if field == crate::app::project_search::ProjectSearchField::Filter
+                && !self.ide_panel.project_search.filter_enabled()
+            {
+                self.ide_panel.project_search.focused = None;
+                return true;
+            }
+            let clean = if field == crate::app::project_search::ProjectSearchField::Query {
+                Cow::Borrowed(text)
+            } else {
+                single_line_ime_text(text)
+            };
+            if !clean.is_empty() {
+                self.project_search_editor_mut(field).insert_str(&clean);
+                self.project_search_editor_mut(field).sync_edits.clear();
+                if field == crate::app::project_search::ProjectSearchField::Filter {
+                    self.ide_panel.project_search.apply_live_filter();
+                } else {
+                    self.ide_panel.project_search.dirty = true;
+                }
+                if matches!(
+                    field,
+                    crate::app::project_search::ProjectSearchField::Include
+                        | crate::app::project_search::ProjectSearchField::Exclude
+                ) {
+                    crate::save_panel_state(&self.ide_panel);
+                }
+                if field == crate::app::project_search::ProjectSearchField::Query {
+                    self.sync_project_search_query_scroll(true);
+                }
+            }
+            return true;
+        }
+
+        if self.ide_panel.lsp_log_filter_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() {
+                self.ide_panel.lsp_log_filter_editor.insert_str(&clean);
+                self.ide_panel.lsp_log_filter_editor.sync_edits.clear();
+                self.ide_panel.lsp_log_filter_dirty = true;
+            }
+            return true;
+        }
+
+        if self.ide_panel.git.message_focused
+            && self.ide_panel.is_open(crate::app::PanelId::Git)
+        {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() {
+                self.ide_panel.git.message_editor.insert_str(&clean);
+                self.ide_panel.git.message_editor.sync_edits.clear();
+            }
+            return true;
+        }
+
+        if self.handle_api_client_ime_commit(text) {
+            return true;
+        }
+        if self.ide_panel.lsp_logs_focused.is_some() {
+            return true;
+        }
+
+        if self.ide_panel.term_show_search && self.ide_panel.term_search_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() {
+                self.ide_panel.term_search_editor.insert_str(&clean);
+                self.ide_panel.term_search_editor.sync_edits.clear();
+                self.update_terminal_search();
+                self.jump_to_terminal_search_result();
+            }
+            return true;
+        }
+        if self.show_search && self.search_focused {
+            let clean = single_line_ime_text(text);
+            if !clean.is_empty() {
+                self.search_editor.insert_str(&clean);
+                self.search_editor.sync_edits.clear();
+                self.update_search();
+                self.jump_to_search_result();
+            }
+            return true;
+        }
+        if self.is_ide_mode
+            && self.ide_panel.terminal_focused
+            && self.ide_panel.is_open(crate::app::PanelId::Terminal)
+        {
+            if let Some(terminal) = self
+                .ide_panel
+                .terminals
+                .get(self.ide_panel.active_terminal)
+            {
+                let _ = terminal.write_input(text.as_bytes());
+            }
+            return true;
+        }
+
+        self.handle_editor_ime_commit(text);
+        true
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
@@ -971,6 +1116,13 @@ mod tests {
             super_key,
             app_cursor_keys,
         )
+    }
+
+    #[test]
+    fn ime_single_line_text_preserves_unicode_and_removes_line_breaks() {
+        assert_eq!(single_line_ime_text("Привет 🌍"), "Привет 🌍");
+        assert_eq!(single_line_ime_text("one\r\ntwo\nthree"), "onetwothree");
+        assert_eq!(single_line_ime_text("\r\n"), "");
     }
 
     #[test]

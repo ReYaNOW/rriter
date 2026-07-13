@@ -110,8 +110,81 @@ impl App {
         self.start_file_watcher();
     }
 
+    pub(crate) fn apply_tool_path_selection(
+        &mut self,
+        kind: crate::platform::ToolKind,
+        path: Option<std::path::PathBuf>,
+    ) {
+        self.tool_paths.set(kind, path);
+        crate::platform::configure_tool_paths(self.tool_paths.clone());
+        self.save_current_config();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn trigger_settings_tool_picker(&mut self, kind: crate::platform::ToolKind) {
+        let title = format!("Выбрать {}", kind.label());
+        if crate::platform::native_dialog_requires_main_thread() {
+            let path = crate::platform::pick_file(&title);
+            if path.is_some() {
+                self.apply_tool_path_selection(kind, path);
+            }
+            return;
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.settings_tool_picker_rx = Some(rx);
+        std::thread::spawn(move || {
+            let path = crate::platform::pick_file(&title);
+            let _ = tx.send((kind, path));
+        });
+    }
+
+    pub(crate) fn apply_selected_workspace_folder(&mut self, path: std::path::PathBuf) {
+        let path = crate::platform::canonicalize_or_absolutize(&path);
+        if !self
+            .ide_workspaces
+            .iter()
+            .any(|existing| crate::platform::paths_equal(existing, &path))
+        {
+            self.ide_workspaces.push(path.clone());
+        }
+        if let Some(lsp) = &mut self.lsp {
+            lsp.set_workspaces(self.ide_workspaces.clone());
+        }
+        self.ide_panel.file_tree_expanded.insert(path);
+        self.refresh_file_tree();
+        self.start_file_watcher();
+        self.save_current_config();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn apply_save_as_path(&mut self, path: std::path::PathBuf) {
+        if self.save_current_file_as(path) {
+            if let Some(window) = self.window.as_ref() {
+                App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+            }
+            self.highlighter.reset(
+                self.editor.version,
+                self.editor.get_full_text(),
+                self.file_extension.clone(),
+                self.editor.cursor,
+            );
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_file_picker(&mut self) {
+        if crate::platform::native_dialog_requires_main_thread() {
+            if let Some(file) = crate::platform::pick_file("Открыть файл") {
+                self.open_file_in_tab(file, true);
+            }
+            return;
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
         std::thread::spawn(move || {
@@ -122,6 +195,12 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_folder_picker(&mut self) {
+        if crate::platform::native_dialog_requires_main_thread() {
+            if let Some(folder) = crate::platform::pick_folder("Выбрать папку") {
+                self.apply_selected_workspace_folder(folder);
+            }
+            return;
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
         std::thread::spawn(move || {
@@ -132,6 +211,14 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_save_as_picker(&mut self) {
+        if crate::platform::native_dialog_requires_main_thread() {
+            if let Some(file) =
+                crate::platform::save_file("Сохранить файл как...", "Безымянный.txt")
+            {
+                self.apply_save_as_path(file);
+            }
+            return;
+        }
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
         std::thread::spawn(move || {

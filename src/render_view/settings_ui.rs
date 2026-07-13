@@ -2,6 +2,20 @@ use crate::editor::Editor;
 use crate::renderer::{Renderer, glyph_quad_rect};
 use glow::HasContext;
 
+fn compact_settings_text(text: &str, max_chars: usize) -> String {
+    let count = text.chars().count();
+    if count <= max_chars {
+        return text.to_string();
+    }
+    let keep = max_chars.saturating_sub(1);
+    let tail = text.chars().skip(count.saturating_sub(keep)).collect::<String>();
+    format!("…{tail}")
+}
+
+fn compact_settings_path(path: &std::path::Path, max_chars: usize) -> String {
+    compact_settings_text(&path.to_string_lossy(), max_chars)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
@@ -42,6 +56,7 @@ impl Renderer {
         settings_ignore_scroll_x: &mut f32,
         ide_scroll_y: f32,
         blink_alpha: f32,
+        tool_paths: &crate::platform::ToolPaths,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
@@ -715,12 +730,220 @@ impl Renderer {
             }
         } else if active_tab == 1 {
             self.draw_string_scaled(
-                "Скоро здесь появятся настройки...",
+                "Внешние инструменты",
                 content_x,
                 content_y,
-                [0.6, 0.6, 0.6, 1.0],
+                [0.82, 0.82, 0.86, 1.0],
                 1.0,
             );
+            let refresh_x = content_x + 350.0 * s;
+            let refresh_y = content_y - 18.0 * s;
+            ui_registry.register_rect(
+                crate::ui_system::UiId::SettingsRefreshTools,
+                refresh_x,
+                refresh_y,
+                102.0 * s,
+                29.0 * s,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+            crate::widgets::ButtonView {
+                x: refresh_x,
+                y: refresh_y,
+                w: 102.0 * s,
+                h: 29.0 * s,
+                text: "Обновить",
+                icon: Some(crate::widgets::IconType::Reload),
+                text_scale: 0.72,
+                icon_size: 14.0 * s,
+            }
+            .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            content_y += 24.0 * s;
+            self.draw_string_scaled(
+                "Явный путь имеет приоритет над PATH. Переменные RRITER_*_PATH — выше настроек.",
+                content_x,
+                content_y,
+                [0.44, 0.46, 0.54, 1.0],
+                0.76,
+            );
+            content_y += 18.0 * s;
+
+            for kind in crate::platform::ToolKind::ALL {
+                let row_h = 47.0 * s;
+                let resolution = crate::platform::resolve_tool_kind(kind);
+                let configured = tool_paths.get(kind);
+                let status = if resolution.is_ready() {
+                    let path = resolution.path.as_deref().unwrap_or(std::path::Path::new(""));
+                    let source = resolution
+                        .source
+                        .map(|source| source.label())
+                        .unwrap_or("авто");
+                    format!("Готов ({source}): {}", compact_settings_path(path, 47))
+                } else if resolution.is_invalid_override() {
+                    let path = resolution
+                        .configured_path
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new(""));
+                    format!("Не найден: {}", compact_settings_path(path, 50))
+                } else {
+                    "Не найден в PATH".to_string()
+                };
+                let status_color = if resolution.is_ready() {
+                    [0.46, 0.82, 0.58, 1.0]
+                } else {
+                    [0.90, 0.52, 0.52, 1.0]
+                };
+
+                self.push_rounded_rect(
+                    content_x,
+                    content_y,
+                    460.0 * s,
+                    row_h - 4.0 * s,
+                    5.0 * s,
+                    [0.12, 0.13, 0.17, 1.0],
+                );
+                self.draw_string_scaled(
+                    kind.label(),
+                    content_x + 10.0 * s,
+                    content_y + 17.0 * s,
+                    [0.88, 0.88, 0.92, 1.0],
+                    0.88,
+                );
+                self.draw_string_scaled(
+                    &status,
+                    content_x + 10.0 * s,
+                    content_y + 35.0 * s,
+                    status_color,
+                    0.70,
+                );
+
+                let choose_x = content_x + 338.0 * s;
+                let button_y = content_y + 7.0 * s;
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsToolPick(kind.index()),
+                    choose_x,
+                    button_y,
+                    72.0 * s,
+                    29.0 * s,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
+                crate::widgets::ButtonView {
+                    x: choose_x,
+                    y: button_y,
+                    w: 72.0 * s,
+                    h: 29.0 * s,
+                    text: "Выбрать",
+                    icon: None,
+                    text_scale: 0.72,
+                    icon_size: 0.0,
+                }
+                .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+
+                if configured.is_some() {
+                    let clear_x = content_x + 416.0 * s;
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::SettingsToolClear(kind.index()),
+                        clear_x,
+                        button_y,
+                        36.0 * s,
+                        29.0 * s,
+                        self.last_mouse_x,
+                        self.last_mouse_y,
+                    );
+                    crate::widgets::ButtonView {
+                        x: clear_x,
+                        y: button_y,
+                        w: 36.0 * s,
+                        h: 29.0 * s,
+                        text: "×",
+                        icon: None,
+                        text_scale: 0.92,
+                        icon_size: 0.0,
+                    }
+                    .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+                }
+                content_y += row_h;
+            }
+
+            content_y += 5.0 * s;
+            self.draw_string_scaled(
+                "Каталоги RRiter",
+                content_x,
+                content_y,
+                [0.82, 0.82, 0.86, 1.0],
+                0.92,
+            );
+            content_y += 13.0 * s;
+            let directory_labels = ["Config", "Data", "Cache", "State"];
+            for (idx, label) in directory_labels.iter().enumerate() {
+                let button_x = content_x + idx as f32 * 112.0 * s;
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsOpenDirectory(idx),
+                    button_x,
+                    content_y,
+                    102.0 * s,
+                    29.0 * s,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
+                crate::widgets::ButtonView {
+                    x: button_x,
+                    y: content_y,
+                    w: 102.0 * s,
+                    h: 29.0 * s,
+                    text: label,
+                    icon: None,
+                    text_scale: 0.76,
+                    icon_size: 0.0,
+                }
+                .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            }
+            content_y += 40.0 * s;
+
+            self.draw_string_scaled(
+                "Графика",
+                content_x,
+                content_y,
+                [0.82, 0.82, 0.86, 1.0],
+                0.92,
+            );
+            content_y += 18.0 * s;
+            let graphics_summary = format!(
+                "{} · {} · scale {:.2}",
+                self.graphics_diagnostics.renderer,
+                self.graphics_diagnostics.version,
+                self.graphics_diagnostics.scale_factor
+            );
+            self.draw_string_scaled(
+                &compact_settings_text(&graphics_summary, 66),
+                content_x,
+                content_y,
+                [0.56, 0.58, 0.66, 1.0],
+                0.74,
+            );
+            let copy_x = content_x + 338.0 * s;
+            let copy_y = content_y - 17.0 * s;
+            ui_registry.register_rect(
+                crate::ui_system::UiId::SettingsCopyGraphicsDiagnostics,
+                copy_x,
+                copy_y,
+                114.0 * s,
+                29.0 * s,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+            crate::widgets::ButtonView {
+                x: copy_x,
+                y: copy_y,
+                w: 114.0 * s,
+                h: 29.0 * s,
+                text: "Скопировать",
+                icon: Some(crate::widgets::IconType::Copy),
+                text_scale: 0.72,
+                icon_size: 14.0 * s,
+            }
+            .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
         } else if active_tab == 2 {
             self.draw_string_scaled(
                 "Размер шрифта: 14px",

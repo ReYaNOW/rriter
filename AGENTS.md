@@ -399,6 +399,8 @@ Allowed shell commands:
 * `make codex_test`
 * `cargo +nightly fmt`
 * `make api-map` if still present
+* `python3 scripts/build_windows.py --self-test`
+* `python3 scripts/build_macos.py --self-test`
 * `code-review-graph status`
 * `code-review-graph update`
 * `code-review-graph update --brief`
@@ -525,6 +527,11 @@ In draw/render/frame paths:
 * Keep API credentials out of ordinary JSON state. Read/write them through `platform::open_user_secret`, `seal_user_secret`, and `atomic_write_secret`; preserve plaintext loading only as a migration path.
 * Keep native multipart selections as `PathBuf` values until filesystem access. Display strings are not the source of truth for uploads.
 * Keep application shortcuts, terminal Control, and word-navigation modifiers separate. Windows AltGr must remain text input; macOS Command is the application shortcut modifier and Option is word navigation/text input.
+* Persist Git/Ruff/Ty/uv/Python/shell overrides through `platform::ToolPaths`; do not mutate process-wide environment variables from settings. Refresh the shared resolution cache after a setting changes.
+* Native dialogs on macOS are main-thread operations. Route them through App/event-loop handlers instead of spawning an arbitrary worker thread.
+* macOS must request OpenGL 4.1 Core only. Windows may fall back from OpenGL 4.1 Core to 3.3 Core. Keep GLES shaders and desktop GLSL preambles distinct.
+* Windows/macOS protected-save elevation must use the validated `--rriter-elevated-save` helper request; never interpolate arbitrary editor paths into a shell command.
+* Release packaging is owned by `scripts/build_windows.py` and `scripts/build_macos.py`. Keep manifests, signing, notarization, icons, portable artifacts, and installer/DMG creation there rather than in feature modules.
 
 Good:
 
@@ -754,13 +761,20 @@ Root:
 * `.code-review-graphignore` -> graph ignore rules. Must ignore `target/`, `.git/`, `.code-review-graph/`.
 * `PROJECT_AI_MAP.txt` -> fallback AI source index/call map. Not exact source. Use only when `code-review-graph` MCP unavailable.
 * `PROJECT_GUIDE.md` -> broader architecture guide.
+* `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
+* `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
-* `build.rs` -> build-time resource/platform setup.
-* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic/secret writes, native trust/proxy hooks, dialogs/Clipboard/Trash/openers, modifier policy, and process API reexports.
+* `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
+* `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
+* `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
+* `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
+* `src/platform/integration.rs` -> platform directories, configured tool resolution, native proxy/trust roots, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
-* `src/platform/windows.rs` -> Windows WTF-16 case-insensitive path identity, UNC/extended-length Win32 paths, DPAPI credentials, native trust roots, proxy discovery, and process memory.
-* `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier regression tests.
+* `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
+* `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
+* `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
+* `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -770,8 +784,9 @@ Entrypoints/state:
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
 * `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
 * `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
-* `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close.
-* `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling.
+* `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close, scale-factor and IME routing.
+* `src/app/events/window_runtime.rs` -> platform GL-context plans, window/surface bootstrap, graphics diagnostics, and persisted shutdown.
+* `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.
 * `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
 * `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
@@ -847,7 +862,7 @@ Rendering:
 * `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search panel controls/results rendering.
 * `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
 * `src/render_view/search.rs` -> search panel UI.
-* `src/render_view/settings_ui.rs` -> settings UI.
+* `src/render_view/settings_ui.rs` -> tool executable configuration, native directory actions, graphics diagnostics, and appearance settings UI.
 * `src/render_view/minimap_ui.rs` -> minimap content/viewport. Hot path.
 * `src/render_view/sticky.rs` -> sticky headers.
 * `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.

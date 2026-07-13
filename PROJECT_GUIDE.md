@@ -36,12 +36,15 @@ Files:
 
 ```text
 src/platform.rs
+src/platform/integration.rs
 src/platform/process.rs
+src/platform/elevated_save.rs
 src/platform/windows.rs
+src/platform/macos.rs
 src/platform/tests.rs
 ```
 
-`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, Trash layout, atomic replacement, text-file decoding/encoding, path identity, keyboard-modifier policy, protected secret records, native trust/proxy hooks, process memory, and the public process API. `platform/process.rs` owns executable discovery, cancelable captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
+`platform.rs` is the public boundary for behavior that differs by operating system. `platform/integration.rs` owns native config/data/cache/state directories, configured tool discovery, native trust/proxy hooks, and process memory. `platform/process.rs` owns executable discovery, cancelable captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup. `platform/elevated_save.rs` owns the validated helper protocol used for protected atomic saves. Windows and macOS native APIs remain in their target-specific modules.
 
 Important invariants:
 
@@ -54,8 +57,11 @@ Important invariants:
 * Long-lived tools and captured commands use the managed process API. Child processes must not outlive RRiter; graceful shutdown is followed by a bounded full-tree termination.
 * Optional executable lookup honors configured overrides, `PATH`, and Windows `PATHEXT`. Missing tools enter a stable disabled state rather than a restart loop.
 * User credentials are persisted separately from ordinary state. Windows records are protected with per-user DPAPI entropy; legacy plaintext remains readable only for migration, and Unix fallback files are created atomically with mode `0600`.
-* Windows HTTP clients add user-installed native trust roots and native static proxy settings while preserving explicit proxy environment overrides.
+* Windows and macOS HTTP clients add user-installed native trust roots and native static proxy settings while preserving explicit proxy environment overrides.
 * Application shortcuts, terminal Control, and word-navigation modifiers are separate policies. This preserves Windows AltGr text and native macOS Command/Option behavior.
+* Tool overrides are persisted as native paths in `ToolPaths`, resolved without changing global environment variables, and surfaced in settings together with their source and availability.
+* macOS native dialogs stay on the main event-loop thread. Windows uses a DPI-aware, long-path-aware manifest and application identity; macOS uses a regular AppKit application lifecycle and default menu.
+* OpenGL context policy is explicit: macOS 4.1 Core only, Windows 4.1 Core then 3.3 Core, Linux desktop 4.1/3.3 then GLES 3.0. Renderer diagnostics retain the requested profile, actual GL/GLSL versions, GPU identity, and scale factor.
 
 ### Managed Git integration
 
@@ -272,7 +278,17 @@ Used by editor, minimap, panels, autocomplete, settings, and similar scrollable 
 
 #### `build.rs`
 
-Build-time Rust script. Usually handles compile-time resource or platform setup.
+Build-time Rust script. It keeps generated icon associations and emits the Windows application manifest linker argument. The manifest declares Per-Monitor V2 DPI awareness, UTF-8 active code page, supported Windows versions, and long-path awareness. `scripts/build_windows.py` supplies the compiled icon/version resource through `RRITER_WINDOWS_RESOURCE`.
+
+#### `scripts/build_windows.py`
+
+Standard-library-only Windows release driver. It discovers Visual Studio Build Tools, imports the x64 MSVC environment, installs/checks the nightly MSVC target, builds native PE resources, optionally runs tests, creates a portable ZIP and Inno Setup installer, signs artifacts, and can launch RRiter. Run its platform-independent checks with `python3 scripts/build_windows.py --self-test`.
+
+#### `scripts/build_macos.py`
+
+Standard-library-only macOS release driver. It builds native or Universal 2 executables, creates a Retina `.app` and ICNS, signs nested code before the bundle under hardened runtime, optionally notarizes/staples, creates a DMG, verifies Gatekeeper, and can launch RRiter. Run `python3 scripts/build_macos.py --self-test` on any platform.
+
+Full operator commands live in `WINDOWS_BUILD.md` and `MACOS_BUILD.md`.
 
 #### `Cargo.toml`
 
@@ -358,13 +374,22 @@ This architecture guide.
 
 ### `src/platform.rs` and `src/platform/*`
 
-Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, and managed processes.
+Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
+* `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, native trust/proxy dispatch, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
-* `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling, per-user DPAPI, native certificate/proxy discovery, and process memory.
-* `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier regression tests that can run on Linux, plus target-gated Windows tests.
+* `src/platform/elevated_save.rs` -> non-shell validated helper request, elevated atomic replacement, result propagation, and Linux `pkexec` compatibility.
+* `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling, AppUserModelID, DPAPI, native certificate/proxy discovery, elevation, and process memory.
+* `src/platform/macos.rs` -> Keychain secrets, Finder/URL integration, `scutil` proxy parsing, Keychain certificates, Mach memory, and administrator authorization helper.
+* `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier/tool-resolution regression tests that can run on Linux, plus target-gated native tests.
 
-Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules.
+Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules. Native tool paths are configured from settings through `ToolPaths`; feature code must not rewrite process-wide environment variables.
+
+### Window, graphics, and native input bootstrap
+
+`src/app/events/window_runtime.rs` selects the platform GL context plan and owns window/display/surface creation. macOS requests OpenGL 4.1 Core only; Windows falls back from 4.1 Core to 3.3 Core; Linux additionally permits GLES 3.0. `Renderer::new` validates the actual context, selects desktop or GLES shader preambles, and records copyable diagnostics. `ScaleFactorChanged` rebuilds scale-sensitive atlases/caches rather than stretching stale glyph data. IME commits are routed to the active editor/API/modal target as one logical edit.
+
+macOS runs as a regular AppKit application with the default application menu. File dialogs are dispatched on the event-loop thread. Windows startup applies the stable application identity in addition to the embedded DPI/long-path manifest.
 
 ### `src/main.rs`
 

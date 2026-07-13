@@ -12,10 +12,16 @@ pub fn detect_uv_path() -> Option<PathBuf> {
 
 #[allow(dead_code)]
 pub fn detect_python_path() -> Option<PathBuf> {
+    if let Some(path) = crate::platform::resolve_tool_executable(
+        OsStr::new(if cfg!(windows) { "python.exe" } else { "python3" }),
+        "RRITER_PYTHON_PATH",
+    ) {
+        return Some(path);
+    }
     let candidates: &[&str] = if cfg!(windows) {
-        &["py.exe", "python.exe", "python3.exe"]
+        &["py.exe", "python3.exe"]
     } else {
-        &["python3", "python"]
+        &["python"]
     };
     candidates
         .iter()

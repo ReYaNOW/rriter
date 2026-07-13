@@ -493,6 +493,24 @@ impl crate::app::App {
             })
             .collect::<Vec<_>>();
         let mock = self.ide_panel.api.mock.clone();
+        if crate::platform::native_dialog_requires_main_thread() {
+            let value = crate::app::api_mock::openapi_export::export_mock_server_openapi_value(
+                &specs, &mock,
+            );
+            let Ok(text) = serde_json::to_string_pretty(&value) else {
+                return;
+            };
+            let Some(path) = crate::platform::save_file_with_filter(
+                "Экспорт openapi.json",
+                "openapi.json",
+                "OpenAPI JSON",
+                &["json"],
+            ) else {
+                return;
+            };
+            let _ = crate::platform::atomic_write(&path, text.as_bytes());
+            return;
+        }
         std::thread::spawn(move || {
             let value = crate::app::api_mock::openapi_export::export_mock_server_openapi_value(
                 &specs, &mock,

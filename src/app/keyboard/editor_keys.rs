@@ -87,6 +87,200 @@ pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
 }
 
 impl App {
+    fn finish_editor_edit_after_input(
+        &mut self,
+        is_git_diff_tab: bool,
+        git_diff_undo: bool,
+        force_close_autocomplete: bool,
+        should_trigger_autocomplete: bool,
+        ty_completion_trigger: Option<&'static str>,
+        should_notify_lsp: bool,
+    ) -> bool {
+        if is_git_diff_tab {
+            self.rebuild_active_git_diff_from_editor_after_history(git_diff_undo);
+            self.editor.sync_edits.clear();
+            if self.show_search && !self.search_editor.get_full_text().is_empty() {
+                self.update_search();
+            } else {
+                self.search_results.clear();
+            }
+            App::update_window_title(
+                self.window.as_ref().unwrap(),
+                &self.base_title,
+                self.editor.is_dirty(),
+            );
+            self.window.as_ref().unwrap().request_redraw();
+            return true;
+        }
+
+        self.lsp_actions_menu = None;
+        self.is_highlighted_once = true;
+        self.is_highlight_complete = false;
+        if force_close_autocomplete {
+            self.close_autocomplete();
+        } else if should_trigger_autocomplete {
+            if let Some(trigger) = ty_completion_trigger {
+                self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
+            } else if self.autocomplete_active
+                && self.autocomplete_mode == AutocompleteMode::TyImports
+            {
+                self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
+            } else if cursor_after_python_member_dot(&self.editor)
+                || cursor_inside_python_call_parens(&self.editor)
+            {
+                self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
+            } else {
+                self.update_autocomplete();
+            }
+        } else {
+            self.close_autocomplete();
+        }
+
+        App::update_window_title(
+            self.window.as_ref().unwrap(),
+            &self.base_title,
+            self.editor.is_dirty(),
+        );
+        if self.show_search && !self.search_editor.get_full_text().is_empty() {
+            self.update_search();
+        } else {
+            self.search_results.clear();
+        }
+
+        if !self.editor.sync_edits.is_empty() {
+            let edits = std::mem::take(&mut self.editor.sync_edits);
+            self.shift_current_python_inlay_hints_for_edits(&edits);
+            // LSP can skip low-value keystrokes; highlighter cannot, its replica must stay exact.
+            if should_notify_lsp && self.is_ide_mode {
+                if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
+                    let text = self.editor.get_full_text();
+                    let ext = self.file_extension.clone();
+                    let path = path.clone();
+                    lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                }
+            }
+            let (line_start_byte, line_end_byte) =
+                sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
+            let (invalidate_start_byte, invalidate_end_byte) =
+                crate::highlighter::sync_edit_invalidation_byte_range(&edits);
+
+            self.highlighter.apply_edits(
+                self.editor.version,
+                edits,
+                line_start_byte,
+                line_end_byte,
+            );
+            self.highlighter.sync_highlight_after_edit(
+                self.editor.version,
+                line_start_byte,
+                line_end_byte,
+                invalidate_start_byte,
+                invalidate_end_byte,
+                std::time::Duration::from_millis(1),
+            );
+        }
+        if should_notify_lsp {
+            self.last_sent_version = self.editor.version;
+        }
+
+        let highlight_updated = self.highlighter.poll(self.editor.version);
+        if highlight_updated {
+            let autofold_threshold = match self.file_extension.as_str() {
+                "py" | "pyi" | "rs" | "dart" => 1,
+                _ => 2,
+            };
+            let should_autofold_initial = false;
+            self.editor.foldable_lines.clear();
+            self.editor.foldable_ranges_bytes.clear();
+            for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
+                self.editor
+                    .foldable_ranges_bytes
+                    .push((start_b, end_b, is_sticky));
+                let sl = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&x| x <= start_b)
+                    .saturating_sub(1);
+                let el = self
+                    .editor
+                    .line_offsets
+                    .partition_point(|&x| x <= end_b)
+                    .saturating_sub(1);
+                if el > sl {
+                    self.editor.foldable_lines.insert(sl, el);
+                    if is_autofold && el - sl >= autofold_threshold && should_autofold_initial {
+                        self.editor.folded_lines.insert(sl);
+                        self.editor
+                            .folded_start_bytes
+                            .insert(self.editor.line_offsets[sl]);
+                    }
+                }
+            }
+
+            self.is_highlighted_once = true;
+            self.is_highlight_complete = self.highlighter.is_complete;
+            if self.autocomplete_active {
+                self.update_autocomplete();
+            }
+        }
+
+        if let Some(log) = &mut self.pending_key_log {
+            log.t_highlight = Some(std::time::Instant::now());
+        }
+        false
+    }
+
+    pub fn handle_editor_ime_commit(&mut self, text: &str) {
+        if text.is_empty() || self.show_welcome {
+            return;
+        }
+        if self.active_tab_is_git_diff() {
+            self.show_readonly_diff_notice();
+            return;
+        }
+
+        let (deleted, inserted_len) = self.editor.insert_str(text);
+        if let Some((offset, len)) = deleted {
+            self.highlighter.shift_delete(offset, len);
+        }
+        self.highlighter.shift_insert(
+            self.editor.cursor - inserted_len,
+            inserted_len,
+            Some(text),
+        );
+        let trigger = (text == ".").then_some(".");
+        let wants_completion = text == "."
+            || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        self.finish_editor_edit_after_input(
+            false,
+            false,
+            false,
+            wants_completion,
+            trigger,
+            true,
+        );
+
+        if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
+            let size = window.inner_size();
+            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
+                0.0
+            } else {
+                38.0 * renderer.scale_factor
+            };
+            App::ensure_cursor_visible(
+                &mut self.scroll_y.target,
+                &mut self.scroll_x.target,
+                &self.editor,
+                renderer,
+                size.width as f32,
+                size.height as f32,
+                tab_bar_h,
+            );
+            window.request_redraw();
+        }
+        self.last_action = Instant::now();
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_editor_keyboard_input(
         &mut self,
@@ -121,6 +315,7 @@ impl App {
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                             .load(std::sync::atomic::Ordering::Relaxed),
+                        tool_paths: self.tool_paths.clone(),
                     });
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);
@@ -682,137 +877,17 @@ impl App {
         }
 
         if is_edit {
-            if is_git_diff_tab {
-                let is_undo = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
-                self.rebuild_active_git_diff_from_editor_after_history(is_undo);
-                self.editor.sync_edits.clear();
-                if self.show_search && !self.search_editor.get_full_text().is_empty() {
-                    self.update_search();
-                } else {
-                    self.search_results.clear();
-                }
-                App::update_window_title(
-                    self.window.as_ref().unwrap(),
-                    &self.base_title,
-                    self.editor.is_dirty(),
-                );
-                self.window.as_ref().unwrap().request_redraw();
+            let git_diff_undo =
+                matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
+            if self.finish_editor_edit_after_input(
+                is_git_diff_tab,
+                git_diff_undo,
+                force_close_autocomplete,
+                should_trigger_autocomplete,
+                ty_completion_trigger,
+                should_notify_lsp,
+            ) {
                 return;
-            }
-            self.lsp_actions_menu = None;
-            self.is_highlighted_once = true;
-            self.is_highlight_complete = false;
-            if force_close_autocomplete {
-                self.close_autocomplete();
-            } else if should_trigger_autocomplete {
-                if let Some(trigger) = ty_completion_trigger {
-                    self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
-                } else if self.autocomplete_active
-                    && self.autocomplete_mode == AutocompleteMode::TyImports
-                {
-                    self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
-                } else if cursor_after_python_member_dot(&self.editor)
-                    || cursor_inside_python_call_parens(&self.editor)
-                {
-                    self.request_ty_autocomplete(AutocompleteMode::TyContext, None);
-                } else {
-                    self.update_autocomplete();
-                }
-            } else {
-                self.close_autocomplete();
-            }
-
-            App::update_window_title(
-                self.window.as_ref().unwrap(),
-                &self.base_title,
-                self.editor.is_dirty(),
-            );
-            if self.show_search && !self.search_editor.get_full_text().is_empty() {
-                self.update_search();
-            } else {
-                self.search_results.clear();
-            }
-
-            if !self.editor.sync_edits.is_empty() {
-                let edits = std::mem::take(&mut self.editor.sync_edits);
-                self.shift_current_python_inlay_hints_for_edits(&edits);
-                // LSP can skip low-value keystrokes; highlighter cannot, its replica must stay exact.
-                if should_notify_lsp && self.is_ide_mode {
-                    if let (Some(lsp), Some(path)) = (&mut self.lsp, &self.file_path) {
-                        let text = self.editor.get_full_text();
-                        let ext = self.file_extension.clone();
-                        let path = path.clone();
-                        lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
-                    }
-                }
-                let (line_start_byte, line_end_byte) =
-                    sync_edit_line_range(&edits, &self.editor.line_offsets, self.editor.len());
-                let (invalidate_start_byte, invalidate_end_byte) =
-                    crate::highlighter::sync_edit_invalidation_byte_range(&edits);
-
-                self.highlighter.apply_edits(
-                    self.editor.version,
-                    edits,
-                    line_start_byte,
-                    line_end_byte,
-                );
-                self.highlighter.sync_highlight_after_edit(
-                    self.editor.version,
-                    line_start_byte,
-                    line_end_byte,
-                    invalidate_start_byte,
-                    invalidate_end_byte,
-                    std::time::Duration::from_millis(1),
-                );
-            }
-            if should_notify_lsp {
-                self.last_sent_version = self.editor.version;
-            }
-
-            let highlight_updated = self.highlighter.poll(self.editor.version);
-
-            if highlight_updated {
-                let autofold_threshold = match self.file_extension.as_str() {
-                    "py" | "pyi" | "rs" | "dart" => 1,
-                    _ => 2,
-                };
-                let should_autofold_initial = false;
-                self.editor.foldable_lines.clear();
-                self.editor.foldable_ranges_bytes.clear();
-                for &(start_b, end_b, is_autofold, is_sticky) in &self.highlighter.foldable_ranges {
-                    self.editor
-                        .foldable_ranges_bytes
-                        .push((start_b, end_b, is_sticky));
-                    let sl = self
-                        .editor
-                        .line_offsets
-                        .partition_point(|&x| x <= start_b)
-                        .saturating_sub(1);
-                    let el = self
-                        .editor
-                        .line_offsets
-                        .partition_point(|&x| x <= end_b)
-                        .saturating_sub(1);
-                    if el > sl {
-                        self.editor.foldable_lines.insert(sl, el);
-                        if is_autofold && el - sl >= autofold_threshold && should_autofold_initial {
-                            self.editor.folded_lines.insert(sl);
-                            self.editor
-                                .folded_start_bytes
-                                .insert(self.editor.line_offsets[sl]);
-                        }
-                    }
-                }
-
-                self.is_highlighted_once = true;
-                self.is_highlight_complete = self.highlighter.is_complete;
-                if self.autocomplete_active {
-                    self.update_autocomplete();
-                }
-            }
-
-            if let Some(log) = &mut self.pending_key_log {
-                log.t_highlight = Some(std::time::Instant::now());
             }
         }
 

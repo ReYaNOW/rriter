@@ -1146,6 +1146,16 @@ impl crate::app::App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_api_file_picker(&mut self) {
+        if crate::platform::native_dialog_requires_main_thread() {
+            if let Some(path) = crate::platform::pick_file_with_filter(
+                "Импорт openapi.json",
+                "OpenAPI JSON",
+                &["json"],
+            ) {
+                self.start_api_local_import(path);
+            }
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         self.api_import_file_rx = Some(rx);
         std::thread::spawn(move || {
@@ -1165,6 +1175,22 @@ impl crate::app::App {
         name: String,
         multi: bool,
     ) {
+        if crate::platform::native_dialog_requires_main_thread() {
+            let paths = if multi {
+                crate::platform::pick_files("Выбрать файл")
+            } else {
+                crate::platform::pick_file("Выбрать файл")
+                    .into_iter()
+                    .collect()
+            };
+            self.apply_api_body_file_pick(ApiBodyFilePickResult {
+                spec_id,
+                route_idx,
+                name,
+                paths,
+            });
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         self.api_body_file_rx = Some(rx);
         std::thread::spawn(move || {
@@ -1188,11 +1214,16 @@ impl crate::app::App {
     fn trigger_api_python_path_picker(&mut self, kind: ApiPythonPathPickKind) {
         let (tx, rx) = mpsc::channel();
         self.ide_panel.api.python_path_pick_rx = Some(rx);
+        let title = match kind {
+            ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
+            ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
+        };
+        if crate::platform::native_dialog_requires_main_thread() {
+            let path = crate::platform::pick_file(title);
+            let _ = tx.send(ApiPythonPathPickResult { kind, path });
+            return;
+        }
         std::thread::spawn(move || {
-            let title = match kind {
-                ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
-                ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
-            };
             let path = crate::platform::pick_file(title);
             let _ = tx.send(ApiPythonPathPickResult { kind, path });
         });

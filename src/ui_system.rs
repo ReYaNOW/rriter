@@ -49,6 +49,13 @@ pub enum UiId {
     SettingsIdeRemoveIgnore(usize),
     SettingsIdeIgnoreInput,
 
+    // Settings platform/tooling
+    SettingsToolPick(usize),
+    SettingsToolClear(usize),
+    SettingsOpenDirectory(usize),
+    SettingsCopyGraphicsDiagnostics,
+    SettingsRefreshTools,
+
     // LSP panel
     LspServerRestart(usize),
     LspServerToggle(usize),

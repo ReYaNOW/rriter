@@ -222,6 +222,104 @@ pub(super) fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
     Some(relative)
 }
 
+
+
+pub(super) fn run_elevated_helper(executable: &Path, request: &Path) -> std::io::Result<i32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_FAILED, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, TerminateProcess, WaitForSingleObject,
+    };
+    use windows_sys::Win32::UI::Shell::{
+        SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW, ShellExecuteExW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
+
+    fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
+        value.encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    let verb = wide(std::ffi::OsStr::new("runas"));
+    let executable = wide(executable.as_os_str());
+    let mut parameter_units = "--rriter-elevated-save \""
+        .encode_utf16()
+        .collect::<Vec<_>>();
+    parameter_units.extend(request.as_os_str().encode_wide());
+    parameter_units.extend(['"' as u16, 0]);
+
+    let mut info = unsafe { std::mem::zeroed::<SHELLEXECUTEINFOW>() };
+    info.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    info.fMask = SEE_MASK_NOCLOSEPROCESS;
+    info.lpVerb = verb.as_ptr();
+    info.lpFile = executable.as_ptr();
+    info.lpParameters = parameter_units.as_ptr();
+    info.nShow = SW_HIDE;
+
+    if unsafe { ShellExecuteExW(&mut info) } == 0 {
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(1223) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Windows elevation was cancelled",
+            ));
+        }
+        return Err(error);
+    }
+    if info.hProcess.is_null() {
+        return Err(std::io::Error::other(
+            "ShellExecuteExW did not return an elevated process handle",
+        ));
+    }
+
+    let wait = unsafe { WaitForSingleObject(info.hProcess, 120_000) };
+    if wait == WAIT_TIMEOUT {
+        unsafe {
+            let _ = TerminateProcess(info.hProcess, 1);
+            let _ = WaitForSingleObject(info.hProcess, 5_000);
+            let _ = CloseHandle(info.hProcess);
+        }
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "Windows elevated save helper timed out",
+        ));
+    }
+    if wait == WAIT_FAILED {
+        let error = std::io::Error::last_os_error();
+        unsafe {
+            let _ = CloseHandle(info.hProcess);
+        }
+        return Err(error);
+    }
+
+    let mut exit_code = 1_u32;
+    let status = unsafe { GetExitCodeProcess(info.hProcess, &mut exit_code) };
+    unsafe {
+        let _ = CloseHandle(info.hProcess);
+    }
+    if status == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(exit_code as i32)
+    }
+}
+
+pub(super) fn initialize_gui_application() {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+
+    let app_id = std::ffi::OsStr::new("RRiter.Editor")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let result = unsafe { SetCurrentProcessExplicitAppUserModelID(app_id.as_ptr()) };
+    if result < 0 {
+        eprintln!(
+            "RRiter could not set Windows AppUserModelID (HRESULT 0x{:08x})",
+            result as u32
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

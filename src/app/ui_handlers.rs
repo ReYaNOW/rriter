@@ -479,6 +479,45 @@ impl App {
                 self.settings_ignore_focused = true;
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::SettingsToolPick(idx) => {
+                if let Some(kind) = crate::platform::ToolKind::from_index(idx) {
+                    self.trigger_settings_tool_picker(kind);
+                }
+            }
+            UiId::SettingsToolClear(idx) => {
+                if let Some(kind) = crate::platform::ToolKind::from_index(idx) {
+                    self.apply_tool_path_selection(kind, None);
+                }
+            }
+            UiId::SettingsOpenDirectory(idx) => {
+                let paths = crate::platform::app_paths();
+                let path = match idx {
+                    0 => paths.config,
+                    1 => paths.data,
+                    2 => paths.cache,
+                    3 => paths.state,
+                    _ => return,
+                };
+                if let Err(error) = std::fs::create_dir_all(&path)
+                    .and_then(|_| crate::platform::reveal_path(&path))
+                {
+                    eprintln!("Failed to open RRiter directory {}: {error}", path.display());
+                }
+            }
+            UiId::SettingsCopyGraphicsDiagnostics => {
+                if let Some(report) = self
+                    .renderer
+                    .as_ref()
+                    .map(|renderer| renderer.graphics_diagnostics.report())
+                {
+                    self.set_clipboard_text(report);
+                }
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::SettingsRefreshTools => {
+                crate::platform::refresh_tool_resolutions();
+                self.window.as_ref().unwrap().request_redraw();
+            }
 
             // LSP panel
             UiId::LspServerRestart(_idx) => {

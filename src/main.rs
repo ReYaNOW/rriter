@@ -1,4 +1,5 @@
 #![cfg_attr(coverage_nightly, feature(coverage_attribute))]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 mod app;
 mod editor;
@@ -31,6 +32,7 @@ pub struct Config {
     pub ide_workspaces: Vec<std::path::PathBuf>,
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
+    pub tool_paths: crate::platform::ToolPaths,
 }
 
 impl Default for Config {
@@ -42,6 +44,7 @@ impl Default for Config {
             ide_workspaces: Vec::new(),
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
+            tool_paths: crate::platform::ToolPaths::default(),
         }
     }
 }
@@ -431,14 +434,27 @@ fn format_config_content(config: &Config) -> String {
         .iter()
         .map(|path| crate::platform::encode_persisted_path(path))
         .collect::<Vec<_>>();
+    let tool_paths = config
+        .tool_paths
+        .iter()
+        .filter_map(|(kind, path)| {
+            path.map(|path| {
+                (
+                    kind.config_key().to_string(),
+                    serde_json::Value::String(crate::platform::encode_persisted_path(path)),
+                )
+            })
+        })
+        .collect::<serde_json::Map<String, serde_json::Value>>();
     let value = serde_json::json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "window_width": config.window_width,
         "window_height": config.window_height,
         "maximized": config.maximized,
         "ide_workspaces": workspaces,
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
+        "tool_paths": tool_paths,
     });
     format!(
         "{}\n",
@@ -506,6 +522,15 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .and_then(serde_json::Value::as_bool)
     {
         config.enable_telemetry = value;
+    }
+    if let Some(values) = value.get("tool_paths").and_then(serde_json::Value::as_object) {
+        for kind in crate::platform::ToolKind::ALL {
+            let path = values
+                .get(kind.config_key())
+                .and_then(serde_json::Value::as_str)
+                .and_then(crate::platform::decode_persisted_path);
+            config.tool_paths.set(kind, path);
+        }
     }
     config
 }
@@ -768,6 +793,45 @@ fn nvidia_gpu_present() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn initial_file_argument_skips_ide_mode_and_honors_benchmark_position() {
+        let normal = vec![
+            std::ffi::OsString::from("rriter"),
+            std::ffi::OsString::from("--ide"),
+            std::ffi::OsString::from(r"C:\Work Tree\пример.py"),
+        ];
+        assert_eq!(
+            initial_file_argument(&normal, None),
+            Some(std::ffi::OsStr::new(r"C:\Work Tree\пример.py"))
+        );
+
+        let benchmark = vec![
+            std::ffi::OsString::from("rriter"),
+            std::ffi::OsString::from("--bench-scroll-render"),
+            std::ffi::OsString::from("sample.py"),
+            std::ffi::OsString::from("2"),
+        ];
+        assert_eq!(
+            initial_file_argument(&benchmark, Some(1)),
+            Some(std::ffi::OsStr::new("sample.py"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn initial_file_argument_preserves_non_utf8_native_paths() {
+        use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+        let path = std::ffi::OsString::from_vec(b"source-\xff.py".to_vec());
+        let arguments = vec![std::ffi::OsString::from("rriter"), path.clone()];
+        assert_eq!(
+            initial_file_argument(&arguments, None)
+                .expect("native path")
+                .as_bytes(),
+            path.as_os_str().as_bytes()
+        );
+    }
 
     fn tab(path: Option<&str>) -> crate::app::EditorTab {
         crate::app::EditorTab {
@@ -1129,7 +1193,7 @@ mod tests {
   "ide_ignore_patterns": "target|.git",
   "enable_telemetry": true
 }"#;
-        let config = parse_config_content(content, Config::default());
+        let mut config = parse_config_content(content, Config::default());
         assert_eq!(config.window_width, 1280.5);
         assert_eq!(config.window_height, 720.25);
         assert!(config.maximized);
@@ -1139,15 +1203,31 @@ mod tests {
         );
         assert_eq!(config.ide_ignore_patterns, vec!["target", ".git"]);
         assert!(config.enable_telemetry);
+        config.tool_paths.set(
+            crate::platform::ToolKind::Git,
+            Some(PathBuf::from(r"C:\Program Files\Git\cmd\git.exe")),
+        );
+        config.tool_paths.set(
+            crate::platform::ToolKind::Shell,
+            Some(PathBuf::from("/opt/Оболочка/bin/zsh")),
+        );
 
         let formatted = format_config_content(&config);
         assert!(formatted.contains("\"window_width\": 1280.5"));
         let value: serde_json::Value = serde_json::from_str(&formatted).unwrap();
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(value["ide_workspaces"].as_array().unwrap().len(), 2);
         let reparsed = parse_config_content(&formatted, Config::default());
         assert_eq!(reparsed.ide_workspaces, config.ide_workspaces);
         assert_eq!(reparsed.ide_ignore_patterns, config.ide_ignore_patterns);
+        assert_eq!(
+            reparsed.tool_paths.get(crate::platform::ToolKind::Git),
+            config.tool_paths.get(crate::platform::ToolKind::Git)
+        );
+        assert_eq!(
+            reparsed.tool_paths.get(crate::platform::ToolKind::Shell),
+            config.tool_paths.get(crate::platform::ToolKind::Shell)
+        );
 
         let color = parse_kde_color(
             "[Colors:Window]\nBackgroundNormal=1,2,3\n[Colors:Selection]\nBackgroundNormal=128,64,255\n",
@@ -1433,8 +1513,29 @@ fn run_headless_ty_mem_probe(args: &[String], flag_idx: usize) {
     std::hint::black_box(editors);
 }
 
+fn initial_file_argument(
+    args: &[std::ffi::OsString],
+    scroll_bench_idx: Option<usize>,
+) -> Option<&std::ffi::OsStr> {
+    if let Some(index) = scroll_bench_idx {
+        return args.get(index + 1).map(std::ffi::OsString::as_os_str);
+    }
+    args.iter()
+        .skip(1)
+        .find(|arg| {
+            arg.as_os_str() != std::ffi::OsStr::new("--ide")
+                && arg.as_os_str() != std::ffi::OsStr::new("ide")
+        })
+        .map(std::ffi::OsString::as_os_str)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn main() {
+    let startup_args = std::env::args_os().collect::<Vec<_>>();
+    if let Some(exit_code) = crate::platform::handle_startup_helper(&startup_args) {
+        std::process::exit(exit_code);
+    }
+    crate::platform::initialize_gui_application();
     prefer_egl_vendor();
 
     #[cfg(target_os = "linux")]
@@ -1448,7 +1549,10 @@ fn main() {
     }
     init_rayon_global_pool();
 
-    let args: Vec<String> = env::args().collect();
+    let args = startup_args
+        .iter()
+        .map(|argument| argument.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
     if let Some(idx) = args.iter().position(|arg| arg == "--probe-git-graph") {
         let Some(repo) = args.get(idx + 1) else {
             eprintln!("usage: rriter --probe-git-graph <repo-path> [iterations]");
@@ -1482,8 +1586,8 @@ fn main() {
         .unwrap_or(22.0);
     let run_ide_on_startup =
         scroll_bench_idx.is_some() || args.iter().any(|a| a == "--ide" || a == "ide");
-    let has_file_arg = scroll_bench_idx.and_then(|idx| args.get(idx + 1)).is_some()
-        || args.iter().skip(1).any(|a| *a != "--ide" && *a != "ide");
+    let initial_file_arg = initial_file_argument(&startup_args, scroll_bench_idx);
+    let has_file_arg = initial_file_arg.is_some();
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
     let mut ext = String::new();
@@ -1493,14 +1597,7 @@ fn main() {
     let mut recent_files = load_recent_files();
 
     if has_file_arg {
-        let path = if let Some(idx) = scroll_bench_idx {
-            args.get(idx + 1).unwrap()
-        } else {
-            args.iter()
-                .skip(1)
-                .find(|a| *a != "--ide" && *a != "ide")
-                .unwrap()
-        };
+        let path = initial_file_arg.expect("has_file_arg is derived from initial_file_arg");
         if let Ok(decoded) = crate::platform::read_text_file(std::path::Path::new(path)) {
             initial_text = decoded.text;
             text_file_format = decoded.format;
@@ -1583,10 +1680,20 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     faq_editor.cursor = 0;
     faq_editor.selection_anchor = None;
 
-    let event_loop = EventLoop::new().unwrap();
+    let mut event_loop_builder = EventLoop::builder();
+    #[cfg(target_os = "macos")]
+    {
+        use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
+        event_loop_builder
+            .with_activation_policy(ActivationPolicy::Regular)
+            .with_default_menu(true)
+            .with_activate_ignoring_other_apps(true);
+    }
+    let event_loop = event_loop_builder.build().unwrap();
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
+    crate::platform::configure_tool_paths(config.tool_paths.clone());
     crate::render_view::TELEMETRY_ENABLED.store(
         config.enable_telemetry || scroll_bench_idx.is_some(),
         std::sync::atomic::Ordering::Relaxed,
@@ -1663,6 +1770,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         settings_ignore_scroll_x: 0.0,
         is_dragging_settings_ignore: false,
         open_folder_rx: None,
+        tool_paths: config.tool_paths.clone(),
+        settings_tool_picker_rx: None,
 
         show_search: false,
         search_anim_y: -120.0,

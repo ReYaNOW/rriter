@@ -210,6 +210,74 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
     None
 }
 
+
+fn configure_windows_executable_resources(out_dir: &Path) {
+    println!("cargo:rerun-if-env-changed=RRITER_WINDOWS_RESOURCE");
+    println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+
+    let manifest_path = out_dir.join("rriter.exe.manifest");
+    let package_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.1.0".into());
+    let mut version_parts = package_version
+        .split('.')
+        .map(|part| {
+            part.chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse::<u16>()
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
+    version_parts.resize(4, 0);
+    let manifest_version = format!(
+        "{}.{}.{}.{}",
+        version_parts[0], version_parts[1], version_parts[2], version_parts[3]
+    );
+    let manifest = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity version="__RRITER_VERSION__" processorArchitecture="*" name="RRiter" type="win32"/>
+  <description>RRiter code editor</description>
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+      <supportedOS Id="{4f476546-937c-49a9-93a7-2bd4f1d3a31f}"/>
+    </application>
+  </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2,PerMonitor</dpiAwareness>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>
+"#
+    .replace("__RRITER_VERSION__", &manifest_version);
+    fs::write(&manifest_path, manifest).expect("write Windows application manifest");
+    println!("cargo:rustc-link-arg-bin=rriter=/MANIFEST:EMBED");
+    println!(
+        "cargo:rustc-link-arg-bin=rriter=/MANIFESTINPUT:{}",
+        manifest_path.display()
+    );
+    if let Some(resource) = std::env::var_os("RRITER_WINDOWS_RESOURCE")
+        .filter(|value| !value.is_empty())
+    {
+        println!(
+            "cargo:rustc-link-arg-bin=rriter={}",
+            Path::new(&resource).display()
+        );
+    }
+}
+
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(coverage_nightly)");
 
@@ -223,6 +291,7 @@ fn main() {
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     let gen_dir = Path::new(&out_dir);
+    configure_windows_executable_resources(gen_dir);
 
     let file_json_path = base.join("src/icons/atom/icon_associations.json");
     let folder_json_path = base.join("src/icons/atom/folder_associations.json");

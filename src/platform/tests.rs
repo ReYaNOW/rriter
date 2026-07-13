@@ -1,5 +1,7 @@
 use super::*;
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::process::Stdio;
 
 fn paths_for(platform: PlatformKind, values: &[(&str, &str)]) -> AppPaths {
     let values = values
@@ -90,6 +92,37 @@ fn user_cache_root_follows_tool_cache_conventions() {
         user_cache_root_with(PlatformKind::Linux, |name| values.get(name).cloned()),
         PathBuf::from("/cache")
     );
+}
+
+
+#[test]
+fn tool_kind_indices_keys_and_sources_are_stable() {
+    for (index, kind) in ToolKind::ALL.into_iter().enumerate() {
+        assert_eq!(kind.index(), index);
+        assert_eq!(ToolKind::from_index(index), Some(kind));
+        assert!(!kind.label().is_empty());
+        assert!(!kind.config_key().is_empty());
+        assert!(kind.override_env().starts_with("RRITER_"));
+    }
+    assert_eq!(ToolKind::from_index(ToolKind::ALL.len()), None);
+    assert_eq!(integration::ToolPathSource::Environment.label(), "RRITER_*_PATH");
+    assert_eq!(integration::ToolPathSource::Settings.label(), "настройки");
+    assert_eq!(integration::ToolPathSource::Path.label(), "PATH");
+}
+
+#[test]
+fn tool_paths_keep_native_paths_and_ignore_empty_values() {
+    let mut paths = ToolPaths::default();
+    let git = PathBuf::from(r"C:\Program Files\Git\cmd\git.exe");
+    let shell = PathBuf::from("/opt/Оболочка/bin/zsh");
+    paths.set(ToolKind::Git, Some(git.clone()));
+    paths.set(ToolKind::Shell, Some(shell.clone()));
+    paths.set(ToolKind::Ruff, Some(PathBuf::new()));
+
+    assert_eq!(paths.get(ToolKind::Git), Some(git.as_path()));
+    assert_eq!(paths.get(ToolKind::Shell), Some(shell.as_path()));
+    assert_eq!(paths.get(ToolKind::Ruff), None);
+    assert_eq!(paths.iter().count(), ToolKind::ALL.len());
 }
 
 #[test]
@@ -518,4 +551,39 @@ fn cancelable_managed_command_terminates_the_process_tree() {
     trigger.join().unwrap();
     assert_eq!(error.kind(), io::ErrorKind::Interrupted);
     assert!(started.elapsed() < Duration::from_secs(3));
+}
+
+#[test]
+fn macos_proxy_parser_supports_native_endpoints_and_bypass_values() {
+    let output = r#"<dictionary> {
+  ExceptionsList : <array> {
+    0 : localhost
+    1 : *.internal
+  }
+  HTTPEnable : 1
+  HTTPPort : 8080
+  HTTPProxy : proxy.local
+  HTTPSEnable : 1
+  HTTPSPort : 8443
+  HTTPSProxy : secure.local
+}"#;
+    let parsed = parse_macos_proxy_config(output).expect("native proxy");
+    assert_eq!(parsed.http.as_deref(), Some("http://proxy.local:8080"));
+    assert_eq!(
+        parsed.https.as_deref(),
+        Some("http://secure.local:8443")
+    );
+    assert_eq!(parsed.bypass.as_deref(), Some("localhost,*.internal"));
+    assert!(parse_macos_proxy_config("HTTPEnable : 0").is_none());
+}
+
+#[test]
+fn native_pem_parser_decodes_multiple_certificates_and_rejects_partial_data() {
+    let input = b"-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----\n\
+                  -----BEGIN CERTIFICATE-----\nBAUG\n-----END CERTIFICATE-----\n";
+    assert_eq!(
+        parse_pem_certificates(input),
+        vec![vec![1, 2, 3], vec![4, 5, 6]]
+    );
+    assert!(parse_pem_certificates(b"-----BEGIN CERTIFICATE-----\nAQID").is_empty());
 }

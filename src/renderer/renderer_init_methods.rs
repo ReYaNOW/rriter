@@ -1,3 +1,28 @@
+fn parse_graphics_version(version: &str) -> Option<(u8, u8)> {
+    let numeric = version
+        .split_whitespace()
+        .find(|part| part.as_bytes().first().is_some_and(u8::is_ascii_digit))?;
+    let mut parts = numeric.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor_digits = parts
+        .next()?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    let minor = minor_digits.parse().ok()?;
+    Some((major, minor))
+}
+
+fn graphics_version_supported(version: &str, is_gles: bool) -> bool {
+    parse_graphics_version(version).is_some_and(|version| {
+        if is_gles {
+            version >= (3, 0)
+        } else {
+            version >= (3, 3)
+        }
+    })
+}
+
 impl Renderer {
     #[inline(always)]
     pub(crate) fn delayed_tooltip_anchor(
@@ -87,24 +112,131 @@ impl Renderer {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn new(gl: glow::Context, scale_factor: f32, theme: Theme) -> Self {
+    pub fn update_scale_factor(&mut self, scale_factor: f32) {
+        if scale_factor <= 0.0 || (self.scale_factor - scale_factor).abs() < 0.001 {
+            return;
+        }
+        self.flush();
+        self.scale_factor = scale_factor;
+        self.graphics_diagnostics.scale_factor = scale_factor;
+        self.font_size = 18.0 * scale_factor;
+        self.line_height = (26.0 * scale_factor).round();
+        self.baseline_offset = (19.0 * scale_factor).round();
+        self.left_padding = (60.0 * scale_factor).round();
+        self.glyphs.clear();
+        self.ui_glyphs.clear();
+        self.icons.clear();
+        self.file_icon_cache.clear();
+        self.ascii_advances.fill(0.0);
+        self.atlas_x = 2;
+        self.atlas_y = 2;
+        self.max_row_h = 0;
+        self.color_atlas_x = 2;
+        self.color_atlas_y = 2;
+        self.color_max_row_h = 0;
         unsafe {
-            let v_shader = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            gl.shader_source(
-                v_shader,
-                "#version 330
-                in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;
-                out vec2 v_uv; out vec4 v_col; out float v_mode; flat out vec3 v_sdf_params;
-                uniform mat4 proj;
-                void main() { 
-                    gl_Position = proj * vec4(pos, 0.0, 1.0); 
-                    v_uv = uv; v_col = color; v_mode = mode; v_sdf_params = sdf_params; 
-                }",
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D,
+                0,
+                PRIMARY_ATLAS_INTERNAL_FORMAT as i32,
+                ATLAS_SIZE_W,
+                ATLAS_SIZE_H,
+                0,
+                PRIMARY_ATLAS_UPLOAD_FORMAT,
+                glow::UNSIGNED_BYTE,
+                glow::PixelUnpackData::Slice(None),
             );
-            gl.compile_shader(v_shader);
+            if let Some(color_texture) = self.color_texture {
+                self.gl.active_texture(glow::TEXTURE1);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(color_texture));
+                self.gl.tex_image_2d(
+                    glow::TEXTURE_2D,
+                    0,
+                    glow::RGBA8 as i32,
+                    ATLAS_SIZE_W,
+                    ATLAS_SIZE_H,
+                    0,
+                    glow::RGBA,
+                    glow::UNSIGNED_BYTE,
+                    glow::PixelUnpackData::Slice(None),
+                );
+                self.gl.active_texture(glow::TEXTURE0);
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+            }
+        }
+        for i in 32..128u8 {
+            if let Some(glyph) = self.get_glyph(i as char) {
+                self.ascii_advances[i as usize] = glyph.advance;
+            }
+        }
+        self.load_builtin_icons();
+        self.last_editor_version = u64::MAX;
+        self.last_editor_version_for_scroll_x = u64::MAX;
+    }
 
-            let f_shader = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(f_shader, "#version 330
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn new(
+        gl: glow::Context,
+        scale_factor: f32,
+        theme: Theme,
+        requested_context: String,
+    ) -> Result<Self, String> {
+        unsafe {
+            let version = gl.get_parameter_string(glow::VERSION);
+            let diagnostics = GraphicsDiagnostics {
+                vendor: gl.get_parameter_string(glow::VENDOR),
+                renderer: gl.get_parameter_string(glow::RENDERER),
+                shading_language: gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION),
+                is_gles: version.contains("OpenGL ES"),
+                version,
+                requested_context,
+                scale_factor,
+            };
+            if !graphics_version_supported(&diagnostics.version, diagnostics.is_gles) {
+                let requirement = if diagnostics.is_gles {
+                    "OpenGL ES 3.0"
+                } else {
+                    "OpenGL 3.3"
+                };
+                return Err(format!(
+                    "RRiter requires {requirement} or newer; detected {} ({})",
+                    diagnostics.version, diagnostics.renderer
+                ));
+            }
+            let shader_preamble = if diagnostics.is_gles {
+                "#version 300 es\nprecision highp float;\nprecision highp int;\n"
+            } else {
+                "#version 330 core\n"
+            };
+
+            let v_shader = gl
+                .create_shader(glow::VERTEX_SHADER)
+                .map_err(|error| format!("failed to create vertex shader: {error}"))?;
+            let vertex_source = format!(
+                "{shader_preamble}\
+                in vec2 pos; in vec2 uv; in vec4 color; in float mode; in vec3 sdf_params;\n\
+                out vec2 v_uv; out vec4 v_col; out float v_mode; flat out vec3 v_sdf_params;\n\
+                uniform mat4 proj;\n\
+                void main() {{\n\
+                    gl_Position = proj * vec4(pos, 0.0, 1.0);\n\
+                    v_uv = uv; v_col = color; v_mode = mode; v_sdf_params = sdf_params;\n\
+                }}"
+            );
+            gl.shader_source(v_shader, &vertex_source);
+            gl.compile_shader(v_shader);
+            if !gl.get_shader_compile_status(v_shader) {
+                let log = gl.get_shader_info_log(v_shader);
+                gl.delete_shader(v_shader);
+                return Err(format!("vertex shader compilation failed: {log}"));
+            }
+
+            let f_shader = gl
+                .create_shader(glow::FRAGMENT_SHADER)
+                .map_err(|error| format!("failed to create fragment shader: {error}"))?;
+            let mut fragment_source = shader_preamble.to_string();
+            fragment_source.push_str("
                 in vec2 v_uv; in vec4 v_col; in float v_mode; flat in vec3 v_sdf_params;
                 out vec4 out_color;
                 uniform sampler2D tex;
@@ -171,12 +303,28 @@ impl Renderer {
                         }
                     }
                 }");
+            gl.shader_source(f_shader, &fragment_source);
             gl.compile_shader(f_shader);
+            if !gl.get_shader_compile_status(f_shader) {
+                let log = gl.get_shader_info_log(f_shader);
+                gl.delete_shader(v_shader);
+                gl.delete_shader(f_shader);
+                return Err(format!("fragment shader compilation failed: {log}"));
+            }
 
-            let program = gl.create_program().unwrap();
+            let program = gl
+                .create_program()
+                .map_err(|error| format!("failed to create shader program: {error}"))?;
             gl.attach_shader(program, v_shader);
             gl.attach_shader(program, f_shader);
             gl.link_program(program);
+            if !gl.get_program_link_status(program) {
+                let log = gl.get_program_info_log(program);
+                gl.delete_shader(v_shader);
+                gl.delete_shader(f_shader);
+                gl.delete_program(program);
+                return Err(format!("shader program link failed: {log}"));
+            }
             let proj_loc = gl.get_uniform_location(program, "proj");
             let tex_loc = gl.get_uniform_location(program, "tex");
             let color_tex_loc = gl.get_uniform_location(program, "color_tex");
@@ -368,6 +516,7 @@ impl Renderer {
 
             let mut renderer = Self {
                 gl,
+                graphics_diagnostics: diagnostics,
                 program,
                 proj_loc,
                 vao,
@@ -484,8 +633,28 @@ impl Renderer {
             // #[cfg(target_os = "linux")]
             // malloc_trim(0);
 
-            renderer
+            Ok(renderer)
         }
     }
 
+}
+
+#[cfg(test)]
+mod graphics_diagnostics_tests {
+    use super::*;
+
+    #[test]
+    fn parses_desktop_and_es_graphics_versions() {
+        assert_eq!(parse_graphics_version("4.1 Metal - 88"), Some((4, 1)));
+        assert_eq!(parse_graphics_version("OpenGL ES 3.2 Mesa"), Some((3, 2)));
+        assert_eq!(parse_graphics_version("3.3.0 NVIDIA"), Some((3, 3)));
+    }
+
+    #[test]
+    fn rejects_contexts_older_than_required_shader_level() {
+        assert!(graphics_version_supported("4.1 INTEL", false));
+        assert!(graphics_version_supported("OpenGL ES 3.3", true));
+        assert!(!graphics_version_supported("3.2 INTEL", false));
+        assert!(!graphics_version_supported("unknown", false));
+    }
 }

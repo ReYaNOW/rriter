@@ -218,6 +218,142 @@ impl crate::app::App {
         }
     }
 
+    fn finish_api_text_edit(
+        &mut self,
+        input_version_before: u64,
+        mock_python_target: Option<(usize, ApiMockSourcePart)>,
+        typed_text: Option<&str>,
+        is_array: bool,
+    ) {
+        if let Some(route_idx) = api_mock_tools_queue_route_after_key(
+            mock_python_target,
+            self.api_mock_python_focus_target(),
+            input_version_before,
+            self.ide_panel.api.input_editor.version,
+        ) {
+            self.queue_api_mock_python_tools(route_idx);
+            if let Some(text) = typed_text
+                && (matches!(text, "." | "(" | ",")
+                    || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
+            {
+                let mock_source = self.active_api_mock_autocomplete_source();
+                if matches!(text, ".")
+                    || mock_source.is_some_and(|source| {
+                        self.source_after_python_member_dot(source)
+                            || self.source_inside_python_call_parens(source)
+                    })
+                {
+                    self.request_api_mock_ty_autocomplete(
+                        matches!(text, "." | "(" | ",").then_some(text),
+                    );
+                } else {
+                    self.update_api_mock_tree_sitter_autocomplete();
+                }
+            } else if self.autocomplete_active {
+                if self.autocomplete_mode == crate::app::AutocompleteMode::TreeSitter {
+                    self.update_api_mock_tree_sitter_autocomplete();
+                } else {
+                    self.request_api_mock_ty_autocomplete(None);
+                }
+            }
+        }
+        if matches!(
+            self.ide_panel.api.focused,
+            Some(ApiFocus::RouteFilter | ApiFocus::MockContractField { .. })
+        ) && self.ide_panel.api.input_editor.version != input_version_before
+        {
+            self.commit_api_focus();
+        }
+        if let Some((id, multiline)) = self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .and_then(|focus| self.api_focus_ui_target(focus))
+        {
+            if multiline {
+                self.sync_api_multiline_scroll_target(id, false);
+            } else if !is_array {
+                self.sync_api_one_line_scroll_target(false);
+            }
+        }
+        self.pulse_api_cursor_blink();
+        self.queue_api_body_json_validation();
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub fn handle_api_client_ime_commit(&mut self, text: &str) -> bool {
+        if self.ide_panel.api.focused.is_none() {
+            return self.active_tab_is_api_client();
+        }
+        let active = self
+            .active_api_tab()
+            .map(|(meta, state)| (meta.spec_id, state.route_idx));
+        if !self.ide_panel.api.clear_stale_keyboard_focus(active) {
+            return false;
+        }
+
+        let mock_python_target = self.api_mock_python_focus_target();
+        let is_body = matches!(
+            self.ide_panel.api.focused,
+            Some(
+                ApiFocus::Body { .. }
+                    | ApiFocus::MockContract { .. }
+                    | ApiFocus::MockPrelude { .. }
+                    | ApiFocus::MockBody { .. }
+                    | ApiFocus::MockStaticResponse { .. }
+            )
+        );
+        let is_readonly = matches!(
+            self.ide_panel.api.focused,
+            Some(
+                ApiFocus::Response { .. }
+                    | ApiFocus::InputSchema { .. }
+                    | ApiFocus::OutputSchema { .. }
+                    | ApiFocus::MockSignature { .. }
+            )
+        );
+        if is_readonly {
+            return true;
+        }
+        let is_array = self
+            .ide_panel
+            .api
+            .focused
+            .as_ref()
+            .is_some_and(|focus| self.api_focus_is_array_input(focus));
+        let clean = if is_body {
+            text.to_string()
+        } else if is_array {
+            text.replace('\r', "")
+        } else {
+            text.replace(['\n', '\r'], "")
+        };
+        if clean.is_empty() {
+            return true;
+        }
+
+        let input_version_before = self.ide_panel.api.input_editor.version;
+        let (insert_text, move_inside_pair) = if mock_python_target.is_some() {
+            crate::app::keyboard::paired_editor_insert_text(&clean)
+        } else {
+            (clean.as_str(), false)
+        };
+        self.ide_panel.api.input_editor.insert_str(insert_text);
+        if move_inside_pair {
+            self.ide_panel.api.input_editor.move_left(false);
+        }
+        self.finish_api_text_edit(
+            input_version_before,
+            mock_python_target,
+            Some(&clean),
+            is_array,
+        );
+        true
+    }
+
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -525,63 +661,12 @@ impl crate::app::App {
             }
             _ => {}
         }
-        if let Some(route_idx) = api_mock_tools_queue_route_after_key(
-            mock_python_target,
-            self.api_mock_python_focus_target(),
+        self.finish_api_text_edit(
             input_version_before,
-            self.ide_panel.api.input_editor.version,
-        ) {
-            self.queue_api_mock_python_tools(route_idx);
-            if let Some(text) = typed_text.as_deref()
-                && (matches!(text, "." | "(" | ",")
-                    || text.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'))
-            {
-                let mock_source = self.active_api_mock_autocomplete_source();
-                if matches!(text, ".")
-                    || mock_source.is_some_and(|source| {
-                        self.source_after_python_member_dot(source)
-                            || self.source_inside_python_call_parens(source)
-                    })
-                {
-                    self.request_api_mock_ty_autocomplete(
-                        matches!(text, "." | "(" | ",").then_some(text),
-                    );
-                } else {
-                    self.update_api_mock_tree_sitter_autocomplete();
-                }
-            } else if self.autocomplete_active {
-                if self.autocomplete_mode == crate::app::AutocompleteMode::TreeSitter {
-                    self.update_api_mock_tree_sitter_autocomplete();
-                } else {
-                    self.request_api_mock_ty_autocomplete(None);
-                }
-            }
-        }
-        if matches!(
-            self.ide_panel.api.focused,
-            Some(ApiFocus::RouteFilter | ApiFocus::MockContractField { .. })
-        ) && self.ide_panel.api.input_editor.version != input_version_before
-        {
-            self.commit_api_focus();
-        }
-        if let Some((id, multiline)) = self
-            .ide_panel
-            .api
-            .focused
-            .as_ref()
-            .and_then(|focus| self.api_focus_ui_target(focus))
-        {
-            if multiline {
-                self.sync_api_multiline_scroll_target(id, false);
-            } else if !is_array {
-                self.sync_api_one_line_scroll_target(false);
-            }
-        }
-        self.pulse_api_cursor_blink();
-        self.queue_api_body_json_validation();
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
+            mock_python_target,
+            typed_text.as_deref(),
+            is_array,
+        );
         true
     }
 

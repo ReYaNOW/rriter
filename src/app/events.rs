@@ -1,33 +1,15 @@
 use crate::app::{App, PendingAction};
-use crate::renderer::Renderer;
-use glutin::config::ConfigTemplateBuilder;
 use glutin::context::PossiblyCurrentGlContext;
-use glutin::context::{ContextApi, ContextAttributesBuilder, NotCurrentGlContext};
-use glutin::display::{GetGlDisplay, GlDisplay};
-use glutin::surface::{GlSurface, WindowSurface};
-use glutin_winit::DisplayBuilder;
+use glutin::surface::GlSurface;
 use std::cell::RefCell;
 use std::num::NonZeroU32;
 use std::time::Instant;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
-use winit::raw_window_handle::HasWindowHandle;
-use winit::window::{Window, WindowId};
+use winit::window::WindowId;
 
-#[cfg(target_os = "linux")]
-fn trim_allocator_after_gl_bootstrap() {
-    unsafe extern "C" {
-        fn malloc_trim(pad: usize) -> i32;
-    }
-    unsafe {
-        malloc_trim(0);
-    }
-}
-
-#[cfg(not(target_os = "linux"))]
-fn trim_allocator_after_gl_bootstrap() {}
-
+mod window_runtime;
 mod about;
 mod source_hover;
 pub(crate) use source_hover::apply_source_hover_response_to_state;
@@ -297,124 +279,12 @@ fn autocomplete_detail_placement(
     2
 }
 
-#[cfg_attr(coverage_nightly, coverage(off))]
-fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
-    let w = app.window.as_ref().unwrap();
-    let maximized = w.is_maximized();
-    let (width, height) = if maximized {
-        (app.window_width, app.window_height)
-    } else {
-        let scale = w.scale_factor();
-        let size = w.inner_size().to_logical::<f64>(scale);
-        (size.width, size.height)
-    };
-    crate::save_config(&crate::Config {
-        window_width: width,
-        window_height: height,
-        maximized,
-        ide_workspaces: app.ide_workspaces.clone(),
-        ide_ignore_patterns: app.ide_ignore_patterns.clone(),
-        enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-            .load(std::sync::atomic::Ordering::Relaxed),
-    });
-    if app.is_ide_mode {
-        app.ide_panel.api.persist();
-        crate::save_panel_state(&app.ide_panel);
-    }
-    app.shutdown_background_services();
-    event_loop.exit();
-}
-
 impl ApplicationHandler for App {
-    // Coverage rationale:
-    // This is the winit/glutin/OpenGL bootstrap boundary. It creates OS window,
-    // GL context, swapchain surface and renderer through external APIs. Editor
-    // and input state logic stays testable in smaller helpers; this wrapper is
-    // not useful as llvm-cov signal.
+    // Coverage rationale: OS window, GL context, swapchain, and renderer
+    // initialization are isolated in the window runtime boundary.
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
-        if self.window.is_some() {
-            return;
-        }
-
-        let template = ConfigTemplateBuilder::new().with_transparency(false);
-
-        let icon_bytes = include_bytes!("../icons/icon.png");
-        let icon_image = image::load_from_memory(icon_bytes).unwrap().into_rgba8();
-        let (icon_w, icon_h) = icon_image.dimensions();
-        let window_icon =
-            winit::window::Icon::from_rgba(icon_image.into_raw(), icon_w, icon_h).ok();
-
-        let display_builder = DisplayBuilder::new().with_window_attributes(Some(
-            crate::platform::apply_window_attributes(
-                Window::default_attributes()
-                .with_title(format!("{} — RRiter", self.base_title))
-                .with_inner_size(winit::dpi::LogicalSize::new(
-                    self.window_width,
-                    self.window_height,
-                ))
-                .with_window_icon(window_icon)
-                .with_transparent(false),
-            ),
-        ));
-
-        let (window_opt, gl_config) = display_builder
-            .build(event_loop, template, |configs| {
-                configs.reduce(|a, _| a).unwrap()
-            })
-            .unwrap();
-        let window = window_opt.unwrap();
-
-        let raw_window_handle = window.window_handle().unwrap().as_raw();
-
-        let context_attributes = ContextAttributesBuilder::new().build(Some(raw_window_handle));
-        let fallback_context_attributes = ContextAttributesBuilder::new()
-            .with_context_api(ContextApi::Gles(None))
-            .build(Some(raw_window_handle));
-
-        let display = gl_config.display();
-        let not_current_gl_context = unsafe {
-            display
-                .create_context(&gl_config, &context_attributes)
-                .unwrap_or_else(|_| {
-                    display
-                        .create_context(&gl_config, &fallback_context_attributes)
-                        .unwrap()
-                })
-        };
-
-        let attrs = glutin::surface::SurfaceAttributesBuilder::<WindowSurface>::new().build(
-            raw_window_handle,
-            NonZeroU32::new(window.inner_size().width.max(1)).unwrap(),
-            NonZeroU32::new(window.inner_size().height.max(1)).unwrap(),
-        );
-
-        let gl_surface = unsafe { display.create_window_surface(&gl_config, &attrs).unwrap() };
-        let gl_context = not_current_gl_context.make_current(&gl_surface).unwrap();
-
-        let _ = gl_surface.set_swap_interval(
-            &gl_context,
-            glutin::surface::SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
-        );
-
-        let gl = unsafe {
-            glow::Context::from_loader_function(|s| {
-                let c_str = std::ffi::CString::new(s).unwrap();
-                display.get_proc_address(c_str.as_c_str()) as *const _
-            })
-        };
-
-        let scale_factor = window.scale_factor() as f32;
-        self.renderer = Some(Renderer::new(gl, scale_factor, self.theme.clone()));
-        self.gl_config = Some(gl_config);
-        self.window = Some(std::sync::Arc::new(window));
-        self.gl_context = Some(gl_context);
-        self.gl_surface = Some(gl_surface);
-
-        if let Some(w) = self.window.as_ref() {
-            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-        }
-        trim_allocator_after_gl_bootstrap();
+        window_runtime::resume(self, event_loop);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -455,7 +325,7 @@ impl ApplicationHandler for App {
                                 let action = self.pending_action;
                                 self.close_dialog();
                                 if action == PendingAction::Quit {
-                                    save_state_and_exit(self, event_loop);
+                                    window_runtime::save_state_and_exit(self, event_loop);
                                 } else if action == PendingAction::OpenFile {
                                     self.trigger_file_picker();
                                 } else if action == PendingAction::CloseFile {
@@ -466,7 +336,7 @@ impl ApplicationHandler for App {
                             let action = self.pending_action;
                             self.close_dialog();
                             if action == PendingAction::Quit {
-                                save_state_and_exit(self, event_loop);
+                                window_runtime::save_state_and_exit(self, event_loop);
                             } else if action == PendingAction::OpenFile {
                                 self.trigger_file_picker();
                             } else if action == PendingAction::CloseFile {
@@ -519,7 +389,7 @@ impl ApplicationHandler for App {
                 if self.editor.is_dirty() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
-                    save_state_and_exit(self, event_loop);
+                    window_runtime::save_state_and_exit(self, event_loop);
                 }
             }
             WindowEvent::Focused(focused) => {
@@ -560,6 +430,24 @@ impl ApplicationHandler for App {
                     self.window.as_ref().unwrap().request_redraw();
                 }
             }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.update_scale_factor(scale_factor as f32);
+                    renderer.last_editor_version_for_scroll_x = u64::MAX;
+                }
+                if let Some(window) = self.window.as_ref() {
+                    let size = window.inner_size();
+                    if size.width > 0 && size.height > 0 {
+                        self.gl_surface.as_ref().unwrap().resize(
+                            self.gl_context.as_ref().unwrap(),
+                            NonZeroU32::new(size.width).unwrap(),
+                            NonZeroU32::new(size.height).unwrap(),
+                        );
+                        self.renderer.as_mut().unwrap().resize(size.width, size.height);
+                    }
+                    window.request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if size.width == 0 || size.height == 0 {
                     self.render_suspended = true;
@@ -594,6 +482,17 @@ impl ApplicationHandler for App {
                     w.request_redraw();
                 }
             }
+            WindowEvent::DroppedFile(path) => {
+                match window_runtime::dropped_path_kind(&path) {
+                    Some(window_runtime::DroppedPathKind::File) => {
+                        self.open_file_in_tab(path, true);
+                    }
+                    Some(window_runtime::DroppedPathKind::Directory) => {
+                        self.apply_selected_workspace_folder(path);
+                    }
+                    None => {}
+                }
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
@@ -601,6 +500,17 @@ impl ApplicationHandler for App {
                 self.handle_main_mouse_input(event_loop, state, button);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
+            WindowEvent::Ime(Ime::Commit(text)) => {
+                self.handle_main_ime_commit(&text);
+            }
+            WindowEvent::Ime(Ime::Disabled) => {
+                self.last_blink_state = true;
+            }
+            WindowEvent::Ime(Ime::Enabled | Ime::Preedit(_, _)) => {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
@@ -1083,6 +993,7 @@ impl ApplicationHandler for App {
                         &mut self.settings_ignore_scroll_x,
                         self.settings_ide_scroll.current,
                         blink_alpha,
+                        &self.tool_paths,
                         &mut self.ui_registry,
                     );
                     if settings_cursor_mode == 1 {
@@ -1453,6 +1364,13 @@ impl ApplicationHandler for App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         about::about_to_wait(self, event_loop);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        // Covers native application termination such as macOS Cmd+Q and OS
+        // session shutdown, which do not necessarily emit CloseRequested.
+        window_runtime::persist_state_and_shutdown(self);
     }
 }
 

@@ -144,6 +144,36 @@ impl App {
         );
     }
 
+    pub fn handle_file_tree_modal_ime_commit(&mut self, text: &str) -> bool {
+        if self.ide_panel.api.mock_contract_field_delete_dialog.is_some()
+            || self.ide_panel.api.mock_route_reset_dialog.is_some()
+            || self.ide_panel.git.confirm_dialog.is_some()
+            || self.ide_panel.file_tree_context_menu.is_some()
+            || self.ide_panel.file_tree_move_dialog.is_some()
+            || self.ide_panel.file_tree_delete_dialog.is_some()
+        {
+            return true;
+        }
+
+        let clean = text.replace(['\n', '\r'], "");
+        if let Some(dialog) = self.ide_panel.file_tree_rename_dialog.as_mut() {
+            if !clean.is_empty() {
+                dialog.error = None;
+                dialog.editor.insert_str(&clean);
+                self.sync_file_tree_rename_scroll_target(false);
+            }
+            return true;
+        }
+        if let Some(dialog) = self.ide_panel.file_tree_create_dialog.as_mut() {
+            if !clean.is_empty() {
+                dialog.error = None;
+                dialog.editor.insert_str(&clean);
+            }
+            return true;
+        }
+        false
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_file_tree_modal_keyboard(&mut self, key_event: &winit::event::KeyEvent) -> bool {
         if self

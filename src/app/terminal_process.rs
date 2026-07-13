@@ -290,6 +290,14 @@ fn terminal_shell_candidates_with(
         });
         return candidates;
     }
+    if let Some(shell) = platform::configured_tool_path(platform::ToolKind::Shell) {
+        candidates.push(TerminalShellCandidate {
+            executable: shell.into_os_string(),
+            args: Vec::new(),
+            strict: true,
+        });
+        return candidates;
+    }
 
     match platform {
         PlatformKind::Windows => {

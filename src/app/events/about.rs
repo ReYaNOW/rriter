@@ -705,39 +705,25 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         if let Ok(result) = rx.try_recv() {
             app.open_folder_rx = None;
             if let Some(path) = result {
-                let path = crate::platform::canonicalize_or_absolutize(&path);
-                if !app
-                    .ide_workspaces
-                    .iter()
-                    .any(|existing| crate::platform::paths_equal(existing, &path))
-                {
-                    app.ide_workspaces.push(path.clone());
-                }
-                if let Some(lsp) = &mut app.lsp {
-                    lsp.set_workspaces(app.ide_workspaces.clone());
-                }
-                app.ide_panel.file_tree_expanded.insert(path.clone());
-                app.refresh_file_tree();
-                app.start_file_watcher();
-                let w = app.window.as_ref().unwrap();
-                let maximized = w.is_maximized();
-                let (width, height) = if maximized {
-                    (app.window_width, app.window_height)
-                } else {
-                    let scale = w.scale_factor();
-                    let size = w.inner_size().to_logical::<f64>(scale);
-                    (size.width, size.height)
-                };
-                crate::save_config(&crate::Config {
-                    window_width: width,
-                    window_height: height,
-                    maximized,
-                    ide_workspaces: app.ide_workspaces.clone(),
-                    ide_ignore_patterns: app.ide_ignore_patterns.clone(),
-                    enable_telemetry: crate::render_view::TELEMETRY_ENABLED
-                        .load(std::sync::atomic::Ordering::Relaxed),
-                });
+                app.apply_selected_workspace_folder(path);
+                needs_redraw = true;
             }
+        }
+    }
+
+    if let Some(rx) = &app.settings_tool_picker_rx {
+        match rx.try_recv() {
+            Ok((kind, path)) => {
+                app.settings_tool_picker_rx = None;
+                if path.is_some() {
+                    app.apply_tool_path_selection(kind, path);
+                    needs_redraw = true;
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                app.settings_tool_picker_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
 
@@ -754,17 +740,8 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         if let Ok(result) = rx.try_recv() {
             app.save_file_rx = None;
             if let Some(path) = result {
-                if app.save_current_file_as(path) {
-                    if let Some(w) = app.window.as_ref() {
-                        App::update_window_title(w, &app.base_title, app.editor.is_dirty());
-                    }
-                    app.highlighter.reset(
-                        app.editor.version,
-                        app.editor.get_full_text(),
-                        app.file_extension.clone(),
-                        app.editor.cursor,
-                    );
-                }
+                app.apply_save_as_path(path);
+                needs_redraw = true;
             }
         }
     }

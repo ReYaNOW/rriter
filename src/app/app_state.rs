@@ -905,6 +905,10 @@ pub struct App {
     pub settings_ignore_scroll_x: f32,
     pub is_dragging_settings_ignore: bool,
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    pub tool_paths: crate::platform::ToolPaths,
+    pub settings_tool_picker_rx: Option<
+        std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>,
+    >,
 
     pub show_search: bool,
     pub search_anim_y: f32,

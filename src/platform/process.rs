@@ -354,6 +354,9 @@ pub fn resolve_tool_executable(program: &OsStr, override_env: &str) -> Option<Pa
     if let Some(path) = std::env::var_os(override_env).filter(|value| !value.is_empty()) {
         return resolve_executable(&path);
     }
+    if let Some(path) = super::configured_tool_path_for_env(override_env) {
+        return resolve_executable(path.as_os_str());
+    }
     resolve_executable(program)
 }
 
@@ -364,6 +367,11 @@ pub fn command_for_tool(program: &OsStr, override_env: &str) -> io::Result<Comma
             let override_hint = std::env::var_os(override_env)
                 .filter(|value| !value.is_empty())
                 .map(|value| format!(" (configured by {override_env}={})", value.to_string_lossy()))
+                .or_else(|| {
+                    super::configured_tool_path_for_env(override_env).map(|value| {
+                        format!(" (configured in RRiter settings: {})", value.display())
+                    })
+                })
                 .unwrap_or_default();
             io::Error::new(
                 io::ErrorKind::NotFound,
