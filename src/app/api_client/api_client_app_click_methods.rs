@@ -1202,6 +1202,7 @@ impl crate::app::App {
                     } else {
                         field.value = value.clone();
                     }
+                    state.body_file_paths.remove(&name);
                     applied = Some((field.name.clone(), field.value.clone(), is_array));
                 }
                 if let Some((field_name, value, _)) = &applied

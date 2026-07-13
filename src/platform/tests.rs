@@ -449,3 +449,73 @@ fn managed_command_collects_stdout_stderr_and_status() {
     assert_eq!(output.stdout, b"out");
     assert_eq!(output.stderr, b"err");
 }
+
+#[test]
+fn windows_proxy_parser_supports_per_scheme_and_bypass_values() {
+    let parsed = parse_windows_proxy_config(
+        "http=proxy.local:8080;https=secure.proxy.local:8443",
+        Some("localhost;<local>;*.internal.test"),
+    )
+    .unwrap();
+    assert_eq!(parsed.http.as_deref(), Some("http://proxy.local:8080"));
+    assert_eq!(
+        parsed.https.as_deref(),
+        Some("http://secure.proxy.local:8443")
+    );
+    assert_eq!(
+        parsed.bypass.as_deref(),
+        Some("localhost,<local>,*.internal.test")
+    );
+    assert!(parsed.all.is_none());
+
+    let all = parse_windows_proxy_config("proxy.local:3128", None).unwrap();
+    assert_eq!(all.all.as_deref(), Some("http://proxy.local:3128"));
+    assert!(parse_windows_proxy_config(" ; ", None).is_none());
+}
+
+#[test]
+fn plaintext_secret_records_remain_readable_for_migration() {
+    let payload = br#"{"token":"secret"}"#;
+    let opened = open_user_secret(payload, "test purpose").unwrap();
+    assert_eq!(opened, payload);
+}
+
+#[cfg(unix)]
+#[test]
+fn atomic_secret_write_uses_owner_only_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "rriter-platform-secret-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("auth.json");
+    atomic_write_secret(&path, b"secret").unwrap();
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(fs::read(&path).unwrap(), b"secret");
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn cancelable_managed_command_terminates_the_process_tree() {
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
+
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_for_thread = Arc::clone(&cancel);
+    let trigger = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(60));
+        cancel_for_thread.store(true, Ordering::Release);
+    });
+    let mut command = command_for("sh").unwrap();
+    command.args(["-c", "sleep 30 & wait"]);
+    let started = std::time::Instant::now();
+    let error = run_command_output_cancelable(&mut command, Duration::from_secs(5), &cancel)
+        .unwrap_err();
+    trigger.join().unwrap();
+    assert_eq!(error.kind(), io::ErrorKind::Interrupted);
+    assert!(started.elapsed() < Duration::from_secs(3));
+}

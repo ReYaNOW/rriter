@@ -1149,10 +1149,11 @@ impl crate::app::App {
         let (tx, rx) = mpsc::channel();
         self.api_import_file_rx = Some(rx);
         std::thread::spawn(move || {
-            let file = rfd::FileDialog::new()
-                .set_title("Импорт openapi.json")
-                .add_filter("OpenAPI JSON", &["json"])
-                .pick_file();
+            let file = crate::platform::pick_file_with_filter(
+                "Импорт openapi.json",
+                "OpenAPI JSON",
+                &["json"],
+            );
             let _ = tx.send(file);
         });
     }
@@ -1167,11 +1168,12 @@ impl crate::app::App {
         let (tx, rx) = mpsc::channel();
         self.api_body_file_rx = Some(rx);
         std::thread::spawn(move || {
-            let dialog = rfd::FileDialog::new().set_title("Выбрать файл");
             let paths = if multi {
-                dialog.pick_files().unwrap_or_default()
+                crate::platform::pick_files("Выбрать файл")
             } else {
-                dialog.pick_file().into_iter().collect()
+                crate::platform::pick_file("Выбрать файл")
+                    .into_iter()
+                    .collect()
             };
             let _ = tx.send(ApiBodyFilePickResult {
                 spec_id,
@@ -1191,13 +1193,16 @@ impl crate::app::App {
                 ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
                 ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
             };
-            let path = rfd::FileDialog::new().set_title(title).pick_file();
+            let path = crate::platform::pick_file(title);
             let _ = tx.send(ApiPythonPathPickResult { kind, path });
         });
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_version_list(&mut self) {
+        if let Some(cancel) = self.ide_panel.api.python_version_list_cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
         let Some(uv_path) = self.ide_panel.api.mock.uv.selected_uv_path() else {
             self.ide_panel.api.mock.uv.status =
                 crate::app::api_mock::types::ApiPythonRuntimeStatus::Missing;
@@ -1210,12 +1215,16 @@ impl crate::app::App {
         self.ide_panel.api.mock_python_version_picker_open = true;
         self.ide_panel.api.mock_python_versions_scroll.current = 0.0;
         self.ide_panel.api.mock_python_versions_scroll.target = 0.0;
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.ide_panel.api.python_version_list_cancel = Some(cancel.clone());
         std::thread::spawn(move || {
-            let result = Command::new(uv_path)
-                .arg("python")
-                .arg("list")
-                .arg("--all-versions")
-                .output();
+            let mut command = Command::new(uv_path);
+            command.arg("python").arg("list").arg("--all-versions");
+            let result = crate::platform::run_command_output_cancelable(
+                &mut command,
+                API_PYTHON_LIST_TIMEOUT,
+                &cancel,
+            );
             let payload = match result {
                 Ok(output) if output.status.success() => ApiPythonVersionListResult {
                     rows: parse_uv_python_list(&String::from_utf8_lossy(&output.stdout)),
@@ -1228,6 +1237,18 @@ impl crate::app::App {
                         String::from_utf8_lossy(&output.stderr).trim()
                     )),
                 },
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
+                    ApiPythonVersionListResult {
+                        rows: Vec::new(),
+                        error: Some("Получение списка версий Python отменено.".to_string()),
+                    }
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
+                    ApiPythonVersionListResult {
+                        rows: Vec::new(),
+                        error: Some("uv python list превысил лимит времени.".to_string()),
+                    }
+                }
                 Err(err) => ApiPythonVersionListResult {
                     rows: Vec::new(),
                     error: Some(format!("Ошибка запуска uv: {err}")),
@@ -1253,6 +1274,8 @@ impl crate::app::App {
         }
         let (tx, rx) = mpsc::channel();
         self.ide_panel.api.python_install_rx = Some(rx);
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.ide_panel.api.python_install_cancel = Some(cancel.clone());
         self.ide_panel.api.mock_python_install_running = true;
         self.ide_panel.api.mock_python_install_log.clear();
         self.ide_panel
@@ -1263,14 +1286,14 @@ impl crate::app::App {
                 kind: ApiPythonInstallLogKind::Info,
             });
         std::thread::spawn(move || {
-            let spawn = Command::new(uv_path)
+            let mut command = Command::new(uv_path);
+            command
                 .arg("python")
                 .arg("install")
                 .arg(&version)
                 .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn();
-            let mut child = match spawn {
+                .stderr(Stdio::piped());
+            let mut child = match crate::platform::ManagedChild::spawn(&mut command) {
                 Ok(child) => child,
                 Err(err) => {
                     let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
@@ -1279,28 +1302,47 @@ impl crate::app::App {
                     return;
                 }
             };
-            if let Some(stdout) = child.stdout.take() {
-                spawn_api_python_log_reader(stdout, tx.clone(), ApiPythonInstallLogKind::Info);
+            let mut readers = Vec::new();
+            if let Some(stdout) = child.take_stdout() {
+                readers.push(spawn_api_python_log_reader(
+                    stdout,
+                    tx.clone(),
+                    ApiPythonInstallLogKind::Info,
+                ));
             }
-            if let Some(stderr) = child.stderr.take() {
-                spawn_api_python_log_reader(stderr, tx.clone(), ApiPythonInstallLogKind::Error);
+            if let Some(stderr) = child.take_stderr() {
+                readers.push(spawn_api_python_log_reader(
+                    stderr,
+                    tx.clone(),
+                    ApiPythonInstallLogKind::Error,
+                ));
             }
-            match child.wait() {
-                Ok(status) if status.success() => {
-                    let _ = tx.send(ApiPythonInstallEvent::Done(Ok(())));
+            let deadline = Instant::now() + API_PYTHON_INSTALL_TIMEOUT;
+            let result = loop {
+                if cancel.load(Ordering::Acquire) {
+                    let _ = child.terminate(Duration::from_secs(1));
+                    break Err("Установка Python отменена.".to_string());
                 }
-                Ok(status) => {
-                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
-                        "uv завершился с кодом {:?}",
-                        status.code()
-                    ))));
+                match child.try_wait() {
+                    Ok(Some(status)) if status.success() => break Ok(()),
+                    Ok(Some(status)) => {
+                        break Err(format!("uv завершился с кодом {:?}", status.code()));
+                    }
+                    Ok(None) if Instant::now() >= deadline => {
+                        let _ = child.terminate(Duration::from_secs(1));
+                        break Err("uv python install превысил лимит времени.".to_string());
+                    }
+                    Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                    Err(err) => {
+                        let _ = child.terminate(Duration::from_secs(1));
+                        break Err(format!("Ошибка ожидания uv: {err}"));
+                    }
                 }
-                Err(err) => {
-                    let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
-                        "Ошибка ожидания uv: {err}"
-                    ))));
-                }
+            };
+            for reader in readers {
+                let _ = reader.join();
             }
+            let _ = tx.send(ApiPythonInstallEvent::Done(result));
         });
     }
 
@@ -1322,6 +1364,9 @@ impl crate::app::App {
                 .find(|value| value.name == result.name)
         {
             value.value = new_value.clone();
+            state
+                .body_file_paths
+                .insert(result.name.clone(), result.paths.clone());
         }
         if matches!(
             self.ide_panel.api.focused,
@@ -1905,6 +1950,7 @@ impl crate::app::App {
             state.path_values = path_values;
             state.query_values = query_values;
             state.body_values = body_values;
+            state.body_file_paths.clear();
             state.body_json = body_json;
             state.body_scroll.current = 0.0;
             state.body_scroll.target = 0.0;

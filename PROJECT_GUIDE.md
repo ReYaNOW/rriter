@@ -41,7 +41,7 @@ src/platform/windows.rs
 src/platform/tests.rs
 ```
 
-`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, Trash layout, atomic replacement, text-file decoding/encoding, path identity, keyboard-modifier policy, and the public process API. `platform/process.rs` owns executable discovery, captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
+`platform.rs` is the single boundary for behavior that differs by operating system. It owns native config/data/cache/state directories, window attributes, file dialogs, Clipboard retry policy, URL/file-manager integration, Trash layout, atomic replacement, text-file decoding/encoding, path identity, keyboard-modifier policy, protected secret records, native trust/proxy hooks, process memory, and the public process API. `platform/process.rs` owns executable discovery, cancelable captured command timeouts, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 
 Important invariants:
 
@@ -53,7 +53,43 @@ Important invariants:
 * Linux-specific Wayland, XDG, FreeDesktop Trash, and `io_uring` behavior stays behind target gates. `src/platform/windows.rs` owns non-lossy Windows path normalization and extended-length Win32 paths.
 * Long-lived tools and captured commands use the managed process API. Child processes must not outlive RRiter; graceful shutdown is followed by a bounded full-tree termination.
 * Optional executable lookup honors configured overrides, `PATH`, and Windows `PATHEXT`. Missing tools enter a stable disabled state rather than a restart loop.
+* User credentials are persisted separately from ordinary state. Windows records are protected with per-user DPAPI entropy; legacy plaintext remains readable only for migration, and Unix fallback files are created atomically with mode `0600`.
+* Windows HTTP clients add user-installed native trust roots and native static proxy settings while preserving explicit proxy environment overrides.
 * Application shortcuts, terminal Control, and word-navigation modifiers are separate policies. This preserves Windows AltGr text and native macOS Command/Option behavior.
+
+### Managed Git integration
+
+Files:
+
+```text
+src/app/git_panel/git_process.rs
+src/app/git_panel/git_panel_graph_helpers.rs
+src/app/git_panel/git_panel_status_tests.rs
+```
+
+Git graph queries and fetch/pull/push commands use the shared managed-process layer. `RRITER_GIT_PATH` can select a non-default executable, and Windows network operations default to the Schannel backend unless `RRITER_GIT_SSL_BACKEND` overrides it. RRiter does not replace `GIT_SSH_COMMAND`, `core.sshCommand`, Git Credential Manager, ssh-agent, or Git proxy settings. Commands run without a console window, with stdin closed and bounded timeouts, and failures preserve the original diagnostic while adding authentication/certificate/proxy guidance.
+
+Repository identity and graph caches use `PathKey`, so drive-letter/case aliases do not duplicate Windows repositories. Status/stage tests cover `core.autocrlf`, `core.filemode=false`, and case-only renames.
+
+### API Client and API Mock platform runtime
+
+Files:
+
+```text
+src/app/api_client.rs
+src/app/api_client/api_client_loading_parser.rs
+src/app/api_client/api_client_request_runtime.rs
+src/app/api_client/api_client_defaults_persist.rs
+src/app/api_client/api_client_app_text_methods.rs
+src/app/api_mock/server.rs
+src/app/api_mock/persist.rs
+```
+
+Blocking API requests and the asynchronous API Mock proxy share builders that apply the same trust roots and proxy policy. Direct server-reach timing uses a bounded TCP connect instead of platform-specific `ping`; it is suppressed when proxy routing is active because a direct probe would be misleading.
+
+Authentication is stored separately through the platform secret envelope and atomic secret writer. Ordinary specs, mock state, caches, and OpenAPI exports use atomic replacement. Multipart picker results stay as native `PathBuf` values, including Windows paths with spaces/UNC paths and non-UTF Unix paths; lossy display text is never used as the selected upload path. Copied cURL commands use POSIX quoting on Linux/macOS and explicit `curl.exe` plus PowerShell quoting/continuations on Windows.
+
+`uv python list` and `uv python install` are cancelable managed processes. Closing RRiter cancels those workers, waits briefly, and terminates their complete process trees. Python worker and Ty commands reuse the same platform lifecycle and accept configured executable paths containing spaces.
 
 ### Text engine
 
@@ -324,8 +360,8 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, and managed processes.
 
-* `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, captured output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
-* `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling.
+* `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
+* `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling, per-user DPAPI, native certificate/proxy discovery, and process memory.
 * `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier regression tests that can run on Linux, plus target-gated Windows tests.
 
 Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules.
@@ -356,7 +392,7 @@ Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/ap
 
 Large app files use thin include shells to keep source chunks small:
 
-* `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input helpers, App method groups, defaults/persist, tests.
+* `src/app/api_client/*` -> API client loading/parsing, shared native-root/proxy HTTP builders, native upload paths, cancelable Python runtime tasks, request runtime, layout/input helpers, protected auth persistence, and tests.
 * `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and async OpenAPI export entrypoint.
 * `src/app/api_mock/contract.rs` -> structured Python mock contract builder for handler signature, locked classes, runtime args, defaults, and schema export.
 * `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON patch/synthesis for selected spec plus manual mock routes.
@@ -364,6 +400,7 @@ Large app files use thin include shells to keep source chunks small:
 * `src/app/python_completion/*` -> source/module helpers and class/member helpers.
 * `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
 * `src/app/app_file_behavior_tests/*` -> file/tab flow, IDE definition jumps, UI/Git/API cases.
+* `src/app/git_panel/git_process.rs` -> managed Git CLI, executable override, Schannel/network policy, credential/SSH/proxy preservation, timeout, and failure classification.
 * `src/app/git_panel/*` -> Git panel types, `App` graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> diff loading/render state and format-preserving worktree save flow.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, CRLF, and invalid-text regressions.

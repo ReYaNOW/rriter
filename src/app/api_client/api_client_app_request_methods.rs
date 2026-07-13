@@ -692,6 +692,7 @@ impl crate::app::App {
         let path_values = state.path_values.clone();
         let query_values = state.query_values.clone();
         let body_values = state.body_values.clone();
+        let body_file_paths = state.body_file_paths.clone();
         let body_json_text = state.body_json.clone();
         let selected_server = server.clone();
         let auth_parts = prepared_auth_for_route(model, route, &self.ide_panel.api.auth);
@@ -706,7 +707,9 @@ impl crate::app::App {
             None
         };
         let body_multipart = (method.can_send_body() && is_multipart_body)
-            .then(|| api_multipart_parts_for_route(route, model, &body_values));
+            .then(|| {
+                api_multipart_parts_for_route(route, model, &body_values, &body_file_paths)
+            });
         let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
         let body_json = (method.can_send_body() && is_json_body)
             .then_some(body_json_text.clone())
@@ -1125,6 +1128,7 @@ impl crate::app::App {
             match rx.try_recv() {
                 Ok(result) => {
                     self.ide_panel.api.mock_python_versions_loading = false;
+                    self.ide_panel.api.python_version_list_cancel = None;
                     if let Some(error) = result.error {
                         self.ide_panel.api.mock.uv.last_error = error;
                     } else {
@@ -1139,6 +1143,7 @@ impl crate::app::App {
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.ide_panel.api.mock_python_versions_loading = false;
+                    self.ide_panel.api.python_version_list_cancel = None;
                     changed = true;
                 }
             }
@@ -1153,6 +1158,7 @@ impl crate::app::App {
                     }
                     Ok(ApiPythonInstallEvent::Done(result)) => {
                         self.ide_panel.api.mock_python_install_running = false;
+                        self.ide_panel.api.python_install_cancel = None;
                         keep = false;
                         match result {
                             Ok(()) => {
@@ -1187,6 +1193,7 @@ impl crate::app::App {
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         self.ide_panel.api.mock_python_install_running = false;
+                        self.ide_panel.api.python_install_cancel = None;
                         keep = false;
                         changed = true;
                         break;

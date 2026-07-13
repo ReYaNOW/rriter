@@ -360,40 +360,67 @@ fn format_api_response_headers(headers: &[(String, String)]) -> String {
     out
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ApiCurlShell {
+    Posix,
+    PowerShell,
+}
+
+fn api_curl_shell_for_platform(platform: crate::platform::PlatformKind) -> ApiCurlShell {
+    if platform == crate::platform::PlatformKind::Windows {
+        ApiCurlShell::PowerShell
+    } else {
+        ApiCurlShell::Posix
+    }
+}
+
 fn format_api_curl_command(job: &ApiJobRequest) -> String {
+    format_api_curl_command_for_platform(job, crate::platform::CURRENT_PLATFORM)
+}
+
+fn format_api_curl_command_for_platform(
+    job: &ApiJobRequest,
+    platform: crate::platform::PlatformKind,
+) -> String {
+    let shell = api_curl_shell_for_platform(platform);
     let mut out = String::with_capacity(job.url.len().saturating_add(160));
-    out.push_str("curl \\\n  -X ");
+    out.push_str(match shell {
+        ApiCurlShell::Posix => "curl",
+        ApiCurlShell::PowerShell => "curl.exe",
+    });
+    push_curl_continuation(&mut out, shell);
+    out.push_str("-X ");
     out.push_str(job.method.as_str());
-    out.push_str(" \\\n  ");
-    push_shell_quoted(&mut out, &job.url);
+    push_curl_continuation(&mut out, shell);
+    push_shell_quoted(&mut out, &job.url, shell);
 
     if !api_auth_parts_have_header(&job.auth_parts, "accept") {
-        push_curl_header(&mut out, "accept", "application/json");
+        push_curl_header(&mut out, "accept", "application/json", shell);
     }
     let mut cookie_header = String::new();
     for part in &job.auth_parts {
         match part {
             ApiPreparedAuthPart::Header { name, value } => {
-                push_curl_header(&mut out, name, value);
+                push_curl_header(&mut out, name, value, shell);
             }
             ApiPreparedAuthPart::Basic { username, password } => {
                 let mut value = String::with_capacity(username.len() + password.len() + 1);
                 value.push_str(username);
                 value.push(':');
                 value.push_str(password);
-                push_curl_arg(&mut out, "-u", &value);
+                push_curl_arg(&mut out, "-u", &value, shell);
             }
             ApiPreparedAuthPart::Bearer { token } => {
                 let mut value = String::with_capacity("Bearer ".len() + token.len());
                 value.push_str("Bearer ");
                 value.push_str(token);
-                push_curl_header(&mut out, "Authorization", &value);
+                push_curl_header(&mut out, "Authorization", &value, shell);
             }
             ApiPreparedAuthPart::Digest { value } => {
                 let mut header = String::with_capacity("Digest ".len() + value.len());
                 header.push_str("Digest ");
                 header.push_str(value);
-                push_curl_header(&mut out, "Authorization", &header);
+                push_curl_header(&mut out, "Authorization", &header, shell);
             }
             ApiPreparedAuthPart::Cookie { name, value } => {
                 if !cookie_header.is_empty() {
@@ -407,7 +434,7 @@ fn format_api_curl_command(job: &ApiJobRequest) -> String {
         }
     }
     if !cookie_header.is_empty() {
-        push_curl_header(&mut out, "Cookie", &cookie_header);
+        push_curl_header(&mut out, "Cookie", &cookie_header, shell);
     }
 
     if let Some(parts) = job.body_multipart.as_ref() {
@@ -428,76 +455,105 @@ fn format_api_curl_command(job: &ApiJobRequest) -> String {
                     value.push_str(&path_text);
                 }
             }
-            push_curl_arg(&mut out, "-F", &value);
+            push_curl_arg(&mut out, "-F", &value, shell);
         }
     } else if let Some(fields) = job.body_form.as_ref() {
         let pairs = api_form_pairs(fields);
         if pairs.is_empty() {
-            push_curl_header(&mut out, "Content-Type", "application/x-www-form-urlencoded");
-            push_curl_arg(&mut out, "--data", "");
+            push_curl_header(
+                &mut out,
+                "Content-Type",
+                "application/x-www-form-urlencoded",
+                shell,
+            );
+            push_curl_arg(&mut out, "--data", "", shell);
         } else {
             for (name, value) in pairs {
                 let mut field = String::with_capacity(name.len() + value.len() + 1);
                 field.push_str(name);
                 field.push('=');
                 field.push_str(value);
-                push_curl_arg(&mut out, "--data-urlencode", &field);
+                push_curl_arg(&mut out, "--data-urlencode", &field, shell);
             }
         }
     } else if job.method.can_send_body() {
-        push_curl_header(&mut out, "Content-Type", "application/json");
+        push_curl_header(&mut out, "Content-Type", "application/json", shell);
         push_curl_arg(
             &mut out,
             "--data-binary",
             job.body_json.as_deref().unwrap_or_default(),
+            shell,
         );
     }
 
     out
 }
 
-fn push_curl_header(out: &mut String, name: &str, value: &str) {
+fn push_curl_continuation(out: &mut String, shell: ApiCurlShell) {
+    out.push_str(match shell {
+        ApiCurlShell::Posix => " \\\n  ",
+        ApiCurlShell::PowerShell => " `\n  ",
+    });
+}
+
+fn push_curl_header(out: &mut String, name: &str, value: &str, shell: ApiCurlShell) {
     let mut header = String::with_capacity(name.len() + value.len() + 2);
     header.push_str(name);
     header.push_str(": ");
     header.push_str(value);
-    if name.eq_ignore_ascii_case("authorization") && header.chars().count() > 96 {
-        push_wrapped_curl_arg(out, "-H", &header, 96);
+    if shell == ApiCurlShell::Posix
+        && name.eq_ignore_ascii_case("authorization")
+        && header.chars().count() > 96
+    {
+        push_wrapped_curl_arg(out, "-H", &header, 96, shell);
     } else {
-        push_curl_arg(out, "-H", &header);
+        push_curl_arg(out, "-H", &header, shell);
     }
 }
 
-fn push_curl_arg(out: &mut String, flag: &str, value: &str) {
-    out.push_str(" \\\n  ");
+fn push_curl_arg(out: &mut String, flag: &str, value: &str, shell: ApiCurlShell) {
+    push_curl_continuation(out, shell);
     out.push_str(flag);
     out.push(' ');
-    push_shell_quoted(out, value);
+    push_shell_quoted(out, value, shell);
 }
 
-fn push_wrapped_curl_arg(out: &mut String, flag: &str, value: &str, chunk_chars: usize) {
-    out.push_str(" \\\n  ");
+fn push_wrapped_curl_arg(
+    out: &mut String,
+    flag: &str,
+    value: &str,
+    chunk_chars: usize,
+    shell: ApiCurlShell,
+) {
+    if shell != ApiCurlShell::Posix {
+        push_curl_arg(out, flag, value, shell);
+        return;
+    }
+    push_curl_continuation(out, shell);
     out.push_str(flag);
     out.push(' ');
     let mut start = 0usize;
     let mut chars = 0usize;
     for (idx, _) in value.char_indices() {
         if chars == chunk_chars {
-            push_shell_quoted(out, &value[start..idx]);
+            push_shell_quoted(out, &value[start..idx], shell);
             out.push_str("\\\n");
             start = idx;
             chars = 0;
         }
         chars += 1;
     }
-    push_shell_quoted(out, &value[start..]);
+    push_shell_quoted(out, &value[start..], shell);
 }
 
-fn push_shell_quoted(out: &mut String, value: &str) {
+fn push_shell_quoted(out: &mut String, value: &str, shell: ApiCurlShell) {
     out.push('\'');
     for ch in value.chars() {
         if ch == '\'' {
-            out.push_str(r#"'\''"#);
+            match shell {
+                ApiCurlShell::Posix => out.push_str(r#"'\''"#),
+                ApiCurlShell::PowerShell => out.push_str("''"),
+            }
         } else {
             out.push(ch);
         }
@@ -630,48 +686,22 @@ fn capture_set_cookie(
 }
 
 fn measure_api_server_reach_ms(resolved: Option<&ApiResolvedHost>) -> Option<u128> {
+    // A direct TCP probe is meaningful only when the request itself is direct.
+    // With an environment or native system proxy the upstream may be reachable
+    // exclusively through that proxy, so report n/a instead of a false failure.
+    if crate::platform::proxy_routing_is_configured() {
+        return None;
+    }
+    measure_direct_server_reach_ms(resolved)
+}
+
+fn measure_direct_server_reach_ms(resolved: Option<&ApiResolvedHost>) -> Option<u128> {
     let resolved = resolved?;
-    measure_api_icmp_reach_ms(resolved).or_else(|| measure_api_tcp_reach_ms(resolved))
-}
-
-fn measure_api_icmp_reach_ms(resolved: &ApiResolvedHost) -> Option<u128> {
-    let ip = resolved.ip.to_string();
-    let output = Command::new("ping")
-        .args(["-n", "-c", "1", "-W", "1", ip.as_str()])
-        .output()
-        .ok()?;
-    parse_api_ping_rtt_ms(&output.stdout)
-        .or_else(|| parse_api_ping_rtt_ms(&output.stderr))
-        .map(|rtt_ms| rtt_ms.saturating_add(1) / 2)
-}
-
-fn measure_api_tcp_reach_ms(resolved: &ApiResolvedHost) -> Option<u128> {
     let addr = SocketAddr::new(resolved.ip, resolved.port);
     let started = Instant::now();
     TcpStream::connect_timeout(&addr, API_REACH_TIMEOUT)
         .ok()
-        .map(|_| started.elapsed().as_millis().max(1).saturating_add(1) / 2)
-}
-
-fn parse_api_ping_rtt_ms(bytes: &[u8]) -> Option<u128> {
-    let text = std::str::from_utf8(bytes).ok()?;
-    if text.contains("time<1") {
-        return Some(1);
-    }
-    let rest = text.split_once("time=")?.1;
-    let mut end = 0usize;
-    for (idx, ch) in rest.char_indices() {
-        if ch.is_ascii_digit() || ch == '.' || ch == ',' {
-            end = idx + ch.len_utf8();
-        } else if end > 0 {
-            break;
-        } else {
-            return None;
-        }
-    }
-    let value = rest.get(..end)?.replace(',', ".");
-    let millis = value.parse::<f64>().ok()?;
-    Some((millis.round().max(1.0)) as u128)
+        .map(|_| started.elapsed().as_millis().max(1))
 }
 
 fn format_api_timing_text(

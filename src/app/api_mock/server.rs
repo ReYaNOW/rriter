@@ -168,7 +168,9 @@ fn run_server_thread(
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(err) => {
-                push_event(ApiMockServerEvent::Failed(err.to_string()));
+                push_event(ApiMockServerEvent::Failed(format_api_mock_bind_error(
+                    addr, &err,
+                )));
                 clear_server_handle();
                 return;
             }
@@ -181,9 +183,22 @@ fn run_server_thread(
             });
         }
         push_log_event("axum router: building fallback router");
+        let proxy_client = match crate::app::api_client::api_async_client_builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                push_event(ApiMockServerEvent::Failed(format!(
+                    "Proxy HTTP client initialization failed: {error}"
+                )));
+                clear_server_handle();
+                return;
+            }
+        };
         let state = ApiMockAxumState {
             snapshot,
-            proxy_client: reqwest::Client::new(),
+            proxy_client,
         };
         let app = Router::new()
             .fallback(any(handle_mock_request))
@@ -805,6 +820,35 @@ fn api_method_from_http(method: &Method) -> Option<ApiMethod> {
     }
 }
 
+fn format_api_mock_bind_error(addr: SocketAddr, error: &std::io::Error) -> String {
+    format_api_mock_bind_error_for_platform(addr, error, crate::platform::CURRENT_PLATFORM)
+}
+
+fn format_api_mock_bind_error_for_platform(
+    addr: SocketAddr,
+    error: &std::io::Error,
+    platform: crate::platform::PlatformKind,
+) -> String {
+    match error.kind() {
+        std::io::ErrorKind::AddrInUse => format!(
+            "Cannot start API Mock on {addr}: the port is already in use. Choose another port or stop the process using it."
+        ),
+        std::io::ErrorKind::PermissionDenied => {
+            if platform == crate::platform::PlatformKind::Windows && !addr.ip().is_loopback() {
+                format!(
+                    "Cannot start API Mock on {addr}: access was denied. Allow RRiter through Windows Firewall or bind to 127.0.0.1 for local-only access. ({error})"
+                )
+            } else {
+                format!("Cannot start API Mock on {addr}: access was denied. ({error})")
+            }
+        }
+        std::io::ErrorKind::AddrNotAvailable => format!(
+            "Cannot start API Mock on {addr}: this address is not available on the current machine. ({error})"
+        ),
+        _ => format!("Cannot start API Mock on {addr}: {error}"),
+    }
+}
+
 fn socket_addr(host: &str, port: u16) -> Result<SocketAddr, String> {
     let ip = host
         .parse::<IpAddr>()
@@ -908,6 +952,33 @@ mod tests {
         assert!(!safe_proxy_header(&HeaderName::from_static("connection")));
         assert!(!safe_proxy_header(&HeaderName::from_static("host")));
         assert!(safe_proxy_header(&HeaderName::from_static("authorization")));
+    }
+
+    #[test]
+    fn bind_errors_explain_port_and_address_failures() {
+        let addr: SocketAddr = "127.0.0.1:4010".parse().unwrap();
+        let in_use = format_api_mock_bind_error(
+            addr,
+            &std::io::Error::new(std::io::ErrorKind::AddrInUse, "busy"),
+        );
+        assert!(in_use.contains("already in use"));
+        assert!(in_use.contains("4010"));
+
+        let unavailable = format_api_mock_bind_error(
+            addr,
+            &std::io::Error::new(std::io::ErrorKind::AddrNotAvailable, "missing"),
+        );
+        assert!(unavailable.contains("not available"));
+        assert!(unavailable.contains("missing"));
+
+        let public_addr: SocketAddr = "0.0.0.0:4010".parse().unwrap();
+        let denied = format_api_mock_bind_error_for_platform(
+            public_addr,
+            &std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied"),
+            crate::platform::PlatformKind::Windows,
+        );
+        assert!(denied.contains("Windows Firewall"));
+        assert!(denied.contains("127.0.0.1"));
     }
 
     #[test]

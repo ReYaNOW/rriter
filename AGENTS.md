@@ -520,6 +520,10 @@ In draw/render/frame paths:
 * Launch external tools through `platform::ManagedChild`, `platform::run_command_output`, or a feature wrapper built on those APIs. Do not add unmanaged long-lived `Command::spawn` calls.
 * Every long-lived child must belong to the Unix process group or Windows Job Object owned by RRiter. Shutdown must be bounded: graceful request first, then terminate the complete process tree after a timeout.
 * Resolve optional tools through `platform::resolve_executable`/`command_for_tool`, including Windows `PATHEXT` and configured path overrides. A missing tool is a stable `Missing`/disabled state and must not cause automatic restart or repeated log spam.
+* Route Git CLI work through `src/app/git_panel/git_process.rs`. Preserve Git Credential Manager, ssh-agent, `core.sshCommand`, proxy configuration, and bounded process-tree shutdown; never build Git commands through a shell string.
+* Build API Client/API Mock HTTP clients through the shared builders in `api_client_loading_parser.rs`, so native Windows trust roots, environment/native proxy settings, timeouts, and cache identity remain consistent.
+* Keep API credentials out of ordinary JSON state. Read/write them through `platform::open_user_secret`, `seal_user_secret`, and `atomic_write_secret`; preserve plaintext loading only as a migration path.
+* Keep native multipart selections as `PathBuf` values until filesystem access. Display strings are not the source of truth for uploads.
 * Keep application shortcuts, terminal Control, and word-navigation modifiers separate. Windows AltGr must remain text input; macOS Command is the application shortcut modifier and Option is word navigation/text input.
 
 Good:
@@ -753,9 +757,9 @@ Root:
 * `Cargo.toml` -> deps/profile/features.
 * `Makefile` -> `make codex_test`, `make api-map`.
 * `build.rs` -> build-time resource/platform setup.
-* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic writes, dialogs/Clipboard/Trash/openers, modifier policy, and process API reexports.
-* `src/platform/process.rs` -> executable resolution, captured commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
-* `src/platform/windows.rs` -> Windows WTF-16 case-insensitive path identity plus UNC/extended-length Win32 path handling.
+* `src/platform.rs` -> cross-platform directories, `PathKey`, reversible path records, text formats, atomic/secret writes, native trust/proxy hooks, dialogs/Clipboard/Trash/openers, modifier policy, and process API reexports.
+* `src/platform/process.rs` -> executable resolution, cancelable captured commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
+* `src/platform/windows.rs` -> Windows WTF-16 case-insensitive path identity, UNC/extended-length Win32 paths, DPAPI credentials, native trust roots, proxy discovery, and process memory.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier regression tests.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
@@ -770,8 +774,10 @@ Entrypoints/state:
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling.
 * `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
-* `src/app/api_client.rs` -> include shell for API client types/state and behavior chunks.
-* `src/app/api_client/*` -> API client loading/parsing, request runtime, layout/input, App methods, defaults/persist, tests.
+* `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
+* `src/app/api_client/api_client_loading_parser.rs` -> shared blocking/async HTTP builders with native roots, proxy handling, DNS pinning/cache keys, and OpenAPI loading.
+* `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
+* `src/app/api_client/*` -> API client request runtime, layout/input, App methods, parser/loading, persistence, and tests.
 * `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
 * `src/app/api_mock/contract.rs` -> Python mock contract builder for signature, classes, worker arg plan, defaults, OpenAPI schema pieces.
 * `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON export patch/synthesis for selected spec and manual mock routes.
@@ -782,6 +788,7 @@ Entrypoints/state:
 * `src/app/app_behavior_tests.rs` -> include shell for app/autocomplete behavior tests.
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
+* `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.

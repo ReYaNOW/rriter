@@ -500,15 +500,16 @@ impl crate::app::App {
             let Ok(text) = serde_json::to_string_pretty(&value) else {
                 return;
             };
-            let Some(path) = rfd::FileDialog::new()
-                .set_title("Экспорт openapi.json")
-                .set_file_name("openapi.json")
-                .add_filter("OpenAPI JSON", &["json"])
-                .save_file()
+            let Some(path) = crate::platform::save_file_with_filter(
+                "Экспорт openapi.json",
+                "openapi.json",
+                "OpenAPI JSON",
+                &["json"],
+            )
             else {
                 return;
             };
-            let _ = std::fs::write(path, text);
+            let _ = crate::platform::atomic_write(&path, text.as_bytes());
         });
     }
 }

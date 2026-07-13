@@ -171,7 +171,7 @@ impl App {
                             .ide_panel
                             .git
                             .graph_latest_request_by_root
-                            .get(&event.repo_root)
+                            .get(&crate::platform::PathKey::new(&event.repo_root))
                             .copied();
                         if latest_for_root == Some(event.request_id) {
                             self.ide_panel.git.graph_latest_request_id = self
@@ -182,11 +182,11 @@ impl App {
                             self.ide_panel
                                 .git
                                 .graph_latest_request_by_root
-                                .remove(&event.repo_root);
+                                .remove(&crate::platform::PathKey::new(&event.repo_root));
                             self.ide_panel
                                 .git
                                 .graph_pending_roots
-                                .remove(&event.repo_root);
+                                .remove(&crate::platform::PathKey::new(&event.repo_root));
                             let same_workspace =
                                 self.ide_panel.git.graph_workspace_idx == Some(event.workspace_idx);
                             let same_root = self
@@ -194,7 +194,7 @@ impl App {
                                 .git
                                 .graph_repo_root
                                 .as_ref()
-                                .is_some_and(|root| root == &event.repo_root);
+                                .is_some_and(|root| crate::platform::paths_equal(root, &event.repo_root));
                             if same_workspace && same_root {
                                 if event.offset == 0 {
                                     self.apply_git_graph_result(
@@ -223,7 +223,10 @@ impl App {
                                 self.ide_panel
                                     .git
                                     .graph_cache
-                                    .insert(event.repo_root.clone(), cache_entry);
+                                    .insert(
+                                        crate::platform::PathKey::new(&event.repo_root),
+                                        cache_entry,
+                                    );
                             }
                             updated = true;
                         }
@@ -245,7 +248,12 @@ impl App {
             .git
             .graph_repo_root
             .as_ref()
-            .is_some_and(|root| self.ide_panel.git.graph_pending_roots.contains(root));
+            .is_some_and(|root| {
+                self.ide_panel
+                    .git
+                    .graph_pending_roots
+                    .contains(&crate::platform::PathKey::new(root))
+            });
         updated
     }
 
@@ -385,7 +393,13 @@ impl App {
         let Some(repo_root) = self.ide_panel.git.graph_repo_root.clone() else {
             return false;
         };
-        let Some(cache_entry) = self.ide_panel.git.graph_cache.get(&repo_root).cloned() else {
+        let Some(cache_entry) = self
+            .ide_panel
+            .git
+            .graph_cache
+            .get(&crate::platform::PathKey::new(&repo_root))
+            .cloned()
+        else {
             return false;
         };
         self.apply_git_graph_cache_entry(cache_entry, reset_scroll);
@@ -446,7 +460,12 @@ impl App {
             self.ide_panel.git.graph_notice = Some("No Git repo".to_string());
             return;
         };
-        if self.ide_panel.git.graph_pending_roots.contains(&repo_root) {
+        if self
+            .ide_panel
+            .git
+            .graph_pending_roots
+            .contains(&crate::platform::PathKey::new(&repo_root))
+        {
             self.ide_panel.git.graph_pending = true;
             return;
         }
@@ -498,11 +517,16 @@ impl App {
             .ide_panel
             .git
             .graph_latest_request_by_root
-            .contains_key(&repo_root)
+            .contains_key(&crate::platform::PathKey::new(&repo_root))
         {
             return;
         }
-        let is_active_graph = self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root);
+        let is_active_graph = self
+            .ide_panel
+            .git
+            .graph_repo_root
+            .as_ref()
+            .is_some_and(|active| crate::platform::paths_equal(active, &repo_root));
         let active_loaded_len = if is_active_graph {
             self.ide_panel.git.graph_snapshot.len()
         } else {
@@ -512,7 +536,7 @@ impl App {
             .ide_panel
             .git
             .graph_cache
-            .get(&repo_root)
+            .get(&crate::platform::PathKey::new(&repo_root))
             .map(|cache| cache.limit);
         if !git_graph_prefetch_needed(
             force_reload,
@@ -543,12 +567,18 @@ impl App {
             .iter()
             .filter_map(|workspace| {
                 let repo_root = workspace.repo_root.clone()?;
-                seen.insert(repo_root.clone())
+                seen.insert(crate::platform::PathKey::new(&repo_root))
                     .then_some((workspace.workspace_idx, repo_root))
             })
             .collect::<Vec<_>>();
         for (workspace_idx, repo_root) in workspaces {
-            let limit = if self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root) {
+            let limit = if self
+                .ide_panel
+                .git
+                .graph_repo_root
+                .as_ref()
+                .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
+            {
                 self.ide_panel.git.graph_commit_limit
             } else {
                 GIT_GRAPH_LIMIT_STEP

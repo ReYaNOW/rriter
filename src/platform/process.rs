@@ -3,6 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -333,6 +334,7 @@ fn configure_managed_command(command: &mut Command) {
     }
 }
 
+#[cfg(test)]
 pub fn command_for(program: impl AsRef<OsStr>) -> io::Result<Command> {
     let program = program.as_ref();
     resolve_executable(program)
@@ -438,6 +440,22 @@ fn executable_extensions_with(path_ext: Option<&OsStr>, platform: PlatformKind) 
 }
 
 pub fn run_command_output(command: &mut Command, timeout: Duration) -> io::Result<Output> {
+    run_command_output_inner(command, timeout, None)
+}
+
+pub fn run_command_output_cancelable(
+    command: &mut Command,
+    timeout: Duration,
+    cancel: &AtomicBool,
+) -> io::Result<Output> {
+    run_command_output_inner(command, timeout, Some(cancel))
+}
+
+fn run_command_output_inner(
+    command: &mut Command,
+    timeout: Duration,
+    cancel: Option<&AtomicBool>,
+) -> io::Result<Output> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -452,9 +470,21 @@ pub fn run_command_output(command: &mut Command, timeout: Duration) -> io::Resul
     let stdout_reader = thread::spawn(move || read_pipe(stdout));
     let stderr_reader = thread::spawn(move || read_pipe(stderr));
 
-    let status = match child.wait_timeout(timeout)? {
-        Some(status) => status,
-        None => {
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if cancel.is_some_and(|cancel| cancel.load(Ordering::Acquire)) {
+            let _ = child.terminate(DROP_GRACE_PERIOD);
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "process was cancelled",
+            ));
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
             let _ = child.terminate(DROP_GRACE_PERIOD);
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
@@ -463,6 +493,9 @@ pub fn run_command_output(command: &mut Command, timeout: Duration) -> io::Resul
                 format!("process exceeded timeout of {} ms", timeout.as_millis()),
             ));
         }
+        thread::sleep(
+            PROCESS_POLL_INTERVAL.min(deadline.saturating_duration_since(Instant::now())),
+        );
     };
 
     let stdout = join_pipe_reader(stdout_reader)?;

@@ -49,6 +49,7 @@ impl App {
         if let Some(lsp) = self.lsp.take() {
             lsp.shutdown();
         }
+        self.ide_panel.api.shutdown_background_tasks();
         crate::app::api_mock::server::stop_api_mock_server();
     }
 

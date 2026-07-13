@@ -24,6 +24,7 @@ fn fill_api_tab_inputs(state: &mut ApiClientTabState, route: &ApiRouteRow, model
         })
         .collect();
     state.body_values = default_body_values_for_route(route, model);
+    state.body_file_paths.clear();
     state.body_json = default_body_for_route(route, model);
 }
 
@@ -61,6 +62,7 @@ fn api_multipart_parts_for_route(
     route: &ApiRouteRow,
     model: &ApiSpecModel,
     values: &[ApiInputValue],
+    file_paths: &FxHashMap<String, Vec<PathBuf>>,
 ) -> Vec<ApiMultipartPart> {
     let Some(body) = route.request_body.as_ref().filter(|body| body.is_multipart) else {
         return Vec::new();
@@ -82,6 +84,13 @@ fn api_multipart_parts_for_route(
             .map(|item| item.value.as_str())
             .unwrap_or("");
         if api_schema_is_file_input(prop_schema, model) {
+            if let Some(paths) = file_paths.get(&prop.name) {
+                out.extend(paths.iter().cloned().map(|path| ApiMultipartPart::File {
+                    name: prop.name.clone(),
+                    path,
+                }));
+                continue;
+            }
             for path in value.lines().map(str::trim).filter(|line| !line.is_empty()) {
                 out.push(ApiMultipartPart::File {
                     name: prop.name.clone(),
@@ -1358,10 +1367,7 @@ fn api_config_dir() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        let mut path = PathBuf::from(std::env::var_os("HOME").unwrap_or_default());
-        path.push(".config");
-        path.push("RRiter");
-        path
+        crate::platform::config_dir()
     }
 }
 
@@ -1377,50 +1383,33 @@ fn api_cache_dir() -> PathBuf {
     api_config_dir().join("api_cache")
 }
 
+const API_AUTH_SECRET_PURPOSE: &str = "RRiter API authentication";
+
 fn load_api_auth() -> ApiAuthStore {
-    std::fs::read_to_string(api_auth_path())
+    std::fs::read(api_auth_path())
         .ok()
-        .and_then(|content| serde_json::from_str::<ApiAuthStore>(&content).ok())
+        .and_then(|record| {
+            crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE).ok()
+        })
+        .and_then(|content| serde_json::from_slice::<ApiAuthStore>(&content).ok())
         .unwrap_or_default()
 }
 
 fn save_api_auth(auth: &ApiAuthStore) {
-    let Ok(content) = serde_json::to_string_pretty(auth) else {
+    let Ok(content) = serde_json::to_vec_pretty(auth) else {
         return;
     };
-    if let Some(dir) = api_auth_path().parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    write_secret_file(&api_auth_path(), content.as_bytes());
-}
-
-fn write_secret_file(path: &Path, bytes: &[u8]) {
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        if let Ok(mut file) = OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .mode(0o600)
-            .open(path)
-        {
-            let _ = file.write_all(bytes);
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = std::fs::write(path, bytes);
-    }
+    let Ok(record) = crate::platform::seal_user_secret(&content, API_AUTH_SECRET_PURPOSE) else {
+        return;
+    };
+    let _ = crate::platform::atomic_write_secret(&api_auth_path(), &record);
 }
 
 fn save_url_cache(id: ApiSpecId, raw: &str) {
-    let dir = api_cache_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join(format!("{}.json", id.0)), raw);
+    let _ = crate::platform::atomic_write(
+        &api_cache_dir().join(format!("{}.json", id.0)),
+        raw.as_bytes(),
+    );
 }
 
 fn read_url_cache(id: ApiSpecId) -> Option<String> {
@@ -1539,7 +1528,8 @@ fn spawn_api_python_log_reader<R>(
     stream: R,
     tx: mpsc::Sender<ApiPythonInstallEvent>,
     kind: ApiPythonInstallLogKind,
-) where
+) -> std::thread::JoinHandle<()>
+where
     R: std::io::Read + Send + 'static,
 {
     std::thread::spawn(move || {
@@ -1553,7 +1543,7 @@ fn spawn_api_python_log_reader<R>(
                 kind,
             }));
         }
-    });
+    })
 }
 
 fn push_api_python_install_log(api: &mut ApiClientState, line: ApiPythonInstallLogLine) {

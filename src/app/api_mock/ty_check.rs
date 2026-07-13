@@ -926,18 +926,21 @@ mod tests {
     fn ty_check_command_uses_selected_uv_python() {
         let runtime = ApiPythonRuntimeConfig {
             mode: ApiPythonRuntimeMode::UvManaged,
-            uv_path: Some(PathBuf::from("/usr/bin/uv")),
+            uv_path: Some(PathBuf::from(r"C:\Program Files\uv\uv.exe")),
             custom_python_path: None,
             python_version: "3.12".to_string(),
         };
-        let command =
-            api_mock_ty_command(&runtime, &PathBuf::from("/tmp/mock_route_0.py")).unwrap();
+        let command = api_mock_ty_command(
+            &runtime,
+            &PathBuf::from(r"C:\Users\Reyan\Mock Project\mock_route_0.py"),
+        )
+        .unwrap();
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
 
-        assert_eq!(command.get_program(), "/usr/bin/uv");
+        assert_eq!(command.get_program(), r"C:\Program Files\uv\uv.exe");
         assert_eq!(
             args,
             vec![
@@ -948,7 +951,7 @@ mod tests {
                 "--no-python-downloads",
                 "ty",
                 "check",
-                "/tmp/mock_route_0.py"
+                r"C:\Users\Reyan\Mock Project\mock_route_0.py"
             ]
         );
     }

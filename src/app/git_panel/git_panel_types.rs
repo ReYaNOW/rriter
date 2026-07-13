@@ -118,7 +118,7 @@ impl GitStatusSnapshot {
             let Some(repo_root) = &workspace.repo_root else {
                 continue;
             };
-            if seen.insert(repo_root.clone()) {
+            if seen.insert(crate::platform::PathKey::new(repo_root)) {
                 roots.push(repo_root.clone());
             }
         }
@@ -128,7 +128,7 @@ impl GitStatusSnapshot {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct BranchAheadKey {
-    repo_root: PathBuf,
+    repo_root: crate::platform::PathKey,
     head_oid: git2::Oid,
     upstream_oid: git2::Oid,
 }
@@ -328,9 +328,9 @@ pub struct GitPanelState {
     graph_rx: Vec<mpsc::Receiver<GitGraphEvent>>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,
-    graph_latest_request_by_root: FxHashMap<PathBuf, u64>,
-    graph_pending_roots: FxHashSet<PathBuf>,
-    graph_cache: FxHashMap<PathBuf, GitGraphCacheEntry>,
+    graph_latest_request_by_root: FxHashMap<crate::platform::PathKey, u64>,
+    graph_pending_roots: FxHashSet<crate::platform::PathKey>,
+    graph_cache: FxHashMap<crate::platform::PathKey, GitGraphCacheEntry>,
     graph_refresh_after_status: bool,
 }
 

@@ -74,13 +74,10 @@ pub fn load_api_mocks() -> ApiMockState {
 
 pub fn save_api_mocks(state: &ApiMockState) {
     let saved = ApiMockPersist::from(state);
-    let Ok(content) = serde_json::to_string_pretty(&saved) else {
+    let Ok(content) = serde_json::to_vec_pretty(&saved) else {
         return;
     };
-    if let Some(dir) = api_mocks_path().parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
-    let _ = std::fs::write(api_mocks_path(), content);
+    let _ = crate::platform::atomic_write(&api_mocks_path(), &content);
 }
 
 pub fn api_mocks_path() -> PathBuf {
@@ -94,13 +91,7 @@ fn api_mock_data_dir() -> PathBuf {
     }
     #[cfg(not(test))]
     {
-        let base = std::env::var_os("XDG_DATA_HOME")
-            .map(PathBuf::from)
-            .or_else(|| {
-                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
-            })
-            .unwrap_or_default();
-        base.join("rriter")
+        crate::platform::data_dir()
     }
 }
 
@@ -123,7 +114,7 @@ mod tests {
             ..Default::default()
         };
         state.uv.status = ApiUvStatus::Ready;
-        state.uv.configured_path = Some(PathBuf::from("/usr/bin/uv"));
+        state.uv.configured_path = Some(PathBuf::from(r"C:\Program Files\uv\uv.exe"));
         state.route_overrides.push(ApiMockRouteOverride {
             source_key: "https://example.test/openapi.json".to_string(),
             method: ApiMethod::Get,
@@ -156,6 +147,10 @@ mod tests {
         assert_eq!(loaded.proxy_base_url, "https://backend.test");
         assert_eq!(loaded.uv.status, ApiUvStatus::Ready);
         assert_eq!(loaded.uv.python_version, "3.13");
+        assert_eq!(
+            loaded.uv.configured_path,
+            Some(PathBuf::from(r"C:\Program Files\uv\uv.exe"))
+        );
         assert_eq!(loaded.route_overrides.len(), 1);
         assert_eq!(loaded.manual_routes.len(), 1);
 

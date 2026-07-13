@@ -61,9 +61,7 @@ fn collect_workspace_status_with_cache(
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.to_path_buf());
 
-    let rel_root = root
-        .strip_prefix(&repo_root)
-        .ok()
+    let rel_root = crate::platform::relative_to(root, &repo_root)
         .filter(|rel_root| !rel_root.as_os_str().is_empty());
     let mut status_opts = git2::StatusOptions::new();
     status_opts
@@ -71,7 +69,7 @@ fn collect_workspace_status_with_cache(
         .recurse_untracked_dirs(true)
         .renames_head_to_index(true)
         .renames_index_to_workdir(true);
-    if let Some(rel_root) = rel_root {
+    if let Some(rel_root) = rel_root.as_deref() {
         status_opts.pathspec(rel_root);
     }
 
@@ -100,7 +98,8 @@ fn collect_workspace_status_with_cache(
         let Some((rel_path, old_rel_path)) = status_entry_paths(&entry) else {
             continue;
         };
-        let Some(display_path) = git_status_display_path(rel_path, rel_root, root, &repo_root)
+        let Some(display_path) =
+            git_status_display_path(rel_path, rel_root.as_deref(), root, &repo_root)
         else {
             continue;
         };
@@ -328,17 +327,16 @@ fn git_status_display_path(
         let display_path = rel_path.strip_prefix(rel_root).ok()?;
         return git_status_path_string(display_path).or_else(|| git_status_path_string(rel_path));
     }
-    if root == repo_root {
+    if crate::platform::paths_equal(root, repo_root) {
         return git_status_path_string(rel_path);
     }
 
     let abs_path = repo_root.join(rel_path);
-    if !abs_path.starts_with(root) {
+    if !crate::platform::path_is_within(&abs_path, root) {
         return None;
     }
-    abs_path
-        .strip_prefix(root)
-        .ok()
+    crate::platform::relative_to(&abs_path, root)
+        .as_deref()
         .and_then(git_status_path_string)
         .or_else(|| git_status_path_string(rel_path))
 }
@@ -529,7 +527,7 @@ fn branch_ahead_key(
         .target()
         .ok_or_else(|| git2::Error::from_str("No upstream target"))?;
     Ok(BranchAheadKey {
-        repo_root: repo_root.to_path_buf(),
+        repo_root: crate::platform::PathKey::new(repo_root),
         head_oid,
         upstream_oid,
     })
@@ -727,39 +725,7 @@ fn pull_repo(repo_root: &Path) -> Result<(), String> {
 }
 
 fn run_git_cli(repo_root: &Path, args: &[&str], label: &str) -> Result<(), String> {
-    println!(
-        "[GIT {label}] git -C {} {}",
-        repo_root.display(),
-        args.join(" ")
-    );
-    let mut command = std::process::Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0");
-    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
-        command.env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes");
-    }
-    let output = command.output().map_err(|err| err.to_string())?;
-    if output.status.success() {
-        println!("[GIT {label}] ok");
-        Ok(())
-    } else {
-        let stderr = short_command_output(&output.stderr);
-        let stdout = short_command_output(&output.stdout);
-        println!(
-            "[GIT {label}] failed status={:?} stderr={} stdout={}",
-            output.status.code(),
-            stderr,
-            stdout
-        );
-        if stderr.is_empty() {
-            Err(stdout)
-        } else {
-            Err(stderr)
-        }
-    }
+    run_git_checked(repo_root, args, label)
 }
 
 fn push_repo_with_git_cli(
@@ -769,58 +735,15 @@ fn push_repo_with_git_cli(
     remote_ref: &str,
 ) -> Result<(), String> {
     let refspec = format!("refs/heads/{branch}:{remote_ref}");
-    println!(
-        "[GIT PUSH] git -C {} push {} {}",
-        repo_root.display(),
-        remote_name,
-        refspec
-    );
-    let mut command = std::process::Command::new("git");
-    command
-        .arg("-C")
-        .arg(repo_root)
-        .arg("push")
-        .arg(remote_name)
-        .arg(refspec)
-        .env("GIT_TERMINAL_PROMPT", "0");
-    if std::env::var_os("GIT_SSH_COMMAND").is_none() {
-        command.env("GIT_SSH_COMMAND", "ssh -oBatchMode=yes");
-    }
-    let output = command.output().map_err(|err| err.to_string())?;
-    if output.status.success() {
-        println!("[GIT PUSH] ok");
-        Ok(())
-    } else {
-        let stderr = short_command_output(&output.stderr);
-        let stdout = short_command_output(&output.stdout);
-        println!(
-            "[GIT PUSH] failed status={:?} stderr={} stdout={}",
-            output.status.code(),
-            stderr,
-            stdout
-        );
-        if stderr.is_empty() {
-            Err(stdout)
-        } else {
-            Err(stderr)
-        }
-    }
-}
-
-fn short_command_output(bytes: &[u8]) -> String {
-    let text = String::from_utf8_lossy(bytes).trim().to_string();
-    if text.len() > 180 {
-        let end = text
-            .char_indices()
-            .take_while(|(idx, _)| *idx <= 180)
-            .map(|(idx, ch)| idx + ch.len_utf8())
-            .last()
-            .unwrap_or(0)
-            .min(text.len());
-        format!("{}...", &text[..end])
-    } else {
-        text
-    }
+    run_git_checked_owned(
+        repo_root,
+        vec![
+            std::ffi::OsString::from("push"),
+            std::ffi::OsString::from(remote_name),
+            std::ffi::OsString::from(refspec),
+        ],
+        "PUSH",
+    )
 }
 
 fn short_git_error(err: git2::Error) -> String {
@@ -1781,4 +1704,87 @@ mod tests {
 
         std::fs::remove_dir_all(&root).unwrap();
     }
+
+    #[test]
+    fn git_autocrlf_normalizes_index_without_dirtying_the_worktree() {
+        let root = temp_git_root("autocrlf");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        repo.config().unwrap().set_bool("core.autocrlf", true).unwrap();
+        std::fs::write(root.join("windows.txt"), b"first\r\nsecond\r\n").unwrap();
+
+        toggle_stage(&root, "windows.txt", None, false).unwrap();
+        commit_repo(&root, "crlf", false).unwrap();
+
+        let commit = repo.head().unwrap().peel_to_commit().unwrap();
+        let tree = commit.tree().unwrap();
+        let entry = tree.get_path(Path::new("windows.txt")).unwrap();
+        let blob = repo.find_blob(entry.id()).unwrap();
+        assert_eq!(blob.content(), b"first\nsecond\n");
+        assert!(collect_workspace_status(0, &root).files.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_core_filemode_false_ignores_executable_bit_changes() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = temp_git_root("filemode");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        repo.config().unwrap().set_bool("core.filemode", false).unwrap();
+        let path = root.join("script.sh");
+        std::fs::write(&path, b"#!/bin/sh\n").unwrap();
+        toggle_stage(&root, "script.sh", None, false).unwrap();
+        commit_repo(&root, "script", false).unwrap();
+
+        let mut permissions = std::fs::metadata(&path).unwrap().permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).unwrap();
+
+        assert!(collect_workspace_status(0, &root).files.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn git_case_only_rename_stages_old_and_new_paths_together() {
+        let root = temp_git_root("case_rename");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("Readme.txt"), b"hello\n").unwrap();
+        toggle_stage(&root, "Readme.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        crate::platform::rename_path(
+            &root.join("Readme.txt"),
+            &root.join("README.txt"),
+        )
+        .unwrap();
+        let status = collect_workspace_status(0, &root);
+        let renamed = status
+            .files
+            .iter()
+            .find(|file| file.status == GitFileStatus::Renamed)
+            .expect("case-only rename");
+        assert_eq!(renamed.rel_path.as_ref(), "README.txt");
+        assert_eq!(renamed.old_rel_path.as_deref(), Some("Readme.txt"));
+
+        toggle_stage(
+            &root,
+            renamed.rel_path.as_ref(),
+            renamed.old_rel_path.as_deref(),
+            false,
+        )
+        .unwrap();
+        commit_repo(&root, "rename", false).unwrap();
+        let tree = repo.head().unwrap().peel_to_commit().unwrap().tree().unwrap();
+        assert!(tree.get_path(Path::new("README.txt")).is_ok());
+        assert!(tree.get_path(Path::new("Readme.txt")).is_err());
+        assert!(collect_workspace_status(0, &root).files.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
 }

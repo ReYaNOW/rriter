@@ -288,21 +288,31 @@ mod tests {
     fn worker_command_uses_uv_managed_python_version() {
         let runtime = ApiPythonRuntimeConfig {
             mode: ApiPythonRuntimeMode::UvManaged,
-            uv_path: Some(PathBuf::from("/usr/bin/uv")),
+            uv_path: Some(PathBuf::from(r"C:\Program Files\uv\uv.exe")),
             custom_python_path: None,
             python_version: "3.12".to_string(),
         };
 
-        let command = python_worker_command(&runtime, PathBuf::from("/tmp/worker.py")).unwrap();
+        let command = python_worker_command(
+            &runtime,
+            PathBuf::from(r"C:\Users\Reyan\Mock Project\worker.py"),
+        )
+        .unwrap();
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect();
 
-        assert_eq!(command.get_program(), "/usr/bin/uv");
+        assert_eq!(command.get_program(), r"C:\Program Files\uv\uv.exe");
         assert_eq!(
             args,
-            vec!["run", "--no-project", "--python", "3.12", "/tmp/worker.py"]
+            vec![
+                "run",
+                "--no-project",
+                "--python",
+                "3.12",
+                r"C:\Users\Reyan\Mock Project\worker.py",
+            ]
         );
     }
 

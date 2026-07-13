@@ -24,7 +24,9 @@ use std::io::{BufRead, BufReader, Read};
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
@@ -38,6 +40,9 @@ const API_SCHEMA_MAX_COUNT: usize = 16_384;
 const API_SCHEMA_MAX_PROPERTIES: usize = 160;
 const API_POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 const API_REACH_TIMEOUT: Duration = Duration::from_millis(1200);
+const API_PYTHON_LIST_TIMEOUT: Duration = Duration::from_secs(30);
+const API_PYTHON_INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const API_PYTHON_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const API_UNTAGGED_GROUP: &str = "Без тэга";
 
 static API_HTTP_CLIENTS: std::sync::LazyLock<
@@ -49,6 +54,7 @@ struct ApiHttpClientKey {
     host: Option<String>,
     ip: Option<IpAddr>,
     port: Option<u16>,
+    proxy: Option<crate::platform::SystemProxyConfig>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -857,6 +863,7 @@ pub struct ApiClientTabState {
     pub path_values: Vec<ApiInputValue>,
     pub query_values: Vec<ApiInputValue>,
     pub body_values: Vec<ApiInputValue>,
+    pub body_file_paths: FxHashMap<String, Vec<PathBuf>>,
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
     pub response_view: ApiResponseView,
@@ -899,6 +906,7 @@ pub struct ApiRouteStateMemory {
     pub path_values: Vec<ApiInputValue>,
     pub query_values: Vec<ApiInputValue>,
     pub body_values: Vec<ApiInputValue>,
+    pub body_file_paths: FxHashMap<String, Vec<PathBuf>>,
     pub body_json: String,
     pub response: Option<ApiJobResponse>,
     pub response_view: ApiResponseView,
@@ -925,6 +933,7 @@ impl Default for ApiClientTabState {
             path_values: Vec::new(),
             query_values: Vec::new(),
             body_values: Vec::new(),
+            body_file_paths: FxHashMap::default(),
             body_json: "{\n  \n}".to_string(),
             response: None,
             response_view: ApiResponseView::Body,
@@ -965,6 +974,7 @@ impl ApiClientTabState {
             path_values: self.path_values.clone(),
             query_values: self.query_values.clone(),
             body_values: self.body_values.clone(),
+            body_file_paths: self.body_file_paths.clone(),
             body_json: self.body_json.clone(),
             response: self.response.clone(),
             response_view: self.response_view,
@@ -1005,6 +1015,7 @@ impl ApiClientTabState {
         self.path_values = saved.path_values;
         self.query_values = saved.query_values;
         self.body_values = saved.body_values;
+        self.body_file_paths = saved.body_file_paths;
         self.body_json = saved.body_json;
         self.response = saved.response;
         self.response_view = saved.response_view;
@@ -1083,6 +1094,7 @@ impl PartialEq for ApiClientTabState {
             && self.path_values == other.path_values
             && self.query_values == other.query_values
             && self.body_values == other.body_values
+            && self.body_file_paths == other.body_file_paths
             && self.body_json == other.body_json
             && self.response == other.response
             && self.response_view == other.response_view
@@ -1305,7 +1317,9 @@ pub struct ApiClientState {
     body_json_validation_pending: Option<(ApiSpecId, usize, u64)>,
     body_json_validation_rx: Option<Receiver<ApiJsonValidationResult>>,
     python_version_list_rx: Option<Receiver<ApiPythonVersionListResult>>,
+    python_version_list_cancel: Option<Arc<AtomicBool>>,
     python_install_rx: Option<Receiver<ApiPythonInstallEvent>>,
+    python_install_cancel: Option<Arc<AtomicBool>>,
     python_path_pick_rx: Option<Receiver<ApiPythonPathPickResult>>,
 }
 
@@ -1485,7 +1499,9 @@ impl Default for ApiClientState {
             body_json_validation_pending: None,
             body_json_validation_rx: None,
             python_version_list_rx: None,
+            python_version_list_cancel: None,
             python_install_rx: None,
+            python_install_cancel: None,
             python_path_pick_rx: None,
         }
     }
@@ -1528,6 +1544,60 @@ impl ApiClientState {
         state
     }
 
+    pub fn shutdown_background_tasks(&mut self) {
+        if let Some(cancel) = &self.python_version_list_cancel {
+            cancel.store(true, Ordering::Release);
+        }
+        if let Some(cancel) = &self.python_install_cancel {
+            cancel.store(true, Ordering::Release);
+        }
+
+        let deadline = Instant::now() + API_PYTHON_SHUTDOWN_TIMEOUT;
+        while Instant::now() < deadline
+            && (self.python_version_list_cancel.is_some()
+                || self.python_install_cancel.is_some())
+        {
+            if let Some(rx) = &self.python_version_list_rx {
+                match rx.try_recv() {
+                    Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        self.python_version_list_cancel = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+            } else {
+                self.python_version_list_cancel = None;
+            }
+
+            if let Some(rx) = &self.python_install_rx {
+                loop {
+                    match rx.try_recv() {
+                        Ok(ApiPythonInstallEvent::Done(_))
+                        | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                            self.python_install_cancel = None;
+                            break;
+                        }
+                        Ok(ApiPythonInstallEvent::Line(_)) => continue,
+                        Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    }
+                }
+            } else {
+                self.python_install_cancel = None;
+            }
+            if self.python_version_list_cancel.is_some()
+                || self.python_install_cancel.is_some()
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        self.python_version_list_cancel = None;
+        self.python_install_cancel = None;
+        self.python_version_list_rx = None;
+        self.python_install_rx = None;
+        self.mock_python_versions_loading = false;
+        self.mock_python_install_running = false;
+    }
+
     pub fn persist(&self) {
         let saved = ApiSpecsPersist {
             specs: self.specs.clone(),
@@ -1541,11 +1611,8 @@ impl ApiClientState {
                     .unwrap_or(1),
             ),
         };
-        if let Ok(content) = serde_json::to_string_pretty(&saved) {
-            if let Some(dir) = api_specs_path().parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            let _ = std::fs::write(api_specs_path(), content);
+        if let Ok(content) = serde_json::to_vec_pretty(&saved) {
+            let _ = crate::platform::atomic_write(&api_specs_path(), &content);
         }
         save_api_auth(&self.auth);
         save_api_mocks(&self.mock);
@@ -1693,6 +1760,17 @@ impl ApiClientState {
         }
         self.focused = None;
         false
+    }
+}
+
+impl Drop for ApiClientState {
+    fn drop(&mut self) {
+        if let Some(cancel) = &self.python_version_list_cancel {
+            cancel.store(true, Ordering::Release);
+        }
+        if let Some(cancel) = &self.python_install_cancel {
+            cancel.store(true, Ordering::Release);
+        }
     }
 }
 

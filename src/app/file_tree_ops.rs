@@ -294,6 +294,7 @@ pub(super) fn trash_single_path_with_layout(
     })
 }
 
+#[cfg(test)]
 pub(super) fn trash_single_path(
     path: &Path,
     files_dir: &Path,

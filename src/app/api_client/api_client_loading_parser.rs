@@ -59,24 +59,98 @@ fn valid_domain(domain: &str) -> bool {
     })
 }
 
-fn api_client_key(resolved: Option<&ApiResolvedHost>) -> ApiHttpClientKey {
+fn api_client_key(
+    resolved: Option<&ApiResolvedHost>,
+    proxy: Option<&crate::platform::SystemProxyConfig>,
+) -> ApiHttpClientKey {
     ApiHttpClientKey {
         host: resolved.map(|r| r.host.clone()),
         ip: resolved.map(|r| r.ip),
         port: resolved.map(|r| r.port),
+        proxy: proxy.cloned(),
     }
 }
 
+fn apply_native_roots_blocking(
+    mut builder: reqwest::blocking::ClientBuilder,
+) -> reqwest::blocking::ClientBuilder {
+    for der in crate::platform::native_root_certificates_der() {
+        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
+    builder
+}
+
+fn apply_native_roots_async(mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    for der in crate::platform::native_root_certificates_der() {
+        if let Ok(certificate) = reqwest::Certificate::from_der(der) {
+            builder = builder.add_root_certificate(certificate);
+        }
+    }
+    builder
+}
+
+fn reqwest_native_proxies(
+    config: &crate::platform::SystemProxyConfig,
+) -> Vec<reqwest::Proxy> {
+    let no_proxy = config
+        .bypass
+        .as_deref()
+        .and_then(reqwest::NoProxy::from_string);
+    let mut proxies = Vec::new();
+    if let Some(url) = config.http.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::http(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy.clone()));
+    }
+    if let Some(url) = config.https.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::https(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy.clone()));
+    }
+    if let Some(url) = config.all.as_deref()
+        && let Ok(proxy) = reqwest::Proxy::all(url)
+    {
+        proxies.push(proxy.no_proxy(no_proxy));
+    }
+    proxies
+}
+
+fn api_blocking_client_builder_with_proxy(
+    proxy_config: Option<&crate::platform::SystemProxyConfig>,
+) -> reqwest::blocking::ClientBuilder {
+    let mut builder = apply_native_roots_blocking(
+        reqwest::blocking::Client::builder().use_rustls_tls(),
+    );
+    if let Some(config) = proxy_config {
+        for proxy in reqwest_native_proxies(config) {
+            builder = builder.proxy(proxy);
+        }
+    }
+    builder
+}
+
+pub(crate) fn api_async_client_builder() -> reqwest::ClientBuilder {
+    let mut builder = apply_native_roots_async(reqwest::Client::builder().use_rustls_tls());
+    if let Some(config) = crate::platform::system_proxy_config() {
+        for proxy in reqwest_native_proxies(&config) {
+            builder = builder.proxy(proxy);
+        }
+    }
+    builder
+}
+
 fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Client {
-    let key = api_client_key(resolved);
+    let native_proxy = crate::platform::system_proxy_config();
+    let key = api_client_key(resolved, native_proxy.as_ref());
     if let Ok(mut clients) = API_HTTP_CLIENTS.lock() {
         if let Some(client) = clients.get(&key) {
             return client.clone();
         }
-        let mut builder = reqwest::blocking::Client::builder()
+        let mut builder = api_blocking_client_builder_with_proxy(native_proxy.as_ref())
             .timeout(API_FETCH_TIMEOUT)
-            .pool_idle_timeout(API_POOL_IDLE_TIMEOUT)
-            .use_rustls_tls();
+            .pool_idle_timeout(API_POOL_IDLE_TIMEOUT);
         if let Some(resolved) = resolved {
             builder = builder.resolve(&resolved.host, SocketAddr::new(resolved.ip, resolved.port));
         }
@@ -85,7 +159,10 @@ fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Cli
             return client;
         }
     }
-    reqwest::blocking::Client::new()
+    api_blocking_client_builder_with_proxy(native_proxy.as_ref())
+        .timeout(API_FETCH_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| reqwest::blocking::Client::new())
 }
 
 fn resolve_api_url_host(url: &str) -> Option<ApiResolvedHost> {

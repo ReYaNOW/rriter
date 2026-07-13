@@ -1,10 +1,13 @@
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
+#[cfg(any(windows, test))]
+use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 use std::time::Duration;
 use winit::window::WindowAttributes;
 
@@ -12,12 +15,15 @@ use winit::window::WindowAttributes;
 mod windows;
 mod process;
 pub use process::{
-    ManagedChild, ProcessTree, command_for, command_for_tool, resolve_executable,
-    resolve_tool_executable, run_command_output,
+    ManagedChild, ProcessTree, command_for_tool, resolve_executable, resolve_tool_executable,
+    run_command_output, run_command_output_cancelable,
 };
+#[cfg(test)]
+pub use process::command_for;
 
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";
+const DPAPI_RECORD_PREFIX: &[u8] = b"rriter-dpapi-v1:";
 const CLIPBOARD_RETRY_COUNT: usize = 5;
 const CLIPBOARD_RETRY_DELAY: Duration = Duration::from_millis(8);
 static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -165,6 +171,21 @@ pub struct AppPaths {
     pub state: PathBuf,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SystemProxyConfig {
+    pub all: Option<String>,
+    pub http: Option<String>,
+    pub https: Option<String>,
+    pub bypass: Option<String>,
+}
+
+impl SystemProxyConfig {
+    #[cfg(any(windows, test))]
+    pub fn is_empty(&self) -> bool {
+        self.all.is_none() && self.http.is_none() && self.https.is_none()
+    }
+}
+
 pub fn app_paths() -> AppPaths {
     app_paths_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
 }
@@ -214,6 +235,128 @@ fn user_cache_root_with(
             .map(PathBuf::from)
             .filter(|path| !path.as_os_str().is_empty())
             .unwrap_or_else(|| home.join(".cache")),
+    }
+}
+
+fn explicit_proxy_environment_configured() -> bool {
+    [
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ]
+    .iter()
+    .any(|name| std::env::var_os(name).is_some_and(|value| !value.is_empty()))
+}
+
+pub fn system_proxy_config() -> Option<SystemProxyConfig> {
+    // Reqwest already honors explicit proxy environment variables. Native
+    // Windows settings are only a fallback so a user override always wins.
+    if explicit_proxy_environment_configured() {
+        return None;
+    }
+
+    #[cfg(windows)]
+    {
+        let (proxy, bypass) = windows::raw_system_proxy_config()?;
+        return parse_windows_proxy_config(&proxy, bypass.as_deref());
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+pub fn proxy_routing_is_configured() -> bool {
+    explicit_proxy_environment_configured() || system_proxy_config().is_some()
+}
+
+#[cfg(any(windows, test))]
+pub(crate) fn parse_windows_proxy_config(
+    proxy: &str,
+    bypass: Option<&str>,
+) -> Option<SystemProxyConfig> {
+    fn normalized_proxy_url(value: &str) -> Option<String> {
+        let value = value.trim();
+        if value.is_empty() {
+            return None;
+        }
+        if value.contains("://") {
+            Some(value.to_string())
+        } else {
+            Some(format!("http://{value}"))
+        }
+    }
+
+    let mut config = SystemProxyConfig::default();
+    let mut tokens = Vec::new();
+    for segment in proxy.split(';') {
+        let segment = segment.trim();
+        if segment.is_empty() {
+            continue;
+        }
+        if segment.matches('=').count() > 1 || (segment.contains('=') && segment.contains(' ')) {
+            tokens.extend(segment.split_whitespace().filter(|part| !part.is_empty()));
+        } else {
+            tokens.push(segment);
+        }
+    }
+    for token in tokens {
+        if let Some((kind, value)) = token.split_once('=') {
+            let value = normalized_proxy_url(value);
+            match kind.trim().to_ascii_lowercase().as_str() {
+                "http" => config.http = value,
+                "https" => config.https = value,
+                "proxy" | "all" | "socks" => config.all = value,
+                _ => {}
+            }
+        } else if config.all.is_none() {
+            config.all = normalized_proxy_url(token);
+        }
+    }
+    config.bypass = bypass
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.replace(';', ","));
+    (!config.is_empty()).then_some(config)
+}
+
+static NATIVE_ROOT_CERTIFICATES: LazyLock<Vec<Vec<u8>>> = LazyLock::new(|| {
+    #[cfg(windows)]
+    {
+        windows::native_root_certificates_der().unwrap_or_default()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+});
+
+/// Additional certificates from the native OS trust store. Reqwest's bundled
+/// WebPKI roots stay enabled; these roots add corporate and user-installed CAs
+/// on Windows without replacing the portable baseline.
+pub fn native_root_certificates_der() -> &'static [Vec<u8>] {
+    NATIVE_ROOT_CERTIFICATES.as_slice()
+}
+
+pub fn current_process_memory_kb() -> Option<usize> {
+    #[cfg(windows)]
+    {
+        return windows::current_process_memory_kb();
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        return status.lines().find_map(|line| {
+            let rest = line.strip_prefix("VmRSS:")?;
+            rest.split_whitespace().next()?.parse::<usize>().ok()
+        });
+    }
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        None
     }
 }
 
@@ -660,6 +803,46 @@ fn hex_digit(byte: u8) -> Option<u8> {
     }
 }
 
+pub fn seal_user_secret(bytes: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
+    #[cfg(windows)]
+    {
+        let protected = windows::protect_user_secret(bytes, purpose)?;
+        let mut record = Vec::with_capacity(DPAPI_RECORD_PREFIX.len() + protected.len() * 2);
+        record.extend_from_slice(DPAPI_RECORD_PREFIX);
+        record.extend_from_slice(hex_encode(&protected).as_bytes());
+        return Ok(record);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = purpose;
+        Ok(bytes.to_vec())
+    }
+}
+
+pub fn open_user_secret(record: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
+    let Some(encoded) = record.strip_prefix(DPAPI_RECORD_PREFIX) else {
+        // Migration path for auth files created before DPAPI support. The next
+        // successful save replaces this plaintext record atomically.
+        return Ok(record.to_vec());
+    };
+    let encoded = std::str::from_utf8(encoded)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    let protected = hex_decode(encoded)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid DPAPI record"))?;
+    #[cfg(windows)]
+    {
+        windows::unprotect_user_secret(&protected, purpose)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (purpose, protected);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "Windows DPAPI record cannot be opened on this platform",
+        ))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextEncoding {
     Utf8,
@@ -859,6 +1042,14 @@ pub fn write_text_file(path: &Path, text: &str, format: TextFileFormat) -> io::R
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write_impl(path, bytes, false)
+}
+
+pub fn atomic_write_secret(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    atomic_write_impl(path, bytes, true)
+}
+
+fn atomic_write_impl(path: &Path, bytes: &[u8], secret: bool) -> io::Result<()> {
     // Saving through a symlink must update its target instead of replacing the
     // link itself with a regular file. This preserves the pre-atomic-save
     // behavior on Linux and the equivalent reparse-point behavior on Windows.
@@ -873,9 +1064,11 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    let (temp_path, mut file) = create_atomic_temp_file(path)?;
+    let (temp_path, mut file) = create_atomic_temp_file(path, secret)?;
     let result = (|| {
-        if let Ok(metadata) = fs::metadata(path) {
+        if secret {
+            set_secret_permissions(&file)?;
+        } else if let Ok(metadata) = fs::metadata(path) {
             let _ = file.set_permissions(metadata.permissions());
         }
         file.write_all(bytes)?;
@@ -892,15 +1085,33 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
-fn create_atomic_temp_file(path: &Path) -> io::Result<(PathBuf, File)> {
+fn set_secret_permissions(file: &File) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(fs::Permissions::from_mode(0o600))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = file;
+        Ok(())
+    }
+}
+
+fn create_atomic_temp_file(path: &Path, secret: bool) -> io::Result<(PathBuf, File)> {
     let mut last_error = None;
     for _ in 0..64 {
         let temp_path = temporary_sibling_path(path);
-        match OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temp_path)
-        {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        if secret {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        #[cfg(not(unix))]
+        let _ = secret;
+        match options.open(&temp_path) {
             Ok(file) => return Ok((temp_path, file)),
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
                 last_error = Some(error);
@@ -1272,6 +1483,24 @@ pub fn pick_file(title: &str) -> Option<PathBuf> {
     rfd::FileDialog::new().set_title(title).pick_file()
 }
 
+pub fn pick_file_with_filter(
+    title: &str,
+    filter_name: &str,
+    extensions: &[&str],
+) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .add_filter(filter_name, extensions)
+        .pick_file()
+}
+
+pub fn pick_files(title: &str) -> Vec<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .pick_files()
+        .unwrap_or_default()
+}
+
 pub fn pick_folder(title: &str) -> Option<PathBuf> {
     rfd::FileDialog::new().set_title(title).pick_folder()
 }
@@ -1280,6 +1509,19 @@ pub fn save_file(title: &str, file_name: &str) -> Option<PathBuf> {
     rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(file_name)
+        .save_file()
+}
+
+pub fn save_file_with_filter(
+    title: &str,
+    file_name: &str,
+    filter_name: &str,
+    extensions: &[&str],
+) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title(title)
+        .set_file_name(file_name)
+        .add_filter(filter_name, extensions)
         .save_file()
 }
 

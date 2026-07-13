@@ -281,3 +281,191 @@ mod tests {
         assert_eq!(path.as_os_str().encode_wide().last(), Some(0xd800));
     }
 }
+
+pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptProtectData,
+    };
+
+    let mut input = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(bytes.len()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret is too large")
+        })?,
+        pbData: bytes.as_ptr().cast_mut(),
+    };
+    let entropy_bytes = purpose.as_bytes();
+    let entropy = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(entropy_bytes.len()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret purpose is too large")
+        })?,
+        pbData: entropy_bytes.as_ptr().cast_mut(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    let ok = unsafe {
+        CryptProtectData(
+            &raw const input,
+            std::ptr::null(),
+            &raw const entropy,
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &raw mut output,
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let protected = unsafe {
+        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
+    };
+    unsafe {
+        LocalFree(output.pbData.cast());
+    }
+    input.pbData = std::ptr::null_mut();
+    Ok(protected)
+}
+
+pub(super) fn unprotect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Result<Vec<u8>> {
+    use windows_sys::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows_sys::Win32::Security::Cryptography::{
+        CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
+    };
+
+    let input = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(bytes.len()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret is too large")
+        })?,
+        pbData: bytes.as_ptr().cast_mut(),
+    };
+    let entropy_bytes = purpose.as_bytes();
+    let entropy = CRYPT_INTEGER_BLOB {
+        cbData: u32::try_from(entropy_bytes.len()).map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret purpose is too large")
+        })?,
+        pbData: entropy_bytes.as_ptr().cast_mut(),
+    };
+    let mut output = CRYPT_INTEGER_BLOB::default();
+    let mut description = std::ptr::null_mut();
+    let ok = unsafe {
+        CryptUnprotectData(
+            &raw const input,
+            &raw mut description,
+            &raw const entropy,
+            std::ptr::null(),
+            std::ptr::null(),
+            CRYPTPROTECT_UI_FORBIDDEN,
+            &raw mut output,
+        )
+    };
+    if ok == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let plain = unsafe {
+        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
+    };
+    unsafe {
+        LocalFree(output.pbData.cast());
+        if !description.is_null() {
+            LocalFree(description.cast::<core::ffi::c_void>() as HLOCAL);
+        }
+    }
+    Ok(plain)
+}
+
+pub(super) fn native_root_certificates_der() -> std::io::Result<Vec<Vec<u8>>> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Security::Cryptography::{
+        CERT_CONTEXT, CertCloseStore, CertEnumCertificatesInStore, CertOpenSystemStoreW,
+    };
+
+    let store_name = std::ffi::OsStr::new("ROOT")
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let store = unsafe { CertOpenSystemStoreW(0, store_name.as_ptr()) };
+    if store.is_null() {
+        return Err(std::io::Error::last_os_error());
+    }
+
+    let mut certificates = Vec::new();
+    let mut previous: *const CERT_CONTEXT = std::ptr::null();
+    loop {
+        let current = unsafe { CertEnumCertificatesInStore(store, previous) };
+        if current.is_null() {
+            break;
+        }
+        let context = unsafe { &*current };
+        if !context.pbCertEncoded.is_null() && context.cbCertEncoded > 0 {
+            certificates.push(unsafe {
+                std::slice::from_raw_parts(
+                    context.pbCertEncoded,
+                    context.cbCertEncoded as usize,
+                )
+                .to_vec()
+            });
+        }
+        previous = current;
+    }
+    unsafe {
+        CertCloseStore(store, 0);
+    }
+    Ok(certificates)
+}
+
+pub(super) fn raw_system_proxy_config() -> Option<(String, Option<String>)> {
+    use windows_sys::Win32::Foundation::GlobalFree;
+    use windows_sys::Win32::Networking::WinHttp::{
+        WINHTTP_CURRENT_USER_IE_PROXY_CONFIG, WinHttpGetIEProxyConfigForCurrentUser,
+    };
+
+    let mut config = WINHTTP_CURRENT_USER_IE_PROXY_CONFIG::default();
+    if unsafe { WinHttpGetIEProxyConfigForCurrentUser(&raw mut config) } == 0 {
+        return None;
+    }
+    let proxy = wide_ptr_to_string(config.lpszProxy);
+    let bypass = wide_ptr_to_string(config.lpszProxyBypass);
+    unsafe {
+        if !config.lpszAutoConfigUrl.is_null() {
+            GlobalFree(config.lpszAutoConfigUrl.cast());
+        }
+        if !config.lpszProxy.is_null() {
+            GlobalFree(config.lpszProxy.cast());
+        }
+        if !config.lpszProxyBypass.is_null() {
+            GlobalFree(config.lpszProxyBypass.cast());
+        }
+    }
+    proxy.map(|proxy| (proxy, bypass))
+}
+
+fn wide_ptr_to_string(value: windows_sys::core::PCWSTR) -> Option<String> {
+    if value.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    unsafe {
+        while *value.add(len) != 0 {
+            len = len.saturating_add(1);
+        }
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(value, len)))
+    }
+}
+
+pub(super) fn current_process_memory_kb() -> Option<usize> {
+    use windows_sys::Win32::System::ProcessStatus::{
+        GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS,
+    };
+    use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+    let mut counters = PROCESS_MEMORY_COUNTERS::default();
+    counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
+    let ok = unsafe {
+        GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            &raw mut counters,
+            counters.cb,
+        )
+    };
+    (ok != 0).then_some(counters.WorkingSetSize / 1024)
+}

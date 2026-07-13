@@ -466,18 +466,24 @@ impl App {
             self.ide_panel
                 .git
                 .graph_latest_request_by_root
-                .insert(repo_root.clone(), request_id);
+                .insert(crate::platform::PathKey::new(&repo_root), request_id);
             self.ide_panel
                 .git
                 .graph_pending_roots
-                .insert(repo_root.clone());
+                .insert(crate::platform::PathKey::new(&repo_root));
             if activate {
                 self.ide_panel.git.graph_pending = true;
                 self.ide_panel.git.graph_notice = None;
                 self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
                 self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
                 self.ide_panel.git.graph_commit_limit = limit;
-            } else if self.ide_panel.git.graph_repo_root.as_ref() == Some(&repo_root) {
+            } else if self
+                .ide_panel
+                .git
+                .graph_repo_root
+                .as_ref()
+                .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
+            {
                 self.ide_panel.git.graph_pending = true;
             }
 

@@ -922,6 +922,16 @@ mod tests {
         assert!(curl.contains("-H 'Cookie: session=cookie-1'"));
         assert!(curl.contains("-H 'Content-Type: application/json'"));
         assert!(curl.contains(r#"--data-binary '{"name":"O'\''Reilly"}'"#));
+
+        let windows = format_api_curl_command_for_platform(
+            &job,
+            crate::platform::PlatformKind::Windows,
+        );
+        assert!(windows.starts_with("curl.exe `\n  -X POST `\n"));
+        assert!(windows.contains("-H 'Authorization: Bearer token-1-"));
+        assert!(windows.contains(r#"--data-binary '{"name":"O''Reilly"}'"#));
+        assert!(!windows.contains(" \\\n"));
+        assert!(!windows.contains(r#"'\''"#));
     }
 
     #[test]
@@ -987,6 +997,23 @@ mod tests {
         auth.entry_mut(ApiSpecId(7), "BasicAuth").password = "pass".to_string();
         save_api_auth(&auth);
 
+        let record = std::fs::read(api_auth_path()).expect("auth record");
+        let plain = crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE)
+            .expect("open auth record");
+        assert!(plain.windows(b"access".len()).any(|part| part == b"access"));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(api_auth_path())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
+
         let loaded = load_api_auth();
         assert_eq!(
             loaded
@@ -999,6 +1026,32 @@ mod tests {
                 .entry(ApiSpecId(7), "BasicAuth")
                 .map(|entry| (entry.username.as_str(), entry.password.as_str())),
             Some(("user", "pass"))
+        );
+
+        let _ = std::fs::remove_dir_all(api_config_dir());
+    }
+
+    #[test]
+    fn legacy_plaintext_api_auth_is_loaded_and_rewritten_safely() {
+        let _guard = persist_test_lock().lock().expect("lock");
+        let _ = std::fs::remove_dir_all(api_config_dir());
+        let mut auth = ApiAuthStore::default();
+        auth.entry_mut(ApiSpecId(8), "BearerJwt").access_token = "legacy".to_string();
+        std::fs::create_dir_all(api_config_dir()).unwrap();
+        std::fs::write(api_auth_path(), serde_json::to_vec_pretty(&auth).unwrap()).unwrap();
+
+        let loaded = load_api_auth();
+        assert_eq!(
+            loaded
+                .entry(ApiSpecId(8), "BearerJwt")
+                .map(|entry| entry.access_token.as_str()),
+            Some("legacy")
+        );
+        save_api_auth(&loaded);
+        let record = std::fs::read(api_auth_path()).unwrap();
+        assert_eq!(
+            crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE).unwrap(),
+            serde_json::to_vec_pretty(&loaded).unwrap()
         );
 
         let _ = std::fs::remove_dir_all(api_config_dir());
@@ -2195,4 +2248,189 @@ mod tests {
             "3 ms до сервера"
         );
     }
+
+    #[test]
+    fn multipart_file_picker_paths_remain_native_pathbuf_values() {
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Upload", "version": "1.0.0"},
+            "paths": {
+                "/upload": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "file": {"type": "string", "format": "binary"},
+                                            "title": {"type": "string"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(88), &spec).expect("parse");
+        let route = &model.routes[0];
+        let selected = PathBuf::from(r"\\server\share\folder with spaces\файл.bin");
+        let values = vec![
+            ApiInputValue {
+                name: "file".to_string(),
+                value: selected.to_string_lossy().into_owned(),
+            },
+            ApiInputValue {
+                name: "title".to_string(),
+                value: "avatar".to_string(),
+            },
+        ];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert("file".to_string(), vec![selected.clone()]);
+
+        let parts = api_multipart_parts_for_route(route, &model, &values, &file_paths);
+        assert_eq!(
+            parts,
+            vec![
+                ApiMultipartPart::File {
+                    name: "file".to_string(),
+                    path: selected,
+                },
+                ApiMultipartPart::Text {
+                    name: "title".to_string(),
+                    value: "avatar".to_string(),
+                },
+            ]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn multipart_file_picker_preserves_non_utf8_unix_paths() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let spec = serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "Upload", "version": "1.0.0"},
+            "paths": {
+                "/upload": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "multipart/form-data": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "file": {"type": "string", "format": "binary"}
+                                        }
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": {"description": "ok"}}
+                    }
+                }
+            }
+        });
+        let model = parse_openapi_model(ApiSpecId(89), &spec).expect("parse");
+        let selected = PathBuf::from(std::ffi::OsString::from_vec(
+            b"/tmp/file-\xff.bin".to_vec(),
+        ));
+        let values = vec![ApiInputValue {
+            name: "file".to_string(),
+            value: selected.to_string_lossy().into_owned(),
+        }];
+        let mut file_paths = FxHashMap::default();
+        file_paths.insert("file".to_string(), vec![selected.clone()]);
+
+        let parts = api_multipart_parts_for_route(
+            &model.routes[0],
+            &model,
+            &values,
+            &file_paths,
+        );
+        assert_eq!(
+            parts,
+            vec![ApiMultipartPart::File {
+                name: "file".to_string(),
+                path: selected,
+            }]
+        );
+    }
+
+    #[test]
+    fn route_memory_keeps_native_multipart_file_paths() {
+        let mut state = ApiClientTabState {
+            route_idx: Some(3),
+            ..Default::default()
+        };
+        let path = PathBuf::from(r"C:\Users\Reyan\upload.bin");
+        state
+            .body_file_paths
+            .insert("file".to_string(), vec![path.clone()]);
+        state.remember_route_state();
+        state.body_file_paths.clear();
+
+        assert!(state.restore_route_state(3));
+        assert_eq!(state.body_file_paths.get("file"), Some(&vec![path]));
+    }
+
+    #[test]
+    fn portable_server_reach_uses_tcp_connect_instead_of_platform_ping() {
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let resolved = ApiResolvedHost {
+            host: "localhost".to_string(),
+            ip: addr.ip(),
+            port: addr.port(),
+        };
+        assert!(measure_direct_server_reach_ms(Some(&resolved)).is_some());
+    }
+
+    #[test]
+    fn api_python_shutdown_cancels_version_and_install_workers() {
+        let mut state = ApiClientState::default();
+        let list_cancel = Arc::new(AtomicBool::new(false));
+        let install_cancel = Arc::new(AtomicBool::new(false));
+        let (list_tx, list_rx) = mpsc::channel();
+        let (install_tx, install_rx) = mpsc::channel();
+        let list_worker_cancel = Arc::clone(&list_cancel);
+        let install_worker_cancel = Arc::clone(&install_cancel);
+        let list_worker = std::thread::spawn(move || {
+            while !list_worker_cancel.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let _ = list_tx.send(ApiPythonVersionListResult {
+                rows: Vec::new(),
+                error: Some("cancelled".to_string()),
+            });
+        });
+        let install_worker = std::thread::spawn(move || {
+            while !install_worker_cancel.load(Ordering::Acquire) {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let _ = install_tx.send(ApiPythonInstallEvent::Done(Err(
+                "cancelled".to_string(),
+            )));
+        });
+        state.python_version_list_cancel = Some(list_cancel);
+        state.python_version_list_rx = Some(list_rx);
+        state.python_install_cancel = Some(install_cancel);
+        state.python_install_rx = Some(install_rx);
+        state.mock_python_versions_loading = true;
+        state.mock_python_install_running = true;
+
+        state.shutdown_background_tasks();
+        list_worker.join().unwrap();
+        install_worker.join().unwrap();
+
+        assert!(state.python_version_list_rx.is_none());
+        assert!(state.python_install_rx.is_none());
+        assert!(!state.mock_python_versions_loading);
+        assert!(!state.mock_python_install_running);
+    }
+
 }

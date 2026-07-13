@@ -103,7 +103,8 @@ fn git_graph_workspace_for_path(
 ) -> Option<(usize, PathBuf)> {
     snapshot.workspaces.iter().find_map(|workspace| {
         let repo_root = workspace.repo_root.as_ref()?;
-        (abs_path.starts_with(&workspace.root) || abs_path.starts_with(repo_root))
+        (crate::platform::path_is_within(abs_path, &workspace.root)
+            || crate::platform::path_is_within(abs_path, repo_root))
             .then(|| (workspace.workspace_idx, repo_root.clone()))
     })
 }
@@ -307,18 +308,13 @@ fn collect_git_graph(
 }
 
 fn git_graph_total_commit_count(repo_root: &Path) -> Option<usize> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .arg("rev-list")
-        .arg("--count")
-        .arg("HEAD")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
+    let output = git_output_strs(
+        repo_root,
+        &["rev-list", "--count", "HEAD"],
+        "GRAPH COUNT",
+        false,
+    )
+    .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
     text.trim().parse::<usize>().ok()
 }
@@ -339,24 +335,18 @@ fn git_graph_log_records(
     offset: usize,
     count: usize,
 ) -> Result<Vec<GitGraphLogRecord>, String> {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .arg("log")
-        .arg("--topo-order")
-        .arg("--decorate=no")
-        .arg("--numstat")
-        .arg(format!("--skip={offset}"))
-        .arg(format!("--max-count={count}"))
-        .arg("--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ct%x1f%ai%x1f%s")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|err| err.to_string())?;
-    if !output.status.success() {
-        let stderr = short_command_output(&output.stderr);
-        let stdout = short_command_output(&output.stdout);
-        return Err(if stderr.is_empty() { stdout } else { stderr });
-    }
+    let args = vec![
+        std::ffi::OsString::from("log"),
+        std::ffi::OsString::from("--topo-order"),
+        std::ffi::OsString::from("--decorate=no"),
+        std::ffi::OsString::from("--numstat"),
+        std::ffi::OsString::from(format!("--skip={offset}")),
+        std::ffi::OsString::from(format!("--max-count={count}")),
+        std::ffi::OsString::from(
+            "--format=%x1e%H%x1f%P%x1f%an%x1f%ae%x1f%ct%x1f%ai%x1f%s",
+        ),
+    ];
+    let output = git_output(repo_root, &args, "GRAPH LOG", false)?;
     let text = String::from_utf8_lossy(&output.stdout);
     let mut records = Vec::new();
     for raw_record in text.split('\x1e') {
@@ -492,11 +482,7 @@ pub(crate) fn run_git_graph_probe(repo_root: &Path, iterations: usize) -> Result
 }
 
 fn current_rss_kb() -> Option<usize> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    status.lines().find_map(|line| {
-        let rest = line.strip_prefix("VmRSS:")?;
-        rest.split_whitespace().next()?.parse::<usize>().ok()
-    })
+    crate::platform::current_process_memory_kb()
 }
 
 fn git_graph_branch_label(

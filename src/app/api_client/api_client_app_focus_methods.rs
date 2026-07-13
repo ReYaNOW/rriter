@@ -574,6 +574,7 @@ impl crate::app::App {
                     && let Some(value) = state.body_values.iter_mut().find(|v| v.name == name)
                 {
                     value.value = text;
+                    state.body_file_paths.remove(&name);
                 }
             }
             ApiFocus::Body { spec_id, route_idx } => {
