@@ -128,6 +128,40 @@ fn tool_paths_keep_native_paths_and_ignore_empty_values() {
 }
 
 #[test]
+fn macos_private_aliases_share_path_identity() {
+    for (private, visible) in [
+        ("/private/var/folders/demo", "/var/folders/demo"),
+        ("/private/tmp/demo", "/tmp/demo"),
+        ("/private/etc/hosts", "/etc/hosts"),
+    ] {
+        assert_eq!(
+            PathKey::for_platform(Path::new(private), PlatformKind::Macos),
+            PathKey::for_platform(Path::new(visible), PlatformKind::Macos)
+        );
+    }
+    assert!(path_is_within_for_platform(
+        Path::new("/private/var/folders/demo/file.rs"),
+        Path::new("/var/folders/demo"),
+        PlatformKind::Macos,
+    ));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_canonical_temp_paths_keep_visible_system_aliases() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-macos-visible-path-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let canonical = canonicalize_or_absolutize(&root);
+    assert!(paths_equal(&canonical, &root));
+    assert!(!canonical.to_string_lossy().starts_with("/private/var/"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn windows_path_keys_handle_drive_unc_case_and_extended_prefixes() {
     let key = |path: &str| PathKey::for_platform(Path::new(path), PlatformKind::Windows);
     assert_eq!(key(r"C:\Work\RRiter\src\main.rs"), key(r"c:/work/rriter/src/MAIN.rs"));
@@ -270,7 +304,7 @@ fn atomic_write_replaces_content_and_leaves_no_temp_file() {
     let _ = fs::remove_dir_all(root);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn atomic_write_supports_non_utf8_target_names() {
     use std::os::unix::ffi::OsStringExt;

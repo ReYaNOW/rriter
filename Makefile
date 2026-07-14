@@ -21,7 +21,7 @@ TEST ?=
 TEST_THREADS ?= 1
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench clean
+.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench clean
 
 all: max
 
@@ -166,6 +166,67 @@ test-time:
 	@echo "✅ Тесты завершены"
 
 PROF_DIR = $(CURDIR)/target/pgo-profiles
+PGO_COMPARE_DIR ?= $(CURDIR)/target/pgo-compare
+PGO_BENCH_TOOL_DIR ?= $(CURDIR)/target/pgo-bench-tools
+PGO_BENCH_RUNS ?= 7
+PGO_BENCH_WARMUP ?= 2
+PGO_SCROLL_RUNS ?= 2
+PGO_SCROLL_WARMUP ?= 1
+PGO_SCROLL_SECONDS ?= 12
+PGO_BENCH_ARGS ?=
+PGO_BENCH_BUILD_TOOL = $(PGO_BENCH_TOOL_DIR)/pgo-bench-build
+PGO_BENCH_COMPARE_TOOL = $(PGO_BENCH_TOOL_DIR)/pgo-bench-compare
+
+$(PGO_BENCH_BUILD_TOOL): scripts/pgo_bench_build.rs scripts/pgo_bench_compare.rs
+	@mkdir -p $(PGO_BENCH_TOOL_DIR)
+	rustc --edition=2021 -O -D warnings scripts/pgo_bench_build.rs -o $(PGO_BENCH_BUILD_TOOL)
+
+$(PGO_BENCH_COMPARE_TOOL): scripts/pgo_bench_compare.rs
+	@mkdir -p $(PGO_BENCH_TOOL_DIR)
+	rustc --edition=2021 -O -D warnings scripts/pgo_bench_compare.rs -o $(PGO_BENCH_COMPARE_TOOL)
+
+pgo-bench-tools: $(PGO_BENCH_BUILD_TOOL) $(PGO_BENCH_COMPARE_TOOL)
+
+pgo-bench-self-test: pgo-bench-tools
+	$(PGO_BENCH_BUILD_TOOL) --self-test
+	$(PGO_BENCH_COMPARE_TOOL) --self-test
+
+pgo-bench-build: $(PGO_BENCH_BUILD_TOOL)
+	$(PGO_BENCH_BUILD_TOOL) \
+		--profile $(PROF_DIR)/merged.profdata \
+		--out-dir $(PGO_COMPARE_DIR) \
+		--target $(TARGET) \
+		--build-std \
+		--rustflag=-Ctarget-cpu=native \
+		--rustflag=-Cllvm-args=-fp-contract=fast \
+		--rustflag=-Clto=fat \
+		--rustflag=-Csymbol-mangling-version=v0 \
+		--rustflag=-Clink-arg=-fuse-ld=lld \
+		--rustflag=-Clink-arg=-Wl,--icf=all \
+		--rustflag=-Clink-arg=-Wl,-O3 \
+		--workspace $(CURDIR) \
+		--fixture $(CURDIR)/tests/perf_large_realistic_15000.py \
+		--runs $(PGO_BENCH_RUNS) \
+		--warmup $(PGO_BENCH_WARMUP) \
+		--scroll-runs $(PGO_SCROLL_RUNS) \
+		--scroll-warmup $(PGO_SCROLL_WARMUP) \
+		--scroll-seconds $(PGO_SCROLL_SECONDS)
+
+pgo-bench-run: $(PGO_BENCH_COMPARE_TOOL)
+	$(PGO_BENCH_COMPARE_TOOL) \
+		--baseline $(PGO_COMPARE_DIR)/baseline/$(BINARY_NAME) \
+		--pgo $(PGO_COMPARE_DIR)/pgo/$(BINARY_NAME) \
+		--workspace $(CURDIR) \
+		--fixture $(CURDIR)/tests/perf_large_realistic_15000.py \
+		--git-repo $(CURDIR) \
+		--runs $(PGO_BENCH_RUNS) \
+		--warmup $(PGO_BENCH_WARMUP) \
+		--scroll-runs $(PGO_SCROLL_RUNS) \
+		--scroll-warmup $(PGO_SCROLL_WARMUP) \
+		--scroll-seconds $(PGO_SCROLL_SECONDS) \
+		--csv $(PGO_COMPARE_DIR)/report.csv $(PGO_BENCH_ARGS)
+
+pgo-bench: pgo-bench-build pgo-bench-run
 
 pgo-gen:
 	@echo "🧬 Сборка для ручного PGO..."
@@ -181,7 +242,7 @@ pgo-run:
 	@echo "🔧 Включаю телеметрию для PGO..."
 	@sed -i 's/"enable_telemetry": false/"enable_telemetry": true/' ~/.config/RRiter/config.json || true
 	@echo "ВАЖНО: Поскролльте, попечатайте, откройте терминал и ЗАКРОЙТЕ редактор."
-	LLVM_PROFILE_FILE="$(PROF_DIR)/default_%p.profraw" target/$(TARGET)/release/$(BINARY_NAME) src/render_view.rs
+	LLVM_PROFILE_FILE="$(PROF_DIR)/default_%p.profraw" target/$(TARGET)/release/$(BINARY_NAME)
 	@echo "♻️ Восстанавливаю бекап ~/.config/RRiter..."
 	@rm -rf ~/.config/RRiter
 	@mv ~/.config/RRiter_pgo_backup ~/.config/RRiter || true

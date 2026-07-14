@@ -602,7 +602,7 @@ fn file_tree_copy_preserves_symlinks_without_following_cycles() {
     let _ = std::fs::remove_dir_all(root);
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "macos")))]
 #[test]
 fn file_tree_copy_supports_non_utf8_file_names() {
     use std::os::unix::ffi::OsStringExt;

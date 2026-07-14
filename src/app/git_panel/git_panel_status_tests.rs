@@ -126,7 +126,7 @@ fn collect_workspace_status_with_cache(
         });
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     append_case_only_renames(
         &repo,
         &repo_root,
@@ -351,7 +351,7 @@ fn git_status_display_path(
         .or_else(|| git_status_path_string(rel_path))
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 fn append_case_only_renames(
     repo: &git2::Repository,
     repo_root: &Path,
@@ -383,18 +383,18 @@ fn append_case_only_renames(
         ) else {
             continue;
         };
-        if actual_rel == index_rel || !crate::platform::paths_equal(&actual_rel, &index_rel) {
+        if actual_rel == index_rel || !git_paths_equal_ignoring_case(&actual_rel, &index_rel) {
             continue;
         }
 
         files.retain(|file| {
             let current = Path::new(file.rel_path.as_ref());
             let old = file.old_rel_path.as_deref().map(Path::new);
-            !crate::platform::paths_equal(current, &index_rel)
-                && !crate::platform::paths_equal(current, &actual_rel)
+            !git_paths_equal_ignoring_case(current, &index_rel)
+                && !git_paths_equal_ignoring_case(current, &actual_rel)
                 && !old.is_some_and(|old| {
-                    crate::platform::paths_equal(old, &index_rel)
-                        || crate::platform::paths_equal(old, &actual_rel)
+                    git_paths_equal_ignoring_case(old, &index_rel)
+                        || git_paths_equal_ignoring_case(old, &actual_rel)
                 })
         });
 
@@ -425,7 +425,19 @@ fn append_case_only_renames(
     }
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
+fn git_paths_equal_ignoring_case(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        return crate::platform::paths_equal(left, right);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        left.to_string_lossy().to_lowercase() == right.to_string_lossy().to_lowercase()
+    }
+}
+
+#[cfg(any(windows, target_os = "macos"))]
 fn actual_case_relative_path(
     repo_root: &Path,
     relative: &Path,
@@ -450,7 +462,7 @@ fn actual_case_relative_path(
             .find(|name| name.as_os_str() == expected)
             .or_else(|| {
                 entries.iter().find(|name| {
-                    crate::platform::paths_equal(Path::new(name), Path::new(expected))
+                    git_paths_equal_ignoring_case(Path::new(name), Path::new(expected))
                 })
             })?
             .clone();

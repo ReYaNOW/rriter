@@ -5,7 +5,9 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::Child;
+#[cfg(any(windows, target_os = "linux"))]
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use winit::window::WindowAttributes;
@@ -350,7 +352,9 @@ pub fn canonicalize_or_absolutize(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
         #[cfg(windows)]
         return windows::without_extended_prefix(&path);
-        #[cfg(not(windows))]
+        #[cfg(target_os = "macos")]
+        return macos_visible_path(&path);
+        #[cfg(not(any(windows, target_os = "macos")))]
         return path;
     }
     if is_absolute(path) {
@@ -388,10 +392,20 @@ fn normalized_path_bytes(path: &Path, platform: PlatformKind) -> Vec<u8> {
     #[cfg(unix)]
     if platform == CURRENT_PLATFORM {
         use std::os::unix::ffi::OsStrExt;
-        return normalize_unix_path_bytes(path.as_os_str().as_bytes());
+        let normalized = normalize_unix_path_bytes(path.as_os_str().as_bytes());
+        return if platform == PlatformKind::Macos {
+            normalize_macos_alias_bytes(&normalized)
+        } else {
+            normalized
+        };
     }
 
-    normalize_unix_path_bytes(path.to_string_lossy().as_bytes())
+    let normalized = normalize_unix_path_bytes(path.to_string_lossy().as_bytes());
+    if platform == PlatformKind::Macos {
+        normalize_macos_alias_bytes(&normalized)
+    } else {
+        normalized
+    }
 }
 
 #[cfg(unix)]
@@ -403,6 +417,34 @@ fn normalized_bytes_to_path(bytes: &[u8]) -> Option<PathBuf> {
 #[cfg(all(not(unix), not(windows)))]
 fn normalized_bytes_to_path(bytes: &[u8]) -> Option<PathBuf> {
     Some(PathBuf::from(String::from_utf8(bytes.to_vec()).ok()?))
+}
+
+fn normalize_macos_alias_bytes(path: &[u8]) -> Vec<u8> {
+    const ALIASES: [(&[u8], &[u8]); 3] = [
+        (b"/private/var", b"/var"),
+        (b"/private/tmp", b"/tmp"),
+        (b"/private/etc", b"/etc"),
+    ];
+    for (private, visible) in ALIASES {
+        if path == private {
+            return visible.to_vec();
+        }
+        if path.starts_with(private) && path.get(private.len()) == Some(&b'/') {
+            let mut normalized = Vec::with_capacity(path.len() - b"/private".len());
+            normalized.extend_from_slice(visible);
+            normalized.extend_from_slice(&path[private.len()..]);
+            return normalized;
+        }
+    }
+    path.to_vec()
+}
+
+#[cfg(target_os = "macos")]
+fn macos_visible_path(path: &Path) -> PathBuf {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    PathBuf::from(OsString::from_vec(normalize_macos_alias_bytes(
+        path.as_os_str().as_bytes(),
+    )))
 }
 
 fn normalize_unix_path_bytes(raw: &[u8]) -> Vec<u8> {
