@@ -1415,7 +1415,7 @@ F compute_about_wait_plan@280>wu,ww
 F earliest_optional_wake@331
 F needs_continuous_poll@341
 F active_scroll_keeps_event_loop_polling@354>wx
-F animation_dt_keeps_real_sixty_hz_time_and_bounds_long_stalls@360>wj
+F animation_dt_restores_smooth_idle_scroll_start@360>wj
 F sticky_animation_add_remove_and_equal_length_are_pure_state_transitions@368>wo
 F drag_autoscroll_uses_inside_edge_band_and_outside_window_distance@411>wp,wq
 F drag_autoscroll_bottom_edge_ignores_open_bottom_panel@422>wp,wr

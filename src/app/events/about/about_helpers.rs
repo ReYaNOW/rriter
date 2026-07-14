@@ -16,7 +16,7 @@ const PYTHON_INLAY_VISIBLE_MARGIN_LINES: usize = 80;
 
 #[inline(always)]
 fn animation_dt(raw_dt: f32) -> f32 {
-    raw_dt.clamp(0.0, 1.0 / 30.0)
+    raw_dt.min(0.016)
 }
 
 fn clear_python_inlay_hint_state(app: &mut App) {
@@ -357,11 +357,11 @@ mod tests {
     }
 
     #[test]
-    fn animation_dt_keeps_real_sixty_hz_time_and_bounds_long_stalls() {
-        assert!((animation_dt(1.0 / 60.0) - 1.0 / 60.0).abs() < f32::EPSILON);
+    fn animation_dt_restores_smooth_idle_scroll_start() {
+        assert_eq!(animation_dt(1.0 / 60.0), 0.016);
         assert!((animation_dt(1.0 / 240.0) - 1.0 / 240.0).abs() < f32::EPSILON);
-        assert_eq!(animation_dt(0.5), 1.0 / 30.0);
-        assert_eq!(animation_dt(-1.0), 0.0);
+        assert_eq!(animation_dt(0.5), 0.016);
+        assert_eq!(animation_dt(0.0), 0.0);
     }
 
     #[test]

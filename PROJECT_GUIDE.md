@@ -410,7 +410,7 @@ Covers platform command plans, isolated generations, rollback/pruning, bounded l
 
 `src/app/events/window_runtime.rs` selects the platform GL context plan and owns window/display/surface creation. macOS requests OpenGL 4.1 Core only; Windows falls back from 4.1 Core to 3.3 Core; Linux additionally permits GLES 3.0. `Renderer::new` validates the actual context, selects desktop or GLES shader preambles, and records copyable diagnostics. `ScaleFactorChanged` rebuilds scale-sensitive atlases/caches rather than stretching stale glyph data. IME commits are routed to the active editor/API/modal target as one logical edit.
 
-The FPS counter samples completed presentation intervals rather than CPU draw submissions. Windows additionally waits for DWM presentation after buffer swap, which keeps continuous scrolling/animation paced by the compositor instead of allowing a misleading high submit rate. Animation delta preserves real high-refresh intervals and caps only long stalls.
+The FPS counter samples completed presentation intervals rather than CPU draw submissions. Windows additionally waits for DWM presentation after buffer swap, which keeps continuous scrolling/animation paced by the compositor instead of allowing a misleading high submit rate. Animation timing keeps the original 16 ms cap, so the first scroll frame after idle does not jump while sub-16 ms high-refresh intervals remain unchanged.
 
 macOS runs as a regular AppKit application with the default application menu. File dialogs are dispatched on the event-loop thread. Windows startup applies the stable application identity in addition to the embedded DPI/long-path manifest, reads the DWM accent color, and falls back to RRiter purple when no desktop accent is available.
 
