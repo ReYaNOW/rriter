@@ -10,6 +10,38 @@ fn wait(highlighter: &mut Highlighter, version: u64) {
 }
 
 #[test]
+fn highlighter_drop_cancels_worker_without_leaving_background_work() {
+    let baseline = active_highlighter_worker_count();
+    let text = "fn pending() { let value = 1; }\n".repeat(4_000);
+
+    for version in 1..=16 {
+        let mut highlighter = Highlighter::new();
+        let start_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while active_highlighter_worker_count() == baseline
+            && std::time::Instant::now() < start_deadline
+        {
+            std::thread::yield_now();
+        }
+        assert_eq!(active_highlighter_worker_count(), baseline + 1);
+
+        highlighter.reset(version, text.clone(), "rs".to_string(), 0);
+        drop(highlighter);
+
+        let stop_deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while active_highlighter_worker_count() != baseline
+            && std::time::Instant::now() < stop_deadline
+        {
+            std::thread::yield_now();
+        }
+        assert_eq!(active_highlighter_worker_count(), baseline);
+    }
+
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(100, "fn ready() {}\n".to_string(), "rs".to_string(), 0);
+    wait(&mut highlighter, 100);
+}
+
+#[test]
 fn tree_sitter_language_labels_follow_highlighter_extensions() {
     assert_eq!(tree_sitter_lang_name_for_ext("py"), "py");
     assert_eq!(tree_sitter_lang_name_for_ext("pyi"), "py");

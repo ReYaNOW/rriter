@@ -30,18 +30,27 @@ impl Highlighter {
             bool,
         )>();
 
-        thread::spawn(move || {
-            let mut parser = tree_sitter::Parser::new();
-            let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
-                HashMap::new();
-            let mut byte_colors_buf = Vec::new();
-            let mut last_full_spans: Vec<ColorSpan> = Vec::new();
+        let worker_control = Arc::new(HighlighterWorkerControl::new());
+        let worker_control_for_thread = Arc::clone(&worker_control);
+        thread::Builder::new()
+            .name("rriter-highlighter".to_string())
+            .spawn(move || {
+                #[cfg(test)]
+                let _active_worker_guard = ActiveHighlighterWorkerGuard::new();
+                let mut parser = tree_sitter::Parser::new();
+                let mut query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query> =
+                    HashMap::new();
+                let mut byte_colors_buf = Vec::new();
+                let mut last_full_spans: Vec<ColorSpan> = Vec::new();
 
-            let mut replica_text = String::new();
-            let mut current_tree: Option<tree_sitter::Tree> = None;
-            let mut current_ext = String::new();
+                let mut replica_text = String::new();
+                let mut current_tree: Option<tree_sitter::Tree> = None;
+                let mut current_ext = String::new();
 
-            while let Ok(msg) = rx_in.recv() {
+                while !worker_control_for_thread.is_cancelled() {
+                    let Ok(msg) = rx_in.recv() else {
+                        break;
+                    };
                 let worker_start = std::time::Instant::now();
                 let mut msgs = vec![msg];
                 while let Ok(m) = rx_in.try_recv() {
@@ -64,6 +73,7 @@ impl Highlighter {
 
                 for m in msgs {
                     match m {
+                        HighlighterMessage::Shutdown => return,
                         HighlighterMessage::Restore {
                             text,
                             ext,
@@ -215,6 +225,10 @@ impl Highlighter {
                     }
                 }
 
+                if worker_control_for_thread.is_cancelled() {
+                    break;
+                }
+
                 if !do_highlight {
                     continue;
                 }
@@ -334,7 +348,11 @@ impl Highlighter {
                                     priority_range.clone(),
                                     &mut query_cache,
                                     &mut byte_colors_buf,
+                                    &worker_control_for_thread,
                                 );
+                                if worker_control_for_thread.is_cancelled() {
+                                    return;
+                                }
                                 priority_ms = highlight_trace_elapsed_ms(priority_start);
                                 priority_span_count = priority_spans.len();
                                 if priority_spans.is_empty()
@@ -417,8 +435,16 @@ impl Highlighter {
                             }
 
                             let parse_start = std::time::Instant::now();
-                            let parsed_tree = parser.parse(&replica_text, current_tree.as_ref());
+                            let parsed_tree = parse_with_worker_control(
+                                &mut parser,
+                                &replica_text,
+                                current_tree.as_ref(),
+                                &worker_control_for_thread,
+                            );
                             parse_ms = highlight_trace_elapsed_ms(parse_start);
+                            if worker_control_for_thread.is_cancelled() {
+                                return;
+                            }
                             current_tree = parsed_tree.clone();
 
                             if let Some(tree) = parsed_tree {
@@ -999,10 +1025,16 @@ impl Highlighter {
                     );
                 }
                 let _ = send_result;
-            }
-        });
+                }
+            })
+            .expect("failed to spawn RRiter highlighter worker");
+        let worker = HighlighterWorker {
+            control: worker_control,
+            shutdown_tx: tx_in.clone(),
+        };
         Self {
             tx: tx_in,
+            _worker: worker,
             rx: rx_out,
             spans: vec![],
             completions: vec![],

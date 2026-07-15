@@ -5,7 +5,11 @@ mod runtime;
 use runtime::flatten_spans;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(test)]
+use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread;
 use tree_sitter::StreamingIterator;
 
@@ -121,10 +125,32 @@ pub enum HighlighterMessage {
         version: u64,
         priority_anchor: usize,
     },
+    Shutdown,
+}
+
+struct HighlighterWorkerControl {
+    cancelled: AtomicBool,
+}
+
+impl HighlighterWorkerControl {
+    fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+        }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
 }
 
 pub struct Highlighter {
     tx: Sender<HighlighterMessage>,
+    _worker: HighlighterWorker,
     pub rx: Receiver<(
         u64,
         u64,
@@ -149,6 +175,44 @@ pub struct Highlighter {
     sync_query_cache: HashMap<(&'static str, &'static str), tree_sitter::Query>,
     sync_byte_colors_buf: Vec<[f32; 4]>,
     pending_priority_anchor: Option<usize>,
+}
+
+struct HighlighterWorker {
+    control: Arc<HighlighterWorkerControl>,
+    shutdown_tx: Sender<HighlighterMessage>,
+}
+
+impl Drop for HighlighterWorker {
+    fn drop(&mut self) {
+        self.control.cancel();
+        let _ = self.shutdown_tx.send(HighlighterMessage::Shutdown);
+    }
+}
+
+#[cfg(test)]
+static ACTIVE_HIGHLIGHTER_WORKERS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+struct ActiveHighlighterWorkerGuard;
+
+#[cfg(test)]
+impl ActiveHighlighterWorkerGuard {
+    fn new() -> Self {
+        ACTIVE_HIGHLIGHTER_WORKERS.fetch_add(1, Ordering::AcqRel);
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ActiveHighlighterWorkerGuard {
+    fn drop(&mut self) {
+        ACTIVE_HIGHLIGHTER_WORKERS.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+#[cfg(test)]
+fn active_highlighter_worker_count() -> usize {
+    ACTIVE_HIGHLIGHTER_WORKERS.load(Ordering::Acquire)
 }
 
 pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
@@ -924,6 +988,7 @@ fn priority_highlight_spans_from_slice(
     range: Range<usize>,
     query_cache: &mut HashMap<(&'static str, &'static str), tree_sitter::Query>,
     byte_colors_buf: &mut Vec<[f32; 4]>,
+    worker_control: &HighlighterWorkerControl,
 ) -> Vec<ColorSpan> {
     if range.start >= range.end || range.end > text.len() {
         return Vec::new();
@@ -932,7 +997,7 @@ fn priority_highlight_spans_from_slice(
     let Some(priority_text) = text.get(range.clone()) else {
         return Vec::new();
     };
-    let Some(tree) = parser.parse(priority_text, None) else {
+    let Some(tree) = parse_with_worker_control(parser, priority_text, None, worker_control) else {
         return Vec::new();
     };
 
@@ -967,6 +1032,33 @@ fn priority_highlight_spans_from_slice(
         text,
         byte_colors_buf,
         !lang_name.is_empty() && lang_name != "bash",
+    )
+}
+
+fn parse_with_worker_control(
+    parser: &mut tree_sitter::Parser,
+    text: &str,
+    old_tree: Option<&tree_sitter::Tree>,
+    worker_control: &HighlighterWorkerControl,
+) -> Option<tree_sitter::Tree> {
+    if worker_control.is_cancelled() {
+        return None;
+    }
+
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut progress = |_state: &tree_sitter::ParseState| {
+        if worker_control.is_cancelled() {
+            std::ops::ControlFlow::Break(())
+        } else {
+            std::ops::ControlFlow::Continue(())
+        }
+    };
+    let options = tree_sitter::ParseOptions::new().progress_callback(&mut progress);
+    parser.parse_with_options(
+        &mut |offset, _| (offset < len).then(|| &bytes[offset..]).unwrap_or_default(),
+        old_tree,
+        Some(options),
     )
 }
 
