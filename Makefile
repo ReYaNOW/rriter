@@ -21,7 +21,7 @@ TEST ?=
 TEST_THREADS ?= 1
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench clean
+.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean
 
 all: max
 
@@ -165,7 +165,12 @@ test-time:
 	--test-threads=$(TEST_THREADS)
 	@echo "✅ Тесты завершены"
 
-PROF_DIR = $(CURDIR)/target/pgo-profiles
+PROF_DIR ?= $(CURDIR)/target/pgo-profiles/$(TARGET)
+PGO_GENERATE_TARGET_DIR ?= $(CURDIR)/target/pgo-generate/$(TARGET)
+PGO_USE_TARGET_DIR ?= $(CURDIR)/target/pgo-use/$(TARGET)
+PGO_TRAINING_DIR ?= $(CURDIR)/target/pgo-training/$(TARGET)
+PGO_AUTOMATION_TIMEOUT ?= 600
+PGO_FAST_EXECUTABLE ?= $(CURDIR)/target/$(TARGET)/release/$(BINARY_NAME)
 PGO_COMPARE_DIR ?= $(CURDIR)/target/pgo-compare
 PGO_BENCH_TOOL_DIR ?= $(CURDIR)/target/pgo-bench-tools
 PGO_BENCH_RUNS ?= 7
@@ -229,40 +234,94 @@ pgo-bench-run: $(PGO_BENCH_COMPARE_TOOL)
 pgo-bench: pgo-bench-build pgo-bench-run
 
 pgo-gen:
-	@echo "🧬 Сборка для ручного PGO..."
+	@echo "🧬 Сборка изолированной версии для ручного PGO..."
 	rm -rf $(PROF_DIR)
-	$(FAST_PROFILE_OPTS) \
-	RUSTFLAGS="$(COMMON_RUSTFLAGS) -Cprofile-generate=$(PROF_DIR)" \
-	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release
+	@mkdir -p $(PROF_DIR)
+	CARGO_TARGET_DIR="$(PGO_GENERATE_TARGET_DIR)" \
+	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+	CARGO_PROFILE_RELEASE_PANIC=abort \
+	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-generate=$(PROF_DIR)" \
+	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
+	@echo "✅ Инструментированный RRiter: $(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)"
 
 pgo-run:
-	@echo "🏃 Открываю редактор для профилирования."
-	@echo "💾 Создаю бекап ~/.config/RRiter..."
-	@cp -r ~/.config/RRiter ~/.config/RRiter_pgo_backup || true
-	@echo "🔧 Включаю телеметрию для PGO..."
-	@sed -i 's/"enable_telemetry": false/"enable_telemetry": true/' ~/.config/RRiter/config.json || true
-	@echo "ВАЖНО: Поскролльте, попечатайте, откройте терминал и ЗАКРОЙТЕ редактор."
-	LLVM_PROFILE_FILE="$(PROF_DIR)/default_%p.profraw" target/$(TARGET)/release/$(BINARY_NAME)
-	@echo "♻️ Восстанавливаю бекап ~/.config/RRiter..."
-	@rm -rf ~/.config/RRiter
-	@mv ~/.config/RRiter_pgo_backup ~/.config/RRiter || true
+	@echo "🏃 Открываю инструментированный RRiter в полноценном IDE-режиме."
+	@echo "ВАЖНО: используйте нужные функции и штатно ЗАКРОЙТЕ редактор."
+	LLVM_PROFILE_FILE="$(PROF_DIR)/manual_%p_%m.profraw" \
+		"$(PGO_GENERATE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)" --ide
 
 pgo-merge:
 	@echo "🔗 Слияние профилей..."
-	rustup run nightly llvm-profdata merge -o $(PROF_DIR)/merged.profdata $(PROF_DIR)/*.profraw
+	@test -n "$$(find "$(PROF_DIR)" -maxdepth 1 -type f -name '*.profraw' -print -quit)" || \
+		(echo "❌ В $(PROF_DIR) нет .profraw; сначала выполните make pgo-run" && exit 2)
+	rustup run nightly llvm-profdata merge -sparse \
+		-o "$(PROF_DIR)/merged.profdata" "$(PROF_DIR)"/*.profraw
+	@echo "✅ Профиль: $(PROF_DIR)/merged.profdata"
 
 pgo-max:
-	@echo "🔥 Сборка MAX с профилем PGO..."
+	@echo "🔥 Изолированная MAX-сборка с PGO..."
+	@test -s "$(PROF_DIR)/merged.profdata" || \
+		(echo "❌ Нет $(PROF_DIR)/merged.profdata; сначала выполните make pgo-merge" && exit 2)
+	CARGO_TARGET_DIR="$(PGO_USE_TARGET_DIR)" \
 	CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
 	CARGO_PROFILE_RELEASE_PANIC=immediate-abort \
-	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-use=$(PROF_DIR)/merged.profdata" \
-	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release
+	RUSTFLAGS="$(MAX_RUSTFLAGS) -Cprofile-use=$(PROF_DIR)/merged.profdata -Cllvm-args=-pgo-warn-missing-function" \
+	cargo +nightly build $(BUILD_STD) --target $(TARGET) --release --bin $(BINARY_NAME)
+	@echo "✅ PGO RRiter: $(PGO_USE_TARGET_DIR)/$(TARGET)/release/$(BINARY_NAME)"
+
+pgo-auto:
+	@echo "🤖 Полный свежий PGO: сборка → GUI-тренировка → merge → MAX-сборка"
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--mode fresh \
+		--build-std \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
+		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
+
+pgo-gen-fast:
+	@echo "⚡ Быстрый RRiter для отладки PGO GUI-сценария (без PGO/MAX/LTO)..."
+	@$(MAKE) fast
+	@echo "✅ Тестовый бинарник: $(PGO_FAST_EXECUTABLE)"
+
+pgo-script:
+	@echo "🎬 Только GUI-автоматизация на быстром RRiter — без сборки, merge и PGO-use"
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--run-only \
+		--run-executable "$(PGO_FAST_EXECUTABLE)" \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)"
+
+pgo-train:
+	@echo "🤖 Создание свежего профиля без финальной PGO-сборки"
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--mode fresh \
+		--train-only \
+		--build-std \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
+		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
+
+pgo-use:
+	@echo "♻️ Проверка и использование совместимого PGO-профиля"
+	python3 scripts/pgo_pipeline.py \
+		--target "$(TARGET)" \
+		--mode reuse \
+		--build-std \
+		--timeout-seconds "$(PGO_AUTOMATION_TIMEOUT)" \
+		--rustflags "$(MAX_RUSTFLAGS)" \
+		--env CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1 \
+		--env CARGO_PROFILE_RELEASE_PANIC=immediate-abort
 
 pgo-clean:
-	@echo "🧹 Удаление временных файлов PGO..."
-	rm -rf $(PROF_DIR)
+	@echo "🧹 Удаление только изолированных PGO-артефактов..."
+	rm -rf "$(PROF_DIR)" "$(PGO_TRAINING_DIR)" \
+		"$(PGO_GENERATE_TARGET_DIR)" "$(PGO_USE_TARGET_DIR)"
 
-pgo: pgo-gen pgo-run pgo-merge pgo-max pgo-clean
+pgo: pgo-auto
 
 clean:
 	@echo "🧹 Очистка..."

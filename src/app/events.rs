@@ -17,6 +17,7 @@ pub(crate) use source_hover::module_path_from_definition_path;
 pub(crate) use source_hover::prepend_hover_module_path;
 pub(crate) use source_hover::source_class_signature_from_definition_file;
 pub(crate) use source_hover::source_function_signature_from_text;
+pub(crate) use source_hover::source_hover_popup_for_editor;
 use source_hover::*;
 
 #[derive(Default)]

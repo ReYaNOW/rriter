@@ -1,5 +1,6 @@
 pub mod api_client;
 pub mod api_mock;
+pub mod automation;
 mod app_state;
 mod autocomplete;
 pub mod events;

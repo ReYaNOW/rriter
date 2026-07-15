@@ -249,6 +249,11 @@ pub(super) fn resume(app: &mut App, event_loop: &ActiveEventLoop) {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn persist_state_and_shutdown(app: &mut App) {
+    if app.is_automation_mode() {
+        app.write_interrupted_automation_report("application exited before automation completed");
+        app.shutdown_background_services();
+        return;
+    }
     let (width, height, maximized) = if let Some(window) = app.window.as_ref() {
         let maximized = window.is_maximized();
         let (width, height) = if maximized {

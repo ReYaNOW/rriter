@@ -23,6 +23,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
+from build_common import (
+    PlanError,
+    PgoMode,
+    confirm,
+    default_build_plan,
+    interactive_build_plan,
+    is_interactive,
+    print_plan,
+    self_test as build_plan_self_test,
+    should_open_menu,
+)
+from pgo_pipeline import PgoConfig, PgoError, run_pipeline
+
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TARGET = "x86_64-pc-windows-msvc"
 APP_NAME = "RRiter"
@@ -587,6 +600,49 @@ def prepare_resources(environment: Mapping[str, str], version: str) -> Path:
     return resource
 
 
+def windows_target_environment(
+    environment: Mapping[str, str],
+    *,
+    target: str,
+    install_target: bool,
+) -> dict[str, str]:
+    ensure_rust_target(environment, target, install_target)
+    return dict(environment)
+
+
+def windows_build_environment(
+    environment: Mapping[str, str],
+    *,
+    target: str,
+    install_target: bool,
+) -> dict[str, str]:
+    build_env = windows_target_environment(
+        environment,
+        target=target,
+        install_target=install_target,
+    )
+    return with_windows_resources(build_env)
+
+
+def with_windows_resources(environment: Mapping[str, str]) -> dict[str, str]:
+    resource = prepare_resources(environment, cargo_version())
+    build_env = dict(environment)
+    build_env["RRITER_WINDOWS_RESOURCE"] = str(resource.resolve())
+    return build_env
+
+
+def run_windows_tests(
+    environment: Mapping[str, str],
+    *,
+    target: str,
+    install_target: bool,
+) -> None:
+    test_env = windows_target_environment(
+        environment, target=target, install_target=install_target
+    )
+    run(windows_test_command(target), env=test_env)
+
+
 def build_rriter(
     environment: Mapping[str, str],
     *,
@@ -594,14 +650,34 @@ def build_rriter(
     release: bool,
     run_tests: bool,
     install_target: bool,
+    pgo_mode: PgoMode = PgoMode.OFF,
+    pgo_profile: Path | None = None,
+    pgo_timeout_seconds: int = 300,
 ) -> Path:
-    ensure_rust_target(environment, target, install_target)
-    version = cargo_version()
-    resource = prepare_resources(environment, version)
-    build_env = dict(environment)
-    build_env["RRITER_WINDOWS_RESOURCE"] = str(resource.resolve())
+    target_env = windows_target_environment(
+        environment, target=target, install_target=install_target
+    )
     if run_tests:
-        run(windows_test_command(target), env=build_env)
+        run(windows_test_command(target), env=target_env)
+    build_env = with_windows_resources(target_env)
+    if pgo_mode is not PgoMode.OFF:
+        if not release:
+            raise BuildError("PGO is supported only for release builds")
+        executable = run_pipeline(
+            PgoConfig(
+                root=ROOT,
+                target=target,
+                mode=pgo_mode.value,
+                profile_path=pgo_profile,
+                timeout_seconds=pgo_timeout_seconds,
+                rustflags=build_env.get("RUSTFLAGS", ""),
+                cargo_env=build_env,
+            )
+        )
+        if executable is None:
+            raise BuildError("PGO pipeline did not produce an executable")
+        return executable
+
     command = ["cargo", "+nightly", "build", "--locked", "--target", target]
     profile = "debug"
     if release:
@@ -822,6 +898,7 @@ def self_test() -> None:
             "--test-threads=1",
         ]:
             raise BuildError("Windows serial test command self-test failed")
+    build_plan_self_test()
     windows_msvc_capture_smoke_test()
     log("self-test passed")
 
@@ -831,6 +908,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--target", default=DEFAULT_TARGET)
     parser.add_argument("--debug", action="store_true", help="Build debug profile")
     parser.add_argument("--test", action="store_true", help="Run Windows tests before build")
+    parser.add_argument("--tests-only", action="store_true", help="Run tests and stop")
+    parser.add_argument("--build-only", action="store_true", help="Build without tests")
     parser.add_argument(
         "--install-target",
         action="store_true",
@@ -839,6 +918,12 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--run", action="store_true", help="Launch built executable")
     parser.add_argument("--no-package", action="store_true", help="Skip portable ZIP")
     parser.add_argument("--installer", action="store_true", help="Build Inno Setup installer")
+    parser.add_argument("--pgo", choices=[mode.value for mode in PgoMode], default="off")
+    parser.add_argument("--pgo-profile", type=Path)
+    parser.add_argument("--pgo-timeout-seconds", type=int, default=300)
+    parser.add_argument("--menu", action="store_true", help="Force the interactive menu")
+    parser.add_argument("--yes", action="store_true", help="Do not ask for final confirmation")
+    parser.add_argument("--print-plan", action="store_true", help="Print the plan and exit")
     parser.add_argument("--sign-pfx", type=Path)
     parser.add_argument("--sign-password-env")
     parser.add_argument("--sign-cert-sha1")
@@ -850,21 +935,74 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def requested_plan(args: argparse.Namespace, raw_argv: Sequence[str]):
+    if args.menu and not is_interactive():
+        raise BuildError("--menu requires an interactive terminal")
+    menu = should_open_menu(raw_argv, force=args.menu)
+    if menu:
+        plan = interactive_build_plan("Windows", supports_installer=True)
+        if not args.yes:
+            print_plan(plan, platform_lines=(f"Target:       {args.target}",))
+            if not confirm("Start this plan?", default=True):
+                raise BuildError("build cancelled")
+        return plan
+    if args.tests_only and args.build_only:
+        raise BuildError("--tests-only and --build-only cannot be combined")
+    if args.build_only and args.test:
+        raise BuildError("--build-only and --test cannot be combined")
+    return default_build_plan(
+        run_tests=args.test and not args.build_only,
+        tests_only=args.tests_only,
+        debug=args.debug,
+        package=not args.no_package,
+        installer=args.installer,
+        run_after_build=args.run,
+        pgo=args.pgo,
+        pgo_profile=str(args.pgo_profile) if args.pgo_profile else None,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if not raw_argv and not is_interactive():
+        print(
+            "[rriter-windows] No interactive terminal detected. "
+            "Run with --help or pass explicit build flags.",
+            file=sys.stderr,
+        )
+        return 2
+    args = parse_args(raw_argv)
     if args.self_test:
         self_test()
+        return 0
+    plan = requested_plan(args, raw_argv)
+    print_plan(plan, platform_lines=(f"Target:       {args.target}",))
+    if args.print_plan:
         return 0
     if os.name != "nt":
         raise BuildError("Windows build must run on Windows 11; use --self-test elsewhere")
     environment = import_msvc_environment(os.environ)
-    executable = build_rriter(
-        environment,
-        target=args.target,
-        release=not args.debug,
-        run_tests=args.test,
-        install_target=args.install_target,
-    )
+    executable: Path | None = None
+    if plan.build:
+        executable = build_rriter(
+            environment,
+            target=args.target,
+            release=plan.release,
+            run_tests=plan.run_tests,
+            install_target=args.install_target,
+            pgo_mode=plan.pgo,
+            pgo_profile=args.pgo_profile,
+            pgo_timeout_seconds=args.pgo_timeout_seconds,
+        )
+    elif plan.run_tests:
+        run_windows_tests(
+            environment, target=args.target, install_target=args.install_target
+        )
+
+    if executable is None:
+        log("tests completed; no build requested")
+        return 0
+
     signing = SigningOptions(
         pfx=args.sign_pfx,
         password_env=args.sign_password_env,
@@ -872,11 +1010,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         timestamp_url=args.timestamp_url,
     )
     artifacts = None
-    if not args.no_package:
+    if plan.package:
         artifacts = package(
             executable,
             environment,
-            create_installer=args.installer,
+            create_installer=plan.installer,
             signing=signing,
         )
     elif signing.pfx is not None or signing.certificate_sha1:
@@ -886,7 +1024,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         log(f"portable ZIP: {artifacts.portable_zip}")
         if artifacts.installer is not None:
             log(f"installer: {artifacts.installer}")
-    if args.run:
+    if plan.run_after_build:
         log("launching RRiter")
         subprocess.Popen([str(executable)], cwd=ROOT, env=environment)
     return 0
@@ -895,6 +1033,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (BuildError, subprocess.CalledProcessError, OSError) as error:
+    except (BuildError, PlanError, PgoError, subprocess.CalledProcessError, OSError) as error:
         print(f"[rriter-windows] ERROR: {error}", file=sys.stderr)
         raise SystemExit(1)

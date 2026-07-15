@@ -2,36 +2,35 @@
 
 ## 1. Статус документа
 
-Этот документ разделяет уже выполненную часть и две будущие части.
+Этап сравнения baseline/PGO был реализован ранее. Этапы автоматизации PGO и
+интерактивных platform build-скриптов теперь также имеют рабочую реализацию:
 
-Уже реализовано в текущем изменении:
+- `src/app/automation.rs` запускает детерминированный сценарий внутри настоящего
+  event loop RRiter и управляет интерфейсом через `UiId` и обычные обработчики
+  ввода;
+- сценарий использует настоящий renderer/window, IDE workspace, вкладки,
+  редактирование и сохранение, поиск, прокрутку и minimap, Project Search, Git,
+  OpenAPI/API Client, контекстные меню, LSP/Problems, terminal и settings;
+- `scripts/pgo_pipeline.py` создаёт изолированный fixture и config root, собирает
+  instrumented binary в отдельном Cargo target, запускает GUI-тренировку,
+  проверяет отчёт и `.profraw`, делает merge, сохраняет manifest/summary и только
+  затем выполняет `profile-use` build;
+- обычный `make fast`, instrumented PGO и PGO-use больше не делят один target
+  cache;
+- `scripts/build_windows.py` и `scripts/build_macos.py` при запуске без аргументов
+  в TTY открывают пошаговое меню; CLI-режим для CI и старых команд сохранён;
+- общая immutable-модель `BuildPlan` и проверки конфликтов находятся в
+  `scripts/build_common.py`;
+- свежий и повторно используемый PGO-профиль доступны как из Makefile, так и из
+  Windows/macOS build-скриптов.
 
-- Rust-скрипт сборки двух сравнимых вариантов RRiter:
-  - baseline без `profile-use`;
-  - PGO с `profile-use`;
-  - одинаковые release-настройки, LTO, codegen units и остальные Rust-флаги;
-  - отдельные `CARGO_TARGET_DIR`, чтобы артефакты вариантов не смешивались.
-- Rust-скрипт сравнения реальных путей RRiter:
-  - project search;
-  - Git graph;
-  - real-window scroll/render benchmark;
-  - frame split;
-  - root render phases;
-  - flush;
-  - FPS и present gaps;
-  - process wall time;
-  - размер бинарника.
-- AB/BA-порядок прогонов, warmup, медиана, mean, p95, min/max.
-- Изолированный временный профиль RRiter для каждого процесса.
-- CSV-отчёт с положительным процентом, когда PGO лучше.
-- Makefile-цели для сборки, self-test и запуска сравнения.
+Оставшиеся разделы документа сохраняются как архитектурное обоснование,
+расширенный checklist покрытия и требования к native smoke/release validation.
+Проверки настоящего Win32/AppKit окна, signing/notarization и Rosetta должны
+выполняться на соответствующих ОС; Linux training требует активную Wayland
+session и не откатывается молча на X11.
 
-Пока не реализовано, а только запланировано ниже:
-
-1. Полностью автоматический сбор свежего PGO-профиля через реальное окно RRiter и полный сценарий использования редактора.
-2. Интерактивные понятные меню без параметров в `scripts/build_windows.py` и `scripts/build_macos.py`.
-
-## 2. Цели будущей автоматизации PGO
+## 2. Цели автоматизации PGO
 
 Автоматизация должна давать не просто любой `.profraw`, а устойчивый профиль, отражающий реальную работу редактора.
 

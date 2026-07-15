@@ -517,11 +517,7 @@ impl crate::app::App {
                 self.commit_api_mock_contract_field_prop(route_idx, group, field_idx, prop, &text);
             }
             ApiFocus::AuthValue { spec_id, scheme } => {
-                let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
-                entry.value = text.clone();
-                if !text.is_empty() && entry.token_type.is_empty() {
-                    entry.token_type = "Bearer".to_string();
-                }
+                self.ide_panel.api.auth.set_value(spec_id, &scheme, text);
                 self.ide_panel.api.persist();
             }
             ApiFocus::AuthRefreshToken { spec_id, scheme } => {

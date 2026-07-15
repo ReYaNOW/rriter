@@ -23,6 +23,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from build_common import (
+    MenuChoice,
+    PlanError,
+    PgoMode,
+    choose,
+    confirm,
+    default_build_plan,
+    interactive_build_plan,
+    is_interactive,
+    print_plan,
+    self_test as build_plan_self_test,
+    should_open_menu,
+)
+from pgo_pipeline import PgoConfig, PgoError, run_pipeline
+
 ROOT = Path(__file__).resolve().parents[1]
 APP_NAME = "RRiter"
 BUNDLE_ID = "com.rriter.RRiter"
@@ -135,6 +150,19 @@ def targets_for_architecture(
     raise BuildError(f"unsupported architecture mode: {architecture}")
 
 
+def validate_pgo_training_targets(
+    targets: Sequence[str],
+    *,
+    machine: str | None = None,
+) -> None:
+    host = native_target(machine)
+    if host == TARGET_X86_64 and TARGET_ARM64 in targets:
+        raise BuildError(
+            "an Intel Mac cannot execute the arm64 instrumented RRiter needed "
+            "for PGO training; create that profile on Apple Silicon"
+        )
+
+
 def validate_minimum_system(value: str) -> str:
     if not re.fullmatch(r"\d+\.\d+(?:\.\d+)?", value):
         raise BuildError(
@@ -169,17 +197,45 @@ def cargo_build_command(target: str, *, release: bool) -> list[str]:
     return command
 
 
+def run_macos_tests(*, install_targets: bool, minimum_system: str) -> None:
+    test_target = native_target()
+    ensure_rust_target(test_target, install_targets)
+    run(cargo_test_command(test_target), env=cargo_environment(minimum_system))
+
+
 def build_target(
     target: str,
     *,
     release: bool,
     install_target: bool,
     minimum_system: str,
+    pgo_mode: PgoMode = PgoMode.OFF,
+    pgo_profile: Path | None = None,
+    pgo_timeout_seconds: int = 300,
 ) -> Path:
     ensure_rust_target(target, install_target)
+    environment = cargo_environment(minimum_system)
+    if pgo_mode is not PgoMode.OFF:
+        if not release:
+            raise BuildError("PGO is supported only for release builds")
+        executable = run_pipeline(
+            PgoConfig(
+                root=ROOT,
+                target=target,
+                mode=pgo_mode.value,
+                profile_path=pgo_profile,
+                timeout_seconds=pgo_timeout_seconds,
+                rustflags=environment.get("RUSTFLAGS", ""),
+                cargo_env=environment,
+            )
+        )
+        if executable is None:
+            raise BuildError("PGO pipeline did not produce an executable")
+        return executable
+
     command = cargo_build_command(target, release=release)
     profile = "release" if release else "debug"
-    run(command, env=cargo_environment(minimum_system))
+    run(command, env=environment)
     executable = ROOT / "target" / target / profile / "rriter"
     if not executable.is_file():
         raise BuildError(f"built executable not found: {executable}")
@@ -193,14 +249,31 @@ def build_executable(
     run_tests: bool,
     install_targets: bool,
     minimum_system: str,
+    pgo_mode: PgoMode = PgoMode.OFF,
+    pgo_profile: Path | None = None,
+    pgo_timeout_seconds: int = 300,
 ) -> tuple[Path, str]:
     targets = targets_for_architecture(architecture)
+    if pgo_mode is PgoMode.FRESH:
+        validate_pgo_training_targets(targets)
+        if native_target() == TARGET_ARM64 and TARGET_X86_64 in targets:
+            rosetta = run(
+                ["/usr/bin/arch", "-x86_64", "/usr/bin/true"],
+                check=False,
+            )
+            if rosetta.returncode != 0:
+                raise BuildError(
+                    "x86_64 PGO training requires Rosetta 2; install it with "
+                    "softwareupdate --install-rosetta"
+                )
     if run_tests:
-        test_target = native_target()
-        ensure_rust_target(test_target, install_targets)
-        run(
-            cargo_test_command(test_target),
-            env=cargo_environment(minimum_system),
+        run_macos_tests(
+            install_targets=install_targets, minimum_system=minimum_system
+        )
+    if len(targets) > 1 and pgo_profile is not None:
+        raise BuildError(
+            "--pgo-profile cannot name one file for a Universal 2 build; "
+            "use the default target-specific profiles"
         )
     binaries = [
         build_target(
@@ -208,6 +281,9 @@ def build_executable(
             release=release,
             install_target=install_targets,
             minimum_system=minimum_system,
+            pgo_mode=pgo_mode,
+            pgo_profile=pgo_profile,
+            pgo_timeout_seconds=pgo_timeout_seconds,
         )
         for target in targets
     ]
@@ -469,6 +545,13 @@ def self_test() -> None:
         raise BuildError("native x86_64 target selection failed")
     if targets_for_architecture("universal") != [TARGET_ARM64, TARGET_X86_64]:
         raise BuildError("Universal 2 target selection failed")
+    validate_pgo_training_targets([TARGET_X86_64], machine="arm64")
+    try:
+        validate_pgo_training_targets([TARGET_ARM64], machine="x86_64")
+    except BuildError:
+        pass
+    else:
+        raise BuildError("Intel hosts must reject arm64 PGO training")
     if cargo_test_command(TARGET_ARM64)[-2:] != ["--", "--test-threads=1"]:
         raise BuildError("macOS tests must follow the project serial-test policy")
     if cargo_build_command(TARGET_ARM64, release=True)[-1] != "--release":
@@ -494,6 +577,7 @@ def self_test() -> None:
             decoded_entitlements = plistlib.load(source)
         if decoded_entitlements != {}:
             raise BuildError("hardened runtime entitlements must remain empty")
+    build_plan_self_test()
     log("self-test passed")
 
 
@@ -506,6 +590,8 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--test", action="store_true")
+    parser.add_argument("--tests-only", action="store_true", help="Run tests and stop")
+    parser.add_argument("--build-only", action="store_true", help="Build without tests")
     parser.add_argument("--install-targets", action="store_true")
     parser.add_argument("--minimum-system", default="12.0")
     parser.add_argument(
@@ -524,26 +610,108 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="notarytool keychain profile created with store-credentials",
     )
     parser.add_argument("--run", action="store_true")
+    parser.add_argument("--pgo", choices=[mode.value for mode in PgoMode], default="off")
+    parser.add_argument("--pgo-profile", type=Path)
+    parser.add_argument("--pgo-timeout-seconds", type=int, default=300)
+    parser.add_argument("--menu", action="store_true", help="Force the interactive menu")
+    parser.add_argument("--yes", action="store_true", help="Do not ask for final confirmation")
+    parser.add_argument("--print-plan", action="store_true", help="Print the plan and exit")
     parser.add_argument("--self-test", action="store_true")
     return parser.parse_args(argv)
 
 
+def requested_plan(args: argparse.Namespace, raw_argv: Sequence[str]):
+    if args.menu and not is_interactive():
+        raise BuildError("--menu requires an interactive terminal")
+    menu = should_open_menu(raw_argv, force=args.menu)
+    if menu:
+        plan = interactive_build_plan("macOS", supports_installer=False)
+        if plan.build:
+            args.arch = str(
+                choose(
+                    "Target architecture",
+                    (
+                        MenuChoice("Native", "native", "current Mac"),
+                        MenuChoice("Apple Silicon", "arm64"),
+                        MenuChoice("Intel", "x86_64"),
+                        MenuChoice("Universal 2", "universal", "arm64 + x86_64"),
+                    ),
+                    default=0,
+                )
+            )
+        if not args.yes:
+            print_plan(
+                plan,
+                platform_lines=(
+                    f"Architecture: {args.arch}",
+                    f"Minimum macOS: {args.minimum_system}",
+                ),
+            )
+            if not confirm("Start this plan?", default=True):
+                raise BuildError("build cancelled")
+        return plan
+    if args.tests_only and args.build_only:
+        raise BuildError("--tests-only and --build-only cannot be combined")
+    if args.build_only and args.test:
+        raise BuildError("--build-only and --test cannot be combined")
+    return default_build_plan(
+        run_tests=args.test and not args.build_only,
+        tests_only=args.tests_only,
+        debug=args.debug,
+        package=not args.no_dmg,
+        installer=False,
+        run_after_build=args.run,
+        pgo=args.pgo,
+        pgo_profile=str(args.pgo_profile) if args.pgo_profile else None,
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if not raw_argv and not is_interactive():
+        print(
+            "[rriter-macos] No interactive terminal detected. "
+            "Run with --help or pass explicit build flags.",
+            file=sys.stderr,
+        )
+        return 2
+    args = parse_args(raw_argv)
     if args.self_test:
         self_test()
         return 0
+    plan = requested_plan(args, raw_argv)
+    minimum_system = validate_minimum_system(args.minimum_system)
+    print_plan(
+        plan,
+        platform_lines=(
+            f"Architecture: {args.arch}",
+            f"Minimum macOS: {minimum_system}",
+        ),
+    )
+    if args.print_plan:
+        return 0
     if sys.platform != "darwin":
         raise BuildError("macOS build must run on macOS; use --self-test elsewhere")
-    require_commands(["cargo", "rustup", "xcrun", "codesign", "sips", "iconutil"])
+
+    require_commands(["cargo", "rustup"])
+    if not plan.build:
+        run_macos_tests(
+            install_targets=args.install_targets, minimum_system=minimum_system
+        )
+        log("tests completed; no build requested")
+        return 0
+
+    require_commands(["xcrun", "codesign", "sips", "iconutil"])
     version = cargo_version()
-    minimum_system = validate_minimum_system(args.minimum_system)
     executable, architecture_label = build_executable(
         args.arch,
-        release=not args.debug,
-        run_tests=args.test,
+        release=plan.release,
+        run_tests=plan.run_tests,
         install_targets=args.install_targets,
         minimum_system=minimum_system,
+        pgo_mode=plan.pgo,
+        pgo_profile=args.pgo_profile,
+        pgo_timeout_seconds=args.pgo_timeout_seconds,
     )
     app = create_bundle(
         executable,
@@ -566,13 +734,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         app,
         version=version,
         architecture_label=architecture_label,
-        create_disk_image=not args.no_dmg,
+        create_disk_image=plan.package,
         notary_profile=args.notary_profile,
     )
     log(f"app bundle: {artifacts.app}")
     if artifacts.dmg is not None:
         log(f"disk image: {artifacts.dmg}")
-    if args.run:
+    if plan.run_after_build:
         run(["open", artifacts.app])
     return 0
 
@@ -580,6 +748,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (BuildError, subprocess.CalledProcessError, OSError) as error:
+    except (BuildError, PlanError, PgoError, subprocess.CalledProcessError, OSError) as error:
         print(f"[rriter-macos] ERROR: {error}", file=sys.stderr)
         raise SystemExit(1)

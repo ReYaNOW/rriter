@@ -11,17 +11,33 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let now = Instant::now();
-    if app.render_suspended {
+    let automation_running = if app.automation.is_some() {
+        match app.advance_automation(event_loop, now) {
+            Some(crate::app::automation::AutomationTick::Exit) => {
+                app.shutdown_background_services();
+                event_loop.exit();
+                return;
+            }
+            Some(crate::app::automation::AutomationTick::Running) => true,
+            None => false,
+        }
+    } else {
+        false
+    };
+    if app.render_suspended && !automation_running {
         app.last_frame = now;
         event_loop.set_control_flow(ControlFlow::Wait);
         return;
+    }
+    if automation_running {
+        app.render_suspended = false;
     }
 
     let raw_dt = (now - app.last_frame).as_secs_f32();
     let dt = animation_dt(raw_dt);
     app.last_frame = now;
 
-    let mut needs_redraw = false;
+    let mut needs_redraw = automation_running;
     let mut hover_wake_at: Option<Instant> = None;
     let mut hover_poll_pending = false;
     let mut api_mock_hover_request_due = false;

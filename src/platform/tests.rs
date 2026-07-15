@@ -705,3 +705,13 @@ fn native_pem_parser_decodes_multiple_certificates_and_rejects_partial_data() {
     );
     assert!(parse_pem_certificates(b"-----BEGIN CERTIFICATE-----\nAQID").is_empty());
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn pgo_automation_uses_distinct_wayland_identity() {
+    assert_eq!(super::linux_window_identity(false), ("rriter", "rriter"));
+    assert_eq!(
+        super::linux_window_identity(true),
+        ("rriter-pgo", "rriter-pgo")
+    );
+}

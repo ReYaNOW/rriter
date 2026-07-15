@@ -97,8 +97,12 @@ impl App {
             self.text_file_format = crate::platform::TextFileFormat::default();
         }
 
-        self.ide_panel = crate::load_panel_state();
-        self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
+        if self.is_automation_mode() {
+            self.ide_panel = crate::app::IdePanelState::default();
+        } else {
+            self.ide_panel = crate::load_panel_state();
+            self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
+        }
         self.ide_panel.enforce_single_open_per_group();
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
@@ -138,7 +142,9 @@ impl App {
             self.active_tab = 0;
         }
 
-        let (saved_tabs, saved_active) = if self.scroll_render_bench.is_some() {
+        let (saved_tabs, saved_active) = if self.scroll_render_bench.is_some()
+            || self.is_automation_mode()
+        {
             (Vec::new(), 0)
         } else {
             crate::load_open_tabs(true)
@@ -230,7 +236,7 @@ impl App {
         }
     }
     pub fn save_tabs_state(&mut self) {
-        if !self.is_ide_mode {
+        if !self.is_ide_mode || self.is_automation_mode() {
             return;
         }
         self.sync_active_tab();

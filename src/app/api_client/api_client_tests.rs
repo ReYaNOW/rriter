@@ -837,6 +837,18 @@ mod tests {
     }
 
     #[test]
+    fn auth_store_set_value_creates_a_bearer_entry() {
+        let mut auth = ApiAuthStore::default();
+        let spec_id = ApiSpecId(42);
+
+        auth.set_value(spec_id, "BearerAuth", "rriter-pgo-token".to_string());
+
+        let entry = auth.entry(spec_id, "BearerAuth").expect("saved auth entry");
+        assert_eq!(entry.value, "rriter-pgo-token");
+        assert_eq!(entry.token_type, "Bearer");
+    }
+
+    #[test]
     fn auth_request_assembly_sets_headers_cookies_query_and_basic() {
         let mut url = "https://api.example.com/items".to_string();
         append_auth_query(

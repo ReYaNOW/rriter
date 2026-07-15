@@ -61,6 +61,7 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
 fn test_app() -> Option<App> {
     let now = Instant::now();
     Some(App {
+        automation: None,
         scroll_render_bench: None,
         pending_key_log: None,
         gl_config: None,

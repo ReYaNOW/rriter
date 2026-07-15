@@ -241,11 +241,23 @@ pub const fn native_dialog_requires_main_thread() -> bool {
     cfg!(target_os = "macos")
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) const fn linux_window_identity(
+    pgo_automation: bool,
+) -> (&'static str, &'static str) {
+    if pgo_automation {
+        ("rriter-pgo", "rriter-pgo")
+    } else {
+        ("rriter", "rriter")
+    }
+}
+
 pub fn apply_window_attributes(attributes: WindowAttributes) -> WindowAttributes {
     #[cfg(target_os = "linux")]
     {
         use winit::platform::wayland::WindowAttributesExtWayland;
-        attributes.with_name("rriter", "rriter")
+        let identity = linux_window_identity(std::env::var_os("RRITER_PGO_AUTOMATION").is_some());
+        attributes.with_name(identity.0, identity.1)
     }
     #[cfg(not(target_os = "linux"))]
     {

@@ -831,6 +831,7 @@ impl App {
 }
 
 pub struct App {
+    pub automation: Option<crate::app::automation::AutomationController>,
     pub scroll_render_bench: Option<ScrollRenderBench>,
     pub pending_key_log: Option<KeyLog>,
     pub gl_config: Option<glutin::config::Config>,

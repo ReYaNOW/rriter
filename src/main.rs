@@ -845,6 +845,53 @@ mod tests {
             initial_file_argument(&benchmark, Some(1)),
             Some(std::ffi::OsStr::new("sample.py"))
         );
+
+        let automation = vec![
+            std::ffi::OsString::from("rriter"),
+            std::ffi::OsString::from("--pgo-train"),
+            std::ffi::OsString::from("--pgo-workspace"),
+            std::ffi::OsString::from("fixture"),
+            std::ffi::OsString::from("--pgo-report"),
+            std::ffi::OsString::from("report.json"),
+            std::ffi::OsString::from("fixture/src/main.rs"),
+        ];
+        assert_eq!(
+            initial_file_argument(&automation, None),
+            Some(std::ffi::OsStr::new("fixture/src/main.rs"))
+        );
+    }
+
+    #[test]
+    fn pgo_automation_arguments_are_validated_without_becoming_file_paths() {
+        let args = vec![
+            "rriter".to_string(),
+            "--pgo-train".to_string(),
+            "--pgo-workspace".to_string(),
+            "fixture".to_string(),
+            "--pgo-report".to_string(),
+            "report.json".to_string(),
+            "--pgo-timeout-seconds".to_string(),
+            "90".to_string(),
+        ];
+        let options = automation_options(&args, None).unwrap().unwrap();
+        assert_eq!(options.workspace, std::path::PathBuf::from("fixture"));
+        assert_eq!(options.report_path, std::path::PathBuf::from("report.json"));
+        assert_eq!(options.timeout, Duration::from_secs(90));
+
+        let missing = vec![
+            "rriter".to_string(),
+            "--pgo-train".to_string(),
+            "--pgo-workspace".to_string(),
+        ];
+        assert!(automation_options(&missing, None).is_err());
+
+        let too_short = vec![
+            "rriter".to_string(),
+            "--pgo-train".to_string(),
+            "--pgo-timeout-seconds".to_string(),
+            "5".to_string(),
+        ];
+        assert!(automation_options(&too_short, None).is_err());
     }
 
     #[cfg(unix)]
@@ -1549,13 +1596,83 @@ fn initial_file_argument(
     if let Some(index) = scroll_bench_idx {
         return args.get(index + 1).map(std::ffi::OsString::as_os_str);
     }
-    args.iter()
-        .skip(1)
-        .find(|arg| {
-            arg.as_os_str() != std::ffi::OsStr::new("--ide")
-                && arg.as_os_str() != std::ffi::OsStr::new("ide")
+
+    let mut index = 1;
+    while let Some(argument) = args.get(index) {
+        let value = argument.as_os_str();
+        if value == std::ffi::OsStr::new("--ide")
+            || value == std::ffi::OsStr::new("ide")
+            || value == std::ffi::OsStr::new("--pgo-train")
+        {
+            index += 1;
+            continue;
+        }
+        if value == std::ffi::OsStr::new("--pgo-workspace")
+            || value == std::ffi::OsStr::new("--pgo-report")
+            || value == std::ffi::OsStr::new("--pgo-timeout-seconds")
+        {
+            index += 2;
+            continue;
+        }
+        if value.to_string_lossy().starts_with("--") {
+            index += 1;
+            continue;
+        }
+        return Some(value);
+    }
+    None
+}
+
+fn argument_value<'a>(args: &'a [String], flag: &str) -> Result<Option<&'a str>, String> {
+    let Some(index) = args.iter().position(|argument| argument == flag) else {
+        return Ok(None);
+    };
+    let Some(value) = args.get(index + 1) else {
+        return Err(format!("{flag} requires a value"));
+    };
+    if value.starts_with("--") {
+        return Err(format!("{flag} requires a value"));
+    }
+    Ok(Some(value.as_str()))
+}
+
+fn automation_options(
+    args: &[String],
+    initial_file: Option<&std::ffi::OsStr>,
+) -> Result<Option<crate::app::automation::AutomationOptions>, String> {
+    if !args.iter().any(|argument| argument == "--pgo-train") {
+        return Ok(None);
+    }
+
+    let workspace = argument_value(args, "--pgo-workspace")?
+        .map(std::path::PathBuf::from)
+        .or_else(|| {
+            initial_file
+                .map(std::path::PathBuf::from)
+                .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
         })
-        .map(std::ffi::OsString::as_os_str)
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or_else(|| "unable to determine PGO automation workspace".to_string())?;
+    let report_path = argument_value(args, "--pgo-report")?
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| workspace.join("rriter-pgo-automation-report.json"));
+    let timeout_seconds = argument_value(args, "--pgo-timeout-seconds")?
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|_| format!("invalid --pgo-timeout-seconds value: {value}"))
+        })
+        .transpose()?
+        .unwrap_or(240);
+    if timeout_seconds < 30 {
+        return Err("--pgo-timeout-seconds must be at least 30".to_string());
+    }
+
+    Ok(Some(crate::app::automation::AutomationOptions {
+        workspace,
+        report_path,
+        timeout: Duration::from_secs(timeout_seconds),
+    }))
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1613,9 +1730,18 @@ fn main() {
         .and_then(|idx| args.get(idx + 2))
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(22.0);
-    let run_ide_on_startup =
-        scroll_bench_idx.is_some() || args.iter().any(|a| a == "--ide" || a == "ide");
+    let pgo_train = args.iter().any(|argument| argument == "--pgo-train");
+    let run_ide_on_startup = scroll_bench_idx.is_some()
+        || pgo_train
+        || args.iter().any(|a| a == "--ide" || a == "ide");
     let initial_file_arg = initial_file_argument(&startup_args, scroll_bench_idx);
+    let automation_options = match automation_options(&args, initial_file_arg) {
+        Ok(options) => options,
+        Err(error) => {
+            eprintln!("PGO_AUTOMATION_ARGUMENT_ERROR {error}");
+            return;
+        }
+    };
     let has_file_arg = initial_file_arg.is_some();
     let mut initial_text = String::new();
     let mut title = "Безымянный".to_string();
@@ -1724,7 +1850,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     let config = load_config();
     crate::platform::configure_tool_paths(config.tool_paths.clone());
     crate::render_view::TELEMETRY_ENABLED.store(
-        config.enable_telemetry || scroll_bench_idx.is_some(),
+        config.enable_telemetry || scroll_bench_idx.is_some() || pgo_train,
         std::sync::atomic::Ordering::Relaxed,
     );
     let highlighter = Highlighter::new();
@@ -1735,6 +1861,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         .as_deref()
         .map(crate::platform::PathKey::new);
     let mut app = App {
+        automation: automation_options.map(crate::app::automation::AutomationController::new),
         scroll_render_bench: scroll_bench_idx
             .map(|_| crate::app::ScrollRenderBench::new(scroll_bench_seconds)),
         pending_key_log: None,

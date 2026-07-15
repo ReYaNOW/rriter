@@ -1249,6 +1249,14 @@ impl ApiAuthStore {
         &mut self.entries[idx]
     }
 
+    pub(crate) fn set_value(&mut self, spec_id: ApiSpecId, scheme: &str, value: String) {
+        let entry = self.entry_mut(spec_id, scheme);
+        entry.value = value;
+        if !entry.value.is_empty() && entry.token_type.is_empty() {
+            entry.token_type = "Bearer".to_string();
+        }
+    }
+
     fn remove(&mut self, spec_id: ApiSpecId, scheme: &str) {
         self.entries
             .retain(|entry| !(entry.spec_id == spec_id && entry.scheme == scheme));
