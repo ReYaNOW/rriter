@@ -194,11 +194,7 @@ impl Renderer {
                         let text_x = icon_x + icon_sz + 2.0 * s;
                         let text_y = current_y + item_h * 0.7;
 
-                        let (err_count, warn_count) = if let Some(l) = lsp {
-                            l.diagnostic_counts_for_path(path)
-                        } else {
-                            (0, 0)
-                        };
+                        let (err_count, warn_count) = ide_panel.problem_counts(lsp, path);
 
                         let mut scratch = std::mem::take(&mut self.scratch_buffer);
                         scratch.clear();
@@ -250,13 +246,7 @@ impl Renderer {
                     continue;
                 }
 
-                let diag = if let Some(l) = lsp {
-                    if let Some(d) = l.diagnostic_at(path, *diag_idx) {
-                        d
-                    } else {
-                        continue;
-                    }
-                } else {
+                let Some(diag) = ide_panel.problem_diagnostic(lsp, path, *diag_idx) else {
                     continue;
                 };
                 if current_y + item_h > list_y && current_y < list_y + list_h {

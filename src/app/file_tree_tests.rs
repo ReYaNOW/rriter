@@ -493,9 +493,12 @@ fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
     );
 
     let start = Instant::now();
-    assert_eq!(file_tree_context_menu_anim_progress(start, start), 0.0);
+    assert_eq!(crate::app::context_menu::context_menu_anim_progress(start, start), 0.0);
     assert_eq!(
-        file_tree_context_menu_anim_progress(start, start + std::time::Duration::from_secs(1)),
+        crate::app::context_menu::context_menu_anim_progress(
+            start,
+            start + std::time::Duration::from_secs(1),
+        ),
         1.0
     );
     assert_eq!(file_tree_context_menu_anchor(100.0, 80.0, 1.0), (110.0, 90.0));
@@ -514,6 +517,10 @@ fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
     );
     assert_eq!(
         file_tree_context_menu_cursor(Some(crate::ui_system::UiId::FileTreeMenuItem(0))),
+        winit::window::CursorIcon::Pointer
+    );
+    assert_eq!(
+        file_tree_context_menu_cursor(Some(crate::ui_system::UiId::DatabaseContextItem(0))),
         winit::window::CursorIcon::Pointer
     );
 }

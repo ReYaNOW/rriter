@@ -359,7 +359,7 @@ impl App {
             return;
         }
 
-        if state == ElementState::Pressed && self.ide_panel.database.modal_open() {
+        if state == ElementState::Pressed && self.database_blocking_modal_open() {
             if button == winit::event::MouseButton::Left
                 && let Some(clicked_id) = self.ui_registry.find_overlay_at(mx, my)
             {
@@ -696,11 +696,12 @@ impl App {
                     let item_h = 36.0 * s;
                     let menu_w = 320.0 * s;
                     let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                        0.0
-                    } else {
-                        38.0 * s
-                    };
+                    let tab_bar_h = crate::render_view::editor_content_top_inset(
+                        self.show_welcome,
+                        self.is_ide_mode,
+                        self.active_tab_is_database_query(),
+                        s,
+                    );
                     let menu_y = menu.menu_y + tab_bar_h;
                     if mx >= menu.menu_x
                         && mx <= menu.menu_x + menu_w
@@ -1473,11 +1474,12 @@ impl App {
                         // Clamp scroll_y к новому max_scroll после изменения высоты панелей
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                            0.0
-                        } else {
-                            38.0 * s
-                        };
+                        let tab_bar_h = crate::render_view::editor_content_top_inset(
+                            self.show_welcome,
+                            self.is_ide_mode,
+                            self.active_tab_is_database_query(),
+                            s,
+                        );
                         let editor_bottom_h = if self.is_ide_mode {
                             self.ide_panel.editor_reserved_bottom_height(s)
                         } else {
@@ -1579,6 +1581,13 @@ impl App {
             self.ide_panel.file_tree_dialog_input_drag = None;
             if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
                 dialog.dragging_field = None;
+            }
+            self.ide_panel.database.table_modal_input_dragging = false;
+            for tab in &mut self.tabs {
+                if let crate::app::EditorTabKind::DatabaseTable(_, state) = &mut tab.kind {
+                    state.grid.text_drag = None;
+                    state.unavailable_text_dragging = false;
+                }
             }
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;

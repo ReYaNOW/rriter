@@ -314,48 +314,80 @@ fn hover_line_bounds_for_byte(
     (idx, line_start, line_end)
 }
 
+pub(crate) fn diagnostic_visual_byte_range_on_line(
+    editor: &crate::editor::Editor,
+    line: usize,
+    start_col: u32,
+    end_col: u32,
+) -> Option<(usize, usize)> {
+    if line >= editor.line_offsets.len() {
+        return None;
+    }
+    let line_start = editor.line_offsets[line];
+    let mut line_end = editor
+        .line_offsets
+        .get(line + 1)
+        .copied()
+        .unwrap_or(editor.len());
+    if line_end > line_start && editor.byte_at(line_end - 1) == b'\n' {
+        line_end -= 1;
+    }
+
+    let mut start_byte = line_start;
+    let mut end_byte = line_end;
+    let mut start_found = false;
+    let mut end_found = false;
+    editor.utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
+        if !start_found && utf16_before >= start_col {
+            start_byte = pos.min(line_end);
+            start_found = true;
+        }
+        if !end_found && utf16_before >= end_col {
+            end_byte = pos.min(line_end);
+            end_found = true;
+        }
+    });
+    if !start_found {
+        start_byte = line_end;
+    }
+    if !end_found {
+        end_byte = line_end;
+    }
+    start_byte = start_byte.min(line_end);
+    end_byte = end_byte.max(start_byte).min(line_end);
+
+    if start_byte == end_byte {
+        if end_byte < line_end {
+            end_byte += 1;
+            while end_byte < line_end && editor.byte_at(end_byte) & 0b1100_0000 == 0b1000_0000 {
+                end_byte += 1;
+            }
+        } else if start_byte > line_start {
+            start_byte -= 1;
+            while start_byte > line_start
+                && editor.byte_at(start_byte) & 0b1100_0000 == 0b1000_0000
+            {
+                start_byte -= 1;
+            }
+        }
+    }
+    (start_byte < end_byte).then_some((start_byte, end_byte))
+}
+
 pub(crate) fn diagnostic_hover_byte_range_on_line(
     editor: &crate::editor::Editor,
     line: usize,
     start_col: u32,
     end_col: u32,
 ) -> Option<(usize, usize, usize)> {
-    if line >= editor.line_offsets.len() {
-        return None;
-    }
-
+    let (scan_start, scan_end) =
+        diagnostic_visual_byte_range_on_line(editor, line, start_col, end_col)?;
     let line_start = editor.line_offsets[line];
     let line_end = editor
         .line_offsets
         .get(line + 1)
         .copied()
         .unwrap_or(editor.len());
-
-    let mut start_byte = line_start;
-    let mut end_byte = line_end;
-    let mut start_byte_found = false;
-    let mut end_byte_found = false;
-
-    editor.utf16_col_to_byte_advance(line, |_ch, utf16_before, pos| {
-        if !start_byte_found && utf16_before >= start_col {
-            start_byte = pos;
-            start_byte_found = true;
-        }
-        if !end_byte_found && utf16_before >= end_col {
-            end_byte = pos;
-            end_byte_found = true;
-        }
-    });
-
-    if !start_byte_found {
-        start_byte = line_start;
-    }
-    if !end_byte_found {
-        end_byte = line_end;
-    }
-
-    let scan_start = start_byte.min(line_end);
-    let scan_end = end_byte.max(scan_start).min(line_end);
     let mut first_target_raw_byte = None;
     let mut first_target_byte = None;
     let mut dotted_target_raw_byte = None;
@@ -379,8 +411,12 @@ pub(crate) fn diagnostic_hover_byte_range_on_line(
         }
     }
 
-    let target_raw_byte = dotted_target_raw_byte.or(first_target_raw_byte)?;
-    let target_byte = dotted_target_byte.or(first_target_byte)?;
+    let target_raw_byte = dotted_target_raw_byte
+        .or(first_target_raw_byte)
+        .or_else(|| (start_col == end_col).then_some(scan_start))?;
+    let target_byte = dotted_target_byte
+        .or(first_target_byte)
+        .or_else(|| (start_col == end_col).then_some(scan_start))?;
 
     let mut range_start = target_byte;
     let mut range_end = target_byte.saturating_add(1).min(line_end);

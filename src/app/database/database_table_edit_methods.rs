@@ -1,4 +1,327 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DatabaseDragUpdate {
+    None,
+    Query,
+    Table(crate::app::database::DatabaseTabId),
+}
+
+impl DatabaseDragUpdate {
+    pub(crate) fn table_tab_id(self) -> Option<crate::app::database::DatabaseTabId> {
+        match self {
+            Self::Table(tab_id) => Some(tab_id),
+            Self::None | Self::Query => None,
+        }
+    }
+
+    pub(crate) fn changed(self) -> bool {
+        !matches!(self, Self::None)
+    }
+}
+
 impl App {
+    pub(crate) fn database_table_unavailable_text_index_at(
+        &mut self,
+        mouse_x: f32,
+    ) -> Option<usize> {
+        let tab_id = self.active_database_table_tab_id()?;
+        let (text, cursor) = {
+            let (_, state) = self.database_table_meta_state(tab_id)?;
+            if state.loading || state.metadata.is_some() {
+                return None;
+            }
+            (
+                state.unavailable_text.text().to_string(),
+                state.unavailable_text.cursor,
+            )
+        };
+        let rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableUnavailableText)?;
+        let renderer = self.renderer.as_mut()?;
+        let text_scale = 0.76;
+        let visible_width = rect.2.max(1.0);
+        let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+            &text,
+            cursor,
+            visible_width,
+            |ch| {
+                renderer
+                    .get_ui_glyph(ch)
+                    .map(|glyph| {
+                        crate::renderer::Renderer::snapped_text_advance(
+                            glyph.advance,
+                            text_scale,
+                        )
+                    })
+                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
+            },
+        );
+        let x_offset = (mouse_x - rect.0 + scroll_x).max(0.0);
+        Some(crate::app::file_tree::file_tree_name_input_hit_index(
+            &text,
+            x_offset,
+            |ch| {
+                renderer
+                    .get_ui_glyph(ch)
+                    .map(|glyph| {
+                        crate::renderer::Renderer::snapped_text_advance(
+                            glyph.advance,
+                            text_scale,
+                        )
+                    })
+                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
+            },
+        ))
+    }
+
+    pub(crate) fn set_database_table_unavailable_text_cursor(
+        &mut self,
+        target_index: usize,
+        selecting: bool,
+    ) {
+        let Some(tab_id) = self.active_database_table_tab_id() else {
+            return;
+        };
+        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
+            return;
+        };
+        if state.loading || state.metadata.is_some() {
+            return;
+        }
+        state
+            .unavailable_text
+            .set_cursor(target_index, selecting);
+        state.unavailable_text_focused = true;
+    }
+
+    pub(crate) fn database_table_input_index_at(
+        &mut self,
+        target: DatabaseTableInputTarget,
+        mouse_x: f32,
+    ) -> Option<usize> {
+        let tab_id = self.active_database_table_tab_id()?;
+        let (text, cursor, id) = {
+            let (_, state) = self.database_table_meta_state(tab_id)?;
+            let input = match target {
+                DatabaseTableInputTarget::Where => &state.grid.where_input,
+                DatabaseTableInputTarget::OrderBy => &state.grid.order_by_input,
+                DatabaseTableInputTarget::Cell => &state.grid.cell_editor.as_ref()?.input,
+            };
+            let id = match target {
+                DatabaseTableInputTarget::Where => crate::ui_system::UiId::DatabaseTableWhereInput,
+                DatabaseTableInputTarget::OrderBy => crate::ui_system::UiId::DatabaseTableOrderInput,
+                DatabaseTableInputTarget::Cell => crate::ui_system::UiId::DatabaseTableCellEditor,
+            };
+            (input.text().to_string(), input.cursor, id)
+        };
+        let rect = self.ui_registry.rect_for(id)?;
+        let renderer = self.renderer.as_mut()?;
+        let scale = renderer.scale_factor;
+        let text_scale = crate::app::database::DATABASE_TABLE_INPUT_TEXT_SCALE;
+        let padding = if target == DatabaseTableInputTarget::Cell {
+            (8.0 * scale).round()
+        } else {
+            (10.0 * scale).round()
+        };
+        let visible_width = (rect.2 - padding * 2.0).max(1.0);
+        let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+            &text,
+            cursor,
+            visible_width,
+            |ch| {
+                renderer
+                    .get_ui_glyph(ch)
+                    .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, text_scale))
+                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
+            },
+        );
+        let x_offset = (mouse_x - rect.0 - padding + scroll_x).max(0.0);
+        Some(crate::app::file_tree::file_tree_name_input_hit_index(
+            &text,
+            x_offset,
+            |ch| {
+                renderer
+                    .get_ui_glyph(ch)
+                    .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, text_scale))
+                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
+            },
+        ))
+    }
+
+    pub(crate) fn database_table_modal_input_index_at(
+        &mut self,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> Option<usize> {
+        enum ModalInputSnapshot {
+            SingleLine { text: String, cursor: usize },
+            SqlPreview {
+                text: String,
+                scroll_x: f32,
+                scroll_y: f32,
+            },
+        }
+        let snapshot = match self.ide_panel.database.table_modal.as_ref()? {
+            DatabaseTableModal::CustomLimit { input, .. } => ModalInputSnapshot::SingleLine {
+                text: input.text().to_string(),
+                cursor: input.cursor,
+            },
+            DatabaseTableModal::SqlPreview {
+                text,
+                scroll_x,
+                scroll_y,
+                ..
+            } => ModalInputSnapshot::SqlPreview {
+                text: text.clone(),
+                scroll_x: scroll_x.current,
+                scroll_y: scroll_y.current,
+            },
+            _ => return None,
+        };
+        let rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput)?;
+        let renderer = self.renderer.as_mut()?;
+        let scale = renderer.scale_factor;
+        match snapshot {
+            ModalInputSnapshot::SingleLine { text, cursor } => {
+                let text_scale = 0.82;
+                let visible_width = (rect.2 - 16.0 * scale).max(1.0);
+                let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                    &text,
+                    cursor,
+                    visible_width,
+                    |ch| {
+                        renderer
+                            .get_ui_glyph(ch)
+                            .map(|glyph| {
+                                crate::renderer::Renderer::snapped_text_advance(
+                                    glyph.advance,
+                                    text_scale,
+                                )
+                            })
+                            .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0))
+                    },
+                );
+                let x_offset = (mouse_x - rect.0 - 8.0 * scale + scroll_x).max(0.0);
+                Some(crate::app::file_tree::file_tree_name_input_hit_index(
+                    &text,
+                    x_offset,
+                    |ch| {
+                        renderer
+                            .get_ui_glyph(ch)
+                            .map(|glyph| {
+                                crate::renderer::Renderer::snapped_text_advance(
+                                    glyph.advance,
+                                    text_scale,
+                                )
+                            })
+                            .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0))
+                    },
+                ))
+            }
+            ModalInputSnapshot::SqlPreview {
+                text,
+                scroll_x,
+                scroll_y,
+            } => {
+                let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * scale)
+                    .round()
+                    .max(1.0);
+                let line_index = ((mouse_y - rect.1 + scroll_y).max(0.0) / line_h)
+                    .floor() as usize;
+                let mut line_start = 0usize;
+                let mut selected_line = None;
+                for (index, raw_line) in text.split_inclusive('\n').enumerate() {
+                    if index == line_index {
+                        selected_line = Some(raw_line.trim_end_matches(&['\r', '\n'][..]));
+                        break;
+                    }
+                    line_start = line_start.saturating_add(raw_line.len());
+                }
+                let Some(line) = selected_line else {
+                    return Some(text.len());
+                };
+                let x_offset = (mouse_x - rect.0 - 8.0 * scale + scroll_x).max(0.0);
+                let within_line = crate::app::file_tree::file_tree_name_input_hit_index(
+                    line,
+                    x_offset,
+                    |ch| {
+                        renderer
+                            .get_glyph(ch)
+                            .map(|glyph| glyph.advance.round().max(1.0))
+                            .unwrap_or_else(|| (9.0 * scale).round().max(1.0))
+                    },
+                );
+                Some((line_start + within_line).min(text.len()))
+            }
+        }
+    }
+
+    pub(crate) fn set_database_table_modal_input_cursor(
+        &mut self,
+        target_index: usize,
+        selecting: bool,
+    ) {
+        match self.ide_panel.database.table_modal.as_mut() {
+            Some(DatabaseTableModal::CustomLimit { input, .. }) => {
+                input.set_cursor(target_index, selecting);
+            }
+            Some(DatabaseTableModal::SqlPreview {
+                text,
+                cursor,
+                selection_anchor,
+                ..
+            }) => {
+                let mut target = target_index.min(text.len());
+                while target > 0 && !text.is_char_boundary(target) {
+                    target -= 1;
+                }
+                let old_cursor = *cursor;
+                *cursor = target;
+                if selecting {
+                    if selection_anchor.is_none() {
+                        *selection_anchor = Some(old_cursor);
+                    }
+                } else {
+                    *selection_anchor = None;
+                }
+            }
+            _ => return,
+        }
+        self.last_action = std::time::Instant::now();
+        self.last_blink_state = true;
+    }
+
+    pub(crate) fn set_database_table_input_cursor(
+        &mut self,
+        target: DatabaseTableInputTarget,
+        target_index: usize,
+        selecting: bool,
+    ) {
+        let Some(tab_id) = self.active_database_table_tab_id() else {
+            return;
+        };
+        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
+            return;
+        };
+        let input = match target {
+            DatabaseTableInputTarget::Where => Some(&mut state.grid.where_input),
+            DatabaseTableInputTarget::OrderBy => Some(&mut state.grid.order_by_input),
+            DatabaseTableInputTarget::Cell => state
+                .grid
+                .cell_editor
+                .as_mut()
+                .map(|editor| &mut editor.input),
+        };
+        if let Some(input) = input {
+            input.set_cursor(target_index, selecting);
+            state.grid.focused_input = Some(target);
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
+        }
+    }
+
     pub fn copy_database_table_selection(
         &mut self,
         tab_id: crate::app::database::DatabaseTabId,
@@ -48,6 +371,8 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
         position: DatabaseCellPosition,
     ) {
+        self.last_action = std::time::Instant::now();
+        self.last_blink_state = true;
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
@@ -265,10 +590,16 @@ impl App {
     ) {
         match self.database_table_change_plan(tab_id) {
             Ok(plan) => {
+                let text = crate::app::database::format_database_sql(&plan.preview)
+                    .unwrap_or(plan.preview);
                 self.ide_panel.database.table_modal = Some(DatabaseTableModal::SqlPreview {
                     tab_id,
-                    text: plan.preview,
-                    scroll: crate::scroll::ScrollState::new(15.0),
+                    spans: crate::highlighter::highlight_sql_text(&text),
+                    text,
+                    cursor: 0,
+                    selection_anchor: None,
+                    scroll_x: crate::scroll::ScrollState::new(15.0),
+                    scroll_y: crate::scroll::ScrollState::new(15.0),
                 });
             }
             Err(error) => {
@@ -285,8 +616,12 @@ impl App {
         close_after_commit: bool,
     ) {
         if self.ide_panel.database.pending_job.is_some() {
-            self.ide_panel.database.global_error =
-                Some("Сейчас уже выполняется другой запрос к базе данных".to_string());
+            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                state.show_timed_notice(
+                    "Сейчас уже выполняется другой запрос к базе данных",
+                );
+                state.error = None;
+            }
             return;
         }
         let plan = match self.database_table_change_plan(tab_id) {
@@ -584,37 +919,69 @@ impl App {
         }
     }
 
-    pub(crate) fn update_database_table_drag(&mut self, mouse_x: f32, mouse_y: f32) -> bool {
-        let Some(tab_id) = self.active_database_table_tab_id() else { return false; };
-        let vertical_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableScrollY);
-        let horizontal_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableScrollX);
-        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return false; };
-        if let Some((column_index, start_x, start_width)) = state.grid.column_resize {
-            if let Some(column) = state.metadata.as_ref().and_then(|metadata| metadata.columns.get(column_index)).cloned() {
-                state.grid.set_column_width(&column.name, start_width + mouse_x - start_x);
-                return true;
-            }
+    pub(crate) fn update_database_table_drag(
+        &mut self,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> DatabaseDragUpdate {
+        if self.update_database_sql_preview_scroll_drag(mouse_x, mouse_y) {
+            return DatabaseDragUpdate::Query;
+        }
+        let Some(tab_id) = self.active_database_table_tab_id() else {
+            return if self.update_database_query_scroll_drag(mouse_x, mouse_y) {
+                DatabaseDragUpdate::Query
+            } else {
+                DatabaseDragUpdate::None
+            };
+        };
+        let vertical_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableScrollY);
+        let horizontal_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableScrollX);
+        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
+            return DatabaseDragUpdate::None;
+        };
+        if let Some((column_index, start_x, start_width)) = state.grid.column_resize
+            && let Some(column) = state
+                .metadata
+                .as_ref()
+                .and_then(|metadata| metadata.columns.get(column_index))
+                .cloned()
+        {
+            state
+                .grid
+                .set_column_width(&column.name, start_width + mouse_x - start_x);
+            return DatabaseDragUpdate::Table(tab_id);
         }
         if state.grid.scroll_y.is_dragging {
-            let Some((_, rect_y, _, rect_h)) = vertical_rect else { return false; };
+            let Some((_, rect_y, _, rect_h)) = vertical_rect else {
+                return DatabaseDragUpdate::None;
+            };
             let max_scroll = (state.grid.logical_row_count() as f32
                 * crate::app::database::DATABASE_GRID_ROW_HEIGHT
                 - state.grid.viewport_height).max(0.0);
             let ratio = ((mouse_y - rect_y) / rect_h.max(1.0)).clamp(0.0, 1.0);
             state.grid.scroll_y.target = ratio * max_scroll;
             state.grid.scroll_y.current = state.grid.scroll_y.target;
-            return true;
+            return DatabaseDragUpdate::Table(tab_id);
         }
         if state.grid.scroll_x.is_dragging {
-            let Some((rect_x, _, rect_w, _)) = horizontal_rect else { return false; };
-            let content = state.metadata.as_ref().map_or(0.0, |metadata| state.grid.content_width(metadata));
+            let Some((rect_x, _, rect_w, _)) = horizontal_rect else {
+                return DatabaseDragUpdate::None;
+            };
+            let content = state
+                .metadata
+                .as_ref()
+                .map_or(0.0, |metadata| state.grid.content_width(metadata));
             let max_scroll = (content - state.grid.viewport_width).max(0.0);
             let ratio = ((mouse_x - rect_x) / rect_w.max(1.0)).clamp(0.0, 1.0);
             state.grid.scroll_x.target = ratio * max_scroll;
             state.grid.scroll_x.current = state.grid.scroll_x.target;
-            return true;
+            return DatabaseDragUpdate::Table(tab_id);
         }
-        false
+        DatabaseDragUpdate::None
     }
 
     pub(crate) fn handle_database_table_key(
@@ -632,6 +999,8 @@ impl App {
         if key_event.state != ElementState::Pressed {
             return true;
         }
+        self.last_action = std::time::Instant::now();
+        self.last_blink_state = true;
 
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -647,6 +1016,53 @@ impl App {
         let mut copy_text = None;
 
         if self.ide_panel.database.table_modal.is_some() {
+            if matches!(
+                self.ide_panel.database.table_modal,
+                Some(DatabaseTableModal::SqlPreview { .. })
+            ) {
+                if primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
+                    let selected = self
+                        .ide_panel
+                        .database
+                        .table_modal
+                        .as_ref()
+                        .and_then(database_sql_preview_copy_text);
+                    if let Some(selected) = selected {
+                        self.set_clipboard_text(selected);
+                    }
+                    return true;
+                }
+                if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                    self.ide_panel.database.table_modal = None;
+                    return true;
+                }
+                if let Some(DatabaseTableModal::SqlPreview {
+                    text,
+                    cursor,
+                    selection_anchor,
+                    ..
+                }) = self.ide_panel.database.table_modal.as_mut()
+                {
+                    let target = match key_event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyA) if primary => {
+                            *selection_anchor = Some(0);
+                            *cursor = text.len();
+                            return true;
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                            previous_char_boundary(text, *cursor)
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowRight) => {
+                            next_char_boundary(text, *cursor)
+                        }
+                        PhysicalKey::Code(KeyCode::Home) => line_start_boundary(text, *cursor),
+                        PhysicalKey::Code(KeyCode::End) => line_end_boundary(text, *cursor),
+                        _ => return true,
+                    };
+                    move_read_only_cursor(cursor, selection_anchor, target, shift);
+                }
+                return true;
+            }
             match key_event.physical_key {
                 PhysicalKey::Code(KeyCode::Escape) => self.activate_database_table_modal_action(1),
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => {
@@ -701,9 +1117,82 @@ impl App {
         let Some(tab_id) = self.active_database_table_tab_id() else {
             return false;
         };
+        let unavailable_focused = self
+            .database_table_meta_state(tab_id)
+            .is_some_and(|(_, state)| {
+                !state.loading
+                    && state.metadata.is_none()
+                    && state.unavailable_text_focused
+            });
+        if unavailable_focused {
+            let mut copied = None;
+            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                    state.clear_unavailable_selection();
+                } else {
+                    let input = &mut state.unavailable_text;
+                    match key_event.physical_key {
+                        PhysicalKey::Code(KeyCode::KeyA) if primary => input.select_all(),
+                        PhysicalKey::Code(KeyCode::KeyC) if primary => {
+                            copied = input.selected_text().map(str::to_owned);
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowLeft) => {
+                            let target = previous_char_boundary(input.text(), input.cursor);
+                            input.set_cursor(target, shift);
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowRight) => {
+                            let target = next_char_boundary(input.text(), input.cursor);
+                            input.set_cursor(target, shift);
+                        }
+                        PhysicalKey::Code(KeyCode::Home) => input.set_cursor(0, shift),
+                        PhysicalKey::Code(KeyCode::End) => {
+                            input.set_cursor(input.text().len(), shift);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(text) = copied {
+                self.set_clipboard_text(text);
+            }
+            return true;
+        }
         let focus = self
             .database_table_meta_state(tab_id)
             .and_then(|(_, state)| state.grid.focused_input);
+        let filter_focus = matches!(
+            focus,
+            Some(DatabaseTableInputTarget::Where | DatabaseTableInputTarget::OrderBy)
+        );
+        if filter_focus && self.autocomplete_active {
+            match self.handle_active_autocomplete_key(key_event.physical_key, primary) {
+                crate::app::AutocompletePopupKeyResult::Consumed => return true,
+                crate::app::AutocompletePopupKeyResult::Continue
+                | crate::app::AutocompletePopupKeyResult::NotHandled => {}
+            }
+        }
+        if filter_focus
+            && primary
+            && key_event.physical_key == PhysicalKey::Code(KeyCode::Space)
+        {
+            if let Some(target) = focus {
+                self.show_active_database_table_filter_completion(target, true);
+            }
+            return true;
+        }
+        let before_filter_text = if filter_focus {
+            self.database_table_meta_state(tab_id).and_then(|(_, state)| match focus {
+                Some(DatabaseTableInputTarget::Where) => {
+                    Some(state.grid.where_input.text().to_string())
+                }
+                Some(DatabaseTableInputTarget::OrderBy) => {
+                    Some(state.grid.order_by_input.text().to_string())
+                }
+                _ => None,
+            })
+        } else {
+            None
+        };
         match key_event.physical_key {
             PhysicalKey::Code(KeyCode::Escape) => {
                 if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
@@ -736,6 +1225,9 @@ impl App {
                 let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
                     return false;
                 };
+                if matches!(focus, Some(DatabaseTableInputTarget::Where | DatabaseTableInputTarget::OrderBy)) {
+                    state.grid.filter_error = None;
+                }
                 let input = match focus {
                     Some(DatabaseTableInputTarget::Where) => Some(&mut state.grid.where_input),
                     Some(DatabaseTableInputTarget::OrderBy) => {
@@ -771,6 +1263,19 @@ impl App {
         }
         if let Some(text) = copy_text {
             self.set_clipboard_text(text);
+        }
+        if let (Some(target), Some(before)) = (focus, before_filter_text) {
+            let changed = self.database_table_meta_state(tab_id).is_some_and(|(_, state)| {
+                let after = match target {
+                    DatabaseTableInputTarget::Where => state.grid.where_input.text(),
+                    DatabaseTableInputTarget::OrderBy => state.grid.order_by_input.text(),
+                    DatabaseTableInputTarget::Cell => return false,
+                };
+                after != before
+            });
+            if changed {
+                self.show_active_database_table_filter_completion(target, false);
+            }
         }
         true
     }
@@ -891,6 +1396,198 @@ impl App {
         editor.input.set_text(text);
     }
 
+    pub(crate) fn start_database_sql_preview_scroll_drag(&mut self, horizontal: bool) {
+        let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
+            (renderer.last_mouse_x, renderer.last_mouse_y)
+        });
+        let input_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
+        let vertical_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
+        let horizontal_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
+        let Some(DatabaseTableModal::SqlPreview {
+            text,
+            scroll_x,
+            scroll_y,
+            ..
+        }) = self.ide_panel.database.table_modal.as_ref()
+        else {
+            return;
+        };
+        let text = text.clone();
+        let current_x = scroll_x.current;
+        let current_y = scroll_y.current;
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
+            &text,
+            input_rect,
+            horizontal_rect,
+            vertical_rect,
+            scale,
+            self.renderer.as_mut(),
+        );
+        let (rect, pointer, viewport, max_scroll, current, min_thumb) = if horizontal {
+            (
+                horizontal_rect,
+                mouse.0,
+                viewport_w,
+                max_x,
+                current_x,
+                (36.0 * scale).round(),
+            )
+        } else {
+            (
+                vertical_rect,
+                mouse.1,
+                viewport_h,
+                max_y,
+                current_y,
+                (28.0 * scale).round(),
+            )
+        };
+        let Some(rect) = rect else { return; };
+        let track_start = if horizontal { rect.0 } else { rect.1 };
+        let track_len = if horizontal { rect.2 } else { rect.3 };
+        let Some(thumb) = crate::scroll::scrollbar_thumb(
+            track_start,
+            track_len,
+            viewport,
+            viewport + max_scroll,
+            current,
+            min_thumb,
+        ) else {
+            return;
+        };
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return;
+        };
+        let Some(DatabaseTableModal::SqlPreview { scroll_x, scroll_y, .. }) =
+            self.ide_panel.database.table_modal.as_mut()
+        else {
+            return;
+        };
+        let scroll = if horizontal { scroll_x } else { scroll_y };
+        scroll.current = target;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        scroll.drag_offset = drag_offset;
+        scroll.is_dragging = true;
+    }
+
+    fn update_database_sql_preview_scroll_drag(
+        &mut self,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> bool {
+        let input_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
+        let vertical_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
+        let horizontal_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
+        let Some(DatabaseTableModal::SqlPreview {
+            text,
+            scroll_x,
+            scroll_y,
+            ..
+        }) = self.ide_panel.database.table_modal.as_ref()
+        else {
+            return false;
+        };
+        let text = text.clone();
+        let dragging_y = scroll_y.is_dragging;
+        let dragging_x = scroll_x.is_dragging;
+        let current_y = scroll_y.current;
+        let current_x = scroll_x.current;
+        let offset_y = scroll_y.drag_offset;
+        let offset_x = scroll_x.drag_offset;
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
+            &text,
+            input_rect,
+            horizontal_rect,
+            vertical_rect,
+            scale,
+            self.renderer.as_mut(),
+        );
+        let target = if dragging_y {
+            let Some((_, track_y, _, track_h)) = vertical_rect else {
+                return false;
+            };
+            let Some(thumb) = crate::scroll::scrollbar_thumb(
+                track_y,
+                track_h,
+                viewport_h,
+                viewport_h + max_y,
+                current_y,
+                (28.0 * scale).round(),
+            ) else {
+                return false;
+            };
+            crate::scroll::scrollbar_drag_target(
+                mouse_y,
+                track_y,
+                track_h,
+                thumb,
+                max_y,
+                Some(offset_y),
+            )
+            .map(|(_, target)| (false, target))
+        } else if dragging_x {
+            let Some((track_x, _, track_w, _)) = horizontal_rect else {
+                return false;
+            };
+            let Some(thumb) = crate::scroll::scrollbar_thumb(
+                track_x,
+                track_w,
+                viewport_w,
+                viewport_w + max_x,
+                current_x,
+                (36.0 * scale).round(),
+            ) else {
+                return false;
+            };
+            crate::scroll::scrollbar_drag_target(
+                mouse_x,
+                track_x,
+                track_w,
+                thumb,
+                max_x,
+                Some(offset_x),
+            )
+            .map(|(_, target)| (true, target))
+        } else {
+            None
+        };
+        let Some((horizontal, target)) = target else {
+            return false;
+        };
+        let Some(DatabaseTableModal::SqlPreview { scroll_x, scroll_y, .. }) =
+            self.ide_panel.database.table_modal.as_mut()
+        else {
+            return false;
+        };
+        let scroll = if horizontal { scroll_x } else { scroll_y };
+        scroll.current = target;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        true
+    }
+
     pub(crate) fn start_database_table_scroll_drag(&mut self, horizontal: bool) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
@@ -910,7 +1607,13 @@ impl App {
         let Some(modal) = self.ide_panel.database.table_modal.clone() else { return; };
         match modal {
             DatabaseTableModal::SqlPreview { .. } => {
-                self.ide_panel.database.table_modal = None;
+                if action == 2 {
+                    if let Some(text) = database_sql_preview_copy_text(&modal) {
+                        self.set_clipboard_text(text);
+                    }
+                } else {
+                    self.ide_panel.database.table_modal = None;
+                }
             }
             DatabaseTableModal::RefreshPrompt { .. } => {
                 self.resolve_database_table_refresh_prompt(action);
@@ -932,6 +1635,13 @@ impl App {
     }
 
     pub(crate) fn finish_database_table_drag(&mut self) {
+        if let Some(DatabaseTableModal::SqlPreview { scroll_x, scroll_y, .. }) =
+            self.ide_panel.database.table_modal.as_mut()
+        {
+            scroll_x.is_dragging = false;
+            scroll_y.is_dragging = false;
+        }
+        self.finish_database_query_scroll_drag();
         let Some(tab_id) = self.active_database_table_tab_id() else {
             return;
         };
@@ -947,6 +1657,124 @@ impl App {
             self.persist_database_table_view(tab_id);
         }
     }
+}
+
+
+fn database_sql_preview_scroll_metrics(
+    text: &str,
+    input_rect: Option<(f32, f32, f32, f32)>,
+    horizontal_rect: Option<(f32, f32, f32, f32)>,
+    vertical_rect: Option<(f32, f32, f32, f32)>,
+    scale: f32,
+    renderer: Option<&mut crate::renderer::Renderer>,
+) -> (f32, f32, f32, f32) {
+    let viewport_w = horizontal_rect
+        .map(|rect| rect.2)
+        .or_else(|| input_rect.map(|rect| rect.2))
+        .unwrap_or(1.0)
+        .max(1.0);
+    let viewport_h = vertical_rect
+        .map(|rect| rect.3)
+        .or_else(|| input_rect.map(|rect| rect.3))
+        .unwrap_or(1.0)
+        .max(1.0);
+    let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * scale)
+        .round()
+        .max(1.0);
+    let content_h = text.lines().count().max(1) as f32 * line_h;
+    let content_w = renderer.map_or_else(
+        || {
+            text.lines()
+                .map(|line| line.chars().count() as f32 * (9.0 * scale).round())
+                .fold(0.0_f32, f32::max)
+        },
+        |renderer| {
+            text.lines()
+                .map(|line| line.chars().map(|ch| renderer.char_advance(ch)).sum())
+                .fold(0.0_f32, f32::max)
+        },
+    ) + (18.0 * scale).round();
+    (
+        viewport_w,
+        viewport_h,
+        (content_w - viewport_w).max(0.0),
+        (content_h - viewport_h).max(0.0),
+    )
+}
+
+fn database_sql_preview_copy_text(modal: &DatabaseTableModal) -> Option<String> {
+    let DatabaseTableModal::SqlPreview {
+        text,
+        cursor,
+        selection_anchor,
+        ..
+    } = modal
+    else {
+        return None;
+    };
+    let Some(anchor) = selection_anchor else {
+        return Some(text.clone());
+    };
+    let start = (*anchor).min(*cursor);
+    let end = (*anchor).max(*cursor);
+    if start == end {
+        return Some(text.clone());
+    }
+    text.get(start..end).map(str::to_owned)
+}
+
+fn previous_char_boundary(text: &str, cursor: usize) -> usize {
+    let mut cursor = cursor.min(text.len());
+    if cursor == 0 {
+        return 0;
+    }
+    cursor -= 1;
+    while cursor > 0 && !text.is_char_boundary(cursor) {
+        cursor -= 1;
+    }
+    cursor
+}
+
+fn next_char_boundary(text: &str, cursor: usize) -> usize {
+    let mut cursor = cursor.min(text.len());
+    if cursor >= text.len() {
+        return text.len();
+    }
+    cursor += 1;
+    while cursor < text.len() && !text.is_char_boundary(cursor) {
+        cursor += 1;
+    }
+    cursor
+}
+
+fn line_start_boundary(text: &str, cursor: usize) -> usize {
+    text[..cursor.min(text.len())]
+        .rfind('\n')
+        .map_or(0, |index| index + 1)
+}
+
+fn line_end_boundary(text: &str, cursor: usize) -> usize {
+    let cursor = cursor.min(text.len());
+    text[cursor..]
+        .find('\n')
+        .map_or(text.len(), |offset| cursor + offset)
+}
+
+fn move_read_only_cursor(
+    cursor: &mut usize,
+    selection_anchor: &mut Option<usize>,
+    target: usize,
+    selecting: bool,
+) {
+    let old_cursor = *cursor;
+    if selecting {
+        if selection_anchor.is_none() {
+            *selection_anchor = Some(old_cursor);
+        }
+    } else {
+        *selection_anchor = None;
+    }
+    *cursor = target;
 }
 
 fn database_table_modal_input_mut(
@@ -972,6 +1800,19 @@ fn edit_database_table_input(
     multiline: bool,
 ) -> Option<String> {
     use winit::keyboard::{KeyCode, PhysicalKey};
+    if !multiline {
+        return crate::app::single_line_input::handle_single_line_input(
+            input,
+            physical_key,
+            logical_text,
+            primary,
+            word,
+            shift,
+            text_input_allowed,
+            paste_text.as_deref(),
+            max_bytes,
+        );
+    }
     match physical_key {
         PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyF) if primary => {
             input.select_all();
@@ -1050,5 +1891,61 @@ fn edit_database_table_input(
             None
         }
         _ => None,
+    }
+}
+
+
+#[cfg(test)]
+mod database_table_edit_method_tests {
+    use super::*;
+
+    fn sql_preview(text: &str, cursor: usize, anchor: Option<usize>) -> DatabaseTableModal {
+        DatabaseTableModal::SqlPreview {
+            tab_id: crate::app::database::DatabaseTabId(1),
+            text: text.to_string(),
+            cursor,
+            selection_anchor: anchor,
+            spans: Vec::new(),
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+        }
+    }
+
+    #[test]
+    fn query_drag_never_requires_a_database_table_tab() {
+        let query = DatabaseDragUpdate::Query;
+        assert!(query.changed());
+        assert_eq!(query.table_tab_id(), None);
+
+        let tab_id = crate::app::database::DatabaseTabId(7);
+        let table = DatabaseDragUpdate::Table(tab_id);
+        assert_eq!(table.table_tab_id(), Some(tab_id));
+    }
+
+    #[test]
+    fn sql_preview_copy_prefers_the_selected_unicode_range() {
+        let text = "SELECT 'Ж';";
+        let start = text.find('Ж').unwrap();
+        let end = start + 'Ж'.len_utf8();
+        let modal = sql_preview(text, end, Some(start));
+        assert_eq!(database_sql_preview_copy_text(&modal).as_deref(), Some("Ж"));
+    }
+
+    #[test]
+    fn sql_preview_copy_without_selection_returns_the_full_query() {
+        let modal = sql_preview("SELECT 1;", 4, None);
+        assert_eq!(
+            database_sql_preview_copy_text(&modal).as_deref(),
+            Some("SELECT 1;")
+        );
+    }
+
+    #[test]
+    fn read_only_cursor_helpers_preserve_utf8_boundaries_and_lines() {
+        let text = "Жx\nSELECT";
+        assert_eq!(next_char_boundary(text, 0), 'Ж'.len_utf8());
+        assert_eq!(previous_char_boundary(text, 'Ж'.len_utf8()), 0);
+        assert_eq!(line_start_boundary(text, text.len()), 4);
+        assert_eq!(line_end_boundary(text, 0), 3);
     }
 }

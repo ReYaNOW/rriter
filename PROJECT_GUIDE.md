@@ -497,6 +497,8 @@ Responsibilities and invariants:
 * `database_secrets.rs` maps connection IDs and secret kinds onto the strict system secret API. Secret-bearing values stay in `Zeroizing<String>`, never enter serialized connection state, command arguments, environment variables, or logs.
 * `database_runtime.rs` owns one dedicated Tokio worker and permits one foreground database job. New jobs receive a Busy event while another is active; cancellation drops network futures and also signals a system-SSH startup task so shutdown does not leave a tunnel process behind.
 
+Database and file-tree single-line fields share `src/app/single_line_input.rs` plus the common dialog input renderer; cursor movement, selection, clipboard, blink reset, scrolling, and pixel-snapped baselines must not be reimplemented per feature.
+
 Panel/catalog/session files added by the Database UI stage:
 
 ```text

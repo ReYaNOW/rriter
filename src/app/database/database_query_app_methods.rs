@@ -1,11 +1,89 @@
 use crate::app::database::{
-    DatabaseQueryHistoryEntry, DatabaseQueryMode, SqlConsoleId, completion_words,
-    format_database_sql, history_started_now, query_execution_target, sanitize_history_sql,
+    DatabaseQueryHistoryEntry, DatabaseQueryMode, SqlConsoleId, analysis_error_ranges,
+    analyze_database_query_sql, completion_words_for_context,
+    database_query_editor_diagnostics,
+    database_query_completion_context, format_database_sql, history_started_now,
+    query_execution_target, sanitize_history_sql,
 };
+use crate::languages::sql_analysis::SqlDiagnosticSeverity;
 
 impl App {
+    pub(crate) fn jump_to_active_database_query_diagnostic(&mut self, index: usize) {
+        let text = self.editor.get_full_text();
+        let offset = self
+            .active_database_query_meta_state()
+            .and_then(|(_, state)| state.editor_diagnostics.get(index))
+            .map(|diagnostic| database_query_diagnostic_navigation_offset(&text, diagnostic));
+        let Some(offset) = offset else {
+            return;
+        };
+        self.editor.cursor = offset.min(self.editor.len());
+        self.editor.selection_anchor = None;
+        self.reprioritize_highlighter_around_cursor();
+        if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
+            let size = window.inner_size();
+            let top_inset = crate::render_view::editor_content_top_inset(
+                self.show_welcome,
+                self.is_ide_mode,
+                true,
+                renderer.scale_factor,
+            );
+            App::ensure_cursor_visible(
+                &mut self.scroll_y.target,
+                &mut self.scroll_x.target,
+                &self.editor,
+                renderer,
+                size.width as f32,
+                size.height as f32,
+                top_inset,
+            );
+            window.request_redraw();
+        }
+        self.last_action = std::time::Instant::now();
+    }
+
+    pub(crate) fn jump_to_next_active_database_query_diagnostic(&mut self) {
+        let text = self.editor.get_full_text();
+        let cursor = self.editor.cursor;
+        let Some((_, state)) = self.active_database_query_meta_state() else {
+            return;
+        };
+        let Some(offset) = crate::app::database::next_database_query_diagnostic_offset(
+            &state.editor_diagnostics,
+            &text,
+            cursor,
+        ) else {
+            return;
+        };
+        self.editor.cursor = offset.min(self.editor.len());
+        self.editor.selection_anchor = None;
+        self.reprioritize_highlighter_around_cursor();
+        if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
+            let size = window.inner_size();
+            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                self.show_welcome,
+                self.is_ide_mode,
+                true,
+                renderer.scale_factor,
+            );
+            App::ensure_cursor_visible(
+                &mut self.scroll_y.target,
+                &mut self.scroll_x.target,
+                &self.editor,
+                renderer,
+                size.width as f32,
+                size.height as f32,
+                tab_bar_h,
+            );
+            window.request_redraw();
+        }
+        self.last_action = std::time::Instant::now();
+    }
+
     pub(crate) fn clear_stale_active_database_query_diagnostic(&mut self) -> bool {
         let editor_version = self.editor.version;
+        let text = self.editor.get_full_text();
+        let line_offsets = self.editor.line_offsets.clone();
         let Some(tab) = self.tabs.get_mut(self.active_tab) else {
             return false;
         };
@@ -21,8 +99,15 @@ impl App {
         state.diagnostic = None;
         state.diagnostic_editor_version = None;
         state.error = None;
-        tab.syntax_errors.clear();
-        self.highlighter.syntax_errors.clear();
+        state.editor_diagnostics = database_query_editor_diagnostics(
+            &state.analysis,
+            None,
+            &text,
+            &line_offsets,
+        );
+        let local_ranges = analysis_error_ranges(&state.analysis);
+        tab.syntax_errors = local_ranges.clone();
+        self.highlighter.syntax_errors = local_ranges;
         true
     }
 
@@ -33,6 +118,17 @@ impl App {
             EditorTabKind::DatabaseQuery(meta, state) => Some((meta, state)),
             _ => None,
         })
+    }
+
+    fn active_database_query_meta_state_mut(
+        &mut self,
+    ) -> Option<(&DatabaseQueryTabMeta, &mut DatabaseQueryTabState)> {
+        self.tabs
+            .get_mut(self.active_tab)
+            .and_then(|tab| match &mut tab.kind {
+                EditorTabKind::DatabaseQuery(meta, state) => Some((&*meta, state)),
+                _ => None,
+            })
     }
 
     fn database_query_tab_index(
@@ -48,6 +144,183 @@ impl App {
         })
     }
 
+    pub(crate) fn refresh_active_database_query_analysis(&mut self) -> bool {
+        let text = self.editor.get_full_text();
+        let editor_version = self.editor.version;
+        let Some((meta, state)) = self.active_database_query_meta_state() else {
+            return false;
+        };
+        if state.analysis_editor_version == Some(editor_version) {
+            return false;
+        }
+        let connection_id = meta.connection_id;
+        let console_id = meta.console_id;
+        let metadata = state.completion.clone();
+        let analysis = analyze_database_query_sql(&metadata, &text);
+        let editor_diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            &text,
+            &self.editor.line_offsets,
+        );
+        let error_ranges = analysis_error_ranges(&analysis);
+        let Some(index) = self.database_query_tab_index(connection_id, console_id) else {
+            return false;
+        };
+        if let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind {
+            state.analysis = analysis;
+            state.analysis_editor_version = Some(editor_version);
+            state.editor_diagnostics = editor_diagnostics;
+        }
+        self.tabs[index].syntax_errors = error_ranges.clone();
+        if index == self.active_tab {
+            self.highlighter.syntax_errors = error_ranges;
+        }
+        true
+    }
+
+    pub(crate) fn update_active_database_query_completion(&mut self, explicit: bool) {
+        let Some((meta, state)) = self.active_database_query_meta_state() else {
+            return;
+        };
+        if !state.completion_loaded {
+            self.request_active_database_query_completion();
+            if !explicit {
+                self.close_autocomplete();
+            }
+            return;
+        }
+        let connection_id = meta.connection_id;
+        let console_id = meta.console_id;
+        let metadata = state.completion.clone();
+        let text = self.editor.get_full_text();
+        let cursor = self.editor.cursor.min(text.len());
+        let mut analysis = if state.analysis_editor_version == Some(self.editor.version) {
+            state.analysis.clone()
+        } else {
+            analyze_database_query_sql(&metadata, &text)
+        };
+        let context = database_query_completion_context(&text, cursor);
+        if let Some(recovered) = crate::app::database::completion_recovery_analysis(
+            &metadata,
+            &text,
+            cursor,
+            &context,
+            &analysis,
+        ) {
+            analysis = recovered;
+        }
+        if !explicit && !context.automatic {
+            self.close_autocomplete();
+            return;
+        }
+        let words = completion_words_for_context(&metadata, &analysis, &context, cursor);
+        if words.is_empty() {
+            self.close_autocomplete();
+            return;
+        }
+
+        let context_key = format!(
+            "{}:{}:{}",
+            connection_id.0,
+            console_id.0,
+            context.context_key()
+        );
+        let same_context = self.autocomplete_active
+            && self.autocomplete_mode == AutocompleteMode::Sql
+            && self.autocomplete_pending_context_key.as_deref() == Some(context_key.as_str());
+        let selected_word = self
+            .autocomplete_options
+            .get(self.autocomplete_selected_idx)
+            .map(|(item, _)| item.word.clone());
+        let (start_line, start_col) = crate::lsp::offset_to_lsp_pos(
+            &text,
+            context.replace_range.start,
+            &self.editor.line_offsets,
+        );
+        let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(
+            &text,
+            context.replace_range.end,
+            &self.editor.line_offsets,
+        );
+        self.autocomplete_options = words
+            .into_iter()
+            .map(|(word, detail)| {
+                let kind = match detail.as_str() {
+                    "table" | "CTE" => SymbolKind::Class,
+                    "function" => SymbolKind::Function,
+                    "operator" | "SQL" | "ORDER BY" => SymbolKind::Keyword,
+                    "enum" | "value" => SymbolKind::Builtin,
+                    _ => SymbolKind::Property,
+                };
+                let text_edit = crate::lsp::TextChange {
+                    start_line,
+                    start_col,
+                    end_line,
+                    end_col,
+                    new_text: word.clone(),
+                };
+                (
+                    AutocompleteItem {
+                        word,
+                        kind,
+                        scope_start: context.scope.start,
+                        scope_end: context.scope.end,
+                        module: None,
+                        module_path: None,
+                        detail: Some(detail),
+                        insert_text: None,
+                        text_edit: Some(text_edit),
+                        additional_text_edits: Vec::new(),
+                    },
+                    Vec::new(),
+                )
+            })
+            .collect();
+        self.autocomplete_selected_idx = selected_word
+            .as_deref()
+            .and_then(|word| {
+                self.autocomplete_options
+                    .iter()
+                    .position(|(item, _)| item.word == word)
+            })
+            .unwrap_or(0);
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_mode = AutocompleteMode::Sql;
+        self.autocomplete_pending_context_key = Some(context_key);
+        self.autocomplete_anchor = self.database_query_autocomplete_anchor();
+        if !same_context {
+            self.autocomplete_scroll.current = 0.0;
+            self.autocomplete_scroll.target = 0.0;
+            self.autocomplete_scroll.velocity = 0.0;
+            self.autocomplete_anim_progress = 0.0;
+        }
+        self.autocomplete_detail_popup = None;
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.reset_autocomplete_detail_size();
+        self.autocomplete_active = true;
+        self.refresh_autocomplete_detail_popup();
+    }
+
+    fn database_query_autocomplete_anchor(&mut self) -> Option<(f32, f32)> {
+        let renderer = self.renderer.as_mut()?;
+        let scale = renderer.scale_factor;
+        let content_top = crate::render_view::editor_content_top_inset(
+            self.show_welcome,
+            self.is_ide_mode,
+            true,
+            scale,
+        );
+        let render_scroll_y = self.scroll_y.current.round() - content_top;
+        let (cursor_x, cursor_y) = renderer.get_cursor_xy(&self.editor);
+        Some((
+            (cursor_x + 2.0 * scale).round(),
+            (cursor_y - render_scroll_y + renderer.line_height * 0.72).round(),
+        ))
+    }
+
     pub(crate) fn request_active_database_query_completion(&mut self) {
         let Some((meta, state)) = self.active_database_query_meta_state() else {
             return;
@@ -56,6 +329,7 @@ impl App {
             return;
         }
         let meta = meta.clone();
+
         let Some(connection) = self
             .ide_panel
             .database
@@ -107,6 +381,7 @@ impl App {
             );
             return;
         }
+        let metadata = state.completion.clone();
         let meta = meta.clone();
         let text = self.editor.get_full_text();
         let selection = self
@@ -121,9 +396,49 @@ impl App {
         let Some((sql, source_offset)) =
             query_execution_target(&text, selection, self.editor.cursor)
         else {
-            self.ide_panel.database.global_error = Some("SQL-запрос пуст".to_string());
+            self.ide_panel.database.global_error = Some("SQL-консоль пуста".to_string());
             return;
         };
+        let mut analysis = analyze_database_query_sql(&metadata, &sql);
+        for diagnostic in &mut analysis.diagnostics {
+            diagnostic.range.start = diagnostic.range.start.saturating_add(source_offset);
+            diagnostic.range.end = diagnostic.range.end.saturating_add(source_offset);
+        }
+        let error_ranges = analysis_error_ranges(&analysis);
+        let editor_diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            &text,
+            &self.editor.line_offsets,
+        );
+        let has_errors = analysis
+            .diagnostics
+            .iter()
+            .any(|diagnostic| diagnostic.severity == SqlDiagnosticSeverity::Error);
+        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
+            && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
+        {
+            state.analysis = analysis;
+            state.analysis_editor_version = Some(self.editor.version);
+            state.editor_diagnostics = editor_diagnostics;
+            if has_errors {
+                state.running = false;
+                state.error = Some(
+                    "SQL-анализатор обнаружил ошибки. Исправьте их перед выполнением."
+                        .to_string(),
+                );
+                state.messages.clear();
+                state.result_view.active_result = state.results.len();
+                state.result_view.reset_scroll();
+            }
+            self.tabs[index].syntax_errors = error_ranges.clone();
+            if index == self.active_tab {
+                self.highlighter.syntax_errors = error_ranges;
+            }
+        }
+        if has_errors {
+            return;
+        }
         let Some(connection) = self
             .ide_panel
             .database
@@ -266,8 +581,7 @@ impl App {
         {
             state.history_open = !state.history_open;
             state.history_selected = 0;
-            state.result_view.scroll_x = 0;
-            state.result_view.scroll_y = 0;
+            state.result_view.reset_scroll();
         }
     }
 
@@ -278,9 +592,9 @@ impl App {
         if let Some(tab_index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
             && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[tab_index].kind
         {
+            state.history_open = false;
             state.result_view.active_result = index.min(state.results.len());
-            state.result_view.scroll_x = 0;
-            state.result_view.scroll_y = 0;
+            state.result_view.reset_scroll();
         }
     }
 
@@ -317,48 +631,8 @@ impl App {
     }
 
     pub fn show_active_database_query_completion(&mut self) {
-        let Some((_, state)) = self.active_database_query_meta_state() else {
-            return;
-        };
-        if !state.completion_loaded {
-            self.request_active_database_query_completion();
-            return;
-        }
-        let words = completion_words(
-            &state.completion,
-            &self.editor.get_full_text(),
-            self.editor.cursor,
-        );
-        self.autocomplete_options = words
-            .into_iter()
-            .map(|(word, detail)| {
-                let kind = match detail.as_str() {
-                    "table" => SymbolKind::Class,
-                    "function" => SymbolKind::Function,
-                    "operator" | "PostgreSQL" => SymbolKind::Keyword,
-                    "enum" => SymbolKind::Builtin,
-                    _ => SymbolKind::Property,
-                };
-                (
-                    AutocompleteItem {
-                        word,
-                        kind,
-                        scope_start: 0,
-                        scope_end: usize::MAX,
-                        module: None,
-                        module_path: None,
-                        detail: Some(detail),
-                        insert_text: None,
-                        text_edit: None,
-                        additional_text_edits: Vec::new(),
-                    },
-                    Vec::new(),
-                )
-            })
-            .collect();
-        self.autocomplete_selected_idx = 0;
-        self.autocomplete_mode = AutocompleteMode::Sql;
-        self.autocomplete_active = !self.autocomplete_options.is_empty();
+        self.refresh_active_database_query_analysis();
+        self.update_active_database_query_completion(true);
     }
 
     pub(crate) fn record_database_query_history(
@@ -443,6 +717,444 @@ impl App {
         settings.normalize();
         self.save_database_panel_state();
     }
+    pub(crate) fn scroll_active_database_query_review_messages_to_pointer(&mut self) {
+        let Some(rect) = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryReviewMessagesScrollY)
+        else {
+            return;
+        };
+        let pointer = self
+            .renderer
+            .as_ref()
+            .map_or(rect.1, |renderer| renderer.last_mouse_y);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return;
+        };
+        let max_scroll = state.result_view.review_message_max_scroll.get();
+        if max_scroll <= 0.0 || rect.3 <= 0.0 {
+            return;
+        }
+        let Some(thumb) = crate::scroll::scrollbar_thumb(
+            rect.1,
+            rect.3,
+            rect.3,
+            rect.3 + max_scroll,
+            state.result_view.review_message_scroll_y.current,
+            (28.0 * scale).round(),
+        ) else {
+            return;
+        };
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer,
+            rect.1,
+            rect.3,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return;
+        };
+        let scroll = &mut state.result_view.review_message_scroll_y;
+        scroll.current = target;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        scroll.drag_offset = drag_offset;
+        scroll.is_dragging = true;
+    }
+
+    pub(crate) fn start_database_query_result_resize(&mut self) {
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return;
+        };
+        state.result_view.is_resizing_height = true;
+    }
+
+    fn update_database_query_result_resize(&mut self, mouse_y: f32) -> bool {
+        let Some((_, state)) = self.active_database_query_meta_state() else {
+            return false;
+        };
+        if !state.result_view.is_resizing_height {
+            return false;
+        }
+        let Some(renderer) = self.renderer.as_ref() else {
+            return false;
+        };
+        let Some(window) = self.window.as_ref() else {
+            return false;
+        };
+        let scale = renderer.scale_factor.max(f32::EPSILON);
+        let window_height = window.inner_size().height as f32;
+        let status_bar_height = crate::render_view::ide_status_bar_height(scale);
+        let reserved_bottom = self.ide_panel.editor_reserved_bottom_height(scale);
+        let results_bottom = (window_height - status_bar_height - reserved_bottom).max(0.0);
+        let panel_bottom_height = if self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * scale
+        } else {
+            0.0
+        };
+        let requested_height = ((results_bottom - mouse_y) / scale)
+            .max(crate::app::database::DATABASE_QUERY_RESULTS_MIN_HEIGHT);
+        let preferred_height = crate::app::database::database_query_results_height(
+            requested_height,
+            window_height,
+            panel_bottom_height,
+            scale,
+        ) / scale;
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return false;
+        };
+        state.result_view.preferred_height = preferred_height;
+        true
+    }
+
+    pub(crate) fn auto_size_active_database_query_column(&mut self, column_index: usize) {
+        let width_and_name = self.active_database_query_meta_state().and_then(|(_, state)| {
+            let result = state.results.get(state.result_view.active_result)?;
+            let column_name = result.columns.get(column_index)?;
+            let mut max_chars = column_name.chars().count().saturating_add(3);
+            for row in result.rows.iter().take(100) {
+                if let Some(cell) = row.get(column_index) {
+                    max_chars = max_chars.max(cell.display_text().chars().count().min(160));
+                }
+            }
+            Some((
+                column_name.clone(),
+                (max_chars as f32 * 8.0 + 24.0).clamp(
+                    crate::app::database::DATABASE_GRID_MIN_COLUMN_WIDTH,
+                    crate::app::database::DATABASE_GRID_MAX_COLUMN_WIDTH,
+                ),
+            ))
+        });
+        let Some((column_name, width)) = width_and_name else {
+            return;
+        };
+        if let Some((_, state)) = self.active_database_query_meta_state_mut() {
+            crate::app::database::set_database_column_width(
+                &mut state.result_view.column_widths,
+                &column_name,
+                width,
+            );
+        }
+    }
+
+    pub(crate) fn start_database_query_column_resize(
+        &mut self,
+        column_index: usize,
+        mouse_x: f32,
+    ) {
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return;
+        };
+        let Some(result) = state.results.get(state.result_view.active_result) else {
+            return;
+        };
+        let Some(column_name) = result.columns.get(column_index) else {
+            return;
+        };
+        let width = crate::app::database::database_column_width(
+            &state.result_view.column_widths,
+            column_name,
+        );
+        state.result_view.column_resize = Some((column_index, mouse_x, width));
+    }
+
+    pub(crate) fn start_database_query_scroll_drag(&mut self, horizontal: bool) {
+        let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
+            (renderer.last_mouse_x, renderer.last_mouse_y)
+        });
+        let body_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryResultBody);
+        let vertical_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryScrollY);
+        let horizontal_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryScrollX);
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let history = &self.ide_panel.database.persisted.query_history;
+        let Some((meta, state)) = self.active_database_query_meta_state() else {
+            return;
+        };
+        let (viewport_w, viewport_h) = database_query_scroll_viewport(
+            body_rect,
+            horizontal_rect,
+            vertical_rect,
+            scale,
+        );
+        let (max_x, max_y) = crate::app::database::database_query_scroll_limits(
+            meta,
+            state,
+            history,
+            viewport_w,
+            viewport_h,
+            scale,
+        );
+        let (rect, pointer, viewport, max_scroll, current, min_thumb) = if horizontal {
+            (
+                horizontal_rect,
+                mouse.0,
+                viewport_w,
+                max_x,
+                state.result_view.scroll_x.current,
+                (36.0 * scale).round(),
+            )
+        } else {
+            (
+                vertical_rect,
+                mouse.1,
+                viewport_h,
+                max_y,
+                state.result_view.scroll_y.current,
+                (28.0 * scale).round(),
+            )
+        };
+        let Some(rect) = rect else { return; };
+        let track_start = if horizontal { rect.0 } else { rect.1 };
+        let track_len = if horizontal { rect.2 } else { rect.3 };
+        let Some(thumb) = crate::scroll::scrollbar_thumb(
+            track_start,
+            track_len,
+            viewport,
+            viewport + max_scroll,
+            current,
+            min_thumb,
+        ) else {
+            return;
+        };
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return;
+        };
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return;
+        };
+        let scroll = if horizontal {
+            &mut state.result_view.scroll_x
+        } else {
+            &mut state.result_view.scroll_y
+        };
+        scroll.current = target;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        scroll.drag_offset = drag_offset;
+        scroll.is_dragging = true;
+    }
+
+    pub(crate) fn update_database_query_scroll_drag(
+        &mut self,
+        mouse_x: f32,
+        mouse_y: f32,
+    ) -> bool {
+        if self.update_database_query_result_resize(mouse_y) {
+            return true;
+        }
+        let resize = self
+            .active_database_query_meta_state()
+            .and_then(|(_, state)| state.result_view.column_resize);
+        if let Some((column_index, start_x, start_width)) = resize {
+            let column_name = self
+                .active_database_query_meta_state()
+                .and_then(|(_, state)| state.results.get(state.result_view.active_result))
+                .and_then(|result| result.columns.get(column_index))
+                .cloned();
+            if let Some(column_name) = column_name
+                && let Some((_, state)) = self.active_database_query_meta_state_mut()
+            {
+                crate::app::database::set_database_column_width(
+                    &mut state.result_view.column_widths,
+                    &column_name,
+                    start_width + mouse_x - start_x,
+                );
+                return true;
+            }
+        }
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let review_scroll_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryReviewMessagesScrollY);
+        if let Some((_, state)) = self.active_database_query_meta_state()
+            && state.result_view.review_message_scroll_y.is_dragging
+        {
+            let Some((_, track_y, _, track_h)) = review_scroll_rect else {
+                return false;
+            };
+            let max_scroll = state.result_view.review_message_max_scroll.get();
+            let Some(thumb) = crate::scroll::scrollbar_thumb(
+                track_y,
+                track_h,
+                track_h,
+                track_h + max_scroll,
+                state.result_view.review_message_scroll_y.current,
+                (28.0 * scale).round(),
+            ) else {
+                return false;
+            };
+            let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+                mouse_y,
+                track_y,
+                track_h,
+                thumb,
+                max_scroll,
+                Some(state.result_view.review_message_scroll_y.drag_offset),
+            ) else {
+                return false;
+            };
+            let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+                return false;
+            };
+            let scroll = &mut state.result_view.review_message_scroll_y;
+            scroll.current = target;
+            scroll.target = target;
+            scroll.velocity = 0.0;
+            return true;
+        }
+        let body_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryResultBody);
+        let vertical_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryScrollY);
+        let horizontal_rect = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryScrollX);
+        let history = &self.ide_panel.database.persisted.query_history;
+        let Some((meta, state)) = self.active_database_query_meta_state() else {
+            return false;
+        };
+        let (viewport_w, viewport_h) = database_query_scroll_viewport(
+            body_rect,
+            horizontal_rect,
+            vertical_rect,
+            scale,
+        );
+        let (max_x, max_y) = crate::app::database::database_query_scroll_limits(
+            meta,
+            state,
+            history,
+            viewport_w,
+            viewport_h,
+            scale,
+        );
+        let dragging_y = state.result_view.scroll_y.is_dragging;
+        let dragging_x = state.result_view.scroll_x.is_dragging;
+        let current_y = state.result_view.scroll_y.current;
+        let current_x = state.result_view.scroll_x.current;
+        let offset_y = state.result_view.scroll_y.drag_offset;
+        let offset_x = state.result_view.scroll_x.drag_offset;
+        let target = if dragging_y {
+            let Some((_, track_y, _, track_h)) = vertical_rect else {
+                return false;
+            };
+            let Some(thumb) = crate::scroll::scrollbar_thumb(
+                track_y,
+                track_h,
+                viewport_h,
+                viewport_h + max_y,
+                current_y,
+                (28.0 * scale).round(),
+            ) else {
+                return false;
+            };
+            crate::scroll::scrollbar_drag_target(
+                mouse_y,
+                track_y,
+                track_h,
+                thumb,
+                max_y,
+                Some(offset_y),
+            )
+            .map(|(_, target)| (false, target))
+        } else if dragging_x {
+            let Some((track_x, _, track_w, _)) = horizontal_rect else {
+                return false;
+            };
+            let Some(thumb) = crate::scroll::scrollbar_thumb(
+                track_x,
+                track_w,
+                viewport_w,
+                viewport_w + max_x,
+                current_x,
+                (36.0 * scale).round(),
+            ) else {
+                return false;
+            };
+            crate::scroll::scrollbar_drag_target(
+                mouse_x,
+                track_x,
+                track_w,
+                thumb,
+                max_x,
+                Some(offset_x),
+            )
+            .map(|(_, target)| (true, target))
+        } else {
+            None
+        };
+        let Some((horizontal, target)) = target else {
+            return false;
+        };
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return false;
+        };
+        let scroll = if horizontal {
+            &mut state.result_view.scroll_x
+        } else {
+            &mut state.result_view.scroll_y
+        };
+        scroll.current = target;
+        scroll.target = target;
+        scroll.velocity = 0.0;
+        true
+    }
+
+    pub(crate) fn finish_database_query_scroll_drag(&mut self) {
+        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+            return;
+        };
+        state.result_view.scroll_x.is_dragging = false;
+        state.result_view.scroll_y.is_dragging = false;
+        state.result_view.review_message_scroll_y.is_dragging = false;
+        state.result_view.is_resizing_height = false;
+        state.result_view.column_resize = None;
+    }
+}
+
+fn normalize_database_query_text_offset(text: &str, offset: usize) -> usize {
+    let mut offset = offset.min(text.len());
+    while offset > 0 && !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
+}
+
+fn database_query_diagnostic_navigation_offset(
+    text: &str,
+    diagnostic: &crate::lsp::Diagnostic,
+) -> usize {
+    let start = crate::lsp::lsp_pos_to_offset(text, diagnostic.start_line, diagnostic.start_col);
+    let end = crate::lsp::lsp_pos_to_offset(text, diagnostic.end_line, diagnostic.end_col);
+    normalize_database_query_text_offset(text, if start == end { start } else { end })
+}
+
+fn database_query_scroll_viewport(
+    body_rect: Option<(f32, f32, f32, f32)>,
+    _horizontal_rect: Option<(f32, f32, f32, f32)>,
+    _vertical_rect: Option<(f32, f32, f32, f32)>,
+    _scale: f32,
+) -> (f32, f32) {
+    body_rect.map_or((1.0, 1.0), |rect| (rect.2.max(1.0), rect.3.max(1.0)))
 }
 
 fn database_query_diagnostic_is_stale(
@@ -471,6 +1183,71 @@ fn adjust_usize(value: &mut usize, delta: i32, step: usize) {
 #[cfg(test)]
 mod database_query_app_method_tests {
     use super::*;
+
+    fn diagnostic(start_col: u32, end_col: u32) -> crate::lsp::Diagnostic {
+        crate::lsp::Diagnostic {
+            start_line: 0,
+            start_col,
+            end_line: 0,
+            end_col,
+            severity: crate::lsp::DiagSeverity::Error,
+            code: None,
+            code_href: None,
+            message: std::sync::Arc::from("error"),
+            source: None,
+            quickfixes: Box::new([]),
+            tags: Box::new([]),
+        }
+    }
+
+    #[test]
+    fn query_problem_navigation_uses_range_end_and_preserves_zero_range() {
+        let text = "0123456789abcdefghij";
+        assert_eq!(database_query_diagnostic_navigation_offset(text, &diagnostic(10, 20)), 20);
+        assert_eq!(database_query_diagnostic_navigation_offset(text, &diagnostic(10, 10)), 10);
+    }
+
+    #[test]
+    fn query_problem_navigation_never_returns_inside_utf8_codepoint() {
+        let text = "aЖb";
+        let inside = 2;
+        let normalized = normalize_database_query_text_offset(text, inside);
+        assert_eq!(normalized, 1);
+        assert!(text.is_char_boundary(normalized));
+    }
+
+    #[test]
+    fn query_scroll_viewport_excludes_tabs_and_visible_scrollbars() {
+        let viewport = database_query_scroll_viewport(
+            Some((0.0, 0.0, 500.0, 300.0)),
+            Some((0.0, 254.0, 490.0, 10.0)),
+            Some((490.0, 36.0, 10.0, 218.0)),
+            1.0,
+        );
+        assert_eq!(viewport, (500.0, 300.0));
+    }
+
+    #[test]
+    fn query_scroll_viewport_does_not_reserve_scrollbars_twice() {
+        assert_eq!(
+            database_query_scroll_viewport(
+                Some((0.0, 0.0, 490.0, 300.0)),
+                None,
+                Some((490.0, 0.0, 10.0, 300.0)),
+                1.0,
+            ),
+            (490.0, 300.0),
+        );
+        assert_eq!(
+            database_query_scroll_viewport(
+                Some((0.0, 0.0, 500.0, 290.0)),
+                Some((0.0, 290.0, 500.0, 10.0)),
+                None,
+                1.0,
+            ),
+            (500.0, 290.0),
+        );
+    }
 
     #[test]
     fn setting_adjusters_saturate() {

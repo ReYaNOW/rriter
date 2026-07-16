@@ -338,6 +338,19 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             needs_redraw = true;
         }
     }
+    for tab in &mut app.tabs {
+        let crate::app::EditorTabKind::DatabaseTable(_, state) = &mut tab.kind else {
+            continue;
+        };
+        if let Some(until) = state.notice_until {
+            if now < until {
+                needs_redraw = true;
+            } else {
+                state.clear_notice();
+                needs_redraw = true;
+            }
+        }
+    }
 
     // Watcher сигнализирует об изменениях на диске — обновляем дерево
     {
@@ -484,15 +497,39 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
     for tab in &mut app.tabs {
-        if let crate::app::EditorTabKind::DatabaseTable(_, state) = &mut tab.kind {
-            if state.grid.scroll_x.update(dt) { needs_redraw = true; }
-            if state.grid.scroll_y.update(dt) { needs_redraw = true; }
+        match &mut tab.kind {
+            crate::app::EditorTabKind::DatabaseTable(_, state) => {
+                if state.grid.scroll_x.update(dt) {
+                    needs_redraw = true;
+                }
+                if state.grid.scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
+                if state.grid.refreshing {
+                    needs_redraw = true;
+                }
+            }
+            crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                if state.result_view.scroll_x.update(dt) {
+                    needs_redraw = true;
+                }
+                if state.result_view.scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
+                if state.result_view.review_message_scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
+            }
+            _ => {}
         }
     }
     if let Some(modal) = app.ide_panel.database.table_modal.as_mut() {
         match modal {
-            crate::app::database::DatabaseTableModal::SqlPreview { scroll, .. }
-            | crate::app::database::DatabaseTableModal::MultilineEditor { scroll, .. }
+            crate::app::database::DatabaseTableModal::SqlPreview { scroll_x, scroll_y, .. } => {
+                if scroll_x.update(dt) { needs_redraw = true; }
+                if scroll_y.update(dt) { needs_redraw = true; }
+            }
+            crate::app::database::DatabaseTableModal::MultilineEditor { scroll, .. }
             | crate::app::database::DatabaseTableModal::Review { scroll, .. } => {
                 if scroll.update(dt) { needs_redraw = true; }
             }
@@ -552,10 +589,22 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if let Some(menu) = &app.ide_panel.file_tree_context_menu {
-        if crate::app::file_tree::file_tree_context_menu_anim_progress(menu.opened_at, now) < 1.0 {
-            needs_redraw = true;
-        }
+    let context_menu_opened_at = app
+        .ide_panel
+        .file_tree_context_menu
+        .as_ref()
+        .map(|menu| menu.opened_at)
+        .or_else(|| {
+            app.ide_panel
+                .database
+                .context_menu
+                .as_ref()
+                .map(|menu| menu.opened_at)
+        });
+    if context_menu_opened_at.is_some_and(|opened_at| {
+        crate::app::context_menu::context_menu_anim_progress(opened_at, now) < 1.0
+    }) {
+        needs_redraw = true;
     }
 
     crate::app::mouse::HOVER_STATE.with(|state| {

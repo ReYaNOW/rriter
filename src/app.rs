@@ -1,6 +1,7 @@
 pub mod api_client;
 pub mod api_mock;
 pub mod automation;
+pub(crate) mod context_menu;
 pub mod database;
 mod app_state;
 mod autocomplete;
@@ -13,6 +14,7 @@ pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
 pub mod project_search;
+pub(crate) mod single_line_input;
 mod project_search_app;
 mod python_completion;
 pub mod terminal;

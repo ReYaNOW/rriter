@@ -184,11 +184,38 @@ impl App {
         }
         if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
             match modal {
-                crate::app::database::DatabaseTableModal::SqlPreview { text, scroll, .. } => {
-                    scroll.anim_speed = 7.0;
-                    scroll.scroll_by(dy);
-                    let max = (text.lines().count() as f32 * 21.0 * s - (self.renderer.as_ref().unwrap().height - 180.0 * s)).max(0.0);
-                    scroll.clamp_target(0.0, max);
+                crate::app::database::DatabaseTableModal::SqlPreview {
+                    text,
+                    scroll_x,
+                    scroll_y,
+                    ..
+                } => {
+                    let renderer = self.renderer.as_ref().unwrap();
+                    let viewport_h = (renderer.height - 180.0 * s).max(1.0);
+                    let viewport_w = (renderer.width - 100.0 * s).max(1.0);
+                    let max_y = (text.lines().count().max(1) as f32
+                        * crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT
+                        * s
+                        - viewport_h)
+                        .max(0.0);
+                    let longest = text
+                        .lines()
+                        .map(|line| line.chars().count())
+                        .max()
+                        .unwrap_or(0) as f32;
+                    let max_x = (longest * 9.0 * s - viewport_w).max(0.0);
+                    if shift {
+                        scroll_x.anim_speed = 7.0;
+                        scroll_x.scroll_by(dy);
+                        scroll_x.clamp_target(0.0, max_x);
+                    } else {
+                        scroll_y.anim_speed = 7.0;
+                        scroll_y.scroll_by(dy);
+                        scroll_y.clamp_target(0.0, max_y);
+                        scroll_x.anim_speed = 7.0;
+                        scroll_x.scroll_by(dx);
+                        scroll_x.clamp_target(0.0, max_x);
+                    }
                 }
                 crate::app::database::DatabaseTableModal::MultilineEditor { input, scroll, .. } => {
                     scroll.anim_speed = 7.0;
@@ -780,11 +807,51 @@ impl App {
             return;
         }
 
-        let s = self.renderer.as_ref().unwrap().scale_factor;
-        let window_h = self.window.as_ref().unwrap().inner_size().height as f32;
-        let window_w = self.window.as_ref().unwrap().inner_size().width as f32;
-        let mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-        let reserved_bottom = self.ide_panel.editor_reserved_bottom_height(s);
+        let Some((s, mouse_x, mouse_y)) = self.renderer.as_ref().map(|renderer| {
+            (
+                renderer.scale_factor,
+                renderer.last_mouse_x,
+                renderer.last_mouse_y,
+            )
+        }) else {
+            return;
+        };
+        let Some(window_size) = self.window.as_ref().map(|window| window.inner_size()) else {
+            return;
+        };
+        let window_h = window_size.height as f32;
+        let window_w = window_size.width as f32;
+        if self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::DatabaseQueryReviewMessagesBody)
+            .is_some_and(|rect| {
+                mouse_x >= rect.0
+                    && mouse_x <= rect.0 + rect.2
+                    && mouse_y >= rect.1
+                    && mouse_y <= rect.1 + rect.3
+            })
+        {
+            if let Some(crate::app::EditorTabKind::DatabaseQuery(_, state)) =
+                self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
+            {
+                let max_scroll = state.result_view.review_message_max_scroll.get();
+                state.result_view.review_message_scroll_y.anim_speed = 7.0;
+                state.result_view.review_message_scroll_y.scroll_by(dy);
+                state
+                    .result_view
+                    .review_message_scroll_y
+                    .clamp_target(0.0, max_scroll);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+        let panel_bottom_h = if self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * s
+        } else {
+            0.0
+        };
         let query_results_h = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::DatabaseQuery(_, state)
                 if state.history_open
@@ -793,53 +860,62 @@ impl App {
                     || state.review.is_some()
                     || state.error.is_some() =>
             {
-                Some((260.0 * s).min((window_h - reserved_bottom - 220.0 * s).max(140.0 * s)))
+                Some(crate::app::database::database_query_results_height(
+                    state.result_view.preferred_height,
+                    window_h,
+                    panel_bottom_h,
+                    s,
+                ))
             }
             _ => None,
         });
         if let Some(results_h) = query_results_h {
-            let results_y = window_h
-                - crate::render_view::ide_status_bar_height(s)
-                - reserved_bottom
-                - results_h;
-            if mouse_y >= results_y && mouse_y <= results_y + results_h {
-                let history_counts = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
-                    crate::app::EditorTabKind::DatabaseQuery(meta, state) if state.history_open => {
-                        Some(self.ide_panel.database.persisted.query_history.iter().filter(|entry| {
-                            entry.connection_id == meta.connection_id
-                                && entry.database_name == meta.database_name
-                        }).count())
-                    }
-                    _ => None,
-                });
-                if let Some(crate::app::EditorTabKind::DatabaseQuery(_, state)) =
+            let viewport = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::DatabaseQueryResultBody);
+            let over_viewport = viewport.is_some_and(|rect| {
+                mouse_x >= rect.0
+                    && mouse_x <= rect.0 + rect.2
+                    && mouse_y >= rect.1
+                    && mouse_y <= rect.1 + rect.3
+            });
+            if over_viewport {
+                let viewport_w = viewport.map_or(window_w, |rect| rect.2).max(1.0);
+                let viewport_h = viewport.map_or(results_h.max(1.0), |rect| rect.3.max(1.0));
+                let history = self.ide_panel.database.persisted.query_history.clone();
+                if let Some(crate::app::EditorTabKind::DatabaseQuery(meta, state)) =
                     self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
                 {
-                    let body_h = (results_h - 34.0 * s).max(0.0);
-                    let (max_x, max_y) = if let Some(count) = history_counts {
-                        (0.0, (count as f32 * 34.0 * s - body_h).max(0.0))
-                    } else if state.result_view.active_result < state.results.len() {
-                        let result = &state.results[state.result_view.active_result];
-                        (
-                            (result.columns.len() as f32 * 180.0 * s - window_w).max(0.0),
-                            (result.rows.len() as f32 * 24.0 * s - (body_h - 28.0 * s)).max(0.0),
-                        )
-                    } else {
-                        (0.0, (state.messages.len() as f32 * 28.0 * s - body_h).max(0.0))
-                    };
+                    let (max_x, max_y) =
+                        crate::app::database::database_query_scroll_limits(
+                            meta,
+                            state,
+                            &history,
+                            viewport_w,
+                            viewport_h,
+                            s,
+                        );
                     if shift {
-                        state.result_view.scroll_x = ((state.result_view.scroll_x as f32 + dy)
-                            .clamp(0.0, max_x)) as i32;
+                        state.result_view.scroll_x.anim_speed = 7.0;
+                        state.result_view.scroll_x.scroll_by(dy);
+                        state.result_view.scroll_x.clamp_target(0.0, max_x);
                     } else {
-                        state.result_view.scroll_y = ((state.result_view.scroll_y as f32 + dy)
-                            .clamp(0.0, max_y)) as i32;
-                        state.result_view.scroll_x = ((state.result_view.scroll_x as f32 + dx)
-                            .clamp(0.0, max_x)) as i32;
+                        state.result_view.scroll_y.anim_speed = 7.0;
+                        state.result_view.scroll_y.scroll_by(dy);
+                        state.result_view.scroll_y.clamp_target(0.0, max_y);
+                        state.result_view.scroll_x.anim_speed = 7.0;
+                        state.result_view.scroll_x.scroll_by(dx);
+                        state.result_view.scroll_x.clamp_target(0.0, max_x);
                     }
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return;
             }
+        }
+        if self.database_blocking_modal_open() {
+            return;
         }
         let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
             0.0
@@ -1373,11 +1449,12 @@ impl App {
 
         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
         let s = self.renderer.as_ref().unwrap().scale_factor;
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
+        let tab_bar_h = crate::render_view::editor_content_top_inset(
+            self.show_welcome,
+            self.is_ide_mode,
+            self.active_tab_is_database_query(),
+            s,
+        );
         let editor_bottom_h = if self.is_ide_mode {
             self.ide_panel.editor_reserved_bottom_height(s)
         } else {

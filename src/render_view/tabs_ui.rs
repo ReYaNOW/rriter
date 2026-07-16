@@ -4,6 +4,41 @@ use glow::HasContext;
 
 pub(crate) const EXTERNAL_TAB_TITLE_COLOR: [f32; 4] = [1.0, 0.55, 0.18, 1.0];
 
+const TAB_ICON_SLOT_SIZE: f32 = 20.0;
+const DATABASE_QUERY_TAB_ICON_SIZE: f32 = 28.0;
+const DATABASE_TABLE_TAB_ICON_SIZE: f32 = 24.0;
+
+fn tab_file_icon_key(
+    path: Option<&std::path::Path>,
+    title: &str,
+    fallback: &'static str,
+) -> &'static str {
+    let name = path
+        .and_then(std::path::Path::file_name)
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or_else(|| title.trim_start_matches('*').trim());
+    if name.is_empty() {
+        fallback
+    } else {
+        crate::app::file_icons::file_icon_key_for_name(name)
+    }
+}
+
+fn tab_icon_rect(
+    slot_x: f32,
+    bar_y: f32,
+    bar_h: f32,
+    slot_size: f32,
+    visual_size: f32,
+    s: f32,
+) -> (f32, f32, f32) {
+    let slot_size = (slot_size * s).round().max(1.0);
+    let visual_size = (visual_size * s).round().max(1.0);
+    let x = (slot_x + (slot_size - visual_size) * 0.5).round();
+    let y = (bar_y + (bar_h - visual_size) * 0.5 - 1.5 * s).round();
+    (x, y, visual_size)
+}
+
 fn tab_diagnostic_severity_for_path(
     lsp: Option<&crate::lsp::LspManager>,
     path: Option<&std::path::PathBuf>,
@@ -59,7 +94,7 @@ impl Renderer {
         }
 
         let tab_pad = 16.0 * s;
-        let icon_size_tab = 20.0 * s;
+        let icon_size_tab = TAB_ICON_SLOT_SIZE * s;
 
         let path_for_tab = |idx: usize| {
             if idx == active_tab {
@@ -288,46 +323,79 @@ impl Renderer {
                 tab.editor.is_dirty()
             };
 
-            let icon_y = (y + (h - icon_size_tab) / 2.0 - 1.5 * s).round();
+            let slot_x = current_x + tab_pad;
+            let (_, icon_y, _) = tab_icon_rect(
+                slot_x,
+                y,
+                h,
+                TAB_ICON_SLOT_SIZE,
+                TAB_ICON_SLOT_SIZE,
+                s,
+            );
             if tab.kind.is_git_diff() {
                 self.draw_atlas_icon(
                     crate::widgets::IconType::GitCompare,
-                    current_x + tab_pad,
+                    slot_x.round(),
                     icon_y,
-                    icon_size_tab,
+                    icon_size_tab.round(),
                     self.theme.fg,
                 );
             } else if tab.kind.is_api_client() {
                 self.draw_atlas_icon(
                     crate::widgets::IconType::Api,
-                    current_x + tab_pad,
+                    slot_x.round(),
                     icon_y,
-                    icon_size_tab,
+                    icon_size_tab.round(),
                     [1.0, 1.0, 1.0, 1.0],
                 );
             } else if tab.kind.is_database_table() {
+                let (icon_x, icon_y, icon_size) = tab_icon_rect(
+                    slot_x,
+                    y,
+                    h,
+                    TAB_ICON_SLOT_SIZE,
+                    DATABASE_TABLE_TAB_ICON_SIZE,
+                    s,
+                );
                 self.draw_atlas_icon(
                     crate::widgets::IconType::DatabaseTable,
-                    current_x + tab_pad,
+                    icon_x,
                     icon_y,
-                    icon_size_tab,
-                    [1.0, 1.0, 1.0, 1.0],
+                    icon_size,
+                    [0.22, 0.84, 0.78, 1.0],
                 );
             } else if tab.kind.is_database_query() {
+                let (icon_x, icon_y, icon_size) = tab_icon_rect(
+                    slot_x,
+                    y,
+                    h,
+                    TAB_ICON_SLOT_SIZE,
+                    DATABASE_QUERY_TAB_ICON_SIZE,
+                    s,
+                );
                 self.draw_atlas_icon(
                     crate::widgets::IconType::Database,
-                    current_x + tab_pad,
+                    icon_x,
                     icon_y,
-                    icon_size_tab,
-                    [1.0, 1.0, 1.0, 1.0],
+                    icon_size,
+                    [1.0, 0.67, 0.16, 1.0],
                 );
             } else {
+                let icon_key = if is_active {
+                    tab_file_icon_key(
+                        _editor_path.map(std::path::PathBuf::as_path),
+                        editor_title,
+                        tab.icon_key,
+                    )
+                } else {
+                    tab_file_icon_key(tab.file_path.as_deref(), &tab.base_title, tab.icon_key)
+                };
                 self.draw_file_icon(
-                    tab.icon_key,
+                    icon_key,
                     false,
-                    current_x + tab_pad,
+                    slot_x.round(),
                     icon_y,
-                    icon_size_tab,
+                    icon_size_tab.round(),
                 );
             }
 
@@ -621,5 +689,33 @@ mod tests {
         assert!(EXTERNAL_TAB_TITLE_COLOR[1] < 0.7);
         assert!(EXTERNAL_TAB_TITLE_COLOR[2] < 0.3);
         assert_eq!(EXTERNAL_TAB_TITLE_COLOR[3], 1.0);
+    }
+
+    #[test]
+    fn python_tab_icon_uses_real_path_instead_of_stale_default_icon() {
+        assert_eq!(
+            tab_file_icon_key(
+                Some(std::path::Path::new("/workspace/app/service.py")),
+                "Безымянный",
+                "default_file",
+            ),
+            "python"
+        );
+    }
+
+    #[test]
+    fn database_tab_icon_is_larger_and_pixel_snapped() {
+        let (x, y, size) = tab_icon_rect(
+            31.35,
+            4.2,
+            36.0,
+            TAB_ICON_SLOT_SIZE,
+            DATABASE_QUERY_TAB_ICON_SIZE,
+            1.25,
+        );
+        assert!(size > (TAB_ICON_SLOT_SIZE * 1.25).round());
+        assert_eq!(x.fract(), 0.0);
+        assert_eq!(y.fract(), 0.0);
+        assert_eq!(size.fract(), 0.0);
     }
 }

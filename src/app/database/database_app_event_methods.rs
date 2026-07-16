@@ -213,6 +213,7 @@ impl App {
                         state.metadata = Some(result.clone());
                         state.loading = false;
                         state.error = None;
+                        state.clear_unavailable_selection();
                         loaded_tabs.push(meta.tab_id);
                     }
                 }
@@ -263,6 +264,7 @@ impl App {
                 self.on_database_table_chunk_loaded(connection_id, result);
             }
             DatabaseEvent::QueryCompletionLoaded { result, .. } => {
+                let mut refresh_analysis = false;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
                         meta.connection_id == result.connection_id
@@ -274,15 +276,20 @@ impl App {
                 {
                     state.completion = result.metadata;
                     state.completion_loaded = true;
+                    state.analysis_editor_version = None;
                     state.error = None;
+                    refresh_analysis = index == self.active_tab;
                 }
                 self.ide_panel.database.pending_job = None;
                 self.ide_panel.database.pending_query_mode = None;
+                if refresh_analysis {
+                    self.refresh_active_database_query_analysis();
+                }
             }
             DatabaseEvent::QueryTransactionPrepared {
                 connection_id,
                 transaction_id,
-                database_name: _,
+                database_name,
                 console_id,
                 sql,
                 source_offset,
@@ -291,16 +298,27 @@ impl App {
                 messages,
                 deadline_unix_ms,
                 duration_ms,
-                affected_rows,
+                returned_rows,
+                changed_rows,
+                requires_review,
                 mode,
                 ..
             } => {
+                let mut completed_history = None;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
                         meta.connection_id == connection_id && meta.console_id == console_id
                     }
                     _ => false,
                 }) {
+                    let (editor_text, line_offsets) = if index == self.active_tab {
+                        (self.editor.get_full_text(), self.editor.line_offsets.clone())
+                    } else {
+                        (
+                            self.tabs[index].editor.get_full_text(),
+                            self.tabs[index].editor.line_offsets.clone(),
+                        )
+                    };
                     if let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind {
                         state.running = false;
                         state.running_sql = None;
@@ -308,25 +326,48 @@ impl App {
                         state.error = None;
                         state.diagnostic = None;
                         state.diagnostic_editor_version = None;
-                        state.results = result_sets.clone();
-                        state.messages = messages.clone();
+                        state.editor_diagnostics =
+                            crate::app::database::database_query_editor_diagnostics(
+                                &state.analysis,
+                                None,
+                                &editor_text,
+                                &line_offsets,
+                            );
+                        state.results = result_sets;
+                        state.messages = messages;
                         state.result_view.active_result = 0;
-                        state.result_view.scroll_x = 0;
-                        state.result_view.scroll_y = 0;
+                        state.result_view.reset_scroll();
                         state.last_duration_ms = duration_ms;
-                        state.last_affected_rows = affected_rows;
-                        state.review = Some(crate::app::database::DatabaseQueryReviewState {
-                            transaction_id,
-                            sql,
-                            source_offset,
-                            started_unix_ms,
-                            result_sets,
-                            messages,
-                            deadline_unix_ms,
-                            duration_ms,
-                            affected_rows,
-                            mode,
-                        });
+                        state.last_returned_rows = returned_rows;
+                        state.last_changed_rows = changed_rows;
+                        if requires_review {
+                            state.review = Some(crate::app::database::DatabaseQueryReviewState {
+                                transaction_id,
+                                sql,
+                                source_offset,
+                                started_unix_ms,
+                                deadline_unix_ms,
+                                duration_ms,
+                                returned_rows,
+                                changed_rows,
+                                mode,
+                            });
+                        } else {
+                            completed_history = Some(
+                                crate::app::database::DatabaseQueryHistoryEntry {
+                                    connection_id,
+                                    database_name: database_name.clone(),
+                                    console_id,
+                                    sql,
+                                    started_unix_ms,
+                                    duration_ms,
+                                    succeeded: true,
+                                    affected_rows: changed_rows,
+                                    error_summary: None,
+                                },
+                            );
+                            state.review = None;
+                        }
                     }
                     self.tabs[index].syntax_errors.clear();
                     if index == self.active_tab {
@@ -335,6 +376,14 @@ impl App {
                 }
                 self.ide_panel.database.pending_job = None;
                 self.ide_panel.database.pending_query_mode = None;
+                if requires_review {
+                    self.ide_panel.is_resizing_left = false;
+                    self.ide_panel.is_resizing_bottom = false;
+                    self.ide_panel.git.graph_resizing = false;
+                }
+                if let Some(history) = completed_history {
+                    self.record_database_query_history(history);
+                }
             }
             DatabaseEvent::QueryTransactionCommitted {
                 connection_id,
@@ -364,7 +413,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: true,
-                            affected_rows: review.affected_rows,
+                            affected_rows: review.changed_rows,
                             error_summary: None,
                         });
                     }
@@ -408,7 +457,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: false,
-                            affected_rows: review.affected_rows,
+                            affected_rows: review.changed_rows,
                             error_summary: Some("Транзакция отменена пользователем".to_string()),
                         });
                     }
@@ -442,7 +491,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: false,
-                            affected_rows: review.affected_rows,
+                            affected_rows: review.changed_rows,
                             error_summary: Some("Транзакция автоматически отменена по таймауту".to_string()),
                         });
                     }
@@ -470,6 +519,14 @@ impl App {
                     }
                     _ => false,
                 }) {
+                    let (editor_text, line_offsets) = if index == self.active_tab {
+                        (self.editor.get_full_text(), self.editor.line_offsets.clone())
+                    } else {
+                        (
+                            self.tabs[index].editor.get_full_text(),
+                            self.tabs[index].editor.line_offsets.clone(),
+                        )
+                    };
                     let diagnostic_editor_version = diagnostic.as_ref().map(|_| {
                         if index == self.active_tab {
                             self.editor.version
@@ -486,21 +543,19 @@ impl App {
                         state.running_sql = None;
                         state.running_started_unix_ms = 0;
                         state.error = Some(message.clone());
-                        state.messages = diagnostic
-                            .as_ref()
-                            .map(|diagnostic| vec![crate::app::database::DatabaseQueryMessage {
-                                severity: "ERROR".to_string(),
-                                message: diagnostic.message.clone(),
-                                detail: diagnostic.detail.clone(),
-                                hint: diagnostic.hint.clone(),
-                            }])
-                            .unwrap_or_default();
+                        state.messages.clear();
                         state.diagnostic = diagnostic;
                         state.diagnostic_editor_version = diagnostic_editor_version;
+                        state.editor_diagnostics =
+                            crate::app::database::database_query_editor_diagnostics(
+                                &state.analysis,
+                                state.diagnostic.as_ref(),
+                                &editor_text,
+                                &line_offsets,
+                            );
                         state.review = None;
                         state.result_view.active_result = state.results.len();
-                        state.result_view.scroll_x = 0;
-                        state.result_view.scroll_y = 0;
+                        state.result_view.reset_scroll();
                     }
                     self.tabs[index].syntax_errors = syntax_errors.clone();
                     if index == self.active_tab {
@@ -596,6 +651,7 @@ impl App {
                 self.ide_panel.database.host_key_prompt = Some(DatabaseHostKeyPrompt { job_id, host, port, algorithm, fingerprint });
             }
             DatabaseEvent::JobFailed { message, .. } => {
+                let mut handled_locally = false;
                 if let Some(pending) = pending.as_ref() {
                     if let Some(node) = self.ide_panel.database.connection_mut(pending.connection_id) {
                         node.loading = false;
@@ -619,17 +675,29 @@ impl App {
                         }
                         match pending.kind {
                             DatabasePendingJobKind::CountRows => {
+                                handled_locally = true;
+                                let filter_target = state.grid.pending_filter_error_target(false);
                                 state.grid.loading_count = false;
+                                state.grid.finish_refresh();
                                 state.grid.count_error = Some(message.clone());
                                 if state.grid.post_commit_refresh_pending {
                                     state.error = Some(format!(
                                         "Изменения успешно применены, но обновить данные не удалось: {message}"
                                     ));
                                     state.grid.post_commit_refresh_pending = false;
+                                } else if let Some(target) = filter_target {
+                                    state.grid.filter_error = Some((target, message.clone()));
+                                    state.error = None;
+                                } else {
+                                    state.error = Some(message.clone());
                                 }
+                                state.grid.abort_pending_view();
                             }
                             DatabasePendingJobKind::LoadChunk => {
+                                handled_locally = true;
+                                let filter_target = state.grid.pending_filter_error_target(true);
                                 state.grid.loading_chunk = false;
+                                state.grid.finish_refresh();
                                 state.grid.in_flight_chunk = None;
                                 state.grid.desired_chunk = None;
                                 if state.grid.post_commit_refresh_pending {
@@ -637,20 +705,27 @@ impl App {
                                         "Изменения успешно применены, но обновить данные не удалось: {message}"
                                     ));
                                     state.grid.post_commit_refresh_pending = false;
+                                } else if let Some(target) = filter_target {
+                                    state.grid.filter_error = Some((target, message.clone()));
+                                    state.error = None;
                                 } else {
                                     state.error = Some(message.clone());
                                 }
+                                state.grid.abort_pending_view();
                             }
                             DatabasePendingJobKind::BeginTableSave
                             | DatabasePendingJobKind::CommitTransaction
                             | DatabasePendingJobKind::RollbackTransaction => {
+                                handled_locally = true;
                                 state.grid.pending_close_after_save = false;
                                 state.error = Some(message.clone());
                                 self.ide_panel.database.table_modal = None;
                             }
                             DatabasePendingJobKind::LoadMetadata => {
+                                handled_locally = true;
                                 state.loading = false;
                                 state.error = Some(message.clone());
+                                state.set_unavailable_text(message.clone());
                             }
                             _ => {}
                         }
@@ -661,6 +736,7 @@ impl App {
                                 && meta.connection_id == pending.connection_id
                                 && pending.database_name.as_deref().is_none_or(|name| name == meta.database_name)
                             {
+                                handled_locally = true;
                                 state.running = false;
                                 state.error = Some(message.clone());
                             }
@@ -668,10 +744,15 @@ impl App {
                     }
                 }
                 if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    handled_locally = true;
                     dialog.error = Some(message.clone());
                     dialog.test_status = None;
                 }
-                self.ide_panel.database.global_error = Some(message);
+                self.ide_panel.database.global_error = if handled_locally {
+                    None
+                } else {
+                    Some(message)
+                };
                 self.ide_panel.database.pending_job = None;
             }
             DatabaseEvent::JobCancelled { .. } => {
@@ -681,10 +762,16 @@ impl App {
                         let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind else { continue; };
                         if meta.connection_id != pending.connection_id { continue; }
                         match pending.kind {
-                            DatabasePendingJobKind::CountRows => state.grid.loading_count = false,
+                            DatabasePendingJobKind::CountRows => {
+                                state.grid.loading_count = false;
+                                state.grid.finish_refresh();
+                                state.grid.abort_pending_view();
+                            },
                             DatabasePendingJobKind::LoadChunk => {
                                 state.grid.loading_chunk = false;
+                                state.grid.finish_refresh();
                                 state.grid.in_flight_chunk = None;
+                                state.grid.abort_pending_view();
                             }
                             DatabasePendingJobKind::BeginTableSave
                             | DatabasePendingJobKind::CommitTransaction
@@ -731,10 +818,43 @@ impl App {
                 self.ide_panel.database.pending_query_mode = None;
             }
             DatabaseEvent::Busy { active_job_id, .. } => {
-                self.ide_panel.database.global_error = Some(format!(
+                let message = format!(
                     "Сейчас уже выполняется запрос {:?}. Отмените его или дождитесь завершения.",
                     active_job_id
-                ));
+                );
+                if let Some(pending) = pending.as_ref()
+                    && matches!(
+                        pending.kind,
+                        DatabasePendingJobKind::CountRows | DatabasePendingJobKind::LoadChunk
+                    )
+                {
+                    for tab in &mut self.tabs {
+                        let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind else {
+                            continue;
+                        };
+                        if meta.connection_id != pending.connection_id
+                            || pending
+                                .database_name
+                                .as_deref()
+                                .is_some_and(|name| name != meta.database_name)
+                            || pending
+                                .table_name
+                                .as_deref()
+                                .is_some_and(|name| name != meta.table_name)
+                        {
+                            continue;
+                        }
+                        state.grid.loading_count = false;
+                        state.grid.loading_chunk = false;
+                        state.grid.in_flight_chunk = None;
+                        state.grid.desired_chunk = None;
+                        state.grid.finish_refresh();
+                        state.grid.abort_pending_view();
+                        state.error = None;
+                        state.show_timed_notice(message.clone());
+                    }
+                }
+                self.ide_panel.database.global_error = None;
                 self.ide_panel.database.pending_job = None;
             }
         }

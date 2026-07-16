@@ -24,7 +24,7 @@ pub(crate) fn tree_icon_x(indent_x: f32, scale: f32) -> f32 {
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub(crate) fn tree_row_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
-        row_y + row_h / 2.0 + 5.5 * scale
+        (row_y + row_h * 0.5 + 5.5 * scale).round()
     }
 
     pub(crate) fn draw_tree_disclosure_icon(

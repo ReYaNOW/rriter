@@ -2,6 +2,7 @@ use super::database_postgres::{
     DatabaseBackendError, DatabaseServerNotice, PostgresSession, connect_postgres,
 };
 use super::database_ssh::SshConnectOptions;
+use super::DatabaseQueryTabMeta;
 use super::{
     DatabaseConnectionConfig, DatabaseConnectionId, DatabaseSecretBundle, DatabaseSettings,
     DatabaseTransactionId, MAX_COLUMNS_PER_RESULT, MAX_RESULT_BYTES, MAX_RESULT_ROWS,
@@ -9,6 +10,11 @@ use super::{
 };
 use crate::languages::sql::{
     SqlStatement, format_sql_conservative, statement_range_at, validate_managed_user_sql,
+};
+use crate::languages::sql_analysis::{
+    SqlAnalysis, SqlAnalysisDiagnostic, SqlCompletionContext, SqlCompletionKind,
+    SqlDiagnosticSeverity, analyze_sql, completion_context, output_aliases_at,
+    relation_for_qualifier,
 };
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
@@ -65,7 +71,8 @@ pub struct DatabaseQueryResultSet {
     pub title: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<DatabaseQueryCell>>,
-    pub command_tag: String,
+    pub command_kind: String,
+    pub returned_rows: u64,
     pub affected_rows: u64,
     pub truncated: bool,
 }
@@ -74,7 +81,7 @@ impl DatabaseQueryResultSet {
     pub fn estimated_bytes(&self) -> usize {
         self.title
             .len()
-            .saturating_add(self.command_tag.len())
+            .saturating_add(self.command_kind.len())
             .saturating_add(self.columns.iter().map(String::len).sum::<usize>())
             .saturating_add(
                 self.rows
@@ -171,13 +178,143 @@ pub struct DatabaseQueryCompletionMetadata {
     pub operators: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub const DATABASE_QUERY_RESULTS_DEFAULT_HEIGHT: f32 = 260.0;
+pub const DATABASE_QUERY_RESULTS_MIN_HEIGHT: f32 = 140.0;
+pub const DATABASE_QUERY_EDITOR_MIN_HEIGHT: f32 = 220.0;
+
+pub fn database_query_results_height(
+    preferred_height: f32,
+    window_height: f32,
+    bottom_panel_height: f32,
+    scale: f32,
+) -> f32 {
+    let min_height = (DATABASE_QUERY_RESULTS_MIN_HEIGHT * scale).round();
+    let max_height = (window_height
+        - bottom_panel_height
+        - (DATABASE_QUERY_EDITOR_MIN_HEIGHT * scale).round())
+    .max(min_height);
+    (preferred_height.max(DATABASE_QUERY_RESULTS_MIN_HEIGHT) * scale)
+        .round()
+        .clamp(min_height, max_height)
+}
+
+#[derive(Clone, Debug)]
 pub struct DatabaseQueryResultViewState {
     pub active_result: usize,
-    pub scroll_x: i32,
-    pub scroll_y: i32,
+    pub preferred_height: f32,
+    pub is_resizing_height: bool,
+    pub scroll_x: crate::scroll::ScrollState,
+    pub scroll_y: crate::scroll::ScrollState,
+    pub review_message_scroll_y: crate::scroll::ScrollState,
+    pub review_message_max_scroll: std::cell::Cell<f32>,
+    pub column_widths: Vec<super::DatabaseColumnWidth>,
+    pub column_resize: Option<(usize, f32, f32)>,
     pub selected_row: Option<usize>,
     pub selected_column: Option<usize>,
+}
+
+impl Default for DatabaseQueryResultViewState {
+    fn default() -> Self {
+        Self {
+            active_result: 0,
+            preferred_height: DATABASE_QUERY_RESULTS_DEFAULT_HEIGHT,
+            is_resizing_height: false,
+            scroll_x: crate::scroll::ScrollState::new(15.0),
+            scroll_y: crate::scroll::ScrollState::new(15.0),
+            review_message_scroll_y: crate::scroll::ScrollState::new(15.0),
+            review_message_max_scroll: std::cell::Cell::new(0.0),
+            column_widths: Vec::new(),
+            column_resize: None,
+            selected_row: None,
+            selected_column: None,
+        }
+    }
+}
+
+impl PartialEq for DatabaseQueryResultViewState {
+    fn eq(&self, other: &Self) -> bool {
+        self.active_result == other.active_result
+            && self.preferred_height.to_bits() == other.preferred_height.to_bits()
+            && self.is_resizing_height == other.is_resizing_height
+            && self.scroll_x.current.to_bits() == other.scroll_x.current.to_bits()
+            && self.scroll_x.target.to_bits() == other.scroll_x.target.to_bits()
+            && self.scroll_y.current.to_bits() == other.scroll_y.current.to_bits()
+            && self.scroll_y.target.to_bits() == other.scroll_y.target.to_bits()
+            && self.review_message_scroll_y.current.to_bits()
+                == other.review_message_scroll_y.current.to_bits()
+            && self.review_message_scroll_y.target.to_bits()
+                == other.review_message_scroll_y.target.to_bits()
+            && self.review_message_max_scroll.get().to_bits()
+                == other.review_message_max_scroll.get().to_bits()
+            && self.column_widths == other.column_widths
+            && self.column_resize == other.column_resize
+            && self.selected_row == other.selected_row
+            && self.selected_column == other.selected_column
+    }
+}
+
+impl Eq for DatabaseQueryResultViewState {}
+
+impl DatabaseQueryResultViewState {
+    pub fn reset_scroll(&mut self) {
+        self.scroll_x.current = 0.0;
+        self.scroll_x.target = 0.0;
+        self.scroll_x.velocity = 0.0;
+        self.scroll_y.current = 0.0;
+        self.scroll_y.target = 0.0;
+        self.scroll_y.velocity = 0.0;
+        self.review_message_scroll_y.current = 0.0;
+        self.review_message_scroll_y.target = 0.0;
+        self.review_message_scroll_y.velocity = 0.0;
+        self.review_message_max_scroll.set(0.0);
+    }
+}
+
+pub fn database_query_history_preview_lines(sql: &str) -> usize {
+    sql.lines().take(20).count().max(1)
+}
+
+pub fn database_query_history_is_truncated(sql: &str) -> bool {
+    sql.lines().nth(20).is_some()
+}
+
+pub fn database_query_history_entry_height(sql: &str) -> f32 {
+    let lines = database_query_history_preview_lines(sql) as f32;
+    30.0 + lines * 20.0 + if database_query_history_is_truncated(sql) { 18.0 } else { 0.0 }
+}
+
+/// Returns horizontal and vertical scroll limits for the shared query result viewport.
+pub fn database_query_scroll_limits(
+    meta: &DatabaseQueryTabMeta,
+    state: &DatabaseQueryTabState,
+    history: &[DatabaseQueryHistoryEntry],
+    viewport_width: f32,
+    viewport_height: f32,
+    scale: f32,
+) -> (f32, f32) {
+    if state.history_open {
+        let content_height = history
+            .iter()
+            .filter(|entry| {
+                entry.connection_id == meta.connection_id
+                    && entry.database_name == meta.database_name
+            })
+            .map(|entry| database_query_history_entry_height(&entry.sql) * scale)
+            .sum::<f32>();
+        return (0.0, (content_height - viewport_height).max(0.0));
+    }
+    if let Some(result) = state.results.get(state.result_view.active_result) {
+        let content_width = super::database_columns_content_width(
+            &state.result_view.column_widths,
+            result.columns.iter().map(String::as_str),
+        ) * scale;
+        let row_height = super::DATABASE_GRID_ROW_HEIGHT * scale;
+        return (
+            (content_width - viewport_width).max(0.0),
+            super::database_grid_max_scroll(result.rows.len(), row_height, viewport_height),
+        );
+    }
+    (0.0, 0.0)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,11 +323,10 @@ pub struct DatabaseQueryReviewState {
     pub sql: String,
     pub source_offset: usize,
     pub started_unix_ms: u128,
-    pub result_sets: Vec<DatabaseQueryResultSet>,
-    pub messages: Vec<DatabaseQueryMessage>,
     pub deadline_unix_ms: u128,
     pub duration_ms: u64,
-    pub affected_rows: u64,
+    pub returned_rows: u64,
+    pub changed_rows: u64,
     pub mode: DatabaseQueryMode,
 }
 
@@ -202,6 +338,9 @@ pub struct DatabaseQueryTabState {
     pub error: Option<String>,
     pub diagnostic: Option<DatabaseQueryDiagnostic>,
     pub diagnostic_editor_version: Option<u64>,
+    pub editor_diagnostics: Vec<crate::lsp::Diagnostic>,
+    pub analysis: SqlAnalysis,
+    pub analysis_editor_version: Option<u64>,
     pub results: Vec<DatabaseQueryResultSet>,
     pub messages: Vec<DatabaseQueryMessage>,
     pub result_view: DatabaseQueryResultViewState,
@@ -211,7 +350,8 @@ pub struct DatabaseQueryTabState {
     pub history_open: bool,
     pub history_selected: usize,
     pub last_duration_ms: u64,
-    pub last_affected_rows: u64,
+    pub last_returned_rows: u64,
+    pub last_changed_rows: u64,
 }
 
 impl DatabaseQueryTabState {
@@ -254,8 +394,38 @@ impl DatabaseQueryTabState {
 pub struct DatabasePreparedQueryTransaction {
     pub result_sets: Vec<DatabaseQueryResultSet>,
     pub messages: Vec<DatabaseQueryMessage>,
-    pub affected_rows: u64,
+    pub effects: SqlExecutionEffects,
     pub mode: DatabaseQueryMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SqlExecutionEffects {
+    pub returned_rows: u64,
+    pub changed_rows: u64,
+    pub has_definition: bool,
+    pub has_other_effect: bool,
+}
+
+impl SqlExecutionEffects {
+    pub fn requires_review(self) -> bool {
+        self.changed_rows > 0 || self.has_definition || self.has_other_effect
+    }
+
+    fn record_command(&mut self, kind: crate::languages::sql::SqlStatementKind, rows: u64) {
+        match kind {
+            crate::languages::sql::SqlStatementKind::Query
+            | crate::languages::sql::SqlStatementKind::Explain => {}
+            crate::languages::sql::SqlStatementKind::Mutation => {
+                self.changed_rows = self.changed_rows.saturating_add(rows);
+            }
+            crate::languages::sql::SqlStatementKind::Definition => {
+                self.has_definition = true;
+            }
+            crate::languages::sql::SqlStatementKind::Other => {
+                self.has_other_effect = true;
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -317,86 +487,438 @@ pub fn format_database_sql(sql: &str) -> Result<String, String> {
     format_sql_conservative(sql)
 }
 
-pub fn completion_words(
+pub fn analyze_database_query_sql(
+    metadata: &DatabaseQueryCompletionMetadata,
+    sql: &str,
+) -> SqlAnalysis {
+    let mut analysis = analyze_sql(sql);
+    if !metadata.tables.is_empty() || !metadata.columns.is_empty() {
+        analysis
+            .diagnostics
+            .extend(database_query_semantic_diagnostics(metadata, &analysis));
+    }
+    analysis.diagnostics.sort_by(|left, right| {
+        left.range
+            .start
+            .cmp(&right.range.start)
+            .then(left.range.end.cmp(&right.range.end))
+            .then(left.code.cmp(right.code))
+    });
+    analysis.diagnostics.dedup_by(|left, right| {
+        left.range == right.range && left.code == right.code && left.message == right.message
+    });
+    analysis
+}
+
+pub fn database_query_editor_diagnostics(
+    analysis: &SqlAnalysis,
+    backend: Option<&DatabaseQueryDiagnostic>,
+    text: &str,
+    line_offsets: &[usize],
+) -> Vec<crate::lsp::Diagnostic> {
+    let mut diagnostics = Vec::with_capacity(
+        analysis
+            .diagnostics
+            .len()
+            .saturating_add(usize::from(backend.is_some())),
+    );
+    for diagnostic in &analysis.diagnostics {
+        diagnostics.push(editor_diagnostic(
+            diagnostic.range.start,
+            diagnostic.range.end,
+            match diagnostic.severity {
+                SqlDiagnosticSeverity::Error => crate::lsp::DiagSeverity::Error,
+                SqlDiagnosticSeverity::Warning => crate::lsp::DiagSeverity::Warning,
+            },
+            Some(diagnostic.code),
+            "RRiter SQL",
+            diagnostic.message.clone(),
+            text,
+            line_offsets,
+        ));
+    }
+    if let Some(diagnostic) = backend {
+        let mut message = diagnostic.message.clone();
+        if let Some(detail) = diagnostic.detail.as_deref() {
+            message.push_str("\n\n");
+            message.push_str(detail);
+        }
+        if let Some(hint) = diagnostic.hint.as_deref() {
+            message.push_str("\n\nПодсказка: ");
+            message.push_str(hint);
+        }
+        diagnostics.push(editor_diagnostic(
+            diagnostic.start_byte,
+            diagnostic.end_byte,
+            crate::lsp::DiagSeverity::Error,
+            diagnostic.sqlstate.as_deref(),
+            "PostgreSQL",
+            message,
+            text,
+            line_offsets,
+        ));
+    }
+    diagnostics.sort_by(|left, right| {
+        left.start_line
+            .cmp(&right.start_line)
+            .then(left.start_col.cmp(&right.start_col))
+            .then_with(|| diagnostic_severity_rank(left.severity).cmp(&diagnostic_severity_rank(right.severity)))
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.code.cmp(&right.code))
+    });
+    diagnostics
+}
+
+pub fn next_database_query_diagnostic_offset(
+    diagnostics: &[crate::lsp::Diagnostic],
+    text: &str,
+    cursor: usize,
+) -> Option<usize> {
+    let first = diagnostics.first().map(|diagnostic| {
+        crate::lsp::lsp_pos_to_offset(text, diagnostic.start_line, diagnostic.start_col)
+    })?;
+    diagnostics
+        .iter()
+        .map(|diagnostic| {
+            crate::lsp::lsp_pos_to_offset(text, diagnostic.start_line, diagnostic.start_col)
+        })
+        .find(|&offset| offset > cursor)
+        .or(Some(first))
+}
+
+fn diagnostic_severity_rank(severity: crate::lsp::DiagSeverity) -> u8 {
+    match severity {
+        crate::lsp::DiagSeverity::Error => 0,
+        crate::lsp::DiagSeverity::Warning => 1,
+        crate::lsp::DiagSeverity::Info => 2,
+        crate::lsp::DiagSeverity::Hint => 3,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn editor_diagnostic(
+    start: usize,
+    end: usize,
+    severity: crate::lsp::DiagSeverity,
+    code: Option<&str>,
+    source: &str,
+    message: String,
+    text: &str,
+    line_offsets: &[usize],
+) -> crate::lsp::Diagnostic {
+    let (start, end) = normalized_diagnostic_range(text, start, end);
+    let (start_line, start_col) = crate::lsp::offset_to_lsp_pos(text, start, line_offsets);
+    let (end_line, end_col) = crate::lsp::offset_to_lsp_pos(text, end, line_offsets);
+    crate::lsp::Diagnostic {
+        start_line,
+        start_col,
+        end_line,
+        end_col,
+        severity,
+        code: code.map(std::sync::Arc::<str>::from),
+        code_href: None,
+        message: std::sync::Arc::<str>::from(message),
+        source: Some(std::sync::Arc::<str>::from(source)),
+        quickfixes: Box::new([]),
+        tags: Box::new([]),
+    }
+}
+
+fn normalized_diagnostic_range(text: &str, start: usize, end: usize) -> (usize, usize) {
+    let mut start = start.min(text.len());
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = end.min(text.len()).max(start);
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    (start, end.max(start))
+}
+
+pub fn database_query_completion_context(sql: &str, cursor: usize) -> SqlCompletionContext {
+    completion_context(sql, cursor)
+}
+
+pub fn completion_recovery_analysis(
     metadata: &DatabaseQueryCompletionMetadata,
     sql: &str,
     cursor: usize,
+    context: &SqlCompletionContext,
+    analysis: &SqlAnalysis,
+) -> Option<SqlAnalysis> {
+    if context.kind != SqlCompletionKind::QualifiedColumn {
+        return None;
+    }
+    let qualifier = context.qualifier.as_deref()?;
+    if relation_for_qualifier(analysis, cursor, qualifier).is_some() {
+        return None;
+    }
+    let range = context.replace_range.clone();
+    if range.start > range.end || range.end > sql.len() {
+        return None;
+    }
+    let mut repaired = String::with_capacity(sql.len() + 24);
+    repaired.push_str(sql.get(..range.start)?);
+    repaired.push_str("__rriter_completion");
+    repaired.push_str(sql.get(range.end..)?);
+    Some(analyze_database_query_sql(metadata, &repaired))
+}
+
+pub fn completion_words_for_context(
+    metadata: &DatabaseQueryCompletionMetadata,
+    analysis: &SqlAnalysis,
+    context: &SqlCompletionContext,
+    cursor: usize,
 ) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    for table in &metadata.tables {
-        out.push((table.clone(), "table".to_string()));
-    }
-    let aliases = sql_aliases(sql);
-    let prefix = dotted_prefix(sql, cursor);
-    for column in &metadata.columns {
-        let include = match prefix.as_deref() {
-            Some(owner) => owner == column.table_name || aliases.get(owner) == Some(&column.table_name),
-            None => true,
-        };
-        if include {
-            out.push((column.column_name.clone(), format!("{} · {}", column.table_name, column.data_type)));
+    let visible_relations = analysis
+        .relations
+        .iter()
+        .filter(|relation| relation.scope.start <= cursor && cursor <= relation.scope.end)
+        .collect::<Vec<_>>();
+
+    match context.kind {
+        SqlCompletionKind::None => {}
+        SqlCompletionKind::Table => {
+            for table in &metadata.tables {
+                out.push((quote_completion_identifier(table), "table".to_string()));
+            }
+            for (scope, cte) in &analysis.ctes {
+                if scope.start <= cursor && cursor <= scope.end {
+                    out.push((quote_completion_identifier(cte), "CTE".to_string()));
+                }
+            }
+        }
+        SqlCompletionKind::QualifiedColumn => {
+            if let Some(qualifier) = context.qualifier.as_deref()
+                && let Some(relation) = relation_for_qualifier(analysis, cursor, qualifier)
+            {
+                for column in metadata
+                    .columns
+                    .iter()
+                    .filter(|column| column.table_name.eq_ignore_ascii_case(&relation.table_name))
+                {
+                    out.push((
+                        quote_completion_identifier(&column.column_name),
+                        format!("{} · {}", relation.alias, column.data_type),
+                    ));
+                }
+                out.push(("*".to_string(), format!("{} · все столбцы", relation.alias)));
+            }
+        }
+        SqlCompletionKind::Column => {
+            let visible_tables = visible_relations
+                .iter()
+                .map(|relation| relation.table_name.to_ascii_lowercase())
+                .collect::<std::collections::BTreeSet<_>>();
+            for column in &metadata.columns {
+                if visible_tables.is_empty()
+                    || visible_tables.contains(&column.table_name.to_ascii_lowercase())
+                {
+                    out.push((
+                        quote_completion_identifier(&column.column_name),
+                        format!("{} · {}", column.table_name, column.data_type),
+                    ));
+                }
+            }
+            for alias in output_aliases_at(analysis, cursor) {
+                out.push((quote_completion_identifier(alias), "alias SELECT".to_string()));
+            }
+            for function in &metadata.functions {
+                out.push((function.clone(), "function".to_string()));
+            }
+        }
+        SqlCompletionKind::Operator => {
+            for operator in &metadata.operators {
+                out.push((operator.clone(), "operator".to_string()));
+            }
+            for operator in ["=", "<>", "!=", "<", ">", "<=", ">=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"] {
+                out.push((operator.to_string(), "operator".to_string()));
+            }
+        }
+        SqlCompletionKind::Value => {
+            for value in &metadata.enum_values {
+                out.push((format!("'{}'", value.replace('\'', "''")), "enum".to_string()));
+            }
+            for value in ["TRUE", "FALSE", "NULL", "CURRENT_DATE", "CURRENT_TIMESTAMP"] {
+                out.push((value.to_string(), "value".to_string()));
+            }
+        }
+        SqlCompletionKind::Direction => {
+            for value in ["ASC", "DESC"] {
+                out.push((value.to_string(), "ORDER BY".to_string()));
+            }
+        }
+        SqlCompletionKind::NullOrdering => {
+            for value in ["NULLS FIRST", "NULLS LAST"] {
+                out.push((value.to_string(), "ORDER BY".to_string()));
+            }
+        }
+        SqlCompletionKind::Keyword => {
+            for keyword in crate::languages::sql::SQL_KEYWORDS {
+                out.push(((*keyword).to_string(), "SQL".to_string()));
+            }
         }
     }
-    for value in &metadata.enum_values {
-        out.push((value.clone(), "enum".to_string()));
+
+    let prefix = context.prefix.to_ascii_lowercase();
+    if !prefix.is_empty() {
+        out.retain(|(word, _)| {
+            let candidate = word.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            candidate.contains(&prefix)
+        });
     }
-    for function in &metadata.functions {
-        out.push((function.clone(), "function".to_string()));
-    }
-    for operator in &metadata.operators {
-        out.push((operator.clone(), "operator".to_string()));
-    }
-    for keyword in ["RETURNING", "ON CONFLICT", "DO UPDATE", "DO NOTHING", "ARRAY", "ANY", "ALL"] {
-        out.push((keyword.to_string(), "PostgreSQL".to_string()));
-    }
-    out.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    out.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    out.sort_unstable_by(|left, right| {
+        completion_rank(&left.0, &prefix)
+            .cmp(&completion_rank(&right.0, &prefix))
+            .then_with(|| left.0.to_ascii_lowercase().cmp(&right.0.to_ascii_lowercase()))
+            .then_with(|| left.1.cmp(&right.1))
+    });
+    out.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
     out
 }
 
-fn sql_aliases(sql: &str) -> std::collections::BTreeMap<String, String> {
-    let words = sql
-        .split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '.'))
-        .filter(|word| !word.is_empty())
-        .collect::<Vec<_>>();
-    let mut aliases = std::collections::BTreeMap::new();
-    let mut idx = 0usize;
-    while idx + 2 < words.len() {
-        if words[idx].eq_ignore_ascii_case("from") || words[idx].eq_ignore_ascii_case("join") {
-            let table = words[idx + 1].rsplit('.').next().unwrap_or(words[idx + 1]);
-            let mut alias_idx = idx + 2;
-            if words[alias_idx].eq_ignore_ascii_case("as") && alias_idx + 1 < words.len() {
-                alias_idx += 1;
-            }
-            let alias = words[alias_idx];
-            if !is_sql_clause(alias) {
-                aliases.insert(alias.to_string(), table.to_string());
-            }
+fn completion_rank(candidate: &str, prefix: &str) -> u8 {
+    if prefix.is_empty() {
+        return 0;
+    }
+    let candidate = candidate.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+    if candidate == prefix {
+        0
+    } else if candidate.starts_with(prefix) {
+        1
+    } else {
+        2
+    }
+}
+
+fn quote_completion_identifier(identifier: &str) -> String {
+    let mut chars = identifier.chars();
+    let simple = chars
+        .next()
+        .is_some_and(|first| first == '_' || first.is_ascii_lowercase())
+        && chars.all(|ch| ch == '_' || ch.is_ascii_lowercase() || ch.is_ascii_digit());
+    if simple && !crate::languages::sql::SQL_KEYWORDS
+        .iter()
+        .any(|keyword| keyword.eq_ignore_ascii_case(identifier))
+    {
+        identifier.to_string()
+    } else {
+        format!("\"{}\"", identifier.replace('"', "\"\""))
+    }
+}
+
+fn database_query_semantic_diagnostics(
+    metadata: &DatabaseQueryCompletionMetadata,
+    analysis: &SqlAnalysis,
+) -> Vec<SqlAnalysisDiagnostic> {
+    let known_tables = metadata
+        .tables
+        .iter()
+        .map(|table| table.to_ascii_lowercase())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut diagnostics = Vec::new();
+    for relation in &analysis.relations {
+        if relation.is_cte || relation.schema.as_deref().is_some_and(|schema| !schema.eq_ignore_ascii_case("public")) {
+            continue;
         }
-        idx += 1;
+        if !known_tables.contains(&relation.table_name.to_ascii_lowercase()) {
+            diagnostics.push(SqlAnalysisDiagnostic {
+                range: relation.source_range.clone(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL202",
+                message: format!("Таблица «{}» не найдена в public schema", relation.table_name),
+            });
+        }
     }
-    aliases
+    for reference in &analysis.qualified_references {
+        let Some(relation) = relation_for_qualifier(analysis, reference.range.start, &reference.qualifier) else {
+            diagnostics.push(SqlAnalysisDiagnostic {
+                range: reference.range.clone(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL203",
+                message: format!("Неизвестный псевдоним таблицы «{}»", reference.qualifier),
+            });
+            continue;
+        };
+        if relation.is_cte || reference.name == "*" {
+            continue;
+        }
+        if !metadata.columns.iter().any(|column| {
+            column.table_name.eq_ignore_ascii_case(&relation.table_name)
+                && column.column_name.eq_ignore_ascii_case(&reference.name)
+        }) {
+            diagnostics.push(SqlAnalysisDiagnostic {
+                range: reference.range.clone(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL204",
+                message: format!(
+                    "Столбец «{}.{}» не найден в таблице «{}»",
+                    reference.qualifier, reference.name, relation.table_name
+                ),
+            });
+        }
+    }
+    for reference in &analysis.unqualified_references {
+        if output_aliases_at(analysis, reference.range.start)
+            .any(|alias| alias.eq_ignore_ascii_case(&reference.name))
+        {
+            continue;
+        }
+        let visible_relations = analysis
+            .relations
+            .iter()
+            .filter(|relation| {
+                relation.scope == reference.scope
+                    && !relation.is_cte
+                    && relation.schema.as_deref().is_none_or(|schema| schema.eq_ignore_ascii_case("public"))
+            })
+            .collect::<Vec<_>>();
+        if visible_relations.is_empty() {
+            continue;
+        }
+        let matching_tables = visible_relations
+            .iter()
+            .filter(|relation| {
+                metadata.columns.iter().any(|column| {
+                    column.table_name.eq_ignore_ascii_case(&relation.table_name)
+                        && column.column_name.eq_ignore_ascii_case(&reference.name)
+                })
+            })
+            .map(|relation| relation.table_name.to_ascii_lowercase())
+            .collect::<std::collections::BTreeSet<_>>();
+        if matching_tables.is_empty() {
+            diagnostics.push(SqlAnalysisDiagnostic {
+                range: reference.range.clone(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL205",
+                message: format!("Столбец «{}» не найден в таблицах текущего SQL-блока", reference.name),
+            });
+        } else if matching_tables.len() > 1 {
+            diagnostics.push(SqlAnalysisDiagnostic {
+                range: reference.range.clone(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL206",
+                message: format!(
+                    "Столбец «{}» неоднозначен; укажите псевдоним таблицы",
+                    reference.name
+                ),
+            });
+        }
+    }
+    diagnostics
 }
 
-fn is_sql_clause(word: &str) -> bool {
-    matches!(word.to_ascii_uppercase().as_str(), "WHERE" | "JOIN" | "LEFT" | "RIGHT" | "FULL" | "INNER" | "ORDER" | "GROUP" | "LIMIT" | "OFFSET" | "RETURNING" | "ON")
+pub fn analysis_error_ranges(analysis: &SqlAnalysis) -> Vec<(usize, usize)> {
+    analysis
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == SqlDiagnosticSeverity::Error)
+        .map(|diagnostic| (diagnostic.range.start, diagnostic.range.end))
+        .collect()
 }
 
-fn dotted_prefix(sql: &str, cursor: usize) -> Option<String> {
-    let bytes = sql.as_bytes();
-    let mut end = cursor.min(bytes.len());
-    while end > 0 && bytes[end - 1].is_ascii_whitespace() {
-        end -= 1;
-    }
-    if end == 0 || bytes[end - 1] != b'.' {
-        return None;
-    }
-    let mut start = end - 1;
-    while start > 0 && (bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'_') {
-        start -= 1;
-    }
-    sql.get(start..end - 1).filter(|value| !value.is_empty()).map(str::to_string)
-}
 
 pub async fn load_query_completion_metadata(
     connection: &DatabaseConnectionConfig,
@@ -507,9 +1029,9 @@ pub async fn begin_user_query_transaction(
         diagnostic: diagnostic_from_error(&error, sql, source_offset),
         error: DatabaseBackendError::Postgres(error),
     })?;
-    let result = execute_simple_query(&session, &execution.text, settings).await;
+    let result = execute_simple_query(&session, &execution.text, &statements, settings).await;
     match result {
-        Ok((result_sets, affected_rows)) => {
+        Ok((result_sets, effects)) => {
             let messages = session
                 .drain_server_notices()
                 .into_iter()
@@ -518,7 +1040,7 @@ pub async fn begin_user_query_transaction(
             Ok((session, DatabasePreparedQueryTransaction {
                 result_sets,
                 messages,
-                affected_rows,
+                effects,
                 mode,
             }))
         }
@@ -554,15 +1076,17 @@ pub async fn finish_user_query_transaction(
 async fn execute_simple_query(
     session: &PostgresSession,
     sql: &str,
+    statements: &[SqlStatement],
     settings: &DatabaseSettings,
-) -> Result<(Vec<DatabaseQueryResultSet>, u64), DatabaseBackendError> {
+) -> Result<(Vec<DatabaseQueryResultSet>, SqlExecutionEffects), DatabaseBackendError> {
     let stream = session.client.simple_query_raw(sql).await?;
     tokio::pin!(stream);
     let mut result_sets = Vec::new();
     let mut current: Option<DatabaseQueryResultSet> = None;
     let mut total_rows = 0usize;
     let mut total_bytes = 0usize;
-    let mut total_affected = 0u64;
+    let mut effects = SqlExecutionEffects::default();
+    let mut statement_index = 0usize;
     while let Some(message) = stream.as_mut().try_next().await? {
         match message {
             SimpleQueryMessage::RowDescription(columns) => {
@@ -573,7 +1097,7 @@ async fn execute_simple_query(
                     return Err(DatabaseBackendError::LimitExceeded("result has more than 512 columns"));
                 }
                 current = Some(DatabaseQueryResultSet {
-                    title: format!("Result {}", result_sets.len() + 1),
+                    title: format!("Результат {}", result_sets.len() + 1),
                     columns: columns.iter().map(|column| column.name().to_string()).collect(),
                     ..DatabaseQueryResultSet::default()
                 });
@@ -584,7 +1108,7 @@ async fn execute_simple_query(
                     return Err(DatabaseBackendError::LimitExceeded("query result exceeds configured row limit"));
                 }
                 let result = current.get_or_insert_with(|| DatabaseQueryResultSet {
-                    title: format!("Result {}", result_sets.len() + 1),
+                    title: format!("Результат {}", result_sets.len() + 1),
                     columns: row.columns().iter().map(|column| column.name().to_string()).collect(),
                     ..DatabaseQueryResultSet::default()
                 });
@@ -600,17 +1124,40 @@ async fn execute_simple_query(
                 result.rows.push(values);
             }
             SimpleQueryMessage::CommandComplete(affected) => {
-                total_affected = total_affected.saturating_add(affected);
+                let statement = statements.get(statement_index);
+                let kind = statement.map_or(
+                    crate::languages::sql::SqlStatementKind::Other,
+                    |statement| statement.kind,
+                );
+                let command_kind = command_kind(sql, statement);
+                statement_index = statement_index.saturating_add(1);
+                effects.record_command(kind, affected);
                 if let Some(mut result) = current.take() {
-                    result.affected_rows = affected;
-                    result.command_tag = format!("{} rows", affected);
+                    result.returned_rows = result.rows.len() as u64;
+                    effects.returned_rows = effects
+                        .returned_rows
+                        .saturating_add(result.returned_rows);
+                    result.affected_rows = if kind
+                        == crate::languages::sql::SqlStatementKind::Mutation
+                    {
+                        affected
+                    } else {
+                        0
+                    };
+                    result.command_kind = command_kind.clone();
                     push_result(&mut result_sets, result)?;
                 } else {
-                    let title = format!("Result {}", result_sets.len() + 1);
+                    let title = format!("Результат {}", result_sets.len() + 1);
                     push_result(&mut result_sets, DatabaseQueryResultSet {
                         title,
-                        command_tag: format!("Command complete · {} rows", affected),
-                        affected_rows: affected,
+                        command_kind,
+                        affected_rows: if kind
+                            == crate::languages::sql::SqlStatementKind::Mutation
+                        {
+                            affected
+                        } else {
+                            0
+                        },
                         ..DatabaseQueryResultSet::default()
                     })?;
                 }
@@ -619,9 +1166,38 @@ async fn execute_simple_query(
         }
     }
     if let Some(result) = current.take() {
+        effects.returned_rows = effects
+            .returned_rows
+            .saturating_add(result.rows.len() as u64);
         push_result(&mut result_sets, result)?;
     }
-    Ok((result_sets, total_affected))
+    Ok((result_sets, effects))
+}
+
+fn command_kind(sql: &str, statement: Option<&SqlStatement>) -> String {
+    let Some(statement) = statement else {
+        return "COMMAND".to_string();
+    };
+    let keyword = sql
+        .get(statement.range.clone())
+        .and_then(|statement_sql| {
+            statement_sql
+                .split(|ch: char| !ch.is_ascii_alphabetic())
+                .find(|part| !part.is_empty())
+        })
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    match statement.kind {
+        crate::languages::sql::SqlStatementKind::Query => {
+            if keyword == "WITH" { "SELECT".to_string() } else { keyword }
+        }
+        crate::languages::sql::SqlStatementKind::Mutation
+        | crate::languages::sql::SqlStatementKind::Definition
+        | crate::languages::sql::SqlStatementKind::Explain => keyword,
+        crate::languages::sql::SqlStatementKind::Other => {
+            if keyword.is_empty() { "COMMAND".to_string() } else { keyword }
+        }
+    }
 }
 
 fn push_result(
@@ -823,6 +1399,24 @@ mod tests {
         assert_eq!(postgres_character_to_byte("Жx", 2), 3);
     }
 
+    fn completion_for(
+        metadata: &DatabaseQueryCompletionMetadata,
+        sql: &str,
+        cursor: usize,
+    ) -> Vec<(String, String)> {
+        let context = database_query_completion_context(sql, cursor);
+        let base = analyze_database_query_sql(metadata, sql);
+        let analysis = completion_recovery_analysis(
+            metadata,
+            sql,
+            cursor,
+            &context,
+            &base,
+        )
+        .unwrap_or(base);
+        completion_words_for_context(metadata, &analysis, &context, cursor)
+    }
+
     #[test]
     fn completion_resolves_alias_columns() {
         let metadata = DatabaseQueryCompletionMetadata {
@@ -834,8 +1428,222 @@ mod tests {
             }],
             ..DatabaseQueryCompletionMetadata::default()
         };
-        let words = completion_words(&metadata, "select u. from users as u", 9);
+        let words = completion_for(&metadata, "select u. from users as u", 9);
         assert!(words.iter().any(|(word, _)| word == "email"));
+    }
+
+    #[test]
+    fn completion_filters_alias_columns_by_prefix_and_table_metadata() {
+        let metadata = DatabaseQueryCompletionMetadata {
+            tables: vec!["booking".to_string(), "car_wash".to_string()],
+            columns: vec![
+                DatabaseQueryCompletionColumn {
+                    table_name: "booking".to_string(),
+                    column_name: "car_wash_id".to_string(),
+                    data_type: "bigint".to_string(),
+                },
+                DatabaseQueryCompletionColumn {
+                    table_name: "booking".to_string(),
+                    column_name: "customer_id".to_string(),
+                    data_type: "bigint".to_string(),
+                },
+                DatabaseQueryCompletionColumn {
+                    table_name: "car_wash".to_string(),
+                    column_name: "capacity".to_string(),
+                    data_type: "integer".to_string(),
+                },
+            ],
+            ..DatabaseQueryCompletionMetadata::default()
+        };
+        let sql = "SELECT b.ca FROM booking AS b";
+        let words = completion_for(&metadata, sql, "SELECT b.ca".len());
+        assert!(words.iter().any(|(word, _)| word == "car_wash_id"));
+        assert!(!words.iter().any(|(word, detail)| {
+            word == "capacity" || detail.starts_with("car_wash ·")
+        }));
+    }
+
+    #[test]
+    fn execution_effects_keep_returned_and_changed_rows_separate() {
+        let mut effects = SqlExecutionEffects {
+            returned_rows: 100,
+            ..SqlExecutionEffects::default()
+        };
+        effects.record_command(crate::languages::sql::SqlStatementKind::Query, 100);
+        assert_eq!(effects.returned_rows, 100);
+        assert_eq!(effects.changed_rows, 0);
+        assert!(!effects.requires_review());
+
+        effects.record_command(crate::languages::sql::SqlStatementKind::Mutation, 0);
+        assert!(!effects.requires_review());
+        effects.record_command(crate::languages::sql::SqlStatementKind::Mutation, 1);
+        assert_eq!(effects.changed_rows, 1);
+        assert!(effects.requires_review());
+    }
+
+    #[test]
+    fn definition_requires_review_without_changed_rows() {
+        let mut effects = SqlExecutionEffects::default();
+        effects.record_command(crate::languages::sql::SqlStatementKind::Definition, 0);
+        assert_eq!(effects.changed_rows, 0);
+        assert!(effects.requires_review());
+    }
+
+    #[test]
+    fn sql_analysis_diagnostics_use_standard_editor_diagnostic_shape() {
+        let text = "SELECT * FROM";
+        let analysis = SqlAnalysis {
+            diagnostics: vec![SqlAnalysisDiagnostic {
+                range: text.len()..text.len(),
+                severity: SqlDiagnosticSeverity::Error,
+                code: "SQL001",
+                message: "Ожидалось имя таблицы".to_string(),
+            }],
+            ..SqlAnalysis::default()
+        };
+        let diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &[0],
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code.as_deref(), Some("SQL001"));
+        assert_eq!(diagnostic.source.as_deref(), Some("RRiter SQL"));
+        assert_eq!(diagnostic.severity, crate::lsp::DiagSeverity::Error);
+        assert_eq!(diagnostic.start_line, diagnostic.end_line);
+        assert_eq!(diagnostic.start_col, diagnostic.end_col);
+    }
+
+    #[test]
+    fn postgres_diagnostics_keep_source_code_and_details() {
+        let text = "SELECT Ж";
+        let backend = DatabaseQueryDiagnostic {
+            start_byte: "SELECT ".len(),
+            end_byte: "SELECT Ж".len(),
+            message: "syntax error".to_string(),
+            detail: Some("detail".to_string()),
+            hint: Some("hint".to_string()),
+            sqlstate: Some("42601".to_string()),
+        };
+        let diagnostics = database_query_editor_diagnostics(
+            &SqlAnalysis::default(),
+            Some(&backend),
+            text,
+            &[0],
+        );
+
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.code.as_deref(), Some("42601"));
+        assert_eq!(diagnostic.source.as_deref(), Some("PostgreSQL"));
+        assert!(diagnostic.message.contains("detail"));
+        assert!(diagnostic.message.contains("Подсказка: hint"));
+    }
+
+    #[test]
+    fn next_sql_diagnostic_wraps_after_last_range() {
+        let text = "SELECT one;\nSELECT two;";
+        let analysis = SqlAnalysis {
+            diagnostics: vec![
+                SqlAnalysisDiagnostic {
+                    range: 7..10,
+                    severity: SqlDiagnosticSeverity::Error,
+                    code: "SQL001",
+                    message: "one".to_string(),
+                },
+                SqlAnalysisDiagnostic {
+                    range: 19..22,
+                    severity: SqlDiagnosticSeverity::Warning,
+                    code: "SQL002",
+                    message: "two".to_string(),
+                },
+            ],
+            ..SqlAnalysis::default()
+        };
+        let diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &[0, 12],
+        );
+
+        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 0), Some(7));
+        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 7), Some(19));
+        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 22), Some(7));
+    }
+
+    #[test]
+    fn semantic_analysis_reports_unknown_and_ambiguous_columns() {
+        let metadata = DatabaseQueryCompletionMetadata {
+            tables: vec!["booking".to_string(), "car_wash".to_string()],
+            columns: vec![
+                DatabaseQueryCompletionColumn {
+                    table_name: "booking".to_string(),
+                    column_name: "id".to_string(),
+                    data_type: "bigint".to_string(),
+                },
+                DatabaseQueryCompletionColumn {
+                    table_name: "car_wash".to_string(),
+                    column_name: "id".to_string(),
+                    data_type: "bigint".to_string(),
+                },
+            ],
+            ..DatabaseQueryCompletionMetadata::default()
+        };
+        let analysis = analyze_database_query_sql(
+            &metadata,
+            "SELECT id, b.missing, x.id FROM booking b JOIN car_wash cw ON cw.id = b.id",
+        );
+        for code in ["SQL204", "SQL203", "SQL206"] {
+            assert!(
+                analysis.diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                "missing {code}: {:?}",
+                analysis.diagnostics
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_analysis_reports_unknown_public_table_but_allows_cte() {
+        let metadata = DatabaseQueryCompletionMetadata {
+            tables: vec!["booking".to_string()],
+            columns: vec![DatabaseQueryCompletionColumn {
+                table_name: "booking".to_string(),
+                column_name: "id".to_string(),
+                data_type: "bigint".to_string(),
+            }],
+            ..DatabaseQueryCompletionMetadata::default()
+        };
+        let unknown = analyze_database_query_sql(&metadata, "SELECT x.id FROM missing x");
+        assert!(unknown.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL202"));
+
+        let cte = analyze_database_query_sql(
+            &metadata,
+            "WITH recent AS (SELECT id FROM booking) SELECT r.id FROM recent r",
+        );
+        assert!(!cte.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL202"));
+    }
+
+    #[test]
+    fn query_result_height_clamps_to_editor_and_panel_space() {
+        assert_eq!(database_query_results_height(260.0, 900.0, 0.0, 1.0), 260.0);
+        assert_eq!(database_query_results_height(80.0, 900.0, 0.0, 1.0), 140.0);
+        assert_eq!(database_query_results_height(900.0, 900.0, 180.0, 1.0), 500.0);
+        assert_eq!(database_query_results_height(260.0, 600.0, 0.0, 1.5), 270.0);
+    }
+
+    #[test]
+    fn history_preview_is_bounded_to_twenty_lines_and_marks_truncation() {
+        let sql = (1..=21)
+            .map(|line| format!("SELECT {line};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(database_query_history_preview_lines(&sql), 20);
+        assert!(database_query_history_is_truncated(&sql));
+        assert_eq!(sql.lines().take(20).count(), 20);
     }
 
     #[test]
@@ -902,17 +1710,49 @@ SELECT 2;  ";
     }
 
     #[test]
-    fn completion_contains_postgresql_specific_constructs_and_operators() {
+    fn completion_uses_postgresql_metadata_for_the_current_ast_context() {
         let metadata = DatabaseQueryCompletionMetadata {
             enum_values: vec!["active".to_string()],
             functions: vec!["jsonb_set".to_string()],
             operators: vec!["->>".to_string()],
             ..DatabaseQueryCompletionMetadata::default()
         };
-        let words = completion_words(&metadata, "INSERT INTO jobs ", 17);
-        for expected in ["RETURNING", "ON CONFLICT", "ARRAY", "jsonb_set", "->>"] {
-            assert!(words.iter().any(|(word, _)| word == expected), "missing {expected}");
-        }
+        let analysis = SqlAnalysis::default();
+        let base = SqlCompletionContext {
+            replace_range: 0..0,
+            scope: 0..0,
+            ..SqlCompletionContext::default()
+        };
+        let columns = completion_words_for_context(
+            &metadata,
+            &analysis,
+            &SqlCompletionContext {
+                kind: SqlCompletionKind::Column,
+                ..base.clone()
+            },
+            0,
+        );
+        assert!(columns.iter().any(|(word, _)| word == "jsonb_set"));
+        let operators = completion_words_for_context(
+            &metadata,
+            &analysis,
+            &SqlCompletionContext {
+                kind: SqlCompletionKind::Operator,
+                ..base.clone()
+            },
+            0,
+        );
+        assert!(operators.iter().any(|(word, _)| word == "->>"));
+        let values = completion_words_for_context(
+            &metadata,
+            &analysis,
+            &SqlCompletionContext {
+                kind: SqlCompletionKind::Value,
+                ..base
+            },
+            0,
+        );
+        assert!(values.iter().any(|(word, _)| word == "'active'"));
     }
 
     #[test]
@@ -972,10 +1812,10 @@ SELECT 2;  ";
             title: "Result 1".to_string(),
             columns: vec!["value".to_string()],
             rows: vec![vec![DatabaseQueryCell { value: Some("hello".to_string()) }]],
-            command_tag: "SELECT 1".to_string(),
+            command_kind: "SELECT".to_string(),
             ..DatabaseQueryResultSet::default()
         };
-        assert!(result.estimated_bytes() >= "Result 1valuehelloSELECT 1".len());
+        assert!(result.estimated_bytes() >= "Result 1valuehelloSELECT".len());
     }
 
     #[test]
@@ -1012,4 +1852,41 @@ SELECT 2;  ";
             driver.await.unwrap().unwrap();
         });
     }
+
+    #[test]
+    fn command_kind_discards_row_counts_and_keeps_sql_command() {
+        let sql = "SELECT * FROM items; UPDATE items SET value = 1;";
+        let statements = crate::languages::sql::validate_managed_user_sql(sql).unwrap();
+        assert_eq!(command_kind(sql, statements.first()), "SELECT");
+        assert_eq!(command_kind(sql, statements.get(1)), "UPDATE");
+    }
+
+    #[test]
+    fn query_scroll_limits_use_shared_resized_column_widths() {
+        let meta = DatabaseQueryTabMeta {
+            connection_id: DatabaseConnectionId(1),
+            database_name: "postgres".to_string(),
+            console_id: super::super::SqlConsoleId(1),
+            title: "SQL".to_string(),
+        };
+        let mut state = DatabaseQueryTabState::default();
+        state.results.push(DatabaseQueryResultSet {
+            columns: vec!["id".to_string(), "description".to_string()],
+            rows: vec![vec![DatabaseQueryCell::default(), DatabaseQueryCell::default()]],
+            ..DatabaseQueryResultSet::default()
+        });
+        crate::app::database::set_database_column_width(
+            &mut state.result_view.column_widths,
+            "id",
+            80.0,
+        );
+        crate::app::database::set_database_column_width(
+            &mut state.result_view.column_widths,
+            "description",
+            420.0,
+        );
+        let (max_x, _) = database_query_scroll_limits(&meta, &state, &[], 300.0, 200.0, 1.0);
+        assert_eq!(max_x, 200.0);
+    }
+
 }

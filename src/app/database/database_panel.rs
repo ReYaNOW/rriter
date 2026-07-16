@@ -222,6 +222,20 @@ impl DatabaseDialogInput {
         self.cursor += end;
     }
 
+    pub fn replace_range(&mut self, start: usize, end: usize, text: &str, max_bytes: usize) {
+        let start = clamp_to_char_boundary(self.value.as_str(), start.min(self.value.len()));
+        let end = clamp_to_char_boundary(self.value.as_str(), end.min(self.value.len())).max(start);
+        let removed = end.saturating_sub(start);
+        let available = max_bytes.saturating_sub(self.value.len().saturating_sub(removed));
+        let mut insert_end = text.len().min(available);
+        while insert_end > 0 && !text.is_char_boundary(insert_end) {
+            insert_end -= 1;
+        }
+        self.value.replace_range(start..end, &text[..insert_end]);
+        self.cursor = start + insert_end;
+        self.selection_anchor = None;
+    }
+
     pub fn delete_selection(&mut self) -> bool {
         let Some((start, end)) = self.selected_range() else {
             return false;
@@ -441,6 +455,7 @@ pub struct DatabaseConnectionDialog {
     pub jump_config_alias: DatabaseDialogInput,
     pub remember_jump_password: bool,
     pub remember_jump_key_passphrase: bool,
+    pub revealed_secret: Option<DatabaseFormField>,
     pub error: Option<String>,
     pub test_status: Option<String>,
     pub scroll: crate::scroll::ScrollState,
@@ -481,6 +496,7 @@ impl DatabaseConnectionDialog {
             jump_config_alias: DatabaseDialogInput::default(),
             remember_jump_password: false,
             remember_jump_key_passphrase: false,
+            revealed_secret: None,
             error: None,
             test_status: None,
             scroll: crate::scroll::ScrollState::new(15.0),
@@ -615,6 +631,22 @@ impl DatabaseConnectionDialog {
             }
             true
         })
+    }
+
+
+    pub fn toggle_secret_visibility(&mut self, field: DatabaseFormField) {
+        if !field.is_secret() {
+            return;
+        }
+        self.revealed_secret = if self.revealed_secret == Some(field) {
+            None
+        } else {
+            Some(field)
+        };
+    }
+
+    pub fn secret_is_revealed(&self, field: DatabaseFormField) -> bool {
+        self.revealed_secret == Some(field)
     }
 
     pub fn focus_next(&mut self, reverse: bool) {
@@ -764,6 +796,7 @@ pub struct DatabaseContextMenu {
     pub x: f32,
     pub y: f32,
     pub entries: Vec<DatabaseContextAction>,
+    pub opened_at: std::time::Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -836,6 +869,8 @@ pub struct DatabasePanelState {
     pub connections: Vec<DatabaseConnectionNode>,
     pub selected_connection: Option<DatabaseConnectionId>,
     pub selected_database: Option<(DatabaseConnectionId, String)>,
+    pub selected_table: Option<(DatabaseConnectionId, String, String)>,
+    pub last_table_click: Option<((DatabaseConnectionId, String, String), std::time::Instant)>,
     pub scroll: crate::scroll::ScrollState,
     pub dialog: Option<DatabaseConnectionDialog>,
     pub delete_prompt: Option<DatabaseDeletePrompt>,
@@ -843,6 +878,7 @@ pub struct DatabasePanelState {
     pub host_key_prompt: Option<DatabaseHostKeyPrompt>,
     pub host_key_policy_override: Option<super::SshHostKeyPolicy>,
     pub table_modal: Option<DatabaseTableModal>,
+    pub table_modal_input_dragging: bool,
     pub ddl_hover: RefCell<Option<DatabaseDdlHoverState>>,
     pub pending_job: Option<DatabasePendingJob>,
     pub pending_query_mode: Option<super::DatabaseQueryMode>,
@@ -898,6 +934,8 @@ impl DatabasePanelState {
             connections,
             selected_connection,
             selected_database,
+            selected_table: None,
+            last_table_click: None,
             scroll: crate::scroll::ScrollState::new(15.0),
             dialog: None,
             delete_prompt: None,
@@ -905,6 +943,7 @@ impl DatabasePanelState {
             host_key_prompt: None,
             host_key_policy_override: None,
             table_modal: None,
+            table_modal_input_dragging: false,
             ddl_hover: RefCell::new(None),
             pending_job: None,
             pending_query_mode: None,
@@ -1049,6 +1088,19 @@ mod tests {
     }
 
     #[test]
+    fn password_reveal_toggle_never_mutates_secret_text() {
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Orange);
+        dialog.postgres_password.set_text("sëcret-value");
+        assert!(!dialog.secret_is_revealed(DatabaseFormField::PostgresPassword));
+        dialog.toggle_secret_visibility(DatabaseFormField::PostgresPassword);
+        assert!(dialog.secret_is_revealed(DatabaseFormField::PostgresPassword));
+        assert_eq!(dialog.postgres_password.text(), "sëcret-value");
+        dialog.toggle_secret_visibility(DatabaseFormField::PostgresPassword);
+        assert!(!dialog.secret_is_revealed(DatabaseFormField::PostgresPassword));
+        assert_eq!(dialog.postgres_password.text(), "sëcret-value");
+    }
+
+    #[test]
     fn dialog_builds_direct_and_ssh_configs() {
         let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Green);
         dialog.username.set_text("postgres");
@@ -1100,5 +1152,71 @@ mod tests {
         assert!(panel.selected_connection_refresh_enabled());
         panel.dialog = Some(DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue));
         assert!(panel.modal_open());
+    }
+}
+
+impl crate::app::single_line_input::SingleLineInputModel for DatabaseDialogInput {
+    fn len_bytes(&self) -> usize {
+        self.value.len()
+    }
+
+    fn selected_len_bytes(&self) -> usize {
+        self.selected_range().map_or(0, |(start, end)| end - start)
+    }
+
+    fn select_all(&mut self) {
+        DatabaseDialogInput::select_all(self);
+    }
+
+    fn selected_text_owned(&self) -> Option<String> {
+        self.selected_text().map(str::to_owned)
+    }
+
+    fn delete_selection(&mut self) {
+        let _ = DatabaseDialogInput::delete_selection(self);
+    }
+
+    fn insert_text(&mut self, text: &str) {
+        DatabaseDialogInput::insert(self, text, usize::MAX);
+    }
+
+    fn backspace(&mut self) {
+        DatabaseDialogInput::backspace(self);
+    }
+
+    fn delete_forward(&mut self) {
+        DatabaseDialogInput::delete_forward(self);
+    }
+
+    fn delete_word_backward(&mut self) {
+        DatabaseDialogInput::delete_word_backward(self);
+    }
+
+    fn delete_word_forward(&mut self) {
+        DatabaseDialogInput::delete_word_forward(self);
+    }
+
+    fn move_left(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_left(self, selecting);
+    }
+
+    fn move_right(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_right(self, selecting);
+    }
+
+    fn move_word_left(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_word_left(self, selecting);
+    }
+
+    fn move_word_right(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_word_right(self, selecting);
+    }
+
+    fn move_home(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_home(self, selecting);
+    }
+
+    fn move_end(&mut self, selecting: bool) {
+        DatabaseDialogInput::move_end(self, selecting);
     }
 }

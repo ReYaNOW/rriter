@@ -86,18 +86,27 @@ impl Renderer {
                 } else {
                     u32::MAX
                 };
-                let diag_hover_range = crate::app::mouse::diagnostic_hover_byte_range_on_line(
+                let visual_range = crate::app::mouse::diagnostic_visual_byte_range_on_line(
                     editor,
                     line,
                     diag.start_col,
                     display_end_col,
                 );
-                let hit_type_target = diag_hover_range.map(|range| range.2);
-
-                let (x_start_px, start_byte) =
-                    self.visual_x_for_utf16_col(editor, line, diag.start_col, true);
-                let (mut x_end_px, end_byte) =
-                    self.visual_x_for_utf16_col(editor, line, display_end_col, false);
+                let hit_type_target = crate::app::mouse::diagnostic_hover_byte_range_on_line(
+                    editor,
+                    line,
+                    diag.start_col,
+                    display_end_col,
+                )
+                .map(|range| range.2);
+                let Some((start_byte, end_byte)) = visual_range else {
+                    continue;
+                };
+                let line_start = editor.line_offsets[line];
+                let x_start_px =
+                    self.visual_x_for_byte_offset(editor, line_start, start_byte, true);
+                let mut x_end_px =
+                    self.visual_x_for_byte_offset(editor, line_start, end_byte, false);
                 if diag.end_line != diag.start_line {
                     x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
                 }

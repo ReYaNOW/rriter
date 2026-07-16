@@ -13,12 +13,13 @@ impl Renderer {
         ui: &mut UiRegistry,
         mx: f32,
         my: f32,
+        blink_alpha: f32,
     ) {
         ui.mark_overlay_start();
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.66]);
         ui.register_blocker(UiId::DatabaseTableModalBackdrop, 0.0, 0.0, self.width, self.height, mx, my);
         let (title, width, height) = match modal {
-            crate::app::database::DatabaseTableModal::SqlPreview { .. } => ("SQL preview", 880.0, 650.0),
+            crate::app::database::DatabaseTableModal::SqlPreview { .. } => ("Предпросмотр SQL", 980.0, 700.0),
             crate::app::database::DatabaseTableModal::RefreshPrompt { close_after_save, .. } => (
                 if *close_after_save { "Закрыть изменённую таблицу?" } else { "Обновить изменённую таблицу?" },
                 560.0,
@@ -43,15 +44,53 @@ impl Renderer {
             [0.105, 0.11, 0.145, 1.0],
         );
         ui.register_blocker(UiId::DatabaseTableModalBody, x, y, width, height, mx, my);
-        self.draw_string_scaled_stable(title, x + 20.0 * s, y + 32.0 * s, self.theme.fg, 1.0);
+        self.draw_string_scaled_pixel_snapped(title, x + 20.0 * s, y + 32.0 * s, self.theme.fg, 1.0);
 
         match modal {
-            crate::app::database::DatabaseTableModal::SqlPreview { text, scroll, .. } => {
-                self.draw_database_table_modal_text(x, y, width, height, s, text, scroll.current, ui, mx, my);
-                draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalSecondary, "Закрыть")], mx, my);
+            crate::app::database::DatabaseTableModal::SqlPreview {
+                text,
+                cursor,
+                selection_anchor,
+                spans,
+                scroll_x,
+                scroll_y,
+                ..
+            } => {
+                self.draw_database_sql_preview(
+                    x,
+                    y,
+                    width,
+                    height,
+                    s,
+                    text,
+                    spans,
+                    *cursor,
+                    *selection_anchor,
+                    scroll_x.current,
+                    scroll_y.current,
+                    blink_alpha,
+                    ui,
+                    mx,
+                    my,
+                );
+                draw_modal_buttons(
+                    self,
+                    ui,
+                    x,
+                    y,
+                    width,
+                    height,
+                    s,
+                    &[
+                        (UiId::DatabaseTableModalTertiary, "Копировать"),
+                        (UiId::DatabaseTableModalSecondary, "Закрыть"),
+                    ],
+                    mx,
+                    my,
+                );
             }
             crate::app::database::DatabaseTableModal::RefreshPrompt { .. } => {
-                self.draw_string_scaled_stable(
+                self.draw_string_scaled_pixel_snapped(
                     "Есть несохранённые изменения. Выберите безопасное действие.",
                     x + 20.0 * s,
                     y + 78.0 * s,
@@ -76,11 +115,49 @@ impl Renderer {
                 );
             }
             crate::app::database::DatabaseTableModal::CustomLimit { input, error, .. } => {
-                draw_modal_input(self, ui, x + 20.0 * s, y + 68.0 * s, width - 40.0 * s, 34.0 * s, input.text(), mx, my, s);
+                let input_x = (x + 20.0 * s).round();
+                let input_y = (y + 68.0 * s).round();
+                let input_w = (width - 40.0 * s).round();
+                let input_h = (34.0 * s).round();
+                ui.register_text_input(
+                    UiId::DatabaseTableModalInput,
+                    input_x,
+                    input_y,
+                    input_w,
+                    input_h,
+                    mx,
+                    my,
+                );
+                let visible_width = (input_w - 16.0 * s).max(1.0);
+                let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                    input.text(),
+                    input.cursor,
+                    visible_width,
+                    |ch| {
+                        self.get_ui_glyph(ch)
+                            .map(|glyph| Self::snapped_text_advance(glyph.advance, 0.82))
+                            .unwrap_or_else(|| (10.0_f32 * 0.82).round().max(1.0))
+                    },
+                );
+                self.draw_one_line_dialog_input(
+                    input.text(),
+                    input.cursor,
+                    input.selection_anchor,
+                    false,
+                    true,
+                    input_x,
+                    input_y,
+                    input_w,
+                    input_h,
+                    scroll_x,
+                    blink_alpha,
+                    0.82,
+                    0.0,
+                );
                 if let Some(error) = error.as_deref() {
-                    self.draw_string_scaled_stable(error, x + 20.0 * s, y + 126.0 * s, [0.95, 0.38, 0.42, 1.0], 0.76);
+                    self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + 126.0 * s, [0.95, 0.38, 0.42, 1.0], 0.76);
                 } else {
-                    self.draw_string_scaled_stable("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.theme.line_num, 0.74);
+                    self.draw_string_scaled_pixel_snapped("Допустимо: 1–10 000", x + 20.0 * s, y + 126.0 * s, self.theme.line_num, 0.74);
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
@@ -98,29 +175,29 @@ impl Renderer {
                 }
                 let mut line_y = body_y + 22.0 * s - scroll.current;
                 for (line_index, line) in input.text().lines().enumerate() {
-                    self.draw_string_scaled_stable(&(line_index + 1).to_string(), body_x + 8.0 * s, line_y, self.theme.line_num, 0.66);
-                    self.draw_string_scaled_stable(line, body_x + 48.0 * s, line_y, self.theme.fg, 0.76);
+                    self.draw_string_scaled_pixel_snapped(&(line_index + 1).to_string(), body_x + 8.0 * s, line_y, self.theme.line_num, 0.66);
+                    self.draw_string_scaled_pixel_snapped(line, body_x + 48.0 * s, line_y, self.theme.fg, 0.76);
                     line_y += 21.0 * s;
                 }
                 self.flush();
                 unsafe { self.gl.disable(glow::SCISSOR_TEST) };
                 ui.register_rect(UiId::DatabaseTableModalScroll, body_x + body_w - 12.0 * s, body_y, 12.0 * s, body_h, mx, my);
                 if let Some(error) = error.as_deref() {
-                    self.draw_string_scaled_stable(error, x + 20.0 * s, y + height - 70.0 * s, [0.95,0.38,0.42,1.0], 0.72);
+                    self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + height - 70.0 * s, [0.95,0.38,0.42,1.0], 0.72);
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalTertiary, "Как текст"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
             crate::app::database::DatabaseTableModal::Review { state, scroll, .. } => {
                 let remaining = state.deadline_unix_ms.saturating_sub(now_unix_ms()) / 1000;
                 let summary = &state.summary;
-                self.draw_string_scaled_stable(
+                self.draw_string_scaled_pixel_snapped(
                     &format!("Добавлено: {}   Изменено: {}   Ячеек: {}   Удалено: {}", summary.inserted_rows, summary.updated_rows, summary.changed_cells, summary.deleted_rows),
                     x + 20.0 * s,
                     y + 66.0 * s,
                     self.theme.fg,
                     0.82,
                 );
-                self.draw_string_scaled_stable(
+                self.draw_string_scaled_pixel_snapped(
                     &format!("До автоматического rollback: {}:{:02}", remaining / 60, remaining % 60),
                     x + 20.0 * s,
                     y + 92.0 * s,
@@ -190,7 +267,7 @@ impl Renderer {
                 }
                 if summary.truncated_details {
                     self.push_rect(body_x, body_y + body_h - 27.0 * s, body_w, 27.0 * s, [0.16,0.12,0.05,0.95]);
-                    self.draw_string_scaled_stable(
+                    self.draw_string_scaled_pixel_snapped(
                         "Подробности ограничены; агрегаты рассчитаны полностью.",
                         body_x + 10.0 * s,
                         body_y + body_h - 8.0 * s,
@@ -198,13 +275,17 @@ impl Renderer {
                         0.7,
                     );
                 }
-                draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, if state.committing { "Применение…" } else { "Apply" }), (UiId::DatabaseTableModalSecondary, "Rollback")], mx, my);
+                draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, if state.committing { "Применение…" } else { "Применить" }), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
         }
     }
 
+    fn database_code_text_width(&mut self, text: &str) -> f32 {
+        text.chars().map(|ch| self.char_advance(ch)).sum()
+    }
+
     #[allow(clippy::too_many_arguments)]
-    fn draw_database_table_modal_text(
+    fn draw_database_sql_preview(
         &mut self,
         x: f32,
         y: f32,
@@ -212,46 +293,220 @@ impl Renderer {
         h: f32,
         s: f32,
         text: &str,
-        scroll: f32,
+        spans: &[crate::highlighter::ColorSpan],
+        cursor: usize,
+        selection_anchor: Option<usize>,
+        scroll_x: f32,
+        scroll_y: f32,
+        blink_alpha: f32,
         ui: &mut UiRegistry,
         mx: f32,
         my: f32,
     ) {
-        let body_x = x + 18.0 * s;
-        let body_y = y + 48.0 * s;
-        let body_w = w - 36.0 * s;
-        let body_h = h - 112.0 * s;
-        self.push_rect(body_x, body_y, body_w, body_h, [0.055,0.06,0.08,1.0]);
+        let outer_x = (x + 18.0 * s).round();
+        let outer_y = (y + 50.0 * s).round();
+        let outer_w = (w - 36.0 * s).round();
+        let outer_h = (h - 116.0 * s).round();
+        let scrollbar = (10.0 * s).round().max(10.0);
+        let gutter_w = (54.0 * s).round();
+        let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * s).round();
+        let line_count = text.lines().count().max(1);
+        let content_h = line_count as f32 * line_h;
+        let content_w = text
+            .lines()
+            .map(|line| self.database_code_text_width(line))
+            .fold(0.0_f32, f32::max)
+            + (18.0 * s).round();
+        let mut viewport_w = outer_w;
+        let mut viewport_h = outer_h;
+        let mut show_y = content_h > viewport_h;
+        if show_y {
+            viewport_w = (viewport_w - scrollbar).max(1.0);
+        }
+        let show_x = content_w > (viewport_w - gutter_w).max(1.0);
+        if show_x {
+            viewport_h = (viewport_h - scrollbar).max(1.0);
+            if !show_y && content_h > viewport_h {
+                show_y = true;
+                viewport_w = (viewport_w - scrollbar).max(1.0);
+            }
+        }
+        let code_w = (viewport_w - gutter_w).max(1.0);
+        let max_x = (content_w - code_w).max(0.0);
+        let max_y = (content_h - viewport_h).max(0.0);
+        let scroll_x = scroll_x.clamp(0.0, max_x);
+        let scroll_y = scroll_y.clamp(0.0, max_y);
+        let code_x = outer_x + gutter_w;
+        ui.register_text_input(
+            UiId::DatabaseTableModalInput,
+            code_x,
+            outer_y,
+            code_w,
+            viewport_h,
+            mx,
+            my,
+        );
+        let (selection_start, selection_end) = selection_anchor
+            .map(|anchor| (anchor.min(cursor), anchor.max(cursor)))
+            .unwrap_or((cursor, cursor));
+
+        self.push_rect(outer_x, outer_y, outer_w, outer_h, [0.045, 0.05, 0.07, 1.0]);
+        self.push_rect(outer_x, outer_y, gutter_w, viewport_h, [0.065, 0.07, 0.09, 1.0]);
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(body_x as i32, (self.height - (body_y + body_h)).max(0.0) as i32, body_w as i32, body_h as i32);
+            self.gl.scissor(
+                outer_x as i32,
+                (self.height - (outer_y + viewport_h)).round().max(0.0) as i32,
+                viewport_w.round().max(0.0) as i32,
+                viewport_h.round().max(0.0) as i32,
+            );
         }
-        let mut cy = body_y + 22.0 * s - scroll;
-        for line in text.lines() {
-            self.draw_string_scaled_stable(line, body_x + 10.0 * s, cy, self.theme.fg, 0.74);
-            cy += 21.0 * s;
+        let first_line = (scroll_y / line_h).floor() as usize;
+        let last_line = (first_line + (viewport_h / line_h).ceil() as usize + 2).min(line_count);
+        let mut byte_offset = 0usize;
+        for (line_index, raw_line) in text.split_inclusive('\n').enumerate() {
+            if line_index >= last_line {
+                break;
+            }
+            let raw_len = raw_line.len();
+            if line_index >= first_line {
+                let baseline = outer_y
+                    + (line_index as f32 + 1.0) * line_h
+                    - scroll_y
+                    - (4.0 * s).round();
+                self.draw_string_scaled_pixel_snapped(
+                    &(line_index + 1).to_string(),
+                    outer_x + (8.0 * s).round(),
+                    baseline,
+                    self.theme.line_num,
+                    0.78,
+                );
+                let line = raw_line.trim_end_matches(&['\r', '\n'][..]);
+                let line_end = byte_offset.saturating_add(line.len());
+                let selected_start = selection_start.max(byte_offset).min(line_end);
+                let selected_end = selection_end.max(byte_offset).min(line_end);
+                let text_x = code_x + (8.0 * s).round() - scroll_x;
+                if selected_start < selected_end {
+                    let prefix = &line[..selected_start - byte_offset];
+                    let selected = &line[selected_start - byte_offset..selected_end - byte_offset];
+                    let selected_x = text_x + self.database_code_text_width(prefix);
+                    let selected_w = self.database_code_text_width(selected).max(1.0);
+                    self.push_rect(
+                        selected_x.round(),
+                        (baseline - 19.0 * s).round(),
+                        selected_w.round(),
+                        line_h,
+                        self.theme.sel,
+                    );
+                }
+                if cursor >= byte_offset && cursor <= line_end && selection_start == selection_end {
+                    let prefix = &line[..cursor.min(line_end) - byte_offset];
+                    let caret_x = text_x + self.database_code_text_width(prefix);
+                    self.push_rect(
+                        caret_x.round(),
+                        (baseline - 19.0 * s).round(),
+                        (1.0 * s).round().max(1.0),
+                        line_h,
+                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], blink_alpha],
+                    );
+                }
+                self.draw_database_sql_line(
+                    line,
+                    byte_offset,
+                    spans,
+                    text_x,
+                    baseline,
+                    outer_x + viewport_w - (6.0 * s).round(),
+                );
+            }
+            byte_offset = byte_offset.saturating_add(raw_len);
+        }
+        if text.is_empty() {
+            self.draw_string_scaled_pixel_snapped(
+                "1",
+                outer_x + (8.0 * s).round(),
+                outer_y + line_h - (4.0 * s).round(),
+                self.theme.line_num,
+                0.78,
+            );
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
-        ui.register_rect(UiId::DatabaseTableModalScroll, body_x + body_w - 12.0 * s, body_y, 12.0 * s, body_h, mx, my);
-    }
-}
 
-#[allow(clippy::too_many_arguments)]
-fn draw_modal_input(renderer: &mut Renderer, ui: &mut UiRegistry, x: f32, y: f32, w: f32, h: f32, text: &str, mx: f32, my: f32, s: f32) {
-    renderer.push_rounded_rect_border(x, y, w, h, 4.0 * s, 1.0, [0.62,0.38,0.90,1.0], [0.055,0.06,0.08,1.0]);
-    ui.register_text_input(UiId::DatabaseTableModalInput, x, y, w, h, mx, my);
-    renderer.draw_string_scaled_stable(text, x + 8.0 * s, y + 22.0 * s, renderer.theme.fg, 0.8);
+        let track_color = [0.055, 0.058, 0.075, 1.0];
+        let thumb_color = [0.35, 0.68, 0.94, 0.92];
+        if show_y {
+            let track_x = outer_x + viewport_w;
+            self.push_rect(track_x, outer_y, scrollbar, viewport_h, track_color);
+            ui.register_rect(
+                UiId::DatabaseTableModalScroll,
+                track_x,
+                outer_y,
+                scrollbar,
+                viewport_h,
+                mx,
+                my,
+            );
+            if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                outer_y,
+                viewport_h,
+                viewport_h,
+                content_h,
+                scroll_y,
+                (28.0 * s).round(),
+            ) {
+                self.push_rounded_rect(
+                    track_x + (2.0 * s).round(),
+                    thumb.start.round(),
+                    (scrollbar - 4.0 * s).max(4.0).round(),
+                    thumb.len.round(),
+                    (3.0 * s).round(),
+                    thumb_color,
+                );
+            }
+        }
+        if show_x {
+            let track_y = outer_y + viewport_h;
+            self.push_rect(outer_x + gutter_w, track_y, code_w, scrollbar, track_color);
+            ui.register_rect(
+                UiId::DatabaseTableModalScrollX,
+                outer_x + gutter_w,
+                track_y,
+                code_w,
+                scrollbar,
+                mx,
+                my,
+            );
+            if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                outer_x + gutter_w,
+                code_w,
+                code_w,
+                content_w,
+                scroll_x,
+                (36.0 * s).round(),
+            ) {
+                self.push_rounded_rect(
+                    thumb.start.round(),
+                    track_y + (2.0 * s).round(),
+                    thumb.len.round(),
+                    (scrollbar - 4.0 * s).max(4.0).round(),
+                    (3.0 * s).round(),
+                    thumb_color,
+                );
+            }
+        }
+    }
+
 }
 
 #[allow(clippy::too_many_arguments)]
 fn draw_modal_buttons(renderer: &mut Renderer, ui: &mut UiRegistry, x: f32, y: f32, w: f32, h: f32, s: f32, buttons: &[(UiId, &str)], mx: f32, my: f32) {
-    let button_w = 110.0 * s;
+    let button_w = 118.0 * s;
     let total = buttons.len() as f32 * button_w + buttons.len().saturating_sub(1) as f32 * 8.0 * s;
     let mut bx = x + w - 20.0 * s - total;
     for (id, label) in buttons {
-        ui.register_button_view(*id, ButtonView { x: bx, y: y + h - 48.0 * s, w: button_w, h: 30.0 * s, text: label, icon: None, text_scale: 0.75, icon_size: 0.0 }, renderer, mx, my, s, false);
+        ui.register_button_view(*id, ButtonView { x: bx, y: y + h - 54.0 * s, w: button_w, h: 36.0 * s, text: label, icon: None, text_scale: 0.82, icon_size: 0.0 }, renderer, mx, my, s, false);
         bx += button_w + 8.0 * s;
     }
 }

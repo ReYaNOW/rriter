@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn diagnostic_copy_includes_code_and_normalized_message() {
+    let diagnostic = crate::lsp::Diagnostic {
+        start_line: 0,
+        start_col: 0,
+        end_line: 0,
+        end_col: 1,
+        severity: crate::lsp::DiagSeverity::Error,
+        code: Some(std::sync::Arc::<str>::from("SQL001")),
+        code_href: None,
+        message: std::sync::Arc::<str>::from("Ошибка\\nПодробность"),
+        source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
+        quickfixes: Box::new([]),
+        tags: Box::new([]),
+    };
+
+    assert_eq!(
+        diagnostic_copy_text(&diagnostic),
+        "SQL001: Ошибка\nПодробность"
+    );
+}
+
+#[test]
 fn module_header_wrap_does_not_split_marker_from_path() {
     assert!(!hover_wrap_space_can_break("[[MODULE]] ".chars().count()));
     assert!(hover_wrap_space_can_break(

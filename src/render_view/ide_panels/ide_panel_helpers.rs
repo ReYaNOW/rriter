@@ -62,11 +62,6 @@ fn file_tree_menu_separator_before(
     idx > 0 && file_tree_menu_group(entries[idx - 1]) != file_tree_menu_group(entries[idx])
 }
 
-fn file_tree_menu_separator_count(entries: &[crate::app::file_tree::FileTreeMenuAction]) -> usize {
-    (1..entries.len())
-        .filter(|&idx| file_tree_menu_separator_before(entries, idx))
-        .count()
-}
 
 fn git_row_visual_hovered(
     mx: f32,

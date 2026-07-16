@@ -85,7 +85,9 @@ impl Renderer {
         ui_registry: &mut UiRegistry,
     ) {
         let s = self.scale_factor;
-        self.draw_string_scaled(
+        let content_x = content_x.round();
+        content_y = content_y.round();
+        self.draw_string_scaled_pixel_snapped(
             "Все ограничения применяются к PostgreSQL и SQL-консолям без перезапуска RRiter.",
             content_x,
             content_y,
@@ -96,10 +98,10 @@ impl Renderer {
 
         for (index, row) in database_settings_rows(settings).iter().enumerate() {
             let row_y = content_y.round();
-            self.draw_string_scaled(
+            self.draw_string_scaled_pixel_snapped(
                 row.label,
                 content_x,
-                row_y + 22.0 * s,
+                Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
                 [0.82, 0.82, 0.86, 1.0],
                 0.86,
             );
@@ -153,10 +155,10 @@ impl Renderer {
                 [0.20, 0.21, 0.26, 1.0],
             );
             let value_w = self.measure_ui_width(&row.value, 0.78);
-            self.draw_string_scaled(
+            self.draw_string_scaled_pixel_snapped(
                 &row.value,
-                value_x + (108.0 * s - value_w) * 0.5,
-                row_y + 21.0 * s,
+                (value_x + (108.0 * s - value_w) * 0.5).round(),
+                Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
                 [0.92, 0.92, 0.95, 1.0],
                 0.78,
             );

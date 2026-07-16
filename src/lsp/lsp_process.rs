@@ -160,13 +160,13 @@ pub enum DiagSeverity {
     Hint,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuickFix {
     pub title: String,
     pub edits: Vec<TextChange>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Diagnostic {
     /// 0-based
     pub start_line: u32,

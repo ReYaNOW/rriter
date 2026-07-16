@@ -271,7 +271,9 @@ pub enum DatabaseEvent {
         messages: Vec<DatabaseQueryMessage>,
         deadline_unix_ms: u128,
         duration_ms: u64,
-        affected_rows: u64,
+        returned_rows: u64,
+        changed_rows: u64,
+        requires_review: bool,
         mode: DatabaseQueryMode,
     },
     QueryTransactionCommitted {
@@ -726,6 +728,7 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
                 Ok((session, prepared)) => {
                     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                     let transaction_id = transaction_id(job_id);
+                    let requires_review = prepared.effects.requires_review();
                     let review_duration = Duration::from_secs(settings.transaction_review_timeout_seconds);
                     let deadline = Instant::now() + review_duration;
                     let deadline_unix_ms = SystemTime::now()
@@ -739,27 +742,46 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
                         transaction_id,
                         database_name: database_name.clone(),
                         console_id,
-                        sql,
+                        sql: sql.clone(),
                         source_offset,
                         started_unix_ms,
                         result_sets: prepared.result_sets,
                         messages: prepared.messages,
                         deadline_unix_ms,
                         duration_ms,
-                        affected_rows: prepared.affected_rows,
+                        returned_rows: prepared.effects.returned_rows,
+                        changed_rows: prepared.effects.changed_rows,
+                        requires_review,
                         mode: prepared.mode,
                     };
-                    JobOutcome {
-                        event,
-                        pending_transaction: Some(PendingTransaction {
-                            job_id,
-                            connection_id: connection.id,
-                            transaction_id,
-                            database_name,
-                            target: PendingTransactionTarget::Query { console_id },
-                            session,
-                            deadline,
-                        }),
+                    if requires_review {
+                        JobOutcome {
+                            event,
+                            pending_transaction: Some(PendingTransaction {
+                                job_id,
+                                connection_id: connection.id,
+                                transaction_id,
+                                database_name,
+                                target: PendingTransactionTarget::Query { console_id },
+                                session,
+                                deadline,
+                            }),
+                        }
+                    } else {
+                        match finish_user_query_transaction(&session, false).await {
+                            Ok(()) => JobOutcome::event(event),
+                            Err(error) => JobOutcome::event(DatabaseEvent::QueryFailed {
+                                connection_id: connection.id,
+                                job_id,
+                                database_name,
+                                console_id,
+                                sql,
+                                started_unix_ms,
+                                duration_ms,
+                                message: error.to_string(),
+                                diagnostic: None,
+                            }),
+                        }
                     }
                 }
                 Err(error) => {

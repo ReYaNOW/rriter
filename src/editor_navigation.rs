@@ -37,8 +37,8 @@ fn line_indent_and_blank(editor: &Editor, line: usize) -> (usize, bool) {
     (indent, true)
 }
 
-fn editor_click_content_y(target_y: f32, line_height: f32) -> f32 {
-    (target_y - line_height * 0.25).max(0.0)
+fn editor_click_content_y(target_y: f32, _line_height: f32) -> f32 {
+    target_y.max(0.0)
 }
 
 impl Editor {
@@ -605,16 +605,30 @@ mod tests {
 
         assert_eq!(
             editor_click_content_y(second_line_midpoint, line_height),
-            second_line_midpoint - line_height * 0.25
+            second_line_midpoint
         );
         assert_ne!(
             editor_click_content_y(second_line_midpoint, line_height),
             second_line_midpoint - line_height * 0.5
         );
-        assert_ne!(
-            editor_click_content_y(second_line_midpoint, line_height),
-            second_line_midpoint
+    }
+
+    #[test]
+    fn database_query_toolbar_keeps_the_regular_editor_caret_midpoint() {
+        let line_height = 24.0;
+        let content_midpoint = line_height * 1.5;
+        let regular_inset = crate::render_view::editor_content_top_inset(false, true, false, 1.0);
+        let query_inset = crate::render_view::editor_content_top_inset(false, true, true, 1.0);
+
+        let regular_y = editor_click_content_y(
+            regular_inset + content_midpoint - regular_inset,
+            line_height,
         );
+        let query_y = editor_click_content_y(
+            query_inset + content_midpoint - query_inset,
+            line_height,
+        );
+        assert_eq!(query_y, regular_y);
     }
 
     #[test]

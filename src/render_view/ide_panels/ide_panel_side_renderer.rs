@@ -15,7 +15,7 @@ impl Renderer {
         }
         let full_w = self.measure_ui_width(text, scale);
         if full_w <= max_w {
-            self.draw_string_scaled_stable(text, x, y, color, scale);
+            self.draw_string_scaled_pixel_snapped(text, x, y, color, scale);
             return full_w;
         }
 
@@ -32,7 +32,7 @@ impl Renderer {
         scratch.clear();
         scratch.push_str(&text[..prefix_len]);
         scratch.push_str(ellipsis);
-        self.draw_string_scaled_stable(scratch, x, y, color, scale);
+        self.draw_string_scaled_pixel_snapped(scratch, x, y, color, scale);
         self.measure_ui_width(scratch, scale).min(max_w)
     }
 
@@ -829,7 +829,7 @@ impl Renderer {
                     0.0,
                     1.0,
                     resize_max_y,
-                    [0.60, 0.35, 0.85, 0.4],
+                    crate::render_view::IDE_RESIZE_HIGHLIGHT_COLOR,
                 );
             }
         }

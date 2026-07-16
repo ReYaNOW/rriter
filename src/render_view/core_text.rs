@@ -33,6 +33,72 @@ fn pixel_snapped_ui_glyph_rect(
     ))
 }
 
+pub(crate) fn wrapped_text_ranges(
+    text: &str,
+    max_width: f32,
+    mut advance: impl FnMut(char) -> f32,
+) -> Vec<(usize, usize)> {
+    if text.is_empty() {
+        return vec![(0, 0)];
+    }
+    let max_width = max_width.max(1.0);
+    let mut lines = Vec::new();
+    let mut line_start = 0usize;
+    while line_start < text.len() {
+        let mut cursor = line_start;
+        let mut width = 0.0f32;
+        let mut last_break = None;
+        let mut line_end = text.len();
+        let mut next_start = text.len();
+
+        while cursor < text.len() {
+            let ch = text[cursor..].chars().next().unwrap_or('\0');
+            let next = cursor + ch.len_utf8();
+            if ch == '\n' {
+                line_end = cursor;
+                next_start = next;
+                break;
+            }
+            let next_width = width + advance(ch);
+            if next_width > max_width && cursor > line_start {
+                line_end = last_break.filter(|&offset| offset > line_start).unwrap_or(cursor);
+                next_start = line_end;
+                break;
+            }
+            width = next_width;
+            cursor = next;
+            if ch.is_whitespace() || matches!(ch, ',' | ':' | ';' | ')' | ']') {
+                last_break = Some(cursor);
+            }
+        }
+
+        let mut visible_end = line_end;
+        while visible_end > line_start {
+            let Some(ch) = text[..visible_end].chars().next_back() else {
+                break;
+            };
+            if !ch.is_whitespace() {
+                break;
+            }
+            visible_end -= ch.len_utf8();
+        }
+        lines.push((line_start, visible_end));
+
+        line_start = next_start;
+        while line_start < text.len() {
+            let ch = text[line_start..].chars().next().unwrap_or('\0');
+            if ch == '\n' || !ch.is_whitespace() {
+                break;
+            }
+            line_start += ch.len_utf8();
+        }
+    }
+    if text.ends_with('\n') {
+        lines.push((text.len(), text.len()));
+    }
+    lines
+}
+
 fn code_end_before_line_comment(editor: &Editor, line_start: usize, line_end: usize) -> usize {
     let mut p = line_start;
     let mut code_end = line_end;
@@ -148,6 +214,25 @@ mod tests {
             pixel_snapped_ui_glyph_rect(10.0, 100.0, 0.0, 0.0, 0.0, 10.0, 0.74),
             None
         );
+    }
+
+    #[test]
+    fn wrapped_text_uses_breaks_and_keeps_unicode_boundaries() {
+        let text = "Ошибка: очень длинное предупреждение";
+        let lines = wrapped_text_ranges(text, 10.0, |_| 1.0);
+        assert!(lines.len() > 1);
+        assert!(lines.iter().all(|&(start, end)| {
+            start <= end && text.is_char_boundary(start) && text.is_char_boundary(end)
+        }));
+        let mut rebuilt = String::new();
+        let mut previous_end = 0usize;
+        for &(start, end) in &lines {
+            rebuilt.push_str(&text[previous_end..start]);
+            rebuilt.push_str(&text[start..end]);
+            previous_end = end;
+        }
+        rebuilt.push_str(&text[previous_end..]);
+        assert_eq!(rebuilt, text);
     }
 
     #[test]
@@ -447,49 +532,6 @@ impl Renderer {
         let (first, second) = editor.text_parts();
         self.measure_width(first, second, line_start, byte_offset)
             + self.current_inlay_width_until(line_start, byte_offset, include_inlays_at_offset)
-    }
-
-    pub(crate) fn visual_x_for_utf16_col(
-        &mut self,
-        editor: &Editor,
-        line_idx: usize,
-        col: u32,
-        include_inlays_at_offset: bool,
-    ) -> (f32, usize) {
-        let line_start = editor.line_offsets.get(line_idx).copied().unwrap_or(0);
-        let line_end = editor
-            .line_offsets
-            .get(line_idx + 1)
-            .map(|&o| o.saturating_sub(1))
-            .unwrap_or_else(|| editor.len());
-        let mut byte_offset = line_end;
-        let mut text_x = 0.0f32;
-        let mut cur_x = 0.0f32;
-        let mut found = false;
-
-        editor.utf16_col_to_byte_advance(line_idx, |ch, utf16_before, pos| {
-            if !found && utf16_before >= col {
-                byte_offset = pos;
-                text_x = cur_x;
-                found = true;
-            }
-            if !found {
-                cur_x += self.char_advance(ch);
-            }
-        });
-
-        if !found {
-            text_x = cur_x;
-        }
-
-        (
-            text_x + self.current_inlay_width_until(
-                line_start,
-                byte_offset,
-                include_inlays_at_offset,
-            ),
-            byte_offset,
-        )
     }
 
     pub(crate) fn visual_text_range_contains_x(

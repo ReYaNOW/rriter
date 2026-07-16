@@ -247,16 +247,27 @@ impl App {
             return true;
         }
         if let Some(tab_id) = self.active_database_table_tab_id() {
+            let mut completion_target = None;
             if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                if !state.loading
+                    && state.metadata.is_none()
+                    && state.unavailable_text_focused
+                {
+                    return true;
+                }
                 let clean = single_line_ime_text(text);
                 match state.grid.focused_input {
                     Some(crate::app::database::DatabaseTableInputTarget::Where) => {
                         if !clean.is_empty() { state.grid.where_input.insert(&clean, 64 * 1024); }
-                        return true;
+                        completion_target = Some(
+                            crate::app::database::DatabaseTableInputTarget::Where,
+                        );
                     }
                     Some(crate::app::database::DatabaseTableInputTarget::OrderBy) => {
                         if !clean.is_empty() { state.grid.order_by_input.insert(&clean, 64 * 1024); }
-                        return true;
+                        completion_target = Some(
+                            crate::app::database::DatabaseTableInputTarget::OrderBy,
+                        );
                     }
                     Some(crate::app::database::DatabaseTableInputTarget::Cell) => {
                         if let Some(editor) = state.grid.cell_editor.as_mut() {
@@ -267,6 +278,10 @@ impl App {
                     }
                     None => {}
                 }
+            }
+            if let Some(target) = completion_target {
+                self.show_active_database_table_filter_completion(target, false);
+                return true;
             }
         }
 
@@ -281,7 +296,7 @@ impl App {
             }
             return true;
         }
-        if self.ide_panel.database.modal_open() {
+        if self.database_blocking_modal_open() {
             return true;
         }
 

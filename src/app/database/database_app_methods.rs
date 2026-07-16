@@ -24,8 +24,15 @@ impl App {
         let input = self.ide_panel.database.dialog.as_ref()?.input(field);
         let s = renderer.scale_factor;
         let text_scale = 0.82;
-        let visible_width = (rect.2 - 16.0 * s).max(1.0);
-        let secret = field.is_secret();
+        let eye_size = if field.is_secret() { (28.0 * s).round() } else { 0.0 };
+        let visible_width = (rect.2 - 16.0 * s - eye_size).max(1.0);
+        let secret = field.is_secret()
+            && !self
+                .ide_panel
+                .database
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.secret_is_revealed(field));
         let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
             input.text(),
             input.cursor,
@@ -61,6 +68,8 @@ impl App {
         if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
             dialog.focused = Some(field);
             dialog.input_mut(field).set_cursor(target, selecting);
+            self.last_action = std::time::Instant::now();
+            self.last_blink_state = true;
         }
     }
 
@@ -78,6 +87,8 @@ impl App {
         if key_event.state != ElementState::Pressed {
             return true;
         }
+        self.last_action = std::time::Instant::now();
+        self.last_blink_state = true;
 
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -103,66 +114,17 @@ impl App {
                     let Some(field) = dialog.focused else {
                         return true;
                     };
-                    let input = dialog.input_mut(field);
-                    match physical_key {
-                        PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyF) if primary => {
-                            input.select_all();
-                        }
-                        PhysicalKey::Code(KeyCode::KeyC) if primary => {
-                            copy_text = input.selected_text().map(str::to_owned);
-                        }
-                        PhysicalKey::Code(KeyCode::KeyX) if primary => {
-                            copy_text = input.selected_text().map(str::to_owned);
-                            if copy_text.is_some() {
-                                input.delete_selection();
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::KeyV) if primary => {
-                            if let Some(text) = paste_text.as_deref() {
-                                let clean = text.replace(['\n', '\r'], "");
-                                input.insert(&clean, database_dialog_field_max_bytes(field));
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::Backspace) => {
-                            if word {
-                                input.delete_word_backward();
-                            } else {
-                                input.backspace();
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::Delete) => {
-                            if word {
-                                input.delete_word_forward();
-                            } else {
-                                input.delete_forward();
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::ArrowLeft) => {
-                            if word {
-                                input.move_word_left(shift);
-                            } else {
-                                input.move_left(shift);
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::ArrowRight) => {
-                            if word {
-                                input.move_word_right(shift);
-                            } else {
-                                input.move_right(shift);
-                            }
-                        }
-                        PhysicalKey::Code(KeyCode::Home) => input.move_home(shift),
-                        PhysicalKey::Code(KeyCode::End) => input.move_end(shift),
-                        _ if text_input_allowed => {
-                            if let Some(text) = key_event.logical_key.to_text() {
-                                let clean = text.replace(['\n', '\r'], "");
-                                if !clean.is_empty() {
-                                    input.insert(&clean, database_dialog_field_max_bytes(field));
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
+                    copy_text = crate::app::single_line_input::handle_single_line_input(
+                        dialog.input_mut(field),
+                        physical_key,
+                        key_event.logical_key.to_text(),
+                        primary,
+                        word,
+                        shift,
+                        text_input_allowed,
+                        paste_text.as_deref(),
+                        database_dialog_field_max_bytes(field),
+                    );
                     dialog.error = None;
                     dialog.test_status = None;
                 }
@@ -194,6 +156,16 @@ impl App {
 
     pub fn active_tab_is_database(&self) -> bool {
         self.active_tab_is_database_table() || self.active_tab_is_database_query()
+    }
+
+    pub fn database_blocking_modal_open(&self) -> bool {
+        self.ide_panel.database.modal_open()
+            || self.tabs.get(self.active_tab).is_some_and(|tab| {
+                matches!(
+                    &tab.kind,
+                    EditorTabKind::DatabaseQuery(_, state) if state.review.is_some()
+                )
+            })
     }
 
     pub(crate) fn load_database_panel_state(&mut self) {
@@ -590,6 +562,7 @@ impl App {
         x: f32,
         y: f32,
     ) {
+        self.ide_panel.file_tree_context_menu = None;
         let entries = match target {
             DatabaseContextTarget::Connection(_) => vec![
                 DatabaseContextAction::Refresh,
@@ -609,11 +582,17 @@ impl App {
                 DatabaseContextAction::OpenSql,
             ],
         };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let (x, y) = crate::app::context_menu::context_menu_anchor(x, y, scale);
         self.ide_panel.database.context_menu = Some(DatabaseContextMenu {
             target,
             x,
             y,
             entries,
+            opened_at: std::time::Instant::now(),
         });
     }
 
@@ -797,6 +776,13 @@ impl App {
             .connection(meta.connection_id)
             .map(|node| node.config.clone())
         else {
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.loading = false;
+                state.error = None;
+                state.set_unavailable_text(
+                    crate::app::database::DATABASE_TABLE_DISCONNECTED_MESSAGE,
+                );
+            }
             return;
         };
         let job_id = self.ide_panel.database.allocate_job_id();
@@ -880,14 +866,13 @@ impl App {
         }
 
         let existing_count = self
-            .ide_panel
-            .database
-            .persisted
-            .consoles
+            .tabs
             .iter()
-            .filter(|console| {
-                console.connection_id == connection_id && console.database_name == database_name
-            })
+            .filter(|tab| matches!(
+                &tab.kind,
+                EditorTabKind::DatabaseQuery(meta, _)
+                    if meta.connection_id == connection_id && meta.database_name == database_name
+            ))
             .count();
         let console_id = preferred_console_id.unwrap_or_else(|| {
             let id = crate::app::database::SqlConsoleId(self.ide_panel.database.next_console_id);
@@ -900,24 +885,11 @@ impl App {
             .database
             .next_console_id
             .max(console_id.0.saturating_add(1));
-        let persisted_console = self
-            .ide_panel
-            .database
-            .persisted
-            .consoles
-            .iter()
-            .find(|console| console.id == console_id)
-            .cloned();
-        let title = persisted_console
-            .as_ref()
-            .map(|console| console.title.clone())
-            .unwrap_or_else(|| {
-                if existing_count == 0 {
-                    format!("{database_name} — SQL")
-                } else {
-                    format!("{database_name} — SQL {}", existing_count + 1)
-                }
-            });
+        let title = if existing_count == 0 {
+            format!("{database_name} — SQL")
+        } else {
+            format!("{database_name} — SQL {}", existing_count + 1)
+        };
         let path = crate::app::database::database_console_path(
             connection_id,
             database_name,
@@ -973,6 +945,7 @@ impl App {
         if !open_ids.contains(&console_id.0) {
             open_ids.push(console_id.0);
         }
+        self.normalize_open_database_query_titles();
         self.save_database_panel_state();
         self.request_active_database_query_completion();
     }
@@ -1012,6 +985,54 @@ impl App {
         self.save_tabs_state();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
+        }
+    }
+
+    pub(crate) fn normalize_open_database_query_titles(&mut self) {
+        let mut totals = std::collections::HashMap::<
+            (DatabaseConnectionId, String),
+            usize,
+        >::new();
+        for tab in &self.tabs {
+            if let EditorTabKind::DatabaseQuery(meta, _) = &tab.kind {
+                *totals
+                    .entry((meta.connection_id, meta.database_name.clone()))
+                    .or_default() += 1;
+            }
+        }
+        let mut positions = std::collections::HashMap::<
+            (DatabaseConnectionId, String),
+            usize,
+        >::new();
+        for tab in &mut self.tabs {
+            let EditorTabKind::DatabaseQuery(meta, _) = &mut tab.kind else {
+                continue;
+            };
+            let key = (meta.connection_id, meta.database_name.clone());
+            let position = positions.entry(key.clone()).or_default();
+            *position += 1;
+            let title = if totals.get(&key).copied().unwrap_or(0) <= 1 || *position == 1 {
+                format!("{} — SQL", meta.database_name)
+            } else {
+                format!("{} — SQL {}", meta.database_name, *position)
+            };
+            meta.title.clone_from(&title);
+            tab.base_title.clone_from(&title);
+            if let Some(console) = self
+                .ide_panel
+                .database
+                .persisted
+                .consoles
+                .iter_mut()
+                .find(|console| console.id == meta.console_id)
+            {
+                console.title = title;
+            }
+        }
+        if let Some(tab) = self.tabs.get(self.active_tab)
+            && matches!(tab.kind, EditorTabKind::DatabaseQuery(_, _))
+        {
+            self.base_title.clone_from(&tab.base_title);
         }
     }
 

@@ -74,7 +74,19 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
-        let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(l) = lsp {
+        let query_diagnostics = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                Some(state.editor_diagnostics.as_slice())
+            }
+            _ => None,
+        });
+        let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(diagnostics) = query_diagnostics {
+            (
+                editor.version.min(i32::MAX as u64) as i32,
+                diagnostics.iter().collect::<Vec<_>>(),
+                false,
+            )
+        } else if let Some(l) = lsp {
             if let Some(p) = editor_path {
                 let (version, diagnostics) = l.instant_merged_diagnostics(p);
                 (
@@ -286,8 +298,14 @@ impl Renderer {
                 || state.error.is_some()
         });
         let database_query_results_h = if database_query_results_open {
-            (260.0 * s)
-                .min((real_height - panel_bottom_h - 220.0 * s).max(140.0 * s))
+            active_database_query.map_or(0.0, |(_, state)| {
+                crate::app::database::database_query_results_height(
+                    state.result_view.preferred_height,
+                    real_height,
+                    panel_bottom_h,
+                    s,
+                )
+            })
         } else {
             0.0
         };
@@ -338,12 +356,12 @@ impl Renderer {
         } else {
             44.0 * s
         };
-        let database_query_toolbar_h = if active_database_query.is_some() {
-            40.0 * s
-        } else {
-            0.0
-        };
-        let tab_bar_h = tab_bar_visual_h + database_query_toolbar_h;
+        let tab_bar_h = crate::render_view::editor_content_top_inset(
+            show_welcome,
+            is_ide_mode,
+            active_database_query.is_some(),
+            s,
+        );
         let editor_height =
             editor_view_height(real_height, tab_bar_h, editor_bottom_h, is_ide_mode, s);
         let editor_scroll_height = editor_height;
@@ -575,6 +593,7 @@ impl Renderer {
                 ui_registry,
                 ui_mx,
                 ui_my,
+                blink_alpha,
             );
             let tab_tooltip = self.draw_tab_bar(
                 tabs,
@@ -1348,7 +1367,7 @@ impl Renderer {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));
-        } else if ide_panel.database.modal_open() {
+        } else if ide_panel.database.modal_open() || database_query_modal_open {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if ide_panel.project_search.help_open {
             crate::app::mouse::clear_hover_popup(Some(self));

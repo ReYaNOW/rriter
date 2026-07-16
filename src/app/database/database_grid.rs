@@ -6,11 +6,180 @@ use super::{
 use crate::scroll::ScrollState;
 use std::collections::{BTreeMap, VecDeque};
 
-pub const DATABASE_GRID_ROW_HEIGHT: f32 = 28.0;
-pub const DATABASE_GRID_HEADER_HEIGHT: f32 = 30.0;
+pub const DATABASE_GRID_ROW_HEIGHT: f32 = 38.0;
+pub const DATABASE_GRID_HEADER_HEIGHT: f32 = 40.0;
+pub const DATABASE_TABLE_INPUT_TEXT_SCALE: f32 = 0.9;
 pub const DATABASE_GRID_MIN_COLUMN_WIDTH: f32 = 60.0;
 pub const DATABASE_GRID_DEFAULT_COLUMN_WIDTH: f32 = 150.0;
 pub const DATABASE_GRID_MAX_COLUMN_WIDTH: f32 = 4096.0;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DatabaseGridViewport {
+    pub show_x: bool,
+    pub show_y: bool,
+    pub body_w: f32,
+    pub body_h: f32,
+    pub data_w: f32,
+    pub rows_h: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DatabaseGridRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DatabaseGridLayout {
+    pub outer_rect: DatabaseGridRect,
+    pub header_rect: DatabaseGridRect,
+    pub body_rect: DatabaseGridRect,
+    pub vertical_scrollbar_rect: Option<DatabaseGridRect>,
+    pub horizontal_scrollbar_rect: Option<DatabaseGridRect>,
+    pub viewport: DatabaseGridViewport,
+}
+
+pub fn database_grid_viewport(
+    width: f32,
+    height: f32,
+    gutter_w: f32,
+    scrollbar_w: f32,
+    header_h: f32,
+    content_w: f32,
+    total_rows_h: f32,
+) -> DatabaseGridViewport {
+    let mut show_y = total_rows_h > (height - header_h).max(0.0);
+    let mut data_w = (width - gutter_w - if show_y { scrollbar_w } else { 0.0 }).max(0.0);
+    let mut show_x = content_w > data_w;
+    let mut body_h = (height - if show_x { scrollbar_w } else { 0.0 }).max(0.0);
+    let mut rows_h = (body_h - header_h).max(0.0);
+    if !show_y && total_rows_h > rows_h {
+        show_y = true;
+        data_w = (width - gutter_w - scrollbar_w).max(0.0);
+        show_x = content_w > data_w;
+        body_h = (height - if show_x { scrollbar_w } else { 0.0 }).max(0.0);
+        rows_h = (body_h - header_h).max(0.0);
+    }
+    DatabaseGridViewport {
+        show_x,
+        show_y,
+        body_w: (width - if show_y { scrollbar_w } else { 0.0 }).max(0.0),
+        body_h,
+        data_w,
+        rows_h,
+    }
+}
+
+pub fn database_grid_layout(
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    gutter_width: f32,
+    scrollbar_width: f32,
+    header_height: f32,
+    content_width: f32,
+    total_rows_height: f32,
+) -> DatabaseGridLayout {
+    let viewport = database_grid_viewport(
+        width,
+        height,
+        gutter_width,
+        scrollbar_width,
+        header_height,
+        content_width,
+        total_rows_height,
+    );
+    let data_x = x + gutter_width;
+    let header_rect = DatabaseGridRect {
+        x: data_x,
+        y,
+        w: viewport.data_w,
+        h: header_height.min(viewport.body_h).max(0.0),
+    };
+    let body_rect = DatabaseGridRect {
+        x: data_x,
+        y: y + header_rect.h,
+        w: viewport.data_w,
+        h: viewport.rows_h,
+    };
+    let vertical_scrollbar_rect = viewport.show_y.then_some(DatabaseGridRect {
+        x: x + viewport.body_w,
+        y: body_rect.y,
+        w: scrollbar_width,
+        h: body_rect.h,
+    });
+    let horizontal_scrollbar_rect = viewport.show_x.then_some(DatabaseGridRect {
+        x: data_x,
+        y: y + viewport.body_h,
+        w: viewport.data_w,
+        h: scrollbar_width,
+    });
+    DatabaseGridLayout {
+        outer_rect: DatabaseGridRect { x, y, w: width, h: height },
+        header_rect,
+        body_rect,
+        vertical_scrollbar_rect,
+        horizontal_scrollbar_rect,
+        viewport,
+    }
+}
+
+pub fn database_grid_max_scroll(row_count: usize, row_height: f32, viewport_height: f32) -> f32 {
+    (row_count as f32 * row_height.max(0.0) - viewport_height.max(0.0)).max(0.0)
+}
+
+pub fn database_grid_visible_row_range(
+    scroll_y: f32,
+    row_height: f32,
+    viewport_height: f32,
+    row_count: usize,
+) -> std::ops::Range<usize> {
+    if row_count == 0 || row_height <= f32::EPSILON || viewport_height <= 0.0 {
+        return 0..0;
+    }
+    let start = (scroll_y.max(0.0) / row_height).floor() as usize;
+    let end = ((scroll_y.max(0.0) + viewport_height.max(0.0)) / row_height).ceil() as usize;
+    start.min(row_count)..end.min(row_count)
+}
+
+pub fn database_column_width(widths: &[DatabaseColumnWidth], name: &str) -> f32 {
+    widths
+        .iter()
+        .find(|entry| entry.column_name == name)
+        .map_or(DATABASE_GRID_DEFAULT_COLUMN_WIDTH, |entry| entry.width_px as f32)
+        .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
+}
+
+pub fn set_database_column_width(
+    widths: &mut Vec<DatabaseColumnWidth>,
+    name: &str,
+    width: f32,
+) {
+    let width = width
+        .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
+        .round() as u16;
+    if let Some(entry) = widths.iter_mut().find(|entry| entry.column_name == name) {
+        entry.width_px = width;
+    } else {
+        widths.push(DatabaseColumnWidth {
+            column_name: name.to_string(),
+            width_px: width,
+        });
+    }
+}
+
+pub fn database_columns_content_width(
+    widths: &[DatabaseColumnWidth],
+    columns: impl IntoIterator<Item = impl AsRef<str>>,
+) -> f32 {
+    columns
+        .into_iter()
+        .map(|column| database_column_width(widths, column.as_ref()))
+        .sum()
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseByteaPreview {
@@ -275,11 +444,16 @@ pub struct DatabaseTableReviewState {
 pub enum DatabaseTableReloadAction {
     Refresh,
     ApplyView(DatabaseTableViewState),
+    ApplyFilterView(DatabaseTableViewState),
 }
 
 #[derive(Clone, Debug)]
 pub struct DatabaseTableGridState {
     pub view: DatabaseTableViewState,
+    pub pending_view: Option<DatabaseTableViewState>,
+    pub pending_count: Option<u64>,
+    pub pending_where_changed: bool,
+    pub pending_order_by_changed: bool,
     pub count: Option<u64>,
     pub count_error: Option<String>,
     pub loading_count: bool,
@@ -294,8 +468,10 @@ pub struct DatabaseTableGridState {
     pub scroll_y: ScrollState,
     pub selection: DatabaseGridSelection,
     pub focused_input: Option<DatabaseTableInputTarget>,
+    pub text_drag: Option<DatabaseTableInputTarget>,
     pub where_input: super::DatabaseDialogInput,
     pub order_by_input: super::DatabaseDialogInput,
+    pub filter_error: Option<(DatabaseTableInputTarget, String)>,
     pub cell_editor: Option<DatabaseCellEditorState>,
     pub refresh_prompt: Option<DatabaseTableRefreshPrompt>,
     pub review: Option<DatabaseTableReviewState>,
@@ -303,6 +479,8 @@ pub struct DatabaseTableGridState {
     pub pending_close_after_save: bool,
     pub pending_reload: Option<DatabaseTableReloadAction>,
     pub post_commit_refresh_pending: bool,
+    pub refresh_started: Option<std::time::Instant>,
+    pub refreshing: bool,
     pub restore_selection_keys: Vec<Vec<String>>,
     pub restore_selection_column: Option<usize>,
     pub column_resize: Option<(usize, f32, f32)>,
@@ -314,6 +492,10 @@ impl PartialEq for DatabaseTableGridState {
     fn eq(&self, other: &Self) -> bool {
         self.view == other.view
             && self.count == other.count
+            && self.pending_view == other.pending_view
+            && self.pending_count == other.pending_count
+            && self.pending_where_changed == other.pending_where_changed
+            && self.pending_order_by_changed == other.pending_order_by_changed
             && self.count_error == other.count_error
             && self.loading_count == other.loading_count
             && self.loading_chunk == other.loading_chunk
@@ -324,8 +506,10 @@ impl PartialEq for DatabaseTableGridState {
             && self.added_rows == other.added_rows
             && self.selection == other.selection
             && self.focused_input == other.focused_input
+            && self.text_drag == other.text_drag
             && self.where_input.text() == other.where_input.text()
             && self.order_by_input.text() == other.order_by_input.text()
+            && self.filter_error == other.filter_error
             && self.cell_editor == other.cell_editor
             && self.refresh_prompt == other.refresh_prompt
             && self.review == other.review
@@ -333,6 +517,7 @@ impl PartialEq for DatabaseTableGridState {
             && self.pending_close_after_save == other.pending_close_after_save
             && self.pending_reload == other.pending_reload
             && self.post_commit_refresh_pending == other.post_commit_refresh_pending
+            && self.refreshing == other.refreshing
             && self.restore_selection_keys == other.restore_selection_keys
             && self.restore_selection_column == other.restore_selection_column
     }
@@ -345,7 +530,12 @@ impl DatabaseTableGridState {
         Self {
             where_input: super::DatabaseDialogInput::new(view.where_clause.clone()),
             order_by_input: super::DatabaseDialogInput::new(view.order_by.clone()),
+            filter_error: None,
             view,
+            pending_view: None,
+            pending_count: None,
+            pending_where_changed: false,
+            pending_order_by_changed: false,
             count: None,
             count_error: None,
             loading_count: false,
@@ -360,6 +550,7 @@ impl DatabaseTableGridState {
             scroll_y: ScrollState::new(15.0),
             selection: DatabaseGridSelection::default(),
             focused_input: None,
+            text_drag: None,
             cell_editor: None,
             refresh_prompt: None,
             review: None,
@@ -367,6 +558,8 @@ impl DatabaseTableGridState {
             pending_close_after_save: false,
             pending_reload: None,
             post_commit_refresh_pending: false,
+            refresh_started: None,
+            refreshing: false,
             restore_selection_keys: Vec::new(),
             restore_selection_column: None,
             column_resize: None,
@@ -382,6 +575,60 @@ impl DatabaseTableGridState {
                 .values()
                 .flat_map(|chunk| &chunk.rows)
                 .any(DatabaseGridRow::is_dirty)
+    }
+
+    pub fn request_view(&self) -> &DatabaseTableViewState {
+        self.pending_view.as_ref().unwrap_or(&self.view)
+    }
+
+    pub fn begin_pending_view(
+        &mut self,
+        view: DatabaseTableViewState,
+        where_changed: bool,
+        order_by_changed: bool,
+    ) {
+        self.pending_view = Some(view);
+        self.pending_count = None;
+        self.pending_where_changed = where_changed;
+        self.pending_order_by_changed = order_by_changed;
+    }
+
+    pub fn commit_pending_view(&mut self) -> bool {
+        let Some(view) = self.pending_view.take() else {
+            if let Some(count) = self.pending_count.take() {
+                self.count = Some(count);
+            }
+            self.pending_where_changed = false;
+            self.pending_order_by_changed = false;
+            return false;
+        };
+        self.view = view;
+        if let Some(count) = self.pending_count.take() {
+            self.count = Some(count);
+        }
+        self.pending_where_changed = false;
+        self.pending_order_by_changed = false;
+        true
+    }
+
+    pub fn abort_pending_view(&mut self) {
+        self.pending_view = None;
+        self.pending_count = None;
+        self.pending_where_changed = false;
+        self.pending_order_by_changed = false;
+    }
+
+    pub fn pending_filter_error_target(
+        &self,
+        load_chunk: bool,
+    ) -> Option<DatabaseTableInputTarget> {
+        if load_chunk && self.pending_order_by_changed {
+            Some(DatabaseTableInputTarget::OrderBy)
+        } else if self.pending_where_changed {
+            Some(DatabaseTableInputTarget::Where)
+        } else {
+            None
+        }
     }
 
     pub fn insert_chunk(&mut self, chunk: DatabaseTableChunk) {
@@ -489,39 +736,18 @@ impl DatabaseTableGridState {
     }
 
     pub fn column_width(&self, name: &str) -> f32 {
-        self.view
-            .column_widths
-            .iter()
-            .find(|entry| entry.column_name == name)
-            .map_or(DATABASE_GRID_DEFAULT_COLUMN_WIDTH, |entry| entry.width_px as f32)
-            .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
+        database_column_width(&self.view.column_widths, name)
     }
 
     pub fn set_column_width(&mut self, name: &str, width: f32) {
-        let width = width
-            .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
-            .round() as u16;
-        if let Some(entry) = self
-            .view
-            .column_widths
-            .iter_mut()
-            .find(|entry| entry.column_name == name)
-        {
-            entry.width_px = width;
-        } else {
-            self.view.column_widths.push(DatabaseColumnWidth {
-                column_name: name.to_string(),
-                width_px: width,
-            });
-        }
+        set_database_column_width(&mut self.view.column_widths, name, width);
     }
 
     pub fn content_width(&self, metadata: &DatabaseTableMetadata) -> f32 {
-        metadata
-            .columns
-            .iter()
-            .map(|column| self.column_width(&column.name))
-            .sum()
+        database_columns_content_width(
+            &self.view.column_widths,
+            metadata.columns.iter().map(|column| column.name.as_str()),
+        )
     }
 
     pub fn logical_row_count(&self) -> usize {
@@ -610,6 +836,15 @@ impl DatabaseTableGridState {
         if self.restore_selection_keys.is_empty() {
             self.restore_selection_column = None;
         }
+    }
+
+    pub fn can_reuse_loaded_chunk(&self, chunk_index: usize) -> bool {
+        !self.refreshing && self.chunks.contains_key(&chunk_index)
+    }
+
+    pub fn finish_refresh(&mut self) {
+        self.refreshing = false;
+        self.refresh_started = None;
     }
 
     pub fn clear_loaded_rows(&mut self) {
@@ -831,6 +1066,80 @@ mod tests {
     }
 
     #[test]
+    fn refresh_does_not_reuse_stale_cached_chunk() {
+        let mut grid = grid();
+        grid.insert_chunk(DatabaseTableChunk {
+            generation: DatabaseGeneration(1),
+            chunk_index: 0,
+            estimated_bytes: 1,
+            rows: Vec::new(),
+        });
+        assert!(grid.can_reuse_loaded_chunk(0));
+
+        grid.refreshing = true;
+        grid.refresh_started = Some(std::time::Instant::now());
+        assert!(!grid.can_reuse_loaded_chunk(0));
+    }
+
+    #[test]
+    fn finishing_refresh_clears_delayed_overlay_state() {
+        let mut grid = grid();
+        grid.refreshing = true;
+        grid.refresh_started = Some(std::time::Instant::now());
+
+        grid.finish_refresh();
+
+        assert!(!grid.refreshing);
+        assert!(grid.refresh_started.is_none());
+    }
+
+    #[test]
+    fn pending_filter_view_commits_only_after_successful_chunk() {
+        let mut grid = grid();
+        grid.count = Some(25);
+        let mut pending = grid.view.clone();
+        pending.where_clause = "id=10".to_string();
+        pending.order_by = "id DESC".to_string();
+        grid.begin_pending_view(pending.clone(), true, true);
+        grid.pending_count = Some(1);
+
+        assert!(grid.commit_pending_view());
+        assert_eq!(grid.view, pending);
+        assert_eq!(grid.count, Some(1));
+        assert!(grid.pending_view.is_none());
+    }
+
+    #[test]
+    fn failed_pending_filter_preserves_last_successful_view() {
+        let mut grid = grid();
+        let applied = grid.view.clone();
+        let mut pending = applied.clone();
+        pending.where_clause = "missing=10".to_string();
+        grid.begin_pending_view(pending, true, false);
+
+        assert_eq!(
+            grid.pending_filter_error_target(false),
+            Some(DatabaseTableInputTarget::Where)
+        );
+        grid.abort_pending_view();
+        assert_eq!(grid.view, applied);
+        assert!(grid.pending_view.is_none());
+    }
+
+    #[test]
+    fn chunk_error_prefers_order_by_when_both_filters_changed() {
+        let mut grid = grid();
+        let mut pending = grid.view.clone();
+        pending.where_clause = "id=10".to_string();
+        pending.order_by = "missing DESC".to_string();
+        grid.begin_pending_view(pending, true, true);
+        assert_eq!(
+            grid.pending_filter_error_target(true),
+            Some(DatabaseTableInputTarget::OrderBy)
+        );
+    }
+
+    #[test]
     fn last_page_uses_only_remaining_server_rows() {
         let mut grid = grid();
         grid.view.limit = 100;
@@ -946,4 +1255,61 @@ mod tests {
         assert!(preview.truncated);
         assert_eq!(preview.hex_preview.len(), MAX_BYTEA_PREVIEW_BYTES * 2);
     }
+
+    #[test]
+    fn shared_column_width_helpers_match_table_resize_rules() {
+        let mut widths = Vec::new();
+        assert_eq!(database_column_width(&widths, "name"), DATABASE_GRID_DEFAULT_COLUMN_WIDTH);
+        set_database_column_width(&mut widths, "name", 12.0);
+        assert_eq!(database_column_width(&widths, "name"), DATABASE_GRID_MIN_COLUMN_WIDTH);
+        set_database_column_width(&mut widths, "name", 320.0);
+        assert_eq!(database_column_width(&widths, "name"), 320.0);
+        set_database_column_width(&mut widths, "other", DATABASE_GRID_MAX_COLUMN_WIDTH + 100.0);
+        assert_eq!(database_column_width(&widths, "other"), DATABASE_GRID_MAX_COLUMN_WIDTH);
+        assert_eq!(
+            database_columns_content_width(&widths, ["name", "other"]),
+            320.0 + DATABASE_GRID_MAX_COLUMN_WIDTH
+        );
+    }
+
+    #[test]
+    fn shared_grid_visible_range_keeps_last_of_one_hundred_rows() {
+        let row_h = 38.0;
+        let viewport_h = row_h * 9.5;
+        let max_scroll = database_grid_max_scroll(100, row_h, viewport_h);
+        let range = database_grid_visible_row_range(max_scroll, row_h, viewport_h, 100);
+        assert_eq!(range.end, 100);
+        assert!(range.contains(&99));
+    }
+
+    #[test]
+    fn shared_grid_visible_range_handles_empty_tiny_and_fractional_viewports() {
+        assert_eq!(database_grid_visible_row_range(0.0, 38.0, 100.0, 0), 0..0);
+        assert_eq!(database_grid_visible_row_range(0.0, 38.0, 1.0, 1), 0..1);
+        let scale = 1.33;
+        let row_h = DATABASE_GRID_ROW_HEIGHT * scale;
+        let viewport_h = row_h * 7.25;
+        let max_scroll = database_grid_max_scroll(100, row_h, viewport_h);
+        assert!(database_grid_visible_row_range(max_scroll, row_h, viewport_h, 100).contains(&99));
+    }
+
+    #[test]
+    fn shared_grid_layout_reserves_header_body_and_both_scrollbars_once() {
+        let layout = database_grid_layout(
+            10.0, 20.0, 500.0, 300.0, 0.0, 10.0, 40.0, 700.0, 500.0,
+        );
+        assert!(layout.viewport.show_x);
+        assert!(layout.viewport.show_y);
+        assert_eq!(layout.header_rect, DatabaseGridRect { x: 10.0, y: 20.0, w: 490.0, h: 40.0 });
+        assert_eq!(layout.body_rect, DatabaseGridRect { x: 10.0, y: 60.0, w: 490.0, h: 250.0 });
+        assert_eq!(
+            layout.vertical_scrollbar_rect,
+            Some(DatabaseGridRect { x: 500.0, y: 60.0, w: 10.0, h: 250.0 }),
+        );
+        assert_eq!(
+            layout.horizontal_scrollbar_rect,
+            Some(DatabaseGridRect { x: 10.0, y: 310.0, w: 490.0, h: 10.0 }),
+        );
+    }
+
 }

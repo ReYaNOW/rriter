@@ -390,6 +390,8 @@ pub struct IdePanelState {
     pub diag_copied_idx: Option<usize>,
     pub problems_tab: usize,
     pub flat_diags: Vec<(std::path::PathBuf, usize)>,
+    pub query_problem_path: Option<std::path::PathBuf>,
+    pub query_problem_diagnostics: Vec<crate::lsp::Diagnostic>,
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
     pub problems_scroll: crate::scroll::ScrollState,
     pub terminals: Vec<crate::app::terminal::Terminal>,
@@ -494,6 +496,8 @@ impl Default for IdePanelState {
             diag_copied_idx: None,
             problems_tab: 0,
             flat_diags: Vec::new(),
+            query_problem_path: None,
+            query_problem_diagnostics: Vec::new(),
             problems_collapsed: FxHashSet::default(),
             problems_scroll: crate::scroll::ScrollState::new(15.0),
             terminals: Vec::new(),
@@ -512,6 +516,41 @@ impl Default for IdePanelState {
 }
 
 impl IdePanelState {
+    pub fn problem_diagnostic<'a>(
+        &'a self,
+        lsp: Option<&'a crate::lsp::LspManager>,
+        path: &std::path::Path,
+        index: usize,
+    ) -> Option<&'a crate::lsp::Diagnostic> {
+        if self.query_problem_path.as_deref() == Some(path) {
+            self.query_problem_diagnostics.get(index)
+        } else {
+            lsp.and_then(|manager| manager.diagnostic_at(path, index))
+        }
+    }
+
+    pub fn problem_counts(
+        &self,
+        lsp: Option<&crate::lsp::LspManager>,
+        path: &std::path::Path,
+    ) -> (usize, usize) {
+        if self.query_problem_path.as_deref() == Some(path) {
+            self.query_problem_diagnostics.iter().fold((0, 0), |counts, diagnostic| {
+                match diagnostic.severity {
+                    crate::lsp::DiagSeverity::Error => (counts.0 + 1, counts.1),
+                    crate::lsp::DiagSeverity::Warning => (counts.0, counts.1 + 1),
+                    crate::lsp::DiagSeverity::Info | crate::lsp::DiagSeverity::Hint => counts,
+                }
+            })
+        } else {
+            lsp.map_or((0, 0), |manager| manager.diagnostic_counts_for_path(path))
+        }
+    }
+
+    pub fn is_query_problem_path(&self, path: &std::path::Path) -> bool {
+        self.query_problem_path.as_deref() == Some(path)
+    }
+
     pub fn current_lsp_log_filter(&self) -> LspLogFilter {
         LspLogFilter {
             query: self.lsp_log_filter_editor.get_full_text(),

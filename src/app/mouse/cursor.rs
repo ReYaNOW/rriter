@@ -1,6 +1,95 @@
 use super::*;
 use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
 
+
+#[allow(clippy::too_many_arguments)]
+fn diagnostic_hover_byte_at<'a>(
+    editor: &crate::editor::Editor,
+    renderer: &mut crate::renderer::Renderer,
+    diagnostics: impl IntoIterator<Item = &'a crate::lsp::Diagnostic>,
+    cursor_phys_line: usize,
+    px: f32,
+    hover_content_y: f32,
+    render_scroll_x: f32,
+    left_padding: f32,
+    line_h: f32,
+) -> Option<usize> {
+    let last_line = editor.line_offsets.len().saturating_sub(1);
+    for diag in diagnostics {
+        if crate::render_view::should_suppress_active_line_useless_expression(
+            diag,
+            cursor_phys_line,
+        ) {
+            continue;
+        }
+        let start_line = (diag.start_line as usize).min(last_line);
+        let end_line = (diag.end_line as usize).min(last_line);
+        for line in start_line..=end_line {
+            let vis_line_idx = renderer
+                .phys_to_visual
+                .get(line)
+                .copied()
+                .map_or(0.0, |value| value as f32);
+            let line_top_y = vis_line_idx * line_h;
+            if !hover_content_y_in_line_hitbox(hover_content_y, line_top_y, line_h) {
+                continue;
+            }
+            let start_col = if line == diag.start_line as usize {
+                diag.start_col
+            } else {
+                0
+            };
+            let end_col = if line == diag.end_line as usize {
+                diag.end_col
+            } else {
+                u32::MAX
+            };
+            let avg_adv = renderer.char_advance('a');
+            let Some((start_byte, end_byte)) =
+                diagnostic_visual_byte_range_on_line(editor, line, start_col, end_col)
+            else {
+                continue;
+            };
+            let line_start = editor.line_offsets.get(line).copied().map_or(0, |value| value);
+            let x_start_px =
+                renderer.visual_x_for_byte_offset(editor, line_start, start_byte, true);
+            let mut x_end_px =
+                renderer.visual_x_for_byte_offset(editor, line_start, end_byte, false);
+            if line != diag.end_line as usize {
+                x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
+            }
+            let line_x = px - left_padding + render_scroll_x;
+            let hit_visual_text = renderer.visual_text_range_contains_x(
+                editor,
+                line_start,
+                start_byte,
+                end_byte,
+                line_x,
+                avg_adv / 2.0,
+            );
+            let logical_line_x = renderer.text_x_for_visual_line_x(editor, line, line_x);
+            let type_target = diagnostic_hover_byte_range_on_line(
+                editor, line, start_col, end_col,
+            )
+            .map_or(start_byte, |range| range.2);
+            let x_start = left_padding + x_start_px - render_scroll_x;
+            let x_end = left_padding + x_end_px - render_scroll_x;
+            let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
+            if px < x_start || px > x_start + squiggle_w || !hit_visual_text {
+                continue;
+            }
+            return diagnostic_hover_type_target_at_x(
+                editor,
+                line,
+                logical_line_x,
+                Some(type_target),
+                |ch| renderer.char_advance(ch),
+            );
+        }
+    }
+    None
+}
+
 fn autocomplete_drag_target(
     py: f32,
     rect_y: f32,
@@ -114,9 +203,28 @@ impl App {
             return;
         }
 
-        if self.update_database_table_drag(px, py) {
-            self.request_database_table_chunk_for_scroll(self.active_database_table_tab_id().unwrap());
-            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+        let unavailable_text_dragging = self
+            .active_database_table_tab_id()
+            .and_then(|tab_id| self.database_table_meta_state(tab_id))
+            .is_some_and(|(_, state)| state.unavailable_text_dragging);
+        if unavailable_text_dragging {
+            if let Some(target_index) = self.database_table_unavailable_text_index_at(px) {
+                self.set_database_table_unavailable_text_cursor(target_index, true);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        let database_drag = self.update_database_table_drag(px, py);
+        if database_drag.changed() {
+            if let Some(tab_id) = database_drag.table_tab_id() {
+                self.request_database_table_chunk_for_scroll(tab_id);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
 
@@ -184,7 +292,31 @@ impl App {
             return;
         }
 
-        if self.ide_panel.database.modal_open() {
+        if self.ide_panel.database.table_modal_input_dragging {
+            if let Some(target_index) = self.database_table_modal_input_index_at(px, py) {
+                self.set_database_table_modal_input_cursor(target_index, true);
+            }
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if let Some(target) = self
+            .active_database_table_tab_id()
+            .and_then(|tab_id| self.database_table_meta_state(tab_id))
+            .and_then(|(_, state)| state.grid.text_drag)
+        {
+            if let Some(target_index) = self.database_table_input_index_at(target, px) {
+                self.set_database_table_input_cursor(target, target_index, true);
+            }
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.database_blocking_modal_open() {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
@@ -627,11 +759,12 @@ impl App {
             && !in_blocking_bottom_panel
             && (!in_hover_popup || in_hover_source_line)
         {
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                38.0 * s
-            };
+            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                self.show_welcome,
+                self.is_ide_mode,
+                self.active_tab_is_database_query(),
+                s,
+            );
             let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
             let px = position.x as f32;
             let py = position.y as f32;
@@ -642,117 +775,47 @@ impl App {
                 hover_screen_y_to_content_y(py, render_scroll_y, line_h, baseline_offset)
                     .unwrap_or(0.0);
 
-            if let (Some(lsp), Some(path)) = (self.lsp.as_ref(), self.file_path.as_ref()) {
-                let (_, diagnostics) = lsp.instant_merged_diagnostics(path);
-                let render_scroll_x = self.scroll_x.current.round();
-                let left_padding = self.renderer.as_ref().unwrap().left_padding;
-                let last_line = self.editor.line_offsets.len().saturating_sub(1);
-                let cursor_phys_line = self
-                    .editor
-                    .line_offsets
-                    .partition_point(|&o| o <= self.editor.cursor)
-                    .saturating_sub(1);
-
-                'diag_scan: for diag in diagnostics {
-                    if crate::render_view::should_suppress_active_line_useless_expression(
-                        diag,
+            let render_scroll_x = self.scroll_x.current.round();
+            let left_padding = self.renderer.as_ref().map_or(0.0, |renderer| renderer.left_padding);
+            let cursor_phys_line = self
+                .editor
+                .line_offsets
+                .partition_point(|&offset| offset <= self.editor.cursor)
+                .saturating_sub(1);
+            if self.active_tab_is_database_query() {
+                let diagnostics = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::DatabaseQuery(_, state) => Some(state.editor_diagnostics.as_slice()),
+                    _ => None,
+                });
+                if let Some(diagnostics) = diagnostics
+                    && let Some(renderer) = self.renderer.as_mut()
+                {
+                    diag_hover_byte = diagnostic_hover_byte_at(
+                        &self.editor,
+                        renderer,
+                        diagnostics.iter(),
                         cursor_phys_line,
-                    ) {
-                        continue;
-                    }
-                    let start_line = (diag.start_line as usize).min(last_line);
-                    let end_line = (diag.end_line as usize).min(last_line);
-
-                    for line in start_line..=end_line {
-                        let vis_line_idx = self
-                            .renderer
-                            .as_ref()
-                            .unwrap()
-                            .phys_to_visual
-                            .get(line)
-                            .copied()
-                            .unwrap_or(0) as f32;
-                        let line_top_y = vis_line_idx * line_h;
-
-                        if !hover_content_y_in_line_hitbox(hover_content_y, line_top_y, line_h) {
-                            continue;
-                        }
-
-                        let start_col = if line == diag.start_line as usize {
-                            diag.start_col
-                        } else {
-                            0
-                        };
-                        let end_col = if line == diag.end_line as usize {
-                            diag.end_col
-                        } else {
-                            u32::MAX
-                        };
-
-                        let (avg_adv, x_start_px, x_end_px, hit_visual_text, logical_line_x) = {
-                            let renderer = self.renderer.as_mut().unwrap();
-                            let avg_adv = renderer.char_advance('a');
-                            let (x_start_px, start_byte) = renderer.visual_x_for_utf16_col(
-                                &self.editor,
-                                line,
-                                start_col,
-                                true,
-                            );
-                            let (mut x_end_px, end_byte) =
-                                renderer.visual_x_for_utf16_col(&self.editor, line, end_col, false);
-                            if line != diag.end_line as usize {
-                                x_end_px = x_end_px.max(x_start_px + avg_adv * 4.0);
-                            }
-                            let line_x = px - left_padding + render_scroll_x;
-                            let hit_visual_text = renderer.visual_text_range_contains_x(
-                                &self.editor,
-                                self.editor.line_offsets[line],
-                                start_byte,
-                                end_byte,
-                                line_x,
-                                avg_adv / 2.0,
-                            );
-                            let logical_line_x =
-                                renderer.text_x_for_visual_line_x(&self.editor, line, line_x);
-                            (
-                                avg_adv,
-                                x_start_px,
-                                x_end_px,
-                                hit_visual_text,
-                                logical_line_x,
-                            )
-                        };
-
-                        let Some((_, _, type_target)) = diagnostic_hover_byte_range_on_line(
-                            &self.editor,
-                            line,
-                            start_col,
-                            end_col,
-                        ) else {
-                            continue;
-                        };
-
-                        let x_start = left_padding + x_start_px - render_scroll_x;
-                        let x_end = left_padding + x_end_px - render_scroll_x;
-                        let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
-
-                        if px < x_start || px > x_start + squiggle_w || !hit_visual_text {
-                            continue;
-                        }
-
-                        let type_target_under_cursor = {
-                            let renderer = self.renderer.as_mut().unwrap();
-                            diagnostic_hover_type_target_at_x(
-                                &self.editor,
-                                line,
-                                logical_line_x,
-                                Some(type_target),
-                                |ch| renderer.char_advance(ch),
-                            )
-                        };
-                        diag_hover_byte = type_target_under_cursor;
-                        break 'diag_scan;
-                    }
+                        px,
+                        hover_content_y,
+                        render_scroll_x,
+                        left_padding,
+                        line_h,
+                    );
+                }
+            } else if let (Some(lsp), Some(path)) = (self.lsp.as_ref(), self.file_path.as_ref()) {
+                let (_, diagnostics) = lsp.instant_merged_diagnostics(path);
+                if let Some(renderer) = self.renderer.as_mut() {
+                    diag_hover_byte = diagnostic_hover_byte_at(
+                        &self.editor,
+                        renderer,
+                        diagnostics,
+                        cursor_phys_line,
+                        px,
+                        hover_content_y,
+                        render_scroll_x,
+                        left_padding,
+                        line_h,
+                    );
                 }
             }
 
@@ -837,11 +900,12 @@ impl App {
             }
         }
         let wh = window_size.height as f32;
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
+        let tab_bar_h = crate::render_view::editor_content_top_inset(
+            self.show_welcome,
+            self.is_ide_mode,
+            self.active_tab_is_database_query(),
+            s,
+        );
         let editor_bottom_h = if self.is_ide_mode {
             self.ide_panel.editor_reserved_bottom_height(s)
         } else {
@@ -1275,11 +1339,12 @@ impl App {
             if elapsed > 120 || dy > 10.0 {
                 let r = self.renderer.as_ref().unwrap();
                 let s = r.scale_factor;
-                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * s
-                };
+                let tab_bar_h = crate::render_view::editor_content_top_inset(
+                    self.show_welcome,
+                    self.is_ide_mode,
+                    self.active_tab_is_database_query(),
+                    s,
+                );
                 let editor_bottom_h = if self.is_ide_mode {
                     self.ide_panel.editor_reserved_bottom_height(s)
                 } else {
@@ -1394,11 +1459,16 @@ impl App {
         } else if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;
             let last_mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                38.0 * self.renderer.as_ref().unwrap().scale_factor
-            };
+            let scale = self
+                .renderer
+                .as_ref()
+                .map_or(1.0, |renderer| renderer.scale_factor);
+            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                self.show_welcome,
+                self.is_ide_mode,
+                self.active_tab_is_database_query(),
+                scale,
+            );
             self.editor.set_cursor_at_pos(
                 last_mouse_x,
                 last_mouse_y - tab_bar_h + self.scroll_y.current,

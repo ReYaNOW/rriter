@@ -572,38 +572,67 @@ impl ApplicationHandler for App {
                 self.ui_registry.clear();
 
                 self.ide_panel.flat_diags.clear();
+                let query_diagnostics = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((
+                        std::path::PathBuf::from(format!(
+                            "SQL-консоль · {}",
+                            meta.database_name
+                        )),
+                        state.editor_diagnostics.clone(),
+                    )),
+                    _ => None,
+                });
+                if let Some((path, diagnostics)) = query_diagnostics {
+                    self.ide_panel.query_problem_path = Some(path.clone());
+                    self.ide_panel.query_problem_diagnostics = diagnostics;
+                    if self.ide_panel.problems_tab == 1 {
+                        self.ide_panel.flat_diags.push((path.clone(), usize::MAX));
+                    }
+                    if self.ide_panel.problems_tab == 0
+                        || !self.ide_panel.problems_collapsed.contains(&path)
+                    {
+                        self.ide_panel.flat_diags.extend(
+                            (0..self.ide_panel.query_problem_diagnostics.len())
+                                .map(|index| (path.clone(), index)),
+                        );
+                    }
+                } else {
+                    self.ide_panel.query_problem_path = None;
+                    self.ide_panel.query_problem_diagnostics.clear();
+                }
                 if let Some(lsp) = &self.lsp {
                     if self.ide_panel.problems_tab == 0 {
-                        if let Some(p) = &self.file_path {
-                            let mut diags = lsp.diagnostic_entries_for_path(p);
-                            diags.sort_by(|(_, a), (_, b)| {
-                                a.start_line
-                                    .cmp(&b.start_line)
-                                    .then(a.start_col.cmp(&b.start_col))
+                        if self.ide_panel.query_problem_path.is_none()
+                            && let Some(path) = &self.file_path
+                        {
+                            let mut diagnostics = lsp.diagnostic_entries_for_path(path);
+                            diagnostics.sort_by(|(_, left), (_, right)| {
+                                left.start_line
+                                    .cmp(&right.start_line)
+                                    .then(left.start_col.cmp(&right.start_col))
                             });
-                            for (i, _) in diags {
-                                self.ide_panel.flat_diags.push((p.clone(), i));
-                            }
+                            self.ide_panel.flat_diags.extend(
+                                diagnostics.into_iter().map(|(index, _)| (path.clone(), index)),
+                            );
                         }
                     } else {
-                        let paths = lsp.diagnostic_paths();
-                        for p in paths {
-                            let mut diags = lsp.diagnostic_entries_for_path(p);
-                            if diags.is_empty() {
+                        for path in lsp.diagnostic_paths() {
+                            let mut diagnostics = lsp.diagnostic_entries_for_path(path);
+                            if diagnostics.is_empty() {
                                 continue;
                             }
-                            diags.sort_by(|(_, a), (_, b)| {
-                                a.start_line
-                                    .cmp(&b.start_line)
-                                    .then(a.start_col.cmp(&b.start_col))
+                            diagnostics.sort_by(|(_, left), (_, right)| {
+                                left.start_line
+                                    .cmp(&right.start_line)
+                                    .then(left.start_col.cmp(&right.start_col))
                             });
-
-                            self.ide_panel.flat_diags.push(((*p).clone(), usize::MAX));
-
-                            if !self.ide_panel.problems_collapsed.contains(p) {
-                                for (i, _) in diags {
-                                    self.ide_panel.flat_diags.push(((*p).clone(), i));
-                                }
+                            self.ide_panel.flat_diags.push(((*path).clone(), usize::MAX));
+                            if !self.ide_panel.problems_collapsed.contains(path) {
+                                self.ide_panel.flat_diags.extend(
+                                    diagnostics
+                                        .into_iter()
+                                        .map(|(index, _)| ((*path).clone(), index)),
+                                );
                             }
                         }
                     }
@@ -732,11 +761,12 @@ impl ApplicationHandler for App {
 
                 // LSP actions menu — рисуем поверх всего
                 if let Some(mut menu) = self.lsp_actions_menu.clone() {
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                        0.0
-                    } else {
-                        38.0 * s
-                    };
+                    let tab_bar_h = crate::render_view::editor_content_top_inset(
+                        self.show_welcome,
+                        self.is_ide_mode,
+                        self.active_tab_is_database_query(),
+                        s,
+                    );
                     menu.menu_y += tab_bar_h;
                     let wants = self
                         .renderer
@@ -757,11 +787,12 @@ impl ApplicationHandler for App {
                     let mut perf_detail_draw_ms = 0.0;
                     let mut perf_detail_len = 0usize;
                     let mut perf_detail_lines = 0usize;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                        0.0
-                    } else {
-                        38.0 * s
-                    };
+                    let tab_bar_h = crate::render_view::editor_content_top_inset(
+                        self.show_welcome,
+                        self.is_ide_mode,
+                        self.active_tab_is_database_query(),
+                        s,
+                    );
                     let render_scroll_y = self.scroll_y.current.round() - tab_bar_h;
                     let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
                     let (anchor_x, anchor_y) = *self
@@ -1015,6 +1046,7 @@ impl ApplicationHandler for App {
                     && !self.show_welcome
                     && !self.show_settings
                     && !popup_blocks_background
+                    && !self.database_blocking_modal_open()
                 {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
@@ -1061,14 +1093,56 @@ impl ApplicationHandler for App {
                     {
                         ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                     }
+                    let query_results_resizing =
+                        self.tabs.get(self.active_tab).is_some_and(|tab| {
+                            matches!(
+                                &tab.kind,
+                                crate::app::EditorTabKind::DatabaseQuery(_, state)
+                                    if state.result_view.is_resizing_height
+                            )
+                        });
+                    if ide_resize_cursor.is_none()
+                        && (query_results_resizing
+                            || self.ui_registry.find_at(mx, my)
+                                == Some(crate::ui_system::UiId::DatabaseQueryResultResize))
+                    {
+                        ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
+                    }
                 }
 
-                let cursor_icon = if let Some(rc) = ide_resize_cursor {
+                let cursor_icon = if self.database_blocking_modal_open() {
+                    let (mx, my) = self.renderer.as_ref().map_or((-1.0, -1.0), |renderer| {
+                        (renderer.last_mouse_x, renderer.last_mouse_y)
+                    });
+                    match self.ui_registry.find_overlay_at(mx, my) {
+                        Some(crate::ui_system::UiId::DatabaseDialogField(_))
+                        | Some(crate::ui_system::UiId::DatabaseTableCellEditor)
+                        | Some(crate::ui_system::UiId::DatabaseTableModalInput) => {
+                            winit::window::CursorIcon::Text
+                        }
+                        Some(
+                            crate::ui_system::UiId::DatabaseDialogBackdrop
+                            | crate::ui_system::UiId::DatabaseDialogBody
+                            | crate::ui_system::UiId::DatabaseTableModalBody
+                            | crate::ui_system::UiId::DatabaseQueryReviewBackdrop
+                            | crate::ui_system::UiId::DatabaseQueryReviewBody
+                            | crate::ui_system::UiId::DatabaseQueryResultBody
+                            | crate::ui_system::UiId::DatabaseQueryReviewMessagesBody,
+                        )
+                        | None => winit::window::CursorIcon::Default,
+                        Some(_) => winit::window::CursorIcon::Pointer,
+                    }
+                } else if let Some(rc) = ide_resize_cursor {
                     rc
                 } else if self.ide_panel.is_resizing_left {
                     winit::window::CursorIcon::EwResize
                 } else if self.ide_panel.is_resizing_bottom || self.ide_panel.git.graph_resizing {
                     winit::window::CursorIcon::NsResize
+                } else if self.ui_registry.find_at(
+                    self.renderer.as_ref().unwrap().last_mouse_x,
+                    self.renderer.as_ref().unwrap().last_mouse_y,
+                ).is_some_and(|id| matches!(id, crate::ui_system::UiId::DatabaseTableColumnResize(_) | crate::ui_system::UiId::DatabaseQueryColumnResize(_))) {
+                    winit::window::CursorIcon::EwResize
                 } else if self.api_python_runtime_overlay_active() {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();
@@ -1086,25 +1160,6 @@ impl ApplicationHandler for App {
                         Some(_) => winit::window::CursorIcon::Pointer,
                         None => winit::window::CursorIcon::Default,
                     }
-                } else if self.ide_panel.database.modal_open() {
-                    let (mx, my) = {
-                        let renderer = self.renderer.as_ref().unwrap();
-                        (renderer.last_mouse_x, renderer.last_mouse_y)
-                    };
-                    match self.ui_registry.find_overlay_at(mx, my) {
-                        Some(crate::ui_system::UiId::DatabaseDialogField(_))
-                        | Some(crate::ui_system::UiId::DatabaseTableCellEditor)
-                        | Some(crate::ui_system::UiId::DatabaseTableModalInput) => {
-                            winit::window::CursorIcon::Text
-                        }
-                        Some(
-                            crate::ui_system::UiId::DatabaseDialogBackdrop
-                            | crate::ui_system::UiId::DatabaseDialogBody
-                            | crate::ui_system::UiId::DatabaseTableModalBody,
-                        )
-                        | None => winit::window::CursorIcon::Default,
-                        Some(_) => winit::window::CursorIcon::Pointer,
-                    }
                 } else if self.ide_panel.project_search.help_open {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();
@@ -1116,6 +1171,14 @@ impl ApplicationHandler for App {
                         }
                         _ => winit::window::CursorIcon::Default,
                     }
+                } else if self.ide_panel.database.context_menu.is_some() {
+                    let (mx, my) = {
+                        let renderer = self.renderer.as_ref().unwrap();
+                        (renderer.last_mouse_x, renderer.last_mouse_y)
+                    };
+                    crate::app::context_menu::context_menu_cursor(
+                        self.ui_registry.find_overlay_at(mx, my),
+                    )
                 } else if self.ide_panel.file_tree_context_menu.is_some() {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();
@@ -1164,6 +1227,14 @@ impl ApplicationHandler for App {
                         _ => winit::window::CursorIcon::Default,
                     }
                 } else if self.active_tab_is_api_client() {
+                    if self.ui_registry.wants_text() {
+                        winit::window::CursorIcon::Text
+                    } else if wants_pointer {
+                        winit::window::CursorIcon::Pointer
+                    } else {
+                        winit::window::CursorIcon::Default
+                    }
+                } else if self.active_tab_is_database_table() {
                     if self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else if wants_pointer {

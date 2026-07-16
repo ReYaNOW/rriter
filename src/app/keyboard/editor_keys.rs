@@ -116,7 +116,14 @@ impl App {
         self.lsp_actions_menu = None;
         self.is_highlighted_once = true;
         self.is_highlight_complete = false;
-        if force_close_autocomplete {
+        if self.active_tab_is_database_query() {
+            self.refresh_active_database_query_analysis();
+            if force_close_autocomplete {
+                self.close_autocomplete();
+            } else {
+                self.update_active_database_query_completion(false);
+            }
+        } else if force_close_autocomplete {
             self.close_autocomplete();
         } else if should_trigger_autocomplete {
             if let Some(trigger) = ty_completion_trigger {
@@ -260,13 +267,15 @@ impl App {
             true,
         );
 
+        let database_query_tab = self.active_tab_is_database_query();
         if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
             let size = window.inner_size();
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                38.0 * renderer.scale_factor
-            };
+            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                self.show_welcome,
+                self.is_ide_mode,
+                database_query_tab,
+                renderer.scale_factor,
+            );
             App::ensure_cursor_visible(
                 &mut self.scroll_y.target,
                 &mut self.scroll_x.target,
@@ -749,7 +758,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
                 let mut copied = false;
-                if let Some(text) = self.selected_autocomplete_detail_text() {
+                if !copied && let Some(text) = self.selected_autocomplete_detail_text() {
                     self.set_clipboard_text(text);
                     self.autocomplete_detail_selection_anchor = None;
                     self.autocomplete_detail_selection_cursor = None;
@@ -952,11 +961,12 @@ impl App {
                 let old_target_y = self.scroll_y.target;
                 let old_target_x = self.scroll_x.target;
 
-                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * self.renderer.as_ref().unwrap().scale_factor
-                };
+                let tab_bar_h = crate::render_view::editor_content_top_inset(
+                    self.show_welcome,
+                    self.is_ide_mode,
+                    self.active_tab_is_database_query(),
+                    self.renderer.as_ref().unwrap().scale_factor,
+                );
                 App::ensure_cursor_visible(
                     &mut self.scroll_y.target,
                     &mut self.scroll_x.target,

@@ -248,6 +248,10 @@ impl Renderer {
             || icon_type == crate::widgets::IconType::Time
             || icon_type == crate::widgets::IconType::NumberCount
             || icon_type == crate::widgets::IconType::GithubDark
+            || icon_type == crate::widgets::IconType::Database
+            || icon_type == crate::widgets::IconType::DatabaseTable
+            || icon_type == crate::widgets::IconType::Run
+            || icon_type == crate::widgets::IconType::Eye
         {
             svg_data_str
                 .replace("currentColor", "#ffffff")
@@ -271,10 +275,7 @@ impl Renderer {
 
         let tree = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt).ok()?;
         let size = tree.size();
-        let target_size = match icon_type {
-            crate::widgets::IconType::Error | crate::widgets::IconType::Warning => 128.0,
-            _ => 64.0,
-        };
+        let target_size = Self::builtin_icon_raster_target_size(icon_type);
 
         let scale = if size.width() > size.height() {
             target_size / size.width()
@@ -302,6 +303,20 @@ impl Renderer {
         }
 
         Some((data.to_vec(), width as i32, height as i32))
+    }
+
+    fn builtin_icon_raster_target_size(icon_type: crate::widgets::IconType) -> f32 {
+        match icon_type {
+            crate::widgets::IconType::Error
+            | crate::widgets::IconType::Warning
+            | crate::widgets::IconType::Plus
+            | crate::widgets::IconType::GitMinus
+            | crate::widgets::IconType::Rollback
+            | crate::widgets::IconType::Save
+            | crate::widgets::IconType::Eye
+            | crate::widgets::IconType::Reload => 128.0,
+            _ => 64.0,
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -778,6 +793,32 @@ mod tests {
         assert_eq!(Renderer::rgba_alpha_bytes(&rgba), vec![0, 10, 200]);
         assert!(Renderer::rgba_uses_color(&rgba));
         assert!(!Renderer::rgba_uses_color(&[255, 255, 255, 1, 255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn run_icon_raster_is_white_and_tintable() {
+        let (rgba, _, _) = Renderer::rasterize_builtin_icon(crate::widgets::IconType::Run)
+            .expect("run icon must rasterize in tests");
+        assert!(!Renderer::rgba_uses_color(&rgba));
+        assert!(rgba.chunks_exact(4).any(|pixel| pixel[3] != 0));
+    }
+
+    #[test]
+    fn database_toolbar_icons_use_high_resolution_raster_sources() {
+        for icon in [
+            crate::widgets::IconType::Plus,
+            crate::widgets::IconType::GitMinus,
+            crate::widgets::IconType::Rollback,
+            crate::widgets::IconType::Save,
+            crate::widgets::IconType::Eye,
+            crate::widgets::IconType::Reload,
+        ] {
+            assert_eq!(Renderer::builtin_icon_raster_target_size(icon), 128.0);
+        }
+        assert_eq!(
+            Renderer::builtin_icon_raster_target_size(crate::widgets::IconType::Explorer),
+            64.0
+        );
     }
 
     #[test]

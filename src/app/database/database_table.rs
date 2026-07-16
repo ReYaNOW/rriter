@@ -12,12 +12,20 @@ use super::{
 use std::time::Duration;
 use tokio_postgres::types::ToSql;
 
+pub const DATABASE_TABLE_DISCONNECTED_MESSAGE: &str =
+    "Подключение к базе данных не установлено. Откройте панель «Базы данных» и обновите подключение.";
+pub const DATABASE_SQL_PREVIEW_LINE_HEIGHT: f32 = 26.0;
+
 #[derive(Clone, Debug)]
 pub enum DatabaseTableModal {
     SqlPreview {
         tab_id: super::DatabaseTabId,
         text: String,
-        scroll: crate::scroll::ScrollState,
+        cursor: usize,
+        selection_anchor: Option<usize>,
+        spans: Vec<crate::highlighter::ColorSpan>,
+        scroll_x: crate::scroll::ScrollState,
+        scroll_y: crate::scroll::ScrollState,
     },
     RefreshPrompt {
         tab_id: super::DatabaseTabId,
@@ -64,23 +72,68 @@ pub struct DatabaseTableTabState {
     pub grid: super::DatabaseTableGridState,
     pub loading: bool,
     pub error: Option<String>,
+    pub notice: Option<String>,
+    pub notice_until: Option<std::time::Instant>,
+    pub unavailable_text: DatabaseDialogInput,
+    pub unavailable_text_focused: bool,
+    pub unavailable_text_dragging: bool,
 }
 
 impl DatabaseTableTabState {
     pub fn new(view: super::DatabaseTableViewState) -> Self {
+        let mut unavailable_text = DatabaseDialogInput::new(DATABASE_TABLE_DISCONNECTED_MESSAGE);
+        unavailable_text.cursor = 0;
         Self {
             generation: DatabaseGeneration::default(),
             metadata: None,
             grid: super::DatabaseTableGridState::new(view),
             loading: true,
             error: None,
+            notice: None,
+            notice_until: None,
+            unavailable_text,
+            unavailable_text_focused: false,
+            unavailable_text_dragging: false,
         }
+    }
+
+    pub fn set_unavailable_text(&mut self, text: impl Into<String>) {
+        self.unavailable_text.set_text(text);
+        self.unavailable_text.cursor = 0;
+        self.unavailable_text_focused = false;
+        self.unavailable_text_dragging = false;
+    }
+
+    pub fn clear_unavailable_selection(&mut self) {
+        self.unavailable_text.cursor = 0;
+        self.unavailable_text.clear_selection();
+        self.unavailable_text_focused = false;
+        self.unavailable_text_dragging = false;
+    }
+
+    pub fn show_timed_notice(&mut self, message: impl Into<String>) {
+        self.notice = Some(message.into());
+        self.notice_until = Some(
+            std::time::Instant::now() + std::time::Duration::from_millis(2800),
+        );
+    }
+
+    pub fn active_notice(&self) -> Option<&str> {
+        self.notice.as_deref().filter(|_| {
+            self.notice_until
+                .is_some_and(|until| std::time::Instant::now() < until)
+        })
+    }
+
+    pub fn clear_notice(&mut self) {
+        self.notice = None;
+        self.notice_until = None;
     }
 }
 
 impl Default for DatabaseTableTabState {
     fn default() -> Self {
-        Self::new(super::DatabaseTableViewState::default())
+        Self::new(crate::app::database::DatabaseTableViewState::default())
     }
 }
 
@@ -198,6 +251,9 @@ pub fn validate_table_fragment(fragment: &str, label: &str) -> Result<(), String
     if crate::languages::sql::contains_top_level_semicolon(trimmed) {
         return Err(format!("{label} не должен содержать верхнеуровневую точку с запятой"));
     }
+    if label == "WHERE" && contains_unquoted_double_equals(trimmed) {
+        return Err("WHERE содержит недопустимый оператор ==; используйте =".to_string());
+    }
     let wrapped = if label == "WHERE" {
         format!("SELECT 1 FROM public.__rriter_validation WHERE {trimmed}")
     } else {
@@ -210,6 +266,50 @@ pub fn validate_table_fragment(fragment: &str, label: &str) -> Result<(), String
         return Err(format!("{label} содержит синтаксическую ошибку"));
     }
     Ok(())
+}
+
+fn contains_unquoted_double_equals(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0usize;
+    let mut quote = None;
+    while index + 1 < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active) = quote {
+            if byte == active {
+                if index + 1 < bytes.len() && bytes[index + 1] == active {
+                    index += 2;
+                    continue;
+                }
+                quote = None;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'\'' || byte == b'"' {
+            quote = Some(byte);
+            index += 1;
+            continue;
+        }
+        if byte == b'=' && bytes[index + 1] == b'=' {
+            return true;
+        }
+        index += 1;
+    }
+    false
+}
+
+pub fn database_table_effective_order_by(view: &super::DatabaseTableViewState) -> String {
+    match (view.sorted_column.as_deref(), view.sort_direction) {
+        (Some(column), Some(direction)) => format!(
+            "__rriter_source.{} {}",
+            quote_pg_identifier(column),
+            match direction {
+                super::DatabaseSortDirection::Asc => "ASC",
+                super::DatabaseSortDirection::Desc => "DESC",
+            }
+        ),
+        _ => view.order_by.trim().to_string(),
+    }
 }
 
 pub fn build_table_change_plan(
@@ -250,7 +350,7 @@ pub fn build_table_change_plan(
         }
         preview.push('\n');
     }
-    preview.push_str("-- Apply выполнит COMMIT; Cancel выполнит ROLLBACK.\n");
+    preview.push_str("-- «Применить» выполнит COMMIT; «Отмена» выполнит ROLLBACK.\n");
     Ok(DatabaseChangePlan {
         database_name: database_name.to_string(),
         table_name: table_name.to_string(),
@@ -565,11 +665,11 @@ pub async fn load_public_table_chunk(
     let select_columns = metadata
         .columns
         .iter()
-        .map(select_expression)
+        .map(|column| select_expression(column, "__rriter_source"))
         .collect::<Vec<_>>()
         .join(", ");
     let mut sql = format!(
-        "SELECT {select_columns}, xmin::text AS __rriter_xmin FROM public.{}",
+        "SELECT {select_columns}, __rriter_source.xmin::text AS __rriter_xmin FROM public.{} AS __rriter_source",
         quote_pg_identifier(&metadata.table_name)
     );
     if !where_clause.trim().is_empty() {
@@ -580,7 +680,7 @@ pub async fn load_public_table_chunk(
         metadata
             .primary_key_columns
             .iter()
-            .map(|column| format!("{} ASC", quote_pg_identifier(column)))
+            .map(|column| format!("__rriter_source.{} ASC", quote_pg_identifier(column)))
             .collect::<Vec<_>>()
             .join(", ")
     } else {
@@ -628,15 +728,16 @@ pub async fn load_public_table_chunk(
     })
 }
 
-fn select_expression(column: &DatabaseColumnInfo) -> String {
+fn select_expression(column: &DatabaseColumnInfo, source_alias: &str) -> String {
     let id = quote_pg_identifier(&column.name);
+    let source = format!("{source_alias}.{id}");
     if column.type_kind == super::DatabaseTypeKind::Bytea {
         format!(
-            "CASE WHEN {id} IS NULL THEN NULL ELSE octet_length({id})::text || ':' || encode(substring({id} FROM 1 FOR {}), 'hex') END AS {id}",
+            "CASE WHEN {source} IS NULL THEN NULL ELSE octet_length({source})::text || ':' || encode(substring({source} FROM 1 FOR {}), 'hex') END AS {id}",
             super::MAX_BYTEA_PREVIEW_BYTES
         )
     } else {
-        format!("{id}::text AS {id}")
+        format!("{source}::text AS {id}")
     }
 }
 
@@ -837,6 +938,31 @@ mod tests {
     }
 
     #[test]
+    fn unavailable_table_text_reuses_selectable_input_state() {
+        let mut state = DatabaseTableTabState::default();
+        state.loading = false;
+        assert_eq!(
+            state.unavailable_text.text(),
+            DATABASE_TABLE_DISCONNECTED_MESSAGE
+        );
+        assert_eq!(state.unavailable_text.cursor, 0);
+        state.unavailable_text_focused = true;
+        state.unavailable_text_dragging = true;
+        state.set_unavailable_text("connection refused");
+        assert_eq!(state.unavailable_text.text(), "connection refused");
+        assert_eq!(state.unavailable_text.cursor, 0);
+        assert!(!state.unavailable_text_focused);
+        assert!(!state.unavailable_text_dragging);
+        state.unavailable_text.select_all();
+        assert_eq!(
+            state.unavailable_text.selected_text(),
+            Some("connection refused")
+        );
+        assert!(!state.unavailable_text_focused);
+        assert!(!state.unavailable_text_dragging);
+    }
+
+    #[test]
     fn calendar_parser_accepts_valid_date_prefix_only() {
         assert_eq!(database_calendar_year_month("2026-07-16 12:30:00"), Some((2026, 7)));
         assert_eq!(database_calendar_year_month("2025-02-29"), None);
@@ -845,9 +971,59 @@ mod tests {
 
     #[test]
     fn fragments_reject_only_top_level_statement_separator() {
+        assert!(validate_table_fragment("id=10", "WHERE").is_ok());
         assert!(validate_table_fragment("name = 'a;b'", "WHERE").is_ok());
         assert!(validate_table_fragment("name = 'a'; DROP TABLE x", "WHERE").is_err());
         assert!(validate_table_fragment("AND broken", "WHERE").is_err());
+        assert_eq!(
+            validate_table_fragment("id == 1", "WHERE").unwrap_err(),
+            "WHERE содержит недопустимый оператор ==; используйте ="
+        );
+        assert!(validate_table_fragment("name = 'a==b'", "WHERE").is_ok());
+    }
+
+    #[test]
+    fn timed_table_notice_expires_without_becoming_a_persistent_error() {
+        let mut state = DatabaseTableTabState::default();
+        state.show_timed_notice("busy");
+        assert_eq!(state.active_notice(), Some("busy"));
+        state.notice_until = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
+        assert_eq!(state.active_notice(), None);
+        assert!(state.error.is_none());
+    }
+
+    #[test]
+    fn sql_preview_formatter_breaks_generated_statements_into_readable_lines() {
+        let formatted = crate::app::database::format_database_sql(
+            "UPDATE public.\"items\" SET \"name\" = 'new' WHERE \"id\" = 10 RETURNING \"id\";",
+        )
+        .unwrap();
+        assert!(formatted.contains("\nWHERE "));
+        assert!(formatted.contains("\nRETURNING "));
+    }
+
+    #[test]
+    fn generated_sort_targets_typed_source_column() {
+        let mut view = crate::app::database::DatabaseTableViewState::default();
+        view.sorted_column = Some("User ID".to_string());
+        view.sort_direction = Some(crate::app::database::DatabaseSortDirection::Asc);
+        view.order_by = "\"User ID\" ASC".to_string();
+        assert_eq!(
+            database_table_effective_order_by(&view),
+            "__rriter_source.\"User ID\" ASC"
+        );
+        view.sorted_column = None;
+        view.sort_direction = None;
+        assert_eq!(database_table_effective_order_by(&view), "\"User ID\" ASC");
+    }
+
+    #[test]
+    fn selected_columns_keep_display_alias_but_qualify_source() {
+        let column = &metadata().columns[0];
+        assert_eq!(
+            select_expression(column, "__rriter_source"),
+            "__rriter_source.\"id\"::text AS \"id\""
+        );
     }
 
     #[test]
@@ -867,7 +1043,7 @@ mod tests {
         assert!(sql.contains("xmin = $3::text::xid"));
         assert!(!sql.contains("new"));
         assert_eq!(plan.statements[0].parameters.len(), 3);
-        assert!(plan.preview.contains("Apply выполнит COMMIT"));
+        assert!(plan.preview.contains("«Применить» выполнит COMMIT"));
     }
 
     #[test]

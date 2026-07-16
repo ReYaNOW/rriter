@@ -44,13 +44,10 @@ pub const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     "*.swp",
     "*.swo",
 ];
-pub const FILE_TREE_CONTEXT_MENU_ANIM_SECS: f32 = 0.28;
-const FILE_TREE_CONTEXT_MENU_CURSOR_OFFSET: f32 = 10.0;
 const FILE_TREE_UNDO_LIMIT: usize = 64;
 
 pub(crate) fn file_tree_context_menu_anchor(mx: f32, my: f32, scale: f32) -> (f32, f32) {
-    let offset = FILE_TREE_CONTEXT_MENU_CURSOR_OFFSET * scale;
-    (mx + offset, my + offset)
+    crate::app::context_menu::context_menu_anchor(mx, my, scale)
 }
 
 /// Проверяет, должен ли узел быть скрыт по паттернам.
@@ -176,24 +173,9 @@ pub struct FileTreeContextMenu {
 pub(crate) fn file_tree_context_menu_cursor(
     hovered_overlay: Option<crate::ui_system::UiId>,
 ) -> winit::window::CursorIcon {
-    if matches!(
-        hovered_overlay,
-        Some(crate::ui_system::UiId::FileTreeMenuItem(_))
-    ) {
-        winit::window::CursorIcon::Pointer
-    } else {
-        winit::window::CursorIcon::Default
-    }
+    crate::app::context_menu::context_menu_cursor(hovered_overlay)
 }
 
-pub fn file_tree_context_menu_anim_progress(opened_at: Instant, now: Instant) -> f32 {
-    let elapsed = now
-        .checked_duration_since(opened_at)
-        .unwrap_or_default()
-        .as_secs_f32();
-    let progress = (elapsed / FILE_TREE_CONTEXT_MENU_ANIM_SECS).clamp(0.0, 1.0);
-    progress * progress * progress * (progress * (progress * 6.0 - 15.0) + 10.0)
-}
 
 pub struct FileTreeCreateDialog {
     pub kind: FileTreeCreateKind,
@@ -485,32 +467,13 @@ where
     text.len()
 }
 
+#[cfg(test)]
 fn insert_file_tree_name_text(editor: &mut Editor, text: &str) {
-    let selected_len = editor
-        .selection_anchor
-        .map(|anchor| anchor.abs_diff(editor.cursor))
-        .unwrap_or(0);
-    let current_len = editor.get_full_text().len();
-    let room =
-        FILE_TREE_NAME_INPUT_MAX_BYTES.saturating_sub(current_len.saturating_sub(selected_len));
-    if room == 0 {
-        return;
-    }
-
-    let mut clean = String::new();
-    for ch in text.chars() {
-        if ch == '\n' || ch == '\r' {
-            continue;
-        }
-        let next_len = clean.len() + ch.len_utf8();
-        if next_len > room {
-            break;
-        }
-        clean.push(ch);
-    }
-    if !clean.is_empty() {
-        editor.insert_str(&clean);
-    }
+    crate::app::single_line_input::insert_single_line_text(
+        editor,
+        text,
+        FILE_TREE_NAME_INPUT_MAX_BYTES,
+    );
 }
 
 fn handle_file_tree_name_editor_input(
@@ -523,91 +486,17 @@ fn handle_file_tree_name_editor_input(
     text_input_allowed: bool,
     paste_text: Option<String>,
 ) -> Option<String> {
-    match physical_key {
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ)
-            if primary && shift =>
-        {
-            editor.redo();
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyZ) if primary => {
-            editor.undo();
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyY) if primary => {
-            editor.redo();
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(
-            winit::keyboard::KeyCode::KeyA | winit::keyboard::KeyCode::KeyF,
-        ) if primary => {
-            editor.select_all();
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyC) if primary => {
-            editor.get_selection()
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyX) if primary => {
-            let copy_text = editor.get_selection();
-            if copy_text.is_some() {
-                editor.delete_selection();
-            }
-            copy_text
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if primary => {
-            if let Some(text) = paste_text {
-                insert_file_tree_name_text(editor, &text);
-            }
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Backspace) => {
-            if word {
-                editor.delete_word_backward();
-            } else {
-                editor.backspace();
-            }
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Delete) => {
-            if word {
-                editor.delete_word_forward();
-            } else {
-                editor.delete_forward();
-            }
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowLeft) => {
-            if word {
-                editor.move_word_left(shift);
-            } else {
-                editor.move_left(shift);
-            }
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::ArrowRight) => {
-            if word {
-                editor.move_word_right(shift);
-            } else {
-                editor.move_right(shift);
-            }
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Home) => {
-            editor.move_home(shift);
-            None
-        }
-        winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::End) => {
-            editor.move_end(shift);
-            None
-        }
-        _ if text_input_allowed => {
-            if let Some(txt) = logical_text {
-                insert_file_tree_name_text(editor, txt);
-            }
-            None
-        }
-        _ => None,
-    }
+    crate::app::single_line_input::handle_single_line_input(
+        editor,
+        physical_key,
+        logical_text,
+        primary,
+        word,
+        shift,
+        text_input_allowed,
+        paste_text.as_deref(),
+        FILE_TREE_NAME_INPUT_MAX_BYTES,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +825,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn open_file_tree_context_menu(&mut self, mx: f32, my: f32) {
+        self.ide_panel.database.context_menu = None;
         let scale = self
             .renderer
             .as_ref()

@@ -91,6 +91,16 @@ impl Button {
     }
 }
 
+
+#[derive(Clone, Copy)]
+pub struct ButtonStyle {
+    pub border: [f32; 4],
+    pub background: [f32; 4],
+    pub hover_background: [f32; 4],
+    pub pressed_background: [f32; 4],
+    pub content: [f32; 4],
+}
+
 impl<'a> ButtonView<'a> {
     pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
@@ -105,65 +115,161 @@ impl<'a> ButtonView<'a> {
         scale: f32,
         pressed: bool,
     ) -> bool {
+        self.render_with_style(renderer, mx, my, scale, pressed, true, None)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn render_styled(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+        style: ButtonStyle,
+    ) -> bool {
+        self.render_with_style(renderer, mx, my, scale, pressed, true, Some(style))
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn render_disabled(&self, renderer: &mut Renderer, scale: f32) {
+        let _ = self.render_with_style(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false, false, None);
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn render_with_style(
+        &self,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+        enabled: bool,
+        style: Option<ButtonStyle>,
+    ) -> bool {
         let x = self.x.round();
         let y = self.y.round();
         let w = self.w.round();
         let h = self.h.round();
+        let hovered = enabled && mx >= x && mx <= x + w && my >= y && my <= y + h;
 
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        let standard = ButtonStyle {
+            border: renderer.theme.sel,
+            background: [0.22, 0.24, 0.26, 1.0],
+            hover_background: [0.28, 0.30, 0.33, 1.0],
+            pressed_background: renderer.theme.sel,
+            content: renderer.theme.fg,
+        };
+        let style = style.unwrap_or(standard);
+        let border_color = if enabled { style.border } else { [1.0, 1.0, 1.0, 0.07] };
+        let bg_color = if !enabled {
+            [0.10, 0.105, 0.13, 1.0]
+        } else if hovered && pressed {
+            style.pressed_background
+        } else if hovered {
+            style.hover_background
+        } else {
+            style.background
+        };
 
-        let border_color = renderer.theme.sel;
-        let mut bg_color = [0.22, 0.24, 0.26, 1.0];
-
-        if hovered {
-            if pressed {
-                bg_color = renderer.theme.sel;
-            } else {
-                bg_color = [0.28, 0.30, 0.33, 1.0];
-            }
-        }
-
-        let r = 4.0 * scale;
+        let r = (4.0 * scale).round();
         let bw = (1.0 * scale).round().max(1.0);
         renderer.push_rounded_rect_border(x, y, w, h, r, bw, border_color, bg_color);
 
-        let icon_size = self.icon_size;
+        let icon_size = self.icon_size.round();
         let text_scale = self.text_scale;
-        let text_color = renderer.theme.fg;
+        let content_color = if enabled { style.content } else { [0.40, 0.42, 0.48, 1.0] };
+        let icon_y = (y + (h - icon_size) * 0.5).round();
+        let text_y = Renderer::tree_row_text_y(y, h, scale);
 
-        let icon_y = y + (h - icon_size) / 2.0;
-        let text_y = y + h / 2.0 + 5.0 * scale;
-
-        let text_w = renderer.measure_ui_width(self.text, text_scale);
+        let text_w = renderer.measure_ui_width(self.text, text_scale).round();
+        let gap = (8.0 * scale).round();
         let mut content_w = text_w;
         if self.icon.is_some() {
             content_w += icon_size;
             if !self.text.is_empty() {
-                content_w += 8.0 * scale;
+                content_w += gap;
             }
         }
-
-        let mut content_x = x + (w - content_w) / 2.0;
+        let mut content_x = (x + (w - content_w) * 0.5).round();
 
         if let Some(icon_type) = self.icon {
-            renderer.draw_atlas_icon(
-                icon_type,
-                content_x,
-                icon_y,
-                icon_size,
-                [1.0, 1.0, 1.0, 1.0],
-            );
-            content_x += icon_size;
-            if !self.text.is_empty() {
-                content_x += 8.0 * scale;
-            }
+            renderer.draw_atlas_icon(icon_type, content_x, icon_y, icon_size, content_color);
+            content_x = (content_x + icon_size + if self.text.is_empty() { 0.0 } else { gap }).round();
         }
-
         if !self.text.is_empty() {
-            renderer.draw_string_scaled(self.text, content_x, text_y, text_color, text_scale);
+            renderer.draw_string_scaled_pixel_snapped(
+                self.text,
+                content_x,
+                text_y,
+                content_color,
+                text_scale,
+            );
         }
-
         hovered
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct CheckboxView<'a> {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub label: &'a str,
+    pub checked: bool,
+    pub enabled: bool,
+}
+
+impl CheckboxView<'_> {
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn render(&self, renderer: &mut Renderer, hovered: bool, scale: f32) {
+        let x = self.x.round();
+        let y = self.y.round();
+        let _w = self.w.round();
+        let h = self.h.round();
+        let box_size = (18.0 * scale).round().max(16.0);
+        let box_x = (x + 7.0 * scale).round();
+        let box_y = (y + (h - box_size) * 0.5).round();
+        let border = if self.enabled {
+            if hovered { renderer.theme.sel } else { [1.0, 1.0, 1.0, 0.22] }
+        } else {
+            [1.0, 1.0, 1.0, 0.08]
+        };
+        let bg = if self.checked {
+            if self.enabled { renderer.theme.sel } else { [0.28, 0.24, 0.34, 1.0] }
+        } else if hovered && self.enabled {
+            [0.16, 0.17, 0.21, 1.0]
+        } else {
+            [0.095, 0.10, 0.13, 1.0]
+        };
+        renderer.push_rounded_rect_border(
+            box_x,
+            box_y,
+            box_size,
+            box_size,
+            (3.0 * scale).round(),
+            (1.0 * scale).round().max(1.0),
+            border,
+            bg,
+        );
+        if self.checked {
+            let icon_size = (13.0 * scale).round().max(11.0);
+            renderer.draw_atlas_icon(
+                IconType::Check,
+                (box_x + (box_size - icon_size) * 0.5).round(),
+                (box_y + (box_size - icon_size) * 0.5).round(),
+                icon_size,
+                if self.enabled { [1.0, 1.0, 1.0, 1.0] } else { [0.62, 0.62, 0.68, 1.0] },
+            );
+        }
+        renderer.draw_string_scaled_pixel_snapped(
+            self.label,
+            (box_x + box_size + 7.0 * scale).round(),
+            Renderer::tree_row_text_y(y, h, scale),
+            if self.enabled { renderer.theme.fg } else { [0.46, 0.47, 0.52, 1.0] },
+            0.86,
+        );
     }
 }
 

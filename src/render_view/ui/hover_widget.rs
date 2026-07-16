@@ -42,6 +42,14 @@ fn normalize_diagnostic_message(message: &str) -> String {
     out
 }
 
+fn diagnostic_copy_text(diagnostic: &Diagnostic) -> String {
+    let message = normalize_diagnostic_message(&diagnostic.message);
+    diagnostic
+        .code
+        .as_deref()
+        .map_or_else(|| message.clone(), |code| format!("{code}: {message}"))
+}
+
 pub fn compute_hover_y_position(
     line_top_y: f32,
     line_height: f32,
@@ -493,6 +501,17 @@ impl Renderer {
             });
             return;
         }
+
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.diag_copy_texts.clear();
+            state
+                .diag_copy_texts
+                .resize(lsp_diagnostics.len(), String::new());
+            for &(idx, _, _, _, _) in &hovered_diags_cache {
+                state.diag_copy_texts[idx] = diagnostic_copy_text(lsp_diagnostics[idx]);
+            }
+        });
 
         let s = self.scale_factor;
         let pad = 12.0 * s;

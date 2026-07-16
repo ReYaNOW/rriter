@@ -4,6 +4,7 @@ use super::super::{
     HOVER_STATE, HoverState, advance_hover_anim_progress, clear_hover_popup,
     compute_hover_visibility, compute_hover_visibility_from_matches,
     diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
+    diagnostic_visual_byte_range_on_line,
     diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
     hover_byte_on_line_at_x, hover_bytes_share_token, hover_screen_y_to_content_y,
     hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
@@ -156,13 +157,34 @@ fn diagnostic_hover_range_does_not_create_type_target_for_keyword() {
 }
 
 #[test]
-fn diagnostic_hover_range_returns_none_for_missing_line_or_empty_span() {
+fn diagnostic_hover_range_expands_empty_span_but_rejects_missing_line() {
     let mut editor = crate::editor::Editor::new(128);
     editor.insert_str("value = 1\n");
 
     assert_eq!(diagnostic_hover_byte_range_on_line(&editor, 5, 0, 4), None);
-    assert_eq!(diagnostic_hover_byte_range_on_line(&editor, 0, 6, 6), None);
+    let empty = diagnostic_visual_byte_range_on_line(&editor, 0, 6, 6).unwrap();
+    assert!(empty.0 < empty.1);
+    assert!(diagnostic_hover_byte_range_on_line(&editor, 0, 6, 6).is_some());
     assert_eq!(diagnostic_hover_range_on_line(&editor, 5, 0, 4), None);
+}
+
+#[test]
+fn diagnostic_visual_range_is_exact_for_sql_and_utf8_safe_for_missing_node() {
+    let mut editor = crate::editor::Editor::new(128);
+    editor.insert_str("SELECT Ж FROM items\n");
+    let text = editor.get_full_text();
+    let start = text.find("Ж").unwrap();
+    let start_col = text[..start].encode_utf16().count() as u32;
+    let end_col = start_col + 1;
+    let range = diagnostic_visual_byte_range_on_line(&editor, 0, start_col, end_col).unwrap();
+    assert_eq!(&text[range.0..range.1], "Ж");
+
+    let missing_col = "SELECT Ж FROM items".encode_utf16().count() as u32;
+    let missing =
+        diagnostic_visual_byte_range_on_line(&editor, 0, missing_col, missing_col).unwrap();
+    assert!(text.is_char_boundary(missing.0));
+    assert!(text.is_char_boundary(missing.1));
+    assert!(missing.0 < missing.1);
 }
 
 #[test]

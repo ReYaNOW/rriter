@@ -651,6 +651,9 @@ impl App {
     }
 
     pub fn apply_autocomplete(&mut self) {
+        if self.apply_database_table_filter_autocomplete() {
+            return;
+        }
         if let Some((route_idx, part)) = self.api_mock_completion_focus()
             && self.apply_api_mock_autocomplete()
         {
@@ -818,6 +821,9 @@ impl App {
         self.highlighter
             .apply_edits(self.editor.version, edits, None, None);
         self.last_sent_version = self.editor.version;
+        if self.active_tab_is_database_query() {
+            self.refresh_active_database_query_analysis();
+        }
     }
 
     #[cfg(test)]

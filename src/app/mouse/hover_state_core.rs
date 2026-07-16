@@ -64,6 +64,7 @@ pub struct HoverState {
     pub diag_hover_ready_after_stale: bool,
     pub diag_anim_progress: f32,
     pub diag_text: String,
+    pub diag_copy_texts: Vec<String>,
     pub diag_href: Option<String>,
 }
 
@@ -98,6 +99,7 @@ impl Default for HoverState {
             diag_hover_ready_after_stale: false,
             diag_anim_progress: 0.0,
             diag_text: String::new(),
+            diag_copy_texts: Vec::new(),
             diag_href: None,
         }
     }
@@ -123,6 +125,7 @@ impl HoverState {
         self.diag_selection_cursor = None;
         self.diag_selecting = false;
         self.diag_text.clear();
+        self.diag_copy_texts.clear();
         self.diag_href = None;
     }
 
@@ -139,6 +142,7 @@ impl HoverState {
         self.diag_selection_cursor = None;
         self.diag_selecting = false;
         self.diag_text.clear();
+        self.diag_copy_texts.clear();
         self.diag_href = None;
     }
 
@@ -360,6 +364,7 @@ impl HoverState {
             self.diag_selection_cursor = None;
             self.diag_selecting = false;
             self.diag_text.clear();
+            self.diag_copy_texts.clear();
             self.diag_href = None;
         }
         self.stale_combined_popup = false;

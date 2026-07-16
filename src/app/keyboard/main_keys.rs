@@ -115,6 +115,28 @@ impl App {
             return;
         }
 
+        let query_review_open = self
+            .active_database_query_meta_state()
+            .is_some_and(|(_, state)| state.review.is_some());
+        if query_review_open {
+            if key_event.state == ElementState::Pressed {
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::Escape) => {
+                        self.rollback_active_database_query();
+                    }
+                    PhysicalKey::Code(KeyCode::Enter)
+                    | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                        self.commit_active_database_query();
+                    }
+                    _ => {}
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            return;
+        }
+
         if key_event.state == ElementState::Pressed
             && alt
             && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyQ)

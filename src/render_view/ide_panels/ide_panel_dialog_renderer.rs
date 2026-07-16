@@ -472,6 +472,7 @@ impl Renderer {
             editor.cursor,
             editor.selection_anchor,
             false,
+            true,
             input_x,
             input_y,
             input_w,
@@ -479,6 +480,7 @@ impl Renderer {
             scroll_x,
             blink_alpha,
             crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE,
+            0.0,
         );
     }
 
@@ -489,6 +491,7 @@ impl Renderer {
         cursor: usize,
         selection_anchor: Option<usize>,
         masked: bool,
+        focused: bool,
         input_x: f32,
         input_y: f32,
         input_w: f32,
@@ -496,38 +499,136 @@ impl Renderer {
         scroll_x: f32,
         blink_alpha: f32,
         text_scale: f32,
+        right_inset: f32,
     ) {
         let s = self.scale_factor;
-        let pad_x = 8.0 * s;
-        let text_y = input_y + (input_h + 10.0 * s) * 0.5;
-        let text_start_x = input_x + pad_x;
-
-        self.push_rounded_rect(
+        self.draw_one_line_input_with_chrome(
+            text,
+            cursor,
+            selection_anchor,
+            masked,
+            focused,
             input_x,
             input_y,
             input_w,
             input_h,
-            5.0 * s,
+            scroll_x,
+            blink_alpha,
+            text_scale,
+            right_inset,
+            (8.0 * s).round(),
+            (5.0 * s).round(),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_one_line_input_with_chrome(
+        &mut self,
+        text: &str,
+        cursor: usize,
+        selection_anchor: Option<usize>,
+        masked: bool,
+        focused: bool,
+        input_x: f32,
+        input_y: f32,
+        input_w: f32,
+        input_h: f32,
+        scroll_x: f32,
+        blink_alpha: f32,
+        text_scale: f32,
+        right_inset: f32,
+        horizontal_padding: f32,
+        corner_radius: f32,
+    ) {
+        let s = self.scale_factor;
+        let x = input_x.round();
+        let y = input_y.round();
+        let w = input_w.round().max(1.0);
+        let h = input_h.round().max(1.0);
+        let pad_x = horizontal_padding.round().clamp(0.0, w * 0.5);
+        let right_inset = right_inset.round().clamp(0.0, w - 1.0);
+        self.push_rounded_rect_border(
+            x,
+            y,
+            w,
+            h,
+            corner_radius.round().max(0.0),
+            (1.0 * s).round().max(1.0),
+            if focused {
+                [0.60, 0.35, 0.85, 1.0]
+            } else {
+                [1.0, 1.0, 1.0, 0.14]
+            },
             [0.08, 0.09, 0.12, 1.0],
         );
+
+        self.draw_one_line_selectable_text(
+            text,
+            cursor,
+            selection_anchor,
+            masked,
+            focused,
+            x,
+            y,
+            w,
+            h,
+            scroll_x,
+            blink_alpha,
+            text_scale,
+            self.theme.fg,
+            right_inset,
+            pad_x,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_one_line_selectable_text(
+        &mut self,
+        text: &str,
+        cursor: usize,
+        selection_anchor: Option<usize>,
+        masked: bool,
+        focused: bool,
+        input_x: f32,
+        input_y: f32,
+        input_w: f32,
+        input_h: f32,
+        scroll_x: f32,
+        blink_alpha: f32,
+        text_scale: f32,
+        color: [f32; 4],
+        right_inset: f32,
+        horizontal_padding: f32,
+    ) {
+        let s = self.scale_factor;
+        let x = input_x.round();
+        let y = input_y.round();
+        let w = input_w.round().max(1.0);
+        let h = input_h.round().max(1.0);
+        let pad_x = horizontal_padding.round().clamp(0.0, w * 0.5);
+        let right_inset = right_inset.round().clamp(0.0, w - 1.0);
+        let content_w = (w - pad_x * 2.0 - right_inset).max(1.0);
+        let text_start_x = x + pad_x;
+        let text_y = Self::tree_row_text_y(y, h, s);
 
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (input_y + input_h);
             self.gl.scissor(
-                input_x as i32,
-                scissor_y as i32,
-                input_w as i32,
-                input_h as i32,
+                text_start_x as i32,
+                (self.height - (y + h)).round().max(0.0) as i32,
+                content_w.round().max(1.0) as i32,
+                h.round().max(1.0) as i32,
             );
 
             let scroll_x = scroll_x.round();
             let sel_start = selection_anchor.unwrap_or(cursor).min(cursor);
             let sel_end = selection_anchor.unwrap_or(cursor).max(cursor);
-            let mut current_x = text_start_x - scroll_x;
+            let mut current_x = (text_start_x - scroll_x).round();
             let mut byte_idx = 0usize;
             let mut cursor_draw_x = current_x;
+            let selection_y = (y + 5.0 * s).round();
+            let selection_h = (h - 10.0 * s).round().max(1.0);
 
             for c in text.chars() {
                 if byte_idx == cursor {
@@ -536,50 +637,40 @@ impl Renderer {
                 let char_to_render = if masked { '•' } else if c == '\n' { '↵' } else { c };
                 let adv = self
                     .get_ui_glyph(char_to_render)
-                    .map(|glyph| glyph.advance * text_scale)
-                    .unwrap_or(10.0 * text_scale);
+                    .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
+                    .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0));
 
                 if byte_idx >= sel_start && byte_idx < sel_end {
-                    self.push_rect(
+                    self.push_rect(current_x, selection_y, adv, selection_h, self.theme.sel);
+                }
+
+                if current_x + adv >= text_start_x
+                    && current_x <= text_start_x + content_w
+                {
+                    let mut buf = [0u8; 4];
+                    self.draw_string_scaled_stable(
+                        char_to_render.encode_utf8(&mut buf),
                         current_x,
-                        input_y + 5.0 * s,
-                        adv,
-                        input_h - 10.0 * s,
-                        self.theme.sel,
+                        text_y,
+                        color,
+                        text_scale,
                     );
                 }
 
-                if current_x + adv >= input_x && current_x <= input_x + input_w {
-                    if let Some(glyph) = self.get_ui_glyph(char_to_render) {
-                        self.push_quad(
-                            current_x + glyph.offset_x * text_scale,
-                            text_y - glyph.offset_y * text_scale,
-                            glyph.width * text_scale,
-                            glyph.height * text_scale,
-                            glyph.u,
-                            glyph.v,
-                            glyph.uw,
-                            glyph.vh,
-                            self.theme.fg,
-                            glyph.is_emoji,
-                        );
-                    }
-                }
-
-                current_x += adv;
+                current_x = (current_x + adv).round();
                 byte_idx += c.len_utf8();
             }
             if byte_idx == cursor {
                 cursor_draw_x = current_x;
             }
 
-            if sel_start == sel_end && blink_alpha > 0.5 {
+            if focused && sel_start == sel_end && blink_alpha > 0.5 {
                 self.push_rect(
                     cursor_draw_x.round(),
-                    input_y + 5.0 * s,
-                    (1.5 * s).max(1.0),
-                    input_h - 10.0 * s,
-                    self.theme.fg,
+                    selection_y,
+                    (1.5 * s).round().max(1.0),
+                    selection_h,
+                    color,
                 );
             }
 
@@ -623,6 +714,123 @@ impl Renderer {
         wants_pointer
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_animated_context_menu<'a, Label, Id, Separator>(
+        &mut self,
+        menu_x: f32,
+        menu_y: f32,
+        opened_at: std::time::Instant,
+        item_count: usize,
+        mut label_at: Label,
+        mut id_at: Id,
+        mut separator_before: Separator,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) -> bool
+    where
+        Label: FnMut(usize) -> &'a str,
+        Id: FnMut(usize) -> crate::ui_system::UiId,
+        Separator: FnMut(usize) -> bool,
+    {
+        let s = self.scale_factor;
+        let row_h = 28.0 * s;
+        let pad_x = 12.0 * s;
+        let border = 2.0 * s;
+        let separator_h = 8.0 * s;
+        let mut menu_w = 190.0 * s;
+        let mut separator_count = 0usize;
+        for idx in 0..item_count {
+            menu_w = menu_w.max(self.measure_ui_width(label_at(idx), 0.88) + pad_x * 2.0);
+            separator_count += usize::from(separator_before(idx));
+        }
+        let menu_h = item_count as f32 * row_h
+            + separator_count as f32 * separator_h
+            + border * 2.0;
+        let x = menu_x.min((self.width - menu_w - 6.0 * s).max(6.0 * s));
+        let y = menu_y.min((self.height - menu_h - 6.0 * s).max(6.0 * s));
+        let anim_progress = crate::app::context_menu::context_menu_anim_progress(
+            opened_at,
+            std::time::Instant::now(),
+        );
+        let visible_h = (menu_h * anim_progress).max(border * 2.0);
+        self.push_rounded_rect_border(
+            x,
+            y,
+            menu_w,
+            visible_h,
+            6.0 * s,
+            border,
+            self.theme.sel,
+            [0.09, 0.10, 0.14, 1.0],
+        );
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let sy = (self.height - (y + visible_h)).round() as i32;
+            self.gl.scissor(
+                x.round() as i32,
+                sy,
+                menu_w.round() as i32,
+                visible_h.round() as i32,
+            );
+        }
+
+        let mut wants_pointer = false;
+        let mut row_y = y + border;
+        let visible_bottom = y + visible_h;
+        for idx in 0..item_count {
+            if separator_before(idx) {
+                let line_y = row_y + separator_h / 2.0;
+                self.push_rect(
+                    x + border + pad_x,
+                    line_y.round(),
+                    menu_w - border * 2.0 - pad_x * 2.0,
+                    1.0,
+                    [1.0, 1.0, 1.0, 0.16],
+                );
+                row_y += separator_h;
+            }
+            if row_y >= visible_bottom {
+                break;
+            }
+            let visible_row_h = (visible_bottom - row_y).min(row_h).max(0.0);
+            let hovered = ui_registry.register_rect(
+                id_at(idx),
+                x,
+                row_y,
+                menu_w,
+                visible_row_h,
+                mx,
+                my,
+            );
+            if hovered {
+                wants_pointer = true;
+                self.push_rect(
+                    x + border,
+                    row_y,
+                    menu_w - border * 2.0,
+                    visible_row_h,
+                    [1.0, 1.0, 1.0, 0.10],
+                );
+            }
+            self.draw_string_scaled_stable(
+                label_at(idx),
+                x + pad_x,
+                row_y + row_h / 2.0 + 5.0 * s,
+                self.theme.fg,
+                0.88,
+            );
+            row_y += row_h;
+        }
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+        wants_pointer
+    }
+
     pub(crate) fn draw_file_tree_overlays(
         &mut self,
         ide_panel: &crate::app::IdePanelState,
@@ -642,97 +850,18 @@ impl Renderer {
         }
 
         if let Some(menu) = &ide_panel.file_tree_context_menu {
-            let row_h = 28.0 * s;
-            let pad_x = 12.0 * s;
-            let border = 2.0 * s;
-            let separator_h = 8.0 * s;
-            let mut menu_w = 190.0 * s;
-            for action in &menu.entries {
-                menu_w = menu_w.max(self.measure_ui_width(action.label(), 0.88) + pad_x * 2.0);
-            }
-            let menu_h = menu.entries.len() as f32 * row_h
-                + file_tree_menu_separator_count(&menu.entries) as f32 * separator_h
-                + border * 2.0;
-            let x = menu.x.min((self.width - menu_w - 6.0 * s).max(6.0 * s));
-            let y = menu.y.min((self.height - menu_h - 6.0 * s).max(6.0 * s));
-            let anim_progress = crate::app::file_tree::file_tree_context_menu_anim_progress(
+            wants_pointer |= self.draw_animated_context_menu(
+                menu.x,
+                menu.y,
                 menu.opened_at,
-                std::time::Instant::now(),
+                menu.entries.len(),
+                |idx| menu.entries[idx].label(),
+                crate::ui_system::UiId::FileTreeMenuItem,
+                |idx| file_tree_menu_separator_before(&menu.entries, idx),
+                ui_registry,
+                mx,
+                my,
             );
-            let visible_h = (menu_h * anim_progress).max(border * 2.0);
-            self.push_rounded_rect_border(
-                x,
-                y,
-                menu_w,
-                visible_h,
-                6.0 * s,
-                border,
-                self.theme.sel,
-                [0.09, 0.10, 0.14, 1.0],
-            );
-
-            self.flush();
-            unsafe {
-                self.gl.enable(glow::SCISSOR_TEST);
-                let sy = (self.height - (y + visible_h)).round() as i32;
-                self.gl.scissor(
-                    x.round() as i32,
-                    sy,
-                    menu_w.round() as i32,
-                    visible_h.round() as i32,
-                );
-            }
-
-            let mut row_y = y + border;
-            let visible_bottom = y + visible_h;
-            for (idx, action) in menu.entries.iter().enumerate() {
-                if file_tree_menu_separator_before(&menu.entries, idx) {
-                    let line_y = row_y + separator_h / 2.0;
-                    self.push_rect(
-                        x + border + pad_x,
-                        line_y.round(),
-                        menu_w - border * 2.0 - pad_x * 2.0,
-                        1.0,
-                        [1.0, 1.0, 1.0, 0.16],
-                    );
-                    row_y += separator_h;
-                }
-                if row_y >= visible_bottom {
-                    break;
-                }
-                let visible_row_h = (visible_bottom - row_y).min(row_h).max(0.0);
-                let hovered = ui_registry.register_rect(
-                    crate::ui_system::UiId::FileTreeMenuItem(idx),
-                    x,
-                    row_y,
-                    menu_w,
-                    visible_row_h,
-                    mx,
-                    my,
-                );
-                if hovered {
-                    wants_pointer = true;
-                    self.push_rect(
-                        x + border,
-                        row_y,
-                        menu_w - border * 2.0,
-                        visible_row_h,
-                        [1.0, 1.0, 1.0, 0.10],
-                    );
-                }
-                self.draw_string_scaled(
-                    action.label(),
-                    x + pad_x,
-                    row_y + row_h / 2.0 + 5.0 * s,
-                    self.theme.fg,
-                    0.88,
-                );
-                row_y += row_h;
-            }
-            self.flush();
-            unsafe {
-                self.gl.disable(glow::SCISSOR_TEST);
-            }
         }
 
         if let Some(dialog) = &ide_panel.file_tree_create_dialog {

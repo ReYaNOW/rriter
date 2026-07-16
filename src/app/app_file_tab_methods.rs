@@ -110,6 +110,7 @@ impl App {
             .unwrap_or(1.0);
         let (menu_x, menu_y) =
             crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
+        self.ide_panel.database.context_menu = None;
         self.ide_panel.file_tree_context_menu =
             Some(crate::app::file_tree::FileTreeContextMenu {
                 x: menu_x,
@@ -188,6 +189,7 @@ impl App {
             }
         }
 
+        self.normalize_open_database_query_titles();
         self.close_autocomplete();
         self.show_welcome =
             self.tabs.is_empty() && self.file_path.is_none() && self.editor.len() == 0;

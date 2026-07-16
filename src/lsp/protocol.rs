@@ -91,7 +91,7 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
 }
 
 /// Одна замена текста (из workspace/applyEdit или codeAction)
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextChange {
     pub start_line: u32,
     pub start_col: u32,

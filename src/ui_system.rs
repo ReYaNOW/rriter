@@ -227,6 +227,7 @@ pub enum UiId {
     DatabaseDialogBackdrop,
     DatabaseDialogBody,
     DatabaseDialogField(crate::app::database::DatabaseFormField),
+    DatabaseDialogSecretEye(crate::app::database::DatabaseFormField),
     DatabaseDialogTls,
     DatabaseDialogColor,
     DatabaseDialogSshToggle,
@@ -247,6 +248,7 @@ pub enum UiId {
     DatabaseDdlBody,
     DatabaseDdlScroll,
     DatabaseTableBody,
+    DatabaseTableUnavailableText,
     DatabaseTableAddRow,
     DatabaseTableDeleteRows,
     DatabaseTableUndo,
@@ -281,18 +283,25 @@ pub enum UiId {
     DatabaseTableModalSecondary,
     DatabaseTableModalTertiary,
     DatabaseTableModalScroll,
+    DatabaseTableModalScrollX,
     DatabaseQueryRun,
     DatabaseQueryCancel,
     DatabaseQueryExplain,
     DatabaseQueryExplainAnalyze,
     DatabaseQueryFormat,
     DatabaseQueryHistory,
+    DatabaseQueryNextDiagnostic,
     DatabaseQueryResultTab(usize),
-    DatabaseQueryMessagesTab,
     DatabaseQueryHistoryEntry(usize),
     DatabaseQueryResultBody,
+    DatabaseQueryResultResize,
+    DatabaseQueryColumnResize(usize),
+    DatabaseQueryScrollY,
+    DatabaseQueryScrollX,
     DatabaseQueryReviewBackdrop,
     DatabaseQueryReviewBody,
+    DatabaseQueryReviewMessagesBody,
+    DatabaseQueryReviewMessagesScrollY,
     DatabaseQueryCommit,
     DatabaseQueryRollback,
 
@@ -661,6 +670,20 @@ impl UiRegistry {
         hovered
     }
 
+    /// Регистрирует выделяемую текстовую область, сохраняя стандартный курсор.
+    pub fn register_default_cursor_text_region(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        self.register_blocker(id, x, y, w, h, mx, my)
+    }
+
     /// Регистрирует область-блокировщик: поглощает клики, но не меняет курсор.
     /// Используется для непрозрачных панелей, перекрывающих редактор.
     pub fn register_blocker(
@@ -828,6 +851,21 @@ mod tests {
         );
 
         registry.reset_cursor_state();
+        assert_eq!(registry.cursor_code(), 0);
+
+        assert!(registry.register_default_cursor_text_region(
+            UiId::DatabaseTableUnavailableText,
+            0.0,
+            0.0,
+            100.0,
+            40.0,
+            10.0,
+            10.0,
+        ));
+        assert_eq!(
+            registry.find_at(10.0, 10.0),
+            Some(UiId::DatabaseTableUnavailableText)
+        );
         assert_eq!(registry.cursor_code(), 0);
 
         registry.clear();

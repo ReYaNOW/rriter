@@ -372,7 +372,12 @@ mod tests {
         assert!(!file_tree_menu_separator_before(&file_tree_entries, 2));
         assert!(file_tree_menu_separator_before(&file_tree_entries, 3));
         assert!(file_tree_menu_separator_before(&file_tree_entries, 5));
-        assert_eq!(file_tree_menu_separator_count(&file_tree_entries), 2);
+        assert_eq!(
+            (1..file_tree_entries.len())
+                .filter(|&idx| file_tree_menu_separator_before(&file_tree_entries, idx))
+                .count(),
+            2
+        );
 
         let tab_entries = [
             FileTreeMenuAction::ShowInExplorer,
@@ -382,6 +387,11 @@ mod tests {
         ];
         assert!(file_tree_menu_separator_before(&tab_entries, 1));
         assert!(!file_tree_menu_separator_before(&tab_entries, 2));
-        assert_eq!(file_tree_menu_separator_count(&tab_entries), 1);
+        assert_eq!(
+            (1..tab_entries.len())
+                .filter(|&idx| file_tree_menu_separator_before(&tab_entries, idx))
+                .count(),
+            1
+        );
     }
 }

@@ -19,12 +19,15 @@ pub use database_panel::*;
 pub use database_grid::{
     DATABASE_GRID_DEFAULT_COLUMN_WIDTH, DATABASE_GRID_HEADER_HEIGHT,
     DATABASE_GRID_MAX_COLUMN_WIDTH, DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_ROW_HEIGHT,
-    DatabaseByteaPreview, DatabaseCellEditorKind, DatabaseCellEditorState, DatabaseCellPosition,
-    DatabaseCellValue, DatabaseGridCell, DatabaseGridRow, DatabaseGridSelection, DatabaseRowState,
-    DatabaseTableChunk, DatabaseTableGridState, DatabaseTableInputTarget,
-    DatabaseTableReloadAction,
-    DatabaseTableRefreshPrompt, DatabaseTableReviewState, DatabaseTableReviewSummary,
-    civil_date_from_unix_days, parse_bytea_preview, parse_editor_value,
+    DATABASE_TABLE_INPUT_TEXT_SCALE, DatabaseByteaPreview, DatabaseCellEditorKind,
+    DatabaseCellEditorState, DatabaseCellPosition, DatabaseCellValue, DatabaseGridCell,
+    DatabaseGridLayout, DatabaseGridRect, DatabaseGridRow, DatabaseGridSelection,
+    DatabaseGridViewport, DatabaseRowState, DatabaseTableChunk, DatabaseTableGridState,
+    DatabaseTableInputTarget, DatabaseTableRefreshPrompt, DatabaseTableReloadAction,
+    DatabaseTableReviewState, DatabaseTableReviewSummary, civil_date_from_unix_days,
+    database_column_width, database_columns_content_width, database_grid_layout,
+    database_grid_max_scroll, database_grid_viewport, database_grid_visible_row_range,
+    parse_bytea_preview, parse_editor_value, set_database_column_width,
 };
 #[allow(unused_imports)]
 pub use database_query::*;
@@ -56,10 +59,11 @@ pub use database_table::{
     DatabaseChangePlanOperation, DatabaseChangeStatement, DatabasePreparedTableTransaction,
     DatabaseTableChunkResult, DatabaseTableCountResult, DatabaseTableModal,
     DatabaseTableTabMeta, DatabaseTableTabState, begin_table_transaction,
+    DATABASE_SQL_PREVIEW_LINE_HEIGHT, DATABASE_TABLE_DISCONNECTED_MESSAGE,
     database_calendar_weekday_monday, database_calendar_year_month,
     database_days_in_month, database_shift_calendar_month,
     build_table_change_plan, count_public_table_rows, finish_table_transaction,
-    load_public_table_chunk, validate_table_fragment,
+    database_table_effective_order_by, load_public_table_chunk, validate_table_fragment,
 };
 
 use serde::{Deserialize, Serialize};

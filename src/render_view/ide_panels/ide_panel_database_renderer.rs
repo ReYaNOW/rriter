@@ -73,7 +73,7 @@ impl Renderer {
 
         if let Some(pending) = database.pending_job.as_ref() {
             let text = format!("Запрос #{}…", pending.id.0);
-            self.draw_string_scaled_stable(
+            self.draw_string_scaled_pixel_snapped(
                 &text,
                 button_x + 4.0 * s,
                 panel_y + 22.0 * s,
@@ -95,12 +95,12 @@ impl Renderer {
             );
         }
 
-        let row_h = 25.0 * s;
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
         let scroll = database.scroll.current.round();
         let mut logical_row = 0usize;
         let mut label_scratch = String::new();
         for (connection_idx, connection) in database.connections.iter().enumerate() {
-            let row_y = content_y + logical_row as f32 * row_h - scroll;
+            let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
             if row_y + row_h >= content_y && row_y <= content_y + content_h {
                 let selected = database.selected_connection == Some(connection.config.id);
                 let hovered = ui_registry.register_rect(
@@ -117,22 +117,22 @@ impl Renderer {
                 } else if hovered {
                     self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.06]);
                 }
+                let arrow_x = panel_x + 6.0 * s;
                 ui_registry.register_rect(
                     UiId::DatabaseConnectionArrow(connection_idx),
-                    panel_x + 4.0 * s,
+                    arrow_x - 4.0 * s,
                     row_y,
-                    22.0 * s,
+                    18.0 * s,
                     row_h,
                     mx,
                     my,
                 );
-                let arrow = if connection.expanded { "▾" } else { "▸" };
-                self.draw_string_scaled_stable(
-                    arrow,
-                    panel_x + 8.0 * s,
-                    row_y + 18.0 * s,
+                self.draw_tree_disclosure_icon(
+                    connection.expanded,
+                    arrow_x,
+                    row_y,
+                    row_h,
                     [0.72, 0.75, 0.82, 1.0],
-                    0.88,
                 );
                 let color = database_connection_color(connection.config.color);
                 self.push_rounded_rect(
@@ -146,7 +146,7 @@ impl Renderer {
                 self.draw_atlas_icon(
                     IconType::Database,
                     panel_x + 37.0 * s,
-                    row_y + 4.0 * s,
+                    database_tree_icon_y(row_y, row_h, 17.0 * s),
                     17.0 * s,
                     [1.0, 0.67, 0.16, 1.0],
                 );
@@ -154,7 +154,7 @@ impl Renderer {
                 self.draw_tree_label_clipped(
                     &connection.config.display_name,
                     panel_x + 58.0 * s,
-                    row_y + 18.0 * s,
+                    Self::tree_row_text_y(row_y, row_h, s),
                     max_w,
                     self.theme.fg,
                     0.86,
@@ -190,7 +190,7 @@ impl Renderer {
                     logical_row += 1;
                 }
                 for (database_idx, database_node) in connection.databases.iter().enumerate() {
-                    let row_y = content_y + logical_row as f32 * row_h - scroll;
+                    let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
                     if row_y + row_h >= content_y && row_y <= content_y + content_h {
                         let selected = database
                             .selected_database
@@ -210,33 +210,34 @@ impl Renderer {
                         } else if hovered {
                             self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.05]);
                         }
+                        let arrow_x = panel_x + 26.0 * s;
                         ui_registry.register_rect(
                             UiId::DatabaseArrow(connection_idx, database_idx),
-                            panel_x + 24.0 * s,
+                            arrow_x - 4.0 * s,
                             row_y,
-                            22.0 * s,
+                            18.0 * s,
                             row_h,
                             mx,
                             my,
                         );
-                        self.draw_string_scaled_stable(
-                            if database_node.expanded { "▾" } else { "▸" },
-                            panel_x + 29.0 * s,
-                            row_y + 18.0 * s,
+                        self.draw_tree_disclosure_icon(
+                            database_node.expanded,
+                            arrow_x,
+                            row_y,
+                            row_h,
                             [0.68, 0.71, 0.79, 1.0],
-                            0.85,
                         );
                         self.draw_atlas_icon(
                             IconType::Database,
                             panel_x + 46.0 * s,
-                            row_y + 5.0 * s,
+                            database_tree_icon_y(row_y, row_h, 15.0 * s),
                             15.0 * s,
                             [1.0, 0.67, 0.16, 1.0],
                         );
                         self.draw_tree_label_clipped(
                             &database_node.name,
                             panel_x + 65.0 * s,
-                            row_y + 18.0 * s,
+                            Self::tree_row_text_y(row_y, row_h, s),
                             (panel_w - 73.0 * s).max(10.0),
                             self.theme.fg,
                             0.84,
@@ -256,7 +257,7 @@ impl Renderer {
                             logical_row += 1;
                         }
                         for (table_idx, table) in database_node.tables.iter().enumerate() {
-                            let row_y = content_y + logical_row as f32 * row_h - scroll;
+                            let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
                             if row_y + row_h >= content_y && row_y <= content_y + content_h {
                                 let hovered = ui_registry.register_rect(
                                     UiId::DatabaseTableRow(connection_idx, database_idx, table_idx),
@@ -273,14 +274,14 @@ impl Renderer {
                                 self.draw_atlas_icon(
                                     IconType::DatabaseTable,
                                     panel_x + 67.0 * s,
-                                    row_y + 5.0 * s,
+                                    database_tree_icon_y(row_y, row_h, 15.0 * s),
                                     15.0 * s,
-                                    [0.95, 0.72, 0.24, 1.0],
+                                    [0.20, 0.80, 0.75, 1.0],
                                 );
                                 self.draw_tree_label_clipped(
                                     &table.name,
                                     panel_x + 86.0 * s,
-                                    row_y + 18.0 * s,
+                                    Self::tree_row_text_y(row_y, row_h, s),
                                     (panel_w - 94.0 * s).max(10.0),
                                     self.theme.fg,
                                     0.82,
@@ -307,53 +308,6 @@ impl Renderer {
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
 
-        if let Some(menu) = database.context_menu.as_ref() {
-            let row_h = 30.0 * s;
-            let width = 220.0 * s;
-            let height = row_h * menu.entries.len() as f32 + 8.0 * s;
-            let x = menu.x.clamp(4.0 * s, self.width - width - 4.0 * s);
-            let y = menu.y.clamp(4.0 * s, self.height - height - 4.0 * s);
-            self.push_rounded_rect(x, y, width, height, 5.0 * s, [0.12, 0.125, 0.16, 0.98]);
-            self.push_rounded_rect_border(
-                x,
-                y,
-                width,
-                height,
-                5.0 * s,
-                1.0,
-                [1.0, 1.0, 1.0, 0.14],
-                [0.12, 0.125, 0.16, 0.98],
-            );
-            for (idx, action) in menu.entries.iter().enumerate() {
-                let row_y = y + 4.0 * s + idx as f32 * row_h;
-                let hovered = ui_registry.register_rect(
-                    UiId::DatabaseContextItem(idx),
-                    x + 4.0 * s,
-                    row_y,
-                    width - 8.0 * s,
-                    row_h,
-                    mx,
-                    my,
-                );
-                if hovered {
-                    self.push_rounded_rect(
-                        x + 4.0 * s,
-                        row_y,
-                        width - 8.0 * s,
-                        row_h,
-                        3.0 * s,
-                        [0.60, 0.35, 0.85, 0.30],
-                    );
-                }
-                self.draw_string_scaled_stable(
-                    database_context_action_label(*action),
-                    x + 13.0 * s,
-                    row_y + 20.0 * s,
-                    self.theme.fg,
-                    0.84,
-                );
-            }
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -369,8 +323,24 @@ impl Renderer {
     ) -> bool {
         let database = &ide_panel.database;
         let mut drew = false;
+        if let Some(menu) = database.context_menu.as_ref() {
+            ui_registry.mark_overlay_start();
+            self.draw_animated_context_menu(
+                menu.x,
+                menu.y,
+                menu.opened_at,
+                menu.entries.len(),
+                |idx| database_context_action_label(menu.entries[idx]),
+                crate::ui_system::UiId::DatabaseContextItem,
+                |_| false,
+                ui_registry,
+                mx,
+                my,
+            );
+            drew = true;
+        }
         if let Some(modal) = database.table_modal.as_ref() {
-            self.draw_database_table_modal(s, modal, ui_registry, mx, my);
+            self.draw_database_table_modal(s, modal, ui_registry, mx, my, blink_alpha);
             drew = true;
         } else if let Some(dialog) = database.dialog.as_ref() {
             self.draw_database_connection_dialog(s, dialog, ui_registry, mx, my, blink_alpha);
@@ -463,8 +433,14 @@ impl Renderer {
             mx,
             my,
         );
-        let width = (700.0 * s).min(self.width - 32.0 * s).max(420.0 * s);
-        let height = (self.height - 48.0 * s).min(780.0 * s).max(420.0 * s);
+        let width = (700.0 * s)
+            .min(self.width - 32.0 * s)
+            .max(420.0 * s)
+            .round();
+        let height = (self.height - 48.0 * s)
+            .min(780.0 * s)
+            .max(420.0 * s)
+            .round();
         let x = ((self.width - width) * 0.5).round();
         let y = ((self.height - height) * 0.5).round();
         self.push_rounded_rect(x, y, width, height, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
@@ -479,7 +455,7 @@ impl Renderer {
             [0.12, 0.125, 0.16, 1.0],
         );
         ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, width, height, mx, my);
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             if dialog.editing_connection_id.is_some() {
                 "Изменить PostgreSQL подключение"
             } else {
@@ -512,70 +488,72 @@ impl Renderer {
         for field in dialog.visible_fields() {
             let row_y = form_top + row as f32 * row_h - dialog.scroll.current;
             if row_y + row_h >= form_top && row_y <= form_bottom {
-                self.draw_string_scaled_stable(
+                let field_h = (28.0 * s).round();
+                let field_y = (row_y + 4.0 * s).round();
+                self.draw_string_scaled_pixel_snapped(
                     database_field_label(field),
-                    label_x,
-                    row_y + 24.0 * s,
+                    label_x.round(),
+                    Self::tree_row_text_y(field_y, field_h, s),
                     [0.72, 0.75, 0.82, 1.0],
                     0.82,
                 );
-                let field_h = 28.0 * s;
-                let field_y = row_y + 4.0 * s;
                 let remember = database_remember_control(field, dialog);
-                let remember_w = if remember.is_some() { 118.0 * s } else { 0.0 };
-                let field_w = (input_w - remember_w).max(80.0 * s);
+                let remember_w = if remember.is_some() { 132.0 * s } else { 0.0 };
+                let field_w = (input_w - remember_w).max(80.0 * s).round();
                 let focused = dialog.focused == Some(field);
-                self.push_rounded_rect_border(
-                    input_x,
-                    field_y,
-                    field_w,
-                    field_h,
-                    4.0 * s,
-                    1.0,
-                    if focused { [0.60, 0.35, 0.85, 0.95] } else { [1.0, 1.0, 1.0, 0.14] },
-                    [0.085, 0.09, 0.12, 1.0],
-                );
+                let eye_size = if field.is_secret() { field_h.round() } else { 0.0 };
                 ui_registry.register_text_input(
                     UiId::DatabaseDialogField(field),
-                    input_x,
-                    field_y,
+                    input_x.round(),
+                    field_y.round(),
                     field_w,
-                    field_h,
+                    field_h.round(),
                     mx,
                     my,
                 );
                 if let Some((remember_id, enabled)) = remember {
-                    let button = crate::widgets::ButtonView {
-                        x: input_x + field_w + 6.0 * s,
+                    let checkbox_x = (input_x + field_w + 6.0 * s).round();
+                    let checkbox_w = (remember_w - 6.0 * s).max(40.0 * s).round();
+                    let hovered = ui_registry.register_rect(
+                        remember_id,
+                        checkbox_x,
+                        field_y.round(),
+                        checkbox_w,
+                        field_h.round(),
+                        mx,
+                        my,
+                    );
+                    crate::widgets::CheckboxView {
+                        x: checkbox_x,
                         y: field_y,
-                        w: (remember_w - 6.0 * s).max(40.0 * s),
+                        w: checkbox_w,
                         h: field_h,
-                        text: if enabled { "✓ Запомнить" } else { "Запомнить" },
-                        icon: None,
-                        text_scale: 0.67,
-                        icon_size: 0.0,
-                    };
-                    ui_registry.register_button_view(remember_id, button, self, mx, my, s, false);
+                        label: "Запомнить",
+                        checked: enabled,
+                        enabled: true,
+                    }
+                    .render(self, hovered, s);
                 }
                 let input = dialog.input(field);
-                let visible_width = (field_w - 16.0 * s).max(1.0);
-                let secret = field.is_secret();
+                let secret_masked = field.is_secret() && !dialog.secret_is_revealed(field);
+                let visible_width = (field_w - 16.0 * s - eye_size).max(1.0);
                 let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
                     input.text(),
                     input.cursor,
                     visible_width,
                     |ch| {
-                        let rendered = if secret { '•' } else { ch };
+                        let rendered = if secret_masked { '•' } else { ch };
                         self.get_ui_glyph(rendered)
-                            .map(|glyph| glyph.advance * 0.82)
-                            .unwrap_or(8.2)
+                            .map(|glyph| Self::snapped_text_advance(glyph.advance, 0.82))
+                            .unwrap_or(8.0)
                     },
                 );
                 self.draw_one_line_dialog_input(
                     input.text(),
                     input.cursor,
                     input.selection_anchor,
-                    secret,
+                    secret_masked,
+                    focused,
                     input_x,
                     field_y,
                     field_w,
@@ -583,7 +561,29 @@ impl Renderer {
                     scroll_x,
                     if focused { blink_alpha } else { 0.0 },
                     0.82,
+                    eye_size,
                 );
+                if field.is_secret() {
+                    let eye = crate::widgets::IconButton {
+                        x: (input_x + field_w - eye_size).round(),
+                        y: field_y.round(),
+                        size: eye_size,
+                        icon: Some(crate::widgets::IconType::Eye),
+                        is_active: dialog.secret_is_revealed(field),
+                        icon_size: Some((16.0 * s).round()),
+                        active_square_width: None,
+                        custom_color: None,
+                    };
+                    ui_registry.register_icon_button(
+                        UiId::DatabaseDialogSecretEye(field),
+                        &eye,
+                        self,
+                        mx,
+                        my,
+                        s,
+                        false,
+                    );
+                }
             }
             row += 1;
         }
@@ -597,7 +597,7 @@ impl Renderer {
             if dialog.ssh_enabled { "да" } else { "нет" },
             if dialog.jump_enabled { "да" } else { "нет" },
         );
-        self.draw_string_scaled_stable(
+        self.draw_string_scaled_pixel_snapped(
             &toggle_label,
             x + 20.0 * s,
             footer.summary_baseline,
@@ -741,8 +741,19 @@ fn database_remember_control(
     }
 }
 
+fn database_tree_icon_y(row_y: f32, row_h: f32, icon_size: f32) -> f32 {
+    (row_y + (row_h - icon_size) * 0.5).round()
+}
+
 fn draw_database_hint(renderer: &mut Renderer, text: &str, x: f32, y: f32, s: f32) {
-    renderer.draw_string_scaled_stable(text, x, y + 18.0 * s, [0.48, 0.50, 0.57, 1.0], 0.78);
+    let row_h = (crate::render_view::tree_ui::TREE_ROW_H * s).round();
+    renderer.draw_string_scaled_pixel_snapped(
+        text,
+        x.round(),
+        Renderer::tree_row_text_y(y.round(), row_h, s),
+        [0.48, 0.50, 0.57, 1.0],
+        0.78,
+    );
 }
 
 fn database_connection_color(color: crate::app::database::DatabaseConnectionColor) -> [f32; 4] {
@@ -762,8 +773,8 @@ fn database_connection_color(color: crate::app::database::DatabaseConnectionColo
 fn database_context_action_label(action: crate::app::database::DatabaseContextAction) -> &'static str {
     use crate::app::database::DatabaseContextAction::*;
     match action {
-        OpenSql => "SQL-запрос",
-        NewSqlConsole => "Новая консоль",
+        OpenSql => "SQL-консоль",
+        NewSqlConsole => "Новая SQL-консоль",
         Refresh => "Обновить",
         EditConnection => "Изменить подключение",
         TestConnection => "Проверить подключение",
@@ -817,14 +828,14 @@ fn draw_database_confirmation(
     ui_registry.mark_overlay_start();
     renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, [0.0, 0.0, 0.0, 0.62]);
     ui_registry.register_blocker(UiId::DatabaseDialogBackdrop, 0.0, 0.0, renderer.width, renderer.height, mx, my);
-    let w = (520.0 * s).min(renderer.width - 30.0 * s);
-    let h = 190.0 * s;
-    let x = (renderer.width - w) * 0.5;
-    let y = (renderer.height - h) * 0.5;
+    let w = (520.0 * s).min(renderer.width - 30.0 * s).round();
+    let h = (190.0 * s).round();
+    let x = ((renderer.width - w) * 0.5).round();
+    let y = ((renderer.height - h) * 0.5).round();
     renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
-    renderer.draw_string_scaled_stable(title, x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
-    renderer.draw_string_scaled_stable(detail, x + 22.0 * s, y + 78.0 * s, [0.72, 0.74, 0.80, 1.0], 0.82);
+    renderer.draw_string_scaled_pixel_snapped(title, x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
+    renderer.draw_string_scaled_pixel_snapped(detail, x + 22.0 * s, y + 78.0 * s, [0.72, 0.74, 0.80, 1.0], 0.82);
     if confirm_enabled {
         ui_registry.register_button_view(
             confirm_id,
@@ -857,9 +868,9 @@ fn draw_database_host_key_confirmation(
     let y = (renderer.height - h) * 0.5;
     renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
-    renderer.draw_string_scaled_stable("Неизвестный SSH host key", x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
+    renderer.draw_string_scaled_pixel_snapped("Неизвестный SSH host key", x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
     for (idx, line) in detail.lines().enumerate() {
-        renderer.draw_string_scaled_stable(line, x + 22.0 * s, y + (76.0 + idx as f32 * 24.0) * s, [0.72, 0.75, 0.82, 1.0], 0.82);
+        renderer.draw_string_scaled_pixel_snapped(line, x + 22.0 * s, y + (76.0 + idx as f32 * 24.0) * s, [0.72, 0.75, 0.82, 1.0], 0.82);
     }
     let by = y + h - 48.0 * s;
     let mut bx = x + 22.0 * s;
@@ -879,7 +890,23 @@ fn draw_database_host_key_confirmation(
 
 #[cfg(test)]
 mod database_dialog_layout_tests {
-    use super::database_dialog_footer_layout;
+    use super::{database_context_action_label, database_dialog_footer_layout};
+
+    #[test]
+    fn database_sql_actions_are_named_as_console_actions() {
+        assert_eq!(
+            database_context_action_label(
+                crate::app::database::DatabaseContextAction::OpenSql
+            ),
+            "SQL-консоль"
+        );
+        assert_eq!(
+            database_context_action_label(
+                crate::app::database::DatabaseContextAction::NewSqlConsole
+            ),
+            "Новая SQL-консоль"
+        );
+    }
 
     #[test]
     fn connection_dialog_footer_rows_never_overlap() {
