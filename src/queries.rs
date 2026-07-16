@@ -936,6 +936,10 @@ pub fn get_ts_config(lang_name: &str) -> Option<(tree_sitter::Language, Vec<&'st
                 "(comment) @comment",
             ],
         )),
+        "sql" => Some((
+            tree_sitter_sequel::LANGUAGE.into(),
+            vec![tree_sitter_sequel::HIGHLIGHTS_QUERY],
+        )),
         "make" => Some((
             tree_sitter_make::LANGUAGE.into(),
             vec![
@@ -974,7 +978,7 @@ mod tests {
     fn test_all_tree_sitter_queries_are_valid() {
         let languages = [
             "bash", "rs", "py", "toml", "go", "js", "ts", "tsx", "regex", "java", "cs", "dart",
-            "html", "css", "json", "c", "cpp", "make",
+            "html", "css", "json", "c", "cpp", "sql", "make",
         ];
         let mut all_passed = true;
 

@@ -67,6 +67,10 @@ impl App {
             return;
         }
 
+        if self.is_ide_mode && !self.tabs.is_empty() {
+            self.prepare_all_database_tabs_close();
+        }
+
         let path_to_close = self.file_path.take();
         self.file_key = None;
         self.text_file_format = crate::platform::TextFileFormat::default();
@@ -611,7 +615,10 @@ impl App {
             if !tab.editor.is_dirty() {
                 let diff_path = match &tab.kind {
                     EditorTabKind::GitDiff(meta, _) => Some(meta.repo_root.join(&meta.rel_path)),
-                    EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) => None,
+                    EditorTabKind::Normal
+                    | EditorTabKind::ApiClient(_, _)
+                    | EditorTabKind::DatabaseTable(_, _)
+                    | EditorTabKind::DatabaseQuery(_, _) => None,
                 };
                 if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref()) {
                     if let Ok(decoded) = crate::platform::read_text_file(path) {
@@ -694,7 +701,9 @@ impl App {
                         Some((idx, meta.repo_root.join(&meta.rel_path)))
                     }
                     EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path)),
-                    EditorTabKind::ApiClient(_, _) => None,
+                    EditorTabKind::ApiClient(_, _)
+                    | EditorTabKind::DatabaseTable(_, _)
+                    | EditorTabKind::DatabaseQuery(_, _) => None,
                 }
             })
             .collect::<Vec<_>>();

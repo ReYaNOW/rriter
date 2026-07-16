@@ -182,6 +182,96 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
+            match modal {
+                crate::app::database::DatabaseTableModal::SqlPreview { text, scroll, .. } => {
+                    scroll.anim_speed = 7.0;
+                    scroll.scroll_by(dy);
+                    let max = (text.lines().count() as f32 * 21.0 * s - (self.renderer.as_ref().unwrap().height - 180.0 * s)).max(0.0);
+                    scroll.clamp_target(0.0, max);
+                }
+                crate::app::database::DatabaseTableModal::MultilineEditor { input, scroll, .. } => {
+                    scroll.anim_speed = 7.0;
+                    scroll.scroll_by(dy);
+                    let max = (input.text().lines().count() as f32 * 21.0 * s - (self.renderer.as_ref().unwrap().height - 190.0 * s)).max(0.0);
+                    scroll.clamp_target(0.0, max);
+                }
+                crate::app::database::DatabaseTableModal::Review { state, scroll, .. } => {
+                    scroll.anim_speed = 7.0;
+                    scroll.scroll_by(dy);
+                    let lines = state.summary.notices.len() + state.summary.detail_rows.len();
+                    let max = (lines as f32 * 22.0 * s
+                        - (self.renderer.as_ref().unwrap().height - 260.0 * s))
+                        .max(0.0);
+                    scroll.clamp_target(0.0, max);
+                }
+                _ => {}
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+            dialog.scroll.anim_speed = 7.0;
+            dialog.scroll.scroll_by(dy);
+            let visible_rows = dialog.visible_fields().count() as f32;
+            let renderer_height = self.renderer.as_ref().unwrap().height;
+            let dialog_height = (renderer_height - 48.0 * s)
+                .min(780.0 * s)
+                .max(420.0 * s);
+            let form_viewport_height = (dialog_height - 194.0 * s).max(38.0 * s);
+            let max_scroll =
+                (visible_rows * 38.0 * s - form_viewport_height).max(0.0);
+            dialog.scroll.clamp_target(0.0, max_scroll);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
+            && let Some(state) = ddl.as_mut()
+            && state.rect.is_some_and(|rect| point_in_rect(mx, my, rect))
+        {
+            state.popup.scroll.anim_speed = 7.0;
+            state.popup.scroll.scroll_by(dy);
+            state.popup.scroll.clamp_target(0.0, state.max_scroll);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if let Some(tab_id) = self.active_database_table_tab_id()
+            && matches!(self.ui_registry.find_at(mx, my), Some(
+                crate::ui_system::UiId::DatabaseTableGridBody
+                | crate::ui_system::UiId::DatabaseTableCell(_, _)
+                | crate::ui_system::UiId::DatabaseGridRow(_)
+                | crate::ui_system::UiId::DatabaseTableHeader(_)
+                | crate::ui_system::UiId::DatabaseTableScrollY
+                | crate::ui_system::UiId::DatabaseTableScrollX
+            ))
+        {
+            let grid_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableGridBody);
+            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                if let Some((_, _, width, height)) = grid_rect {
+                    state.grid.viewport_width = (width / s - 54.0).max(0.0);
+                    state.grid.viewport_height = (height / s - crate::app::database::DATABASE_GRID_HEADER_HEIGHT).max(0.0);
+                }
+                if shift || dx.abs() > dy.abs() {
+                    let amount = if shift { dy } else { dx } / s.max(0.001);
+                    let max = state.metadata.as_ref().map_or(0.0, |metadata| {
+                        (state.grid.content_width(metadata) - state.grid.viewport_width).max(0.0)
+                    });
+                    state.grid.scroll_x.anim_speed = 7.0;
+                    state.grid.scroll_x.scroll_by(amount);
+                    state.grid.scroll_x.clamp_target(0.0, max);
+                } else {
+                    let max = (state.grid.logical_row_count() as f32 * crate::app::database::DATABASE_GRID_ROW_HEIGHT - state.grid.viewport_height).max(0.0);
+                    state.grid.scroll_y.anim_speed = 7.0;
+                    state.grid.scroll_y.scroll_by(dy / s.max(0.001));
+                    state.grid.scroll_y.clamp_target(0.0, max);
+                }
+            }
+            self.request_database_table_chunk_for_scroll(tab_id);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if self.api_python_runtime_overlay_active() {
             self.scroll_api_python_runtime_overlay(dy);
             self.window.as_ref().unwrap().request_redraw();
@@ -423,6 +513,29 @@ impl App {
         }
         if closed_git_menu {
             self.window.as_ref().unwrap().request_redraw();
+        }
+
+        if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Database) {
+            let (cx, cy, cw, ch, _) =
+                app_panel_scroll_rect(self, crate::app::PanelId::Database, s, false);
+            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                self.ide_panel.database.scroll.anim_speed = 7.0;
+                self.ide_panel.database.scroll.scroll_by(dy);
+                let mut rows = 0usize;
+                for connection in &self.ide_panel.database.connections {
+                    rows += 1;
+                    if connection.expanded {
+                        for database in &connection.databases {
+                            rows += 1;
+                            if database.expanded { rows += database.tables.len(); }
+                        }
+                    }
+                }
+                let max_scroll = (rows as f32 * 28.0 * s - ch).max(0.0);
+                self.ide_panel.database.scroll.clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
         }
 
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::ApiClient) {
@@ -668,6 +781,66 @@ impl App {
         }
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
+        let window_h = self.window.as_ref().unwrap().inner_size().height as f32;
+        let window_w = self.window.as_ref().unwrap().inner_size().width as f32;
+        let mouse_y = self.renderer.as_ref().unwrap().last_mouse_y;
+        let reserved_bottom = self.ide_panel.editor_reserved_bottom_height(s);
+        let query_results_h = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(_, state)
+                if state.history_open
+                    || !state.results.is_empty()
+                    || !state.messages.is_empty()
+                    || state.review.is_some()
+                    || state.error.is_some() =>
+            {
+                Some((260.0 * s).min((window_h - reserved_bottom - 220.0 * s).max(140.0 * s)))
+            }
+            _ => None,
+        });
+        if let Some(results_h) = query_results_h {
+            let results_y = window_h
+                - crate::render_view::ide_status_bar_height(s)
+                - reserved_bottom
+                - results_h;
+            if mouse_y >= results_y && mouse_y <= results_y + results_h {
+                let history_counts = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
+                    crate::app::EditorTabKind::DatabaseQuery(meta, state) if state.history_open => {
+                        Some(self.ide_panel.database.persisted.query_history.iter().filter(|entry| {
+                            entry.connection_id == meta.connection_id
+                                && entry.database_name == meta.database_name
+                        }).count())
+                    }
+                    _ => None,
+                });
+                if let Some(crate::app::EditorTabKind::DatabaseQuery(_, state)) =
+                    self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
+                {
+                    let body_h = (results_h - 34.0 * s).max(0.0);
+                    let (max_x, max_y) = if let Some(count) = history_counts {
+                        (0.0, (count as f32 * 34.0 * s - body_h).max(0.0))
+                    } else if state.result_view.active_result < state.results.len() {
+                        let result = &state.results[state.result_view.active_result];
+                        (
+                            (result.columns.len() as f32 * 180.0 * s - window_w).max(0.0),
+                            (result.rows.len() as f32 * 24.0 * s - (body_h - 28.0 * s)).max(0.0),
+                        )
+                    } else {
+                        (0.0, (state.messages.len() as f32 * 28.0 * s - body_h).max(0.0))
+                    };
+                    if shift {
+                        state.result_view.scroll_x = ((state.result_view.scroll_x as f32 + dy)
+                            .clamp(0.0, max_x)) as i32;
+                    } else {
+                        state.result_view.scroll_y = ((state.result_view.scroll_y as f32 + dy)
+                            .clamp(0.0, max_y)) as i32;
+                        state.result_view.scroll_x = ((state.result_view.scroll_x as f32 + dx)
+                            .clamp(0.0, max_x)) as i32;
+                    }
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
         let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
             0.0
         } else {

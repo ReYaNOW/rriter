@@ -466,10 +466,40 @@ impl Renderer {
         scroll_x: f32,
         blink_alpha: f32,
     ) {
+        let text = editor.get_full_text();
+        self.draw_one_line_dialog_input(
+            &text,
+            editor.cursor,
+            editor.selection_anchor,
+            false,
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            scroll_x,
+            blink_alpha,
+            crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_one_line_dialog_input(
+        &mut self,
+        text: &str,
+        cursor: usize,
+        selection_anchor: Option<usize>,
+        masked: bool,
+        input_x: f32,
+        input_y: f32,
+        input_w: f32,
+        input_h: f32,
+        scroll_x: f32,
+        blink_alpha: f32,
+        text_scale: f32,
+    ) {
         let s = self.scale_factor;
-        let text_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
         let pad_x = 8.0 * s;
-        let text_y = input_y + 23.0 * s;
+        let text_y = input_y + (input_h + 10.0 * s) * 0.5;
         let text_start_x = input_x + pad_x;
 
         self.push_rounded_rect(
@@ -492,55 +522,46 @@ impl Renderer {
                 input_h as i32,
             );
 
-            let text = editor.get_full_text();
             let scroll_x = scroll_x.round();
-
-            let sel_start = editor
-                .selection_anchor
-                .unwrap_or(editor.cursor)
-                .min(editor.cursor);
-            let sel_end = editor
-                .selection_anchor
-                .unwrap_or(editor.cursor)
-                .max(editor.cursor);
-
+            let sel_start = selection_anchor.unwrap_or(cursor).min(cursor);
+            let sel_end = selection_anchor.unwrap_or(cursor).max(cursor);
             let mut current_x = text_start_x - scroll_x;
             let mut byte_idx = 0usize;
             let mut cursor_draw_x = current_x;
+
             for c in text.chars() {
-                if byte_idx == editor.cursor {
+                if byte_idx == cursor {
                     cursor_draw_x = current_x;
                 }
-
-                let char_to_render = if c == '\n' { '↵' } else { c };
+                let char_to_render = if masked { '•' } else if c == '\n' { '↵' } else { c };
                 let adv = self
                     .get_ui_glyph(char_to_render)
-                    .map(|g| g.advance * text_scale)
+                    .map(|glyph| glyph.advance * text_scale)
                     .unwrap_or(10.0 * text_scale);
 
                 if byte_idx >= sel_start && byte_idx < sel_end {
                     self.push_rect(
                         current_x,
-                        input_y + 7.0 * s,
+                        input_y + 5.0 * s,
                         adv,
-                        input_h - 14.0 * s,
+                        input_h - 10.0 * s,
                         self.theme.sel,
                     );
                 }
 
                 if current_x + adv >= input_x && current_x <= input_x + input_w {
-                    if let Some(g) = self.get_ui_glyph(char_to_render) {
+                    if let Some(glyph) = self.get_ui_glyph(char_to_render) {
                         self.push_quad(
-                            current_x + g.offset_x * text_scale,
-                            text_y - g.offset_y * text_scale,
-                            g.width * text_scale,
-                            g.height * text_scale,
-                            g.u,
-                            g.v,
-                            g.uw,
-                            g.vh,
+                            current_x + glyph.offset_x * text_scale,
+                            text_y - glyph.offset_y * text_scale,
+                            glyph.width * text_scale,
+                            glyph.height * text_scale,
+                            glyph.u,
+                            glyph.v,
+                            glyph.uw,
+                            glyph.vh,
                             self.theme.fg,
-                            g.is_emoji,
+                            glyph.is_emoji,
                         );
                     }
                 }
@@ -548,16 +569,16 @@ impl Renderer {
                 current_x += adv;
                 byte_idx += c.len_utf8();
             }
-            if byte_idx == editor.cursor {
+            if byte_idx == cursor {
                 cursor_draw_x = current_x;
             }
 
             if sel_start == sel_end && blink_alpha > 0.5 {
                 self.push_rect(
-                    cursor_draw_x,
-                    input_y + 7.0 * s,
-                    2.0 * s,
-                    input_h - 14.0 * s,
+                    cursor_draw_x.round(),
+                    input_y + 5.0 * s,
+                    (1.5 * s).max(1.0),
+                    input_h - 10.0 * s,
                     self.theme.fg,
                 );
             }

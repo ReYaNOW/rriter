@@ -4,6 +4,7 @@ impl Renderer {
         &mut self,
         s: f32,
         ide_panel: &crate::app::IdePanelState,
+        editor: &crate::editor::Editor,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
@@ -37,12 +38,16 @@ impl Renderer {
             self.draw_project_search_help_overlay(ide_panel, ui_registry, mx, my, s);
             drew = true;
         }
+        if self.draw_database_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha) {
+            drew = true;
+        }
         drew
     }
 
     fn draw_empty_ide_frame(
         &mut self,
         ide_panel: &crate::app::IdePanelState,
+        editor: &crate::editor::Editor,
         ui_registry: &mut crate::ui_system::UiRegistry,
         mx: f32,
         my: f32,
@@ -51,7 +56,7 @@ impl Renderer {
         s: f32,
     ) -> (bool, Vec<(usize, usize)>) {
         self.draw_empty_ide(panel_left_w);
-        if self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha) {
+        if self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha) {
             self.flush();
             return (ui_registry.wants_pointer(), Vec::new());
         }

@@ -262,13 +262,22 @@ fn resolve_color(
     param_scopes: &[Scope],
 ) -> [f32; 4] {
     let mut color = match name {
-        "fg" | "property" | "py_assign" => DRACULA_FG,
+        "fg" | "property" | "field" | "py_assign" => DRACULA_FG,
         "interpolation" => MARKER_INTERPOLATION,
         "string" => DRACULA_YELLOW,
         "comment" => DRACULA_COMMENT,
-        "function" | "py_function" => DRACULA_GREEN,
-        "keyword.control" | "operator" | "boolean" => DRACULA_PINK,
-        "keyword" | "subst" | "type" | "function.builtin" => DRACULA_CYAN,
+        "function" | "function.call" | "py_function" => DRACULA_GREEN,
+        "keyword.control" | "keyword.operator" | "operator" | "boolean" | "conditional" => {
+            DRACULA_PINK
+        }
+        "keyword"
+        | "subst"
+        | "type"
+        | "type.builtin"
+        | "type.qualifier"
+        | "storageclass"
+        | "attribute"
+        | "function.builtin" => DRACULA_CYAN,
         "class_name" => DRACULA_DARK_CYAN,
         "constant" => DRACULA_PURPLE,
         "parameter" => match node_text {
@@ -305,7 +314,7 @@ fn resolve_color(
             }
         }
         "variable" => DRACULA_FG,
-        "number" => DRACULA_PURPLE,
+        "number" | "float" => DRACULA_PURPLE,
         _ => DRACULA_FG,
     };
 
@@ -774,6 +783,18 @@ fn inject_builtin_completions(
         }
     }
 
+    fn inject_words(
+        completions_map: &mut HashMap<(String, usize, usize), SymbolKind>,
+        words: &[&str],
+        kind: SymbolKind,
+    ) {
+        for &word in words {
+            completions_map
+                .entry((word.to_string(), 0, usize::MAX))
+                .or_insert(kind);
+        }
+    }
+
     match lang_name {
         "py" => {
             inject(
@@ -930,6 +951,18 @@ fn inject_builtin_completions(
                     ("null", SymbolKind::Keyword),
                     ("undefined", SymbolKind::Keyword),
                 ],
+            );
+        }
+        "sql" => {
+            inject_words(
+                completions_map,
+                crate::languages::sql::SQL_KEYWORDS,
+                SymbolKind::Keyword,
+            );
+            inject_words(
+                completions_map,
+                crate::languages::sql::SQL_BUILTIN_FUNCTIONS,
+                SymbolKind::Builtin,
             );
         }
         "c" | "cpp" => {
@@ -1303,6 +1336,7 @@ pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
         "c" | "h" => "c",
         "cpp" | "cc" | "cxx" | "hpp" => "cpp",
         "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
+        "sql" => "sql",
         _ => "",
     }
 }
@@ -1393,6 +1427,33 @@ fn push_ast_select_line_range(
     if start < end {
         ranges.push((start, end));
     }
+}
+
+pub fn highlight_sql_text(text: &str) -> Vec<ColorSpan> {
+    let Some((lang, queries)) = get_ts_config("sql") else {
+        return Vec::new();
+    };
+    let mut parser = tree_sitter::Parser::new();
+    if parser.set_language(&lang).is_err() {
+        return Vec::new();
+    }
+    let Some(tree) = parser.parse(text, None) else {
+        return Vec::new();
+    };
+    let mut cache = HashMap::new();
+    let mut spans = Vec::new();
+    collect_query_highlight_spans(
+        &lang,
+        "sql",
+        &queries,
+        &tree,
+        text,
+        &mut cache,
+        None,
+        &mut spans,
+    );
+    spans.sort_unstable_by_key(|span| (span.start, span.end));
+    spans
 }
 
 pub fn ast_select_expand_range(

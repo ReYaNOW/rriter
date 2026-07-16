@@ -152,6 +152,104 @@ impl App {
             return;
         }
 
+        if key_event.state == ElementState::Pressed {
+            if self.active_tab_is_database_query() {
+                match key_event.physical_key {
+                    PhysicalKey::Code(KeyCode::Escape) => {
+                        let (running, reviewing, history_open) = self
+                            .active_database_query_meta_state()
+                            .map_or((false, false, false), |(_, state)| {
+                                (state.running, state.review.is_some(), state.history_open)
+                            });
+                        if reviewing {
+                            self.rollback_active_database_query();
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        if running {
+                            self.cancel_active_database_query();
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        if history_open {
+                            self.toggle_active_database_query_history();
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                    }
+                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
+                        if ctrl =>
+                    {
+                        self.run_active_database_query(crate::app::database::DatabaseQueryMode::Run);
+                        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                        return;
+                    }
+                    PhysicalKey::Code(KeyCode::Space) if ctrl => {
+                        self.show_active_database_query_completion();
+                        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+            if self.handle_database_table_key(&key_event) {
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                return;
+            }
+            if self.handle_database_dialog_keyboard(&key_event) {
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                return;
+            }
+            if self.ide_panel.database.delete_prompt.is_some()
+                || self.ide_panel.database.host_key_prompt.is_some()
+            {
+                if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                    self.ide_panel.database.delete_prompt = None;
+                    self.ide_panel.database.host_key_prompt = None;
+                    self.cancel_database_job();
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                }
+                return;
+            }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                if self.ide_panel.database.context_menu.take().is_some()
+                    || self.ide_panel.database.ddl_hover.borrow_mut().take().is_some()
+                {
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    return;
+                }
+            }
+        }
+
+        if key_event.state == ElementState::Pressed
+            && self.ide_panel.database.ddl_hover.borrow().is_some()
+        {
+            match key_event.physical_key {
+                PhysicalKey::Code(KeyCode::Escape) => {
+                    *self.ide_panel.database.ddl_hover.borrow_mut() = None;
+                }
+                PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
+                    if let Some(state) = self.ide_panel.database.ddl_hover.borrow_mut().as_mut() {
+                        state.selection_anchor = Some(0);
+                        state.selection_cursor = Some(state.popup.text.len());
+                    }
+                }
+                PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
+                    let selected = self.ide_panel.database.ddl_hover.borrow().as_ref().and_then(|state| {
+                        let (a, b) = (state.selection_anchor?, state.selection_cursor?);
+                        let (start, end) = (a.min(b), a.max(b));
+                        state.popup.text.get(start..end).map(str::to_string)
+                    });
+                    if let Some(selected) = selected.filter(|text| !text.is_empty()) {
+                        self.set_clipboard_text(selected);
+                    }
+                }
+                _ => {}
+            }
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return;
+        }
+
         if self.ide_panel.project_search.help_open {
             if key_event.state == ElementState::Pressed
                 && key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)

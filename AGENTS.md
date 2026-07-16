@@ -772,6 +772,7 @@ Root:
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/platform/integration.rs` -> platform directories, configured tool resolution, shared native-root/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
+* `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
 * `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
 * `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
@@ -783,6 +784,25 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
+* `src/app/database/database_postgres.rs` -> PostgreSQL TCP/TLS connection backend plus bounded autocommit discovery of databases and `public` tables.
+* `src/app/database/database_ssh.rs` -> system OpenSSH selection, platform executable lookup, config/jump arguments, managed tunnel lifecycle, and alias resolution.
+* `src/app/database/database_ssh_builtin.rs` -> built-in `russh` password/key/agent fallback, host-key verification, direct-tcpip, and one-hop bastion support.
+* `src/app/database/database_secrets.rs` -> stable Database secret identities and zeroizing load/store/delete coordination through the strict platform secret API.
+* `src/app/database/database_runtime.rs` -> dedicated Tokio database worker, one-active-job policy, busy/cancel/shutdown events, and cancellation propagation.
+* `src/app/database/database_panel.rs` -> Database panel/tree/dialog/context/host-key/DDL-hover state plus global table overlays; password fields must remain zeroizing and non-debuggable.
+* `src/app/database/database_catalog.rs` -> bounded autocommit PostgreSQL metadata reads and reconstructed `public` table DDL.
+* `src/app/database/database_app_methods.rs` and `database_app_event_methods.rs` -> Database panel commands/events, tab/session restore, connection delete guards, and exact SQL console persistence.
+* `src/render_view/ide_panels/ide_panel_database_renderer.rs` -> Database sidebar, embedded dimmed dialogs, tree/context rendering, and common-hover-based selectable DDL overlay.
+* `src/app/database/database_grid.rs` -> typed table rows/cells, selection, bounded chunk cache, visible ranges, editor state, and PK-based post-refresh selection restore.
+* `src/app/database/database_table.rs` -> autocommit COUNT/chunk SQL, immutable parameterized DML plans, PK+`xmin` conflict checks, and dedicated pending transaction execution.
+* `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
+* `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
+* `src/app/database/database_query_app_methods.rs` -> query Run/Cancel, Explain/Analyze, Format, History, completion, result selection, close guards, transaction Apply/Rollback, and Database-settings mutation.
+* `src/render_view/database_table_tab.rs` -> virtualized editable grid, two-axis smooth scrolling, pagination, typed cell editors, selection, and column resizing; render code must never perform database or filesystem I/O.
+* `src/render_view/database_table_tab_overlay.rs` -> full-app-blocking SQL preview, multiline editor, dirty confirmation, custom limit, and transaction review overlays.
+* `src/render_view/database_query_tab.rs` -> SQL toolbar, virtualized result/message/history panes, internal result tabs, and full-app-blocking user-query transaction review; render code must never execute SQL or touch persistence.
+* `src/render_view/settings_database_ui.rs` -> Settings -> Databases value rows and +/- controls; keep row ordering aligned with `adjust_database_setting` and test every adjustable entry.
 * `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
 * `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
 * `src/app/tool_installer.rs` -> cross-platform managed uv/Ruff/Ty bootstrap, isolated install layout, progress/log state, cancellation, validation, and App integration.
@@ -887,6 +907,7 @@ Syntax/languages:
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
 * `src/languages/python_tests.rs` -> Python language helper tests.
 * `src/languages/rust.rs` -> Rust import-block helpers.
+* `src/languages/sql.rs` -> PostgreSQL statement scanner/classifier, managed-transaction safety validation, statement selection, SQL keywords/functions, and regression tests.
 
 LSP:
 

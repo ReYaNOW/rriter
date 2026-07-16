@@ -58,6 +58,7 @@ impl Renderer {
         blink_alpha: f32,
         tool_paths: &crate::platform::ToolPaths,
         tool_installer: &crate::app::tool_installer::ToolInstaller,
+        database_settings: &crate::app::database::DatabaseSettings,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
@@ -125,7 +126,7 @@ impl Renderer {
         let sidebar_w = 200.0 * s;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
-        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь"];
+        let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
         let mut tab_y = iy + 20.0 * s;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
@@ -1300,6 +1301,13 @@ impl Renderer {
                     [0.7, 0.33, 0.54, 1.0],
                 );
             }
+        } else if active_tab == 5 {
+            self.draw_database_settings_tab(
+                database_settings,
+                content_x,
+                content_y,
+                ui_registry,
+            );
         }
 
         if tool_installer.is_log_open() {

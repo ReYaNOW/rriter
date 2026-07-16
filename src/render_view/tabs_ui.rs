@@ -305,6 +305,22 @@ impl Renderer {
                     icon_size_tab,
                     [1.0, 1.0, 1.0, 1.0],
                 );
+            } else if tab.kind.is_database_table() {
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::DatabaseTable,
+                    current_x + tab_pad,
+                    icon_y,
+                    icon_size_tab,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
+            } else if tab.kind.is_database_query() {
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::Database,
+                    current_x + tab_pad,
+                    icon_y,
+                    icon_size_tab,
+                    [1.0, 1.0, 1.0, 1.0],
+                );
             } else {
                 self.draw_file_icon(
                     tab.icon_key,

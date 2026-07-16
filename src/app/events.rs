@@ -1001,6 +1001,7 @@ impl ApplicationHandler for App {
                         blink_alpha,
                         &self.tool_paths,
                         &self.tool_installer,
+                        self.ide_panel.database.settings(),
                         &mut self.ui_registry,
                     );
                     if settings_cursor_mode == 1 {
@@ -1084,6 +1085,25 @@ impl ApplicationHandler for App {
                         }
                         Some(_) => winit::window::CursorIcon::Pointer,
                         None => winit::window::CursorIcon::Default,
+                    }
+                } else if self.ide_panel.database.modal_open() {
+                    let (mx, my) = {
+                        let renderer = self.renderer.as_ref().unwrap();
+                        (renderer.last_mouse_x, renderer.last_mouse_y)
+                    };
+                    match self.ui_registry.find_overlay_at(mx, my) {
+                        Some(crate::ui_system::UiId::DatabaseDialogField(_))
+                        | Some(crate::ui_system::UiId::DatabaseTableCellEditor)
+                        | Some(crate::ui_system::UiId::DatabaseTableModalInput) => {
+                            winit::window::CursorIcon::Text
+                        }
+                        Some(
+                            crate::ui_system::UiId::DatabaseDialogBackdrop
+                            | crate::ui_system::UiId::DatabaseDialogBody
+                            | crate::ui_system::UiId::DatabaseTableModalBody,
+                        )
+                        | None => winit::window::CursorIcon::Default,
+                        Some(_) => winit::window::CursorIcon::Pointer,
                     }
                 } else if self.ide_panel.project_search.help_open {
                     let (mx, my) = {

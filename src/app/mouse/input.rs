@@ -150,8 +150,13 @@ fn stop_click_scroll_anims(app: &mut App) {
     }
 
     for tab in &mut app.tabs {
-        if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
-            stop_api_tab_scroll_anims(state);
+        match &mut tab.kind {
+            crate::app::EditorTabKind::ApiClient(_, state) => stop_api_tab_scroll_anims(state),
+            crate::app::EditorTabKind::DatabaseTable(_, state) => {
+                stop_scroll_anim(&mut state.grid.scroll_x);
+                stop_scroll_anim(&mut state.grid.scroll_y);
+            }
+            _ => {}
         }
     }
 }
@@ -223,6 +228,9 @@ impl App {
                 self.ide_panel.project_search.focused = None;
             }
         }
+        if state == ElementState::Released {
+            self.finish_database_table_drag();
+        }
         if state == ElementState::Released && self.autocomplete_detail_selecting {
             self.autocomplete_detail_selecting = false;
             self.window.as_ref().unwrap().request_redraw();
@@ -259,6 +267,50 @@ impl App {
 
             if !in_hover_popup && clear_hover_popup(self.renderer.as_mut()) {
                 self.window.as_ref().unwrap().request_redraw();
+            }
+        }
+
+        if button == winit::event::MouseButton::Left {
+            let ddl_rect = self
+                .ide_panel
+                .database
+                .ddl_hover
+                .try_borrow()
+                .ok()
+                .and_then(|ddl| ddl.as_ref().and_then(|state| state.rect));
+            if let Some(rect) = ddl_rect {
+                let inside = mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3;
+                if state == ElementState::Pressed {
+                    if inside {
+                        if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
+                            && let Some(ddl) = ddl.as_mut()
+                        {
+                            let byte = crate::app::mouse::hover_popup_byte_at(
+                                self.renderer.as_mut().unwrap(),
+                                &ddl.popup,
+                                rect,
+                                mx,
+                                my,
+                            );
+                            ddl.selection_anchor = Some(byte);
+                            ddl.selection_cursor = Some(byte);
+                            ddl.selecting = true;
+                        }
+                    } else {
+                        *self.ide_panel.database.ddl_hover.borrow_mut() = None;
+                    }
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    return;
+                }
+                if state == ElementState::Released {
+                    if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
+                        && let Some(ddl) = ddl.as_mut()
+                    {
+                        ddl.selecting = false;
+                    }
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    return;
+                }
             }
         }
 
@@ -305,6 +357,39 @@ impl App {
             }
             self.window.as_ref().unwrap().request_redraw();
             return;
+        }
+
+        if state == ElementState::Pressed && self.ide_panel.database.modal_open() {
+            if button == winit::event::MouseButton::Left
+                && let Some(clicked_id) = self.ui_registry.find_overlay_at(mx, my)
+            {
+                self.handle_ui_click(clicked_id);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        if state == ElementState::Pressed
+            && self.ide_panel.database.context_menu.is_some()
+        {
+            let clicked_id = self.ui_registry.find_overlay_at(mx, my);
+            let keep = matches!(clicked_id, Some(crate::ui_system::UiId::DatabaseContextItem(_)));
+            if button == winit::event::MouseButton::Left && keep {
+                if let Some(clicked_id) = clicked_id {
+                    self.handle_ui_click(clicked_id);
+                }
+                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                return;
+            }
+            if !keep {
+                self.ide_panel.database.context_menu = None;
+                if button != winit::event::MouseButton::Left {
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    return;
+                }
+            }
         }
 
         if state == ElementState::Pressed && self.file_tree_overlay_active() {
@@ -377,6 +462,15 @@ impl App {
             && self.autocomplete_window_contains(mx, my)
         {
             self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if state == ElementState::Pressed
+            && button == winit::event::MouseButton::Right
+            && let Some(id) = self.ui_registry.find_at(mx, my)
+            && self.open_database_context_menu_for_hit(id, mx, my)
+        {
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return;
         }
 
@@ -1483,6 +1577,9 @@ impl App {
             self.ide_panel.project_search.query_scroll_y.is_dragging = false;
             self.ide_panel.project_search.query_scroll_x.is_dragging = false;
             self.ide_panel.file_tree_dialog_input_drag = None;
+            if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                dialog.dragging_field = None;
+            }
             self.is_dragging_settings_ignore = false;
             self.is_dragging_lsp_log = false;
             self.autocomplete_scroll.is_dragging = false;

@@ -49,7 +49,39 @@ fn tree_sitter_language_labels_follow_highlighter_extensions() {
     assert_eq!(tree_sitter_lang_name_for_ext("jsx"), "js");
     assert_eq!(tree_sitter_lang_name_for_ext("hpp"), "cpp");
     assert_eq!(tree_sitter_lang_name_for_ext("makefile"), "make");
+    assert_eq!(tree_sitter_lang_name_for_ext("sql"), "sql");
     assert_eq!(tree_sitter_lang_name_for_ext("txt"), "");
+}
+
+#[test]
+fn sql_highlighter_colors_postgresql_and_injects_core_completions() {
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(
+        1,
+        "SELECT jsonb_build_object('id', id) FROM users WHERE active = TRUE;".to_string(),
+        "sql".to_string(),
+        0,
+    );
+    wait(&mut highlighter, 1);
+
+    assert!(
+        highlighter
+            .spans
+            .iter()
+            .any(|span| span.color == DRACULA_CYAN || span.color == DRACULA_PINK)
+    );
+    assert!(
+        highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "SELECT" && item.kind == SymbolKind::Keyword)
+    );
+    assert!(
+        highlighter
+            .completions
+            .iter()
+            .any(|item| item.word == "jsonb_build_object" && item.kind == SymbolKind::Builtin)
+    );
 }
 
 #[test]

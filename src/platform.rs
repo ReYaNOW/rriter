@@ -16,8 +16,9 @@ use winit::window::WindowAttributes;
 mod macos;
 #[cfg(windows)]
 mod windows;
-mod process;
 mod integration;
+mod process;
+mod secret_store;
 mod elevated_save;
 pub use integration::{
     SystemProxyConfig, ToolKind, ToolPaths, app_paths, async_http_client_builder,
@@ -55,6 +56,7 @@ pub(crate) use integration::{
     app_paths_with, parse_macos_proxy_config, parse_pem_certificates, user_cache_root_with,
 };
 pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
+pub use secret_store::{delete_system_user_secret, load_system_user_secret, store_system_user_secret};
 pub use process::{
     ManagedChild, ProcessOutputStream, ProcessTree, command_for_tool, resolve_executable,
     resolve_tool_executable, run_command_output, run_command_output_cancelable,
@@ -83,7 +85,6 @@ pub enum PlatformKind {
     Macos,
     Other,
 }
-
 
 pub const CURRENT_PLATFORM: PlatformKind = if cfg!(target_os = "linux") {
     PlatformKind::Linux

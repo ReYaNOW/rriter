@@ -1,4 +1,7 @@
 pub mod core_text;
+mod database_table_tab;
+mod database_query_tab;
+mod database_table_tab_overlay;
 pub mod api_client_panel;
 pub mod api_client_tab;
 mod editor_text_layer;
@@ -8,6 +11,7 @@ pub mod lsp_ui;
 pub mod minimap_ui;
 pub mod search;
 pub mod settings_ui;
+mod settings_database_ui;
 pub mod sticky;
 pub mod tabs_ui;
 pub mod terminal_ui;

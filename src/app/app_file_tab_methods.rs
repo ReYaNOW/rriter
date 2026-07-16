@@ -149,11 +149,18 @@ impl App {
             return;
         }
 
+        if self.request_database_query_close(idx) || self.request_database_table_close(idx) {
+            return;
+        }
+
         if self.tabs.len() <= 1 {
+            // close_current_file() prepares all database tabs before clearing the
+            // final IDE tab, so do not save/remove this tab twice here.
             self.close_current_file();
             return;
         }
 
+        self.prepare_database_tab_close(idx);
         let closing_lsp = self.tab_lsp_close_identity(idx);
         if idx == self.active_tab {
             self.sync_active_tab();
@@ -161,7 +168,7 @@ impl App {
             self.tabs.remove(idx);
             self.active_tab = if idx > 0 { idx - 1 } else { 0 };
             self.sync_active_tab();
-            if self.active_tab_is_api_client() {
+            if self.active_tab_is_api_client() || self.active_tab_is_database_table() {
                 while let Ok(_) = self.highlighter.rx.try_recv() {}
             } else {
                 self.editor.version = self.next_tab_highlight_version();

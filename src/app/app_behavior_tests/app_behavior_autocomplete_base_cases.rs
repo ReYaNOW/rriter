@@ -62,6 +62,7 @@ fn test_app() -> Option<App> {
     let now = Instant::now();
     Some(App {
         automation: None,
+        database_runtime: None,
         scroll_render_bench: None,
         pending_key_log: None,
         gl_config: None,

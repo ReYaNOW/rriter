@@ -97,6 +97,89 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
         match id {
+            UiId::DatabasePanelBody
+            | UiId::DatabaseAdd
+            | UiId::DatabaseDelete
+            | UiId::DatabaseRefresh
+            | UiId::DatabaseConnectionRow(_)
+            | UiId::DatabaseConnectionArrow(_)
+            | UiId::DatabaseRow(_, _)
+            | UiId::DatabaseArrow(_, _)
+            | UiId::DatabaseTableRow(_, _, _)
+            | UiId::DatabaseContextItem(_)
+            | UiId::DatabaseDialogBackdrop
+            | UiId::DatabaseDialogBody
+            | UiId::DatabaseDialogField(_)
+            | UiId::DatabaseDialogTls
+            | UiId::DatabaseDialogColor
+            | UiId::DatabaseDialogSshToggle
+            | UiId::DatabaseDialogJumpToggle
+            | UiId::DatabaseDialogRememberPostgres
+            | UiId::DatabaseDialogRememberSshPassword
+            | UiId::DatabaseDialogRememberSshPassphrase
+            | UiId::DatabaseDialogRememberJumpPassword
+            | UiId::DatabaseDialogRememberJumpPassphrase
+            | UiId::DatabaseDialogTest
+            | UiId::DatabaseDialogSave
+            | UiId::DatabaseDialogCancel
+            | UiId::DatabaseDeleteConfirm
+            | UiId::DatabaseDeleteCancel
+            | UiId::DatabaseHostKeyTrustOnce
+            | UiId::DatabaseHostKeyTrustStore
+            | UiId::DatabaseHostKeyCancel
+            | UiId::DatabaseDdlBody
+            | UiId::DatabaseDdlScroll
+            | UiId::DatabaseTableBody
+            | UiId::DatabaseTableAddRow
+            | UiId::DatabaseTableDeleteRows
+            | UiId::DatabaseTableUndo
+            | UiId::DatabaseTableSave
+            | UiId::DatabaseTablePreview
+            | UiId::DatabaseTableRefresh
+            | UiId::DatabaseTablePageFirst
+            | UiId::DatabaseTablePagePrevious
+            | UiId::DatabaseTablePageNext
+            | UiId::DatabaseTablePageLast
+            | UiId::DatabaseTableLimit
+            | UiId::DatabaseTableWhereInput
+            | UiId::DatabaseTableOrderInput
+            | UiId::DatabaseTableHeader(_)
+            | UiId::DatabaseTableColumnResize(_)
+            | UiId::DatabaseGridRow(_)
+            | UiId::DatabaseTableCell(_, _)
+            | UiId::DatabaseTableCellEditor
+            | UiId::DatabaseTableEnumOption(_)
+            | UiId::DatabaseTableDatePreviousMonth
+            | UiId::DatabaseTableDateNextMonth
+            | UiId::DatabaseTableDateDay(_)
+            | UiId::DatabaseTableDateToday
+            | UiId::DatabaseTableDateNow
+            | UiId::DatabaseTableGridBody
+            | UiId::DatabaseTableScrollY
+            | UiId::DatabaseTableScrollX
+            | UiId::DatabaseTableModalBackdrop
+            | UiId::DatabaseTableModalBody
+            | UiId::DatabaseTableModalInput
+            | UiId::DatabaseTableModalPrimary
+            | UiId::DatabaseTableModalSecondary
+            | UiId::DatabaseTableModalTertiary
+            | UiId::DatabaseTableModalScroll
+            | UiId::DatabaseQueryRun
+            | UiId::DatabaseQueryCancel
+            | UiId::DatabaseQueryExplain
+            | UiId::DatabaseQueryExplainAnalyze
+            | UiId::DatabaseQueryFormat
+            | UiId::DatabaseQueryHistory
+            | UiId::DatabaseQueryResultTab(_)
+            | UiId::DatabaseQueryMessagesTab
+            | UiId::DatabaseQueryHistoryEntry(_)
+            | UiId::DatabaseQueryResultBody
+            | UiId::DatabaseQueryReviewBackdrop
+            | UiId::DatabaseQueryReviewBody
+            | UiId::DatabaseQueryCommit
+            | UiId::DatabaseQueryRollback => {
+                self.handle_database_ui_click(id);
+            }
             UiId::ApiImportAdd
             | UiId::ApiImportFile
             | UiId::ApiImportUrl
@@ -429,6 +512,10 @@ impl App {
             // Settings tabs
             UiId::SettingsTab(idx) => {
                 self.settings_tab = idx;
+                self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::SettingsDatabaseAdjust(setting, delta) => {
+                self.adjust_database_setting(setting, delta as i32);
                 self.window.as_ref().unwrap().request_redraw();
             }
 
@@ -1703,6 +1790,296 @@ impl App {
                     window.request_redraw();
                 }
             }
+        }
+    }
+}
+
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl App {
+    fn handle_database_ui_click(&mut self, id: UiId) {
+        use crate::app::database::{
+            DatabaseConnectionColor, PostgresTlsMode, SshHostKeyPolicy,
+        };
+
+        match id {
+            UiId::DatabasePanelBody | UiId::DatabaseDialogBody | UiId::DatabaseDdlBody
+            | UiId::DatabaseDdlScroll | UiId::DatabaseTableBody | UiId::DatabaseTableGridBody
+            | UiId::DatabaseTableModalBody | UiId::DatabaseTableModalScroll
+            | UiId::DatabaseTableCellEditor | UiId::DatabaseTableModalInput => {}
+            UiId::DatabaseAdd => self.open_database_connection_dialog(),
+            UiId::DatabaseDelete => {
+                if let Some(id) = self.ide_panel.database.selected_connection {
+                    self.request_delete_database_connection(id);
+                }
+            }
+            UiId::DatabaseRefresh => self.refresh_selected_database(),
+            UiId::DatabaseConnectionRow(index) => {
+                if let Some(id) = self.ide_panel.database.connections.get(index).map(|node| node.config.id) {
+                    self.select_database_connection(id);
+                }
+            }
+            UiId::DatabaseConnectionArrow(index) => {
+                if let Some(id) = self.ide_panel.database.connections.get(index).map(|node| node.config.id) {
+                    self.toggle_database_connection(id);
+                }
+            }
+            UiId::DatabaseRow(connection_index, database_index) => {
+                let selected = self.ide_panel.database.connections.get(connection_index).and_then(|node| {
+                    node.databases.get(database_index).map(|database| (node.config.id, database.name.clone()))
+                });
+                if let Some((id, database_name)) = selected {
+                    self.ide_panel.database.selected_connection = Some(id);
+                    self.ide_panel.database.selected_database = Some((id, database_name));
+                }
+            }
+            UiId::DatabaseArrow(connection_index, database_index) => {
+                if let Some(id) = self.ide_panel.database.connections.get(connection_index).map(|node| node.config.id) {
+                    self.toggle_database_node(id, database_index);
+                }
+            }
+            UiId::DatabaseTableRow(connection_index, database_index, table_index) => {
+                let target = self.ide_panel.database.connections.get(connection_index).and_then(|node| {
+                    node.databases.get(database_index).and_then(|database| {
+                        database.tables.get(table_index).map(|table| {
+                            (node.config.id, database.name.clone(), table.name.clone())
+                        })
+                    })
+                });
+                if let Some((id, database, table)) = target {
+                    self.ide_panel.database.selected_connection = Some(id);
+                    self.ide_panel.database.selected_database = Some((id, database));
+                    self.ide_panel.database.notice = Some(format!("Выбрана таблица public.{table}"));
+                }
+            }
+            UiId::DatabaseContextItem(index) => self.activate_database_context_action(index),
+            UiId::DatabaseDialogField(field) => {
+                let mouse_x = self
+                    .renderer
+                    .as_ref()
+                    .map_or(0.0, |renderer| renderer.last_mouse_x);
+                let target = self.database_dialog_input_index_at(field, mouse_x);
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.focused = Some(field);
+                    dialog.dragging_field = Some(field);
+                    dialog.error = None;
+                    dialog.test_status = None;
+                }
+                if let Some(target) = target {
+                    self.set_database_dialog_input_cursor(field, target, false);
+                }
+            }
+            UiId::DatabaseDialogTls => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.tls_mode = match dialog.tls_mode {
+                        PostgresTlsMode::Disable => PostgresTlsMode::Prefer,
+                        PostgresTlsMode::Prefer => PostgresTlsMode::Require,
+                        PostgresTlsMode::Require => PostgresTlsMode::Disable,
+                    };
+                    dialog.error = None;
+                    dialog.test_status = None;
+                }
+            }
+            UiId::DatabaseDialogColor => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.color = match dialog.color {
+                        DatabaseConnectionColor::Blue => DatabaseConnectionColor::Green,
+                        DatabaseConnectionColor::Green => DatabaseConnectionColor::Yellow,
+                        DatabaseConnectionColor::Yellow => DatabaseConnectionColor::Orange,
+                        DatabaseConnectionColor::Orange => DatabaseConnectionColor::Red,
+                        DatabaseConnectionColor::Red => DatabaseConnectionColor::Purple,
+                        DatabaseConnectionColor::Purple => DatabaseConnectionColor::Cyan,
+                        DatabaseConnectionColor::Cyan => DatabaseConnectionColor::Gray,
+                        DatabaseConnectionColor::Gray => DatabaseConnectionColor::Blue,
+                    };
+                    dialog.error = None;
+                    dialog.test_status = None;
+                }
+            }
+            UiId::DatabaseDialogSshToggle => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.ssh_enabled = !dialog.ssh_enabled;
+                    if !dialog.ssh_enabled { dialog.jump_enabled = false; }
+                    dialog.error = None;
+                    dialog.test_status = None;
+                }
+            }
+            UiId::DatabaseDialogJumpToggle => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.toggle_jump_host();
+                }
+            }
+            UiId::DatabaseDialogRememberPostgres => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.remember_postgres_password = !dialog.remember_postgres_password;
+                }
+            }
+            UiId::DatabaseDialogRememberSshPassword => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.remember_ssh_password = !dialog.remember_ssh_password;
+                }
+            }
+            UiId::DatabaseDialogRememberSshPassphrase => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.remember_ssh_key_passphrase = !dialog.remember_ssh_key_passphrase;
+                }
+            }
+            UiId::DatabaseDialogRememberJumpPassword => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.remember_jump_password = !dialog.remember_jump_password;
+                }
+            }
+            UiId::DatabaseDialogRememberJumpPassphrase => {
+                if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+                    dialog.remember_jump_key_passphrase = !dialog.remember_jump_key_passphrase;
+                }
+            }
+            UiId::DatabaseDialogTest => self.test_database_dialog_connection(),
+            UiId::DatabaseDialogSave => self.save_database_connection_dialog(),
+            UiId::DatabaseDialogCancel => self.cancel_database_dialog(),
+            UiId::DatabaseDialogBackdrop => {
+                if self.ide_panel.database.dialog.is_some() {
+                    self.cancel_database_dialog();
+                } else if self.ide_panel.database.delete_prompt.is_some() {
+                    self.cancel_delete_database_connection();
+                } else if self.ide_panel.database.host_key_prompt.is_some() {
+                    self.ide_panel.database.host_key_prompt = None;
+                    self.cancel_database_job();
+                }
+            }
+            UiId::DatabaseDeleteConfirm => self.confirm_delete_database_connection(),
+            UiId::DatabaseDeleteCancel => self.cancel_delete_database_connection(),
+            UiId::DatabaseHostKeyTrustOnce => self.resolve_database_host_key(SshHostKeyPolicy::TrustOnce),
+            UiId::DatabaseHostKeyTrustStore => self.resolve_database_host_key(SshHostKeyPolicy::TrustAndStore),
+            UiId::DatabaseHostKeyCancel => {
+                self.ide_panel.database.host_key_prompt = None;
+                self.cancel_database_job();
+            }
+            UiId::DatabaseTableAddRow => { if let Some(tab) = self.active_database_table_tab_id() { self.add_database_table_row(tab); } }
+            UiId::DatabaseTableDeleteRows => { if let Some(tab) = self.active_database_table_tab_id() { self.delete_database_table_selection(tab); } }
+            UiId::DatabaseTableUndo => { if let Some(tab) = self.active_database_table_tab_id() { self.undo_database_table_selection(tab); } }
+            UiId::DatabaseTableSave => { if let Some(tab) = self.active_database_table_tab_id() { self.save_database_table_changes(tab, false); } }
+            UiId::DatabaseTablePreview => { if let Some(tab) = self.active_database_table_tab_id() { self.preview_database_table_changes(tab); } }
+            UiId::DatabaseTableRefresh => { if let Some(tab) = self.active_database_table_tab_id() { self.request_database_table_refresh(tab); } }
+            UiId::DatabaseTablePageFirst => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_first(tab); } }
+            UiId::DatabaseTablePagePrevious => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_previous(tab); } }
+            UiId::DatabaseTablePageNext => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_next(tab); } }
+            UiId::DatabaseTablePageLast => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_last(tab); } }
+            UiId::DatabaseTableLimit => { if let Some(tab) = self.active_database_table_tab_id() { self.open_database_table_limit_dialog(tab); } }
+            UiId::DatabaseTableWhereInput => {
+                if let Some(tab) = self.active_database_table_tab_id()
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    state.grid.focused_input = Some(crate::app::database::DatabaseTableInputTarget::Where);
+                    state.grid.cell_editor = None;
+                }
+            }
+            UiId::DatabaseTableOrderInput => {
+                if let Some(tab) = self.active_database_table_tab_id()
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    state.grid.focused_input = Some(crate::app::database::DatabaseTableInputTarget::OrderBy);
+                    state.grid.cell_editor = None;
+                }
+            }
+            UiId::DatabaseTableHeader(column) => { if let Some(tab) = self.active_database_table_tab_id() { self.cycle_database_table_sort(tab, column); } }
+            UiId::DatabaseTableColumnResize(column) => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    let now = std::time::Instant::now();
+                    let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
+                        (renderer.last_mouse_x, renderer.last_mouse_y)
+                    });
+                    let double = now.duration_since(self.last_click_time).as_millis() < 400
+                        && (mouse.0 - self.last_click_pos.0).powi(2)
+                            + (mouse.1 - self.last_click_pos.1).powi(2) < 25.0;
+                    self.last_click_time = now;
+                    self.last_click_pos = mouse;
+                    if double {
+                        self.auto_size_database_table_column(tab, column);
+                    } else {
+                        self.start_database_table_column_resize(tab, column, mouse.0);
+                    }
+                }
+            }
+            UiId::DatabaseGridRow(row) => {
+                let extend = self.modifiers.shift_key();
+                let toggle = self.modifiers.control_key() || self.modifiers.super_key();
+                if let Some(tab) = self.active_database_table_tab_id()
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    state.grid.selection.select_row(row, extend, toggle);
+                    state.grid.focused_input = None;
+                }
+            }
+            UiId::DatabaseTableCell(row, column) => self.handle_database_table_cell_click(row, column),
+            UiId::DatabaseTableEnumOption(option) => self.select_database_table_enum_option(option),
+            UiId::DatabaseTableDatePreviousMonth => self.shift_database_table_calendar_month(-1),
+            UiId::DatabaseTableDateNextMonth => self.shift_database_table_calendar_month(1),
+            UiId::DatabaseTableDateDay(day) => self.select_database_table_calendar_day(day as u32),
+            UiId::DatabaseTableDateToday => self.set_database_table_date_today(),
+            UiId::DatabaseTableDateNow => self.set_database_table_time_now_utc(),
+            UiId::DatabaseTableScrollY => self.start_database_table_scroll_drag(false),
+            UiId::DatabaseTableScrollX => self.start_database_table_scroll_drag(true),
+            UiId::DatabaseTableModalPrimary => self.activate_database_table_modal_action(0),
+            UiId::DatabaseTableModalSecondary | UiId::DatabaseTableModalBackdrop => self.activate_database_table_modal_action(1),
+            UiId::DatabaseTableModalTertiary => self.activate_database_table_modal_action(2),
+            UiId::DatabaseQueryRun => self.run_active_database_query(crate::app::database::DatabaseQueryMode::Run),
+            UiId::DatabaseQueryCancel => self.cancel_active_database_query(),
+            UiId::DatabaseQueryExplain => self.run_active_database_query(crate::app::database::DatabaseQueryMode::Explain),
+            UiId::DatabaseQueryExplainAnalyze => self.run_active_database_query(crate::app::database::DatabaseQueryMode::ExplainAnalyze),
+            UiId::DatabaseQueryFormat => self.format_active_database_query(),
+            UiId::DatabaseQueryHistory => self.toggle_active_database_query_history(),
+            UiId::DatabaseQueryResultTab(index) => self.select_active_database_query_result(index),
+            UiId::DatabaseQueryMessagesTab => {
+                let messages_index = self.active_database_query_meta_state()
+                    .map_or(0, |(_, state)| state.results.len());
+                self.select_active_database_query_result(messages_index);
+            }
+            UiId::DatabaseQueryHistoryEntry(index) => self.load_database_query_history_entry(index),
+            UiId::DatabaseQueryCommit => self.commit_active_database_query(),
+            UiId::DatabaseQueryRollback | UiId::DatabaseQueryReviewBackdrop => {
+                self.rollback_active_database_query();
+            }
+            UiId::DatabaseQueryResultBody | UiId::DatabaseQueryReviewBody => {}
+            _ => {}
+        }
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+    }
+
+    pub(crate) fn open_database_context_menu_for_hit(
+        &mut self,
+        id: UiId,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        use crate::app::database::DatabaseContextTarget;
+        let target = match id {
+            UiId::DatabaseConnectionRow(connection_index)
+            | UiId::DatabaseConnectionArrow(connection_index) => self
+                .ide_panel
+                .database
+                .connections
+                .get(connection_index)
+                .map(|node| DatabaseContextTarget::Connection(node.config.id)),
+            UiId::DatabaseRow(connection_index, database_index)
+            | UiId::DatabaseArrow(connection_index, database_index) => self
+                .ide_panel
+                .database
+                .connections
+                .get(connection_index)
+                .map(|node| DatabaseContextTarget::Database(node.config.id, database_index)),
+            UiId::DatabaseTableRow(connection_index, database_index, table_index) => self
+                .ide_panel
+                .database
+                .connections
+                .get(connection_index)
+                .map(|node| DatabaseContextTarget::Table(node.config.id, database_index, table_index)),
+            _ => None,
+        };
+        if let Some(target) = target {
+            self.open_database_context_menu(target, mx, my);
+            true
+        } else {
+            false
         }
     }
 }

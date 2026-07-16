@@ -1,5 +1,6 @@
 include!("ide_panels/ide_panel_helpers.rs");
 include!("ide_panels/ide_panel_project_search_renderer.rs");
+include!("ide_panels/ide_panel_database_renderer.rs");
 include!("ide_panels/ide_panel_side_renderer.rs");
 include!("ide_panels/ide_panel_git_tooltip_renderer.rs");
 include!("ide_panels/ide_panel_git_graph_renderer.rs");

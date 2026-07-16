@@ -65,6 +65,14 @@ pub enum EditorTabKind {
         crate::app::api_client::ApiClientTabMeta,
         crate::app::api_client::ApiClientTabState,
     ),
+    DatabaseTable(
+        crate::app::database::DatabaseTableTabMeta,
+        crate::app::database::DatabaseTableTabState,
+    ),
+    DatabaseQuery(
+        crate::app::database::DatabaseQueryTabMeta,
+        crate::app::database::DatabaseQueryTabState,
+    ),
 }
 
 impl EditorTabKind {
@@ -74,6 +82,18 @@ impl EditorTabKind {
 
     pub fn is_api_client(&self) -> bool {
         matches!(self, Self::ApiClient(_, _))
+    }
+
+    pub fn is_database_table(&self) -> bool {
+        matches!(self, Self::DatabaseTable(_, _))
+    }
+
+    pub fn is_database_query(&self) -> bool {
+        matches!(self, Self::DatabaseQuery(_, _))
+    }
+
+    pub fn is_database_tab(&self) -> bool {
+        self.is_database_table() || self.is_database_query()
     }
 }
 
@@ -114,6 +134,7 @@ pub enum PanelId {
     Search,
     Git,
     ApiClient,
+    Database,
     Terminal,
     Problems,
     LspServers,
@@ -126,6 +147,7 @@ impl PanelId {
             PanelId::Search => "Поиск",
             PanelId::Git => "Git",
             PanelId::ApiClient => "API клиент",
+            PanelId::Database => "Базы данных",
             PanelId::Terminal => "Терминал",
             PanelId::Problems => "Ляпы",
             PanelId::LspServers => "Языковые серверы",
@@ -137,6 +159,7 @@ impl PanelId {
             PanelId::Search => crate::widgets::IconType::Search,
             PanelId::Git => crate::widgets::IconType::Git,
             PanelId::ApiClient => crate::widgets::IconType::Api,
+            PanelId::Database => crate::widgets::IconType::Database,
             PanelId::Terminal => crate::widgets::IconType::Terminal,
             PanelId::Problems => crate::widgets::IconType::Problems,
             PanelId::LspServers => crate::widgets::IconType::LspServers,
@@ -245,6 +268,7 @@ pub enum AutocompleteMode {
     TreeSitter,
     TyContext,
     TyImports,
+    Sql,
 }
 
 #[derive(Clone, Debug)]
@@ -344,6 +368,7 @@ pub struct IdePanelState {
     pub project_search: crate::app::project_search::ProjectSearchState,
     pub git: crate::app::git_panel::GitPanelState,
     pub api: crate::app::api_client::ApiClientState,
+    pub database: crate::app::database::DatabasePanelState,
     /// Актуальная инфа о LSP серверах для рендера панели
     pub lsp_servers: Vec<crate::lsp::LspServerInfo>,
     pub lsp_logs_expanded: FxHashSet<String>,
@@ -405,6 +430,11 @@ impl Default for IdePanelState {
                     open: false,
                 },
                 PanelSlot {
+                    id: PanelId::Database,
+                    group: PanelGroup::Top,
+                    open: false,
+                },
+                PanelSlot {
                     id: PanelId::LspServers,
                     group: PanelGroup::Top,
                     open: false,
@@ -443,6 +473,7 @@ impl Default for IdePanelState {
             project_search: crate::app::project_search::ProjectSearchState::default(),
             git: crate::app::git_panel::GitPanelState::default(),
             api: crate::app::api_client::ApiClientState::default(),
+            database: crate::app::database::DatabasePanelState::default(),
             lsp_servers: Vec::new(),
             lsp_logs_expanded: FxHashSet::default(),
             lsp_scroll_y: crate::scroll::ScrollState::new(15.0),
@@ -976,6 +1007,7 @@ pub struct App {
     pub settings_ide_scroll: crate::scroll::ScrollState,
 
     pub ide_panel: IdePanelState,
+    pub database_runtime: Option<crate::app::database::DatabaseRuntime>,
     pub file_tree_rx: Option<std::sync::mpsc::Receiver<crate::app::file_tree::FileTreeScanMessage>>,
     /// Канал сигналов от notify-watcher. `()` = что-то изменилось в workspaces.
     pub file_tree_notify_rx: Option<std::sync::mpsc::Receiver<()>>,
@@ -1051,8 +1083,12 @@ mod tests {
         assert!(!panels.terminal_focused);
 
         panels.toggle(PanelId::Explorer);
-        panels.toggle(PanelId::LspServers);
+        panels.toggle(PanelId::Database);
         assert!(!panels.is_open(PanelId::Explorer));
+        assert!(panels.is_open(PanelId::Database));
+
+        panels.toggle(PanelId::LspServers);
+        assert!(!panels.is_open(PanelId::Database));
         assert!(panels.is_open(PanelId::LspServers));
 
         panels

@@ -1,6 +1,7 @@
 pub mod api_client;
 pub mod api_mock;
 pub mod automation;
+pub mod database;
 mod app_state;
 mod autocomplete;
 pub mod events;
@@ -251,6 +252,10 @@ pub(crate) fn write_tab_display_titles_for(
             };
             if let EditorTabKind::ApiClient(meta, _) = &tabs[i].kind {
                 write_api_client_tab_display_title(meta, title, display_title);
+            } else if let EditorTabKind::DatabaseTable(meta, _) = &tabs[i].kind {
+                display_title.push_str(&meta.title());
+            } else if let EditorTabKind::DatabaseQuery(meta, _) = &tabs[i].kind {
+                display_title.push_str(&meta.title);
             } else if title.is_empty() {
                 display_title.push_str("Безымянный");
             } else {
@@ -260,6 +265,11 @@ pub(crate) fn write_tab_display_titles_for(
     }
 }
 
+include!("app/database/database_app_methods.rs");
+include!("app/database/database_app_event_methods.rs");
+include!("app/database/database_table_app_methods.rs");
+include!("app/database/database_table_edit_methods.rs");
+include!("app/database/database_query_app_methods.rs");
 include!("app/app_ide_tab_methods.rs");
 include!("app/app_file_tab_methods.rs");
 include!("app/app_window_external_methods.rs");

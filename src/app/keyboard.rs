@@ -232,6 +232,59 @@ impl App {
             return true;
         }
 
+        if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
+            match modal {
+                crate::app::database::DatabaseTableModal::CustomLimit { input, error, .. } => {
+                    let clean = single_line_ime_text(text);
+                    if !clean.is_empty() { input.insert(&clean, 16); *error = None; }
+                }
+                crate::app::database::DatabaseTableModal::MultilineEditor { input, error, .. } => {
+                    input.insert(text, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
+                    *error = None;
+                }
+                _ => {}
+            }
+            return true;
+        }
+        if let Some(tab_id) = self.active_database_table_tab_id() {
+            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                let clean = single_line_ime_text(text);
+                match state.grid.focused_input {
+                    Some(crate::app::database::DatabaseTableInputTarget::Where) => {
+                        if !clean.is_empty() { state.grid.where_input.insert(&clean, 64 * 1024); }
+                        return true;
+                    }
+                    Some(crate::app::database::DatabaseTableInputTarget::OrderBy) => {
+                        if !clean.is_empty() { state.grid.order_by_input.insert(&clean, 64 * 1024); }
+                        return true;
+                    }
+                    Some(crate::app::database::DatabaseTableInputTarget::Cell) => {
+                        if let Some(editor) = state.grid.cell_editor.as_mut() {
+                            if !clean.is_empty() { editor.input.insert(&clean, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES); }
+                            editor.error = None;
+                        }
+                        return true;
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+            if let Some(field) = dialog.focused {
+                let clean = single_line_ime_text(text);
+                if !clean.is_empty() {
+                    let max_bytes = if field.is_secret() { 4096 } else { 8192 };
+                    dialog.input_mut(field).insert(&clean, max_bytes);
+                    dialog.error = None;
+                }
+            }
+            return true;
+        }
+        if self.ide_panel.database.modal_open() {
+            return true;
+        }
+
         if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {

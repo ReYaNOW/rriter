@@ -130,6 +130,16 @@ pub enum OpenTabSnapshot {
         route_idx: Option<usize>,
         auth_view: bool,
     },
+    DatabaseTable {
+        connection_id: crate::app::database::DatabaseConnectionId,
+        database_name: String,
+        table_name: String,
+    },
+    DatabaseQuery {
+        connection_id: crate::app::database::DatabaseConnectionId,
+        database_name: String,
+        console_id: crate::app::database::SqlConsoleId,
+    },
 }
 
 fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
@@ -163,6 +173,26 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
                     spec_id,
                     route_idx,
                     auth_view,
+                });
+            }
+        } else if let Some(rest) = line.strip_prefix("DBTABLE\t") {
+            if let Ok((connection_id, database_name, table_name)) =
+                serde_json::from_str::<(u64, String, String)>(rest)
+            {
+                tabs.push(OpenTabSnapshot::DatabaseTable {
+                    connection_id: crate::app::database::DatabaseConnectionId(connection_id),
+                    database_name,
+                    table_name,
+                });
+            }
+        } else if let Some(rest) = line.strip_prefix("DBQUERY\t") {
+            if let Ok((connection_id, database_name, console_id)) =
+                serde_json::from_str::<(u64, String, u64)>(rest)
+            {
+                tabs.push(OpenTabSnapshot::DatabaseQuery {
+                    connection_id: crate::app::database::DatabaseConnectionId(connection_id),
+                    database_name,
+                    console_id: crate::app::database::SqlConsoleId(console_id),
                 });
             }
         } else {
@@ -228,6 +258,20 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
                 }
             ))
         }
+        crate::app::EditorTabKind::DatabaseTable(meta, _) => serde_json::to_string(&(
+            meta.connection_id.0,
+            &meta.database_name,
+            &meta.table_name,
+        ))
+        .ok()
+        .map(|payload| format!("DBTABLE\t{payload}")),
+        crate::app::EditorTabKind::DatabaseQuery(meta, _) => serde_json::to_string(&(
+            meta.connection_id.0,
+            &meta.database_name,
+            meta.console_id.0,
+        ))
+        .ok()
+        .map(|payload| format!("DBQUERY\t{payload}")),
         crate::app::EditorTabKind::GitDiff(_, _) => None,
     }
 }
@@ -268,6 +312,7 @@ fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
             crate::app::PanelId::Search => "Search",
             crate::app::PanelId::Git => "Git",
             crate::app::PanelId::ApiClient => "ApiClient",
+            crate::app::PanelId::Database => "Database",
             crate::app::PanelId::Terminal => "Terminal",
             crate::app::PanelId::Problems => "Problems",
             crate::app::PanelId::LspServers => "LspServers",
@@ -388,6 +433,7 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
                 "Search" => crate::app::PanelId::Search,
                 "Git" => crate::app::PanelId::Git,
                 "ApiClient" => crate::app::PanelId::ApiClient,
+                "Database" => crate::app::PanelId::Database,
                 "Terminal" => crate::app::PanelId::Terminal,
                 "Problems" => crate::app::PanelId::Problems,
                 "LspServers" => crate::app::PanelId::LspServers,
@@ -1102,6 +1148,51 @@ mod tests {
                 route_idx: None,
                 auth_view: true,
             }]
+        );
+    }
+
+    #[test]
+    fn open_tabs_text_preserves_database_table_and_query_tabs() {
+        let mut table_tab = tab(None);
+        table_tab.kind = crate::app::EditorTabKind::DatabaseTable(
+            crate::app::database::DatabaseTableTabMeta {
+                tab_id: crate::app::database::DatabaseTabId(9),
+                connection_id: crate::app::database::DatabaseConnectionId(42),
+                database_name: "analytics db".to_string(),
+                table_name: "events".to_string(),
+            },
+            crate::app::database::DatabaseTableTabState::default(),
+        );
+
+        let mut query_tab = tab(None);
+        query_tab.kind = crate::app::EditorTabKind::DatabaseQuery(
+            crate::app::database::DatabaseQueryTabMeta {
+                console_id: crate::app::database::SqlConsoleId(17),
+                connection_id: crate::app::database::DatabaseConnectionId(42),
+                database_name: "analytics db".to_string(),
+                title: "analytics db — SQL 2".to_string(),
+            },
+            crate::app::database::DatabaseQueryTabState::default(),
+        );
+
+        let formatted = format_open_tabs_content(&[table_tab, query_tab], 1);
+        let (tabs, active) = parse_open_tabs_content(&formatted);
+
+        assert_eq!(active, 1);
+        assert_eq!(
+            tabs,
+            vec![
+                OpenTabSnapshot::DatabaseTable {
+                    connection_id: crate::app::database::DatabaseConnectionId(42),
+                    database_name: "analytics db".to_string(),
+                    table_name: "events".to_string(),
+                },
+                OpenTabSnapshot::DatabaseQuery {
+                    connection_id: crate::app::database::DatabaseConnectionId(42),
+                    database_name: "analytics db".to_string(),
+                    console_id: crate::app::database::SqlConsoleId(17),
+                },
+            ]
         );
     }
 
@@ -1994,6 +2085,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
 
         ide_panel: crate::app::IdePanelState::default(),
+        database_runtime: None,
         file_tree_rx: None,
         file_tree_notify_rx: None,
         file_tree_watcher_stop_tx: None,

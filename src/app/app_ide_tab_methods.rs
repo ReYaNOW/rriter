@@ -51,6 +51,7 @@ impl App {
             lsp.shutdown();
         }
         self.ide_panel.api.shutdown_background_tasks();
+        self.shutdown_database_runtime();
         crate::app::api_mock::server::stop_api_mock_server();
     }
 
@@ -102,6 +103,7 @@ impl App {
         } else {
             self.ide_panel = crate::load_panel_state();
             self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
+            self.load_database_panel_state();
         }
         self.ide_panel.enforce_single_open_per_group();
 
@@ -185,6 +187,26 @@ impl App {
                                     self.open_api_spec_tab(spec_id);
                                 }
                             }
+                            loaded_any = true;
+                        }
+                    }
+                    crate::OpenTabSnapshot::DatabaseTable {
+                        connection_id,
+                        database_name,
+                        table_name,
+                    } => {
+                        if self.ide_panel.database.connection(connection_id).is_some() {
+                            self.open_database_table_tab(connection_id, &database_name, &table_name);
+                            loaded_any = true;
+                        }
+                    }
+                    crate::OpenTabSnapshot::DatabaseQuery {
+                        connection_id,
+                        database_name,
+                        console_id,
+                    } => {
+                        if self.ide_panel.database.connection(connection_id).is_some() {
+                            self.restore_database_query_tab(connection_id, &database_name, console_id);
                             loaded_any = true;
                         }
                     }
@@ -426,6 +448,7 @@ impl App {
         }
 
         let previous_tab = self.active_tab;
+        self.save_active_database_query();
         self.commit_api_focus();
         self.ide_panel.api.focused = None;
         self.sync_active_tab();
@@ -433,8 +456,8 @@ impl App {
         self.sync_active_tab();
         self.prefetch_active_tab_git_graph();
 
-        if self.active_tab_is_api_client() {
-            while let Ok(_) = self.highlighter.rx.try_recv() {}
+        if self.active_tab_is_api_client() || self.active_tab_is_database_table() {
+            while self.highlighter.rx.try_recv().is_ok() {}
             self.autocomplete_active = false;
             self.inline_git_popup = None;
         } else if self.active_tab_is_git_diff() {
@@ -471,7 +494,7 @@ impl App {
             self.wait_for_current_highlight();
         }
 
-        if self.is_ide_mode && !self.active_tab_is_api_client() {
+        if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() {
             if let Some(lsp) = &mut self.lsp {
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();

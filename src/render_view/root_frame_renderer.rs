@@ -261,6 +261,7 @@ impl Renderer {
             self.last_mouse_y
         };
 
+        let real_height = self.height;
         let panel_left_w = if is_ide_mode && ide_panel.any_top_open() {
             ide_panel.left_width * s
         } else {
@@ -271,11 +272,32 @@ impl Renderer {
         } else {
             0.0
         };
+        let active_database_query = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((meta, state)),
+            _ => None,
+        });
+        let database_query_modal_open = active_database_query
+            .is_some_and(|(_, state)| state.review.is_some());
+        let database_query_results_open = active_database_query.is_some_and(|(_, state)| {
+            state.history_open
+                || !state.results.is_empty()
+                || !state.messages.is_empty()
+                || state.review.is_some()
+                || state.error.is_some()
+        });
+        let database_query_results_h = if database_query_results_open {
+            (260.0 * s)
+                .min((real_height - panel_bottom_h - 220.0 * s).max(140.0 * s))
+        } else {
+            0.0
+        };
         let modal_overlay_open = is_ide_mode
             && (ide_panel.api.mock_python_runtime_open
                 || ide_panel.api.mock_guide_open
                 || ide_panel.api.mock_server_detail_open
                 || ide_panel.project_search.help_open
+                || ide_panel.database.modal_open()
+                || database_query_modal_open
                 || crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel));
         let (ui_mx, ui_my) = if modal_overlay_open {
             (-1.0, -1.0)
@@ -294,7 +316,7 @@ impl Renderer {
                 ),
             };
         let editor_bottom_h = if is_ide_mode {
-            ide_panel.editor_reserved_bottom_height(s)
+            ide_panel.editor_reserved_bottom_height(s) + database_query_results_h
         } else {
             0.0
         };
@@ -311,12 +333,17 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-        let real_height = self.height;
-        let tab_bar_h = if show_welcome || !is_ide_mode {
+        let tab_bar_visual_h = if show_welcome || !is_ide_mode {
             0.0
         } else {
             44.0 * s
         };
+        let database_query_toolbar_h = if active_database_query.is_some() {
+            40.0 * s
+        } else {
+            0.0
+        };
+        let tab_bar_h = tab_bar_visual_h + database_query_toolbar_h;
         let editor_height =
             editor_view_height(real_height, tab_bar_h, editor_bottom_h, is_ide_mode, s);
         let editor_scroll_height = editor_height;
@@ -466,7 +493,7 @@ impl Renderer {
                 tab_x,
                 0.0,
                 tab_w,
-                tab_bar_h,
+                tab_bar_visual_h,
                 s,
                 ui_mx,
                 ui_my,
@@ -510,7 +537,7 @@ impl Renderer {
             }
             wants_pointer |=
                 self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
-            self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha);
+            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
             if show_fps {
                 self.draw_fps_overlay(self.minimap_width);
             }
@@ -529,10 +556,99 @@ impl Renderer {
             );
             return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
         }
+        if is_ide_mode
+            && !show_welcome
+            && let Some(crate::app::EditorTabKind::DatabaseTable(tab_meta, tab_state)) =
+                tabs.get(active_tab).map(|tab| &tab.kind)
+        {
+            let gutter_x = 48.0 * s + panel_left_w;
+            let tab_x = gutter_x.round() + 1.0;
+            let tab_w = self.width - tab_x;
+            self.draw_database_table_tab(
+                tab_x,
+                tab_bar_h,
+                tab_w,
+                editor_height,
+                s,
+                tab_meta,
+                tab_state,
+                ui_registry,
+                ui_mx,
+                ui_my,
+            );
+            let tab_tooltip = self.draw_tab_bar(
+                tabs,
+                active_tab,
+                editor,
+                editor_title,
+                editor_path,
+                tab_x,
+                0.0,
+                tab_w,
+                tab_bar_visual_h,
+                s,
+                ui_mx,
+                ui_my,
+                ui_registry,
+                tab_scroll_x,
+                ide_panel.tab_drag.as_ref(),
+                lsp,
+                &ide_panel.api,
+                ide_workspaces,
+            );
+            if panel_bottom_h > 0.0 {
+                self.draw_ide_bottom_panel(
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    has_lsp_diagnostics,
+                    s,
+                    ui_mx,
+                    ui_my,
+                    panel_bottom_h,
+                    is_ui_disabled,
+                );
+            }
+            self.draw_status_bar(
+                editor,
+                None,
+                lsp,
+                ui_registry,
+                s,
+                ui_mx,
+                ui_my,
+                panel_bottom_h,
+                status_progress_label,
+                status_progress_elapsed,
+                status_progress_value,
+            );
+            if let Some((path, tx, ty)) = tab_tooltip {
+                self.draw_tab_tooltip(&path, tx, ty, s);
+            }
+            wants_pointer |= self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
+            if show_fps { self.draw_fps_overlay(self.minimap_width); }
+            self.flush();
+            self.register_root_resize_blockers(
+                ide_panel,
+                ui_registry,
+                s,
+                mx,
+                my,
+                panel_left_w,
+                panel_bottom_h,
+                is_ui_disabled,
+                modal_overlay_open,
+                real_height,
+            );
+            return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
+        }
+
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора
         if is_ide_mode && tabs.is_empty() {
             return self.draw_empty_ide_frame(
                 ide_panel,
+                editor,
                 ui_registry,
                 mx,
                 my,
@@ -657,7 +773,10 @@ impl Renderer {
         let end_visual_line = self.visual_lines.len();
         let active_git_diff_state = tabs.get(active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::GitDiff(_, state) => Some(state),
-            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::ApiClient(_, _) => None,
+            crate::app::EditorTabKind::Normal
+            | crate::app::EditorTabKind::ApiClient(_, _)
+            | crate::app::EditorTabKind::DatabaseTable(_, _)
+            | crate::app::EditorTabKind::DatabaseQuery(_, _) => None,
         });
 
         let editor_clip_x = self.left_padding.round().max(0.0);
@@ -956,7 +1075,7 @@ impl Renderer {
                 tab_x,
                 0.0,
                 tab_w,
-                tab_bar_h,
+                tab_bar_visual_h,
                 s,
                 ui_mx,
                 ui_my,
@@ -968,6 +1087,25 @@ impl Renderer {
                 ide_workspaces,
             );
             self.flush();
+            if let Some((query_meta, query_state)) = active_database_query {
+                self.draw_database_query_chrome(
+                    tab_x,
+                    tab_bar_visual_h,
+                    tab_w,
+                    tab_bar_h + editor_height,
+                    database_query_results_h,
+                    s,
+                    query_meta,
+                    query_state,
+                    &ide_panel.database.persisted.query_history,
+                    ui_registry,
+                    ui_mx,
+                    ui_my,
+                    mx,
+                    my,
+                );
+                self.flush();
+            }
         }
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {
             telemetry_chrome_details[0] = start.elapsed().as_secs_f32();
@@ -1210,6 +1348,8 @@ impl Renderer {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));
+        } else if ide_panel.database.modal_open() {
+            crate::app::mouse::clear_hover_popup(Some(self));
         } else if ide_panel.project_search.help_open {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if ide_panel.api.mock_guide_open || ide_panel.api.mock_server_detail_open {
@@ -1260,7 +1400,7 @@ impl Renderer {
                 overlay_my,
                 blink_alpha,
             );
-            self.draw_ide_modal_overlays(s, ide_panel, ui_registry, mx, my, blink_alpha);
+            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
         }
 
         if is_ide_mode {

@@ -114,6 +114,29 @@ impl App {
             return;
         }
 
+        if self.update_database_table_drag(px, py) {
+            self.request_database_table_chunk_for_scroll(self.active_database_table_tab_id().unwrap());
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return;
+        }
+
+        if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
+            && let Some(state) = ddl.as_mut()
+            && state.selecting
+            && let Some(rect) = state.rect
+        {
+            let byte = crate::app::mouse::hover_popup_byte_at(
+                self.renderer.as_mut().unwrap(),
+                &state.popup,
+                rect,
+                px,
+                py,
+            );
+            state.selection_cursor = Some(byte);
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            return;
+        }
+
         if self
             .autocomplete_detail_popup
             .as_ref()
@@ -139,6 +162,29 @@ impl App {
         }
 
         if !self.autocomplete_detail_selecting && self.autocomplete_window_contains(px, py) {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if let Some(field) = self
+            .ide_panel
+            .database
+            .dialog
+            .as_ref()
+            .and_then(|dialog| dialog.dragging_field)
+        {
+            if let Some(target_idx) = self.database_dialog_input_index_at(field, px) {
+                self.set_database_dialog_input_cursor(field, target_idx, true);
+            }
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.ide_panel.database.modal_open() {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();

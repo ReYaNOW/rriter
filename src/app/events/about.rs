@@ -299,6 +299,15 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_api_client() {
         needs_redraw = true;
     }
+    if app.clear_stale_active_database_query_diagnostic() {
+        needs_redraw = true;
+    }
+    app.poll_database_runtime();
+    if app.ide_panel.database.pending_job.is_some()
+        || app.ide_panel.database.ddl_hover.borrow().is_some()
+    {
+        needs_redraw = true;
+    }
     let api_now = crate::app::api_client::now_epoch_secs();
     if let Some(at) = app.ide_panel.api.import_error_at {
         if api_now.saturating_sub(at) < 5 {
@@ -474,6 +483,23 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
         }
     }
+    for tab in &mut app.tabs {
+        if let crate::app::EditorTabKind::DatabaseTable(_, state) = &mut tab.kind {
+            if state.grid.scroll_x.update(dt) { needs_redraw = true; }
+            if state.grid.scroll_y.update(dt) { needs_redraw = true; }
+        }
+    }
+    if let Some(modal) = app.ide_panel.database.table_modal.as_mut() {
+        match modal {
+            crate::app::database::DatabaseTableModal::SqlPreview { scroll, .. }
+            | crate::app::database::DatabaseTableModal::MultilineEditor { scroll, .. }
+            | crate::app::database::DatabaseTableModal::Review { scroll, .. } => {
+                if scroll.update(dt) { needs_redraw = true; }
+            }
+            _ => {}
+        }
+    }
+
     for scroll in app.ide_panel.lsp_logs_scroll_y.values_mut() {
         if scroll.update(dt) {
             needs_redraw = true;

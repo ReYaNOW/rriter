@@ -38,6 +38,7 @@ Files:
 src/platform.rs
 src/platform/integration.rs
 src/platform/process.rs
+src/platform/secret_store.rs
 src/platform/elevated_save.rs
 src/platform/windows.rs
 src/platform/macos.rs
@@ -56,7 +57,8 @@ Important invariants:
 * Linux-specific Wayland, XDG, FreeDesktop Trash, and `io_uring` behavior stays behind target gates. `src/platform/windows.rs` owns non-lossy Windows path normalization and extended-length Win32 paths.
 * Long-lived tools and captured commands use the managed process API. Child processes must not outlive RRiter; graceful shutdown is followed by a bounded full-tree termination.
 * Optional executable lookup honors configured overrides, `PATH`, and Windows `PATHEXT`. Missing tools enter a stable disabled state rather than a restart loop.
-* User credentials are persisted separately from ordinary state. Windows records are protected with per-user DPAPI entropy; legacy plaintext remains readable only for migration, and Unix fallback files are created atomically with mode `0600`.
+* User credentials are persisted separately from ordinary state. Windows records are protected with per-user DPAPI entropy; legacy plaintext remains readable only for migration, and Unix compatibility fallback files are created atomically with mode `0600`.
+* Database credentials use the stricter `secret_store` API: Windows DPAPI, macOS Keychain, and Linux Secret Service through `secret-tool`. That API intentionally has no plaintext/file fallback; a missing or locked system secret service leaves the password session-only and returns an actionable error.
 * Windows and macOS HTTP clients add user-installed native trust roots and native static proxy settings while preserving explicit proxy environment overrides.
 * Application shortcuts, terminal Control, and word-navigation modifiers are separate policies. This preserves Windows AltGr text and native macOS Command/Option behavior.
 * Tool overrides are persisted as native paths in `ToolPaths`, resolved without changing global environment variables, and surfaced in settings together with their source and availability.
@@ -460,6 +462,87 @@ Main `App` state and app-owned structs.
 Owns editor state, panel state, UI state, LSP menu state, terminal/search state, file tree state, settings, dialogs, and tab metadata.
 
 Use when adding/removing persistent app fields or panel/tab state types. Keep behavior in `app.rs` or targeted submodules.
+
+### `src/app/database.rs`
+
+Database Tools foundation shared by later panel, runtime, table, and SQL-console stages.
+
+Responsibilities:
+
+* PostgreSQL and SSH connection configuration without embedded secret values.
+* Fixed resource limits and configurable timeout defaults.
+* Explicit execution-policy separation: internal read autocommit, table mutation review, and user SQL review.
+* Persisted table filters, ordering, limits, column widths, console metadata, and connection colors.
+* Atomic database state and SQL scratch storage through the platform filesystem boundary.
+* Secret-bearing runtime values wrapped in `Zeroizing<String>` and excluded from serialized state.
+
+Internal metadata/COUNT/table-loading `SELECT` statements use autocommit and never open the global transaction-review UI. Table mutations and user SQL use dedicated managed transactions in later stages.
+
+Backend files added by the connection/runtime stage:
+
+```text
+src/app/database/database_postgres.rs
+src/app/database/database_runtime.rs
+src/app/database/database_secrets.rs
+src/app/database/database_ssh.rs
+src/app/database/database_ssh_builtin.rs
+src/platform/secret_store.rs
+```
+
+Responsibilities and invariants:
+
+* `database_postgres.rs` owns direct TCP, TLS Disable/Prefer/Require, PostgreSQL connection tests, accessible-database discovery, and `public` ordinary/partitioned table discovery. These discovery queries are bounded autocommit reads and never issue `BEGIN`.
+* `database_ssh.rs` prefers the user's system OpenSSH, preserves agent/config/ProxyJump behavior, locates standard Windows and macOS executables, runs tunnels through `ManagedChild`, bounds stderr, and deterministically terminates the process tree.
+* `database_ssh_builtin.rs` is the cross-platform `russh` fallback for a missing system client or password/passphrase authentication. It supports direct-tcpip, one jump host, agent/key/password authentication, and strict known-host verification; unknown keys must be accepted by the later UI and changed keys are always rejected.
+* `database_secrets.rs` maps connection IDs and secret kinds onto the strict system secret API. Secret-bearing values stay in `Zeroizing<String>`, never enter serialized connection state, command arguments, environment variables, or logs.
+* `database_runtime.rs` owns one dedicated Tokio worker and permits one foreground database job. New jobs receive a Busy event while another is active; cancellation drops network futures and also signals a system-SSH startup task so shutdown does not leave a tunnel process behind.
+
+Panel/catalog/session files added by the Database UI stage:
+
+```text
+src/app/database/database_panel.rs
+src/app/database/database_catalog.rs
+src/app/database/database_app_methods.rs
+src/app/database/database_app_event_methods.rs
+src/render_view/ide_panels/ide_panel_database_renderer.rs
+src/render_view/database_table_tab.rs
+```
+
+Responsibilities and invariants:
+
+* `database_panel.rs` owns secret-safe connection-dialog inputs, connection/database/table tree state, context menus, host-key/delete prompts, DDL hover state, and database table/query tab metadata. Password fields remain `Zeroizing<String>` and render masked text.
+* `database_catalog.rs` loads PostgreSQL column, primary-key, enum, constraint, and index metadata through bounded internal autocommit reads and reconstructs read-only `public` table DDL.
+* `database_app_methods.rs` and `database_app_event_methods.rs` connect the panel to the database worker, preserve exact SQL console IDs, lazily restore table/query tabs, guard connection deletion while related tabs are open, and persist expanded/selected tree state.
+* `ide_panel_database_renderer.rs` renders the left database panel, embedded dimmed connection/confirmation/host-key dialogs, connection colors, context menus, and the DDL document overlay. The DDL overlay reuses the common animated hover renderer, selection, copy, and smooth scrolling rather than creating a platform window.
+* `database_table_tab.rs` renders the editable virtual table grid. It registers only visible rows/columns, reuses two `ScrollState` instances, provides page/chunk controls, resizable/sortable headers, selection, typed editors, and embedded calendar/enum/multiline UI without render-time I/O.
+* `database_table_tab_overlay.rs` owns the dimmed SQL preview, dirty-refresh/close confirmation, custom-limit input, multiline editor, and transaction review. These overlays block the full application and never create a platform window.
+* `database_grid.rs` owns typed cell/row state, rectangular and multi-row selection, bounded bytea previews, LRU chunk caching, dirty-row protection, PK-based selection restore, NULL/DEFAULT parsing, and visible-range calculations.
+* `database_table.rs` owns internal autocommit COUNT/chunk reads, deterministic PK ordering, safe WHERE/ORDER validation, immutable parameterized DML plans, exact SQL preview, PK+`xmin` optimistic concurrency, and dedicated pending transactions.
+* `database_table_app_methods.rs` and `database_table_edit_methods.rs` route pagination, lazy chunk coalescing, editing, copy, resize, dirty prompts, transaction Apply/Rollback, and post-commit autocommit refresh outside the renderer.
+* `database_query.rs` owns SQL execution-target selection, metadata completion, bounded multiple result sets, PostgreSQL notices, server diagnostic mapping, query history sanitization, and dedicated managed user-SQL transactions. User SQL, including SELECT and Explain Analyze, remains pending until Apply or Cancel; internal metadata reads stay autocommit.
+* `database_query_app_methods.rs` routes Run/Cancel, Explain/Analyze, Format, History, completion, result selection, close guards, transaction Apply/Rollback, and live Database-settings changes outside the renderer.
+* `database_query_tab.rs` renders the SQL toolbar, virtualized result/message/history panes, internal result tabs, and the full-app-blocking query transaction review without performing database or filesystem I/O.
+* `settings_database_ui.rs` renders the bounded Settings -> Databases controls and keeps their UI ordering covered by regression tests without growing the shared settings renderer past project limits.
+* Database query tabs reuse the regular editor/highlighter path with SQL language selection and atomic scratch persistence; they never start Python LSP or participate in Git diff.
+* Successful committed DDL invalidates cached SQL completion metadata, refreshes the database tree, and reloads completion through a later internal autocommit metadata job.
+* Query history is bounded by both entry count and bytes, stores sanitized SQL/error summaries, and never persists PostgreSQL passwords or connection-URI credentials.
+
+Table-editor invariants:
+
+* COUNT, metadata, DDL, and chunk SELECTs remain implicit-autocommit reads and never open transaction review.
+* Table Save executes one immutable plan on a dedicated connection under `BEGIN` plus local statement/lock/idle timeouts. Any statement failure rolls back the whole plan.
+* Apply commits; Cancel, close, shutdown, disconnect, and the configurable review deadline roll back and close the dedicated session.
+* Post-commit COUNT/chunk refresh is autocommit and preserves in-session scroll plus logical selection by primary key. A refresh failure reports that commit already succeeded.
+* Tables without a primary key, primary-key/identity/generated columns, and bytea cells are read-only. Boolean, enum, date/time, JSON, NULL, and DEFAULT use typed editors or explicit tokens.
+* Page data is fetched in chunks of 100 with one in-flight request, latest-target coalescing, generation rejection, and bounded LRU memory. Dragging the scrollbar must not enqueue a request per pixel.
+
+SQL-console invariants:
+
+* Run executes the selected text, otherwise the statement at the cursor, otherwise the non-empty document. Ctrl+Enter is used on Linux/Windows and Command+Enter on macOS.
+* Transaction-control and known non-transactional PostgreSQL commands are rejected before network I/O. Explain accepts exactly one statement; Explain Analyze stays rollback-safe inside the managed transaction.
+* Result streaming enforces configured/hard row, memory, column, and result-set caps before unbounded growth. PostgreSQL notices use a bounded channel and appear in Messages/review state.
+* Server character positions are converted to editor byte ranges and attached to the normal syntax-error/highlighter path with message, detail, hint, and SQLSTATE context.
+* Settings -> Databases owns review, statement, lock, connection, SSH-startup, table-limit, result-limit, history-limit, and default-connection-color controls. Normalization clamps persisted or interactive values to the approved hard limits.
 
 ### `src/app/events.rs`
 
@@ -1023,6 +1106,20 @@ Python language helper tests live in `src/languages/python_tests.rs`.
 Rust-specific import-block helpers.
 
 Use when Rust import folding behavior changes.
+
+### `src/languages/sql.rs`
+
+PostgreSQL SQL language foundation.
+
+Responsibilities:
+
+* Split scripts into statements without treating semicolons inside strings, quoted identifiers, nested block comments, line comments, or dollar-quoted bodies as separators.
+* Select the statement under the cursor.
+* Classify query, mutation, definition, and explain statements.
+* Reject transaction-control statements owned by RRiter and commands unsupported inside managed transactions.
+* Provide baseline PostgreSQL keywords and built-in functions for highlighter completion.
+
+Tree-sitter grammar and capture queries are wired through `src/queries.rs`; `.sql` extension routing is owned by `src/highlighter/highlighter_core.rs`.
 
 ### `src/lsp.rs`
 

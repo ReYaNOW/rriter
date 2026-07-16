@@ -38,6 +38,7 @@ unsafe extern "C" {
         length: c_uint,
         data: *const c_void,
     ) -> c_int;
+    fn SecKeychainItemDelete(item_ref: SecKeychainItemRef) -> c_int;
     fn SecKeychainItemFreeContent(attr_list: *const c_void, data: *mut c_void) -> c_int;
 }
 
@@ -158,6 +159,10 @@ pub fn store_keychain_secret(purpose: &str, bytes: &[u8]) -> io::Result<()> {
     os_status(add_status, "Keychain insert")
 }
 
+pub fn is_keychain_item_not_found(error: &io::Error) -> bool {
+    error.kind() == io::ErrorKind::NotFound
+}
+
 pub fn load_keychain_secret(purpose: &str) -> io::Result<Vec<u8>> {
     let service = KEYCHAIN_SERVICE.as_bytes();
     let account = purpose.as_bytes();
@@ -177,6 +182,9 @@ pub fn load_keychain_secret(purpose: &str) -> io::Result<Vec<u8>> {
             std::ptr::null_mut(),
         )
     };
+    if status == ERR_SEC_ITEM_NOT_FOUND {
+        return Err(io::Error::new(io::ErrorKind::NotFound, "Keychain item not found"));
+    }
     os_status(status, "Keychain lookup")?;
     if password_data.is_null() {
         return Err(io::Error::new(
@@ -191,6 +199,39 @@ pub fn load_keychain_secret(purpose: &str) -> io::Result<Vec<u8>> {
         let _ = SecKeychainItemFreeContent(std::ptr::null(), password_data);
     }
     Ok(bytes)
+}
+
+pub fn delete_keychain_secret(purpose: &str) -> io::Result<()> {
+    let service = KEYCHAIN_SERVICE.as_bytes();
+    let account = purpose.as_bytes();
+    let service_length = keychain_length(service.len(), "service name")?;
+    let account_length = keychain_length(account.len(), "account name")?;
+    let mut item_ref = std::ptr::null_mut();
+    let status = unsafe {
+        SecKeychainFindGenericPassword(
+            std::ptr::null(),
+            service_length,
+            service.as_ptr().cast(),
+            account_length,
+            account.as_ptr().cast(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut item_ref,
+        )
+    };
+    if status == ERR_SEC_ITEM_NOT_FOUND {
+        return Ok(());
+    }
+    os_status(status, "Keychain lookup")?;
+    if item_ref.is_null() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Keychain returned an empty item reference",
+        ));
+    }
+    let delete_status = unsafe { SecKeychainItemDelete(item_ref) };
+    unsafe { CFRelease(item_ref) };
+    os_status(delete_status, "Keychain delete")
 }
 
 pub fn current_process_memory_kb() -> Option<usize> {

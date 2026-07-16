@@ -266,6 +266,8 @@ impl Renderer {
                 } else {
                     Some([0.69, 0.745, 0.773, 1.0])
                 }
+            } else if slot.id == crate::app::PanelId::Database {
+                Some([1.0, 0.67, 0.16, 1.0])
             } else {
                 None
             };
@@ -303,6 +305,8 @@ impl Renderer {
                         } else {
                             Some([0.69, 0.745, 0.773, 1.0])
                         }
+                    } else if slot.id == crate::app::PanelId::Database {
+                        Some([1.0, 0.67, 0.16, 1.0])
                     } else {
                         None
                     };
@@ -489,6 +493,33 @@ impl Renderer {
                         hit_my,
                         blink_alpha,
                         active_api_route,
+                    );
+                }
+            }
+
+            // --- Базы данных ---
+            if ide_panel.is_open(crate::app::PanelId::Database) {
+                let is_top = ide_panel.slots.iter().any(|slot| {
+                    slot.id == crate::app::PanelId::Database
+                        && slot.group == crate::app::PanelGroup::Top
+                });
+                if is_top {
+                    let panel_bottom_h = if ide_panel.any_bottom_open() {
+                        ide_panel.bottom_height * s
+                    } else {
+                        0.0
+                    };
+                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                    self.draw_database_panel(
+                        panel_x,
+                        title_h,
+                        panel_left_w,
+                        (content_bottom - title_h).max(0.0),
+                        s,
+                        ide_panel,
+                        ui_registry,
+                        hit_mx,
+                        hit_my,
                     );
                 }
             }
