@@ -1,3 +1,38 @@
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ApiOverlayLayout {
+    pub box_x: f32,
+    pub box_y: f32,
+    pub box_w: f32,
+    pub box_h: f32,
+    pub pad: f32,
+    pub close_x: f32,
+    pub close_y: f32,
+    pub close_size: f32,
+}
+
+pub(crate) fn api_overlay_layout(
+    width: f32,
+    height: f32,
+    scale: f32,
+    desired_w: f32,
+    desired_h: f32,
+    desired_pad: f32,
+) -> ApiOverlayLayout {
+    let width = width.max(0.0);
+    let height = height.max(0.0);
+    let box_w = (desired_w * scale).min((width - 32.0 * scale).max(0.0));
+    let box_h = (desired_h * scale).min((height - 32.0 * scale).max(0.0));
+    let pad = (desired_pad * scale).min(box_w * 0.25).min(box_h * 0.25);
+    let box_x = ((width - box_w) * 0.5).max(0.0).round();
+    let box_y = ((height - box_h) * 0.5).max(0.0).round();
+    let close_size = (32.0 * scale).min(box_w).min(box_h).max(0.0);
+    let close_x = (box_x + box_w - close_size - 6.0 * scale).max(box_x);
+    let close_y = (box_y + 6.0 * scale).min((box_y + box_h - close_size).max(box_y));
+    ApiOverlayLayout {
+        box_x, box_y, box_w, box_h, pad, close_x, close_y, close_size,
+    }
+}
+
 impl Renderer {
     pub(crate) fn draw_api_mock_guide_overlay(
         &mut self,
@@ -19,11 +54,12 @@ impl Renderer {
         }
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
-        let pad = 24.0 * s;
-        let box_w = (860.0 * s).min(self.width - 32.0 * s).max(320.0 * s);
-        let box_h = (700.0 * s).min(self.height - 32.0 * s).max(360.0 * s);
-        let box_x = ((self.width - box_w) / 2.0).round();
-        let box_y = ((self.height - box_h) / 2.0).round();
+        let layout = api_overlay_layout(self.width, self.height, s, 860.0, 700.0, 24.0);
+        let box_w = layout.box_w;
+        let box_h = layout.box_h;
+        let pad = layout.pad;
+        let box_x = layout.box_x;
+        let box_y = layout.box_y;
         self.push_rounded_rect_border(
             box_x,
             box_y,
@@ -34,16 +70,18 @@ impl Renderer {
             [0.60, 0.35, 0.85, 0.90],
             [0.12, 0.13, 0.17, 1.0],
         );
+        let close_size = layout.close_size;
         let close = IconButton {
-            x: box_x + box_w - 42.0 * s,
-            y: box_y + 6.0 * s,
-            size: 32.0 * s,
+            x: layout.close_x,
+            y: layout.close_y,
+            size: close_size,
             icon: Some(IconType::Cancel),
             is_active: false,
             icon_size: Some(26.0 * s),
             active_square_width: None,
             custom_color: None,
         };
+        if close_size > 0.0 {
         ui_registry.register_icon_button(
             crate::ui_system::UiId::ApiMockGuideClose,
             &close,
@@ -53,6 +91,7 @@ impl Renderer {
             s,
             false,
         );
+        }
         self.draw_string_scaled_stable(
             "Подробный гайд по мокам",
             box_x + pad,
@@ -62,8 +101,8 @@ impl Renderer {
         );
         let content_x = box_x + pad;
         let content_y = (box_y + 72.0 * s).round();
-        let content_w = box_w - pad * 2.0;
-        let content_h = (box_h - 90.0 * s).max(80.0 * s);
+        let content_w = (box_w - pad * 2.0).max(0.0);
+        let content_h = (box_h - 90.0 * s).max(0.0);
         ui_registry.register_blocker(
             crate::ui_system::UiId::ApiMockGuideBody,
             content_x,
@@ -76,14 +115,16 @@ impl Renderer {
         let max_scroll = api_mock_guide_max_scroll(content_h, s);
         let scroll_y = api.mock_guide_scroll.current.min(max_scroll).max(0.0);
         self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
-                content_x.round() as i32,
-                (self.height - (content_y + content_h)).round() as i32,
-                content_w.round() as i32,
-                content_h.round() as i32,
-            );
+        if content_w > 0.0 && content_h > 0.0 {
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    content_x.round() as i32,
+                    (self.height - (content_y + content_h)).round() as i32,
+                    content_w.round() as i32,
+                    content_h.round() as i32,
+                );
+            }
         }
         let mut cy = (content_y + 20.0 * s - scroll_y).round();
         self.draw_wrapped_api_panel_text(
@@ -212,11 +253,12 @@ impl Renderer {
         }
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
         ui_registry.register_blocker(crate::ui_system::UiId::ApiTabBody, 0.0, 0.0, self.width, self.height, mx, my);
-        let pad = 22.0 * s;
-        let box_w = (720.0 * s).min(self.width - 32.0 * s).max(320.0 * s);
-        let box_h = (560.0 * s).min(self.height - 32.0 * s).max(340.0 * s);
-        let box_x = ((self.width - box_w) / 2.0).round();
-        let box_y = ((self.height - box_h) / 2.0).round();
+        let layout = api_overlay_layout(self.width, self.height, s, 720.0, 560.0, 22.0);
+        let box_w = layout.box_w;
+        let box_h = layout.box_h;
+        let pad = layout.pad;
+        let box_x = layout.box_x;
+        let box_y = layout.box_y;
         self.push_rounded_rect_border(
             box_x,
             box_y,
@@ -227,25 +269,28 @@ impl Renderer {
             [0.60, 0.35, 0.85, 0.90],
             [0.12, 0.13, 0.17, 1.0],
         );
+        let close_size = layout.close_size;
         let close = IconButton {
-            x: box_x + box_w - 42.0 * s,
-            y: box_y + 6.0 * s,
-            size: 32.0 * s,
+            x: layout.close_x,
+            y: layout.close_y,
+            size: close_size,
             icon: Some(IconType::Cancel),
             is_active: false,
             icon_size: Some(26.0 * s),
             active_square_width: None,
             custom_color: None,
         };
-        ui_registry.register_icon_button(
-            crate::ui_system::UiId::ApiMockServerDetailsClose,
-            &close,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
+        if close_size > 0.0 {
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::ApiMockServerDetailsClose,
+                &close,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
         let mut cy = (box_y + 38.0 * s).round();
         self.draw_string_scaled_stable("Статус и логи мок-сервера", box_x + pad, cy, self.theme.fg, 1.02);
         cy += 34.0 * s;
@@ -262,8 +307,8 @@ impl Renderer {
         cy += 28.0 * s;
         let log_x = box_x + pad;
         let log_y = cy.round();
-        let log_w = box_w - pad * 2.0;
-        let log_h = (box_y + box_h - log_y - 18.0 * s).max(64.0 * s);
+        let log_w = (box_w - pad * 2.0).max(0.0);
+        let log_h = (box_y + box_h - log_y - 18.0 * s).max(0.0);
         self.push_rounded_rect_border(
             log_x,
             log_y,

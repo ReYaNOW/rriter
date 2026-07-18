@@ -629,7 +629,7 @@ fn lsp_protocol_parses_edge_shapes_and_dispatches_server_requests() {
         &pending,
     );
     let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
-    assert_eq!(reply["id"], 55);
+    assert_eq!(reply["id"], "55");
     assert!(reply["result"].is_null());
 
     dispatch_frame(
@@ -935,4 +935,58 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
     let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
     assert_eq!(reply["id"], 5);
     assert!(reply["result"].is_null());
+}
+
+#[test]
+fn preproduction_json_rpc_rejects_out_of_range_client_response_ids() {
+    assert_eq!(client_request_id(1), Some(1));
+    assert_eq!(client_request_id(i32::MAX as i64), Some(i32::MAX));
+    assert_eq!(client_request_id(i32::MAX as i64 + 1), None);
+    assert_eq!(client_request_id(u32::MAX as i64 + 1), None);
+
+    let (event_tx, event_rx) = mpsc::channel();
+    let (out_tx, _out_rx) = mpsc::channel();
+    let pending = Arc::new(Mutex::new(HashMap::from([(
+        0,
+        PendingRequestKind::Hover,
+    )])));
+    dispatch_frame(
+        br#"{"jsonrpc":"2.0","id":4294967296,"result":null}"#,
+        &event_tx,
+        "ty",
+        &out_tx,
+        &pending,
+    );
+    assert!(crate::platform::lock_recover(&pending).contains_key(&0));
+    assert!(matches!(event_rx.try_recv(), Ok(LspEvent::Log { .. })));
+    assert!(event_rx.try_recv().is_err());
+}
+
+#[test]
+fn preproduction_json_rpc_preserves_string_server_request_ids() {
+    let (event_tx, _event_rx) = mpsc::channel();
+    let (out_tx, out_rx) = mpsc::channel();
+    let pending = Arc::new(Mutex::new(HashMap::new()));
+    dispatch_frame(
+        br#"{"jsonrpc":"2.0","id":"server-42","method":"client/registerCapability","params":{}}"#,
+        &event_tx,
+        "ty",
+        &out_tx,
+        &pending,
+    );
+    let reply: serde_json::Value = serde_json::from_slice(&out_rx.recv().unwrap()).unwrap();
+    assert_eq!(reply["id"], "server-42");
+    assert!(reply["result"].is_null());
+}
+
+#[test]
+fn preproduction_position_request_builders_share_valid_trigger_encoding() {
+    let completion: serde_json::Value =
+        serde_json::from_slice(&make_completion(7, "file:///tmp/a.py", 2, 3, Some("\""))).unwrap();
+    let signature: serde_json::Value =
+        serde_json::from_slice(&make_signature_help(8, "file:///tmp/a.py", 4, 5, None)).unwrap();
+    assert_eq!(completion["method"], "textDocument/completion");
+    assert_eq!(completion["params"]["context"]["triggerCharacter"], "\"");
+    assert_eq!(signature["method"], "textDocument/signatureHelp");
+    assert_eq!(signature["params"]["context"]["triggerKind"], 1);
 }

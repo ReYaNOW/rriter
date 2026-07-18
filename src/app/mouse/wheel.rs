@@ -7,9 +7,6 @@ fn wheel_delta(delta: MouseScrollDelta, line_height: f32) -> (f32, f32) {
     }
 }
 
-fn point_in_rect(mx: f32, my: f32, rect: (f32, f32, f32, f32)) -> bool {
-    mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3
-}
 
 fn panel_scroll_rect(
     is_top: bool,
@@ -254,7 +251,7 @@ impl App {
         }
         if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
             && let Some(state) = ddl.as_mut()
-            && state.rect.is_some_and(|rect| point_in_rect(mx, my, rect))
+            && state.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
         {
             state.popup.scroll.anim_speed = 7.0;
             state.popup.scroll.scroll_by(dy);
@@ -328,7 +325,7 @@ impl App {
                 self.autocomplete_detail_rect,
                 self.autocomplete_detail_popup.as_mut(),
             ) {
-                if point_in_rect(mx, my, rect) {
+                if crate::ui_system::point_in_rect(mx, my, rect) {
                     popup.scroll.anim_speed = 7.0;
                     popup.scroll.scroll_by(dy);
                     popup
@@ -339,7 +336,7 @@ impl App {
                 }
             }
             if let Some(rect) = self.autocomplete_rect {
-                if point_in_rect(mx, my, rect) {
+                if crate::ui_system::point_in_rect(mx, my, rect) {
                     scroll_autocomplete_list(
                         &mut self.autocomplete_scroll,
                         dy,
@@ -358,7 +355,7 @@ impl App {
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(rect) = state.diag_rect {
-                if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
+                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     state.diag_scroll.anim_speed = 7.0;
                     state.diag_scroll.scroll_by(dy);
                     let max_scroll = state.diag_max_scroll;
@@ -376,7 +373,7 @@ impl App {
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
             if let Some(rect) = state.rect {
-                if point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
+                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
                         popup.scroll.anim_speed = 7.0;
@@ -405,7 +402,7 @@ impl App {
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s, true);
 
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
                 let row_h = 28.0 * s;
@@ -424,9 +421,9 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Search, s, true);
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if let Some(layout) = self.project_search_panel_layout() {
-                    if point_in_rect(
+                    if crate::ui_system::point_in_rect(
                         mx,
                         my,
                         (layout.query.x, layout.query.y, layout.query.w, layout.query.h),
@@ -456,7 +453,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Git, s, false);
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
                 let full_list_h = (ch - controls_h).max(40.0 * s);
@@ -472,7 +469,7 @@ impl App {
                 if self.ide_panel.git.graph_open {
                     let graph_y = list_y + changes_h + divider_h;
                     let graph_header_h = 34.0 * s;
-                    if point_in_rect(mx, my, (cx, graph_y, cw, graph_header_h)) {
+                    if crate::ui_system::point_in_rect(mx, my, (cx, graph_y, cw, graph_header_h)) {
                         let mut total_w = 0.0f32;
                         let renderer = self.renderer.as_mut().unwrap();
                         for workspace in self
@@ -499,7 +496,7 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                    if point_in_rect(mx, my, (cx, graph_y, cw, graph_h)) {
+                    if crate::ui_system::point_in_rect(mx, my, (cx, graph_y, cw, graph_h)) {
                         self.ide_panel.git.graph_scroll.anim_speed = 7.0;
                         self.ide_panel.git.graph_scroll.scroll_by(dy);
                         let rows_h = (graph_h - graph_header_h).max(0.0);
@@ -524,7 +521,7 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                    if !point_in_rect(mx, my, (cx, list_y, cw, changes_h)) {
+                    if !crate::ui_system::point_in_rect(mx, my, (cx, list_y, cw, changes_h)) {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
@@ -545,7 +542,7 @@ impl App {
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Database) {
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Database, s, false);
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.database.scroll.anim_speed = 7.0;
                 self.ide_panel.database.scroll.scroll_by(dy);
                 let mut rows = 0usize;
@@ -571,7 +568,7 @@ impl App {
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::ApiClient, s, false);
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.api.panel_scroll.anim_speed = 7.0;
                 self.ide_panel.api.panel_scroll.scroll_by(dy);
                 let max_scroll =
@@ -592,7 +589,7 @@ impl App {
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Problems, s, true);
 
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
                 self.ide_panel.problems_scroll.scroll_by(dy);
                 let row_h = 24.0 * s;
@@ -612,11 +609,11 @@ impl App {
             let (cx, cy, cw, ch, _) =
                 app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s, true);
 
-            if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if self.ide_panel.terminal_focused {
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                        let grid = term.grid.lock().unwrap();
+                        let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                         let is_alt = grid.is_alt;
                         let app_cursor = grid.app_cursor_keys;
                         let mouse_tracking = grid.mouse_tracking;
@@ -676,7 +673,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             if let Some((cx, cy, cw, ch)) = self.lsp_panel_bounds() {
-                if point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                     let mut over_inner = false;
                     let scroll_y = self.ide_panel.lsp_scroll_y.current.round();
                     let mut current_y = cy + 8.0 * s - scroll_y;
@@ -706,7 +703,7 @@ impl App {
                             let log_bg_w = cw - 48.0 * s;
                             let log_bg_h = logs_h - 52.0 * s;
 
-                            if point_in_rect(mx, my, (log_bg_x, log_bg_y, log_bg_w, log_bg_h)) {
+                            if crate::ui_system::point_in_rect(mx, my, (log_bg_x, log_bg_y, log_bg_w, log_bg_h)) {
                                 let name = info.name.to_string();
 
                                 let inner_y = self
@@ -1504,11 +1501,11 @@ mod tests {
     #[test]
     fn point_in_rect_uses_inclusive_edges() {
         let rect = (10.0, 20.0, 30.0, 40.0);
-        assert!(point_in_rect(10.0, 20.0, rect));
-        assert!(point_in_rect(40.0, 60.0, rect));
-        assert!(point_in_rect(25.0, 45.0, rect));
-        assert!(!point_in_rect(9.9, 45.0, rect));
-        assert!(!point_in_rect(25.0, 60.1, rect));
+        assert!(crate::ui_system::point_in_rect(10.0, 20.0, rect));
+        assert!(crate::ui_system::point_in_rect(40.0, 60.0, rect));
+        assert!(crate::ui_system::point_in_rect(25.0, 45.0, rect));
+        assert!(!crate::ui_system::point_in_rect(9.9, 45.0, rect));
+        assert!(!crate::ui_system::point_in_rect(25.0, 60.1, rect));
     }
 
     #[test]

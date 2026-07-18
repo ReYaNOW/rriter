@@ -43,14 +43,16 @@ pub struct ProjectSearchPreviewWorker {
     pub rx: Receiver<ProjectSearchPreviewWorkerMessage>,
 }
 
-pub fn start_project_search_preview_worker() -> ProjectSearchPreviewWorker {
+pub fn start_project_search_preview_worker() -> std::io::Result<ProjectSearchPreviewWorker> {
     let (request_tx, request_rx) = channel::<ProjectSearchPreviewRequest>();
     let (message_tx, message_rx) = channel::<ProjectSearchPreviewWorkerMessage>();
-    std::thread::spawn(move || run_project_search_preview_worker(request_rx, message_tx));
-    ProjectSearchPreviewWorker {
+    crate::platform::spawn_named("rriter-project-search-preview", move || {
+        run_project_search_preview_worker(request_rx, message_tx);
+    })?;
+    Ok(ProjectSearchPreviewWorker {
         tx: request_tx,
         rx: message_rx,
-    }
+    })
 }
 
 impl ProjectSearchState {
@@ -62,9 +64,15 @@ impl ProjectSearchState {
 
     pub fn start_preview_worker(&mut self) {
         self.reset_preview_worker();
-        let worker = start_project_search_preview_worker();
-        self.preview_tx = Some(worker.tx);
-        self.preview_rx = Some(worker.rx);
+        match start_project_search_preview_worker() {
+            Ok(worker) => {
+                self.preview_tx = Some(worker.tx);
+                self.preview_rx = Some(worker.rx);
+            }
+            Err(err) => {
+                self.error = Some(format!("Не удалось запустить предпросмотр поиска: {err}"));
+            }
+        }
     }
 
     pub fn has_pending_previews(&self) -> bool {
@@ -146,6 +154,10 @@ impl ProjectSearchState {
             let request = preview_request_for_match(self.generation, key, path, mat);
             if tx.send(request).is_err() {
                 self.reset_preview_worker();
+                self.start_preview_worker();
+                self.error.get_or_insert_with(||
+                    "Предпросмотр поиска был перезапущен после сбоя".to_string()
+                );
                 return sent > 0;
             }
             self.preview_pending.insert(key);

@@ -1,6 +1,20 @@
 use alacritty_terminal::vte::{Params, Parser, Perform};
 use std::io;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
+
+/// Locks the terminal grid while recovering the inner state after a worker panic.
+///
+/// A poisoned terminal mutex must not cascade into a UI-thread panic: the grid is
+/// still structurally valid and can be redrawn, cleared, or shut down safely.
+#[inline]
+fn recover_terminal_lock<T>(result: std::sync::LockResult<T>) -> T {
+    result.unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[inline]
+pub(crate) fn lock_terminal_grid(grid: &Mutex<TermGrid>) -> MutexGuard<'_, TermGrid> {
+    recover_terminal_lock(grid.lock())
+}
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct Cell {
@@ -912,6 +926,21 @@ mod tests {
         assert_eq!(grid.lines[1][2].fg, 123);
         assert_eq!(grid.lines[1][2].bg, 0);
     }
+
+
+    #[test]
+    fn bug_70_poisoned_terminal_mutex_recovers_without_ui_thread_panic() {
+        let grid = Mutex::new(TermGrid::new(4, 2));
+        let mut guard = lock_terminal_grid(&grid);
+        guard.put_char('R');
+        assert_eq!(guard.lines[0][0].c, 'R');
+        drop(guard);
+
+        let source = include_str!("terminal.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production.contains("unwrap_or_else(std::sync::PoisonError::into_inner)"));
+        assert!(!production.contains("grid.lock().unwrap()"));
+    }
 }
 
 impl Perform for TermGrid {
@@ -1331,11 +1360,10 @@ impl Terminal {
             Ok((process, shell)) => (Some(process), shell.title),
             Err(error) => {
                 let message = format!("RRiter terminal error: {error}\r\n");
-                if let Ok(mut grid) = grid.lock() {
-                    let mut parser = Parser::new();
-                    parser.advance(&mut *grid, message.as_bytes());
-                    grid.dirty = true;
-                }
+                let mut grid = crate::platform::lock_recover(&grid);
+                let mut parser = Parser::new();
+                parser.advance(&mut *grid, message.as_bytes());
+                grid.dirty = true;
                 (None, "terminal error".to_string())
             }
         };

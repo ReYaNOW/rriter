@@ -715,3 +715,25 @@ fn pgo_automation_uses_distinct_wayland_identity() {
         ("rriter-pgo", "rriter-pgo")
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn preproduction_atomic_write_preserves_existing_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = std::env::temp_dir().join(format!(
+        "rriter-preproduction-atomic-mode-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("state.txt");
+    fs::write(&path, b"old").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+    atomic_write(&path, b"new").unwrap();
+
+    assert_eq!(fs::read(&path).unwrap(), b"new");
+    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+    let _ = fs::remove_dir_all(root);
+}

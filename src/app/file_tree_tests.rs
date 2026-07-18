@@ -268,6 +268,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
     let first = match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
         FileTreeScanMessage::Nodes(nodes) => nodes,
         FileTreeScanMessage::IconsReady => panic!("scan must send nodes before icon signal"),
+        FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
     };
     let second = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
 
@@ -733,5 +734,27 @@ fn file_tree_cross_volume_move_restores_source_after_copy_failure() {
     assert!(!std::fs::read_dir(&root)
         .unwrap()
         .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".rriter-move-")));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn preproduction_file_tree_copy_preserves_file_permissions() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = test_root("preproduction_copy_permissions");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let source = root.join("source.sh");
+    let destination = root.join("destination.sh");
+    std::fs::write(&source, "#!/bin/sh\n").unwrap();
+    std::fs::set_permissions(&source, std::fs::Permissions::from_mode(0o740)).unwrap();
+
+    copy_path_recursive(&source, &destination).unwrap();
+
+    assert_eq!(
+        std::fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+        0o740
+    );
     let _ = std::fs::remove_dir_all(root);
 }

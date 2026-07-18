@@ -61,6 +61,43 @@ pub(crate) fn tab_path_is_external(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn editor_tab_width(
+        &mut self,
+        tab: &crate::app::EditorTab,
+        title: &str,
+        scale: f32,
+    ) -> f32 {
+        let tab_pad = 16.0 * scale;
+        let icon_size_tab = TAB_ICON_SLOT_SIZE * scale;
+        if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind
+            && let Some(method) = meta.route_method
+        {
+            let api_title = if meta.title.is_empty() {
+                "API"
+            } else {
+                meta.title.as_str()
+            };
+            let mut path = String::new();
+            crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
+            let title_w = self.measure_ui_width(api_title, 1.0);
+            let chip_w = (self.measure_ui_width(method.chip_str(), 0.62) + 16.0 * scale)
+                .max(34.0 * scale);
+            let path_w = self.measure_ui_width(&path, 0.88);
+            tab_pad * 2.0
+                + icon_size_tab
+                + 8.0 * scale
+                + title_w
+                + 8.0 * scale
+                + chip_w
+                + 8.0 * scale
+                + path_w
+                + 30.0 * scale
+        } else {
+            let title_w = self.measure_ui_width(title, 1.0);
+            tab_pad * 2.0 + icon_size_tab + 8.0 * scale + title_w + 30.0 * scale
+        }
+    }
+
     pub fn draw_tab_bar(
         &mut self,
         tabs: &[crate::app::EditorTab],
@@ -114,35 +151,7 @@ impl Renderer {
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
         for (idx, title) in display_titles.iter().enumerate() {
-            if let crate::app::EditorTabKind::ApiClient(meta, _) = &tabs[idx].kind
-                && let Some(method) = meta.route_method
-            {
-                let api_title = if meta.title.is_empty() {
-                    "API"
-                } else {
-                    meta.title.as_str()
-                };
-                let mut path = String::new();
-                crate::app::api_client::write_api_path_display(&meta.route_path, &mut path);
-                let title_w = self.measure_ui_width(api_title, 1.0);
-                let chip_w = (self.measure_ui_width(method.chip_str(), 0.62) + 16.0 * s)
-                    .max(34.0 * s);
-                let path_w = self.measure_ui_width(&path, 0.88);
-                tab_widths.push(
-                    tab_pad * 2.0
-                        + icon_size_tab
-                        + 8.0 * s
-                        + title_w
-                        + 8.0 * s
-                        + chip_w
-                        + 8.0 * s
-                        + path_w
-                        + 30.0 * s,
-                );
-            } else {
-                let title_w = self.measure_ui_width(title, 1.0);
-                tab_widths.push(tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s);
-            }
+            tab_widths.push(self.editor_tab_width(&tabs[idx], title, s));
         }
 
         let mut hovered_tab_tooltip = None;
@@ -164,7 +173,7 @@ impl Renderer {
         let dragged_idx = tab_drag.map(|d| d.start_idx);
 
         if let Some(drag) = tab_drag {
-            if drag.threshold_passed {
+            if drag.threshold_passed && drag.start_idx < tabs.len() {
                 let dragged_x = initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
                 let dragged_w = tab_widths[drag.start_idx];
                 let dragged_center = dragged_x + dragged_w / 2.0;
@@ -526,7 +535,7 @@ impl Renderer {
                     }
                 }
 
-                if close_rect_right > x && close_rect_x < x + w {
+                if show_close && close_rect_right > x && close_rect_x < x + w {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::EditorTabClose(i),
                         close_rect_x.max(x),

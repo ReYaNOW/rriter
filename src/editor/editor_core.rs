@@ -22,6 +22,19 @@ impl<'a> TokenSource for HashSource<'a> {
     }
 }
 
+#[inline(always)]
+pub(crate) fn next_editor_version(version: u64) -> u64 {
+    version.wrapping_add(1).max(1)
+}
+
+#[inline(always)]
+pub(crate) fn lsp_document_version(version: u64) -> i32 {
+    if version == 0 {
+        return 0;
+    }
+    (((version - 1) % i32::MAX as u64) + 1) as i32
+}
+
 #[derive(Clone)]
 struct DiffInfo {
     modified: Vec<bool>,
@@ -449,7 +462,7 @@ impl Editor {
                 || (char_before == b'{' && char_after == b'}');
 
             if is_pair {
-                self.version += 1;
+                self.version = next_editor_version(self.version);
                 let start = self.cursor - 1;
                 let len = 2;
                 let text_to_save = format!("{}{}", char_before as char, char_after as char);
@@ -477,7 +490,7 @@ impl Editor {
         }
 
         if self.cursor > 0 {
-            self.version += 1;
+            self.version = next_editor_version(self.version);
             let cursor_before = self.cursor;
             let mut prev = self.cursor - 1;
             while prev > 0 && !self.is_char_boundary(prev) {
@@ -804,7 +817,7 @@ impl Editor {
             self.selection_anchor = None;
             self.redo_stack.push_back(step);
             self.is_working_history = false;
-            self.version += 1;
+            self.version = next_editor_version(self.version);
 
             self.update_modifications();
             return Some(delta);
@@ -862,7 +875,7 @@ impl Editor {
             self.selection_anchor = None;
             self.history.push_back(step);
             self.is_working_history = false;
-            self.version += 1;
+            self.version = next_editor_version(self.version);
 
             self.update_modifications();
             return Some(delta);
@@ -920,7 +933,7 @@ impl Editor {
         let original_hashes = self.original_hashes.clone();
         let saved_hashes = self.saved_hashes.clone();
         let git_base_text = self.git_base_text.clone();
-        let version = self.version.saturating_add(1);
+        let version = next_editor_version(self.version);
         let cursor = self.cursor.min(text.len());
 
         let capacity = text.len() + 8192;
@@ -1036,8 +1049,15 @@ impl Editor {
         end: usize,
         new_text: &str,
     ) -> (usize, usize, String) {
-        self.version += 1;
         let cursor_before_op = self.cursor;
+        if start > end
+            || end > self.len()
+            || !self.is_char_boundary(start)
+            || !self.is_char_boundary(end)
+        {
+            return (cursor_before_op, cursor_before_op, String::new());
+        }
+        self.version = next_editor_version(self.version);
 
         let len = end - start;
         let mut res = Vec::with_capacity(len);
@@ -1086,7 +1106,7 @@ impl Editor {
             return (del_info, 0);
         }
 
-        self.version += 1;
+        self.version = next_editor_version(self.version);
         let insert_offset = self.cursor;
         let len = self.insert_str_internal(s);
 
@@ -1107,7 +1127,7 @@ impl Editor {
     pub fn delete_selection(&mut self) -> Option<(usize, usize)> {
         if let Some(anchor) = self.selection_anchor {
             if anchor != self.cursor {
-                self.version += 1;
+                self.version = next_editor_version(self.version);
                 let start = anchor.min(self.cursor);
                 let end = anchor.max(self.cursor);
                 let len = end - start;
@@ -1148,7 +1168,7 @@ impl Editor {
             return Some(del_info);
         }
         if self.cursor < self.len() {
-            self.version += 1;
+            self.version = next_editor_version(self.version);
             let cursor_before = self.cursor;
             let mut next = self.cursor + 1;
             while next < self.len() && !self.is_char_boundary(next) {

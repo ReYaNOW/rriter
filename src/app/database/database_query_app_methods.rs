@@ -325,7 +325,7 @@ impl App {
         let Some((meta, state)) = self.active_database_query_meta_state() else {
             return;
         };
-        if state.completion_loaded || self.ide_panel.database.pending_job.is_some() {
+        if state.completion_loaded {
             return;
         }
         let meta = meta.clone();
@@ -342,6 +342,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind: DatabasePendingJobKind::LoadQueryCompletion,
+            owner: crate::app::database::DatabaseJobOwner::Query(meta.console_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: None,
@@ -451,6 +452,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind: DatabasePendingJobKind::RunUserSql,
+            owner: crate::app::database::DatabaseJobOwner::Query(meta.console_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: None,
@@ -531,8 +533,17 @@ impl App {
         let Some(review) = state.review.as_ref() else {
             return;
         };
+        if !database_query_transaction_finish_allowed(review.finishing) {
+            return;
+        }
         let meta = meta.clone();
         let transaction_id = review.transaction_id;
+        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
+            && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
+            && let Some(review) = state.review.as_mut()
+        {
+            review.finishing = true;
+        }
         let job_id = self.ide_panel.database.allocate_job_id();
         let kind = if commit {
             DatabasePendingJobKind::CommitTransaction
@@ -542,6 +553,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind,
+            owner: crate::app::database::DatabaseJobOwner::Query(meta.console_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name),
             table_name: None,
@@ -652,26 +664,11 @@ impl App {
             .min(crate::app::database::MAX_SQL_HISTORY_ENTRIES);
         let history = &mut self.ide_panel.database.persisted.query_history;
         history.push(entry);
-        if history.len() > limit {
-            let remove = history.len() - limit;
-            history.drain(0..remove);
-        }
-        while history
-            .iter()
-            .map(|entry| {
-                entry.sql.len()
-                    + entry.database_name.len()
-                    + entry.error_summary.as_ref().map_or(0, String::len)
-                    + 64
-            })
-            .sum::<usize>()
-            > crate::app::database::MAX_SQL_HISTORY_BYTES
-        {
-            if history.is_empty() {
-                break;
-            }
-            history.remove(0);
-        }
+        crate::app::database::trim_database_query_history(
+            history,
+            limit,
+            crate::app::database::MAX_SQL_HISTORY_BYTES,
+        );
         self.save_database_panel_state();
     }
 
@@ -1157,6 +1154,10 @@ fn database_query_scroll_viewport(
     body_rect.map_or((1.0, 1.0), |rect| (rect.2.max(1.0), rect.3.max(1.0)))
 }
 
+fn database_query_transaction_finish_allowed(finishing: bool) -> bool {
+    !finishing
+}
+
 fn database_query_diagnostic_is_stale(
     diagnostic_version: Option<u64>,
     editor_version: u64,
@@ -1271,4 +1272,10 @@ mod database_query_app_method_tests {
         assert!(!database_query_diagnostic_is_stale(Some(2), 2));
         assert!(database_query_diagnostic_is_stale(Some(2), 3));
     }
+    #[test]
+    fn bug_58_query_transaction_finish_rejects_duplicate_commit_or_rollback() {
+        assert!(database_query_transaction_finish_allowed(false));
+        assert!(!database_query_transaction_finish_allowed(true));
+    }
+
 }

@@ -1385,31 +1385,50 @@ fn api_cache_dir() -> PathBuf {
 
 const API_AUTH_SECRET_PURPOSE: &str = "RRiter API authentication";
 
+fn load_api_auth_checked() -> Result<ApiAuthStore, String> {
+    load_api_auth_from_checked(&api_auth_path())
+}
+
+fn load_api_auth_from_checked(path: &std::path::Path) -> Result<ApiAuthStore, String> {
+    let record = match std::fs::read(path) {
+        Ok(record) => record,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ApiAuthStore::default());
+        }
+        Err(error) => return Err(format!("API credentials не прочитаны: {error}")),
+    };
+    let parse_result = crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE)
+        .map_err(|error| format!("API credentials не расшифрованы: {error}"))
+        .and_then(|content| {
+            serde_json::from_slice::<ApiAuthStore>(&content)
+                .map_err(|error| format!("API credentials повреждены: {error}"))
+        });
+    if let Err(error) = parse_result {
+        let backup_note = crate::platform::corrupt_file_backup_note(path);
+        return Err(format!("{error}{backup_note}"));
+    }
+    parse_result
+}
+
 fn load_api_auth() -> ApiAuthStore {
-    std::fs::read(api_auth_path())
-        .ok()
-        .and_then(|record| {
-            crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE).ok()
-        })
-        .and_then(|content| serde_json::from_slice::<ApiAuthStore>(&content).ok())
-        .unwrap_or_default()
+    load_api_auth_checked().unwrap_or_default()
 }
 
-fn save_api_auth(auth: &ApiAuthStore) {
-    let Ok(content) = serde_json::to_vec_pretty(auth) else {
-        return;
-    };
-    let Ok(record) = crate::platform::seal_user_secret(&content, API_AUTH_SECRET_PURPOSE) else {
-        return;
-    };
-    let _ = crate::platform::atomic_write_secret(&api_auth_path(), &record);
+fn save_api_auth(auth: &ApiAuthStore) -> Result<(), String> {
+    let content = serde_json::to_vec_pretty(auth).map_err(|err| err.to_string())?;
+    let record = crate::platform::seal_user_secret(&content, API_AUTH_SECRET_PURPOSE)
+        .map_err(|err| err.to_string())?;
+    crate::platform::atomic_write_secret(&api_auth_path(), &record)
+        .map_err(|err| err.to_string())
 }
 
-fn save_url_cache(id: ApiSpecId, raw: &str) {
-    let _ = crate::platform::atomic_write(
-        &api_cache_dir().join(format!("{}.json", id.0)),
-        raw.as_bytes(),
-    );
+fn save_url_cache(id: ApiSpecId, raw: &str) -> Result<(), String> {
+    save_url_cache_to(&api_cache_dir().join(format!("{}.json", id.0)), raw)
+}
+
+fn save_url_cache_to(path: &std::path::Path, raw: &str) -> Result<(), String> {
+    crate::platform::atomic_write(path, raw.as_bytes())
+        .map_err(|error| format!("OpenAPI URL cache не сохранён: {error}"))
 }
 
 fn read_url_cache(id: ApiSpecId) -> Option<String> {
@@ -1421,9 +1440,12 @@ pub(crate) fn api_python_runtime_dialog_layout(
     height: f32,
     scale: f32,
 ) -> ApiPythonRuntimeDialogLayout {
-    let pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * scale;
-    let box_w = (crate::app::file_tree::FILE_TREE_DIALOG_W * scale).min(width - 32.0 * scale);
-    let box_h = (500.0 * scale).min(height - 32.0 * scale);
+    let available_w = (width - 32.0 * scale).max(0.0);
+    let available_h = (height - 32.0 * scale).max(0.0);
+    let box_w = (crate::app::file_tree::FILE_TREE_DIALOG_W * scale).min(available_w);
+    let box_h = (500.0 * scale).min(available_h);
+    let pad = (crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * scale)
+        .min(box_w * 0.5);
     let box_x = ((width - box_w) / 2.0).round();
     let box_y = ((height - box_h) / 2.0).round();
     ApiPythonRuntimeDialogLayout {
@@ -1432,7 +1454,7 @@ pub(crate) fn api_python_runtime_dialog_layout(
         box_w,
         box_h,
         pad,
-        content_w: box_w - pad * 2.0,
+        content_w: (box_w - pad * 2.0).max(0.0),
     }
 }
 
@@ -1440,11 +1462,13 @@ pub(crate) fn api_python_version_list_rect(
     layout: ApiPythonRuntimeDialogLayout,
     scale: f32,
 ) -> (f32, f32, f32, f32) {
+    let y = (layout.box_y + 210.0 * scale).min(layout.box_y + layout.box_h);
+    let footer_y = (layout.box_y + layout.box_h - 64.0 * scale).max(layout.box_y);
     (
         layout.box_x + layout.pad,
-        layout.box_y + 210.0 * scale,
-        layout.content_w,
-        158.0 * scale,
+        y,
+        layout.content_w.max(0.0),
+        (footer_y - y).max(0.0).min(158.0 * scale),
     )
 }
 
@@ -1471,8 +1495,8 @@ pub(crate) fn api_python_install_log_rect(
     (
         layout.box_x + layout.pad,
         y,
-        layout.content_w,
-        (btn_y - y - 12.0 * scale).max(44.0 * scale),
+        layout.content_w.max(0.0),
+        (btn_y - y - 12.0 * scale).max(0.0),
     )
 }
 
@@ -1484,9 +1508,6 @@ pub(crate) fn api_python_install_log_line_height(scale: f32) -> f32 {
     18.0 * scale
 }
 
-fn api_point_in_rect(mx: f32, my: f32, rect: (f32, f32, f32, f32)) -> bool {
-    mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3
-}
 
 fn parse_uv_python_list(raw: &str) -> Vec<ApiPythonVersionRow> {
     let mut rows = Vec::new();

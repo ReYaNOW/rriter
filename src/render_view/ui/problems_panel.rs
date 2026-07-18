@@ -130,8 +130,14 @@ impl Renderer {
         }
 
         let scroll_y = ide_panel.problems_scroll.current.round();
-        let hover_settled =
-            (ide_panel.problems_scroll.current - ide_panel.problems_scroll.target).abs() < 0.5;
+        let hover_settled = ide_panel.problems_scroll.is_settled();
+        let list_clip = crate::ui_system::UiClipRect::new(
+            content_x,
+            list_y,
+            (content_w - 14.0 * s).max(0.0),
+            list_h,
+        );
+        let visible_row_count = ide_panel.visible_problem_row_count(lsp);
 
         if ide_panel.flat_diags.is_empty() {
             let hint = "Нет ляпов";
@@ -148,17 +154,23 @@ impl Renderer {
             let item_h = 24.0 * s;
 
             for (idx, (path, diag_idx)) in ide_panel.flat_diags.iter().enumerate() {
+                if !ide_panel.problem_row_visible(lsp, path, *diag_idx) {
+                    continue;
+                }
                 if *diag_idx == usize::MAX {
                     if current_y + item_h > list_y && current_y < list_y + list_h {
-                        ui_registry.register_rect(
-                            crate::ui_system::UiId::ProblemFileToggle(idx),
-                            content_x,
-                            current_y,
-                            content_w,
-                            item_h,
-                            self.last_mouse_x,
-                            self.last_mouse_y,
-                        );
+                        if hover_settled {
+                            ui_registry.register_rect_clipped(
+                                crate::ui_system::UiId::ProblemFileToggle(idx),
+                                content_x,
+                                current_y,
+                                content_w,
+                                item_h,
+                                list_clip,
+                                self.last_mouse_x,
+                                self.last_mouse_y,
+                            );
+                        }
                         if hover_settled
                             && ui_registry.hovered()
                             == Some(crate::ui_system::UiId::ProblemFileToggle(idx))
@@ -246,9 +258,7 @@ impl Renderer {
                     continue;
                 }
 
-                let Some(diag) = ide_panel.problem_diagnostic(lsp, path, *diag_idx) else {
-                    continue;
-                };
+                let Some(diag) = ide_panel.problem_diagnostic(lsp, path, *diag_idx) else { continue; };
                 if current_y + item_h > list_y && current_y < list_y + list_h {
                     let is_all_tab = ide_panel.problems_tab == 1;
                     let indent = if is_all_tab { 24.0 * s } else { 0.0 };
@@ -256,15 +266,18 @@ impl Renderer {
                     let icon_x = content_x + pad_x + indent;
                     let icon_y = current_y + (item_h - icon_sz) / 2.0;
 
-                    ui_registry.register_rect(
-                        crate::ui_system::UiId::ProblemJump(idx),
-                        content_x,
-                        current_y,
-                        content_w - 14.0 * s,
-                        item_h,
-                        self.last_mouse_x,
-                        self.last_mouse_y,
-                    );
+                    if hover_settled {
+                        ui_registry.register_rect_clipped(
+                            crate::ui_system::UiId::ProblemJump(idx),
+                            content_x,
+                            current_y,
+                            content_w - 14.0 * s,
+                            item_h,
+                            list_clip,
+                            self.last_mouse_x,
+                            self.last_mouse_y,
+                        );
+                    }
                     if hover_settled
                         && ui_registry.hovered() == Some(crate::ui_system::UiId::ProblemJump(idx))
                     {
@@ -368,15 +381,18 @@ impl Renderer {
                         );
 
                         if diag.code_href.is_some() {
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::ProblemUrl(idx),
-                                sfx_x - 1.0,
-                                current_y,
-                                sfx_w + 2.0,
-                                item_h,
-                                self.last_mouse_x,
-                                self.last_mouse_y,
-                            );
+                            if hover_settled {
+                                ui_registry.register_rect_clipped(
+                                    crate::ui_system::UiId::ProblemUrl(idx),
+                                    sfx_x - 1.0,
+                                    current_y,
+                                    sfx_w + 2.0,
+                                    item_h,
+                                    list_clip,
+                                    self.last_mouse_x,
+                                    self.last_mouse_y,
+                                );
+                            }
                             if hover_settled
                                 && ui_registry.hovered()
                                 == Some(crate::ui_system::UiId::ProblemUrl(idx))
@@ -403,19 +419,21 @@ impl Renderer {
                 current_y += item_h;
             }
 
-            let total_h = ide_panel.flat_diags.len() as f32 * item_h;
-            let track_h = content_h - 40.0 * s;
-            if total_h > track_h {
-                let max_scroll = total_h - track_h;
-                let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-                let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
-                let thumb_y = list_y + scroll_ratio * (track_h - thumb_h);
-
+            let total_h = crate::app::problems_scroll_content_height(visible_row_count, item_h);
+            let track_h = (content_h - 40.0 * s).max(0.0);
+            if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                list_y,
+                track_h,
+                track_h,
+                total_h,
+                scroll_y,
+                20.0 * s,
+            ) {
                 self.push_rounded_rect(
                     content_x + content_w - 12.0 * s,
-                    thumb_y.round(),
+                    thumb.start.round(),
                     6.0 * s,
-                    thumb_h,
+                    thumb.len,
                     3.0 * s,
                     [0.45, 0.45, 0.55, 0.5],
                 );

@@ -149,6 +149,8 @@ impl Renderer {
 
         let row_h = crate::app::git_panel::GIT_GRAPH_ROW_H * s;
         let scroll = ide_panel.git.graph_scroll.current.round();
+        let hover_settled = ide_panel.git.graph_scroll.is_settled();
+        let rows_clip = crate::ui_system::UiClipRect::new(panel_x, rows_y, panel_w, rows_h);
         let first = (scroll / row_h).floor().max(0.0) as usize;
         let last = (((scroll + rows_h) / row_h).ceil() as usize + 1).min(commits.len());
         let active_workspace = ide_panel.git.graph_workspace_idx.unwrap_or(0);
@@ -169,15 +171,17 @@ impl Renderer {
         for idx in first..last {
             let commit = &commits[idx];
             let row_y = rows_y + idx as f32 * row_h - scroll;
-            let hovered = ui_registry.register_rect(
-                crate::ui_system::UiId::GitGraphCommit(active_workspace, idx),
-                panel_x,
-                row_y,
-                panel_w,
-                row_h,
-                mx,
-                my,
-            );
+            let hovered = hover_settled
+                && ui_registry.register_rect_clipped(
+                    crate::ui_system::UiId::GitGraphCommit(active_workspace, idx),
+                    panel_x,
+                    row_y,
+                    panel_w,
+                    row_h,
+                    rows_clip,
+                    mx,
+                    my,
+                );
             if hovered {
                 row_hover_target = Some((
                     GitGraphTooltipTarget {
@@ -466,4 +470,14 @@ impl Renderer {
         }
     }
 
+}
+
+#[cfg(test)]
+mod git_graph_scroll_regression_tests {
+    #[test]
+    fn bug_32_git_graph_disables_row_hover_while_scroll_is_moving() {
+        let source = include_str!("ide_panel_git_graph_renderer.rs");
+        assert!(source.contains("let hover_settled = ide_panel.git.graph_scroll.is_settled();"));
+        assert!(source.contains("let hovered = hover_settled"));
+    }
 }

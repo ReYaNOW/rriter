@@ -15,6 +15,7 @@ use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -22,6 +23,7 @@ use tokio::sync::oneshot;
 
 static SERVER: LazyLock<Mutex<Option<ApiMockServerHandle>>> = LazyLock::new(|| Mutex::new(None));
 static EVENTS: LazyLock<Mutex<Vec<ApiMockServerEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
+static SERVER_STOPPING: AtomicBool = AtomicBool::new(false);
 
 struct ApiMockServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
@@ -48,16 +50,15 @@ enum MultipartValue {
 }
 
 pub fn drain_api_mock_server_events() -> Vec<ApiMockServerEvent> {
-    EVENTS
-        .lock()
-        .map(|mut events| events.drain(..).collect())
-        .unwrap_or_default()
+    crate::platform::lock_recover(&EVENTS).drain(..).collect()
 }
 
 pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), String> {
-    let mut server = SERVER
-        .lock()
-        .map_err(|_| "Mock server lock failed".to_string())?;
+    if SERVER_STOPPING.load(Ordering::Acquire) {
+        return Err("Mock server is still stopping".to_string());
+    }
+    let mut server = crate::platform::lock_recover(&SERVER);
+    reap_finished_server(&mut server);
     if server.is_some() {
         return Ok(());
     }
@@ -83,16 +84,12 @@ pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), Stri
 }
 
 pub fn update_api_mock_server_snapshot(snapshot: ApiMockServerSnapshot) -> Result<bool, String> {
-    let server = SERVER
-        .lock()
-        .map_err(|_| "Mock server lock failed".to_string())?;
+    let mut server = crate::platform::lock_recover(&SERVER);
+    reap_finished_server(&mut server);
     let Some(handle) = server.as_ref() else {
         return Ok(false);
     };
-    let mut current = handle
-        .snapshot
-        .lock()
-        .map_err(|_| "Mock server snapshot lock failed".to_string())?;
+    let mut current = crate::platform::lock_recover(&handle.snapshot);
     if *current == snapshot {
         return Ok(false);
     }
@@ -102,7 +99,10 @@ pub fn update_api_mock_server_snapshot(snapshot: ApiMockServerSnapshot) -> Resul
 }
 
 pub fn stop_api_mock_server() {
-    let mut handle = SERVER.lock().ok().and_then(|mut server| server.take());
+    if SERVER_STOPPING.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let mut handle = crate::platform::lock_recover(&SERVER).take();
     if let Some(handle) = handle.as_mut() {
         if let Some(shutdown) = handle.shutdown.take() {
             let _ = shutdown.send(());
@@ -113,7 +113,26 @@ pub fn stop_api_mock_server() {
             let _ = thread.join();
         }
     }
+    SERVER_STOPPING.store(false, Ordering::Release);
     stop_python_worker();
+}
+
+fn reap_finished_server(server: &mut Option<ApiMockServerHandle>) -> bool {
+    let finished = server.as_ref().is_some_and(|handle| {
+        !matches!(
+            handle.finished.try_recv(),
+            Err(std::sync::mpsc::TryRecvError::Empty)
+        )
+    });
+    if !finished {
+        return false;
+    }
+    if let Some(mut handle) = server.take()
+        && let Some(thread) = handle.thread.take()
+    {
+        let _ = thread.join();
+    }
+    true
 }
 
 pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiMockServerEvent) {
@@ -139,29 +158,18 @@ fn run_server_thread(
         Ok(runtime) => runtime,
         Err(err) => {
             push_event(ApiMockServerEvent::Failed(err.to_string()));
-            clear_server_handle();
             return;
         }
     };
 
     runtime.block_on(async move {
         push_log_event("bind address: resolving");
-        let bind_snapshot = match snapshot.lock() {
-            Ok(snapshot) => snapshot.clone(),
-            Err(_) => {
-                push_event(ApiMockServerEvent::Failed(
-                    "Mock server snapshot lock failed".to_string(),
-                ));
-                clear_server_handle();
-                return;
-            }
-        };
+        let bind_snapshot = crate::platform::lock_recover(&snapshot).clone();
         let addr = match socket_addr(&bind_snapshot.bind_host, bind_snapshot.port) {
             Ok(addr) => addr,
             Err(err) => {
                 push_event(ApiMockServerEvent::Failed(err));
-                clear_server_handle();
-                return;
+                    return;
             }
         };
         push_log_event(&format!("tcp bind: {addr}"));
@@ -171,8 +179,7 @@ fn run_server_thread(
                 push_event(ApiMockServerEvent::Failed(format_api_mock_bind_error(
                     addr, &err,
                 )));
-                clear_server_handle();
-                return;
+                    return;
             }
         };
         let local = listener.local_addr().ok();
@@ -192,8 +199,7 @@ fn run_server_thread(
                 push_event(ApiMockServerEvent::Failed(format!(
                     "Proxy HTTP client initialization failed: {error}"
                 )));
-                clear_server_handle();
-                return;
+                    return;
             }
         };
         let state = ApiMockAxumState {
@@ -214,7 +220,6 @@ fn run_server_thread(
         } else {
             push_event(ApiMockServerEvent::Stopped);
         }
-        clear_server_handle();
     });
 }
 
@@ -225,23 +230,7 @@ async fn handle_mock_request(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let snapshot = match state.snapshot.lock() {
-        Ok(snapshot) => snapshot.clone(),
-        Err(_) => {
-            let response = response_text(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "text/plain",
-                "mock server snapshot lock failed",
-            );
-            push_request_event(
-                method.as_str(),
-                uri.path(),
-                response.status().as_u16(),
-                "snapshot_error",
-            );
-            return response;
-        }
-    };
+    let snapshot = crate::platform::lock_recover(&state.snapshot).clone();
     let Some(api_method) = api_method_from_http(&method) else {
         let response = response_text(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -785,13 +774,24 @@ async fn proxy_request(
                     builder = builder.header(name, value);
                 }
             }
-            let bytes = upstream.bytes().await.unwrap_or_default();
+            let bytes = match upstream.bytes().await {
+                Ok(bytes) => bytes,
+                Err(error) => return proxy_body_read_error_response(error),
+            };
             builder.body(Body::from(bytes)).unwrap_or_else(|_| {
                 response_text(StatusCode::BAD_GATEWAY, "text/plain", "bad proxy response")
             })
         }
         Err(err) => response_text(StatusCode::BAD_GATEWAY, "text/plain", err.to_string()),
     }
+}
+
+fn proxy_body_read_error_response(error: impl std::fmt::Display) -> Response {
+    response_text(
+        StatusCode::BAD_GATEWAY,
+        "text/plain",
+        format!("failed to read proxy response body: {error}"),
+    )
 }
 
 fn response_text(
@@ -886,9 +886,7 @@ fn safe_proxy_header(name: &HeaderName) -> bool {
 }
 
 fn push_event(event: ApiMockServerEvent) {
-    if let Ok(mut events) = EVENTS.lock() {
-        events.push(event);
-    }
+    crate::platform::lock_recover(&EVENTS).push(event);
 }
 
 fn push_request_event(method: &str, path: &str, status: u16, action: &str) {
@@ -904,12 +902,6 @@ fn push_log_event(text: &str) {
     push_event(ApiMockServerEvent::Log {
         text: text.to_string(),
     });
-}
-
-fn clear_server_handle() {
-    if let Ok(mut server) = SERVER.lock() {
-        *server = None;
-    }
 }
 
 #[cfg(test)]
@@ -1032,4 +1024,11 @@ mod tests {
         assert_eq!(image.get("size"), Some(&serde_json::json!(3)));
         assert_eq!(values.get("title"), Some(&serde_json::json!("pic")));
     }
+
+    #[test]
+    fn r3_108_proxy_body_read_error_returns_bad_gateway_not_upstream_success() {
+        let response = proxy_body_read_error_response("stream failed");
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    }
+
 }

@@ -750,11 +750,36 @@ impl DatabaseTableGridState {
         )
     }
 
+    pub fn loaded_server_row_count_on_page(&self) -> usize {
+        let page_base = self.view.current_page.saturating_mul(self.view.limit);
+        let page_end = page_base.saturating_add(self.view.limit);
+        self.chunks
+            .values()
+            .flat_map(|chunk| chunk.rows.iter())
+            .filter(|row| row.absolute_index >= page_base && row.absolute_index < page_end)
+            .count()
+    }
+
+    pub fn loaded_server_row_extent_on_page(&self) -> usize {
+        let page_base = self.view.current_page.saturating_mul(self.view.limit);
+        let page_end = page_base.saturating_add(self.view.limit);
+        self.chunks
+            .values()
+            .flat_map(|chunk| chunk.rows.iter())
+            .filter_map(|row| {
+                (row.absolute_index >= page_base && row.absolute_index < page_end)
+                    .then_some(row.absolute_index.saturating_sub(page_base).saturating_add(1))
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     pub fn logical_row_count(&self) -> usize {
         let page_base = self.view.current_page.saturating_mul(self.view.limit);
-        let server_rows = self.count.map_or(self.view.limit, |count| {
-            (count as usize).saturating_sub(page_base).min(self.view.limit)
-        });
+        let server_rows = self.count.map_or_else(
+            || self.loaded_server_row_extent_on_page(),
+            |count| (count as usize).saturating_sub(page_base).min(self.view.limit),
+        );
         server_rows.saturating_add(self.added_rows.len())
     }
 
@@ -1153,6 +1178,30 @@ mod tests {
             state: DatabaseRowState::Added,
         });
         assert_eq!(grid.logical_row_count(), 51);
+    }
+
+    #[test]
+    fn bug_63_unknown_count_uses_loaded_extent_instead_of_full_limit() {
+        let mut grid = grid();
+        grid.view.limit = 100;
+        grid.count = None;
+        assert_eq!(grid.logical_row_count(), 0);
+        grid.chunks.insert(
+            0,
+            DatabaseTableChunk {
+                generation: DatabaseGeneration(1),
+                chunk_index: 0,
+                rows: vec![DatabaseGridRow {
+                    absolute_index: 7,
+                    cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text("row".to_string()))],
+                    xmin: None,
+                    state: DatabaseRowState::Clean,
+                }],
+                estimated_bytes: 0,
+            },
+        );
+        assert_eq!(grid.logical_row_count(), 8);
+        assert_ne!(grid.logical_row_count(), grid.view.limit);
     }
 
     #[test]

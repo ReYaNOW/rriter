@@ -15,6 +15,10 @@ mod renderer;
 mod scroll;
 mod ui_system;
 mod widgets;
+#[cfg(test)]
+mod round2_regression_tests;
+#[cfg(test)]
+mod round3_regression_tests;
 
 use crate::app::{App, PendingAction};
 use crate::editor::Editor;
@@ -77,12 +81,21 @@ fn config_path() -> PathBuf {
 }
 
 fn parse_recent_files(content: &str) -> Vec<PathBuf> {
-    crate::platform::dedup_paths(content.lines().filter_map(|line| {
+    parse_recent_files_checked(content).unwrap_or_default()
+}
+
+fn parse_recent_files_checked(content: &str) -> Result<Vec<PathBuf>, String> {
+    let mut files = Vec::new();
+    for line in content.lines() {
         let line = line.strip_prefix("P\t").unwrap_or(line);
-        (!line.trim().is_empty())
-            .then(|| crate::platform::decode_persisted_path(line))
-            .flatten()
-    }))
+        if line.trim().is_empty() {
+            continue;
+        }
+        let path = crate::platform::decode_persisted_path(line)
+            .ok_or_else(|| "recent files contains invalid path record".to_string())?;
+        files.push(path);
+    }
+    Ok(crate::platform::dedup_paths(files))
 }
 
 fn format_recent_files(files: &[PathBuf]) -> String {
@@ -101,10 +114,22 @@ pub fn load_recent_files() -> Vec<PathBuf> {
 #[cfg(not(test))]
 pub fn load_recent_files() -> Vec<PathBuf> {
     let path = recent_files_path();
-    if let Ok(content) = crate::platform::read_text_file(&path) {
-        parse_recent_files(&content.text)
-    } else {
-        Vec::new()
+    match crate::platform::read_text_file(&path) {
+        Ok(content) => match parse_recent_files_checked(&content.text) {
+            Ok(files) => files,
+            Err(error) => {
+                eprintln!(
+                    "RRiter: {error}{}",
+                    crate::platform::corrupt_file_backup_note(&path)
+                );
+                Vec::new()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            eprintln!("RRiter: recent files not read: {error}");
+            Vec::new()
+        }
     }
 }
 
@@ -114,11 +139,16 @@ pub fn save_recent_files(_files: &[PathBuf]) {}
 #[cfg(not(test))]
 pub fn save_recent_files(files: &[PathBuf]) {
     let dir = rriter_config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = crate::platform::atomic_write(
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("RRiter: failed to create config directory for recent files: {error}");
+        return;
+    }
+    if let Err(error) = crate::platform::atomic_write(
         &dir.join("recent.txt"),
         format_recent_files(files).as_bytes(),
-    );
+    ) {
+        eprintln!("RRiter: failed to persist recent files: {error}");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,11 +173,19 @@ pub enum OpenTabSnapshot {
 }
 
 fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
+    parse_open_tabs_content_checked(content).unwrap_or_default()
+}
+
+fn parse_open_tabs_content_checked(
+    content: &str,
+) -> Result<(Vec<OpenTabSnapshot>, usize), String> {
     let mut tabs = Vec::new();
     let mut active = 0;
     let mut lines = content.lines();
     if let Some(first) = lines.next() {
-        active = first.parse().unwrap_or(0);
+        active = first
+            .parse()
+            .map_err(|_| "open tabs contains invalid active index".to_string())?;
     }
     for line in lines {
         if line == "EMPTY" || line.is_empty() {
@@ -168,40 +206,48 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
                 .then_some(tail)
                 .and_then(|raw| (!raw.is_empty()).then_some(raw))
                 .and_then(|raw| raw.parse::<usize>().ok());
+            if !auth_view && !tail.is_empty() && route_idx.is_none() {
+                return Err("open tabs contains invalid API route index".to_string());
+            }
             if let Some(spec_id) = spec_id {
                 tabs.push(OpenTabSnapshot::Api {
                     spec_id,
                     route_idx,
                     auth_view,
                 });
+            } else {
+                return Err("open tabs contains invalid API specification id".to_string());
             }
         } else if let Some(rest) = line.strip_prefix("DBTABLE\t") {
-            if let Ok((connection_id, database_name, table_name)) =
+            let (connection_id, database_name, table_name) =
                 serde_json::from_str::<(u64, String, String)>(rest)
-            {
-                tabs.push(OpenTabSnapshot::DatabaseTable {
-                    connection_id: crate::app::database::DatabaseConnectionId(connection_id),
-                    database_name,
-                    table_name,
-                });
-            }
+                    .map_err(|_| "open tabs contains invalid database table record".to_string())?;
+            tabs.push(OpenTabSnapshot::DatabaseTable {
+                connection_id: crate::app::database::DatabaseConnectionId(connection_id),
+                database_name,
+                table_name,
+            });
         } else if let Some(rest) = line.strip_prefix("DBQUERY\t") {
-            if let Ok((connection_id, database_name, console_id)) =
+            let (connection_id, database_name, console_id) =
                 serde_json::from_str::<(u64, String, u64)>(rest)
-            {
-                tabs.push(OpenTabSnapshot::DatabaseQuery {
-                    connection_id: crate::app::database::DatabaseConnectionId(connection_id),
-                    database_name,
-                    console_id: crate::app::database::SqlConsoleId(console_id),
-                });
-            }
+                    .map_err(|_| "open tabs contains invalid database query record".to_string())?;
+            tabs.push(OpenTabSnapshot::DatabaseQuery {
+                connection_id: crate::app::database::DatabaseConnectionId(connection_id),
+                database_name,
+                console_id: crate::app::database::SqlConsoleId(console_id),
+            });
         } else {
-            if let Some(path) = crate::platform::decode_persisted_path(line) {
-                tabs.push(OpenTabSnapshot::File(path));
-            }
+            let path = crate::platform::decode_persisted_path(line)
+                .ok_or_else(|| "open tabs contains invalid file path record".to_string())?;
+            tabs.push(OpenTabSnapshot::File(path));
         }
     }
-    (tabs, active)
+    if tabs.is_empty() {
+        active = 0;
+    } else {
+        active = active.min(tabs.len() - 1);
+    }
+    Ok((tabs, active))
 }
 
 fn format_open_tabs_content(tabs: &[crate::app::EditorTab], active_tab: usize) -> String {
@@ -284,10 +330,19 @@ pub fn load_open_tabs(_is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
 #[cfg(not(test))]
 pub fn load_open_tabs(is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
     let path = open_tabs_path(is_ide);
-    if let Ok(content) = crate::platform::read_text_file(&path) {
-        parse_open_tabs_content(&content.text)
-    } else {
-        (Vec::new(), 0)
+    match crate::platform::read_text_file(&path) {
+        Ok(content) => match parse_open_tabs_content_checked(&content.text) {
+            Ok(tabs) => tabs,
+            Err(error) => {
+                eprintln!("RRiter: {error}{}", crate::platform::corrupt_file_backup_note(&path));
+                (Vec::new(), 0)
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (Vec::new(), 0),
+        Err(error) => {
+            eprintln!("RRiter: open tabs not read: {error}");
+            (Vec::new(), 0)
+        }
     }
 }
 
@@ -297,11 +352,16 @@ pub fn save_open_tabs(_tabs: &[crate::app::EditorTab], _active_tab: usize, _is_i
 #[cfg(not(test))]
 pub fn save_open_tabs(tabs: &[crate::app::EditorTab], active_tab: usize, is_ide: bool) {
     let dir = rriter_config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = crate::platform::atomic_write(
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("RRiter: failed to create config directory for open tabs: {err}");
+        return;
+    }
+    if let Err(err) = crate::platform::atomic_write(
         &open_tabs_path(is_ide),
         format_open_tabs_content(tabs, active_tab).as_bytes(),
-    );
+    ) {
+        eprintln!("RRiter: failed to persist open tabs: {err}");
+    }
 }
 
 fn format_panel_state_content(state: &crate::app::IdePanelState) -> String {
@@ -389,27 +449,46 @@ pub fn save_panel_state(_state: &crate::app::IdePanelState) {}
 #[cfg(not(test))]
 pub fn save_panel_state(state: &crate::app::IdePanelState) {
     let dir = rriter_config_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = crate::platform::atomic_write(
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        eprintln!("RRiter: failed to create config directory for panel state: {err}");
+        return;
+    }
+    if let Err(err) = crate::platform::atomic_write(
         &panel_state_path(),
         format_panel_state_content(state).as_bytes(),
-    );
+    ) {
+        eprintln!("RRiter: failed to persist panel state: {err}");
+    }
 }
 
 fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
+    parse_panel_state_content_checked(content).unwrap_or_default()
+}
+
+fn parse_panel_state_content_checked(
+    content: &str,
+) -> Result<crate::app::IdePanelState, String> {
     let mut state = crate::app::IdePanelState::default();
     let mut loaded: Vec<crate::app::PanelSlot> = Vec::new();
     for line in content.lines() {
         if let Some(value) = line.strip_prefix("left_width:") {
-            if let Ok(v) = value.parse::<f32>() {
-                state.left_width = v;
+            let v = value
+                .parse::<f32>()
+                .map_err(|_| "panel state contains invalid left width".to_string())?;
+            if !v.is_finite() || v < 0.0 {
+                return Err("panel state contains non-finite left width".to_string());
             }
+            state.left_width = v;
             continue;
         }
         if let Some(value) = line.strip_prefix("bottom_height:") {
-            if let Ok(v) = value.parse::<f32>() {
-                state.bottom_height = v;
+            let v = value
+                .parse::<f32>()
+                .map_err(|_| "panel state contains invalid bottom height".to_string())?;
+            if !v.is_finite() || v < 0.0 {
+                return Err("panel state contains non-finite bottom height".to_string());
             }
+            state.bottom_height = v;
             continue;
         }
         if let Some(value) = line.strip_prefix("project_search_include:") {
@@ -439,16 +518,26 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
                 "LspServers" => crate::app::PanelId::LspServers,
                 _ => continue,
             };
-            let group = if parts[1] == "Top" {
-                crate::app::PanelGroup::Top
-            } else {
-                crate::app::PanelGroup::Bottom
+            if loaded.iter().any(|slot| slot.id == id) {
+                return Err("panel state contains duplicate panel record".to_string());
+            }
+            let group = match parts[1] {
+                "Top" => crate::app::PanelGroup::Top,
+                "Bottom" => crate::app::PanelGroup::Bottom,
+                _ => return Err("panel state contains invalid panel group".to_string()),
+            };
+            let open = match parts[2] {
+                "0" => false,
+                "1" => true,
+                _ => return Err("panel state contains invalid open flag".to_string()),
             };
             loaded.push(crate::app::PanelSlot {
                 id,
                 group,
-                open: parts[2] == "1",
+                open,
             });
+        } else if !line.trim().is_empty() {
+            return Err("panel state contains malformed record".to_string());
         }
     }
     if !loaded.is_empty() {
@@ -459,7 +548,7 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
         }
         state.slots = loaded;
     }
-    state
+    Ok(state)
 }
 
 #[cfg(test)]
@@ -471,8 +560,20 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
 pub fn load_panel_state() -> crate::app::IdePanelState {
     let path = panel_state_path();
     match crate::platform::read_text_file(&path) {
-        Ok(content) => parse_panel_state_content(&content.text),
-        Err(_) => crate::app::IdePanelState::default(),
+        Ok(content) => match parse_panel_state_content_checked(&content.text) {
+            Ok(state) => state,
+            Err(error) => {
+                eprintln!("RRiter: {error}{}", crate::platform::corrupt_file_backup_note(&path));
+                crate::app::IdePanelState::default()
+            }
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            crate::app::IdePanelState::default()
+        }
+        Err(error) => {
+            eprintln!("RRiter: panel state not read: {error}");
+            crate::app::IdePanelState::default()
+        }
     }
 }
 
@@ -516,7 +617,10 @@ pub fn save_config(_config: &Config) {}
 #[cfg(not(test))]
 pub fn save_config(config: &Config) {
     let dir = rriter_config_dir();
-    let _ = std::fs::create_dir_all(&dir);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        eprintln!("RRiter: failed to create config directory: {error}");
+        return;
+    }
     let path = config_path();
     let content = format_config_content(config);
     if let Ok(existing) = crate::platform::read_text_file(&path) {
@@ -524,7 +628,9 @@ pub fn save_config(config: &Config) {
             return;
         }
     }
-    let _ = crate::platform::atomic_write(&path, content.as_bytes());
+    if let Err(error) = crate::platform::atomic_write(&path, content.as_bytes()) {
+        eprintln!("RRiter: failed to persist config: {error}");
+    }
 }
 
 fn parse_config_content(content: &str, mut config: Config) -> Config {
@@ -594,13 +700,23 @@ fn load_config() -> Config {
     let mut path = rriter_config_dir();
 
     if !path.exists() {
-        let _ = std::fs::create_dir_all(&path);
+        if let Err(error) = std::fs::create_dir_all(&path) {
+            eprintln!("RRiter: failed to create config directory: {error}");
+            return config;
+        }
     }
 
     path.push("config.json");
     if path.exists() {
-        if let Ok(content) = crate::platform::read_text_file(&path) {
-            config = parse_config_content(&content.text, config);
+        match crate::platform::read_text_file(&path) {
+            Ok(content) => match serde_json::from_str::<serde_json::Value>(&content.text) {
+                Ok(_) => config = parse_config_content(&content.text, config),
+                Err(error) => eprintln!(
+                    "RRiter: config is corrupted: {error}{}",
+                    crate::platform::corrupt_file_backup_note(&path)
+                ),
+            },
+            Err(error) => eprintln!("RRiter: config not read: {error}"),
         }
     } else {
         // Первый запуск: засеваем дефолтные паттерны в пользовательский конфиг
@@ -624,9 +740,15 @@ fn parse_kde_color(content: &str, target_group: &str, target_key: &str) -> Optio
         } else if current_group == target_group && line.starts_with(&format!("{}=", target_key)) {
             let parts: Vec<&str> = line[target_key.len() + 1..].split(',').collect();
             if parts.len() == 3 {
-                let r: f32 = parts[0].parse().unwrap_or(0.0);
-                let g: f32 = parts[1].parse().unwrap_or(0.0);
-                let b: f32 = parts[2].parse().unwrap_or(0.0);
+                let [r, g, b] = [parts[0], parts[1], parts[2]].map(|part| {
+                    part.trim()
+                        .parse::<f32>()
+                        .ok()
+                        .filter(|value| value.is_finite() && (0.0..=255.0).contains(value))
+                });
+                let (Some(r), Some(g), Some(b)) = (r, g, b) else {
+                    return None;
+                };
                 return Some([r / 255.0, g / 255.0, b / 255.0, 1.0]);
             }
         }
@@ -1112,18 +1234,12 @@ mod tests {
         );
 
         let (tabs, active) = parse_open_tabs_content("1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n");
-        assert_eq!(active, 1);
-        assert_eq!(
-            tabs,
-            vec![
-                OpenTabSnapshot::Api {
-                    spec_id: crate::app::api_client::ApiSpecId(42),
-                    route_idx: Some(7),
-                    auth_view: false,
-                },
-                OpenTabSnapshot::File(PathBuf::from("api:/tmp/file"))
-            ]
-        );
+        assert_eq!(active, 0);
+        assert!(tabs.is_empty());
+        assert!(parse_open_tabs_content_checked(
+            "1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n"
+        )
+        .is_err());
 
         let mut auth_tab = tab(None);
         auth_tab.kind = crate::app::EditorTabKind::ApiClient(
@@ -1279,7 +1395,14 @@ mod tests {
             parsed.left_width,
             crate::app::IdePanelState::default().left_width
         );
-        assert_eq!(parsed.bottom_height, 333.3);
+        assert_eq!(
+            parsed.bottom_height,
+            crate::app::IdePanelState::default().bottom_height
+        );
+        assert!(parse_panel_state_content_checked(
+            "Unknown:Top:1\nExplorer:Top:0\nleft_width:nope\nbottom_height:333.3\n"
+        )
+        .is_err());
         assert!(
             parsed
                 .slots
@@ -1301,13 +1424,8 @@ mod tests {
 
         let (tabs, active) = parse_open_tabs_content("not-a-number\n\n/tmp/a.py\n");
         assert_eq!(active, 0);
-        assert_eq!(
-            tabs,
-            vec![
-                OpenTabSnapshot::Empty,
-                OpenTabSnapshot::File(PathBuf::from("/tmp/a.py"))
-            ]
-        );
+        assert!(tabs.is_empty());
+        assert!(parse_open_tabs_content_checked("not-a-number\n\n/tmp/a.py\n").is_err());
 
         let (empty_tabs, empty_active) = parse_open_tabs_content("");
         assert!(empty_tabs.is_empty());
@@ -1338,7 +1456,7 @@ mod tests {
                 "Colors:Selection",
                 "BackgroundNormal",
             ),
-            Some([0.0, 0.0, 0.0, 1.0])
+            None
         );
         assert_eq!(
             parse_kde_color(
@@ -1767,6 +1885,10 @@ fn automation_options(
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+fn event_loop_error_message(stage: &str, error: &impl std::fmt::Display) -> String {
+    format!("RRiter: {stage}: {error}")
+}
+
 fn main() {
     let startup_args = std::env::args_os().collect::<Vec<_>>();
     if let Some(exit_code) = crate::platform::handle_startup_helper(&startup_args) {
@@ -1935,7 +2057,13 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
             .with_default_menu(true)
             .with_activate_ignoring_other_apps(true);
     }
-    let event_loop = event_loop_builder.build().unwrap();
+    let event_loop = match event_loop_builder.build() {
+        Ok(event_loop) => event_loop,
+        Err(error) => {
+            eprintln!("{}", event_loop_error_message("не удалось создать event loop", &error));
+            return;
+        }
+    };
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let config = load_config();
@@ -1998,10 +2126,13 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         last_click_pos: (0.0, 0.0),
 
         pending_action: PendingAction::Quit,
+        pending_action_waiting_for_save_as: false,
+        pending_action_ready: false,
         open_file_rx: None,
         save_file_rx: None,
         api_import_file_rx: None,
         api_body_file_rx: None,
+        api_openapi_export_rx: None,
         api_load_rx: Vec::new(),
         api_request_rx: Vec::new(),
         api_mock_ty_rx: None,
@@ -2126,5 +2257,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         app.base_title = "Добро пожаловать".to_string();
     }
 
-    event_loop.run_app(&mut app).unwrap();
+    if let Err(error) = event_loop.run_app(&mut app) {
+        eprintln!("{}", event_loop_error_message("event loop завершился с ошибкой", &error));
+    }
 }

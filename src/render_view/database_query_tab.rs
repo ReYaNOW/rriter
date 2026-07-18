@@ -1,13 +1,41 @@
 use crate::renderer::Renderer;
-use crate::ui_system::{UiId, UiRegistry};
+use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 use crate::widgets::{ButtonStyle, ButtonView, IconType};
 use glow::HasContext;
 
 const QUERY_TOOLBAR_H: f32 = 40.0;
+const QUERY_BUTTON_TEXT_SCALE: f32 = 0.78;
+const DATABASE_SQL_SPANS_CACHE_MAX_ENTRIES: usize = 256;
+const DATABASE_SQL_SPANS_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+#[derive(Default)]
+struct DatabaseSqlSpansCache {
+    entries: std::collections::HashMap<String, Vec<crate::highlighter::ColorSpan>>,
+    retained_bytes: usize,
+}
+
+impl DatabaseSqlSpansCache {
+    fn entry_bytes(sql: &str, spans: &[crate::highlighter::ColorSpan]) -> usize {
+        sql.len().saturating_add(
+            spans
+                .len()
+                .saturating_mul(std::mem::size_of::<crate::highlighter::ColorSpan>()),
+        )
+    }
+
+    fn should_cache(&self, sql: &str, spans: &[crate::highlighter::ColorSpan]) -> bool {
+        Self::entry_bytes(sql, spans) <= DATABASE_SQL_SPANS_CACHE_MAX_BYTES
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.retained_bytes = 0;
+    }
+}
+
 thread_local! {
-    static DATABASE_SQL_SPANS_CACHE: std::cell::RefCell<
-        std::collections::HashMap<String, Vec<crate::highlighter::ColorSpan>>
-    > = std::cell::RefCell::new(std::collections::HashMap::new());
+    static DATABASE_SQL_SPANS_CACHE: std::cell::RefCell<DatabaseSqlSpansCache> =
+        std::cell::RefCell::new(DatabaseSqlSpansCache::default());
 }
 
 fn with_cached_database_sql_spans<R>(
@@ -16,14 +44,130 @@ fn with_cached_database_sql_spans<R>(
 ) -> R {
     DATABASE_SQL_SPANS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
-        if cache.len() > 256 && !cache.contains_key(sql) {
+        if let Some(spans) = cache.entries.get(sql) {
+            return callback(spans);
+        }
+        let spans = crate::highlighter::highlight_sql_text(sql);
+        if !cache.should_cache(sql, &spans) {
+            return callback(&spans);
+        }
+        let entry_bytes = DatabaseSqlSpansCache::entry_bytes(sql, &spans);
+        if cache.entries.len() >= DATABASE_SQL_SPANS_CACHE_MAX_ENTRIES
+            || cache.retained_bytes.saturating_add(entry_bytes)
+                > DATABASE_SQL_SPANS_CACHE_MAX_BYTES
+        {
             cache.clear();
         }
-        let spans = cache
-            .entry(sql.to_owned())
-            .or_insert_with(|| crate::highlighter::highlight_sql_text(sql));
-        callback(spans)
+        cache.retained_bytes = cache.retained_bytes.saturating_add(entry_bytes);
+        cache.entries.insert(sql.to_owned(), spans);
+        if let Some(spans) = cache.entries.get(sql) {
+            callback(spans)
+        } else {
+            let spans = crate::highlighter::highlight_sql_text(sql);
+            callback(&spans)
+        }
     })
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct QueryToolbarLayout {
+    compact: bool,
+    button_widths: [f32; 6],
+    gap: f32,
+    status_x: f32,
+    status_w: f32,
+}
+
+fn query_toolbar_layout(x: f32, w: f32, scale: f32) -> QueryToolbarLayout {
+    let scale = scale.max(0.1);
+    let viewport_right = x + w.max(0.0);
+    let left = (x + (8.0 * scale).round()).min(viewport_right);
+    let right = (viewport_right - 8.0 * scale).max(left).min(viewport_right);
+    let normal = [106.0, 92.0, 82.0, 84.0, 88.0, 96.0].map(|v| (v * scale).round());
+    let compact = [82.0, 72.0, 44.0, 44.0, 54.0, 44.0].map(|v| (v * scale).round());
+    let normal_gap = (5.0 * scale).round();
+    let compact_gap = (3.0 * scale).round().max(1.0);
+    let normal_total = normal.iter().sum::<f32>() + normal_gap * 5.0;
+    let available = (right - left).max(0.0);
+    let use_compact = normal_total + (120.0 * scale).round() > available;
+    let mut widths = if use_compact { compact } else { normal };
+    let gap = if use_compact { compact_gap } else { normal_gap };
+    let total = widths.iter().sum::<f32>() + gap * 5.0;
+    if total > available && total > 0.0 {
+        let minimum = (24.0 * scale).round().max(18.0);
+        let distributable = (available - gap * 5.0).max(0.0);
+        let ratio = (distributable / widths.iter().sum::<f32>()).clamp(0.0, 1.0);
+        for width in &mut widths {
+            *width = (*width * ratio).max(minimum).round();
+        }
+        let overflow = (widths.iter().sum::<f32>() + gap * 5.0 - available).max(0.0);
+        if overflow > 0.0 {
+            let each = overflow / widths.len() as f32;
+            for width in &mut widths {
+                *width = (*width - each).max(1.0).round();
+            }
+        }
+    }
+    let buttons_end = left + widths.iter().sum::<f32>() + gap * 5.0;
+    let status_x = (buttons_end + (8.0 * scale).round()).min(right);
+    QueryToolbarLayout {
+        compact: use_compact,
+        button_widths: widths,
+        gap,
+        status_x,
+        status_w: (right - status_x).max(0.0),
+    }
+}
+
+fn query_tabs_offset(widths: &[f32], active: usize, viewport_w: f32, gap: f32) -> f32 {
+    if widths.is_empty() || viewport_w <= 0.0 {
+        return 0.0;
+    }
+    let total = widths.iter().sum::<f32>() + gap * widths.len().saturating_sub(1) as f32;
+    if total <= viewport_w {
+        return 0.0;
+    }
+    let active = active.min(widths.len() - 1);
+    let active_start = widths[..active].iter().sum::<f32>() + gap * active as f32;
+    let active_end = active_start + widths[active];
+    (active_end - viewport_w)
+        .max(0.0)
+        .min(active_start)
+        .min(total - viewport_w)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct QueryReviewLayout {
+    content_y: f32,
+    content_bottom: f32,
+    grid_h: f32,
+    messages_y: f32,
+    messages_h: f32,
+    button_y: f32,
+}
+
+fn query_review_layout(y: f32, h: f32, text_bottom: f32, scale: f32) -> QueryReviewLayout {
+    let button_h = (46.0 * scale).round().max(34.0);
+    let button_y = (y + h - button_h - (8.0 * scale).round()).max(y).round();
+    let content_y = (text_bottom + (8.0 * scale).round()).min(button_y).round();
+    let content_bottom = (button_y - (8.0 * scale).round()).max(content_y).round();
+    let content_h = (content_bottom - content_y).max(0.0);
+    let gap = if content_h >= 100.0 { (8.0 * scale).round() } else { 0.0 };
+    let messages_h = if content_h >= 120.0 {
+        (content_h * 0.32).round().clamp(42.0, content_h)
+    } else {
+        0.0
+    };
+    let grid_h = (content_h - messages_h - gap).max(0.0).round();
+    let messages_y = (content_y + grid_h + gap).round();
+    QueryReviewLayout {
+        content_y,
+        content_bottom,
+        grid_h,
+        messages_y,
+        messages_h,
+        button_y,
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -106,39 +250,47 @@ impl Renderer {
         self.push_rect(x, y, w, toolbar_h, [0.10, 0.105, 0.13, 1.0]);
         let can_run = !state.running && state.review.is_none();
         let can_cancel = state.running || state.review.is_some();
+        let layout = query_toolbar_layout(x, w, s);
         let mut bx = x + (8.0 * s).round();
-        for (id, text, icon, active, primary, width) in [
-            (UiId::DatabaseQueryRun, "Выполнить", Some(IconType::Run), can_run, true, 106.0),
-            (UiId::DatabaseQueryCancel, "Отмена", Some(IconType::Cancel), can_cancel, false, 92.0),
-            (UiId::DatabaseQueryExplain, "Explain", None, can_run, false, 82.0),
+        let labels = if layout.compact {
+            ["Run", "Stop", "EX", "AN", "Fmt", ""]
+        } else {
+            ["Выполнить", "Отмена", "Explain", "Analyze", "Формат", "История"]
+        };
+        let specs = [
+            (UiId::DatabaseQueryRun, Some(IconType::Run), can_run, true),
+            (UiId::DatabaseQueryCancel, Some(IconType::Cancel), can_cancel, false),
+            (UiId::DatabaseQueryExplain, None, can_run, false),
             (
                 UiId::DatabaseQueryExplainAnalyze,
-                "Analyze",
                 None,
                 can_run,
                 false,
-                84.0,
             ),
-            (UiId::DatabaseQueryFormat, "Формат", None, can_run, false, 88.0),
-            (UiId::DatabaseQueryHistory, "История", Some(IconType::Time), true, false, 96.0),
-        ] {
+            (UiId::DatabaseQueryFormat, None, can_run, false),
+            (UiId::DatabaseQueryHistory, Some(IconType::Time), true, false),
+        ];
+        let toolbar_clip = UiClipRect::new(x, y, w, toolbar_h);
+        for (index, (id, icon, active, primary)) in specs.into_iter().enumerate() {
+            let width = layout.button_widths[index];
             draw_query_button(
                 self,
                 ui,
                 id,
                 bx,
                 y + (5.0 * s).round(),
-                (width * s).round(),
+                width,
                 (30.0 * s).round(),
-                text,
+                labels[index],
                 icon,
                 active,
                 primary,
                 mx,
                 my,
                 s,
+                Some(toolbar_clip),
             );
-            bx = (bx + (width + 5.0) * s).round();
+            bx = (bx + width + layout.gap).round();
         }
         let analysis_errors = state
             .editor_diagnostics
@@ -159,21 +311,18 @@ impl Renderer {
         } else if analysis_errors > 0 || analysis_warnings > 0 {
             format!("SQL-анализ: {analysis_errors} ошибок · {analysis_warnings} предупреждений")
         } else if state.last_duration_ms > 0 {
-            format!(
-                "{} мс · получено {} · изменено {}",
-                state.last_duration_ms, state.last_returned_rows, state.last_changed_rows
-            )
+            "Готово · SQL-консоль".to_string()
         } else {
             format!("{} · SQL-консоль", meta.database_name)
         };
-        let status_w = self.measure_ui_width(&status, 0.68);
-        let status_x = (x + w - status_w - 14.0 * s)
-            .max(bx)
-            .round();
-        self.draw_string_scaled_pixel_snapped(
+        let status_x = layout.status_x.round();
+        let status_w = layout.status_w.round();
+        let mut scratch = String::new();
+        self.draw_tree_label_clipped(
             &status,
             status_x,
             Self::tree_row_text_y(y, toolbar_h, s),
+            status_w,
             if state.error.is_some() || analysis_errors > 0 {
                 [0.95, 0.38, 0.42, 1.0]
             } else if analysis_warnings > 0 {
@@ -182,14 +331,16 @@ impl Renderer {
                 self.theme.line_num
             },
             0.68,
+            &mut scratch,
         );
-        if !state.editor_diagnostics.is_empty() {
-            ui.register_rect(
+        if !state.editor_diagnostics.is_empty() && status_w > 0.0 {
+            ui.register_rect_clipped(
                 UiId::DatabaseQueryNextDiagnostic,
                 status_x,
                 y,
                 status_w,
                 toolbar_h,
+                toolbar_clip,
                 mx,
                 my,
             );
@@ -256,11 +407,38 @@ impl Renderer {
         self.push_rect(x, y, w, h, [0.07, 0.073, 0.092, 1.0]);
         let tabs_h = (36.0 * s).round();
         self.push_rect(x, y, w, tabs_h, [0.105, 0.11, 0.14, 1.0]);
-        let mut tab_x = x + (8.0 * s).round();
+        let tab_pad = (8.0 * s).round();
+        let tab_gap = (4.0 * s).round();
+        let tab_widths = state
+            .results
+            .iter()
+            .map(|result| {
+                (self.measure_ui_width(&result.title, 0.76) + 26.0 * s)
+                    .max(90.0 * s)
+                    .round()
+            })
+            .collect::<Vec<_>>();
+        let tabs_view_w = (w - tab_pad * 2.0).max(0.0);
+        let tab_offset = query_tabs_offset(
+            &tab_widths,
+            state.result_view.active_result,
+            tabs_view_w,
+            tab_gap,
+        );
+        let tabs_clip = UiClipRect::new(x, y, w, tabs_h);
+        let mut tab_x = x + tab_pad - tab_offset;
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                x as i32,
+                (self.height - (y + tabs_h)).round().max(0.0) as i32,
+                w.max(0.0) as i32,
+                tabs_h.max(0.0) as i32,
+            );
+        }
         for (index, result) in state.results.iter().enumerate() {
-            let width = (self.measure_ui_width(&result.title, 0.76) + 26.0 * s)
-                .max(90.0 * s)
-                .round();
+            let width = tab_widths[index];
             draw_query_tab(
                 self,
                 ui,
@@ -274,9 +452,12 @@ impl Renderer {
                 mx,
                 my,
                 s,
+                tabs_clip,
             );
-            tab_x = (tab_x + width + 4.0 * s).round();
+            tab_x = (tab_x + width + tab_gap).round();
         }
+        self.flush();
+        unsafe { self.gl.disable(glow::SCISSOR_TEST) };
 
         let result_active = !state.history_open
             && state.result_view.active_result < state.results.len();
@@ -301,16 +482,13 @@ impl Renderer {
         let grid_h = (h - tabs_h - summary_h).max(0.0);
         let scrollbar = (10.0 * s).round().max(10.0);
         if state.history_open {
-            let content_h = history
-                .iter()
-                .filter(|entry| {
+            let content_h = crate::app::database::database_query_history_content_height(
+                history.iter().filter(|entry| {
                     entry.connection_id == meta.connection_id
                         && entry.database_name == meta.database_name
-                })
-                .map(|entry| {
-                    crate::app::database::database_query_history_entry_height(&entry.sql) * s
-                })
-                .sum::<f32>();
+                }),
+                s,
+            );
             let layout = crate::app::database::database_grid_layout(
                 x, grid_y, w, grid_h, 0.0, scrollbar, 0.0, 0.0, content_h,
             );
@@ -333,6 +511,7 @@ impl Renderer {
                 meta,
                 history,
                 state.result_view.scroll_y.current.clamp(0.0, max_y),
+                state.result_view.scroll_y.is_settled(),
                 ui,
                 mx,
                 my,
@@ -417,6 +596,7 @@ impl Renderer {
         meta: &crate::app::database::DatabaseQueryTabMeta,
         history: &[crate::app::database::DatabaseQueryHistoryEntry],
         scroll_y: f32,
+        hover_settled: bool,
         ui: &mut UiRegistry,
         mx: f32,
         my: f32,
@@ -426,6 +606,7 @@ impl Renderer {
         let w = w.round();
         let h = h.round();
         let padding = (10.0 * s).round();
+        let clip = UiClipRect::new(x, y, w, h);
         let mut content_y = 0.0f32;
         let mut matching = 0usize;
         self.flush();
@@ -449,14 +630,19 @@ impl Renderer {
         {
             matching += 1;
             let entry_h =
-                (crate::app::database::database_query_history_entry_height(&entry.sql) * s)
-                    .round();
+                crate::app::database::database_query_history_entry_height_px(&entry.sql, s);
             let row_y = (y + content_y - scroll_y).round();
             content_y += entry_h;
             if row_y + entry_h <= y || row_y >= y + h {
                 continue;
             }
-            let hovered = mx >= x && mx <= x + w && my >= row_y && my <= row_y + entry_h;
+            let hovered = hover_settled
+                && clip.intersect(x, row_y, w, entry_h).is_some_and(|rect| {
+                    mx >= rect.x
+                        && mx <= rect.x + rect.w
+                        && my >= rect.y
+                        && my <= rect.y + rect.h
+                });
             self.push_rect(
                 x,
                 row_y,
@@ -475,15 +661,18 @@ impl Renderer {
                 1.0,
                 [0.52, 0.55, 0.62, 0.16],
             );
-            ui.register_rect(
-                UiId::DatabaseQueryHistoryEntry(visible_index),
-                x,
-                row_y,
-                w,
-                entry_h,
-                mx,
-                my,
-            );
+            if hover_settled {
+                ui.register_rect_clipped(
+                    UiId::DatabaseQueryHistoryEntry(visible_index),
+                    x,
+                    row_y,
+                    w,
+                    entry_h,
+                    clip,
+                    mx,
+                    my,
+                );
+            }
             let status = if entry.succeeded { "OK" } else { "ERR" };
             let meta_text = format!(
                 "{status} · {} мс · {} строк",
@@ -625,6 +814,12 @@ impl Renderer {
             );
         }
         let header_baseline = Self::tree_row_text_y(y, header_h, s).round();
+        let header_clip = UiClipRect::new(
+            layout.header_rect.x,
+            layout.header_rect.y,
+            layout.header_rect.w,
+            layout.header_rect.h,
+        );
         for (column, column_x, column_width) in &visible_columns {
             let cx = (x + column_x * s - scroll_x).round();
             let draw_w = (column_width * s).round().max(1.0);
@@ -638,12 +833,13 @@ impl Renderer {
                 &mut scratch,
             );
             let divider_x = (cx + draw_w - 3.0 * s).round();
-            ui.register_rect(
+            ui.register_rect_clipped(
                 UiId::DatabaseQueryColumnResize(*column),
                 divider_x,
                 y,
                 (6.0 * s).round(),
                 header_h,
+                header_clip,
                 mx,
                 my,
             );
@@ -778,47 +974,15 @@ impl Renderer {
         y: f32,
         max_x: f32,
     ) {
-        let mut draw_x = x;
-        let mut offset = base_offset;
-        let mut span_index = match spans.binary_search_by_key(&base_offset, |span| span.start) {
-            Ok(index) => index,
-            Err(index) => index.saturating_sub(1),
-        };
-        for ch in line.chars() {
-            if draw_x > max_x {
-                break;
-            }
-            let advance = self.char_advance(ch);
-            if ch != ' ' && ch != '\t'
-                && let Some(glyph) = self.get_glyph(ch)
-            {
-                while span_index < spans.len() && spans[span_index].end <= offset {
-                    span_index += 1;
-                }
-                let color = if span_index < spans.len()
-                    && spans[span_index].start <= offset
-                    && offset < spans[span_index].end
-                {
-                    spans[span_index].color
-                } else {
-                    self.theme.fg
-                };
-                self.push_quad(
-                    draw_x + glyph.offset_x,
-                    y - glyph.offset_y,
-                    glyph.width,
-                    glyph.height,
-                    glyph.u,
-                    glyph.v,
-                    glyph.uw,
-                    glyph.vh,
-                    color,
-                    glyph.is_emoji,
-                );
-            }
-            draw_x += advance;
-            offset = offset.saturating_add(ch.len_utf8());
-        }
+        self.draw_spanned_ui_line_pixel_snapped(
+            line,
+            spans,
+            Some(base_offset),
+            x,
+            y,
+            max_x,
+            1.0,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -917,50 +1081,54 @@ impl Renderer {
             text_y = (text_y + summary_line_h).round();
         }
 
-        let button_h = (58.0 * s).round();
-        let button_y = (y + h - button_h + 10.0 * s).round();
-        let content_y = (text_y + 8.0 * s).round();
-        let content_bottom = (button_y - 10.0 * s).round();
-        let content_h = (content_bottom - content_y).max(180.0 * s);
-        let grid_h = (content_h * 0.54).round().max(150.0 * s);
+        let layout = query_review_layout(y, h, text_y, s);
         let grid_x = x + padding;
         let grid_w = (w - padding * 2.0).max(1.0);
-        self.draw_database_query_results(
-            grid_x,
-            content_y,
-            grid_w,
-            grid_h,
-            s,
-            meta,
-            state,
-            history,
-            ui,
-            mx,
-            my,
-        );
+        if layout.grid_h > 1.0 {
+            self.draw_database_query_results(
+                grid_x,
+                layout.content_y,
+                grid_w,
+                layout.grid_h,
+                s,
+                meta,
+                state,
+                history,
+                ui,
+                mx,
+                my,
+            );
+        }
 
-        let messages_y = (content_y + grid_h + 10.0 * s).round();
-        let messages_h = (content_bottom - messages_y).max(70.0 * s);
-        self.draw_database_query_review_messages(
-            grid_x,
-            messages_y,
-            grid_w,
-            messages_h,
-            s,
-            state,
-            ui,
-            mx,
-            my,
-        );
+        if layout.messages_h > (30.0 * s).round() {
+            self.draw_database_query_review_messages(
+                grid_x,
+                layout.messages_y,
+                grid_w,
+                layout.messages_h,
+                s,
+                state,
+                ui,
+                mx,
+                my,
+            );
+        }
+
+        let button_gap = (10.0 * s).round().max(4.0);
+        let available_button_w = (w - padding * 2.0 - button_gap).max(2.0);
+        let primary_w = (available_button_w * 0.52).round();
+        let secondary_w = (available_button_w - primary_w).max(1.0);
+        let button_h = (36.0 * s).round().min((y + h - layout.button_y).max(1.0));
+        let button_clip = UiClipRect::new(x, y, w, h);
 
         draw_query_button(
             self,
             ui,
             UiId::DatabaseQueryCommit,
-            x + w - 286.0 * s,
-            button_y,
-            130.0 * s,
-            36.0 * s,
+            x + padding,
+            layout.button_y,
+            primary_w,
+            button_h,
             "Применить",
             Some(IconType::Check),
             true,
@@ -968,15 +1136,16 @@ impl Renderer {
             mx,
             my,
             s,
+            Some(button_clip),
         );
         draw_query_button(
             self,
             ui,
             UiId::DatabaseQueryRollback,
-            x + w - 144.0 * s,
-            button_y,
-            120.0 * s,
-            36.0 * s,
+            x + padding + primary_w + button_gap,
+            layout.button_y,
+            secondary_w,
+            button_h,
             "Отмена",
             Some(IconType::Cancel),
             true,
@@ -984,6 +1153,7 @@ impl Renderer {
             mx,
             my,
             s,
+            Some(button_clip),
         );
     }
 
@@ -1216,6 +1386,7 @@ fn draw_query_button(
     mx: f32,
     my: f32,
     s: f32,
+    clip: Option<UiClipRect>,
 ) {
     let view = ButtonView {
         x: x.round(),
@@ -1224,7 +1395,7 @@ fn draw_query_button(
         h: h.round(),
         text,
         icon,
-        text_scale: 0.72,
+        text_scale: QUERY_BUTTON_TEXT_SCALE,
         icon_size: (16.0 * s).round(),
     };
     if active {
@@ -1246,7 +1417,11 @@ fn draw_query_button(
         } else {
             let _ = view.render(renderer, mx, my, s, false);
         }
-        ui.register_rect(id, view.x, view.y, view.w, view.h, mx, my);
+        if let Some(clip) = clip {
+            ui.register_rect_clipped(id, view.x, view.y, view.w, view.h, clip, mx, my);
+        } else {
+            ui.register_rect(id, view.x, view.y, view.w, view.h, mx, my);
+        }
     } else {
         view.render_disabled(renderer, s);
     }
@@ -1266,12 +1441,16 @@ fn draw_query_tab(
     mx: f32,
     my: f32,
     s: f32,
+    clip: UiClipRect,
 ) {
     let x = x.round();
     let y = y.round();
     let w = w.round();
     let h = h.round();
-    let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+    let visible = clip.intersect(x, y, w, h);
+    let hovered = visible.is_some_and(|rect| {
+        mx >= rect.x && mx <= rect.x + rect.w && my >= rect.y && my <= rect.y + rect.h
+    });
     renderer.push_rounded_rect(
         x,
         y,
@@ -1286,23 +1465,61 @@ fn draw_query_tab(
             [0.13, 0.135, 0.17, 1.0]
         },
     );
-    renderer.draw_string_scaled_pixel_snapped(
+    let mut scratch = String::new();
+    renderer.draw_tree_label_clipped(
         text,
         x + (10.0 * s).round(),
         Renderer::tree_row_text_y(y, h, s),
+        (w - 20.0 * s).max(4.0),
         renderer.theme.fg,
         0.68,
+        &mut scratch,
     );
-    ui.register_rect(id, x, y, w, h, mx, my);
+    ui.register_rect_clipped(id, x, y, w, h, clip, mx, my);
 }
 
 
 #[cfg(test)]
 mod tests {
-    use super::database_query_execution_summary;
+    use super::*;
 
     #[test]
-    fn query_execution_summary_reports_time_rows_command_and_truncation() {
+    fn bug_5_query_toolbar_buttons_fit_narrow_viewport() {
+        let layout = query_toolbar_layout(0.0, 280.0, 1.0);
+        let total = layout.button_widths.iter().sum::<f32>() + layout.gap * 5.0;
+        assert!(layout.compact);
+        assert!(total <= 264.0 + 1.0);
+        assert!(layout.status_x <= 272.0);
+    }
+
+    #[test]
+    fn bug_6_query_status_width_never_crosses_toolbar_clip() {
+        for width in [0.0, 40.0, 180.0, 900.0] {
+            let layout = query_toolbar_layout(10.0, width, 1.25);
+            assert!(layout.status_w.is_finite());
+            assert!(layout.status_w >= 0.0);
+            assert!(layout.status_x + layout.status_w <= 10.0 + width.max(0.0) + 0.5);
+        }
+    }
+
+    #[test]
+    fn bug_7_query_toolbar_uses_standard_button_typography() {
+        assert_eq!(QUERY_BUTTON_TEXT_SCALE, 0.78);
+    }
+
+    #[test]
+    fn bug_8_active_result_tab_is_scrolled_into_view() {
+        let widths = [120.0, 140.0, 160.0, 180.0];
+        let viewport = 220.0;
+        let offset = query_tabs_offset(&widths, 3, viewport, 4.0);
+        let start = widths[..3].iter().sum::<f32>() + 12.0 - offset;
+        let end = start + widths[3];
+        assert!(start >= -0.5);
+        assert!(end <= viewport + 0.5);
+    }
+
+    #[test]
+    fn bug_9_query_execution_summary_reports_metrics_once() {
         let state = crate::app::database::DatabaseQueryTabState {
             last_duration_ms: 17,
             ..crate::app::database::DatabaseQueryTabState::default()
@@ -1323,6 +1540,49 @@ mod tests {
         assert!(!summary.contains("SELECT 100"));
         assert!(summary.contains("Показаны первые 100"));
         assert!(!summary.contains("Изменено строк"));
+    }
+
+    #[test]
+    fn bug_11_query_history_hover_waits_for_scroll_to_settle() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.current = 10.0;
+        scroll.target = 25.0;
+        assert!(!scroll.is_settled());
+        scroll.current = scroll.target;
+        assert!(scroll.is_settled());
+    }
+
+    #[test]
+    fn bug_12_history_hitbox_is_intersected_with_visible_body() {
+        let clip = UiClipRect::new(0.0, 20.0, 100.0, 80.0);
+        assert_eq!(clip.intersect(0.0, 0.0, 100.0, 40.0), Some(UiClipRect::new(0.0, 20.0, 100.0, 20.0)));
+    }
+
+    #[test]
+    fn bug_13_query_column_resize_hitbox_cannot_escape_header() {
+        let header = UiClipRect::new(10.0, 30.0, 200.0, 40.0);
+        let hit = header.intersect(205.0, 25.0, 12.0, 60.0).expect("visible divider strip");
+        assert_eq!(hit, UiClipRect::new(205.0, 30.0, 5.0, 40.0));
+    }
+
+    #[test]
+    fn bug_14_query_review_layout_stays_inside_tiny_modal() {
+        let layout = query_review_layout(0.0, 120.0, 70.0, 1.0);
+        assert!(layout.content_y <= layout.content_bottom);
+        assert!(layout.messages_y + layout.messages_h <= layout.button_y + 0.5);
+        assert!(layout.button_y <= 120.0);
+    }
+
+    #[test]
+    fn bug_15_sql_span_cache_respects_entry_and_byte_caps() {
+        let mut cache = DatabaseSqlSpansCache::default();
+        let huge = "x".repeat(DATABASE_SQL_SPANS_CACHE_MAX_BYTES + 1);
+        assert!(!cache.should_cache(&huge, &[]));
+        cache.entries.insert("small".to_string(), Vec::new());
+        cache.retained_bytes = DATABASE_SQL_SPANS_CACHE_MAX_BYTES;
+        cache.clear();
+        assert!(cache.entries.is_empty());
+        assert_eq!(cache.retained_bytes, 0);
     }
 
     #[test]

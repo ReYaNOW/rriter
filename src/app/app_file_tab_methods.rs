@@ -629,7 +629,7 @@ impl App {
             .build()
         {
             if let Some(term) = self.ide_panel.terminals.get(self.ide_panel.active_terminal) {
-                let grid = term.grid.lock().unwrap();
+                let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                 let total_lines = if grid.is_alt {
                     grid.lines.len()
                 } else {
@@ -670,7 +670,7 @@ impl App {
                     .terminals
                     .get_mut(self.ide_panel.active_terminal)
                 {
-                    let mut grid = term.grid.lock().unwrap();
+                    let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                     grid.selection = Some((sx, sy, ex, ey));
                     if let Some(r) = self.renderer.as_ref() {
                         let s = r.scale_factor;

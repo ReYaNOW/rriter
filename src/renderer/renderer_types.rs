@@ -303,6 +303,8 @@ pub struct Renderer {
     pub frame_count: u32,
     pub time_acc: f32,
     pub search_scroll_x: f32,
+    pub git_commit_scroll_x: f32,
+    pub terminal_search_scroll_x: f32,
 
     pub fps_string: String,
     pub search_res_string: String,

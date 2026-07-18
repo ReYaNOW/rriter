@@ -167,6 +167,8 @@ impl App {
             | UiId::DatabaseTableCell(_, _)
             | UiId::DatabaseTableCellEditor
             | UiId::DatabaseTableEnumOption(_)
+            | UiId::DatabaseTableEnumPreviousPage
+            | UiId::DatabaseTableEnumNextPage
             | UiId::DatabaseTableDatePreviousMonth
             | UiId::DatabaseTableDateNextMonth
             | UiId::DatabaseTableDateDay(_)
@@ -350,7 +352,7 @@ impl App {
                 self.ide_panel.file_tree_focused = false;
                 let active = self.ide_panel.active_terminal;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                    term.grid.lock().unwrap().selection = None;
+                    crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
                 }
             }
             UiId::TerminalScrollY => {
@@ -388,7 +390,7 @@ impl App {
                     .terminals
                     .get_mut(self.ide_panel.active_terminal)
                 {
-                    term.grid.lock().unwrap().selection = None;
+                    crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
                 }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -502,32 +504,16 @@ impl App {
 
             // Dialog
             UiId::DialogSave => {
-                let _ = self.save_current_file();
-                self.dialog_window = None;
-                self.window.as_ref().unwrap().request_redraw();
+                self.begin_pending_action_save();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::DialogDiscard => {
-                self.dialog_window = None;
-                match self.pending_action {
-                    crate::app::PendingAction::Quit => {
-                        if let Some(w) = &self.window {
-                            w.set_visible(false);
-                        }
-                    }
-                    crate::app::PendingAction::OpenFile => {
-                        self.trigger_file_picker();
-                    }
-                    crate::app::PendingAction::CloseFile => {
-                        self.show_welcome = true;
-                        self.base_title = "Добро пожаловать".to_string();
-                        App::update_window_title(
-                            self.window.as_ref().unwrap(),
-                            &self.base_title,
-                            false,
-                        );
-                    }
+                self.discard_pending_action_changes();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
                 }
-                self.window.as_ref().unwrap().request_redraw();
             }
             UiId::DialogCancel => {
                 self.dialog_window = None;
@@ -675,61 +661,71 @@ impl App {
             }
 
             // LSP panel
-            UiId::LspServerRestart(_idx) => {
-                if let Some(lsp) = &mut self.lsp {
-                    lsp.restart_python();
+            UiId::LspServerRestart(idx) => {
+                if let Some(name) = self.ide_panel.lsp_servers.get(idx).map(|info| info.name)
+                    && let Some(lsp) = &mut self.lsp
+                {
+                    lsp.restart_server(name);
                     self.ide_panel.lsp_servers = lsp.servers_info();
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::LspServerToggle(idx) => {
-                if idx < self.ide_panel.lsp_servers.len() {
-                    let is_disabled = matches!(
-                        self.ide_panel.lsp_servers[idx].status,
+                if let Some(info) = self.ide_panel.lsp_servers.get(idx).cloned()
+                    && let Some(lsp) = &mut self.lsp
+                {
+                    let enable = matches!(
+                        info.status,
                         crate::lsp::LspServerStatus::Disabled
                             | crate::lsp::LspServerStatus::Missing
                     );
-                    if let Some(lsp) = &mut self.lsp {
-                        if is_disabled {
-                            lsp.enable_python();
-                        } else {
-                            lsp.disable_python();
-                        }
-                        self.ide_panel.lsp_servers = lsp.servers_info();
-                        if self.ide_panel.lsp_servers.iter().all(|info| {
-                            matches!(info.status, crate::lsp::LspServerStatus::Disabled)
-                        }) {
-                            if let Some(slot) = self
-                                .ide_panel
-                                .slots
-                                .iter_mut()
-                                .find(|slot| slot.id == crate::app::PanelId::LspServers)
-                            {
-                                slot.open = false;
-                            }
-                            self.ide_panel.lsp_logs_focused = None;
-                            crate::save_panel_state(&self.ide_panel);
-                        }
-                    }
-                }
-                self.window.as_ref().unwrap().request_redraw();
-            }
-            UiId::LspServerStop(_idx) => {
-                if let Some(lsp) = &mut self.lsp {
-                    lsp.disable_python();
+                    lsp.set_server_enabled(info.name, enable);
                     self.ide_panel.lsp_servers = lsp.servers_info();
-                    if let Some(slot) = self
-                        .ide_panel
-                        .slots
-                        .iter_mut()
-                        .find(|slot| slot.id == crate::app::PanelId::LspServers)
-                    {
-                        slot.open = false;
+                    if self.ide_panel.lsp_servers.iter().all(|server| {
+                        matches!(server.status, crate::lsp::LspServerStatus::Disabled)
+                    }) {
+                        if let Some(slot) = self
+                            .ide_panel
+                            .slots
+                            .iter_mut()
+                            .find(|slot| slot.id == crate::app::PanelId::LspServers)
+                        {
+                            slot.open = false;
+                        }
+                        self.ide_panel.lsp_logs_focused = None;
+                        crate::save_panel_state(&self.ide_panel);
                     }
-                    self.ide_panel.lsp_logs_focused = None;
-                    crate::save_panel_state(&self.ide_panel);
                 }
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::LspServerStop(idx) => {
+                if let Some(name) = self.ide_panel.lsp_servers.get(idx).map(|info| info.name)
+                    && let Some(lsp) = &mut self.lsp
+                {
+                    lsp.stop_server(name);
+                    self.ide_panel.lsp_servers = lsp.servers_info();
+                    if self.ide_panel.lsp_servers.iter().all(|server| {
+                        matches!(server.status, crate::lsp::LspServerStatus::Disabled)
+                    }) {
+                        if let Some(slot) = self
+                            .ide_panel
+                            .slots
+                            .iter_mut()
+                            .find(|slot| slot.id == crate::app::PanelId::LspServers)
+                        {
+                            slot.open = false;
+                        }
+                        self.ide_panel.lsp_logs_focused = None;
+                        crate::save_panel_state(&self.ide_panel);
+                    }
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
             UiId::LspServerLogs(idx) => {
                 if idx < self.ide_panel.lsp_servers.len() {
@@ -2063,18 +2059,14 @@ impl App {
                 } else if self.ide_panel.database.delete_prompt.is_some() {
                     self.cancel_delete_database_connection();
                 } else if self.ide_panel.database.host_key_prompt.is_some() {
-                    self.ide_panel.database.host_key_prompt = None;
-                    self.cancel_database_job();
+                    self.cancel_database_host_key_prompt();
                 }
             }
             UiId::DatabaseDeleteConfirm => self.confirm_delete_database_connection(),
             UiId::DatabaseDeleteCancel => self.cancel_delete_database_connection(),
             UiId::DatabaseHostKeyTrustOnce => self.resolve_database_host_key(SshHostKeyPolicy::TrustOnce),
             UiId::DatabaseHostKeyTrustStore => self.resolve_database_host_key(SshHostKeyPolicy::TrustAndStore),
-            UiId::DatabaseHostKeyCancel => {
-                self.ide_panel.database.host_key_prompt = None;
-                self.cancel_database_job();
-            }
+            UiId::DatabaseHostKeyCancel => self.cancel_database_host_key_prompt(),
             UiId::DatabaseTableAddRow => { if let Some(tab) = self.active_database_table_tab_id() { self.add_database_table_row(tab); } }
             UiId::DatabaseTableDeleteRows => { if let Some(tab) = self.active_database_table_tab_id() { self.delete_database_table_selection(tab); } }
             UiId::DatabaseTableUndo => { if let Some(tab) = self.active_database_table_tab_id() { self.undo_database_table_selection(tab); } }
@@ -2177,6 +2169,8 @@ impl App {
             }
             UiId::DatabaseTableCell(row, column) => self.handle_database_table_cell_click(row, column),
             UiId::DatabaseTableEnumOption(option) => self.select_database_table_enum_option(option),
+            UiId::DatabaseTableEnumPreviousPage => self.page_database_table_enum_options(false),
+            UiId::DatabaseTableEnumNextPage => self.page_database_table_enum_options(true),
             UiId::DatabaseTableDatePreviousMonth => self.shift_database_table_calendar_month(-1),
             UiId::DatabaseTableDateNextMonth => self.shift_database_table_calendar_month(1),
             UiId::DatabaseTableDateDay(day) => self.select_database_table_calendar_day(day as u32),
@@ -2281,6 +2275,8 @@ fn database_table_click_closes_cell_popup(id: UiId) -> bool {
         id,
         UiId::DatabaseTableCellEditor
             | UiId::DatabaseTableEnumOption(_)
+            | UiId::DatabaseTableEnumPreviousPage
+            | UiId::DatabaseTableEnumNextPage
             | UiId::DatabaseTableDatePreviousMonth
             | UiId::DatabaseTableDateNextMonth
             | UiId::DatabaseTableDateDay(_)

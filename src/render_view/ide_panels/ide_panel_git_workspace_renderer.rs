@@ -79,118 +79,31 @@ impl Renderer {
             my,
         );
 
-        self.flush();
-        unsafe {
-            let text = ide_panel.git.message_editor.get_full_text();
-            let text_y = input_y + input_h / 2.0 + 6.0 * s;
-            let text_start_x = input_x + 5.0 * s;
-            let visible_width = input_w - 10.0 * s;
-
-            let mut cursor_total_x = 0.0;
-            let mut total_text_width = 0.0;
-            for (byte_idx, c) in text.char_indices() {
-                let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                if byte_idx < ide_panel.git.message_editor.cursor {
-                    cursor_total_x += adv;
-                }
-                total_text_width += adv;
-            }
-
-            if ide_panel.git.message_focused {
-                if cursor_total_x - self.search_scroll_x > visible_width {
-                    self.search_scroll_x = cursor_total_x - visible_width;
-                }
-                if cursor_total_x - self.search_scroll_x < 0.0 {
-                    self.search_scroll_x = cursor_total_x;
-                }
-                self.search_scroll_x = self
-                    .search_scroll_x
-                    .min(total_text_width - visible_width)
-                    .max(0.0);
-            }
-
-            self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (input_y + input_h);
-            self.gl.scissor(
-                input_x as i32,
-                scissor_y as i32,
-                input_w as i32,
-                input_h as i32,
-            );
-
-            let sel_start = ide_panel
-                .git
-                .message_editor
-                .selection_anchor
-                .unwrap_or(ide_panel.git.message_editor.cursor)
-                .min(ide_panel.git.message_editor.cursor);
-            let sel_end = ide_panel
-                .git
-                .message_editor
-                .selection_anchor
-                .unwrap_or(ide_panel.git.message_editor.cursor)
-                .max(ide_panel.git.message_editor.cursor);
-            let mut cursor_draw_x = text_start_x - self.search_scroll_x;
-
-            if text.is_empty() {
-                self.draw_string_scaled(
-                    "Message",
-                    text_start_x,
-                    text_y,
-                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.34],
-                    1.0,
-                );
-            } else {
-                let mut current_x = text_start_x - self.search_scroll_x;
-                let mut byte_idx = 0usize;
-
-                for c in text.chars() {
-                    if byte_idx == ide_panel.git.message_editor.cursor {
-                        cursor_draw_x = current_x;
-                    }
-                    let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                    if byte_idx >= sel_start && byte_idx < sel_end {
-                        self.push_rect(
-                            current_x,
-                            input_y + 4.0 * s,
-                            adv,
-                            input_h - 8.0 * s,
-                            self.theme.sel,
-                        );
-                    }
-                    if let Some(g) = self.get_ui_glyph(c) {
-                        self.push_quad(
-                            current_x + g.offset_x,
-                            text_y - g.offset_y,
-                            g.width,
-                            g.height,
-                            g.u,
-                            g.v,
-                            g.uw,
-                            g.vh,
-                            self.theme.fg,
-                            g.is_emoji,
-                        );
-                    }
-                    current_x += adv;
-                    byte_idx += c.len_utf8();
-                }
-                if byte_idx == ide_panel.git.message_editor.cursor {
-                    cursor_draw_x = current_x;
-                }
-            }
-            if ide_panel.git.message_focused && sel_start == sel_end && blink_alpha > 0.5 {
-                self.push_rect(
-                    cursor_draw_x,
-                    input_y + 4.0 * s,
-                    2.0 * s,
-                    input_h - 8.0 * s,
-                    self.theme.fg,
-                );
-            }
-            self.flush();
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
+        let text = ide_panel.git.message_editor.get_full_text();
+        self.git_commit_scroll_x = self.one_line_scroll_for_cursor(
+            &text,
+            ide_panel.git.message_editor.cursor,
+            1.0,
+            input_w - 10.0 * s,
+            self.git_commit_scroll_x,
+        );
+        self.draw_one_line_input_with_chrome(
+            &text,
+            ide_panel.git.message_editor.cursor,
+            ide_panel.git.message_editor.selection_anchor,
+            false,
+            ide_panel.git.message_focused,
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            self.git_commit_scroll_x,
+            blink_alpha,
+            1.0,
+            0.0,
+            5.0 * s,
+            4.0 * s,
+        );
 
         let commit_y = title_h + 44.0 * s;
         let commit_enabled = ide_panel.git.commit_enabled();
@@ -333,6 +246,10 @@ impl Renderer {
         }
 
         self.flush();
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            panel_x, list_y, panel_w, list_h,
+        ));
+        ui_registry.push_interactions_enabled(hover_settled);
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             let scissor_y = self.height - (list_y + list_h);
@@ -1280,6 +1197,8 @@ impl Renderer {
             );
         }
 
+        ui_registry.pop_interactions_enabled();
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);

@@ -82,7 +82,7 @@ impl Renderer {
         });
         let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(diagnostics) = query_diagnostics {
             (
-                editor.version.min(i32::MAX as u64) as i32,
+                crate::editor::lsp_document_version(editor.version),
                 diagnostics.iter().collect::<Vec<_>>(),
                 false,
             )

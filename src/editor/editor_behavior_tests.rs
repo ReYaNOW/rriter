@@ -379,3 +379,46 @@ mod tests {
         assert_eq!(editor.cursor, editor.len());
     }
 }
+
+#[cfg(test)]
+mod round3_editor_regressions {
+    use super::*;
+
+    #[test]
+    fn r3_097_editor_version_wraps_to_new_nonzero_generation() {
+        assert_eq!(next_editor_version(u64::MAX), 1);
+        assert_eq!(next_editor_version(0), 1);
+        assert_eq!(next_editor_version(41), 42);
+    }
+
+    #[test]
+    fn r3_098_lsp_document_version_stays_positive_after_editor_counter_wraps() {
+        assert_eq!(lsp_document_version(0), 0);
+        assert_eq!(lsp_document_version(i32::MAX as u64), i32::MAX);
+        assert_eq!(lsp_document_version(i32::MAX as u64 + 1), 1);
+        assert!((1..=i32::MAX).contains(&lsp_document_version(u64::MAX)));
+    }
+
+    #[test]
+    fn r3_099_api_editor_generation_changes_after_u64_max_edit() {
+        let mut editor = Editor::new(32);
+        editor.insert_str("a");
+        editor.version = u64::MAX;
+        editor.replace_range(0, 1, "b");
+        assert_eq!(editor.version, 1);
+        assert_eq!(editor.get_full_text(), "b");
+    }
+
+    #[test]
+    fn r3_111_replace_range_rejects_reversed_out_of_bounds_and_split_utf8() {
+        let mut editor = Editor::new(32);
+        editor.insert_str("aé😀z");
+        let before = editor.get_full_text();
+        let version = editor.version;
+        assert_eq!(editor.replace_range(4, 2, "x").2, "");
+        assert_eq!(editor.replace_range(0, 999, "x").2, "");
+        assert_eq!(editor.replace_range(2, 3, "x").2, "");
+        assert_eq!(editor.get_full_text(), before);
+        assert_eq!(editor.version, version);
+    }
+}

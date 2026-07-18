@@ -1,5 +1,6 @@
 use super::database_postgres::{
     DatabaseBackendError, DatabaseServerNotice, PostgresSession, connect_postgres,
+    rollback_postgres_transaction_after_error,
 };
 use super::database_ssh::SshConnectOptions;
 use super::DatabaseQueryTabMeta;
@@ -283,6 +284,52 @@ pub fn database_query_history_entry_height(sql: &str) -> f32 {
     30.0 + lines * 20.0 + if database_query_history_is_truncated(sql) { 18.0 } else { 0.0 }
 }
 
+pub fn database_query_history_entry_height_px(sql: &str, scale: f32) -> f32 {
+    (database_query_history_entry_height(sql) * scale.max(0.0)).round()
+}
+
+pub fn database_query_history_entry_bytes(entry: &DatabaseQueryHistoryEntry) -> usize {
+    entry
+        .sql
+        .len()
+        .saturating_add(entry.database_name.len())
+        .saturating_add(entry.error_summary.as_ref().map_or(0, String::len))
+        .saturating_add(64)
+}
+
+pub fn trim_database_query_history(
+    history: &mut Vec<DatabaseQueryHistoryEntry>,
+    entry_limit: usize,
+    byte_limit: usize,
+) {
+    let remove_for_count = history.len().saturating_sub(entry_limit);
+    let total_bytes = history
+        .iter()
+        .map(database_query_history_entry_bytes)
+        .sum::<usize>();
+    let mut remove_for_bytes = 0usize;
+    let mut remaining_bytes = total_bytes;
+    while remove_for_bytes < history.len() && remaining_bytes > byte_limit {
+        remaining_bytes = remaining_bytes.saturating_sub(database_query_history_entry_bytes(
+            &history[remove_for_bytes],
+        ));
+        remove_for_bytes += 1;
+    }
+    let remove = remove_for_count.max(remove_for_bytes);
+    if remove > 0 {
+        history.drain(0..remove);
+    }
+}
+
+pub fn database_query_history_content_height<'a>(
+    entries: impl Iterator<Item = &'a DatabaseQueryHistoryEntry>,
+    scale: f32,
+) -> f32 {
+    entries
+        .map(|entry| database_query_history_entry_height_px(&entry.sql, scale))
+        .sum()
+}
+
 /// Returns horizontal and vertical scroll limits for the shared query result viewport.
 pub fn database_query_scroll_limits(
     meta: &DatabaseQueryTabMeta,
@@ -293,14 +340,13 @@ pub fn database_query_scroll_limits(
     scale: f32,
 ) -> (f32, f32) {
     if state.history_open {
-        let content_height = history
-            .iter()
-            .filter(|entry| {
+        let content_height = database_query_history_content_height(
+            history.iter().filter(|entry| {
                 entry.connection_id == meta.connection_id
                     && entry.database_name == meta.database_name
-            })
-            .map(|entry| database_query_history_entry_height(&entry.sql) * scale)
-            .sum::<f32>();
+            }),
+            scale,
+        );
         return (0.0, (content_height - viewport_height).max(0.0));
     }
     if let Some(result) = state.results.get(state.result_view.active_result) {
@@ -328,6 +374,7 @@ pub struct DatabaseQueryReviewState {
     pub returned_rows: u64,
     pub changed_rows: u64,
     pub mode: DatabaseQueryMode,
+    pub finishing: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -1045,7 +1092,6 @@ pub async fn begin_user_query_transaction(
             }))
         }
         Err(error) => {
-            let _ = session.client.batch_execute("ROLLBACK").await;
             let diagnostic = match &error {
                 DatabaseBackendError::Postgres(postgres) => {
                     diagnostic_from_execution_error(
@@ -1057,20 +1103,10 @@ pub async fn begin_user_query_transaction(
                 }
                 _ => None,
             };
+            let error = rollback_postgres_transaction_after_error(&session, error).await;
             Err(DatabaseQueryExecutionError { error, diagnostic })
         }
     }
-}
-
-pub async fn finish_user_query_transaction(
-    session: &PostgresSession,
-    commit: bool,
-) -> Result<(), DatabaseBackendError> {
-    session
-        .client
-        .batch_execute(if commit { "COMMIT" } else { "ROLLBACK" })
-        .await?;
-    Ok(())
 }
 
 async fn execute_simple_query(
@@ -1887,6 +1923,48 @@ SELECT 2;  ";
         );
         let (max_x, _) = database_query_scroll_limits(&meta, &state, &[], 300.0, 200.0, 1.0);
         assert_eq!(max_x, 200.0);
+    }
+
+    #[test]
+    fn bug_10_history_content_height_uses_same_rounded_step_as_renderer() {
+        let entries = vec![
+            DatabaseQueryHistoryEntry {
+                sql: "select 1".to_string(),
+                ..DatabaseQueryHistoryEntry::default()
+            };
+            200
+        ];
+        let scale = 1.25;
+        let content = database_query_history_content_height(entries.iter(), scale);
+        let laid_out = entries
+            .iter()
+            .map(|entry| database_query_history_entry_height_px(&entry.sql, scale))
+            .sum::<f32>();
+        assert_eq!(content, laid_out);
+        assert_ne!(
+            content,
+            entries
+                .iter()
+                .map(|entry| database_query_history_entry_height(&entry.sql) * scale)
+                .sum::<f32>()
+        );
+    }
+
+    #[test]
+    fn bug_16_history_trim_removes_one_prefix_in_linear_pass() {
+        let mut history = (0..10)
+            .map(|index| DatabaseQueryHistoryEntry {
+                sql: format!("select {index} -- {}", "x".repeat(64)),
+                started_unix_ms: index,
+                ..DatabaseQueryHistoryEntry::default()
+            })
+            .collect::<Vec<_>>();
+        let keep_bytes = database_query_history_entry_bytes(&history[8])
+            + database_query_history_entry_bytes(&history[9]);
+        trim_database_query_history(&mut history, 8, keep_bytes);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].started_unix_ms, 8);
+        assert_eq!(history[1].started_unix_ms, 9);
     }
 
 }

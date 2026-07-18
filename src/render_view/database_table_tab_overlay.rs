@@ -29,10 +29,13 @@ impl Renderer {
             crate::app::database::DatabaseTableModal::MultilineEditor { .. } => ("Редактор значения", 820.0, 620.0),
             crate::app::database::DatabaseTableModal::Review { .. } => ("Проверка транзакции", 780.0, 620.0),
         };
-        let width = (width * s).min(self.width - 32.0 * s).max(360.0 * s);
-        let height = (height * s).min(self.height - 32.0 * s).max(180.0 * s);
-        let x = ((self.width - width) * 0.5).round();
-        let y = ((self.height - height) * 0.5).round();
+        let fitted = crate::ui_system::fit_centered_rect(
+            self.width, self.height, width * s, height * s, 16.0 * s,
+        );
+        let width = fitted.w;
+        let height = fitted.h;
+        let x = fitted.x;
+        let y = fitted.y;
         self.push_rounded_rect_border(
             x,
             y,

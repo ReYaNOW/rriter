@@ -18,6 +18,8 @@ fn test_process_with_events(
         open_file_data: None,
         stop: Arc::new(AtomicBool::new(false)),
         supervisor: None,
+        local_events: Mutex::new(Vec::new()),
+        event_disconnected: AtomicBool::new(false),
     };
     (proc, cmd_rx, event_tx)
 }
@@ -271,7 +273,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
         _ => panic!("expected change command"),
     }
 
-    let hover_id = proc.request_hover(&path, 5, 6);
+    let hover_id = proc.request_hover(&path, 5, 6).unwrap();
     match rx.try_recv().unwrap() {
         Cmd::Hover { id, uri, line, col } => {
             assert_eq!(id, hover_id);
@@ -281,7 +283,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
         _ => panic!("expected hover command"),
     }
 
-    let def_id = proc.request_definition(&path, 7, 8);
+    let def_id = proc.request_definition(&path, 7, 8).unwrap();
     match rx.try_recv().unwrap() {
         Cmd::Definition { id, uri, line, col } => {
             assert_eq!(id, def_id);
@@ -291,15 +293,17 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
         _ => panic!("expected definition command"),
     }
 
-    let action_id = proc.request_code_actions(
-        &path,
-        1,
-        2,
-        3,
-        4,
-        &[test_diag("fix me", DiagSeverity::Warning, Some("F401"))],
-        Some(vec!["quickfix".to_string()]),
-    );
+    let action_id = proc
+        .request_code_actions(
+            &path,
+            1,
+            2,
+            3,
+            4,
+            &[test_diag("fix me", DiagSeverity::Warning, Some("F401"))],
+            Some(vec!["quickfix".to_string()]),
+        )
+        .unwrap();
     match rx.try_recv().unwrap() {
         Cmd::CodeAction {
             id,
@@ -320,9 +324,11 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
         _ => panic!("expected code action command"),
     }
 
-    let ws_diag_id = proc.request_workspace_diagnostics(
-        r#"[{"uri":"file:///tmp/app.py","value":"r1"}]"#.to_string(),
-    );
+    let ws_diag_id = proc
+        .request_workspace_diagnostics(
+            r#"[{"uri":"file:///tmp/app.py","value":"r1"}]"#.to_string(),
+        )
+        .unwrap();
     match rx.try_recv().unwrap() {
         Cmd::WorkspaceDiagnostic {
             id,
@@ -1179,7 +1185,7 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
 #[test]
 fn manager_requests_ty_workspace_diagnostics_for_large_current_python_file() {
     let path = PathBuf::from("/tmp/ws/huge.py");
-    let (ty, ty_rx) = test_process(&TY_SERVER);
+    let (ty, ty_rx, _ty_event_tx) = test_process_with_events(&TY_SERVER);
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
     let large_line_count = 50_000;
     let text = python_text_with_lines(large_line_count);
@@ -1208,7 +1214,7 @@ fn manager_requests_ty_workspace_diagnostics_for_large_current_python_file() {
 #[test]
 fn manager_skips_ty_workspace_diagnostics_without_active_workspace_root() {
     let path = PathBuf::from("/tmp/external.py");
-    let (ty, ty_rx) = test_process(&TY_SERVER);
+    let (ty, ty_rx, _ty_event_tx) = test_process_with_events(&TY_SERVER);
     let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
     manager.python_disabled = true;
     manager.notify_open(&path, "py", "x = 1\n", 1);
@@ -1390,4 +1396,95 @@ fn lsp_format_json_pretty_prints_spans_and_folds_multiline_payloads() {
     assert!(folds.iter().any(|(start, end, _)| *start < *end));
     assert!(folds.iter().any(|(_, _, depth)| *depth == 1));
     assert!(folds.iter().any(|(_, _, depth)| *depth == 2));
+}
+
+#[test]
+fn r3_090_did_open_send_failure_does_not_mark_document_open() {
+    let (mut process, command_rx) = test_process(&RUFF_SERVER);
+    drop(command_rx);
+    let path = PathBuf::from("/tmp/r3-open.py");
+    assert!(!process.notify_open(&path, Arc::from("x = 1\n"), 1, None));
+    assert!(process.current_uri.is_none());
+    assert!(process.open_file_data.is_none());
+}
+
+#[test]
+fn r3_091_did_change_send_failure_does_not_advance_current_uri() {
+    let (mut process, command_rx) = test_process(&RUFF_SERVER);
+    drop(command_rx);
+    let path = PathBuf::from("/tmp/r3-change.py");
+    assert!(!process.notify_change(&path, Arc::from("x = 2\n"), 2));
+    assert!(process.current_uri.is_none());
+}
+
+#[test]
+fn r3_092_request_send_failure_returns_no_pending_id() {
+    let (mut process, command_rx) = test_process(&RUFF_SERVER);
+    drop(command_rx);
+    let path = PathBuf::from("/tmp/r3-hover.py");
+    assert!(process.request_hover(&path, 0, 0).is_none());
+    assert!(process.request_definition(&path, 0, 0).is_none());
+    assert!(process.request_completion(&path, 0, 0, None).is_none());
+}
+
+#[test]
+fn r3_093_event_channel_disconnect_emits_disabled_once() {
+    let (process, _command_rx, event_tx) = test_process_with_events(&RUFF_SERVER);
+    drop(event_tx);
+    let mut events = Vec::new();
+    process.poll(&mut events);
+    assert!(events.iter().any(|event| matches!(
+        event,
+        LspEvent::StatusChanged { status: LspServerStatus::Disabled, .. }
+    )));
+    let first_len = events.len();
+    process.poll(&mut events);
+    assert_eq!(events.len(), first_len);
+}
+
+#[test]
+fn r3_094_request_id_allocator_cycles_without_zero_or_negative_ids() {
+    let counter = AtomicI32::new(i32::MAX - 1);
+    assert_eq!(allocate_request_id(&counter), Some(i32::MAX - 1));
+    assert_eq!(allocate_request_id(&counter), Some(i32::MAX));
+    assert_eq!(allocate_request_id(&counter), Some(1));
+    counter.store(0, Ordering::Relaxed);
+    assert_eq!(allocate_request_id(&counter), Some(1));
+}
+
+#[test]
+fn r3_095_ruff_workspace_disconnect_clears_stale_diagnostics() {
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp")]);
+    manager.ruff_workspace_diagnostics.insert(
+        PathBuf::from("/tmp/stale.py"),
+        diag_arc(vec![test_diag("stale", DiagSeverity::Warning, None)]),
+    );
+    let (tx, rx) = mpsc::channel();
+    manager.ruff_workspace_diag_rx = Some(rx);
+    manager.ruff_workspace_diag_pending = true;
+    drop(tx);
+    manager.poll_ruff_workspace_diagnostics();
+    assert!(manager.ruff_workspace_diagnostics.is_empty());
+    assert!(!manager.ruff_workspace_diag_pending);
+}
+
+#[test]
+fn r3_096_lsp_drop_reaps_unfinished_supervisor_without_blocking() {
+    let (cmd_tx, _cmd_rx) = mpsc::channel();
+    let (_event_tx, event_rx) = mpsc::channel();
+    let supervisor = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(120)));
+    let process = LspProcess {
+        cmd_tx,
+        event_rx,
+        current_uri: None,
+        def: &RUFF_SERVER,
+        open_file_data: None,
+        stop: Arc::new(AtomicBool::new(false)),
+        supervisor: Some(supervisor),
+        local_events: Mutex::new(Vec::new()),
+        event_disconnected: AtomicBool::new(false),
+    };
+    let started = Instant::now();
+    drop(process);
+    assert!(started.elapsed() < Duration::from_millis(80));
 }

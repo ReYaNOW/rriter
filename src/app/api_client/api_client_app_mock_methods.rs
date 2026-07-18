@@ -51,7 +51,7 @@ impl crate::app::App {
         let my = renderer.last_mouse_y;
         if self.ide_panel.api.mock_python_version_picker_open {
             let rect = api_python_version_list_rect(layout, s);
-            if api_point_in_rect(mx, my, rect) {
+            if crate::ui_system::point_in_rect(mx, my, rect) {
                 let max_scroll = api_python_version_list_max_scroll(
                     self.ide_panel.api.mock_python_versions.len(),
                     s,
@@ -67,7 +67,7 @@ impl crate::app::App {
         }
         if api_python_install_log_visible(&self.ide_panel.api) {
             let rect = api_python_install_log_rect(layout, s);
-            if api_point_in_rect(mx, my, rect) {
+            if crate::ui_system::point_in_rect(mx, my, rect) {
                 let max_scroll = api_python_install_log_max_scroll(
                     self.ide_panel.api.mock_python_install_log.len(),
                     rect.3,
@@ -1155,7 +1155,7 @@ impl crate::app::App {
             return false;
         };
         let virtual_path = Self::api_mock_virtual_path_for(spec_id, target.route_idx);
-        let base_version = target.version.min(i32::MAX as u64) as i32;
+        let base_version = crate::editor::lsp_document_version(target.version);
         if !self.notify_api_mock_lsp_source(&virtual_path, &source, base_version) {
             return false;
         }
@@ -1769,7 +1769,7 @@ impl crate::app::App {
             };
             let old_version = self.ide_panel.api.input_editor.version;
             self.ide_panel.api.input_editor.set_text_clean(&text);
-            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+            self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
             self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
             self.ide_panel.api.input_editor.selection_anchor =
                 Some(self.ide_panel.api.input_editor.cursor);

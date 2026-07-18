@@ -21,6 +21,12 @@ impl ScrollState {
     }
 
     pub fn update(&mut self, dt: f32) -> bool {
+        if self.sanitize_non_finite() {
+            return true;
+        }
+        if !dt.is_finite() || dt <= 0.0 {
+            return false;
+        }
         let diff = self.target - self.current;
         let abs_diff = diff.abs();
         if abs_diff > 0.0 {
@@ -46,30 +52,82 @@ impl ScrollState {
     }
 
     pub fn is_settled(&self) -> bool {
-        !self.is_dragging && self.current == self.target
+        !self.is_dragging
+            && self.current.is_finite()
+            && self.target.is_finite()
+            && self.current == self.target
     }
 
     pub fn clamp_target(&mut self, min: f32, max: f32) {
+        let (min, max) = finite_bounds(min, max);
+        if !self.target.is_finite() {
+            self.target = min;
+            self.velocity = 0.0;
+        }
         self.target = self.target.clamp(min, max);
     }
 
     pub fn clamp_current(&mut self, min: f32, max: f32) {
+        let (min, max) = finite_bounds(min, max);
+        if !self.current.is_finite() {
+            self.current = min;
+            self.velocity = 0.0;
+        }
         self.current = self.current.clamp(min, max);
     }
 
     pub fn scroll_by(&mut self, delta: f32) {
-        self.target += delta;
+        if delta.is_finite() {
+            if !self.target.is_finite() {
+                self.target = self.current.max(0.0);
+            }
+            self.target += delta;
+        }
     }
 
     pub fn set_target(&mut self, target: f32) {
-        self.target = target;
+        if target.is_finite() {
+            self.target = target;
+        }
     }
 
     pub fn stop_anim(&mut self) {
+        self.sanitize_non_finite();
         self.target = self.current.round();
         self.current = self.target;
         self.velocity = 0.0;
     }
+
+    fn sanitize_non_finite(&mut self) -> bool {
+        let mut changed = false;
+        if !self.current.is_finite() {
+            self.current = 0.0;
+            changed = true;
+        }
+        if !self.target.is_finite() {
+            self.target = self.current;
+            changed = true;
+        }
+        if !self.velocity.is_finite() {
+            self.velocity = 0.0;
+            changed = true;
+        }
+        if !self.anim_speed.is_finite() || self.anim_speed <= 0.0 {
+            self.anim_speed = 15.0;
+            changed = true;
+        }
+        if !self.drag_offset.is_finite() {
+            self.drag_offset = 0.0;
+            changed = true;
+        }
+        changed
+    }
+}
+
+fn finite_bounds(min: f32, max: f32) -> (f32, f32) {
+    let min = if min.is_finite() { min } else { 0.0 };
+    let max = if max.is_finite() { max.max(min) } else { min };
+    (min, max)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -86,7 +144,16 @@ pub(crate) fn scrollbar_thumb(
     current_scroll: f32,
     min_thumb_len: f32,
 ) -> Option<ScrollbarThumb> {
-    if track_len <= 0.0 || viewport_len <= 0.0 || content_len <= viewport_len {
+    if !track_start.is_finite()
+        || !track_len.is_finite()
+        || !viewport_len.is_finite()
+        || !content_len.is_finite()
+        || !current_scroll.is_finite()
+        || !min_thumb_len.is_finite()
+        || track_len <= 0.0
+        || viewport_len <= 0.0
+        || content_len <= viewport_len
+    {
         return None;
     }
     let max_scroll = content_len - viewport_len;
@@ -108,7 +175,17 @@ pub(crate) fn scrollbar_drag_target(
     max_scroll: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
-    if track_len <= 0.0 || max_scroll <= 0.0 || thumb.len >= track_len {
+    if !pointer.is_finite()
+        || !track_start.is_finite()
+        || !track_len.is_finite()
+        || !thumb.start.is_finite()
+        || !thumb.len.is_finite()
+        || !max_scroll.is_finite()
+        || drag_offset.is_some_and(|offset| !offset.is_finite())
+        || track_len <= 0.0
+        || max_scroll <= 0.0
+        || thumb.len >= track_len
+    {
         return None;
     }
     let offset = drag_offset.unwrap_or_else(|| {
@@ -169,5 +246,36 @@ mod tests {
         assert!(target <= 300.0);
 
         assert!(scrollbar_thumb(0.0, 100.0, 100.0, 100.0, 0.0, 20.0).is_none());
+    }
+
+    #[test]
+    fn bug_37_non_finite_scroll_state_recovers_without_poisoning_future_frames() {
+        let mut scroll = ScrollState::new(15.0);
+        scroll.current = f32::NAN;
+        scroll.target = f32::INFINITY;
+        scroll.velocity = f32::NEG_INFINITY;
+        scroll.drag_offset = f32::NAN;
+
+        assert!(scroll.update(0.016));
+        assert_eq!(scroll.current, 0.0);
+        assert_eq!(scroll.target, 0.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.drag_offset, 0.0);
+        assert!(scroll.is_settled());
+    }
+
+    #[test]
+    fn bug_37_scrollbar_helpers_reject_zero_over_zero_and_non_finite_inputs() {
+        assert!(scrollbar_thumb(0.0, 0.0, 0.0, 0.0, 0.0, 20.0).is_none());
+        assert!(scrollbar_thumb(0.0, 100.0, 50.0, f32::NAN, 0.0, 20.0).is_none());
+        assert!(scrollbar_drag_target(
+            f32::NAN,
+            0.0,
+            100.0,
+            ScrollbarThumb { start: 0.0, len: 20.0 },
+            100.0,
+            None,
+        )
+        .is_none());
     }
 }

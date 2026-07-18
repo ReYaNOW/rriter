@@ -516,7 +516,7 @@ impl crate::app::App {
                 if matches!(self.ide_panel.api.focused, Some(ApiFocus::RouteFilter)) {
                     let old_version = self.ide_panel.api.input_editor.version;
                     self.ide_panel.api.input_editor.set_text_clean("");
-                    self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                    self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
                     self.ide_panel.api.input_editor.cursor = 0;
                     self.ide_panel.api.input_editor.selection_anchor = None;
                     self.ide_panel.api.input_scroll_x.current = 0.0;
@@ -1217,7 +1217,7 @@ impl crate::app::App {
                 {
                     let old_version = self.ide_panel.api.input_editor.version;
                     self.ide_panel.api.input_editor.set_text_clean(value);
-                    self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                    self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
                 }
                 if applied.is_some_and(|(_, _, is_array)| is_array) {
                     self.ide_panel.api.focused = None;

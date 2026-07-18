@@ -13,95 +13,34 @@ impl App {
         let Some(prompt) = self.ide_panel.database.host_key_prompt.take() else {
             return;
         };
-        let Some(pending) = self.ide_panel.database.pending_job.clone() else {
+        let Some((mut command, pending)) = self.ide_panel.database.host_key_retry.take() else {
+            self.ide_panel.database.global_error = Some(
+                "Не удалось повторить подключение: исходная команда потеряна".to_string(),
+            );
+            self.drain_database_command_queue();
             return;
         };
         if prompt.job_id != pending.id {
+            self.recover_database_pending_job(
+                &pending,
+                "Ответ SSH относится к другой операции",
+                false,
+            );
+            self.drain_database_command_queue();
             return;
         }
-        self.ide_panel.database.pending_job = None;
-        match pending.kind {
-            DatabasePendingJobKind::TestConnection => self.test_database_dialog_connection_with_policy(policy),
-            DatabasePendingJobKind::LoadDatabases => self.load_connection_databases(pending.connection_id, policy),
-            DatabasePendingJobKind::LoadTables => {
-                if let Some(database_name) = pending.database_name {
-                    self.load_public_database_tables(pending.connection_id, &database_name, policy);
-                }
-            }
-            DatabasePendingJobKind::LoadMetadata => {
-                if let (Some(database_name), Some(table_name)) = (pending.database_name, pending.table_name) {
-                    let meta = DatabaseTableTabMeta {
-                        tab_id: crate::app::database::DatabaseTabId(0),
-                        connection_id: pending.connection_id,
-                        database_name,
-                        table_name,
-                    };
-                    self.load_database_table_metadata(&meta, policy);
-                }
-            }
-            DatabasePendingJobKind::LoadDdl => {
-                if let (Some(database_name), Some(table_name)) = (pending.database_name, pending.table_name) {
-                    self.load_database_ddl(pending.connection_id, &database_name, &table_name, policy);
-                }
-            }
-            DatabasePendingJobKind::CountRows
-            | DatabasePendingJobKind::LoadChunk
-            | DatabasePendingJobKind::BeginTableSave => {
-                self.ide_panel.database.host_key_policy_override = Some(policy);
-                let tab_id = self.tabs.iter().find_map(|tab| match &tab.kind {
-                    EditorTabKind::DatabaseTable(meta, _)
-                        if meta.connection_id == pending.connection_id
-                            && pending.database_name.as_deref() == Some(meta.database_name.as_str())
-                            && pending.table_name.as_deref() == Some(meta.table_name.as_str()) => Some(meta.tab_id),
-                    _ => None,
-                });
-                if let Some(tab_id) = tab_id {
-                    if pending.kind == DatabasePendingJobKind::BeginTableSave {
-                        let close_after = self.database_table_meta_state(tab_id)
-                            .is_some_and(|(_, state)| state.grid.pending_close_after_save);
-                        self.save_database_table_changes(tab_id, close_after);
-                    } else {
-                        self.queue_database_table_initial_load(tab_id);
-                    }
-                }
-            }
-            DatabasePendingJobKind::LoadQueryCompletion => {
-                self.ide_panel.database.host_key_policy_override = Some(policy);
-                self.request_active_database_query_completion();
-            }
-            DatabasePendingJobKind::RunUserSql => {
-                let mode = self.ide_panel.database.pending_query_mode.take().unwrap_or_default();
-                self.ide_panel.database.host_key_policy_override = Some(policy);
-                self.run_active_database_query(mode);
-            }
-            DatabasePendingJobKind::CommitTransaction
-            | DatabasePendingJobKind::RollbackTransaction
-            | DatabasePendingJobKind::SaveConnection
-            | DatabasePendingJobKind::DeleteConnection => {}
+        command.set_host_key_policy(policy);
+        if !self.start_database_command_now(command, pending) {
+            self.drain_database_command_queue();
         }
     }
 
-    fn test_database_dialog_connection_with_policy(&mut self, policy: SshHostKeyPolicy) {
-        let (connection, secrets) = {
-            let Some(dialog) = self.ide_panel.database.dialog.as_ref() else {
-                return;
-            };
-            let fallback_id = dialog.editing_connection_id.unwrap_or(DatabaseConnectionId(self.ide_panel.database.next_connection_id));
-            let Ok(connection) = dialog.build_config(fallback_id) else {
-                return;
-            };
-            (connection, dialog.secret_bundle())
-        };
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob { id: job_id, kind: DatabasePendingJobKind::TestConnection, connection_id: connection.id, database_name: None, table_name: None };
-        let settings = self.ide_panel.database.settings().clone();
-        self.send_database_command(DatabaseCommand::TestConnection {
-            job_id,
-            connection,
-            secrets: Some(secrets),
-            settings,
-            ssh_options: crate::app::database::host_key_options(policy),
-        }, pending);
+    pub(crate) fn cancel_database_host_key_prompt(&mut self) {
+        self.ide_panel.database.host_key_prompt = None;
+        if let Some((_, pending)) = self.ide_panel.database.host_key_retry.take() {
+            self.recover_database_pending_job(&pending, "Проверка SSH-ключа отменена", true);
+        }
+        self.drain_database_command_queue();
     }
 
     fn apply_database_event(&mut self, event: DatabaseEvent) {
@@ -131,9 +70,18 @@ impl App {
             | DatabaseEvent::QueryTransactionExpired { .. } => None,
         };
         let pending = self.ide_panel.database.pending_job.clone();
-        if let (Some(event_job_id), Some(pending)) = (event_job_id, pending.as_ref())
-            && event_job_id != pending.id
+        if let Some(job_id) = event_job_id
+            && self.ide_panel.database.cancelled_job_ids.remove(&job_id).is_some()
         {
+            if pending.as_ref().is_some_and(|active| active.id == job_id) {
+                self.finish_database_active_job(true);
+            }
+            return;
+        }
+        if !database_event_matches_active_job(
+            event_job_id,
+            pending.as_ref().map(|active| active.id),
+        ) {
             return;
         }
 
@@ -151,7 +99,7 @@ impl App {
                     apply_connection_notices(node, result.ssh_backend, &result.notices);
                     node.status = connection_status(result.ssh_backend);
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
             DatabaseEvent::DatabasesLoaded { result, .. } => {
                 let expanded = self.ide_panel.database.persisted.expanded_databases.clone();
@@ -172,7 +120,7 @@ impl App {
                     node.status = connection_status(result.ssh_backend);
                     apply_connection_notices(node, result.ssh_backend, &result.notices);
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
             DatabaseEvent::PublicTablesLoaded { database_name, result, .. } => {
                 let connection_id = pending.as_ref().map(|pending| pending.connection_id);
@@ -188,7 +136,7 @@ impl App {
                     node.status = connection_status(result.ssh_backend);
                     apply_connection_notices(node, result.ssh_backend, &result.notices);
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 let should_refresh_completion = connection_id.is_some_and(|connection_id| {
                     self.tabs.get(self.active_tab).is_some_and(|tab| {
                         matches!(&tab.kind,
@@ -217,7 +165,7 @@ impl App {
                         loaded_tabs.push(meta.tab_id);
                     }
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 for tab_id in loaded_tabs {
                     self.queue_database_table_initial_load(tab_id);
                 }
@@ -253,14 +201,14 @@ impl App {
                     selection_cursor: None,
                     selecting: false,
                 });
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
             DatabaseEvent::TableCountLoaded { connection_id, result, .. } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.on_database_table_count_loaded(connection_id, result);
             }
             DatabaseEvent::TableChunkLoaded { connection_id, result, .. } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.on_database_table_chunk_loaded(connection_id, result);
             }
             DatabaseEvent::QueryCompletionLoaded { result, .. } => {
@@ -280,7 +228,7 @@ impl App {
                     state.error = None;
                     refresh_analysis = index == self.active_tab;
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.ide_panel.database.pending_query_mode = None;
                 if refresh_analysis {
                     self.refresh_active_database_query_analysis();
@@ -351,6 +299,7 @@ impl App {
                                 returned_rows,
                                 changed_rows,
                                 mode,
+                                finishing: false,
                             });
                         } else {
                             completed_history = Some(
@@ -374,7 +323,7 @@ impl App {
                         self.highlighter.syntax_errors.clear();
                     }
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.ide_panel.database.pending_query_mode = None;
                 if requires_review {
                     self.ide_panel.is_resizing_left = false;
@@ -391,7 +340,7 @@ impl App {
                 console_id,
                 ..
             } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 let mut history = None;
                 let mut refresh_metadata = false;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
@@ -439,7 +388,7 @@ impl App {
                 console_id,
                 ..
             } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 let mut history = None;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
@@ -473,7 +422,6 @@ impl App {
                 console_id,
                 ..
             } => {
-                self.ide_panel.database.pending_job = None;
                 let mut history = None;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
@@ -574,7 +522,7 @@ impl App {
                     error_summary: Some(message.clone()),
                 });
                 self.ide_panel.database.global_error = Some(message);
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.ide_panel.database.pending_query_mode = None;
             }
             DatabaseEvent::TransactionPrepared { connection_id, transaction_id, database_name, table_name, summary, deadline_unix_ms, .. } => {
@@ -600,18 +548,17 @@ impl App {
                         scroll: crate::scroll::ScrollState::new(15.0),
                     });
                 }
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
             DatabaseEvent::TransactionCommitted { connection_id, database_name, table_name, .. } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.finish_committed_database_table(connection_id, &database_name, &table_name);
             }
             DatabaseEvent::TransactionRolledBack { .. } => {
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.finish_rolled_back_database_table();
             }
             DatabaseEvent::TransactionExpired { connection_id, database_name, table_name, .. } => {
-                self.ide_panel.database.pending_job = None;
                 self.ide_panel.database.table_modal = None;
                 for tab in &mut self.tabs {
                     if let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind
@@ -627,13 +574,21 @@ impl App {
                 ));
             }
             DatabaseEvent::ConnectionSecretsSaved { connection, .. } => {
+                if let Some(secrets) = self
+                    .ide_panel
+                    .database
+                    .pending_session_secrets
+                    .remove(&connection.id)
+                {
+                    self.ide_panel.database.session_secrets.insert(connection.id, secrets);
+                }
                 if let Some(index) = self.ide_panel.database.connection_index(connection.id) {
                     self.ide_panel.database.connections[index] = DatabaseConnectionNode::new(connection);
                 } else {
                     self.ide_panel.database.connections.push(DatabaseConnectionNode::new(connection));
                 }
                 self.ide_panel.database.dialog = None;
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.save_database_panel_state();
             }
             DatabaseEvent::ConnectionSecretsDeleted { connection_id, .. } => {
@@ -644,15 +599,29 @@ impl App {
                 self.ide_panel.database.selected_connection = None;
                 self.ide_panel.database.selected_database = None;
                 self.ide_panel.database.delete_prompt = None;
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.save_database_panel_state();
             }
             DatabaseEvent::HostKeyConfirmationRequired { job_id, host, port, algorithm, fingerprint } => {
-                self.ide_panel.database.host_key_prompt = Some(DatabaseHostKeyPrompt { job_id, host, port, algorithm, fingerprint });
+                let retry = self
+                    .ide_panel
+                    .database
+                    .active_command
+                    .take()
+                    .zip(self.ide_panel.database.pending_job.take());
+                self.ide_panel.database.host_key_retry = retry;
+                self.ide_panel.database.host_key_prompt = Some(DatabaseHostKeyPrompt {
+                    job_id,
+                    host,
+                    port,
+                    algorithm,
+                    fingerprint,
+                });
             }
             DatabaseEvent::JobFailed { message, .. } => {
                 let mut handled_locally = false;
                 if let Some(pending) = pending.as_ref() {
+                    self.recover_database_pending_job(pending, &message, false);
                     if let Some(node) = self.ide_panel.database.connection_mut(pending.connection_id) {
                         node.loading = false;
                         node.status = DatabaseConnectionStatus::Error;
@@ -713,13 +682,17 @@ impl App {
                                 }
                                 state.grid.abort_pending_view();
                             }
-                            DatabasePendingJobKind::BeginTableSave
-                            | DatabasePendingJobKind::CommitTransaction
-                            | DatabasePendingJobKind::RollbackTransaction => {
+                            DatabasePendingJobKind::BeginTableSave => {
                                 handled_locally = true;
                                 state.grid.pending_close_after_save = false;
                                 state.error = Some(message.clone());
                                 self.ide_panel.database.table_modal = None;
+                            }
+                            DatabasePendingJobKind::CommitTransaction
+                            | DatabasePendingJobKind::RollbackTransaction => {
+                                handled_locally = true;
+                                state.grid.pending_close_after_save = false;
+                                state.error = Some(message.clone());
                             }
                             DatabasePendingJobKind::LoadMetadata => {
                                 handled_locally = true;
@@ -753,11 +726,12 @@ impl App {
                 } else {
                     Some(message)
                 };
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
             DatabaseEvent::JobCancelled { .. } => {
                 let mut cancelled_query_history = None;
                 if let Some(pending) = pending.as_ref() {
+                    self.recover_database_pending_job(pending, "Запрос отменён", true);
                     for tab in &mut self.tabs {
                         let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind else { continue; };
                         if meta.connection_id != pending.connection_id { continue; }
@@ -773,11 +747,13 @@ impl App {
                                 state.grid.in_flight_chunk = None;
                                 state.grid.abort_pending_view();
                             }
-                            DatabasePendingJobKind::BeginTableSave
-                            | DatabasePendingJobKind::CommitTransaction
-                            | DatabasePendingJobKind::RollbackTransaction => {
+                            DatabasePendingJobKind::BeginTableSave => {
                                 state.grid.pending_close_after_save = false;
                                 self.ide_panel.database.table_modal = None;
+                            }
+                            DatabasePendingJobKind::CommitTransaction
+                            | DatabasePendingJobKind::RollbackTransaction => {
+                                state.grid.pending_close_after_save = false;
                             }
                             _ => {}
                         }
@@ -805,16 +781,11 @@ impl App {
                         }
                     }
                 }
-                for tab in &mut self.tabs {
-                    if let EditorTabKind::DatabaseQuery(_, state) = &mut tab.kind {
-                        state.running = false;
-                    }
-                }
                 if let Some(history) = cancelled_query_history {
                     self.record_database_query_history(history);
                 }
                 self.ide_panel.database.notice = Some("Запрос отменён".to_string());
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
                 self.ide_panel.database.pending_query_mode = None;
             }
             DatabaseEvent::Busy { active_job_id, .. } => {
@@ -822,6 +793,9 @@ impl App {
                     "Сейчас уже выполняется запрос {:?}. Отмените его или дождитесь завершения.",
                     active_job_id
                 );
+                if let Some(pending) = pending.as_ref() {
+                    self.recover_database_pending_job(pending, &message, false);
+                }
                 if let Some(pending) = pending.as_ref()
                     && matches!(
                         pending.kind,
@@ -855,9 +829,10 @@ impl App {
                     }
                 }
                 self.ide_panel.database.global_error = None;
-                self.ide_panel.database.pending_job = None;
+                self.finish_database_active_job(false);
             }
         }
+        self.drain_database_command_queue();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -889,4 +864,27 @@ fn apply_connection_notices(
         }
     });
     node.status = connection_status(backend);
+}
+
+
+fn database_event_matches_active_job(
+    event_job_id: Option<crate::app::database::DatabaseJobId>,
+    active_job_id: Option<crate::app::database::DatabaseJobId>,
+) -> bool {
+    event_job_id.is_none() || event_job_id == active_job_id
+}
+
+#[cfg(test)]
+mod database_app_event_method_regression_tests {
+    use super::*;
+
+    #[test]
+    fn bug_44_stale_database_event_cannot_consume_new_active_job() {
+        let old = crate::app::database::DatabaseJobId(10);
+        let active = crate::app::database::DatabaseJobId(11);
+        assert!(!database_event_matches_active_job(Some(old), Some(active)));
+        assert!(database_event_matches_active_job(Some(active), Some(active)));
+        assert!(!database_event_matches_active_job(Some(old), None));
+        assert!(database_event_matches_active_job(None, Some(active)));
+    }
 }

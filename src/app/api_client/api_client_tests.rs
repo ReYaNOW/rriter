@@ -1010,7 +1010,7 @@ mod tests {
         auth.entry_mut(ApiSpecId(7), "BearerJwt").refresh_token = "refresh".to_string();
         auth.entry_mut(ApiSpecId(7), "BasicAuth").username = "user".to_string();
         auth.entry_mut(ApiSpecId(7), "BasicAuth").password = "pass".to_string();
-        save_api_auth(&auth);
+        let _ = save_api_auth(&auth);
 
         let record = std::fs::read(api_auth_path()).expect("auth record");
         let plain = crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE)
@@ -1062,7 +1062,7 @@ mod tests {
                 .map(|entry| entry.access_token.as_str()),
             Some("legacy")
         );
-        save_api_auth(&loaded);
+        let _ = save_api_auth(&loaded);
         let record = std::fs::read(api_auth_path()).unwrap();
         assert_eq!(
             crate::platform::open_user_secret(&record, API_AUTH_SECRET_PURPOSE).unwrap(),
@@ -2056,7 +2056,7 @@ mod tests {
             selected: true,
             error: None,
         });
-        save_url_cache(ApiSpecId(7), &sample_spec().to_string());
+        save_url_cache(ApiSpecId(7), &sample_spec().to_string()).unwrap();
         state.persist();
 
         let loaded = ApiClientState::load_persisted();
@@ -2448,4 +2448,51 @@ mod tests {
         assert!(!state.mock_python_install_running);
     }
 
+}
+
+#[test]
+fn r3_103_url_cache_write_failure_is_reported() {
+    let root = std::env::temp_dir().join(format!("rriter-r3-url-cache-{}", crate::platform::next_operation_id()));
+    std::fs::write(&root, b"not a directory").unwrap();
+    let target = root.join("spec.json");
+    let error = save_url_cache_to(&target, "{}").unwrap_err();
+    assert!(error.contains("OpenAPI URL cache"));
+    let _ = std::fs::remove_file(root);
+}
+
+#[test]
+fn r3_104_corrupt_api_auth_is_reported_and_backed_up() {
+    let root = std::env::temp_dir().join(format!("rriter-r3-auth-{}", crate::platform::next_operation_id()));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("api_auth.json");
+    std::fs::write(&path, b"definitely not a sealed secret").unwrap();
+    let error = load_api_auth_from_checked(&path).unwrap_err();
+    assert!(error.contains("API credentials"));
+    assert!(std::fs::read_dir(&root).unwrap().flatten().any(|entry| {
+        entry.file_name().to_string_lossy().starts_with("api_auth.corrupt-")
+    }));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+
+#[test]
+fn preproduction_corrupt_api_specs_are_reported_and_backed_up() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-preproduction-api-specs-{}",
+        crate::platform::next_operation_id()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("api_specs.json");
+    std::fs::write(&path, b"{broken").unwrap();
+
+    let error = load_api_specs_from_checked(&path).unwrap_err();
+
+    assert!(error.contains("API specifications"));
+    assert!(std::fs::read_dir(&root).unwrap().flatten().any(|entry| {
+        entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with("api_specs.corrupt-")
+    }));
+    let _ = std::fs::remove_dir_all(root);
 }

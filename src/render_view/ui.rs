@@ -518,7 +518,11 @@ impl Renderer {
     ) -> Option<IconAtlasEntry> {
         use crate::app::file_tree::RasterizedIconState;
 
-        let mut cache = crate::app::file_tree::RASTERIZED_ICONS.lock().unwrap();
+        let mut cache = crate::platform::recover_poisoned(
+            crate::app::file_tree::RASTERIZED_ICONS
+                .lock()
+                .map_err(std::sync::PoisonError::into_inner),
+        );
 
         if let Some(state) = cache.remove(key) {
             match state {

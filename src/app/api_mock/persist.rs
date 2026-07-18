@@ -64,28 +64,44 @@ fn lan_bind_host(_bind_host: &str) -> &'static str {
     API_MOCK_LAN_BIND_HOST
 }
 
+#[allow(dead_code)]
 pub fn load_api_mocks() -> ApiMockState {
-    load_api_mocks_from(&api_mocks_path())
+    load_api_mocks_checked().unwrap_or_default()
+}
+
+pub fn load_api_mocks_checked() -> Result<ApiMockState, String> {
+    load_api_mocks_from_checked(&api_mocks_path())
+}
+
+fn load_api_mocks_from_checked(path: &Path) -> Result<ApiMockState, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(ApiMockState::default());
+        }
+        Err(error) => return Err(format!("API mock configuration не прочитана: {error}")),
+    };
+    match serde_json::from_str::<ApiMockPersist>(&content) {
+        Ok(saved) => Ok(ApiMockState::from(saved)),
+        Err(error) => {
+            let backup_note = crate::platform::corrupt_file_backup_note(path);
+            Err(format!("API mock configuration повреждена: {error}{backup_note}"))
+        }
+    }
 }
 
 fn load_api_mocks_from(path: &Path) -> ApiMockState {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<ApiMockPersist>(&content).ok())
-        .map(ApiMockState::from)
-        .unwrap_or_default()
+    load_api_mocks_from_checked(path).unwrap_or_default()
 }
 
-pub fn save_api_mocks(state: &ApiMockState) {
-    save_api_mocks_to(&api_mocks_path(), state);
+pub fn save_api_mocks(state: &ApiMockState) -> Result<(), String> {
+    save_api_mocks_to(&api_mocks_path(), state)
 }
 
-fn save_api_mocks_to(path: &Path, state: &ApiMockState) {
+fn save_api_mocks_to(path: &Path, state: &ApiMockState) -> Result<(), String> {
     let saved = ApiMockPersist::from(state);
-    let Ok(content) = serde_json::to_vec_pretty(&saved) else {
-        return;
-    };
-    let _ = crate::platform::atomic_write(path, &content);
+    let content = serde_json::to_vec_pretty(&saved).map_err(|err| err.to_string())?;
+    crate::platform::atomic_write(path, &content).map_err(|err| err.to_string())
 }
 
 pub fn api_mocks_path() -> PathBuf {
@@ -164,7 +180,7 @@ mod tests {
             output_fields: Vec::new(),
         });
 
-        save_api_mocks_to(&path, &state);
+        let _ = save_api_mocks_to(&path, &state);
         let loaded = load_api_mocks_from(&path);
 
         assert!(!loaded.enabled);
@@ -260,7 +276,7 @@ mod tests {
         state.uv.custom_python_path = Some(PathBuf::from("/opt/python/bin/python"));
         state.uv.python_version = "3.12".to_string();
 
-        save_api_mocks_to(&path, &state);
+        let _ = save_api_mocks_to(&path, &state);
         let loaded = load_api_mocks_from(&path);
 
         assert_eq!(loaded.uv.mode, ApiPythonRuntimeMode::CustomPython);
@@ -371,7 +387,7 @@ mod tests {
             extra_output_fields: Vec::new(),
         });
 
-        save_api_mocks_to(&path, &state);
+        let _ = save_api_mocks_to(&path, &state);
         let loaded = load_api_mocks_from(&path);
         let script = loaded.route_overrides[0].python.as_ref().expect("script");
 
@@ -379,4 +395,22 @@ mod tests {
         assert_eq!(script.contract.query.fields[0].name, "page");
         cleanup_test_path(&path);
     }
+
+    #[test]
+    fn r3_105_corrupt_mock_state_is_reported_and_backed_up() {
+        let path = test_persist_path("r3-corrupt");
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        std::fs::write(&path, "{broken json").unwrap();
+        let error = load_api_mocks_from_checked(&path).unwrap_err();
+        assert!(error.contains("повреждена"));
+        let parent = path.parent().unwrap();
+        let stem = path.file_stem().unwrap().to_string_lossy();
+        assert!(std::fs::read_dir(parent).unwrap().flatten().any(|entry| {
+            entry.file_name().to_string_lossy().starts_with(&format!("{stem}.corrupt-"))
+        }));
+        cleanup_test_path(&path);
+    }
+
 }

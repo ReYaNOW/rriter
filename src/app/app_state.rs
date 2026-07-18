@@ -351,6 +351,7 @@ pub struct IdePanelState {
     pub is_resizing_left: bool,
     pub is_resizing_bottom: bool,
     pub file_tree_nodes: Vec<crate::app::file_tree::FileNode>,
+    pub file_tree_error: Option<String>,
     pub file_tree_expanded: FxHashSet<std::path::PathBuf>,
     pub explorer_scroll: crate::scroll::ScrollState,
     pub file_tree_hovered_idx: Option<usize>,
@@ -458,6 +459,7 @@ impl Default for IdePanelState {
             is_resizing_left: false,
             is_resizing_bottom: false,
             file_tree_nodes: Vec::new(),
+            file_tree_error: None,
             file_tree_expanded: FxHashSet::default(),
             explorer_scroll: crate::scroll::ScrollState::new(15.0),
             file_tree_hovered_idx: None,
@@ -527,6 +529,25 @@ impl IdePanelState {
         } else {
             lsp.and_then(|manager| manager.diagnostic_at(path, index))
         }
+    }
+
+    pub fn visible_problem_row_count(
+        &self,
+        lsp: Option<&crate::lsp::LspManager>,
+    ) -> usize {
+        self.flat_diags
+            .iter()
+            .filter(|(path, index)| self.problem_row_visible(lsp, path, *index))
+            .count()
+    }
+
+    pub fn problem_row_visible(
+        &self,
+        lsp: Option<&crate::lsp::LspManager>,
+        path: &std::path::Path,
+        index: usize,
+    ) -> bool {
+        index == usize::MAX || self.problem_diagnostic(lsp, path, index).is_some()
     }
 
     pub fn problem_counts(
@@ -691,6 +712,13 @@ impl IdePanelState {
                 && (slot.id != PanelId::Terminal || self.terminal_focused)
         })
     }
+}
+
+pub(crate) fn problems_scroll_content_height(visible_rows: usize, item_h: f32) -> f32 {
+    if !item_h.is_finite() || item_h <= 0.0 {
+        return 0.0;
+    }
+    visible_rows as f32 * item_h
 }
 
 #[inline(always)]
@@ -949,12 +977,16 @@ pub struct App {
     pub last_click_pos: (f32, f32),
 
     pub pending_action: PendingAction,
+    pub pending_action_waiting_for_save_as: bool,
+    pub pending_action_ready: bool,
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_body_file_rx:
         Option<std::sync::mpsc::Receiver<crate::app::api_client::ApiBodyFilePickResult>>,
-    pub api_load_rx: Vec<std::sync::mpsc::Receiver<crate::app::api_client::ApiLoadResult>>,
+    pub api_openapi_export_rx:
+        Option<std::sync::mpsc::Receiver<Result<Option<PathBuf>, String>>>,
+    pub api_load_rx: Vec<crate::app::api_client::ApiLoadReceiver>,
     pub api_request_rx: Vec<(
         u64,
         std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>,
@@ -1053,7 +1085,7 @@ pub struct App {
     pub file_tree_watcher_stop_tx: Option<std::sync::mpsc::Sender<()>>,
     pub file_tree_watched_dirs: Vec<PathBuf>,
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
-    pub git_diff_rx: Vec<std::sync::mpsc::Receiver<crate::app::git_diff::GitDiffEvent>>,
+    pub git_diff_rx: Vec<crate::app::git_diff::GitDiffReceiver>,
     pub inline_git_diff_rx:
         Option<std::sync::mpsc::Receiver<crate::app::git_diff::InlineGitDiffEvent>>,
     pub inline_git_popup: Option<InlineGitPopup>,
@@ -1365,5 +1397,51 @@ mod tests {
         assert!(PanelId::LspServers.icon() == crate::widgets::IconType::LspServers);
         assert!(PanelId::ApiClient.icon() == crate::widgets::IconType::Api);
         assert_eq!(IdePanelState::default().bottom_height, 180.0);
+    }
+
+    fn problem_test_diagnostic(message: &str) -> crate::lsp::Diagnostic {
+        crate::lsp::Diagnostic {
+            start_line: 0,
+            start_col: 0,
+            end_line: 0,
+            end_col: 1,
+            severity: crate::lsp::DiagSeverity::Error,
+            code: None,
+            code_href: None,
+            message: std::sync::Arc::<str>::from(message),
+            source: None,
+            quickfixes: Box::new([]),
+            tags: Box::new([]),
+        }
+    }
+
+    #[test]
+    fn bug_34_stale_problem_rows_do_not_consume_layout_slots() {
+        let path = std::path::PathBuf::from("query.sql");
+        let mut panel = IdePanelState::default();
+        panel.query_problem_path = Some(path.clone());
+        panel.query_problem_diagnostics = vec![problem_test_diagnostic("valid")];
+        panel.flat_diags = vec![(path.clone(), 0), (path.clone(), 99), (path.clone(), 0)];
+
+        let visible = panel
+            .flat_diags
+            .iter()
+            .filter(|(path, index)| panel.problem_row_visible(None, path, *index))
+            .count();
+        assert_eq!(visible, 2);
+        assert!(!panel.problem_row_visible(None, &path, 99));
+    }
+
+    #[test]
+    fn bug_38_problem_scroll_height_counts_only_renderable_rows() {
+        let path = std::path::PathBuf::from("query.sql");
+        let mut panel = IdePanelState::default();
+        panel.query_problem_path = Some(path.clone());
+        panel.query_problem_diagnostics = vec![problem_test_diagnostic("valid")];
+        panel.flat_diags = vec![(path.clone(), usize::MAX), (path.clone(), 0), (path, 42)];
+        let rows = panel.visible_problem_row_count(None);
+        assert_eq!(rows, 2);
+        assert_eq!(problems_scroll_content_height(rows, 24.0), 48.0);
+        assert_eq!(problems_scroll_content_height(rows, f32::NAN), 0.0);
     }
 }

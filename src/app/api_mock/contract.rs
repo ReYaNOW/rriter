@@ -471,30 +471,42 @@ fn parse_literal_values(type_text: &str) -> Vec<String> {
         return Vec::new();
     };
     let rest = &type_text[start + "Literal[".len()..];
-    let Some(end) = rest.find(']') else {
-        return Vec::new();
-    };
     let mut values = Vec::new();
-    let mut quote = None;
-    let mut current = String::new();
+    let mut quote_start = None;
+    let mut quote = 0u8;
     let mut escaped = false;
-    for ch in rest[..end].chars() {
-        if let Some(quoted) = quote {
+    let mut depth = 1usize;
+    for (idx, byte) in rest.bytes().enumerate() {
+        if quote != 0 {
             if escaped {
-                current.push(ch);
                 escaped = false;
-            } else if ch == '\\' {
+            } else if byte == b'\\' {
                 escaped = true;
-            } else if ch == quoted {
-                values.push(current.clone());
-                current.clear();
-                quote = None;
-            } else {
-                current.push(ch);
+            } else if byte == quote {
+                if let Some(start) = quote_start.take()
+                    && let Some(value) = crate::languages::decode_python_string_literal(
+                        &rest[start..=idx],
+                    )
+                {
+                    values.push(value);
+                }
+                quote = 0;
             }
-        } else if ch == '"' || ch == '\'' {
-            quote = Some(ch);
-            current.clear();
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => {
+                quote = byte;
+                quote_start = Some(idx);
+            }
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
         }
     }
     values
@@ -527,7 +539,7 @@ fn parse_str_enum_defs(text: &str) -> FxHashMap<String, Vec<String>> {
         let Some((_, value)) = trimmed.split_once('=') else {
             continue;
         };
-        if let Ok(value) = serde_json::from_str::<String>(value.trim()) {
+        if let Some(value) = crate::languages::decode_python_string_literal(value) {
             defs.entry(name.clone()).or_default().push(value);
         }
     }
@@ -614,22 +626,16 @@ fn parse_usize_marker(text: &str, marker: &str) -> Option<usize> {
 
 fn parse_string_marker(text: &str, marker: &str) -> Option<String> {
     let arg = parse_marker_arg(text, marker)?;
-    serde_json::from_str::<String>(&arg).ok().or(Some(arg))
+    crate::languages::decode_python_string_literal(&arg)
 }
 
 fn parse_string_or_number_marker(text: &str, marker: &str) -> Option<String> {
-    Some(
-        parse_marker_arg(text, marker)?
-            .trim_matches('"')
-            .to_string(),
-    )
+    let arg = parse_marker_arg(text, marker)?;
+    Some(crate::languages::decode_python_string_literal(&arg).unwrap_or(arg))
 }
 
 fn parse_marker_arg(text: &str, marker: &str) -> Option<String> {
-    let start = text.find(&format!("{marker}("))? + marker.len() + 1;
-    let rest = &text[start..];
-    let end = rest.find(')')?;
-    Some(rest[..end].trim().to_string())
+    crate::languages::python_call_argument(text, marker).map(str::to_string)
 }
 
 fn python_default_to_contract_default(default: &str) -> Option<String> {
@@ -642,8 +648,7 @@ fn python_default_to_contract_default(default: &str) -> Option<String> {
     if default == "False" {
         return Some("false".to_string());
     }
-    serde_json::from_str::<String>(default)
-        .ok()
+    crate::languages::decode_python_string_literal(default)
         .or_else(|| Some(default.to_string()))
 }
 

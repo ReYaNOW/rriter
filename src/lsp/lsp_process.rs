@@ -67,8 +67,26 @@ impl LspRestartBudget {
 }
 
 #[inline(always)]
-fn next_id() -> i32 {
-    NEXT_ID.fetch_add(1, Ordering::Relaxed)
+fn allocate_request_id(counter: &AtomicI32) -> Option<i32> {
+    let mut current = counter.load(Ordering::Relaxed);
+    loop {
+        let id = current.max(1);
+        let next = if id == i32::MAX { 1 } else { id + 1 };
+        match counter.compare_exchange_weak(
+            current,
+            next,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return Some(id),
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+#[inline(always)]
+fn next_id() -> Option<i32> {
+    allocate_request_id(&NEXT_ID)
 }
 
 fn compact_lsp_log_message(message: &str) -> String {
@@ -380,6 +398,25 @@ fn send_and_log(
     out_tx.send(msg)
 }
 
+fn send_tracked_request(
+    out_tx: &Sender<Vec<u8>>,
+    event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    pending_requests: &Mutex<HashMap<i32, PendingRequestKind>>,
+    id: i32,
+    kind: PendingRequestKind,
+    msg: Vec<u8>,
+) -> Result<(), mpsc::SendError<Vec<u8>>> {
+    crate::platform::lock_recover(pending_requests).insert(id, kind);
+    match send_and_log(out_tx, event_tx, server_name, msg) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            crate::platform::lock_recover(pending_requests).remove(&id);
+            Err(error)
+        }
+    }
+}
+
 fn remove_sent_log_text_fields(raw: &str) -> String {
     let Ok(mut value) = serde_json::from_str::<serde_json::Value>(raw) else {
         return raw.to_string();
@@ -476,8 +513,9 @@ fn shutdown_spawned_process(
     event_tx: &Sender<LspEvent>,
     server_name: &'static str,
 ) {
-    let sid = next_id();
-    let _ = send_and_log(&proc.out_tx, event_tx, server_name, make_shutdown(sid));
+    if let Some(sid) = next_id() {
+        let _ = send_and_log(&proc.out_tx, event_tx, server_name, make_shutdown(sid));
+    }
     thread::sleep(Duration::from_millis(100));
     let _ = send_and_log(&proc.out_tx, event_tx, server_name, make_exit());
     match proc.child.wait_timeout(Duration::from_millis(750)) {
@@ -524,9 +562,7 @@ fn run_supervisor(
             }
             restart_delay = (restart_delay * 2).min(Duration::from_secs(10));
         }
-        if let Ok(mut pending) = pending_requests.lock() {
-            pending.clear();
-        }
+        crate::platform::lock_recover(&pending_requests).clear();
         let _ = event_tx.send(LspEvent::StatusChanged {
             name: def.program,
             status: LspServerStatus::Starting,
@@ -565,7 +601,18 @@ fn run_supervisor(
         };
 
         // ── Handshake: initialize ─────────────────────────────────────────
-        init_id = next_id();
+        let Some(next_init_id) = next_id() else {
+            let _ = event_tx.send(LspEvent::Log {
+                name: def.program,
+                message: "[LSP] request id space exhausted".to_string(),
+            });
+            let _ = event_tx.send(LspEvent::StatusChanged {
+                name: def.program,
+                status: LspServerStatus::Disabled,
+            });
+            return;
+        };
+        init_id = next_init_id;
         let init_msg = make_initialize(init_id, &workspaces);
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
@@ -696,25 +743,41 @@ fn run_supervisor(
                     Ok(Cmd::Close { uri }) => {
                         if let Some(ref of) = open_file && of.uri == uri {
                             let msg = make_did_close(&uri);
-                            let _ = send_and_log(&proc.out_tx, &event_tx, def.program, msg);
+                            if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                                break 'inner;
+                            }
                             open_file = None;
                         }
                     }
                     Ok(Cmd::Hover { id, uri, line, col }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::Hover);
-                        }
                         let msg = make_hover(id, &uri, line, col);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::Hover,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
                     Ok(Cmd::Definition { id, uri, line, col }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::Definition);
-                        }
                         let msg = make_definition(id, &uri, line, col);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::Definition,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -725,11 +788,18 @@ fn run_supervisor(
                         col,
                         trigger,
                     }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::Completion);
-                        }
                         let msg = make_completion(id, &uri, line, col, trigger.as_deref());
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::Completion,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -740,11 +810,18 @@ fn run_supervisor(
                         col,
                         trigger,
                     }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::SignatureHelp);
-                        }
                         let msg = make_signature_help(id, &uri, line, col, trigger.as_deref());
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::SignatureHelp,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -756,12 +833,19 @@ fn run_supervisor(
                         end_line,
                         end_col,
                     }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::InlayHint);
-                        }
                         let msg =
                             make_inlay_hint(id, &uri, start_line, start_col, end_line, end_col);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::InlayHint,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -769,11 +853,18 @@ fn run_supervisor(
                         id,
                         previous_result_ids_json,
                     }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::WorkspaceDiagnostic);
-                        }
                         let msg = make_workspace_diagnostic(id, &previous_result_ids_json);
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::WorkspaceDiagnostic,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -787,9 +878,6 @@ fn run_supervisor(
                         diagnostics_json,
                         only,
                     }) => {
-                        if let Ok(mut pending) = pending_requests.lock() {
-                            pending.insert(id, PendingRequestKind::CodeAction);
-                        }
                         let msg = make_code_action(
                             id,
                             &uri,
@@ -800,7 +888,17 @@ fn run_supervisor(
                             &diagnostics_json,
                             only.as_deref(),
                         );
-                        if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::CodeAction,
+                            msg,
+                        )
+                        .is_err()
+                        {
                             break 'inner;
                         }
                     }
@@ -832,6 +930,8 @@ pub struct LspProcess {
     pub open_file_data: Option<(String, Arc<str>)>, // (lang, text) for re-open after restart
     stop: Arc<AtomicBool>,
     supervisor: Option<JoinHandle<()>>,
+    local_events: Mutex<Vec<LspEvent>>,
+    event_disconnected: AtomicBool,
 }
 
 impl LspProcess {
@@ -873,7 +973,26 @@ impl LspProcess {
             open_file_data: None,
             stop,
             supervisor,
+            local_events: Mutex::new(Vec::new()),
+            event_disconnected: AtomicBool::new(false),
         }
+    }
+
+    fn send_command(&self, command: Cmd, action: &str) -> bool {
+        if self.cmd_tx.send(command).is_ok() {
+            return true;
+        }
+        let mut events = crate::platform::lock_recover(&self.local_events);
+        events.push(LspEvent::Log {
+            name: self.def.program,
+            message: format!("[LSP] command channel disconnected while sending {action}"),
+        });
+        events.push(LspEvent::StatusChanged {
+            name: self.def.program,
+            status: LspServerStatus::Disabled,
+        });
+        self.stop.store(true, Ordering::Release);
+        false
     }
 
     /// textDocument/didOpen
@@ -884,42 +1003,65 @@ impl LspProcess {
         text: Arc<str>,
         version: i32,
         _workspace: Option<&PathBuf>,
-    ) {
+    ) -> bool {
         let uri = path_to_uri(path);
-        self.current_uri = Some(uri.clone());
-        self.open_file_data = Some((self.def.language_id.to_string(), text.clone()));
-        let _ = self.cmd_tx.send(Cmd::Open {
-            uri,
-            lang: self.def.language_id,
-            version,
-            text,
-        });
+        if !self.send_command(
+            Cmd::Open {
+                uri: uri.clone(),
+                lang: self.def.language_id,
+                version,
+                text: text.clone(),
+            },
+            "didOpen",
+        ) {
+            return false;
+        }
+        self.current_uri = Some(uri);
+        self.open_file_data = Some((self.def.language_id.to_string(), text));
+        true
     }
 
     /// textDocument/didChange — полный текст (Full Sync).
     /// Вызывать когда editor.sync_edits непуст.
-    pub fn notify_change(&mut self, path: &PathBuf, text: Arc<str>, version: i32) {
+    pub fn notify_change(&mut self, path: &PathBuf, text: Arc<str>, version: i32) -> bool {
         let uri = path_to_uri(path);
-        self.current_uri = Some(uri.clone());
-        let _ = self.cmd_tx.send(Cmd::Change {
-            uri,
-            version,
-            text,
-        });
+        if !self.send_command(
+            Cmd::Change {
+                uri: uri.clone(),
+                version,
+                text,
+            },
+            "didChange",
+        ) {
+            return false;
+        }
+        self.current_uri = Some(uri);
+        true
     }
 
-    pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
-        let id = next_id();
-        let uri = path_to_uri(path);
-        let _ = self.cmd_tx.send(Cmd::Hover { id, uri, line, col });
-        id
+    fn request_position_command(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+        label: &'static str,
+        build: impl FnOnce(i32, String, u32, u32) -> Cmd,
+    ) -> Option<i32> {
+        let id = next_id()?;
+        let command = build(id, path_to_uri(path), line, col);
+        self.send_command(command, label).then_some(id)
     }
 
-    pub fn request_definition(&mut self, path: &PathBuf, line: u32, col: u32) -> i32 {
-        let id = next_id();
-        let uri = path_to_uri(path);
-        let _ = self.cmd_tx.send(Cmd::Definition { id, uri, line, col });
-        id
+    pub fn request_hover(&mut self, path: &PathBuf, line: u32, col: u32) -> Option<i32> {
+        self.request_position_command(path, line, col, "hover", |id, uri, line, col| {
+            Cmd::Hover { id, uri, line, col }
+        })
+    }
+
+    pub fn request_definition(&mut self, path: &PathBuf, line: u32, col: u32) -> Option<i32> {
+        self.request_position_command(path, line, col, "definition", |id, uri, line, col| {
+            Cmd::Definition { id, uri, line, col }
+        })
     }
 
     pub fn request_completion(
@@ -928,17 +1070,17 @@ impl LspProcess {
         line: u32,
         col: u32,
         trigger: Option<&str>,
-    ) -> i32 {
-        let id = next_id();
-        let uri = path_to_uri(path);
-        let _ = self.cmd_tx.send(Cmd::Completion {
-            id,
-            uri,
-            line,
-            col,
-            trigger: trigger.map(str::to_string),
-        });
-        id
+    ) -> Option<i32> {
+        let trigger = trigger.map(str::to_string);
+        self.request_position_command(path, line, col, "completion", move |id, uri, line, col| {
+            Cmd::Completion {
+                id,
+                uri,
+                line,
+                col,
+                trigger,
+            }
+        })
     }
 
     pub fn request_signature_help(
@@ -947,17 +1089,21 @@ impl LspProcess {
         line: u32,
         col: u32,
         trigger: Option<&str>,
-    ) -> i32 {
-        let id = next_id();
-        let uri = path_to_uri(path);
-        let _ = self.cmd_tx.send(Cmd::SignatureHelp {
-            id,
-            uri,
+    ) -> Option<i32> {
+        let trigger = trigger.map(str::to_string);
+        self.request_position_command(
+            path,
             line,
             col,
-            trigger: trigger.map(str::to_string),
-        });
-        id
+            "signature help",
+            move |id, uri, line, col| Cmd::SignatureHelp {
+                id,
+                uri,
+                line,
+                col,
+                trigger,
+            },
+        )
     }
 
     pub fn request_inlay_hints(
@@ -967,36 +1113,46 @@ impl LspProcess {
         start_col: u32,
         end_line: u32,
         end_col: u32,
-    ) -> i32 {
-        let id = next_id();
+    ) -> Option<i32> {
+        let id = next_id()?;
         let uri = path_to_uri(path);
-        let _ = self.cmd_tx.send(Cmd::InlayHint {
-            id,
-            uri,
-            start_line,
-            start_col,
-            end_line,
-            end_col,
-        });
-        id
+        self.send_command(
+            Cmd::InlayHint {
+                id,
+                uri,
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+            },
+            "inlay hints",
+        )
+        .then_some(id)
     }
 
-    pub fn request_workspace_diagnostics(&mut self, previous_result_ids_json: String) -> i32 {
-        let id = next_id();
-        let _ = self.cmd_tx.send(Cmd::WorkspaceDiagnostic {
-            id,
-            previous_result_ids_json,
-        });
-        id
+    pub fn request_workspace_diagnostics(
+        &mut self,
+        previous_result_ids_json: String,
+    ) -> Option<i32> {
+        let id = next_id()?;
+        self.send_command(
+            Cmd::WorkspaceDiagnostic {
+                id,
+                previous_result_ids_json,
+            },
+            "workspace diagnostics",
+        )
+        .then_some(id)
     }
 
     /// textDocument/didClose
     pub fn notify_close(&mut self, path: &PathBuf) {
         let uri = path_to_uri(path);
         if self.current_uri.as_deref() == Some(uri.as_str()) {
-            let _ = self.cmd_tx.send(Cmd::Close { uri });
-            self.current_uri = None;
-            self.open_file_data = None;
+            if self.send_command(Cmd::Close { uri }, "didClose") {
+                self.current_uri = None;
+                self.open_file_data = None;
+            }
         }
     }
 
@@ -1011,32 +1167,49 @@ impl LspProcess {
         end_col: u32,
         diagnostics: &[Diagnostic],
         only: Option<Vec<String>>,
-    ) -> i32 {
-        let id = next_id();
+    ) -> Option<i32> {
+        let id = next_id()?;
         let uri = path_to_uri(path);
 
         // Кодируем диагностики в JSON для контекста запроса
         let diag_json = encode_diagnostics_json(diagnostics);
 
-        let _ = self.cmd_tx.send(Cmd::CodeAction {
-            id,
-            uri,
-            start_line,
-            start_col,
-            end_line,
-            end_col,
-            diagnostics_json: diag_json,
-            only,
-        });
-        id
+        self.send_command(
+            Cmd::CodeAction {
+                id,
+                uri,
+                start_line,
+                start_col,
+                end_line,
+                end_col,
+                diagnostics_json: diag_json,
+                only,
+            },
+            "code actions",
+        )
+        .then_some(id)
     }
 
     /// Опрашивает входящие события (non-blocking). Вызывать раз в кадр.
     pub fn poll(&self, events: &mut Vec<LspEvent>) {
+        events.extend(crate::platform::lock_recover(&self.local_events).drain(..));
         loop {
             match self.event_rx.try_recv() {
                 Ok(e) => events.push(e),
-                Err(TryRecvError::Empty) | Err(TryRecvError::Disconnected) => break,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    if !self.event_disconnected.swap(true, Ordering::AcqRel) {
+                        events.push(LspEvent::Log {
+                            name: self.def.program,
+                            message: "[LSP] supervisor event channel disconnected".to_string(),
+                        });
+                        events.push(LspEvent::StatusChanged {
+                            name: self.def.program,
+                            status: LspServerStatus::Disabled,
+                        });
+                    }
+                    break;
+                }
             }
         }
     }
@@ -1046,7 +1219,11 @@ impl LspProcess {
             let _ = self.cmd_tx.send(Cmd::Shutdown);
         }
         if let Some(supervisor) = self.supervisor.take() {
-            let _ = supervisor.join();
+            if supervisor.is_finished() {
+                let _ = supervisor.join();
+            } else {
+                crate::platform::reap_unit_thread(supervisor);
+            }
         }
     }
 

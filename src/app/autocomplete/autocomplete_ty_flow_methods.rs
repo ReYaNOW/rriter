@@ -764,7 +764,7 @@ impl App {
                     analysis_text: text,
                     path: self.file_path.clone(),
                     line_offsets: self.editor.line_offsets.clone(),
-                    version: self.editor.version.min(i32::MAX as u64) as i32,
+                    version: crate::editor::lsp_document_version(self.editor.version),
                 })
             }
             ActiveAutocompleteSource::ApiMock {
@@ -791,7 +791,7 @@ impl App {
                     analysis_cursor: source_cursor,
                     path: Some(Self::api_mock_virtual_path_for(spec_id, route_idx)),
                     line_offsets,
-                    version: self.ide_panel.api.input_editor.version.min(i32::MAX as u64) as i32,
+                    version: crate::editor::lsp_document_version(self.ide_panel.api.input_editor.version),
                 })
             }
         }

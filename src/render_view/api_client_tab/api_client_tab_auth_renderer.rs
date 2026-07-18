@@ -1,3 +1,37 @@
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ApiAuthRowLayout {
+    input_offset: f32,
+    input_w: f32,
+    save_w: f32,
+    clear_w: f32,
+    input_action_gap: f32,
+    action_gap: f32,
+    compact_actions: bool,
+}
+
+fn api_auth_row_layout(width: f32, scale: f32) -> ApiAuthRowLayout {
+    let width = width.max(0.0);
+    let input_offset = (width * 0.28)
+        .clamp(52.0 * scale, 124.0 * scale)
+        .min((width * 0.42).max(0.0));
+    let after_label = (width - input_offset).max(0.0);
+    let natural_action_w = 84.0 * scale;
+    let gap_total = (14.0 * scale).min(after_label * 0.15);
+    let preferred_input_w = (72.0 * scale).min(after_label * 0.45);
+    let action_w = ((after_label - gap_total - preferred_input_w).max(0.0) * 0.5)
+        .min(natural_action_w);
+    let input_w = (after_label - gap_total - action_w * 2.0).max(0.0);
+    ApiAuthRowLayout {
+        input_offset,
+        input_w,
+        save_w: action_w,
+        clear_w: action_w,
+        input_action_gap: gap_total * (8.0 / 14.0),
+        action_gap: gap_total * (6.0 / 14.0),
+        compact_actions: action_w < 62.0 * scale,
+    }
+}
 impl Renderer {
     fn draw_api_section_title(&mut self, text: &str, x: f32, y: f32, _s: f32) {
         self.draw_string_scaled_stable(
@@ -116,24 +150,34 @@ impl Renderer {
         let row_h = api_auth_scheme_row_height(scheme, s);
         let label_x = x + 12.0 * s;
         let text_y = y + 24.0 * s;
-        self.draw_string_scaled_stable(&scheme.name, label_x, text_y, self.theme.fg, 0.90);
-        self.draw_string_scaled_stable(
+        let layout = api_auth_row_layout(w, s);
+        let mut label_scratch = String::new();
+        let label_max_w = (layout.input_offset - 24.0 * s).max(1.0);
+        self.draw_tree_label_clipped(
+            &scheme.name,
+            label_x,
+            text_y,
+            label_max_w,
+            self.theme.fg,
+            0.90,
+            &mut label_scratch,
+        );
+        self.draw_tree_label_clipped(
             &scheme.summary(),
             label_x,
             text_y + 18.0 * s,
+            label_max_w,
             [0.35, 0.75, 1.0, 1.0],
             API_FIELD_META_SCALE,
+            &mut label_scratch,
         );
 
-        let save_w = 84.0 * s;
-        let clear_w = 84.0 * s;
-        let controls_w = save_w + clear_w + 28.0 * s;
-        let min_input_w = 120.0 * s;
-        let mut input_x = x + (w * 0.30).max(124.0 * s);
-        if w - (input_x - x) - controls_w < min_input_w {
-            input_x = x + (w - controls_w - min_input_w).max(90.0 * s);
-        }
-        let input_w = (w - (input_x - x) - controls_w).max(min_input_w);
+        let save_w = layout.save_w;
+        let clear_w = layout.clear_w;
+        let input_x = x + layout.input_offset;
+        let input_w = layout.input_w;
+        let save_label = if layout.compact_actions { "✓" } else { "Сохранить" };
+        let clear_label = if layout.compact_actions { "×" } else { "Очистить" };
         let entry = ide_panel.api.auth.entry(spec_id, &scheme.name);
         if matches!(
             scheme.kind,
@@ -247,11 +291,11 @@ impl Renderer {
                 my,
             );
             let save = Button {
-                x: input_x + input_w + 8.0 * s,
+                x: input_x + input_w + layout.input_action_gap,
                 y: y + 14.0 * s,
                 w: save_w,
                 h: 30.0 * s,
-                text: "Сохранить".to_string(),
+                text: save_label.to_string(),
                 icon: None,
                 text_scale: API_FIELD_META_SCALE,
                 icon_size: 0.0,
@@ -266,11 +310,11 @@ impl Renderer {
                 false,
             );
             let clear = Button {
-                x: save.x + save.w + 6.0 * s,
+                x: save.x + save.w + layout.action_gap,
                 y: save.y,
                 w: clear_w,
                 h: 30.0 * s,
-                text: "Очистить".to_string(),
+                text: clear_label.to_string(),
                 icon: None,
                 text_scale: API_FIELD_META_SCALE,
                 icon_size: 0.0,
@@ -331,11 +375,11 @@ impl Renderer {
 
         let btn_y = y + (row_h - 30.0 * s) * 0.5;
         let save = Button {
-            x: input_x + input_w + 8.0 * s,
+            x: input_x + input_w + layout.input_action_gap,
             y: btn_y,
             w: save_w,
             h: 30.0 * s,
-            text: "Сохранить".to_string(),
+            text: save_label.to_string(),
             icon: None,
             text_scale: API_FIELD_META_SCALE,
             icon_size: 0.0,
@@ -350,11 +394,11 @@ impl Renderer {
             false,
         );
         let clear = Button {
-            x: save.x + save.w + 6.0 * s,
+            x: save.x + save.w + layout.action_gap,
             y: btn_y,
             w: clear_w,
             h: 30.0 * s,
-            text: "Очистить".to_string(),
+            text: clear_label.to_string(),
             icon: None,
             text_scale: API_FIELD_META_SCALE,
             icon_size: 0.0,

@@ -69,7 +69,7 @@ impl TerminalProcess {
         let process_id = child.process_id().ok_or_else(|| {
             io::Error::other("terminal backend did not expose the child process id")
         })?;
-        let tree = match ProcessTree::attach_process_id(process_id) {
+        let mut tree = match ProcessTree::attach_process_id(process_id) {
             Ok(tree) => tree,
             Err(error) => {
                 let _ = child.kill();
@@ -90,7 +90,13 @@ impl TerminalProcess {
             .take_writer()
             .map_err(|error| io::Error::other(format!("failed to take PTY writer: {error}")))?;
         let writer = Arc::new(Mutex::new(writer));
-        install_terminal_io_threads(&grid, reader, writer.clone(), window);
+        if let Err(error) = install_terminal_io_threads(&grid, reader, writer.clone(), window) {
+            let _ = tree.terminate_forcefully();
+            let _ = child.kill();
+            let _ = child.wait();
+            tree.finish_after_owner_exit();
+            return Err(error);
+        }
 
         Ok((
             Self {
@@ -180,42 +186,12 @@ fn install_terminal_io_threads(
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     window: Option<Arc<winit::window::Window>>,
-) {
+) -> io::Result<()> {
     let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    if let Ok(mut grid) = grid.lock() {
-        grid.reply_tx = Some(reply_tx);
-    }
-
-    std::thread::spawn(move || {
-        while let Ok(message) = reply_rx.recv() {
-            let Ok(mut writer) = writer.lock() else {
-                break;
-            };
-            if writer.write_all(&message).is_err() || writer.flush().is_err() {
-                break;
-            }
-        }
-    });
-
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
-        let mut reader = reader;
-        let mut buffer = [0_u8; 65_536];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => {
-                    if tx.send(buffer[..read].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
-            }
-        }
-    });
 
-    let grid = grid.clone();
-    std::thread::spawn(move || {
+    let parser_grid = grid.clone();
+    crate::platform::spawn_named("rriter-terminal-parser", move || {
         let mut parser = Parser::new();
         while let Ok(first) = rx.recv() {
             let mut chunks = vec![first];
@@ -232,7 +208,7 @@ fn install_terminal_io_threads(
                 }
             }
 
-            let Ok(mut grid) = grid.lock() else {
+            let Ok(mut grid) = parser_grid.lock() else {
                 break;
             };
             for chunk in &chunks {
@@ -244,7 +220,40 @@ fn install_terminal_io_threads(
                 window.request_redraw();
             }
         }
-    });
+    })
+    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal parser: {error}")))?;
+
+    crate::platform::spawn_named("rriter-terminal-reader", move || {
+        let mut reader = reader;
+        let mut buffer = [0_u8; 65_536];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if tx.send(buffer[..read].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+    })
+    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal reader: {error}")))?;
+
+    crate::platform::spawn_named("rriter-terminal-writer", move || {
+        while let Ok(message) = reply_rx.recv() {
+            let Ok(mut writer) = writer.lock() else {
+                break;
+            };
+            if writer.write_all(&message).is_err() || writer.flush().is_err() {
+                break;
+            }
+        }
+    })
+    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal writer: {error}")))?;
+
+    crate::platform::lock_recover(&grid).reply_tx = Some(reply_tx);
+    Ok(())
 }
 
 pub(crate) fn resolve_terminal_shell() -> io::Result<TerminalShellSpec> {

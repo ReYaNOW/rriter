@@ -209,7 +209,7 @@ pub(crate) fn start_system_ssh_tunnel_cancelable(
         .take_stderr()
         .ok_or_else(|| io::Error::other("system SSH stderr was not piped"))?;
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let stderr_reader = Some(spawn_bounded_stderr_reader(stderr_pipe, Arc::clone(&stderr)));
+    let stderr_reader = Some(spawn_bounded_stderr_reader(stderr_pipe, Arc::clone(&stderr))?);
     let mut tunnel = SystemSshTunnel {
         child,
         stderr,
@@ -331,18 +331,17 @@ fn system_jump_target(config: &SshJumpHostConfig) -> io::Result<String> {
 fn spawn_bounded_stderr_reader(
     mut pipe: impl Read + Send + 'static,
     output: Arc<Mutex<Vec<u8>>>,
-) -> thread::JoinHandle<()> {
-    thread::spawn(move || {
+) -> io::Result<thread::JoinHandle<()>> {
+    crate::platform::spawn_named("rriter-ssh-stderr", move || {
         const LIMIT: usize = 64 * 1024;
         let mut buffer = [0_u8; 4096];
         loop {
             match pipe.read(&mut buffer) {
                 Ok(0) | Err(_) => break,
                 Ok(count) => {
-                    if let Ok(mut output) = output.lock() {
-                        let remaining = LIMIT.saturating_sub(output.len());
-                        output.extend_from_slice(&buffer[..count.min(remaining)]);
-                    }
+                    let mut output = crate::platform::lock_recover(&output);
+                    let remaining = LIMIT.saturating_sub(output.len());
+                    output.extend_from_slice(&buffer[..count.min(remaining)]);
                 }
             }
         }

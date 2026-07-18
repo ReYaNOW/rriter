@@ -444,7 +444,7 @@ impl App {
             let active = self.ide_panel.active_terminal;
             let mut clipboard_text = None;
             if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                let mut grid = term.grid.lock().unwrap();
+                let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                 let input = match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
                         if primary && grid.selection.is_some() {
@@ -503,7 +503,7 @@ impl App {
                         .terminals
                         .get_mut(self.ide_panel.active_terminal)
                     {
-                        term.grid.lock().unwrap().selection = None;
+                        crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
                     }
                 }
                 PhysicalKey::Code(KeyCode::Enter) => {

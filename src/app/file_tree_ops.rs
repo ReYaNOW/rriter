@@ -80,6 +80,17 @@ pub(super) fn unique_child_path(target_dir: &Path, name: impl AsRef<OsStr>) -> P
     target_dir.join(copy_candidate_name(name, 10_000))
 }
 
+fn copy_cleanup_error(dst: &Path, error: std::io::Error) -> std::io::Error {
+    match crate::platform::remove_path_entry(dst) {
+        Ok(()) => error,
+        Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => error,
+        Err(cleanup) => std::io::Error::new(
+            error.kind(),
+            format!("{error}; не удалось удалить неполную копию {}: {cleanup}", dst.display()),
+        ),
+    }
+}
+
 pub(super) fn copy_path_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     let metadata = std::fs::symlink_metadata(src)?;
     if crate::platform::metadata_is_link(&metadata) {
@@ -95,18 +106,14 @@ pub(super) fn copy_path_recursive(src: &Path, dst: &Path) -> std::io::Result<()>
             std::fs::set_permissions(dst, metadata.permissions())?;
             Ok(())
         })();
-        if copy_result.is_err() {
-            let _ = crate::platform::remove_path_entry(dst);
-        }
-        copy_result
+        copy_result.map_err(|error| copy_cleanup_error(dst, error))
     } else {
-        let copy_result = std::fs::copy(src, dst).map(|_| ());
-        if copy_result.is_err() {
-            let _ = std::fs::remove_file(dst);
-        } else {
-            let _ = std::fs::set_permissions(dst, metadata.permissions());
-        }
-        copy_result
+        let copy_result = (|| {
+            std::fs::copy(src, dst)?;
+            std::fs::set_permissions(dst, metadata.permissions())?;
+            Ok(())
+        })();
+        copy_result.map_err(|error| copy_cleanup_error(dst, error))
     }
 }
 
@@ -134,7 +141,6 @@ pub(super) fn cross_volume_move(src: &Path, dst: &Path) -> Result<(), String> {
 
     std::fs::rename(src, &staging).map_err(|error| error.to_string())?;
     if let Err(copy_error) = copy_path_recursive(&staging, dst) {
-        let _ = delete_path(dst);
         return match std::fs::rename(&staging, src) {
             Ok(()) => Err(copy_error.to_string()),
             Err(rollback_error) => Err(format!(
@@ -145,14 +151,26 @@ pub(super) fn cross_volume_move(src: &Path, dst: &Path) -> Result<(), String> {
     }
 
     if let Err(delete_error) = delete_path(&staging) {
-        return match std::fs::rename(&staging, src) {
-            Ok(()) => Err(format!(
-                "Копирование завершено, но исходный путь не удалось удалить: {delete_error}; исходник восстановлен"
+        let destination_cleanup = delete_path(dst);
+        let source_restore = std::fs::rename(&staging, src);
+        return match (destination_cleanup, source_restore) {
+            (Ok(()), Ok(())) => Err(format!(
+                "Копирование завершено, но исходный путь не удалось удалить: {delete_error}; операция полностью откачена"
             )),
-            Err(restore_error) => Err(format!(
-                "Копирование завершено, но временный исходный путь {} не удалось удалить: {delete_error}; восстановление имени также не удалось: {restore_error}",
-                staging.display()
-            )),
+            (cleanup, restore) => {
+                let cleanup = cleanup
+                    .err()
+                    .map(|error| format!("; копию {} удалить не удалось: {error}", dst.display()))
+                    .unwrap_or_default();
+                let restore = restore
+                    .err()
+                    .map(|error| format!("; имя исходника {} восстановить не удалось: {error}", src.display()))
+                    .unwrap_or_default();
+                Err(format!(
+                    "Копирование завершено, но временный исходный путь {} не удалось удалить: {delete_error}{cleanup}{restore}",
+                    staging.display()
+                ))
+            }
         };
     }
     Ok(())
@@ -284,8 +302,14 @@ pub(super) fn trash_single_path_with_layout(
         trash_deletion_date()
     );
     if let Err(error) = crate::platform::atomic_write(&info_path, info.as_bytes()) {
-        let _ = move_path_exact(&trash_path, path);
-        return Err(error.to_string());
+        return match move_path_exact(&trash_path, path) {
+            Ok(()) => Err(error.to_string()),
+            Err(rollback) => Err(format!(
+                "Не удалось записать метаданные корзины: {error}; откат {} -> {} также не удался: {rollback}",
+                trash_path.display(),
+                path.display()
+            )),
+        };
     }
     Ok(FileTreeTrashEntry {
         original_path: path.to_path_buf(),
@@ -389,11 +413,23 @@ pub(super) fn restore_trash_entries(
             }
         }
     }
+    let mut metadata_errors = Vec::new();
     for (entry, _) in &restored {
-        let _ = std::fs::remove_file(&entry.info_path);
+        if let Err(error) = std::fs::remove_file(&entry.info_path)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            metadata_errors.push(format!("{}: {error}", entry.info_path.display()));
+        }
     }
     restored.reverse();
-    Ok(restored.into_iter().map(|(_, path)| path).collect())
+    if metadata_errors.is_empty() {
+        Ok(restored.into_iter().map(|(_, path)| path).collect())
+    } else {
+        Err(format!(
+            "Файлы восстановлены, но не удалось удалить метаданные корзины: {}",
+            metadata_errors.join("; ")
+        ))
+    }
 }
 
 pub(super) fn move_path_to_dir(

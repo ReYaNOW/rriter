@@ -6,6 +6,91 @@ use glow::HasContext;
 pub(crate) const TERMINAL_TEXT_SCALE: f32 = 1.05;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TerminalTabsMetrics {
+    pub available: f32,
+    pub gap: f32,
+    pub per_tab: f32,
+    pub add_size: f32,
+    pub add_x: f32,
+}
+
+pub(crate) fn terminal_tabs_metrics(
+    panel_x: f32,
+    panel_w: f32,
+    tab_count: usize,
+    scale: f32,
+) -> TerminalTabsMetrics {
+    let panel_w = panel_w.max(0.0);
+    let add_reserve = (34.0 * scale).min(panel_w);
+    let available = (panel_w - 16.0 * scale - add_reserve).max(0.0);
+    let gap = if tab_count > 1 {
+        (4.0 * scale).min(available / (tab_count - 1) as f32)
+    } else {
+        0.0
+    };
+    let per_tab = if tab_count == 0 {
+        0.0
+    } else {
+        ((available - gap * tab_count.saturating_sub(1) as f32) / tab_count as f32)
+            .max(0.0)
+    };
+    let add_size = (20.0 * scale).min(panel_w);
+    let add_x = (panel_x + panel_w - 8.0 * scale - add_size).max(panel_x);
+    TerminalTabsMetrics { available, gap, per_tab, add_size, add_x }
+}
+
+#[inline(always)]
+pub(crate) fn clamp_terminal_pty_dimension(value: usize) -> u16 {
+    value.min(u16::MAX as usize) as u16
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TerminalSearchGeometry {
+    pub x: f32,
+    pub w: f32,
+    pub input_w: f32,
+    pub close_x: f32,
+    pub close_size: f32,
+    pub text_viewport_w: f32,
+    pub show_nav: bool,
+    pub show_case: bool,
+    pub counter_reserve: f32,
+}
+
+pub(crate) fn terminal_search_geometry(
+    panel_x: f32,
+    panel_w: f32,
+    scale: f32,
+) -> TerminalSearchGeometry {
+    let panel_w = panel_w.max(0.0);
+    let w = (480.0 * scale).min((panel_w - 16.0 * scale).max(0.0));
+    let x = (panel_x + panel_w - w - 8.0 * scale).max(panel_x);
+    let btn_size = 36.0 * scale;
+    let btn_gap = (10.0 * scale).min(w * 0.025);
+    let show_nav = w >= 250.0 * scale;
+    let show_case = w >= 330.0 * scale;
+    let button_count = 1 + usize::from(show_nav) * 2 + usize::from(show_case);
+    let controls_w = button_count as f32 * btn_size
+        + button_count.saturating_sub(1) as f32 * btn_gap;
+    let counter_reserve = if w >= 235.0 * scale { 52.0 * scale } else { 0.0 };
+    let input_w = (w - 20.0 * scale - controls_w - counter_reserve - 8.0 * scale)
+        .max(0.0);
+    let close_size = btn_size.min(w);
+    let close_x = (x + w - close_size).max(x);
+    TerminalSearchGeometry {
+        x,
+        w,
+        input_w,
+        close_x,
+        close_size,
+        text_viewport_w: (input_w - 10.0 * scale).max(0.0),
+        show_nav,
+        show_case,
+        counter_reserve,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct TerminalScrollbarLayout {
     pub track_x: f32,
     pub track_y: f32,
@@ -158,6 +243,16 @@ impl Renderer {
         let mut cx = panel_x + 8.0 * s;
         let cy = content_y + 6.0 * s;
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        let tab_count = ide_panel.terminals.len();
+        let tab_metrics = terminal_tabs_metrics(panel_x, panel_w, tab_count, s);
+        let tab_gap = tab_metrics.gap;
+        let per_tab_w = tab_metrics.per_tab;
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            panel_x,
+            content_y,
+            panel_w,
+            term_tab_h + 12.0 * s,
+        ));
 
         for i in 0..ide_panel.terminals.len() {
             let is_active = i == ide_panel.active_terminal;
@@ -167,7 +262,10 @@ impl Renderer {
                 format_args!("{} {}", ide_panel.terminals[i].title, i + 1),
             );
             let title_w = self.measure_ui_width(&scratch, 0.9);
-            let tab_w = title_w + 32.0 * s + 24.0 * s;
+            let tab_w = (title_w + 56.0 * s).min(per_tab_w).max(0.0);
+            if tab_w <= 0.0 {
+                continue;
+            }
 
             let is_hovered = mx >= cx && mx <= cx + tab_w && my >= cy && my <= cy + term_tab_h;
             let bg_color = if is_active {
@@ -202,12 +300,18 @@ impl Renderer {
             } else {
                 self.theme.line_num
             };
-            self.draw_string_scaled(
+            let close_visible = tab_w >= 46.0 * s;
+            let title_max_w = (tab_w - if close_visible { 38.0 * s } else { 18.0 * s })
+                .max(0.0);
+            let mut title_scratch = String::new();
+            self.draw_tree_label_clipped(
                 &scratch,
                 cx + 12.0 * s,
                 cy + term_tab_h / 2.0 + 4.0 * s,
+                title_max_w,
                 text_color,
                 0.9,
+                &mut title_scratch,
             );
 
             let close_sz = 18.0 * s;
@@ -217,7 +321,7 @@ impl Renderer {
                 && mx <= close_x + close_sz + 2.0 * s
                 && my >= close_y - 2.0 * s
                 && my <= close_y + close_sz + 2.0 * s;
-            if c_hovered {
+            if close_visible && c_hovered {
                 self.push_rounded_rect(
                     close_x - 2.0 * s,
                     close_y - 2.0 * s,
@@ -227,43 +331,46 @@ impl Renderer {
                     [1.0, 1.0, 1.0, 0.2],
                 );
             }
-            self.draw_atlas_icon(
-                crate::widgets::IconType::Close,
-                close_x,
-                close_y,
-                close_sz,
-                text_color,
-            );
-
-            ui_registry.register_rect(
-                crate::ui_system::UiId::TerminalTabClose(i),
-                close_x - 2.0 * s,
-                close_y - 2.0 * s,
-                close_sz + 4.0 * s,
-                close_sz + 4.0 * s,
-                mx,
-                my,
-            );
+            if close_visible {
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::Close,
+                    close_x,
+                    close_y,
+                    close_sz,
+                    text_color,
+                );
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::TerminalTabClose(i),
+                    close_x - 2.0 * s,
+                    close_y - 2.0 * s,
+                    close_sz + 4.0 * s,
+                    close_sz + 4.0 * s,
+                    mx,
+                    my,
+                );
+            }
             ui_registry.register_rect(
                 crate::ui_system::UiId::TerminalTab(i),
                 cx,
                 cy,
-                tab_w - close_sz - 4.0 * s,
+                (tab_w - if close_visible { close_sz + 4.0 * s } else { 0.0 }).max(0.0),
                 term_tab_h,
                 mx,
                 my,
             );
 
-            cx += tab_w + 4.0 * s;
+            cx += tab_w + tab_gap;
         }
         self.scratch_buffer = scratch;
 
-        let add_sz = 20.0 * s;
+        let add_sz = tab_metrics.add_size;
+        let add_x = tab_metrics.add_x;
         let add_y = (cy + (term_tab_h - add_sz) / 2.0).round();
-        let add_hovered = mx >= cx && mx <= cx + add_sz && my >= add_y && my <= add_y + add_sz;
+        let add_hovered = add_sz > 0.0
+            && mx >= add_x && mx <= add_x + add_sz && my >= add_y && my <= add_y + add_sz;
         if add_hovered {
             self.push_rounded_rect(
-                cx - 2.0 * s,
+                add_x - 2.0 * s,
                 add_y - 2.0 * s,
                 add_sz + 4.0 * s,
                 add_sz + 4.0 * s,
@@ -273,20 +380,21 @@ impl Renderer {
         }
         self.draw_atlas_icon(
             crate::widgets::IconType::Plus,
-            cx,
+            add_x,
             add_y,
             add_sz,
             self.theme.fg,
         );
         ui_registry.register_rect(
             crate::ui_system::UiId::TerminalAdd,
-            cx - 2.0 * s,
+            add_x - 2.0 * s,
             add_y - 2.0 * s,
-            add_sz + 4.0 * s,
+            (add_sz + 4.0 * s).min(panel_w.max(0.0)),
             add_sz + 4.0 * s,
             mx,
             my,
         );
+        ui_registry.pop_clip();
 
         let (term_content_y, term_content_h) = terminal_body_rect(content_y, content_h, s);
 
@@ -304,7 +412,7 @@ impl Renderer {
 
         let active = ide_panel.active_terminal;
         if let Some(term) = ide_panel.terminals.get(active) {
-            let mut grid = term.grid.lock().unwrap();
+            let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
             let term_scale = TERMINAL_TEXT_SCALE;
             let char_w = self.char_advance('A') * term_scale;
             let char_h = self.line_height * term_scale;
@@ -313,7 +421,10 @@ impl Renderer {
 
             if grid.cols != new_cols || grid.visible_rows != new_rows {
                 grid.resize(new_cols, new_rows);
-                term.resize_pty(new_cols as u16, new_rows as u16);
+                term.resize_pty(
+                    clamp_terminal_pty_dimension(new_cols),
+                    clamp_terminal_pty_dimension(new_rows),
+                );
             }
             grid.dirty = false;
 
@@ -590,9 +701,10 @@ impl Renderer {
         }
 
         if ide_panel.term_show_search {
-            let search_w = 480.0 * s;
+            let geometry = terminal_search_geometry(panel_x, panel_w, s);
+            let search_w = geometry.w;
             let search_h = 52.0 * s;
-            let search_x = panel_x + panel_w - search_w - 20.0 * s;
+            let search_x = geometry.x;
             let search_y = term_content_y + 10.0 * s;
 
             self.push_rounded_rect(
@@ -627,138 +739,81 @@ impl Renderer {
 
             let input_x = search_x + 10.0 * s;
             let input_y = search_y + 11.0 * s;
-            let input_w = 215.0 * s;
             let input_h = 30.0 * s;
+            let btn_size = 36.0 * s;
+            let btn_gap = (10.0 * s).min(search_w * 0.025);
+            let show_nav = geometry.show_nav;
+            let show_case = geometry.show_case;
+            let counter_reserve = geometry.counter_reserve;
+            let input_w = geometry.input_w;
 
-            let input_bg = self.theme.bg;
-            let input_border = if ide_panel.term_search_focused {
-                self.theme.sel
-            } else {
-                [0.3, 0.3, 0.3, 1.0]
-            };
-
-            self.push_rounded_rect(
-                input_x - 1.0,
-                input_y - 1.0,
-                input_w + 2.0,
-                input_h + 2.0,
-                4.0 * s,
-                input_border,
+            if input_w > 0.0 {
+                ui_registry.register_text_input(
+                    crate::ui_system::UiId::TerminalSearchInput,
+                    input_x,
+                    input_y,
+                    input_w,
+                    input_h,
+                    mx,
+                    my,
+                );
+            }
+            let text = ide_panel.term_search_editor.get_full_text();
+            let text_empty = text.is_empty();
+            self.terminal_search_scroll_x = self.one_line_scroll_for_cursor(
+                &text,
+                ide_panel.term_search_editor.cursor,
+                1.0,
+                geometry.text_viewport_w,
+                self.terminal_search_scroll_x,
             );
-            self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
-
-            ui_registry.register_text_input(
-                crate::ui_system::UiId::TerminalSearchInput,
+            self.draw_one_line_input_with_chrome(
+                &text,
+                ide_panel.term_search_editor.cursor,
+                ide_panel.term_search_editor.selection_anchor,
+                false,
+                ide_panel.term_search_focused,
                 input_x,
                 input_y,
                 input_w,
                 input_h,
-                mx,
-                my,
+                self.terminal_search_scroll_x,
+                1.0,
+                1.0,
+                0.0,
+                5.0 * s,
+                4.0 * s,
             );
-
-            self.flush();
-
-            let (first_text, second_text) = ide_panel.term_search_editor.text_parts();
-            let text_empty = first_text.is_empty() && second_text.is_empty();
             let text_y = input_y + input_h / 2.0 + 6.0 * s;
-            let text_start_x = input_x + 5.0 * s;
-            let mut current_x = text_start_x;
-
-            if let Some(anchor) = ide_panel.term_search_editor.selection_anchor {
-                let cursor = ide_panel.term_search_editor.cursor;
-                if anchor != cursor {
-                    let start = anchor.min(cursor);
-                    let end = anchor.max(cursor);
-                    let mut sel_start_x = text_start_x;
-                    let mut sel_w = 0.0;
-                    for (part_start, part) in
-                        [(0usize, first_text), (first_text.len(), second_text)]
-                    {
-                        for (local_idx, c) in part.char_indices() {
-                            let byte_idx = part_start + local_idx;
-                            let adv = self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                            if byte_idx < start {
-                                sel_start_x += adv;
-                            } else if byte_idx < end {
-                                sel_w += adv;
-                            }
-                        }
-                    }
-                    self.push_rounded_rect(
-                        sel_start_x,
-                        input_y + 4.0 * s,
-                        sel_w,
-                        input_h - 8.0 * s,
-                        2.0 * s,
-                        [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 0.5],
-                    );
-                    self.flush();
-                }
-            }
-
-            for part in [first_text, second_text] {
-                for c in part.chars() {
-                    let char_to_render = if c == '\n' { '↵' } else { c };
-                    let adv = self
-                        .get_ui_glyph(char_to_render)
-                        .map(|g| g.advance)
-                        .unwrap_or(10.0);
-                    if let Some(g) = self.get_ui_glyph(char_to_render) {
-                        self.push_quad(
-                            current_x + g.offset_x,
-                            text_y - g.offset_y,
-                            g.width,
-                            g.height,
-                            g.u,
-                            g.v,
-                            g.uw,
-                            g.vh,
-                            self.theme.fg,
-                            g.is_emoji,
-                        );
-                    }
-                    current_x += adv;
-                }
-            }
-
-            if ide_panel.term_search_focused {
-                self.push_rect(
-                    current_x,
-                    input_y + 4.0 * s,
-                    2.0 * s,
-                    input_h - 8.0 * s,
-                    self.theme.fg,
-                );
-            }
-
-            self.flush();
 
             let btn_y = search_y + 8.0 * s;
-            let btn_size = 36.0 * s;
-            let mut btn_x = search_x + search_w - 10.0 * s - btn_size;
+            let close_size = geometry.close_size;
+            let mut btn_x = geometry.close_x;
 
             let btn_close = crate::widgets::IconButton {
                 x: btn_x,
                 y: btn_y,
-                size: btn_size,
+                size: close_size,
                 icon: Some(crate::widgets::IconType::Close),
                 is_active: false,
                 icon_size: Some(26.0 * s),
                 active_square_width: None,
                 custom_color: None,
             };
-            ui_registry.register_icon_button(
-                crate::ui_system::UiId::TerminalSearchClose,
-                &btn_close,
-                self,
-                mx,
-                my,
-                s,
-                false,
-            );
-            btn_x -= btn_size + 10.0 * s;
+            if close_size > 0.0 {
+                ui_registry.register_icon_button(
+                    crate::ui_system::UiId::TerminalSearchClose,
+                    &btn_close,
+                    self,
+                    mx,
+                    my,
+                    s,
+                    false,
+                );
+            }
+            btn_x -= close_size + btn_gap;
 
+            if show_nav {
             let btn_down = crate::widgets::IconButton {
                 x: btn_x,
                 y: btn_y,
@@ -799,8 +854,10 @@ impl Renderer {
                 s,
                 false,
             );
-            btn_x -= btn_size + 10.0 * s;
+            btn_x -= btn_size + btn_gap;
+            }
 
+            if show_case {
             let btn_case = crate::widgets::IconButton {
                 x: btn_x,
                 y: btn_y,
@@ -820,8 +877,9 @@ impl Renderer {
                 s,
                 false,
             );
+            }
 
-            if ide_panel.term_search_results.is_empty() {
+            if counter_reserve > 0.0 && ide_panel.term_search_results.is_empty() {
                 if !text_empty {
                     self.draw_string_mono_scaled(
                         "Нет",
@@ -831,7 +889,7 @@ impl Renderer {
                         0.9,
                     );
                 }
-            } else {
+            } else if !ide_panel.term_search_results.is_empty() {
                 let mut scratch = std::mem::take(&mut self.scratch_buffer);
                 scratch.clear();
                 let _ = std::fmt::Write::write_fmt(

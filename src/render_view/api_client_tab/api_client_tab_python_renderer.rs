@@ -426,44 +426,15 @@ impl Renderer {
         y: f32,
         w: f32,
     ) {
-        let mut draw_x = x;
-        let mut offset = base_offset;
-        let mut span_idx = match spans.binary_search_by_key(&base_offset, |s| s.start) {
-            Ok(idx) => idx,
-            Err(idx) => idx.saturating_sub(1),
-        };
-        for ch in line.chars() {
-            if draw_x > x + w {
-                break;
-            }
-            let adv = self.char_advance(ch);
-            if ch != ' ' && ch != '\t'
-                && let Some(g) = self.get_glyph(ch)
-            {
-                while span_idx < spans.len() && spans[span_idx].end <= offset {
-                    span_idx += 1;
-                }
-                let color = if span_idx < spans.len() && spans[span_idx].start <= offset {
-                    spans[span_idx].color
-                } else {
-                    self.theme.fg
-                };
-                self.push_quad(
-                    draw_x + g.offset_x,
-                    y - g.offset_y,
-                    g.width,
-                    g.height,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    color,
-                    g.is_emoji,
-                );
-            }
-            draw_x += adv;
-            offset = offset.saturating_add(ch.len_utf8());
-        }
+        self.draw_spanned_ui_line_pixel_snapped(
+            line,
+            spans,
+            Some(base_offset),
+            x,
+            y,
+            x + w,
+            1.0,
+        );
     }
 
     fn draw_json_lexed_line(&mut self, line: &str, x: f32, y: f32, w: f32) {

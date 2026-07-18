@@ -119,11 +119,12 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
     let gitignore_path = root.join(".gitignore");
     let fingerprint = gitignore_fingerprint(&gitignore_path);
 
-    if let Ok(cache) = GITIGNORE_CACHE.lock() {
-        if let Some(entry) = cache.get(&root_key) {
-            if entry.fingerprint == fingerprint {
-                return Arc::clone(&entry.gitignore);
-            }
+    {
+        let cache = crate::platform::lock_recover(&GITIGNORE_CACHE);
+        if let Some(entry) = cache.get(&root_key)
+            && entry.fingerprint == fingerprint
+        {
+            return Arc::clone(&entry.gitignore);
         }
     }
 
@@ -137,16 +138,15 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
             .unwrap_or_else(|_| ignore::gitignore::Gitignore::empty()),
     );
 
-    if let Ok(mut cache) = GITIGNORE_CACHE.lock() {
-        trim_gitignore_cache(&mut cache, &root_key);
-        cache.insert(
-            root_key,
-            GitignoreCacheEntry {
-                fingerprint,
-                gitignore: Arc::clone(&gitignore),
-            },
-        );
-    }
+    let mut cache = crate::platform::lock_recover(&GITIGNORE_CACHE);
+    trim_gitignore_cache(&mut cache, &root_key);
+    cache.insert(
+        root_key,
+        GitignoreCacheEntry {
+            fingerprint,
+            gitignore: Arc::clone(&gitignore),
+        },
+    );
 
     gitignore
 }
@@ -159,10 +159,13 @@ pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
 }
 
 pub fn request_rasterized_icon(key: &'static str, is_folder: bool) {
-    if reserve_rasterized_icon(key) {
-        std::thread::spawn(move || {
+    if reserve_rasterized_icon(key)
+        && let Err(err) = crate::platform::spawn_named("rriter-file-icon", move || {
             finish_reserved_rasterized_icon(key, is_folder);
-        });
+        })
+    {
+        eprintln!("RRiter: не удалось запустить rasterize icon worker: {err}");
+        finish_reserved_rasterized_icon(key, is_folder);
     }
 }
 
@@ -179,10 +182,9 @@ fn reserve_rasterized_icon(key: &'static str) -> bool {
 }
 
 fn store_rasterized_icon_state(key: &'static str, state: RasterizedIconState) {
-    if let Ok(mut cache) = RASTERIZED_ICONS.lock() {
-        cache.insert(key, state);
-        trim_rasterized_icon_cache(&mut cache, key);
-    }
+    let mut cache = crate::platform::lock_recover(&RASTERIZED_ICONS);
+    cache.insert(key, state);
+    trim_rasterized_icon_cache(&mut cache, key);
 }
 
 fn finish_reserved_rasterized_icon(key: &'static str, is_folder: bool) {
@@ -458,6 +460,7 @@ fn push_file_nodes(
 pub enum FileTreeScanMessage {
     Nodes(Vec<FileNode>),
     IconsReady,
+    Failed(String),
 }
 
 /// Запускает фоновый поток сканирования. Возвращает канал для результата.
@@ -467,7 +470,8 @@ pub fn spawn_scan(
     user_patterns: Vec<String>,
 ) -> mpsc::Receiver<FileTreeScanMessage> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-file-tree-scan", move || {
         // STEP 1: Build ordered tree in one reusable buffer.
         let all_patterns_refs: Vec<&str> = user_patterns.iter().map(String::as_str).collect();
         let mut full_nodes = Vec::new();
@@ -502,7 +506,7 @@ pub fn spawn_scan(
         }
 
         // Отправляем полное дерево немедленно (текст появится мгновенно)
-        let _ = tx.send(FileTreeScanMessage::Nodes(full_nodes));
+        let _ = worker_tx.send(FileTreeScanMessage::Nodes(full_nodes));
 
         // STEP 2: Параллельная растеризация иконок без блокировки UI
         if needed_icons.len() >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
@@ -516,8 +520,12 @@ pub fn spawn_scan(
         }
 
         // STEP 3: Финальный легкий триггер для перерисовки (иконки появятся)
-        let _ = tx.send(FileTreeScanMessage::IconsReady);
-    });
+        let _ = worker_tx.send(FileTreeScanMessage::IconsReady);
+    }) {
+        let _ = tx.send(FileTreeScanMessage::Failed(format!(
+            "не удалось запустить file tree scan worker: {err}"
+        )));
+    }
     rx
 }
 
@@ -612,8 +620,12 @@ pub(crate) fn build_file_tree_watch_paths(
 /// Отправляет `()` в `tx` при каждом дебаунсированном событии в watched папках.
 /// Дебаунс = 300 мс, поэтому спам событий ОС сворачивается в одно сообщение.
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>, stop_rx: mpsc::Receiver<()>) {
-    std::thread::spawn(move || {
+pub fn spawn_watcher(
+    paths: Vec<PathBuf>,
+    tx: mpsc::Sender<()>,
+    stop_rx: mpsc::Receiver<()>,
+) -> bool {
+    match crate::platform::spawn_named("rriter-file-tree-watcher", move || {
         use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 
         let (dtx, drx) = mpsc::channel();
@@ -628,8 +640,9 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>, stop_rx: mpsc::R
 
         // Блокируемся в цикле — debouncer должен жить, пока работает watcher.
         loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
+            match stop_rx.try_recv() {
+                Ok(()) | Err(mpsc::TryRecvError::Disconnected) => break,
+                Err(mpsc::TryRecvError::Empty) => {}
             }
             match drx.recv_timeout(Duration::from_millis(250)) {
                 Ok(Ok(events)) => {
@@ -645,7 +658,13 @@ pub fn spawn_watcher(paths: Vec<PathBuf>, tx: mpsc::Sender<()>, stop_rx: mpsc::R
                 Err(_) => break,
             }
         }
-    });
+    }) {
+        Ok(_) => true,
+        Err(err) => {
+            eprintln!("RRiter: не удалось запустить file tree watcher: {err}");
+            false
+        }
+    }
 }
 
 #[cfg(test)]

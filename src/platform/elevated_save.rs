@@ -140,7 +140,7 @@ fn read_request(files: &RequestFiles) -> io::Result<PathBuf> {
 }
 
 #[cfg(any(windows, target_os = "macos", test))]
-fn write_helper_result(files: &RequestFiles, outcome: &io::Result<()>) {
+fn write_helper_result(files: &RequestFiles, outcome: &io::Result<()>) -> io::Result<()> {
     let message = match outcome {
         Ok(()) => "ok\n".to_string(),
         Err(error) => format!(
@@ -149,7 +149,7 @@ fn write_helper_result(files: &RequestFiles, outcome: &io::Result<()>) {
             error
         ),
     };
-    let _ = fs::write(&files.result, message.as_bytes());
+    fs::write(&files.result, message.as_bytes())
 }
 
 #[cfg(any(windows, target_os = "macos", test))]
@@ -167,8 +167,11 @@ fn run_helper(request_path: &Path) -> i32 {
         Ok(_) => execute_request(request_path),
         Err(error) => Err(io::Error::new(error.kind(), error.to_string())),
     };
-    if let Ok(files) = &files {
-        write_helper_result(files, &outcome);
+    if let Ok(files) = &files
+        && let Err(error) = write_helper_result(files, &outcome)
+    {
+        eprintln!("RRiter elevated save could not publish its result: {error}");
+        return 1;
     }
     if let Err(error) = outcome {
         eprintln!("RRiter elevated save failed: {error}");
@@ -194,17 +197,27 @@ pub fn handle_startup_helper(args: &[OsString]) -> Option<i32> {
 
 #[cfg(any(windows, target_os = "macos", test))]
 fn elevated_result(files: &RequestFiles, exit_code: i32) -> io::Result<()> {
-    let response = fs::read_to_string(&files.result).unwrap_or_default();
-    if exit_code == 0 && response.starts_with("ok") {
+    let response = fs::read_to_string(&files.result).map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("elevated save helper did not publish a result: {error}"),
+        )
+    })?;
+    if exit_code == 0 && response.trim() == "ok" {
         return Ok(());
     }
-    let message = response
+    if let Some(message) = response
         .strip_prefix("error\t")
         .and_then(|value| value.split_once('\t'))
         .map(|(_, message)| message.trim())
         .filter(|message| !message.is_empty())
-        .unwrap_or("elevated file replacement was rejected");
-    Err(io::Error::new(io::ErrorKind::PermissionDenied, message))
+    {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, message));
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("elevated save helper returned an invalid result (exit code {exit_code})"),
+    ))
 }
 
 #[cfg(any(windows, target_os = "macos"))]

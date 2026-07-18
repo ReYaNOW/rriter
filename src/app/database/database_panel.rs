@@ -7,6 +7,7 @@ use super::{
 use crate::app::mouse::HoverPopup;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use zeroize::{Zeroize, Zeroizing};
 
@@ -423,7 +424,9 @@ impl Drop for DatabaseDialogInput {
 
 #[derive(Debug)]
 pub struct DatabaseConnectionDialog {
+    pub session_id: u64,
     pub editing_connection_id: Option<DatabaseConnectionId>,
+    pub reserved_connection_id: Option<DatabaseConnectionId>,
     pub focused: Option<DatabaseFormField>,
     pub dragging_field: Option<DatabaseFormField>,
     pub display_name: DatabaseDialogInput,
@@ -464,7 +467,9 @@ pub struct DatabaseConnectionDialog {
 impl DatabaseConnectionDialog {
     pub fn new(default_color: DatabaseConnectionColor) -> Self {
         Self {
+            session_id: 0,
             editing_connection_id: None,
+            reserved_connection_id: None,
             focused: Some(DatabaseFormField::DisplayName),
             dragging_field: None,
             display_name: DatabaseDialogInput::new("PostgreSQL"),
@@ -506,6 +511,7 @@ impl DatabaseConnectionDialog {
     pub fn from_connection(connection: &DatabaseConnectionConfig) -> Self {
         let mut dialog = Self::new(connection.color);
         dialog.editing_connection_id = Some(connection.id);
+        dialog.reserved_connection_id = Some(connection.id);
         dialog.display_name.set_text(connection.display_name.clone());
         dialog.host.set_text(connection.host.clone());
         dialog.port.set_text(connection.port.to_string());
@@ -845,10 +851,64 @@ pub enum DatabasePendingJobKind {
     DeleteConnection,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct DatabaseRecoveryTargets {
+    pub connection_loading: bool,
+    pub database_loading: bool,
+    pub dialog_status: bool,
+    pub metadata_loading: bool,
+    pub count_loading: bool,
+    pub chunk_loading: bool,
+    pub table_transaction: bool,
+    pub query_running: bool,
+    pub query_transaction: bool,
+}
+
+impl DatabasePendingJobKind {
+    pub(crate) const fn recovery_targets(self) -> DatabaseRecoveryTargets {
+        let mut targets = DatabaseRecoveryTargets {
+            connection_loading: false,
+            database_loading: false,
+            dialog_status: false,
+            metadata_loading: false,
+            count_loading: false,
+            chunk_loading: false,
+            table_transaction: false,
+            query_running: false,
+            query_transaction: false,
+        };
+        match self {
+            Self::LoadDatabases => targets.connection_loading = true,
+            Self::LoadTables => targets.database_loading = true,
+            Self::TestConnection | Self::SaveConnection => targets.dialog_status = true,
+            Self::LoadMetadata => targets.metadata_loading = true,
+            Self::CountRows => targets.count_loading = true,
+            Self::LoadChunk => targets.chunk_loading = true,
+            Self::BeginTableSave => targets.table_transaction = true,
+            Self::RunUserSql => targets.query_running = true,
+            Self::CommitTransaction | Self::RollbackTransaction => {
+                targets.table_transaction = true;
+                targets.query_transaction = true;
+            }
+            Self::LoadDdl | Self::LoadQueryCompletion | Self::DeleteConnection => {}
+        }
+        targets
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DatabaseJobOwner {
+    Dialog(u64),
+    Connection(DatabaseConnectionId),
+    Table(super::DatabaseTabId),
+    Query(super::SqlConsoleId),
+}
+
 #[derive(Clone, Debug)]
 pub struct DatabasePendingJob {
     pub id: DatabaseJobId,
     pub kind: DatabasePendingJobKind,
+    pub owner: DatabaseJobOwner,
     pub connection_id: DatabaseConnectionId,
     pub database_name: Option<String>,
     pub table_name: Option<String>,
@@ -863,6 +923,14 @@ pub struct DatabaseQueryTabMeta {
     pub title: String,
 }
 
+
+pub const MAX_QUEUED_DATABASE_COMMANDS: usize = 64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DatabaseQueueResult {
+    Queued,
+    Full,
+}
 
 pub struct DatabasePanelState {
     pub persisted: DatabasePersistedState,
@@ -881,16 +949,24 @@ pub struct DatabasePanelState {
     pub table_modal_input_dragging: bool,
     pub ddl_hover: RefCell<Option<DatabaseDdlHoverState>>,
     pub pending_job: Option<DatabasePendingJob>,
+    pub active_command: Option<super::DatabaseCommand>,
+    pub queued_commands: VecDeque<(super::DatabaseCommand, DatabasePendingJob)>,
+    pub host_key_retry: Option<(super::DatabaseCommand, DatabasePendingJob)>,
+    pub cancelled_job_ids: FxHashMap<DatabaseJobId, std::time::Instant>,
+    pub cancel_requested_at: Option<std::time::Instant>,
     pub pending_query_mode: Option<super::DatabaseQueryMode>,
     pub generation: DatabaseGeneration,
     pub next_job_id: u64,
     pub next_connection_id: u64,
     pub next_tab_id: u64,
     pub next_console_id: u64,
+    pub next_dialog_id: u64,
     pub global_error: Option<String>,
     pub notice: Option<String>,
     pub session_secrets: FxHashMap<DatabaseConnectionId, DatabaseSecretBundle>,
+    pub pending_session_secrets: FxHashMap<DatabaseConnectionId, DatabaseSecretBundle>,
     pub open_table_keys: FxHashSet<(DatabaseConnectionId, String, String)>,
+    pub open_table_ids: FxHashSet<super::DatabaseTabId>,
     pub open_console_keys: FxHashMap<(DatabaseConnectionId, String), Vec<u64>>,
 }
 
@@ -902,7 +978,7 @@ impl Default for DatabasePanelState {
 
 impl DatabasePanelState {
     pub fn from_persisted(mut persisted: DatabasePersistedState) -> Self {
-        let _ = persisted.normalize_and_validate();
+        let normalization_error = persisted.normalize_and_validate().err();
         let next_connection_id = persisted
             .connections
             .iter()
@@ -946,16 +1022,24 @@ impl DatabasePanelState {
             table_modal_input_dragging: false,
             ddl_hover: RefCell::new(None),
             pending_job: None,
+            active_command: None,
+            queued_commands: VecDeque::new(),
+            host_key_retry: None,
+            cancelled_job_ids: FxHashMap::default(),
+            cancel_requested_at: None,
             pending_query_mode: None,
             generation: DatabaseGeneration::default(),
             next_job_id: 1,
             next_connection_id,
             next_tab_id: 1,
             next_console_id,
-            global_error: None,
+            next_dialog_id: 1,
+            global_error: normalization_error.map(|error| format!("Повреждено состояние Database Tools: {error}")),
             notice: None,
             session_secrets: FxHashMap::default(),
+            pending_session_secrets: FxHashMap::default(),
             open_table_keys: FxHashSet::default(),
+            open_table_ids: FxHashSet::default(),
             open_console_keys: FxHashMap::default(),
         }
     }
@@ -965,15 +1049,180 @@ impl DatabasePanelState {
     }
 
     pub fn allocate_job_id(&mut self) -> DatabaseJobId {
-        let id = DatabaseJobId(self.next_job_id);
-        self.next_job_id = self.next_job_id.wrapping_add(1).max(1);
-        id
+        let start = self.next_job_id.max(1);
+        let mut candidate = start;
+        loop {
+            let id = DatabaseJobId(candidate);
+            let used = self.pending_job.as_ref().is_some_and(|job| job.id == id)
+                || self.queued_commands.iter().any(|(_, job)| job.id == id)
+                || self.host_key_retry.as_ref().is_some_and(|(_, job)| job.id == id)
+                || self.cancelled_job_ids.contains_key(&id);
+            candidate = candidate.wrapping_add(1).max(1);
+            if !used {
+                self.next_job_id = candidate;
+                return id;
+            }
+        }
+    }
+
+    pub(crate) fn activate_command(
+        &mut self,
+        command: super::DatabaseCommand,
+        pending: DatabasePendingJob,
+    ) {
+        self.active_command = Some(command);
+        self.pending_job = Some(pending);
+    }
+
+    pub(crate) fn queue_command(
+        &mut self,
+        command: super::DatabaseCommand,
+        pending: DatabasePendingJob,
+    ) -> DatabaseQueueResult {
+        if self.queued_commands.len() >= MAX_QUEUED_DATABASE_COMMANDS {
+            return DatabaseQueueResult::Full;
+        }
+        // Каждое пользовательское действие сохраняет собственный payload.
+        // Не coalesce по owner/kind: database, table, filter, generation и secrets
+        // могут различаться при одинаковом виде операции.
+        self.queued_commands.push_back((command, pending));
+        DatabaseQueueResult::Queued
+    }
+
+    pub(crate) fn remove_queued_owner(&mut self, owner: DatabaseJobOwner) -> Vec<DatabasePendingJob> {
+        let mut removed = Vec::new();
+        self.queued_commands.retain(|(_, pending)| {
+            if pending.owner == owner {
+                removed.push(pending.clone());
+                false
+            } else {
+                true
+            }
+        });
+        if self.host_key_retry.as_ref().is_some_and(|(_, pending)| pending.owner == owner) {
+            if let Some((_, pending)) = self.host_key_retry.take() {
+                removed.push(pending);
+            }
+            self.host_key_prompt = None;
+        }
+        removed
+    }
+
+    pub(crate) fn pop_queued_command(
+        &mut self,
+    ) -> Option<(super::DatabaseCommand, DatabasePendingJob)> {
+        self.queued_commands.pop_front()
+    }
+
+    pub(crate) fn clear_active_command(&mut self) {
+        self.pending_job = None;
+        self.active_command = None;
+    }
+
+    pub(crate) fn mark_job_cancelled(
+        &mut self,
+        job_id: DatabaseJobId,
+        now: std::time::Instant,
+    ) {
+        self.cancelled_job_ids
+            .insert(job_id, now + std::time::Duration::from_secs(30));
+    }
+
+    pub(crate) fn prune_cancelled_jobs(&mut self, now: std::time::Instant) {
+        self.cancelled_job_ids.retain(|_, expires| *expires > now);
+    }
+
+    pub(crate) fn cancel_timed_out(
+        &self,
+        now: std::time::Instant,
+        timeout: std::time::Duration,
+    ) -> bool {
+        self.cancel_requested_at
+            .is_some_and(|started| now.saturating_duration_since(started) >= timeout)
     }
 
     pub fn allocate_connection_id(&mut self) -> DatabaseConnectionId {
-        let id = DatabaseConnectionId(self.next_connection_id);
-        self.next_connection_id = self.next_connection_id.wrapping_add(1).max(1);
-        id
+        let start = self.next_connection_id.max(1);
+        let mut candidate = start;
+        loop {
+            let id = DatabaseConnectionId(candidate);
+            let used = self.connections.iter().any(|node| node.config.id == id)
+                || self.dialog.as_ref().is_some_and(|dialog| dialog.reserved_connection_id == Some(id))
+                || self.pending_job.as_ref().is_some_and(|job| job.connection_id == id)
+                || self.queued_commands.iter().any(|(_, job)| job.connection_id == id)
+                || self.host_key_retry.as_ref().is_some_and(|(_, job)| job.connection_id == id)
+                || self.pending_session_secrets.contains_key(&id);
+            candidate = candidate.wrapping_add(1).max(1);
+            if !used {
+                self.next_connection_id = candidate;
+                return id;
+            }
+        }
+    }
+
+    pub fn allocate_dialog_id(&mut self) -> u64 {
+        let start = self.next_dialog_id.max(1);
+        let mut candidate = start;
+        loop {
+            let used_by_dialog = self
+                .dialog
+                .as_ref()
+                .is_some_and(|dialog| dialog.session_id == candidate);
+            let used_by_pending = self.pending_job.as_ref().is_some_and(|job| {
+                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
+            });
+            let used_by_queue = self.queued_commands.iter().any(|(_, job)| {
+                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
+            });
+            let used_by_retry = self.host_key_retry.as_ref().is_some_and(|(_, job)| {
+                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
+            });
+            let id = candidate;
+            candidate = candidate.wrapping_add(1).max(1);
+            if !(used_by_dialog || used_by_pending || used_by_queue || used_by_retry) {
+                self.next_dialog_id = candidate;
+                return id;
+            }
+        }
+    }
+
+    pub fn allocate_tab_id(&mut self) -> super::DatabaseTabId {
+        let used: FxHashSet<u64> = self
+            .open_table_ids
+            .iter()
+            .map(|id| id.0)
+            .chain(self.queued_commands
+            .iter()
+            .filter_map(|(_, job)| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
+            .chain(self.pending_job.iter().filter_map(|job| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
+            .chain(self.host_key_retry.iter().filter_map(|(_, job)| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
+            .collect();
+        let start = self.next_tab_id.max(1);
+        let mut candidate = start;
+        loop {
+            candidate = candidate.max(1);
+            if !used.contains(&candidate) {
+                self.next_tab_id = candidate.wrapping_add(1).max(1);
+                return super::DatabaseTabId(candidate);
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
+    }
+
+    pub fn allocate_console_id(&mut self) -> super::SqlConsoleId {
+        let used_persisted = |candidate| self.persisted.consoles.iter().any(|console| console.id.0 == candidate);
+        let start = self.next_console_id.max(1);
+        let mut candidate = start;
+        loop {
+            let queued = self.queued_commands.iter().any(|(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
+            let active = self.pending_job.as_ref().is_some_and(|job| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
+            let retry = self.host_key_retry.as_ref().is_some_and(|(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
+            if !used_persisted(candidate) && !queued && !active && !retry {
+                self.next_console_id = candidate.wrapping_add(1).max(1);
+                return super::SqlConsoleId(candidate);
+            }
+            candidate = candidate.wrapping_add(1).max(1);
+        }
     }
 
     pub fn connection_index(&self, id: DatabaseConnectionId) -> Option<usize> {
@@ -1153,6 +1402,334 @@ mod tests {
         panel.dialog = Some(DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue));
         assert!(panel.modal_open());
     }
+
+    fn pending(id: u64, kind: DatabasePendingJobKind) -> DatabasePendingJob {
+        DatabasePendingJob {
+            id: DatabaseJobId(id),
+            kind,
+            owner: DatabaseJobOwner::Connection(DatabaseConnectionId(1)),
+            connection_id: DatabaseConnectionId(1),
+            database_name: Some("db".to_string()),
+            table_name: Some("items".to_string()),
+        }
+    }
+
+    #[test]
+    fn bug_42_multiple_restored_table_loads_are_queued_in_order() {
+        let mut panel = DatabasePanelState::default();
+        let mut first = pending(1, DatabasePendingJobKind::LoadMetadata);
+        first.owner = DatabaseJobOwner::Table(crate::app::database::DatabaseTabId(1));
+        let mut second = pending(2, DatabasePendingJobKind::LoadMetadata);
+        second.owner = DatabaseJobOwner::Table(crate::app::database::DatabaseTabId(2));
+        panel.activate_command(super::super::DatabaseCommand::Shutdown, first);
+        panel.queue_command(super::super::DatabaseCommand::Shutdown, second);
+        assert_eq!(panel.pending_job.as_ref().map(|job| job.id), Some(DatabaseJobId(1)));
+        assert_eq!(panel.queued_commands.front().map(|(_, job)| job.id), Some(DatabaseJobId(2)));
+    }
+
+    #[test]
+    fn bug_43_new_database_job_never_overwrites_active_pending_context() {
+        let mut panel = DatabasePanelState::default();
+        panel.activate_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending(7, DatabasePendingJobKind::RunUserSql),
+        );
+        panel.queue_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending(8, DatabasePendingJobKind::LoadDatabases),
+        );
+        assert_eq!(panel.pending_job.as_ref().map(|job| job.id), Some(DatabaseJobId(7)));
+        assert_eq!(panel.queued_commands.len(), 1);
+    }
+
+    #[test]
+    fn bug_45_finishing_busy_job_preserves_queued_commands() {
+        let mut panel = DatabasePanelState::default();
+        panel.activate_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending(1, DatabasePendingJobKind::RunUserSql),
+        );
+        panel.queue_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending(2, DatabasePendingJobKind::LoadDatabases),
+        );
+        panel.clear_active_command();
+        assert!(panel.pending_job.is_none());
+        assert!(panel.active_command.is_none());
+        assert_eq!(panel.pop_queued_command().map(|(_, job)| job.id), Some(DatabaseJobId(2)));
+    }
+
+    #[test]
+    fn bug_46_busy_metadata_job_clears_table_loading_target() {
+        assert!(DatabasePendingJobKind::LoadMetadata.recovery_targets().metadata_loading);
+    }
+
+    #[test]
+    fn bug_47_busy_database_list_job_clears_connection_loading_target() {
+        assert!(DatabasePendingJobKind::LoadDatabases.recovery_targets().connection_loading);
+    }
+
+    #[test]
+    fn bug_48_busy_table_list_job_clears_database_loading_target() {
+        assert!(DatabasePendingJobKind::LoadTables.recovery_targets().database_loading);
+    }
+
+    #[test]
+    fn bug_49_busy_connection_test_clears_dialog_status_target() {
+        assert!(DatabasePendingJobKind::TestConnection.recovery_targets().dialog_status);
+    }
+
+    #[test]
+    fn bug_50_busy_connection_save_clears_dialog_status_target() {
+        assert!(DatabasePendingJobKind::SaveConnection.recovery_targets().dialog_status);
+    }
+
+    #[test]
+    fn bug_51_busy_user_sql_clears_query_running_target() {
+        assert!(DatabasePendingJobKind::RunUserSql.recovery_targets().query_running);
+    }
+
+    #[test]
+    fn bug_52_busy_commit_clears_both_transaction_targets() {
+        let targets = DatabasePendingJobKind::CommitTransaction.recovery_targets();
+        assert!(targets.table_transaction);
+        assert!(targets.query_transaction);
+    }
+
+    #[test]
+    fn bug_53_send_failure_recovers_running_sql_state() {
+        let source = include_str!("database_app_methods.rs");
+        assert!(source.contains("self.recover_database_pending_job(&pending, &message, false);"));
+        assert!(DatabasePendingJobKind::RunUserSql.recovery_targets().query_running);
+    }
+
+    #[test]
+    fn bug_54_send_failure_recovers_test_and_save_dialog_state() {
+        for kind in [DatabasePendingJobKind::TestConnection, DatabasePendingJobKind::SaveConnection] {
+            assert!(kind.recovery_targets().dialog_status);
+        }
+    }
+
+    #[test]
+    fn bug_55_send_failure_recovers_database_and_table_loaders() {
+        assert!(DatabasePendingJobKind::LoadDatabases.recovery_targets().connection_loading);
+        assert!(DatabasePendingJobKind::LoadTables.recovery_targets().database_loading);
+        assert!(DatabasePendingJobKind::LoadMetadata.recovery_targets().metadata_loading);
+    }
+
+    #[test]
+    fn bug_56_send_failure_recovers_table_commit_state() {
+        let targets = DatabasePendingJobKind::CommitTransaction.recovery_targets();
+        assert!(targets.table_transaction);
+    }
+
+    #[test]
+    fn bug_57_cancelled_jobs_use_the_same_complete_recovery_map() {
+        let source = include_str!("database_app_event_methods.rs");
+        assert!(source.contains("self.recover_database_pending_job(pending, \"Запрос отменён\", true);"));
+        assert!(DatabasePendingJobKind::CountRows.recovery_targets().count_loading);
+        assert!(DatabasePendingJobKind::LoadChunk.recovery_targets().chunk_loading);
+        assert!(DatabasePendingJobKind::RollbackTransaction.recovery_targets().query_transaction);
+    }
+
+
+    fn pending_for(
+        id: u64,
+        owner: DatabaseJobOwner,
+        kind: DatabasePendingJobKind,
+    ) -> DatabasePendingJob {
+        DatabasePendingJob {
+            id: DatabaseJobId(id),
+            kind,
+            owner,
+            connection_id: DatabaseConnectionId(1),
+            database_name: None,
+            table_name: None,
+        }
+    }
+
+    #[test]
+    fn r2_001_cancel_removes_queued_save_for_dialog_owner() {
+        let mut panel = DatabasePanelState::default();
+        let owner = DatabaseJobOwner::Dialog(41);
+        assert_eq!(
+            panel.queue_command(
+                super::super::DatabaseCommand::Shutdown,
+                pending_for(1, owner, DatabasePendingJobKind::SaveConnection),
+            ),
+            DatabaseQueueResult::Queued
+        );
+        let removed = panel.remove_queued_owner(owner);
+        assert_eq!(removed.len(), 1);
+        assert!(matches!(removed[0].kind, DatabasePendingJobKind::SaveConnection));
+        assert!(panel.queued_commands.is_empty());
+    }
+
+    #[test]
+    fn r2_002_cancel_removes_queued_test_for_closed_dialog() {
+        let mut panel = DatabasePanelState::default();
+        let owner = DatabaseJobOwner::Dialog(77);
+        panel.queue_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending_for(2, owner, DatabasePendingJobKind::TestConnection),
+        );
+        assert_eq!(panel.remove_queued_owner(owner).len(), 1);
+        assert!(panel.pop_queued_command().is_none());
+    }
+
+    #[test]
+    fn r2_003_cancelled_active_job_is_tombstoned_before_dialog_closes() {
+        let mut panel = DatabasePanelState::default();
+        let job_id = DatabaseJobId(41);
+        let now = std::time::Instant::now();
+        panel.mark_job_cancelled(job_id, now);
+        let expires = panel
+            .cancelled_job_ids
+            .get(&job_id)
+            .copied()
+            .expect("active cancellation must create a tombstone");
+        assert!(expires > now);
+        panel.prune_cancelled_jobs(expires);
+        assert!(!panel.cancelled_job_ids.contains_key(&job_id));
+    }
+
+    #[test]
+    fn r2_004_repeated_save_reuses_one_reserved_connection_id() {
+        let mut panel = DatabasePanelState::default();
+        let reserved = panel.allocate_connection_id();
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue);
+        dialog.reserved_connection_id = Some(reserved);
+        panel.dialog = Some(dialog);
+        assert_eq!(panel.dialog.as_ref().unwrap().reserved_connection_id, Some(reserved));
+        assert_ne!(panel.allocate_connection_id(), reserved);
+        let methods = include_str!("database_app_methods.rs");
+        assert!(methods.contains("dialog.reserved_connection_id = dialog.editing_connection_id.or(allocated_id)"));
+    }
+
+    #[test]
+    fn r2_005_repeated_test_connection_is_coalesced() {
+        let mut panel = DatabasePanelState::default();
+        let owner = DatabaseJobOwner::Dialog(9);
+        assert_eq!(
+            panel.queue_command(
+                super::super::DatabaseCommand::Shutdown,
+                pending_for(1, owner, DatabasePendingJobKind::TestConnection),
+            ),
+            DatabaseQueueResult::Queued
+        );
+        assert_eq!(
+            panel.queue_command(
+                super::super::DatabaseCommand::Shutdown,
+                pending_for(2, owner, DatabasePendingJobKind::TestConnection),
+            ),
+            DatabaseQueueResult::Queued
+        );
+        assert_eq!(panel.queued_commands.len(), 2);
+        assert_eq!(panel.queued_commands[0].1.id, DatabaseJobId(1));
+        assert_eq!(panel.queued_commands[1].1.id, DatabaseJobId(2));
+    }
+
+    #[test]
+    fn r2_006_save_secrets_remain_pending_until_success() {
+        let methods = include_str!("database_app_methods.rs");
+        assert!(methods.contains("pending_session_secrets"));
+        assert!(!methods.contains("session_secrets.insert(connection_id, session_secrets)"));
+        let events = include_str!("database_app_event_methods.rs");
+        assert!(events.contains("pending_session_secrets"));
+        assert!(events.contains("session_secrets.insert(connection.id, secrets)"));
+    }
+
+    #[test]
+    fn r2_007_database_queue_has_a_hard_limit() {
+        let mut panel = DatabasePanelState::default();
+        for idx in 0..MAX_QUEUED_DATABASE_COMMANDS {
+            let result = panel.queue_command(
+                super::super::DatabaseCommand::Shutdown,
+                pending_for(
+                    idx as u64 + 1,
+                    DatabaseJobOwner::Connection(DatabaseConnectionId(idx as u64 + 1)),
+                    DatabasePendingJobKind::LoadDatabases,
+                ),
+            );
+            assert_eq!(result, DatabaseQueueResult::Queued);
+        }
+        assert_eq!(
+            panel.queue_command(
+                super::super::DatabaseCommand::Shutdown,
+                pending_for(
+                    999,
+                    DatabaseJobOwner::Connection(DatabaseConnectionId(999)),
+                    DatabasePendingJobKind::LoadDatabases,
+                ),
+            ),
+            DatabaseQueueResult::Full
+        );
+        assert_eq!(panel.queued_commands.len(), MAX_QUEUED_DATABASE_COMMANDS);
+    }
+
+    #[test]
+    fn r2_008_closing_tab_removes_all_jobs_owned_by_that_tab() {
+        let mut panel = DatabasePanelState::default();
+        let owner = DatabaseJobOwner::Table(super::super::DatabaseTabId(55));
+        panel.queue_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending_for(1, owner, DatabasePendingJobKind::LoadMetadata),
+        );
+        panel.queue_command(
+            super::super::DatabaseCommand::Shutdown,
+            pending_for(2, owner, DatabasePendingJobKind::LoadChunk),
+        );
+        assert_eq!(panel.remove_queued_owner(owner).len(), 2);
+        assert!(panel.queued_commands.is_empty());
+    }
+
+    #[test]
+    fn r2_009_failed_host_key_retry_drains_next_queued_command() {
+        let source = include_str!("database_app_event_methods.rs");
+        assert!(source.contains("if !self.start_database_command_now(command, pending)"));
+        assert!(source.contains("self.drain_database_command_queue();"));
+    }
+
+    #[test]
+    fn r2_010_database_ids_skip_live_values_after_wraparound() {
+        let mut panel = DatabasePanelState::default();
+        panel.next_job_id = u64::MAX;
+        panel.cancelled_job_ids.insert(DatabaseJobId(u64::MAX), std::time::Instant::now());
+        panel.cancelled_job_ids.insert(DatabaseJobId(1), std::time::Instant::now());
+        assert_eq!(panel.allocate_job_id(), DatabaseJobId(2));
+
+        panel.next_connection_id = u64::MAX;
+        panel.connections.push(DatabaseConnectionNode::new(config(u64::MAX)));
+        panel.connections.push(DatabaseConnectionNode::new(config(1)));
+        assert_eq!(panel.allocate_connection_id(), DatabaseConnectionId(2));
+
+        panel.next_dialog_id = u64::MAX;
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue);
+        dialog.session_id = u64::MAX;
+        panel.dialog = Some(dialog);
+        panel.queued_commands.push_back((
+            super::super::DatabaseCommand::Shutdown,
+            pending_for(
+                44,
+                DatabaseJobOwner::Dialog(1),
+                DatabasePendingJobKind::TestConnection,
+            ),
+        ));
+        assert_eq!(panel.allocate_dialog_id(), 2);
+    }
+
+
+    #[test]
+    fn r3_106_invalid_persisted_database_state_surfaces_global_error() {
+        let mut persisted = DatabasePersistedState::default();
+        persisted.version = u32::MAX;
+        let panel = DatabasePanelState::from_persisted(persisted);
+        assert!(panel.global_error.as_deref().is_some_and(|error| {
+            error.contains("Повреждено состояние Database Tools")
+                && error.contains("newer RRiter version")
+        }));
+    }
+
 }
 
 impl crate::app::single_line_input::SingleLineInputModel for DatabaseDialogInput {

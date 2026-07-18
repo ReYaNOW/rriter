@@ -482,6 +482,11 @@ impl crate::app::App {
 
     pub fn trigger_api_mock_export_openapi(&mut self) {
         self.commit_api_focus();
+        if self.api_openapi_export_rx.is_some() {
+            self.ide_panel.api.persistence_error =
+                Some("Экспорт OpenAPI уже выполняется".to_string());
+            return;
+        }
         let specs = self
             .ide_panel
             .api
@@ -494,42 +499,42 @@ impl crate::app::App {
             .collect::<Vec<_>>();
         let mock = self.ide_panel.api.mock.clone();
         if crate::platform::native_dialog_requires_main_thread() {
-            let value = crate::app::api_mock::openapi_export::export_mock_server_openapi_value(
-                &specs, &mock,
-            );
-            let Ok(text) = serde_json::to_string_pretty(&value) else {
-                return;
-            };
-            let Some(path) = crate::platform::save_file_with_filter(
-                "Экспорт openapi.json",
-                "openapi.json",
-                "OpenAPI JSON",
-                &["json"],
-            ) else {
-                return;
-            };
-            let _ = crate::platform::atomic_write(&path, text.as_bytes());
+            if let Err(error) = export_api_mock_openapi_file(&specs, &mock) {
+                self.ide_panel.api.persistence_error = Some(error);
+            }
             return;
         }
-        std::thread::spawn(move || {
-            let value = crate::app::api_mock::openapi_export::export_mock_server_openapi_value(
-                &specs, &mock,
-            );
-            let Ok(text) = serde_json::to_string_pretty(&value) else {
-                return;
-            };
-            let Some(path) = crate::platform::save_file_with_filter(
-                "Экспорт openapi.json",
-                "openapi.json",
-                "OpenAPI JSON",
-                &["json"],
-            )
-            else {
-                return;
-            };
-            let _ = crate::platform::atomic_write(&path, text.as_bytes());
-        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.api_openapi_export_rx = Some(rx);
+        if let Err(err) = crate::platform::spawn_named("rriter-api-openapi-export", move || {
+            let _ = tx.send(export_api_mock_openapi_file(&specs, &mock));
+        }) {
+            self.api_openapi_export_rx = None;
+            self.ide_panel.api.persistence_error =
+                Some(format!("Не удалось запустить экспорт OpenAPI: {err}"));
+        }
     }
+
+}
+
+fn export_api_mock_openapi_file(
+    specs: &[(crate::app::api_client::ApiSpecEntry, crate::app::api_client::ApiSpecModel)],
+    mock: &crate::app::api_mock::types::ApiMockState,
+) -> Result<Option<std::path::PathBuf>, String> {
+    let value = crate::app::api_mock::openapi_export::export_mock_server_openapi_value(specs, mock);
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| format!("Не удалось сериализовать OpenAPI: {error}"))?;
+    let Some(path) = crate::platform::save_file_with_filter(
+        "Экспорт openapi.json",
+        "openapi.json",
+        "OpenAPI JSON",
+        &["json"],
+    ) else {
+        return Ok(None);
+    };
+    crate::platform::atomic_write(&path, text.as_bytes())
+        .map_err(|error| format!("Не удалось сохранить экспорт OpenAPI: {error}"))?;
+    Ok(Some(path))
 }
 
 fn parse_optional_usize(value: &str) -> Option<usize> {

@@ -565,17 +565,35 @@ impl Renderer {
                         (real_height - title_h) as i32,
                     );
                 }
-
+                ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+                    panel_x,
+                    title_h,
+                    panel_left_w,
+                    (real_height - title_h).max(0.0),
+                ));
                 let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
                 let indent_w = crate::render_view::tree_ui::TREE_INDENT_W * s;
                 let scroll = ide_panel.explorer_scroll.current.round();
                 let hover_settled =
                     (ide_panel.explorer_scroll.current - ide_panel.explorer_scroll.target).abs()
                         < 0.5;
+                ui_registry.push_interactions_enabled(hover_settled);
                 let content_h = real_height - title_h;
                 let total_nodes = ide_panel.file_tree_nodes.len();
 
                 let tree_text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
+                if let Some(error) = ide_panel.file_tree_error.as_deref() {
+                    let mut error_scratch = String::new();
+                    self.draw_tree_label_clipped(
+                        error,
+                        panel_x + 8.0 * s,
+                        title_h + 8.0 * s,
+                        (panel_left_w - 16.0 * s).max(0.0),
+                        [0.95, 0.36, 0.36, 1.0],
+                        0.72,
+                        &mut error_scratch,
+                    );
+                }
                 if total_nodes == 0 {
                     let hint = "Нет папок в проекте";
                     let tw = self.measure_ui_width(hint, tree_text_scale);
@@ -597,7 +615,7 @@ impl Renderer {
                         let node = &ide_panel.file_tree_nodes[i];
                         let row_y = title_h + i as f32 * row_h - scroll;
 
-                        if !file_tree_overlay_open {
+                        if hover_settled && !file_tree_overlay_open {
                             ui_registry.register_rect(
                                 crate::ui_system::UiId::FileTreeNode(i),
                                 panel_x,
@@ -668,7 +686,7 @@ impl Renderer {
 
                         if node.is_dir {
                             let arrow_x = indent_x - 2.0 * s;
-                            if !file_tree_overlay_open {
+                            if hover_settled && !file_tree_overlay_open {
                                 ui_registry.register_rect(
                                     crate::ui_system::UiId::FileTreeArrow(i),
                                     arrow_x - 4.0 * s,
@@ -807,6 +825,8 @@ impl Renderer {
                     }
                 }
 
+                ui_registry.pop_interactions_enabled();
+                ui_registry.pop_clip();
                 self.flush();
                 unsafe {
                     self.gl.disable(glow::SCISSOR_TEST);

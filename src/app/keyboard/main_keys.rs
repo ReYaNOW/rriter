@@ -227,8 +227,9 @@ impl App {
             {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                     self.ide_panel.database.delete_prompt = None;
-                    self.ide_panel.database.host_key_prompt = None;
-                    self.cancel_database_job();
+                    if self.ide_panel.database.host_key_prompt.is_some() {
+                        self.cancel_database_host_key_prompt();
+                    }
                     if let Some(window) = self.window.as_ref() { window.request_redraw(); }
                 }
                 return;

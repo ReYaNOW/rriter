@@ -9,7 +9,9 @@ use std::process::Child;
 #[cfg(any(windows, target_os = "linux"))]
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
+use std::thread::JoinHandle;
 use winit::window::WindowAttributes;
 
 #[cfg(target_os = "macos")]
@@ -76,6 +78,58 @@ static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 pub(crate) fn next_operation_id() -> String {
     let counter = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
     format!("{}-{counter}", std::process::id())
+}
+
+#[inline]
+pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub(crate) fn corrupt_file_backup_note(path: &Path) -> String {
+    let backup = path.with_extension(format!(
+        "corrupt-{}.json",
+        next_operation_id()
+    ));
+    match fs::copy(path, &backup) {
+        Ok(_) => format!("; резервная копия: {}", backup.display()),
+        Err(error) => format!("; резервная копия не создана: {error}"),
+    }
+}
+
+pub(crate) fn spawn_named<T, F>(name: impl Into<String>, task: F) -> io::Result<JoinHandle<T>>
+where
+    T: Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
+{
+    std::thread::Builder::new().name(name.into()).spawn(task)
+}
+
+pub(crate) fn reap_unit_thread(worker: JoinHandle<()>) {
+    static REAPER: std::sync::OnceLock<std::sync::mpsc::SyncSender<JoinHandle<()>>> =
+        std::sync::OnceLock::new();
+    let sender = REAPER.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<JoinHandle<()>>(32);
+        let _ = spawn_named("rriter-thread-reaper", move || {
+            while let Ok(worker) = rx.recv() {
+                let _ = worker.join();
+            }
+        });
+        tx
+    });
+    if let Err(error) = sender.try_send(worker) {
+        match error {
+            std::sync::mpsc::TrySendError::Full(worker)
+            | std::sync::mpsc::TrySendError::Disconnected(worker) => {
+                if worker.is_finished() {
+                    let _ = worker.join();
+                } else {
+                    // The worker has already received its shutdown/cancel signal.
+                    // Never block the UI thread when the bounded reaper is unavailable.
+                    drop(worker);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -671,7 +725,7 @@ fn hex_decode(encoded: &str) -> Option<Vec<u8>> {
     Some(out)
 }
 
-fn hex_digit(byte: u8) -> Option<u8> {
+pub(crate) fn hex_digit(byte: u8) -> Option<u8> {
     match byte {
         b'0'..=b'9' => Some(byte - b'0'),
         b'a'..=b'f' => Some(byte - b'a' + 10),
@@ -959,15 +1013,21 @@ fn atomic_write_impl(path: &Path, bytes: &[u8], secret: bool) -> io::Result<()> 
         fs::create_dir_all(parent)?;
     }
 
+    let preserved_permissions = if secret {
+        None
+    } else {
+        fs::metadata(path).ok().map(|metadata| metadata.permissions())
+    };
     let (temp_path, mut file) = create_atomic_temp_file(path, secret)?;
     let result = (|| {
         if secret {
             set_secret_permissions(&file)?;
-        } else if let Ok(metadata) = fs::metadata(path) {
-            let _ = file.set_permissions(metadata.permissions());
         }
         file.write_all(bytes)?;
         file.flush()?;
+        if let Some(permissions) = preserved_permissions {
+            file.set_permissions(permissions)?;
+        }
         file.sync_all()?;
         drop(file);
         replace_file_with_retry(&temp_path, path)?;
@@ -1249,10 +1309,17 @@ pub fn rename_path(source: &Path, destination: &Path) -> io::Result<()> {
         fs::rename(source, &temp)?;
         match fs::rename(&temp, destination) {
             Ok(()) => Ok(()),
-            Err(error) => {
-                let _ = fs::rename(&temp, source);
-                Err(error)
-            }
+            Err(error) => match fs::rename(&temp, source) {
+                Ok(()) => Err(error),
+                Err(rollback) => Err(io::Error::new(
+                    error.kind(),
+                    format!(
+                        "{error}; не удалось откатить временное переименование {} -> {}: {rollback}",
+                        temp.display(),
+                        source.display()
+                    ),
+                )),
+            },
         }
     } else {
         fs::rename(source, destination)
@@ -1504,6 +1571,42 @@ pub fn copy_symlink(source: &Path, destination: &Path) -> io::Result<()> {
         ))
     }
 }
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ReceiverPoll<T> {
+    Item(T),
+    Empty,
+    Disconnected,
+}
+
+pub(crate) fn recover_poisoned<T>(result: Result<T, T>) -> T {
+    match result {
+        Ok(value) | Err(value) => value,
+    }
+}
+
+pub(crate) fn receiver_slot_available<T>(
+    slot: &Option<std::sync::mpsc::Receiver<T>>,
+) -> bool {
+    slot.is_none()
+}
+
+pub(crate) fn poll_optional_receiver<T>(
+    slot: &mut Option<std::sync::mpsc::Receiver<T>>,
+) -> ReceiverPoll<T> {
+    let Some(rx) = slot.take() else {
+        return ReceiverPoll::Empty;
+    };
+    match rx.try_recv() {
+        Ok(value) => ReceiverPoll::Item(value),
+        Err(std::sync::mpsc::TryRecvError::Empty) => {
+            *slot = Some(rx);
+            ReceiverPoll::Empty
+        }
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => ReceiverPoll::Disconnected,
+    }
+}
+
 
 #[cfg(test)]
 mod tests;

@@ -4,12 +4,13 @@ use super::database_catalog::{
 };
 use super::database_postgres::{
     DatabaseBackendError, DatabaseConnectionTestResult, DatabaseListResult, PostgresSession,
-    DatabaseTableListResult, list_databases, list_public_tables, test_database_connection,
+    DatabaseTableListResult, finish_postgres_transaction, list_databases, list_public_tables,
+    test_database_connection,
 };
 use super::database_query::{
     DatabaseQueryCompletionResult, DatabaseQueryDiagnostic, DatabaseQueryMessage,
     DatabaseQueryMode, DatabaseQueryResultSet, begin_user_query_transaction,
-    finish_user_query_transaction, history_started_now, load_query_completion_metadata,
+    history_started_now, load_query_completion_metadata,
 };
 use super::database_secrets::{
     delete_all_database_secrets, load_database_secret_bundle, save_remembered_database_secrets,
@@ -18,8 +19,7 @@ use super::database_ssh::{SshConnectOptions, SshHostKeyPolicy};
 use super::database_ssh_builtin::DatabaseSshError;
 use super::database_table::{
     DatabaseChangePlan, DatabaseTableChunkResult, DatabaseTableCountResult,
-    begin_table_transaction, count_public_table_rows, finish_table_transaction,
-    load_public_table_chunk,
+    begin_table_transaction, count_public_table_rows, load_public_table_chunk,
 };
 use super::{
     DatabaseConnectionConfig, DatabaseConnectionId, DatabaseGeneration, DatabaseJobId,
@@ -36,6 +36,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc as tokio_mpsc;
 use tokio::time::Instant;
 
+#[derive(Clone)]
 pub enum DatabaseCommand {
     TestConnection {
         job_id: DatabaseJobId,
@@ -156,6 +157,28 @@ pub enum DatabaseCommand {
 }
 
 impl DatabaseCommand {
+    pub(crate) fn set_host_key_policy(&mut self, policy: SshHostKeyPolicy) {
+        let options = host_key_options(policy);
+        match self {
+            Self::TestConnection { ssh_options, .. }
+            | Self::LoadDatabases { ssh_options, .. }
+            | Self::LoadPublicTables { ssh_options, .. }
+            | Self::LoadMetadata { ssh_options, .. }
+            | Self::LoadDdl { ssh_options, .. }
+            | Self::CountRows { ssh_options, .. }
+            | Self::LoadChunk { ssh_options, .. }
+            | Self::LoadQueryCompletion { ssh_options, .. }
+            | Self::RunUserSql { ssh_options, .. }
+            | Self::BeginTableSave { ssh_options, .. } => *ssh_options = options,
+            Self::CommitTransaction { .. }
+            | Self::RollbackTransaction { .. }
+            | Self::SaveConnectionSecrets { .. }
+            | Self::DeleteConnectionSecrets { .. }
+            | Self::CancelJob { .. }
+            | Self::Shutdown => {}
+        }
+    }
+
     fn execution_policy(&self) -> Option<DatabaseExecutionPolicy> {
         match self {
             Self::TestConnection { .. }
@@ -445,8 +468,21 @@ impl DatabaseRuntime {
         self.event_rx.try_recv()
     }
 
-    pub fn drain_events(&self, output: &mut Vec<DatabaseEvent>) {
-        output.extend(self.event_rx.try_iter());
+    #[cfg(test)]
+    pub(crate) fn disconnected_for_test() -> Self {
+        let (command_tx, _command_rx) = tokio_mpsc::unbounded_channel();
+        let (_event_tx, event_rx) = mpsc::channel();
+        Self { command_tx, event_rx, worker: None }
+    }
+
+    pub fn drain_events(&self, output: &mut Vec<DatabaseEvent>) -> bool {
+        loop {
+            match self.event_rx.try_recv() {
+                Ok(event) => output.push(event),
+                Err(mpsc::TryRecvError::Empty) => return true,
+                Err(mpsc::TryRecvError::Disconnected) => return false,
+            }
+        }
     }
 
     pub fn shutdown(&mut self) {
@@ -473,12 +509,18 @@ async fn worker_loop(
         if let Some(transaction) = pending.take() {
             tokio::select! {
                 _ = tokio::time::sleep_until(transaction.deadline) => {
-                    let _ = finish_pending_transaction(&transaction, false).await;
-                    let _ = event_tx.send(pending_expired_event(transaction));
+                    let event = rollback_pending_transaction_event(
+                        &transaction,
+                        pending_expired_event(&transaction),
+                        transaction.job_id,
+                    ).await;
+                    let _ = event_tx.send(event);
                 }
                 command = command_rx.recv() => {
                     let Some(command) = command else {
-                        let _ = finish_pending_transaction(&transaction, false).await;
+                        if let Err(error) = finish_pending_transaction(&transaction, false).await {
+                            eprintln!("RRiter: failed to roll back database transaction after runtime disconnect: {error}");
+                        }
                         break;
                     };
                     match command {
@@ -499,11 +541,17 @@ async fn worker_loop(
                             let _ = event_tx.send(event);
                         }
                         DatabaseCommand::CancelJob { job_id } if job_id == transaction.job_id => {
-                            let _ = finish_pending_transaction(&transaction, false).await;
-                            let _ = event_tx.send(DatabaseEvent::JobCancelled { job_id });
+                            let event = rollback_pending_transaction_event(
+                                &transaction,
+                                DatabaseEvent::JobCancelled { job_id },
+                                job_id,
+                            ).await;
+                            let _ = event_tx.send(event);
                         }
                         DatabaseCommand::Shutdown => {
-                            let _ = finish_pending_transaction(&transaction, false).await;
+                            if let Err(error) = finish_pending_transaction(&transaction, false).await {
+                                eprintln!("RRiter: failed to roll back database transaction during shutdown: {error}");
+                            }
                             break;
                         }
                         command if command.starts_job() => {
@@ -768,7 +816,7 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
                             }),
                         }
                     } else {
-                        match finish_user_query_transaction(&session, false).await {
+                        match finish_postgres_transaction(&session, false).await {
                             Ok(()) => JobOutcome::event(event),
                             Err(error) => JobOutcome::event(DatabaseEvent::QueryFailed {
                                 connection_id: connection.id,
@@ -897,30 +945,34 @@ async fn finish_pending_transaction(
     transaction: &PendingTransaction,
     commit: bool,
 ) -> Result<(), DatabaseBackendError> {
-    match transaction.target {
-        PendingTransactionTarget::Table { .. } => {
-            finish_table_transaction(&transaction.session, commit).await
-        }
-        PendingTransactionTarget::Query { .. } => {
-            finish_user_query_transaction(&transaction.session, commit).await
-        }
-    }
+    finish_postgres_transaction(&transaction.session, commit).await
 }
 
-fn pending_expired_event(transaction: PendingTransaction) -> DatabaseEvent {
-    match transaction.target {
+fn pending_expired_event(transaction: &PendingTransaction) -> DatabaseEvent {
+    match &transaction.target {
         PendingTransactionTarget::Table { table_name } => DatabaseEvent::TransactionExpired {
             connection_id: transaction.connection_id,
             transaction_id: transaction.transaction_id,
-            database_name: transaction.database_name,
-            table_name,
+            database_name: transaction.database_name.clone(),
+            table_name: table_name.clone(),
         },
         PendingTransactionTarget::Query { console_id } => DatabaseEvent::QueryTransactionExpired {
             connection_id: transaction.connection_id,
             transaction_id: transaction.transaction_id,
-            database_name: transaction.database_name,
-            console_id,
+            database_name: transaction.database_name.clone(),
+            console_id: *console_id,
         },
+    }
+}
+
+async fn rollback_pending_transaction_event(
+    transaction: &PendingTransaction,
+    success: DatabaseEvent,
+    job_id: DatabaseJobId,
+) -> DatabaseEvent {
+    match finish_pending_transaction(transaction, false).await {
+        Ok(()) => success,
+        Err(error) => failure(job_id, error),
     }
 }
 
@@ -1133,4 +1185,77 @@ mod tests {
         assert_eq!(event, DatabaseEvent::JobCancelled { job_id: DatabaseJobId(7) });
         runtime.shutdown();
     }
+
+    #[test]
+    fn bug_60_host_key_retry_preserves_the_exact_sql_request() {
+        let mut command = DatabaseCommand::RunUserSql {
+            job_id: DatabaseJobId(60),
+            connection: DatabaseConnectionConfig::default(),
+            database_name: "analytics".to_string(),
+            console_id: SqlConsoleId(600),
+            sql: "SELECT 'original';".to_string(),
+            source_offset: 17,
+            mode: DatabaseQueryMode::ExplainAnalyze,
+            secrets: None,
+            settings: DatabaseSettings::default(),
+            ssh_options: host_key_options(SshHostKeyPolicy::Strict),
+        };
+        command.set_host_key_policy(SshHostKeyPolicy::TrustOnce);
+
+        match command {
+            DatabaseCommand::RunUserSql {
+                job_id,
+                database_name,
+                console_id,
+                sql,
+                source_offset,
+                mode,
+                ssh_options,
+                ..
+            } => {
+                assert_eq!(job_id, DatabaseJobId(60));
+                assert_eq!(database_name, "analytics");
+                assert_eq!(console_id, SqlConsoleId(600));
+                assert_eq!(sql, "SELECT 'original';");
+                assert_eq!(source_offset, 17);
+                assert_eq!(mode, DatabaseQueryMode::ExplainAnalyze);
+                assert_eq!(ssh_options.host_key_policy, SshHostKeyPolicy::TrustOnce);
+            }
+            _ => panic!("host-key retry changed the command variant"),
+        }
+    }
+
+    #[test]
+    fn bug_61_host_key_retry_preserves_query_completion_console() {
+        let mut command = DatabaseCommand::LoadQueryCompletion {
+            job_id: DatabaseJobId(61),
+            connection: DatabaseConnectionConfig::default(),
+            database_name: "postgres".to_string(),
+            console_id: SqlConsoleId(610),
+            secrets: None,
+            settings: DatabaseSettings::default(),
+            ssh_options: host_key_options(SshHostKeyPolicy::Strict),
+        };
+        command.set_host_key_policy(SshHostKeyPolicy::TrustAndStore);
+
+        match command {
+            DatabaseCommand::LoadQueryCompletion {
+                job_id,
+                database_name,
+                console_id,
+                ssh_options,
+                ..
+            } => {
+                assert_eq!(job_id, DatabaseJobId(61));
+                assert_eq!(database_name, "postgres");
+                assert_eq!(console_id, SqlConsoleId(610));
+                assert_eq!(
+                    ssh_options.host_key_policy,
+                    SshHostKeyPolicy::TrustAndStore
+                );
+            }
+            _ => panic!("host-key retry changed the command variant"),
+        }
+    }
+
 }

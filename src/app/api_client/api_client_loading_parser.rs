@@ -78,25 +78,24 @@ pub(crate) fn api_async_client_builder() -> reqwest::ClientBuilder {
 fn api_http_client(resolved: Option<&ApiResolvedHost>) -> reqwest::blocking::Client {
     let native_proxy = crate::platform::system_proxy_config();
     let key = api_client_key(resolved, native_proxy.as_ref());
-    if let Ok(mut clients) = API_HTTP_CLIENTS.lock() {
-        if let Some(client) = clients.get(&key) {
-            return client.clone();
-        }
-        let mut builder = crate::platform::blocking_http_client_builder()
-            .timeout(API_FETCH_TIMEOUT)
-            .pool_idle_timeout(API_POOL_IDLE_TIMEOUT);
-        if let Some(resolved) = resolved {
-            builder = builder.resolve(&resolved.host, SocketAddr::new(resolved.ip, resolved.port));
-        }
-        if let Ok(client) = builder.build() {
-            clients.insert(key, client.clone());
-            return client;
-        }
+    let mut clients = crate::platform::lock_recover(&API_HTTP_CLIENTS);
+    if let Some(client) = clients.get(&key) {
+        return client.clone();
     }
-    crate::platform::blocking_http_client_builder()
+    let mut builder = crate::platform::blocking_http_client_builder()
         .timeout(API_FETCH_TIMEOUT)
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new())
+        .pool_idle_timeout(API_POOL_IDLE_TIMEOUT);
+    if let Some(resolved) = resolved {
+        builder = builder.resolve(&resolved.host, SocketAddr::new(resolved.ip, resolved.port));
+    }
+    let client = builder.build().unwrap_or_else(|_| {
+        crate::platform::blocking_http_client_builder()
+            .timeout(API_FETCH_TIMEOUT)
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new())
+    });
+    clients.insert(key, client.clone());
+    client
 }
 
 fn resolve_api_url_host(url: &str) -> Option<ApiResolvedHost> {
@@ -112,40 +111,76 @@ fn resolve_api_url_host(url: &str) -> Option<ApiResolvedHost> {
 }
 
 fn spawn_api_preconnect(resolved: ApiResolvedHost) {
-    std::thread::spawn(move || {
+    if let Err(error) = crate::platform::spawn_named("rriter-api-preconnect", move || {
         let client = api_http_client(Some(&resolved));
         let url = format!("https://{}/", resolved.host);
         let _ = client.head(url).send();
-    });
+    }) {
+        eprintln!("RRiter: не удалось запустить API preconnect worker: {error}");
+    }
 }
 
-pub fn spawn_load_local(id: ApiSpecId, path: PathBuf) -> Receiver<ApiLoadResult> {
+pub fn spawn_load_local(id: ApiSpecId, generation: u64, path: PathBuf) -> Receiver<ApiLoadResult> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-api-load-local", move || {
         let result = load_local_spec(id, &path);
-        let _ = tx.send(ApiLoadResult { id, result });
-    });
+        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
+    }) {
+        let _ = tx.send(ApiLoadResult {
+            id,
+            generation,
+            result: Err(ApiLoadError::new(
+                ApiLoadErrorKind::Io,
+                format!("не удалось запустить worker локальной спецификации: {err}"),
+            )),
+        });
+    }
     rx
 }
 
-pub fn spawn_load_url(id: ApiSpecId, url: String) -> Receiver<ApiLoadResult> {
+pub fn spawn_load_url(id: ApiSpecId, generation: u64, url: String) -> Receiver<ApiLoadResult> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-api-load-url", move || {
         let result = load_url_spec(id, &url);
-        let _ = tx.send(ApiLoadResult { id, result });
-    });
+        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
+    }) {
+        let _ = tx.send(ApiLoadResult {
+            id,
+            generation,
+            result: Err(ApiLoadError::new(
+                ApiLoadErrorKind::Io,
+                format!("не удалось запустить worker URL-спецификации: {err}"),
+            )),
+        });
+    }
     rx
 }
 
-pub fn spawn_load_cached_url(id: ApiSpecId, url: String) -> Receiver<ApiLoadResult> {
+pub fn spawn_load_cached_url(
+    id: ApiSpecId,
+    generation: u64,
+    url: String,
+) -> Receiver<ApiLoadResult> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-api-load-cache", move || {
         let result = match read_url_cache(id) {
             Some(raw) => parse_openapi_payload(id, ApiSpecSource::Url(url), raw, None, None),
             None => Err(ApiLoadError::new(ApiLoadErrorKind::Io, "URL cache пустой")),
         };
-        let _ = tx.send(ApiLoadResult { id, result });
-    });
+        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
+    }) {
+        let _ = tx.send(ApiLoadResult {
+            id,
+            generation,
+            result: Err(ApiLoadError::new(
+                ApiLoadErrorKind::Io,
+                format!("не удалось запустить worker URL cache: {err}"),
+            )),
+        });
+    }
     rx
 }
 

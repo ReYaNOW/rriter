@@ -160,46 +160,35 @@ impl ProcessTree {
         }
     }
 
-    pub fn terminate_gracefully(&self) -> io::Result<()> {
+    fn terminate(&self, force: bool) -> io::Result<()> {
         if !self.active {
             return Ok(());
         }
         #[cfg(unix)]
         {
-            return signal_process_group(self.process_group, libc::SIGTERM);
+            let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
+            return signal_process_group(self.process_group, signal);
         }
 
         #[cfg(windows)]
         {
+            let _ = force;
             return terminate_windows_job(self.job, 1);
         }
 
         #[cfg(not(any(unix, windows)))]
         {
-            let _ = self.process_id;
+            let _ = (self.process_id, force);
             Ok(())
         }
     }
 
+    pub fn terminate_gracefully(&self) -> io::Result<()> {
+        self.terminate(false)
+    }
+
     pub fn terminate_forcefully(&self) -> io::Result<()> {
-        if !self.active {
-            return Ok(());
-        }
-        #[cfg(unix)]
-        {
-            return signal_process_group(self.process_group, libc::SIGKILL);
-        }
-
-        #[cfg(windows)]
-        {
-            return terminate_windows_job(self.job, 1);
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            let _ = self.process_id;
-            Ok(())
-        }
+        self.terminate(true)
     }
 
     /// The direct process has exited. Kill any descendants that still hold
@@ -492,8 +481,15 @@ where
         .take_stderr()
         .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
     let (tx, rx) = mpsc::sync_channel(PROCESS_OUTPUT_CHANNEL_CAPACITY);
-    let stdout_reader = spawn_line_reader(stdout, ProcessOutputStream::Stdout, tx.clone());
-    let stderr_reader = spawn_line_reader(stderr, ProcessOutputStream::Stderr, tx);
+    let stdout_reader = spawn_line_reader(stdout, ProcessOutputStream::Stdout, tx.clone())?;
+    let stderr_reader = match spawn_line_reader(stderr, ProcessOutputStream::Stderr, tx) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let _ = child.terminate(DROP_GRACE_PERIOD);
+            let _ = join_line_reader(stdout_reader);
+            return Err(error);
+        }
+    };
     let deadline = Instant::now() + timeout;
 
     let result = loop {
@@ -552,8 +548,15 @@ fn run_command_output_inner(
     let stderr = child
         .take_stderr()
         .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
-    let stdout_reader = thread::spawn(move || read_pipe(stdout));
-    let stderr_reader = thread::spawn(move || read_pipe(stderr));
+    let stdout_reader = super::spawn_named("rriter-process-stdout", move || read_pipe(stdout))?;
+    let stderr_reader = match super::spawn_named("rriter-process-stderr", move || read_pipe(stderr)) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let _ = child.terminate(DROP_GRACE_PERIOD);
+            let _ = join_pipe_reader(stdout_reader);
+            return Err(error);
+        }
+    };
 
     let deadline = Instant::now() + timeout;
     let status = loop {
@@ -610,11 +613,11 @@ fn spawn_line_reader<R>(
     mut stream: R,
     output_stream: ProcessOutputStream,
     tx: mpsc::SyncSender<(ProcessOutputStream, String)>,
-) -> thread::JoinHandle<io::Result<()>>
+) -> io::Result<thread::JoinHandle<io::Result<()>>>
 where
     R: Read + Send + 'static,
 {
-    thread::spawn(move || {
+    super::spawn_named("rriter-process-line-reader", move || {
         let mut read_buffer = [0u8; 4096];
         let mut line = Vec::with_capacity(256);
         let mut truncated = false;

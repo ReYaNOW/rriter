@@ -180,40 +180,6 @@ pub(super) fn source_line<'a>(
     text.get(start..end)
 }
 
-fn update_python_statement_depth(
-    line: &str,
-    paren_depth: &mut i32,
-    bracket_depth: &mut i32,
-    brace_depth: &mut i32,
-    in_string: &mut bool,
-    string_char: &mut char,
-) {
-    for c in line.chars() {
-        if *in_string {
-            if c == '\\' {
-                continue;
-            }
-            if c == *string_char {
-                *in_string = false;
-            }
-        } else {
-            match c {
-                '"' | '\'' => {
-                    *in_string = true;
-                    *string_char = c;
-                }
-                '(' => *paren_depth += 1,
-                ')' => *paren_depth -= 1,
-                '[' => *bracket_depth += 1,
-                ']' => *bracket_depth -= 1,
-                '{' => *brace_depth += 1,
-                '}' => *brace_depth -= 1,
-                _ => {}
-            }
-        }
-    }
-}
-
 pub(super) fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
@@ -292,38 +258,18 @@ pub(super) fn source_signature_for_hover(
                 }
             }
 
-            let mut paren_depth = 0;
-            let mut bracket_depth = 0;
-            let mut brace_depth = 0;
-            let mut in_string = false;
-            let mut string_char = ' ';
+            let mut delimiters = crate::languages::PythonDelimiterState::default();
             let mut statement_lines = vec![line.trim_end().to_string()];
 
-            update_python_statement_depth(
-                line,
-                &mut paren_depth,
-                &mut bracket_depth,
-                &mut brace_depth,
-                &mut in_string,
-                &mut string_char,
-            );
+            delimiters.scan_line(line);
 
             let mut curr_idx = idx;
-            while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0)
-                && curr_idx + 1 < line_offsets.len()
-            {
+            while delimiters.has_open_delimiter() && curr_idx + 1 < line_offsets.len() {
                 curr_idx += 1;
                 if let Some(next_line) = source_line(text, line_offsets, curr_idx) {
                     let trim_next = next_line.trim_end();
                     statement_lines.push(trim_next.to_string());
-                    update_python_statement_depth(
-                        trim_next,
-                        &mut paren_depth,
-                        &mut bracket_depth,
-                        &mut brace_depth,
-                        &mut in_string,
-                        &mut string_char,
-                    );
+                    delimiters.scan_line(trim_next);
                 } else {
                     break;
                 }
@@ -668,37 +614,17 @@ pub(super) fn source_attribute_hover_from_definition_file(
             continue;
         }
 
-        let mut paren_depth = 0;
-        let mut bracket_depth = 0;
-        let mut brace_depth = 0;
-        let mut in_string = false;
-        let mut string_char = ' ';
+        let mut delimiters = crate::languages::PythonDelimiterState::default();
         let mut statement_lines = vec![lines[idx].trim_end().to_string()];
 
-        update_python_statement_depth(
-            lines[idx],
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-            &mut in_string,
-            &mut string_char,
-        );
+        delimiters.scan_line(lines[idx]);
 
         let mut curr_idx = idx;
-        while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0)
-            && curr_idx + 1 < lines.len()
-        {
+        while delimiters.has_open_delimiter() && curr_idx + 1 < lines.len() {
             curr_idx += 1;
             let trim_next = lines[curr_idx].trim_end();
             statement_lines.push(trim_next.to_string());
-            update_python_statement_depth(
-                trim_next,
-                &mut paren_depth,
-                &mut bracket_depth,
-                &mut brace_depth,
-                &mut in_string,
-                &mut string_char,
-            );
+            delimiters.scan_line(trim_next);
         }
 
         let full_statement = statement_lines.join("\n");

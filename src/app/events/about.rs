@@ -1,3 +1,7 @@
+pub(crate) fn file_watcher_disconnect_message() -> &'static str {
+    "Наблюдение за файлами неожиданно завершилось; выполняется перезапуск"
+}
+
 use super::*;
 
 include!("about/about_helpers.rs");
@@ -8,6 +12,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         app.run_ide_on_startup = false;
         app.enter_ide_mode();
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
+    }
+
+    if app.pending_action_ready {
+        app.pending_action_ready = false;
+        match app.pending_action {
+            PendingAction::Quit => {
+                window_runtime::save_state_and_exit(app, event_loop);
+                return;
+            }
+            PendingAction::OpenFile => app.trigger_file_picker(),
+            PendingAction::CloseFile => app.close_current_file(),
+        }
     }
 
     let now = Instant::now();
@@ -372,6 +388,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             app.file_tree_notify_rx = None;
             app.file_tree_watcher_stop_tx = None;
             app.file_tree_watched_dirs.clear();
+            app.ide_panel.file_tree_error =
+                Some(file_watcher_disconnect_message().to_string());
+            app.start_file_watcher();
+            needs_redraw = true;
         }
         if fs_changed {
             app.refresh_file_tree();
@@ -575,7 +595,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if t.scroll_y.update(dt) {
                 needs_redraw = true;
             }
-            if t.grid.lock().unwrap().dirty {
+            if crate::app::terminal::lock_terminal_grid(&t.grid).dirty {
                 needs_redraw = true;
             }
         }
@@ -679,7 +699,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 if drag_delta != 0.0 {
                     let active = app.ide_panel.active_terminal;
                     if let Some(term) = app.ide_panel.terminals.get_mut(active) {
-                        let mut grid = term.grid.lock().unwrap();
+                        let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                         if !grid.is_alt {
                             let total_lines = grid.scrollback.len() + grid.lines.len();
                             let max_scroll =
@@ -800,11 +820,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         app.scroll_x.clamp_current(0.0, max_scroll_x);
     }
 
-    if let Some(rx) = &app.open_folder_rx {
-        if let Ok(result) = rx.try_recv() {
-            app.open_folder_rx = None;
-            if let Some(path) = result {
-                app.apply_selected_workspace_folder(path);
+    if let Some(rx) = app.open_folder_rx.take() {
+        match rx.try_recv() {
+            Ok(result) => {
+                if let Some(path) = result {
+                    app.apply_selected_workspace_folder(path);
+                    needs_redraw = true;
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                app.open_folder_rx = Some(rx);
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                app.ide_panel.file_tree_error =
+                    Some("Диалог выбора папки неожиданно завершился".to_string());
                 needs_redraw = true;
             }
         }
@@ -821,6 +850,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 app.settings_tool_picker_rx = None;
+                app.tool_installer
+                    .report_external_error("Диалог выбора инструмента неожиданно завершился");
+                needs_redraw = true;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
@@ -836,20 +868,34 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
 
-    if let Some(rx) = &app.open_file_rx {
-        if let Ok(result) = rx.try_recv() {
-            app.open_file_rx = None;
-            if let Some(path) = result {
-                app.open_file_in_tab(path, true);
+    if let Some(rx) = app.open_file_rx.take() {
+        match rx.try_recv() {
+            Ok(result) => {
+                if let Some(path) = result {
+                    app.open_file_in_tab(path, true);
+                    needs_redraw = true;
+                }
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => app.open_file_rx = Some(rx),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                app.ide_panel.file_tree_error =
+                    Some("Диалог выбора файла неожиданно завершился".to_string());
+                needs_redraw = true;
             }
         }
     }
 
-    if let Some(rx) = &app.save_file_rx {
-        if let Ok(result) = rx.try_recv() {
-            app.save_file_rx = None;
-            if let Some(path) = result {
-                app.apply_save_as_path(path);
+    if let Some(rx) = app.save_file_rx.take() {
+        match rx.try_recv() {
+            Ok(result) => {
+                app.handle_save_as_selection(result);
+                needs_redraw = true;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => app.save_file_rx = Some(rx),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                app.pending_action_waiting_for_save_as = false;
+                app.ide_panel.file_tree_error =
+                    Some("Диалог сохранения неожиданно завершился".to_string());
                 needs_redraw = true;
             }
         }

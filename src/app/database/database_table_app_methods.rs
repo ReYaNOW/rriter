@@ -400,24 +400,6 @@ impl App {
         state.error = Some(message);
     }
 
-    fn show_database_table_busy_notice(
-        &mut self,
-        tab_id: crate::app::database::DatabaseTabId,
-        message: String,
-    ) {
-        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
-            return;
-        };
-        state.grid.loading_count = false;
-        state.grid.loading_chunk = false;
-        state.grid.in_flight_chunk = None;
-        state.grid.desired_chunk = None;
-        state.grid.finish_refresh();
-        state.grid.abort_pending_view();
-        state.error = None;
-        state.show_timed_notice(message);
-    }
-
     pub(crate) fn queue_database_table_initial_load(
         &mut self,
         tab_id: crate::app::database::DatabaseTabId,
@@ -453,13 +435,6 @@ impl App {
         meta: DatabaseTableTabMeta,
         generation: DatabaseGeneration,
     ) {
-        if self.ide_panel.database.pending_job.is_some() {
-            self.show_database_table_busy_notice(
-                meta.tab_id,
-                "Сейчас уже выполняется другой запрос к базе данных".to_string(),
-            );
-            return;
-        }
         let Some(connection) = self
             .ide_panel
             .database
@@ -489,6 +464,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind: DatabasePendingJobKind::CountRows,
+            owner: crate::app::database::DatabaseJobOwner::Table(meta.tab_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: Some(meta.table_name.clone()),
@@ -543,19 +519,6 @@ impl App {
                         state.grid.desired_chunk = Some(chunk_index);
                         return;
                     }
-                    if self.ide_panel.database.pending_job.is_some() {
-                        if state.grid.refreshing {
-                            state.grid.finish_refresh();
-                            state.grid.abort_pending_view();
-                            state.error = None;
-                            state.show_timed_notice(
-                                "Сейчас уже выполняется другой запрос к базе данных",
-                            );
-                        } else {
-                            state.grid.desired_chunk = Some(chunk_index);
-                        }
-                        return;
-                    }
                     let Some(metadata) = state.metadata.clone() else {
                         return;
                     };
@@ -592,6 +555,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind: DatabasePendingJobKind::LoadChunk,
+            owner: crate::app::database::DatabaseJobOwner::Table(meta.tab_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: Some(meta.table_name.clone()),

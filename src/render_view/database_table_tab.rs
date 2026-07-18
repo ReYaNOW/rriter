@@ -1,5 +1,5 @@
 use crate::renderer::Renderer;
-use crate::ui_system::{UiId, UiRegistry};
+use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 use crate::widgets::{ButtonStyle, ButtonView, IconType};
 use glow::HasContext;
 
@@ -9,6 +9,81 @@ const ROW_GUTTER_W: f32 = 62.0;
 const SCROLLBAR_W: f32 = 12.0;
 const TABLE_CELL_TEXT_SCALE: f32 = 0.9;
 const TABLE_HEADER_TEXT_SCALE: f32 = 0.84;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabasePopupPlacement {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn database_popup_placement(
+    anchor_x: f32,
+    anchor_y: f32,
+    _anchor_w: f32,
+    anchor_h: f32,
+    desired_w: f32,
+    desired_h: f32,
+    bounds_x: f32,
+    bounds_y: f32,
+    bounds_w: f32,
+    bounds_h: f32,
+    base_scale: f32,
+) -> DatabasePopupPlacement {
+    let fit_scale = (bounds_w / desired_w.max(1.0))
+        .min(bounds_h / desired_h.max(1.0))
+        .min(1.0)
+        .max(0.1);
+    let scale = base_scale * fit_scale;
+    let w = (desired_w * fit_scale).min(bounds_w).max(1.0).round();
+    let h = (desired_h * fit_scale).min(bounds_h).max(1.0).round();
+    let x = anchor_x.clamp(bounds_x, (bounds_x + bounds_w - w).max(bounds_x));
+    let below = anchor_y + anchor_h;
+    let y = if below + h <= bounds_y + bounds_h {
+        below
+    } else {
+        (anchor_y - h).max(bounds_y)
+    };
+    DatabasePopupPlacement {
+        x: x.round(),
+        y: y.round(),
+        w,
+        h,
+        scale,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct DatabaseEnumPage {
+    start: usize,
+    end: usize,
+    previous: bool,
+    next: bool,
+}
+
+fn database_enum_page(option_count: usize, requested_start: usize, visible_rows: usize) -> DatabaseEnumPage {
+    if option_count == 0 || visible_rows == 0 {
+        return DatabaseEnumPage {
+            start: 0,
+            end: 0,
+            previous: false,
+            next: false,
+        };
+    }
+    let page_size = visible_rows.max(1);
+    let max_start = option_count.saturating_sub(page_size);
+    let start = requested_start.min(max_start);
+    let end = start.saturating_add(page_size).min(option_count);
+    DatabaseEnumPage {
+        start,
+        end,
+        previous: start > 0,
+        next: end < option_count,
+    }
+}
 fn database_table_unavailable_message(
     state: &crate::app::database::DatabaseTableTabState,
 ) -> Option<&str> {
@@ -415,6 +490,19 @@ impl Renderer {
         let scroll_x = (state.grid.scroll_x.current * s).round();
         let header_baseline = Self::tree_row_text_y(y, header_h, s).round();
         let mut scratch = String::new();
+        let header_clip = UiClipRect::new(
+            layout.header_rect.x,
+            layout.header_rect.y,
+            layout.header_rect.w,
+            layout.header_rect.h,
+        );
+        let body_clip = UiClipRect::new(
+            layout.body_rect.x,
+            layout.body_rect.y,
+            layout.body_rect.w,
+            layout.body_rect.h,
+        );
+        let gutter_clip = UiClipRect::new(x, rows_y, gutter_w, rows_h);
 
         self.flush();
         unsafe {
@@ -439,7 +527,16 @@ impl Renderer {
             if state.grid.view.sorted_column.as_deref() == Some(column.name.as_str()) {
                 self.push_rect(draw_x, y, draw_w, header_h, [0.35, 0.22, 0.52, 0.36]);
             }
-            ui.register_rect(UiId::DatabaseTableHeader(column_index), draw_x, y, draw_w, header_h, mx, my);
+            ui.register_rect_clipped(
+                UiId::DatabaseTableHeader(column_index),
+                draw_x,
+                y,
+                draw_w,
+                header_h,
+                header_clip,
+                mx,
+                my,
+            );
             self.draw_tree_label_clipped(
                 &database_column_header(column, state),
                 draw_x + (8.0 * s).round(),
@@ -450,12 +547,13 @@ impl Renderer {
                 &mut scratch,
             );
             let divider_x = (draw_x + draw_w - 3.0 * s).round();
-            ui.register_rect(
+            ui.register_rect_clipped(
                 UiId::DatabaseTableColumnResize(column_index),
                 divider_x,
                 y,
                 (6.0 * s).round(),
                 header_h,
+                header_clip,
                 mx,
                 my,
             );
@@ -518,12 +616,13 @@ impl Renderer {
                 if cell.dirty {
                     self.push_rect(draw_x, row_y + row_h - (2.0 * s).round(), draw_w, (2.0 * s).round().max(1.0), [0.32, 0.90, 0.48, 1.0]);
                 }
-                ui.register_rect(
+                ui.register_rect_clipped(
                     UiId::DatabaseTableCell(row.absolute_index, column_index),
                     draw_x,
                     row_y,
                     draw_w,
                     row_h,
+                    body_clip,
                     mx,
                     my,
                 );
@@ -595,38 +694,71 @@ impl Renderer {
         {
             match editor.kind {
                 crate::app::database::DatabaseCellEditorKind::DateTime => {
-                    let (popup_w, popup_h) = database_date_picker_size(s);
-                    let popup_x = anchor_x.clamp(data_x, (data_x + data_w - popup_w).max(data_x));
-                    let below = row_y + row_h;
-                    let popup_y = if below + popup_h <= rows_y + rows_h {
-                        below
+                    let is_time_only = metadata.columns[column_index].type_kind
+                        == crate::app::database::DatabaseTypeKind::Time;
+                    let (desired_w, desired_h) = if is_time_only {
+                        (142.0 * s, 38.0 * s)
                     } else {
-                        (row_y - popup_h).max(rows_y)
+                        database_date_picker_size(s)
                     };
+                    let placement = database_popup_placement(
+                        anchor_x,
+                        row_y,
+                        anchor_w,
+                        row_h,
+                        desired_w,
+                        desired_h,
+                        data_x,
+                        rows_y,
+                        data_w,
+                        rows_h,
+                        s,
+                    );
                     draw_database_date_picker(
                         self,
                         ui,
-                        popup_x,
-                        popup_y,
+                        placement.x,
+                        placement.y,
                         editor,
                         &metadata.columns[column_index],
                         mx,
                         my,
-                        s,
+                        placement.scale,
                     );
                 }
                 crate::app::database::DatabaseCellEditorKind::Enum => {
                     let options = &metadata.columns[column_index].enum_values;
-                    let option_h = (28.0 * s).round();
-                    let popup_h = option_h * options.len().min(10) as f32;
-                    let popup_w = anchor_w.max((150.0 * s).round()).min(data_w);
-                    let popup_x = anchor_x.clamp(data_x, (data_x + data_w - popup_w).max(data_x));
-                    let below = row_y + row_h;
-                    let popup_y = if below + popup_h <= rows_y + rows_h {
-                        below
+                    let base_option_h = (28.0 * s).round().max(1.0);
+                    let max_rows = (rows_h / base_option_h).floor().max(1.0) as usize;
+                    let page_size = if options.len() > max_rows {
+                        max_rows.saturating_sub(2).max(1)
                     } else {
-                        (row_y - popup_h).max(rows_y)
+                        max_rows
                     };
+                    let page = database_enum_page(options.len(), editor.enum_index, page_size);
+                    let control_rows = page.previous as usize + page.next as usize;
+                    let row_count = page.end.saturating_sub(page.start) + control_rows;
+                    let desired_h = base_option_h * row_count.max(1) as f32;
+                    let desired_w = anchor_w.max((150.0 * s).round()).min(data_w);
+                    let placement = database_popup_placement(
+                        anchor_x,
+                        row_y,
+                        anchor_w,
+                        row_h,
+                        desired_w,
+                        desired_h,
+                        data_x,
+                        rows_y,
+                        data_w,
+                        rows_h,
+                        s,
+                    );
+                    let popup_x = placement.x;
+                    let popup_y = placement.y;
+                    let popup_w = placement.w;
+                    let popup_h = placement.h;
+                    let option_h = (28.0 * placement.scale).round().max(1.0);
+                    let popup_clip = UiClipRect::new(data_x, rows_y, data_w, rows_h);
                     self.push_rounded_rect_border(
                         popup_x,
                         popup_y,
@@ -637,17 +769,52 @@ impl Renderer {
                         [0.32, 0.34, 0.42, 1.0],
                         [0.095, 0.10, 0.13, 1.0],
                     );
-                    for (option_index, option) in options.iter().take(10).enumerate() {
-                        let option_y = (popup_y + option_index as f32 * option_h).round();
+                    let mut visual_row = 0usize;
+                    if page.previous {
+                        let option_y = popup_y;
+                        let hovered = ui.register_rect_clipped(
+                            UiId::DatabaseTableEnumPreviousPage,
+                            popup_x,
+                            option_y,
+                            popup_w,
+                            option_h,
+                            popup_clip,
+                            mx,
+                            my,
+                        );
+                        if hovered {
+                            self.push_rect(
+                                popup_x + 1.0,
+                                option_y + 1.0,
+                                popup_w - 2.0,
+                                option_h - 2.0,
+                                [0.20, 0.18, 0.29, 1.0],
+                            );
+                        }
+                        self.draw_tree_label_clipped(
+                            "↑ Предыдущие",
+                            popup_x + (7.0 * placement.scale).round(),
+                            Self::tree_row_text_y(option_y, option_h, placement.scale),
+                            (popup_w - 14.0 * placement.scale).max(4.0),
+                            self.theme.line_num,
+                            0.84,
+                            &mut scratch,
+                        );
+                        visual_row += 1;
+                    }
+                    for option_index in page.start..page.end {
+                        let option = &options[option_index];
+                        let option_y = (popup_y + visual_row as f32 * option_h).round();
                         if mx >= popup_x && mx <= popup_x + popup_w && my >= option_y && my <= option_y + option_h {
                             self.push_rect(popup_x + 1.0, option_y + 1.0, popup_w - 2.0, option_h - 2.0, [0.20, 0.18, 0.29, 1.0]);
                         }
-                        ui.register_rect(
+                        ui.register_rect_clipped(
                             UiId::DatabaseTableEnumOption(option_index),
                             popup_x,
                             option_y,
                             popup_w,
                             option_h,
+                            popup_clip,
                             mx,
                             my,
                         );
@@ -657,6 +824,38 @@ impl Renderer {
                             Self::tree_row_text_y(option_y, option_h, s),
                             (popup_w - 14.0 * s).max(4.0),
                             self.theme.fg,
+                            0.84,
+                            &mut scratch,
+                        );
+                        visual_row += 1;
+                    }
+                    if page.next {
+                        let option_y = (popup_y + visual_row as f32 * option_h).round();
+                        let hovered = ui.register_rect_clipped(
+                            UiId::DatabaseTableEnumNextPage,
+                            popup_x,
+                            option_y,
+                            popup_w,
+                            option_h,
+                            popup_clip,
+                            mx,
+                            my,
+                        );
+                        if hovered {
+                            self.push_rect(
+                                popup_x + 1.0,
+                                option_y + 1.0,
+                                popup_w - 2.0,
+                                option_h - 2.0,
+                                [0.20, 0.18, 0.29, 1.0],
+                            );
+                        }
+                        self.draw_tree_label_clipped(
+                            "Следующие ↓",
+                            popup_x + (7.0 * placement.scale).round(),
+                            Self::tree_row_text_y(option_y, option_h, placement.scale),
+                            (popup_w - 14.0 * placement.scale).max(4.0),
+                            self.theme.line_num,
                             0.84,
                             &mut scratch,
                         );
@@ -695,7 +894,16 @@ impl Renderer {
             if state.grid.selection.contains_row(absolute) {
                 self.push_rect(x, row_y, gutter_w, row_h, [0.42, 0.25, 0.63, 0.55]);
             }
-            ui.register_rect(UiId::DatabaseGridRow(absolute), x, row_y, gutter_w, row_h, mx, my);
+            ui.register_rect_clipped(
+                UiId::DatabaseGridRow(absolute),
+                x,
+                row_y,
+                gutter_w,
+                row_h,
+                gutter_clip,
+                mx,
+                my,
+            );
             self.draw_string_scaled_pixel_snapped(
                 &(absolute + 1).to_string(),
                 x + (8.0 * s).round(),
@@ -911,12 +1119,22 @@ fn database_server_rows_on_page(state: &crate::app::database::DatabaseTableTabSt
 
 fn database_table_page_status(state: &crate::app::database::DatabaseTableTabState) -> String {
     let base = state.grid.view.current_page.saturating_mul(state.grid.view.limit);
-    let visible = database_server_rows_on_page(state);
+    let loaded = state.grid.loaded_server_row_count_on_page();
     match state.grid.count {
-        Some(count) if count == 0 => "0 из 0".to_string(),
-        Some(count) => format!("{}–{} из {}", base + 1, base + visible, count),
-        None if state.grid.loading_count => format!("{}–{}, подсчёт…", base + 1, base + visible),
-        None => state.grid.count_error.clone().unwrap_or_else(|| "общее число неизвестно".to_string()),
+        Some(0) => "0 из 0".to_string(),
+        Some(count) if loaded > 0 => format!("{}–{} из {}", base + 1, base + loaded, count),
+        Some(count) if state.grid.loading_chunk => format!("Загрузка… · всего {count}"),
+        Some(count) => format!("0 загружено · всего {count}"),
+        None if state.grid.loading_count && loaded > 0 => {
+            format!("Загружено {loaded} · подсчёт…")
+        }
+        None if state.grid.loading_count => "Подсчёт…".to_string(),
+        None if loaded > 0 => format!("Загружено {loaded} · общее число неизвестно"),
+        None => state
+            .grid
+            .count_error
+            .clone()
+            .unwrap_or_else(|| "общее число неизвестно".to_string()),
     }
 }
 
@@ -1415,6 +1633,43 @@ mod database_table_renderer_tests {
     use super::*;
 
     #[test]
+    fn bug_22_enum_popup_can_reach_options_after_the_first_ten() {
+        let first = database_enum_page(25, 0, 8);
+        assert_eq!(first.start, 0);
+        assert_eq!(first.end, 8);
+        assert!(first.next);
+        let later = database_enum_page(25, 17, 8);
+        assert_eq!(later.start, 17);
+        assert_eq!(later.end, 25);
+        assert!(later.previous);
+        assert!(!later.next);
+    }
+
+    #[test]
+    fn bug_23_date_picker_is_scaled_and_repositioned_inside_rows_viewport() {
+        let placement = database_popup_placement(
+            180.0, 160.0, 80.0, 30.0, 238.0, 300.0, 10.0, 20.0, 220.0, 140.0, 1.0,
+        );
+        assert!(placement.x >= 10.0);
+        assert!(placement.y >= 20.0);
+        assert!(placement.x + placement.w <= 230.0 + 0.5);
+        assert!(placement.y + placement.h <= 160.0 + 0.5);
+        assert!(placement.scale < 1.0);
+    }
+
+    #[test]
+    fn bug_24_enum_popup_is_scaled_and_repositioned_inside_rows_viewport() {
+        let placement = database_popup_placement(
+            0.0, 95.0, 60.0, 28.0, 180.0, 280.0, 0.0, 0.0, 140.0, 120.0, 1.0,
+        );
+        assert_eq!(placement.x, 0.0);
+        assert!(placement.y >= 0.0);
+        assert!(placement.w <= 140.0);
+        assert!(placement.h <= 120.0);
+        assert!(placement.y + placement.h <= 120.0 + 0.5);
+    }
+
+    #[test]
     fn grid_does_not_reserve_black_scrollbar_strips_without_overflow() {
         let viewport = crate::app::database::database_grid_viewport(800.0, 500.0, 54.0, 12.0, 28.0, 600.0, 300.0);
         assert!(!viewport.show_x);
@@ -1523,5 +1778,38 @@ mod database_table_renderer_tests {
 
         state.grid.view.sort_direction = Some(crate::app::database::DatabaseSortDirection::Desc);
         assert!(database_column_header(&column, &state).ends_with(" ↑"));
+    }
+
+    #[test]
+    fn bug_62_page_status_uses_loaded_rows_not_theoretical_limit() {
+        let view = crate::app::database::DatabaseTableViewState {
+            key: crate::app::database::DatabaseTableViewKey {
+                connection_id: crate::app::database::DatabaseConnectionId(1),
+                database_name: "db".to_string(),
+                table_name: "items".to_string(),
+            },
+            limit: 100,
+            ..crate::app::database::DatabaseTableViewState::default()
+        };
+        let mut state = crate::app::database::DatabaseTableTabState::new(view);
+        state.grid.count = Some(100);
+        let rows = (0..99)
+            .map(|absolute_index| crate::app::database::DatabaseGridRow {
+                absolute_index,
+                cells: Vec::new(),
+                xmin: None,
+                state: crate::app::database::DatabaseRowState::Clean,
+            })
+            .collect::<Vec<_>>();
+        state.grid.chunks.insert(
+            0,
+            crate::app::database::DatabaseTableChunk {
+                generation: crate::app::database::DatabaseGeneration(1),
+                chunk_index: 0,
+                rows,
+                estimated_bytes: 0,
+            },
+        );
+        assert_eq!(database_table_page_status(&state), "1–99 из 100");
     }
 }

@@ -10,69 +10,15 @@ impl Renderer {
         max_x: f32,
         scale: f32,
     ) {
-        let mut draw_x = x;
-        let mut current_offset = base_offset.unwrap_or(usize::MAX);
-        let mut span_idx = base_offset
-            .map(
-                |offset| match spans.binary_search_by_key(&offset, |s| s.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
-                },
-            )
-            .unwrap_or(0);
-
-        for c in text.chars() {
-            if draw_x > max_x {
-                break;
-            }
-            if c == '\r' || c == '\n' {
-                break;
-            }
-            let char_len = c.len_utf8();
-            let adv = self.char_advance(c);
-            if c != ' '
-                && c != '\t'
-                && let Some(g) = self.get_glyph(c)
-            {
-                let mut color = self.theme.fg;
-                if base_offset.is_some() {
-                    while span_idx < spans.len() && spans[span_idx].end <= current_offset {
-                        span_idx += 1;
-                    }
-                    if span_idx < spans.len() && spans[span_idx].start <= current_offset {
-                        color = spans[span_idx].color;
-                    }
-                }
-                self.push_quad(
-                    draw_x + g.offset_x,
-                    y - g.offset_y,
-                    g.width,
-                    g.height,
-                    g.u,
-                    g.v,
-                    g.uw,
-                    g.vh,
-                    color,
-                    g.is_emoji,
-                );
-                if c == '.' || c == ':' {
-                    self.push_quad(
-                        draw_x + g.offset_x + 1.0 * scale,
-                        y - g.offset_y,
-                        g.width,
-                        g.height,
-                        g.u,
-                        g.v,
-                        g.uw,
-                        g.vh,
-                        color,
-                        g.is_emoji,
-                    );
-                }
-            }
-            draw_x += adv;
-            current_offset = current_offset.saturating_add(char_len);
-        }
+        self.draw_spanned_ui_line_pixel_snapped(
+            text,
+            spans,
+            base_offset,
+            x,
+            y,
+            max_x,
+            scale,
+        );
     }
 
     fn draw_inline_git_popup_panel(

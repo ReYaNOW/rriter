@@ -64,10 +64,34 @@ pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &s
 
 pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let spawn_error_response = ApiJobResponse {
+        request_id: job.request_id,
+        spec_id: job.spec_id,
+        route_idx: job.route_idx,
+        status: None,
+        elapsed_ms: 0,
+        server_reach_ms: None,
+        timing_text: String::new(),
+        headers: Vec::new(),
+        headers_text: String::new(),
+        curl_text: format_api_curl_command(&job),
+        body: String::new(),
+        truncated: false,
+        error: None,
+        resolved_host: job.resolved_host.clone(),
+    };
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-api-request", move || {
         let response = run_api_request(job);
+        let _ = worker_tx.send(response);
+    }) {
+        let mut response = spawn_error_response;
+        response.error = Some(ApiLoadError::new(
+            ApiLoadErrorKind::Io,
+            format!("не удалось запустить API request worker: {err}"),
+        ));
         let _ = tx.send(response);
-    });
+    }
     rx
 }
 
@@ -911,12 +935,6 @@ pub(crate) struct ApiMockTyDiagLayout {
     pub byte_offset: usize,
 }
 
-pub(crate) fn api_byte_offset_for_char_col(line: &str, col: usize) -> usize {
-    line.char_indices()
-        .nth(col)
-        .map(|(idx, _)| idx)
-        .unwrap_or(line.len())
-}
 
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn api_mock_ty_diag_layout<F>(
@@ -959,8 +977,8 @@ where
         line_start = line_start.saturating_add(candidate.len()).saturating_add(1);
     }
     let line = line?;
-    let start_byte = api_byte_offset_for_char_col(line, diag.start_col);
-    let end_byte = api_byte_offset_for_char_col(line, diag.end_col);
+    let start_byte = crate::editor::byte_offset_for_char_col(line, diag.start_col);
+    let end_byte = crate::editor::byte_offset_for_char_col(line, diag.end_col);
     let x_start = x + measure(&line[..start_byte]) - scroll_x;
     let x_end = x + measure(&line[..end_byte]) - scroll_x;
     let base_y = y - line_offset + visible_idx as f32 * line_h;

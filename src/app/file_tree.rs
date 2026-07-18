@@ -358,23 +358,14 @@ pub(crate) fn file_tree_path_input_layout<F>(
 where
     F: FnMut(&str) -> f32,
 {
-    let side_pad = FILE_TREE_DIALOG_SIDE_PAD * scale;
-    let content_x = dialog_x + side_pad;
-    let content_w = dialog_w - side_pad * 2.0;
-    let gap = 6.0 * scale;
-    let min_input_w = (FILE_TREE_PATH_INPUT_MIN_W * scale)
-        .min(content_w * 0.58)
-        .max(80.0 * scale);
-    let max_prefix_w = (content_w - min_input_w - gap).max(0.0);
-    let prefix = file_tree_clipped_path_suffix(
-        &file_tree_parent_path_prefix(parent_dir),
-        max_prefix_w,
+    file_tree_path_input_layout_with_base(
+        dialog_x,
+        dialog_w,
+        dialog_w,
+        scale,
+        parent_dir,
         &mut measure,
-    );
-    let prefix_w = measure(&prefix).min(max_prefix_w);
-    let input_x = content_x + prefix_w + gap;
-    let input_w = (content_x + content_w - input_x).max(min_input_w.min(content_w));
-    (prefix, input_x, input_w)
+    )
 }
 
 pub(crate) fn file_tree_rename_dialog_width(
@@ -400,14 +391,35 @@ pub(crate) fn file_tree_rename_path_input_layout<F>(
 where
     F: FnMut(&str) -> f32,
 {
+    file_tree_path_input_layout_with_base(
+        dialog_x,
+        dialog_w,
+        base_dialog_w,
+        scale,
+        parent_dir,
+        &mut measure,
+    )
+}
+
+fn file_tree_path_input_layout_with_base<F>(
+    dialog_x: f32,
+    dialog_w: f32,
+    prefix_dialog_w: f32,
+    scale: f32,
+    parent_dir: &Path,
+    mut measure: F,
+) -> (String, f32, f32)
+where
+    F: FnMut(&str) -> f32,
+{
     let side_pad = FILE_TREE_DIALOG_SIDE_PAD * scale;
     let content_x = dialog_x + side_pad;
-    let content_w = dialog_w - side_pad * 2.0;
+    let content_w = (dialog_w - side_pad * 2.0).max(0.0);
     let gap = 6.0 * scale;
-    let base_content_w = base_dialog_w - side_pad * 2.0;
+    let base_content_w = (prefix_dialog_w - side_pad * 2.0).max(0.0);
     let min_input_w = (FILE_TREE_PATH_INPUT_MIN_W * scale)
         .min(base_content_w * 0.58)
-        .max(80.0 * scale);
+        .max(0.0);
     let max_prefix_w = (base_content_w - min_input_w - gap).max(0.0);
     let prefix = file_tree_clipped_path_suffix(
         &file_tree_parent_path_prefix(parent_dir),
@@ -416,7 +428,9 @@ where
     );
     let prefix_w = measure(&prefix).min(max_prefix_w);
     let input_x = content_x + prefix_w + gap;
-    let input_w = (content_x + content_w - input_x).max(min_input_w.min(content_w));
+    let input_w = (content_x + content_w - input_x)
+        .max(0.0)
+        .max(min_input_w.min(content_w));
     (prefix, input_x, input_w)
 }
 
@@ -505,6 +519,22 @@ fn handle_file_tree_name_editor_input(
 // Возвращает (папки, файлы), обе группы отсортированы натурально.
 // ---------------------------------------------------------------------------
 
+pub(crate) fn clear_file_tree_for_empty_roots(
+    panel: &mut crate::app::IdePanelState,
+    receiver: &mut Option<std::sync::mpsc::Receiver<FileTreeScanMessage>>,
+) {
+    panel.file_tree_nodes.clear();
+    panel.file_tree_error = None;
+    *receiver = None;
+}
+
+pub(crate) fn apply_file_tree_scan_error(
+    panel: &mut crate::app::IdePanelState,
+    message: impl Into<String>,
+) {
+    panel.file_tree_error = Some(message.into());
+}
+
 impl App {
     fn push_file_tree_undo(&mut self, action: FileTreeUndoAction) {
         self.ide_panel
@@ -555,7 +585,7 @@ impl App {
     pub fn refresh_file_tree(&mut self) {
         let roots = self.ide_workspaces.clone();
         if roots.is_empty() {
-            self.ide_panel.file_tree_nodes.clear();
+            clear_file_tree_for_empty_roots(&mut self.ide_panel, &mut self.file_tree_rx);
             return;
         }
         // Новые корни (которых ещё нет в дереве) автоматически раскрываем.
@@ -577,6 +607,7 @@ impl App {
         }
         let expanded = self.ide_panel.file_tree_expanded.clone();
         let patterns = self.ide_ignore_patterns.clone();
+        self.ide_panel.file_tree_error = None;
         self.file_tree_rx = Some(spawn_scan(roots, expanded, patterns));
     }
 
@@ -622,9 +653,20 @@ impl App {
                     Ok(crate::app::file_tree::FileTreeScanMessage::IconsReady) => {
                         updated = true;
                     }
+                    Ok(crate::app::file_tree::FileTreeScanMessage::Failed(error)) => {
+                        apply_file_tree_scan_error(&mut self.ide_panel, error);
+                        disconnected = true;
+                        updated = true;
+                        break;
+                    }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        apply_file_tree_scan_error(
+                            &mut self.ide_panel,
+                            "Фоновое сканирование дерева файлов неожиданно завершилось",
+                        );
                         disconnected = true;
+                        updated = true;
                         break;
                     }
                 }
@@ -727,7 +769,13 @@ impl App {
         self.file_tree_notify_rx = Some(rx);
         self.file_tree_watcher_stop_tx = Some(stop_tx);
         self.file_tree_watched_dirs = paths.clone();
-        crate::app::file_tree::spawn_watcher(paths, tx, stop_rx);
+        if !crate::app::file_tree::spawn_watcher(paths, tx, stop_rx) {
+            self.file_tree_notify_rx = None;
+            self.file_tree_watcher_stop_tx = None;
+            self.file_tree_watched_dirs.clear();
+            self.ide_panel.file_tree_error =
+                Some("Не удалось запустить наблюдение за файлами".to_string());
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1115,7 +1163,7 @@ impl App {
                         &updated,
                         &self.file_extension,
                         &text,
-                        self.editor.version as i32,
+                        crate::editor::lsp_document_version(self.editor.version),
                     );
                 }
                 self.highlighter.reset(

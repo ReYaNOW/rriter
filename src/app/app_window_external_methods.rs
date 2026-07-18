@@ -1,3 +1,23 @@
+pub(crate) fn native_picker_spawn_error(action: &str, error: impl std::fmt::Display) -> String {
+    format!("Не удалось запустить {action}: {error}")
+}
+
+pub(crate) fn external_changes_disconnect_message() -> &'static str {
+    "Проверка внешних изменений неожиданно завершилась; выполняется повтор"
+}
+
+fn render_should_continue_after_present<T, E>(
+    render_suspended: &mut bool,
+    result: &Result<T, E>,
+) -> bool {
+    if result.is_err() {
+        *render_suspended = true;
+        false
+    } else {
+        true
+    }
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn update_window_title(window: &Window, base_title: &str, is_dirty: bool) {
@@ -30,8 +50,16 @@ impl App {
         if let Ok(window) = event_loop.create_window(attrs) {
             use glutin::display::GlDisplay;
             use winit::raw_window_handle::HasWindowHandle;
-            let raw_handle = window.window_handle().unwrap().as_raw();
-            let display = self.gl_config.as_ref().unwrap().display();
+            let Ok(window_handle) = window.window_handle() else {
+                eprintln!("failed to obtain confirmation dialog window handle");
+                return;
+            };
+            let Some(gl_config) = self.gl_config.as_ref() else {
+                eprintln!("confirmation dialog requested before GL configuration was ready");
+                return;
+            };
+            let raw_handle = window_handle.as_raw();
+            let display = gl_config.display();
             let scale = window.scale_factor();
             let phys_w = (660.0 * scale).round() as u32;
             let phys_h = (260.0 * scale).round() as u32;
@@ -39,16 +67,38 @@ impl App {
                 glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
                     .build(
                         raw_handle,
-                        std::num::NonZeroU32::new(phys_w.max(1)).unwrap(),
-                        std::num::NonZeroU32::new(phys_h.max(1)).unwrap(),
+                        std::num::NonZeroU32::new(phys_w.max(1))
+                            .unwrap_or(std::num::NonZeroU32::MIN),
+                        std::num::NonZeroU32::new(phys_h.max(1))
+                            .unwrap_or(std::num::NonZeroU32::MIN),
                     );
-            let surface = unsafe {
-                display
-                    .create_window_surface(self.gl_config.as_ref().unwrap(), &surface_attrs)
-                    .unwrap()
+            let surface = unsafe { display.create_window_surface(gl_config, &surface_attrs) };
+            let Ok(surface) = surface else {
+                eprintln!("failed to create confirmation dialog GL surface");
+                return;
             };
             self.dialog_window = Some(std::sync::Arc::new(window));
             self.dialog_gl_surface = Some(surface);
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn present_main_surface(&mut self) -> bool {
+        use glutin::surface::GlSurface;
+        let (Some(surface), Some(context)) = (self.gl_surface.as_ref(), self.gl_context.as_ref())
+        else {
+            self.render_suspended = true;
+            eprintln!("cannot present RRiter frame: GL surface or context is unavailable");
+            return false;
+        };
+        let result = surface.swap_buffers(context);
+        if render_should_continue_after_present(&mut self.render_suspended, &result) {
+            true
+        } else {
+            if let Err(error) = result {
+                eprintln!("failed to present RRiter frame: {error}");
+            }
+            false
         }
     }
 
@@ -129,6 +179,11 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn trigger_settings_tool_picker(&mut self, kind: crate::platform::ToolKind) {
+        if !crate::platform::receiver_slot_available(&self.settings_tool_picker_rx) {
+            self.tool_installer
+                .report_external_error("Окно выбора инструмента уже открыто");
+            return;
+        }
         let title = format!("Выбрать {}", kind.label());
         if crate::platform::native_dialog_requires_main_thread() {
             let path = crate::platform::pick_file(&title);
@@ -140,10 +195,15 @@ impl App {
 
         let (tx, rx) = std::sync::mpsc::channel();
         self.settings_tool_picker_rx = Some(rx);
-        std::thread::spawn(move || {
+        if let Err(err) = crate::platform::spawn_named("rriter-tool-picker", move || {
             let path = crate::platform::pick_file(&title);
             let _ = tx.send((kind, path));
-        });
+        }) {
+            self.settings_tool_picker_rx = None;
+            self.tool_installer.report_external_error(format!(
+                "Не удалось запустить выбор инструмента: {err}"
+            ));
+        }
     }
 
     pub(crate) fn apply_selected_workspace_folder(&mut self, path: std::path::PathBuf) {
@@ -167,22 +227,62 @@ impl App {
         }
     }
 
-    pub(crate) fn apply_save_as_path(&mut self, path: std::path::PathBuf) {
-        if self.save_current_file_as(path) {
-            if let Some(window) = self.window.as_ref() {
-                App::update_window_title(window, &self.base_title, self.editor.is_dirty());
-            }
-            self.highlighter.reset(
-                self.editor.version,
-                self.editor.get_full_text(),
-                self.file_extension.clone(),
-                self.editor.cursor,
-            );
+    pub(crate) fn apply_save_as_path(&mut self, path: std::path::PathBuf) -> bool {
+        if !self.save_current_file_as(path) {
+            return false;
         }
+        if let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+        }
+        self.highlighter.reset(
+            self.editor.version,
+            self.editor.get_full_text(),
+            self.file_extension.clone(),
+            self.editor.cursor,
+        );
+        true
+    }
+
+    pub(crate) fn handle_save_as_selection(
+        &mut self,
+        selected: Option<std::path::PathBuf>,
+    ) -> bool {
+        let saved = selected
+            .map(|path| self.apply_save_as_path(path))
+            .unwrap_or(false);
+        if self.pending_action_waiting_for_save_as {
+            self.pending_action_waiting_for_save_as = false;
+            self.pending_action_ready = saved;
+        }
+        saved
+    }
+
+    pub(crate) fn begin_pending_action_save(&mut self) {
+        if self.file_path.is_none() && !self.active_tab_is_git_diff() {
+            self.pending_action_waiting_for_save_as = true;
+            self.close_dialog();
+            self.trigger_save_as_picker();
+            return;
+        }
+        if self.save_current_file() {
+            self.close_dialog();
+            self.pending_action_ready = true;
+        }
+    }
+
+    pub(crate) fn discard_pending_action_changes(&mut self) {
+        self.close_dialog();
+        self.pending_action_waiting_for_save_as = false;
+        self.pending_action_ready = true;
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_file_picker(&mut self) {
+        if !crate::platform::receiver_slot_available(&self.open_file_rx) {
+            self.ide_panel.file_tree_error =
+                Some("Диалог выбора файла уже открыт".to_string());
+            return;
+        }
         if crate::platform::native_dialog_requires_main_thread() {
             if let Some(file) = crate::platform::pick_file("Открыть файл") {
                 self.open_file_in_tab(file, true);
@@ -191,14 +291,23 @@ impl App {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
-        std::thread::spawn(move || {
+        if let Err(err) = crate::platform::spawn_named("rriter-file-picker", move || {
             let file = crate::platform::pick_file("Открыть файл");
             let _ = tx.send(file);
-        });
+        }) {
+            self.open_file_rx = None;
+            self.ide_panel.file_tree_error =
+                Some(native_picker_spawn_error("выбор файла", err));
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_folder_picker(&mut self) {
+        if !crate::platform::receiver_slot_available(&self.open_folder_rx) {
+            self.ide_panel.file_tree_error =
+                Some("Диалог выбора папки уже открыт".to_string());
+            return;
+        }
         if crate::platform::native_dialog_requires_main_thread() {
             if let Some(folder) = crate::platform::pick_folder("Выбрать папку") {
                 self.apply_selected_workspace_folder(folder);
@@ -207,28 +316,39 @@ impl App {
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
-        std::thread::spawn(move || {
+        if let Err(err) = crate::platform::spawn_named("rriter-folder-picker", move || {
             let folder = crate::platform::pick_folder("Выбрать папку");
             let _ = tx.send(folder);
-        });
+        }) {
+            self.open_folder_rx = None;
+            self.ide_panel.file_tree_error =
+                Some(native_picker_spawn_error("выбор папки", err));
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_save_as_picker(&mut self) {
+        if !crate::platform::receiver_slot_available(&self.save_file_rx) {
+            self.ide_panel.file_tree_error =
+                Some("Диалог сохранения уже открыт".to_string());
+            return;
+        }
         if crate::platform::native_dialog_requires_main_thread() {
-            if let Some(file) =
-                crate::platform::save_file("Сохранить файл как...", "Безымянный.txt")
-            {
-                self.apply_save_as_path(file);
-            }
+            let selected = crate::platform::save_file("Сохранить файл как...", "Безымянный.txt");
+            self.handle_save_as_selection(selected);
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
-        std::thread::spawn(move || {
+        if let Err(err) = crate::platform::spawn_named("rriter-save-picker", move || {
             let file = crate::platform::save_file("Сохранить файл как...", "Безымянный.txt");
             let _ = tx.send(file);
-        });
+        }) {
+            self.save_file_rx = None;
+            self.pending_action_waiting_for_save_as = false;
+            self.ide_panel.file_tree_error =
+                Some(native_picker_spawn_error("выбор пути сохранения", err));
+        }
     }
 
     pub fn save_current_file(&mut self) -> bool {
@@ -248,18 +368,28 @@ impl App {
         false
     }
 
-    fn write_current_text_to_path(&self, path: &Path, content: &str) -> bool {
-        match crate::platform::write_text_file(path, content, self.text_file_format) {
-            Ok(()) => true,
+    fn write_current_text_to_path(&mut self, path: &Path, content: &str) -> bool {
+        let result = match crate::platform::write_text_file(path, content, self.text_file_format) {
+            Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 crate::platform::write_text_file_elevated(
                     path,
                     content,
                     self.text_file_format,
                 )
-                .is_ok()
             }
-            Err(_) => false,
+            Err(error) => Err(error),
+        };
+        match result {
+            Ok(()) => {
+                self.ide_panel.file_tree_error = None;
+                true
+            }
+            Err(error) => {
+                self.ide_panel.file_tree_error =
+                    Some(format!("Не удалось сохранить {}: {error}", path.display()));
+                false
+            }
         }
     }
 
@@ -304,7 +434,7 @@ impl App {
                 &path,
                 &self.file_extension,
                 &content,
-                self.editor.version as i32,
+                crate::editor::lsp_document_version(self.editor.version),
             );
         }
 
@@ -583,7 +713,7 @@ impl App {
                             &path,
                             &self.file_extension,
                             &content,
-                            self.editor.version as i32,
+                            crate::editor::lsp_document_version(self.editor.version),
                         );
                     }
                 }
@@ -651,7 +781,7 @@ impl App {
                                         path,
                                         &tab.file_extension,
                                         &disk_text,
-                                        tab.editor.version as i32,
+                                        crate::editor::lsp_document_version(tab.editor.version),
                                     );
                                 }
                             }
@@ -712,7 +842,7 @@ impl App {
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
+        match crate::platform::spawn_named("rriter-external-changes", move || {
             let mut changes = Vec::new();
             for (tab_idx, path) in clean_tabs {
                 if let Ok(decoded) = crate::platform::read_text_file(&path) {
@@ -725,23 +855,34 @@ impl App {
                 }
             }
             let _ = tx.send(changes);
-        });
-        self.external_changes_rx = Some(rx);
+        }) {
+            Ok(_) => self.external_changes_rx = Some(rx),
+            Err(err) => {
+                self.ide_panel.file_tree_error = Some(format!(
+                    "Не удалось запустить проверку внешних изменений: {err}"
+                ));
+            }
+        }
     }
 
     pub fn poll_external_changes(&mut self) -> bool {
-        let Some(rx) = &self.external_changes_rx else {
+        let Some(rx) = self.external_changes_rx.take() else {
             return false;
         };
         let changes = match rx.try_recv() {
             Ok(changes) => changes,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                self.external_changes_rx = None;
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.external_changes_rx = Some(rx);
                 return false;
             }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.ide_panel.file_tree_error = Some(
+                    external_changes_disconnect_message().to_string(),
+                );
+                self.start_external_changes_check();
+                return true;
+            }
         };
-        self.external_changes_rx = None;
         if changes.is_empty() {
             return false;
         }
@@ -803,7 +944,7 @@ impl App {
                     &change.path,
                     &tab.file_extension,
                     &change.disk_text,
-                    tab.editor.version as i32,
+                    crate::editor::lsp_document_version(tab.editor.version),
                 );
             }
             if change.tab_idx == active_idx {
@@ -826,5 +967,43 @@ impl App {
             w.request_redraw();
         }
         needs_redraw
+    }
+}
+
+
+#[cfg(test)]
+mod app_window_failure_regression_tests {
+    use super::*;
+
+    #[test]
+    fn bug_64_swap_failure_suspends_rendering_without_panicking() {
+        let mut suspended = false;
+        let failed: Result<(), &str> = Err("context lost");
+        assert!(!render_should_continue_after_present(&mut suspended, &failed));
+        assert!(suspended);
+
+        let mut suspended = false;
+        let success: Result<(), &str> = Ok(());
+        assert!(render_should_continue_after_present(&mut suspended, &success));
+        assert!(!suspended);
+    }
+
+    #[test]
+    fn bug_65_confirmation_surface_creation_has_no_unwrap_path() {
+        let source = include_str!("app_window_external_methods.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production.contains("let Ok(window_handle) = window.window_handle() else"));
+        assert!(production.contains("let Ok(surface) = surface else"));
+        assert!(!production.contains("create_window_surface(gl_config, &surface_attrs).unwrap"));
+        assert!(!production.contains("window.window_handle().unwrap"));
+    }
+
+    #[test]
+    fn bug_66_confirmation_context_and_present_errors_close_only_the_dialog() {
+        let source = include_str!("events.rs");
+        assert!(source.contains("confirmation dialog disabled after GL error"));
+        assert!(source.contains("self.close_dialog();"));
+        assert!(!source.contains("make_current(gl_surface).unwrap"));
+        assert!(!source.contains("swap_buffers(gl_context).unwrap"));
     }
 }

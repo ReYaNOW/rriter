@@ -155,12 +155,21 @@ pub fn spawn_api_mock_ty_check(
     script: ApiMockPythonScript,
 ) -> Receiver<ApiMockTyCheckResult> {
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || {
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-api-mock-ty-check", move || {
         let result = run_api_mock_ty_check(
             route_idx, version, &runtime, method, &path, &route, &model, &script,
         );
-        let _ = tx.send(result);
-    });
+        let _ = worker_tx.send(result);
+    }) {
+        let _ = tx.send(ApiMockTyCheckResult {
+            route_idx,
+            version,
+            ok: false,
+            message: format!("не удалось запустить Ty check worker: {err}"),
+            diagnostics: Vec::new(),
+        });
+    }
     rx
 }
 
@@ -383,7 +392,7 @@ fn source_line_col_to_offset(source: &str, line_one: usize, col_one: usize) -> O
     for (idx, line) in source.split('\n').enumerate() {
         if idx + 1 == line_one {
             let col = col_one.saturating_sub(1);
-            return Some(offset + byte_offset_for_char_col(line, col).min(line.len()));
+            return Some(offset + crate::editor::byte_offset_for_char_col(line, col).min(line.len()));
         }
         offset = offset.saturating_add(line.len()).saturating_add(1);
     }
@@ -401,12 +410,6 @@ fn edit_offset_to_line_col(text: &str, offset: usize) -> (usize, usize) {
     (0, 0)
 }
 
-fn byte_offset_for_char_col(line: &str, col: usize) -> usize {
-    line.char_indices()
-        .nth(col)
-        .map(|(idx, _)| idx)
-        .unwrap_or(line.len())
-}
 
 fn next_token_end_col(line: &str, start_col: usize) -> usize {
     let mut col = 0usize;

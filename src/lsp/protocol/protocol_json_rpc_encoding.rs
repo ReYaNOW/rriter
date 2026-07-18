@@ -118,8 +118,8 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
     let mut index = 0;
     while index < bytes.len() {
         if bytes[index] == b'%' && index + 2 < bytes.len() {
-            let high = hex_value(bytes[index + 1])?;
-            let low = hex_value(bytes[index + 2])?;
+            let high = crate::platform::hex_digit(bytes[index + 1])?;
+            let low = crate::platform::hex_digit(bytes[index + 2])?;
             decoded.push((high << 4) | low);
             index += 3;
         } else {
@@ -128,15 +128,6 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
         }
     }
     String::from_utf8(decoded).ok()
-}
-
-fn hex_value(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte - b'0'),
-        b'a'..=b'f' => Some(byte - b'a' + 10),
-        b'A'..=b'F' => Some(byte - b'A' + 10),
-        _ => None,
-    }
 }
 
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
@@ -232,18 +223,43 @@ pub(super) fn make_code_action(
     body.into_bytes()
 }
 
-pub(super) fn make_hover(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
+fn make_position_request(
+    id: i32,
+    method: &str,
+    uri: &str,
+    line: u32,
+    col: u32,
+    context: &str,
+) -> Vec<u8> {
     format!(
-        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/hover","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
-        id, json_escape(uri), line, col
-    ).into_bytes()
+        r#"{{"jsonrpc":"2.0","id":{},"method":"{}","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
+        id,
+        method,
+        json_escape(uri),
+        line,
+        col,
+        context
+    )
+    .into_bytes()
+}
+
+fn trigger_context(trigger: Option<&str>) -> String {
+    if let Some(character) = trigger {
+        format!(
+            r#","context":{{"triggerKind":2,"triggerCharacter":"{}"}}"#,
+            json_escape(character)
+        )
+    } else {
+        String::from(r#","context":{"triggerKind":1}"#)
+    }
+}
+
+pub(super) fn make_hover(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
+    make_position_request(id, "textDocument/hover", uri, line, col, "")
 }
 
 pub(super) fn make_definition(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
-    format!(
-        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/definition","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}}}}}"#,
-        id, json_escape(uri), line, col
-    ).into_bytes()
+    make_position_request(id, "textDocument/definition", uri, line, col, "")
 }
 
 pub(super) fn make_completion(
@@ -253,23 +269,8 @@ pub(super) fn make_completion(
     col: u32,
     trigger: Option<&str>,
 ) -> Vec<u8> {
-    let context = if let Some(ch) = trigger {
-        format!(
-            r#","context":{{"triggerKind":2,"triggerCharacter":"{}"}}"#,
-            json_escape(ch)
-        )
-    } else {
-        String::from(r#","context":{"triggerKind":1}"#)
-    };
-    format!(
-        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/completion","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
-        id,
-        json_escape(uri),
-        line,
-        col,
-        context
-    )
-    .into_bytes()
+    let context = trigger_context(trigger);
+    make_position_request(id, "textDocument/completion", uri, line, col, &context)
 }
 
 pub(super) fn make_signature_help(
@@ -279,23 +280,8 @@ pub(super) fn make_signature_help(
     col: u32,
     trigger: Option<&str>,
 ) -> Vec<u8> {
-    let context = if let Some(ch) = trigger {
-        format!(
-            r#","context":{{"triggerKind":2,"triggerCharacter":"{}"}}"#,
-            json_escape(ch)
-        )
-    } else {
-        String::from(r#","context":{"triggerKind":1}"#)
-    };
-    format!(
-        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":"{}"}},"position":{{"line":{},"character":{}}}{}}}}}"#,
-        id,
-        json_escape(uri),
-        line,
-        col,
-        context
-    )
-    .into_bytes()
+    let context = trigger_context(trigger);
+    make_position_request(id, "textDocument/signatureHelp", uri, line, col, &context)
 }
 
 pub(super) fn make_inlay_hint(
@@ -381,7 +367,7 @@ fn emit_workspace_diagnostic_report(
     let version = report
         .get("version")
         .and_then(|v| v.as_i64())
-        .map(|v| v as i32);
+        .and_then(|value| i32::try_from(value).ok());
     let result_id = report
         .get("resultId")
         .and_then(|v| v.as_str())
@@ -420,6 +406,19 @@ fn emit_workspace_diagnostics(
 
 // ── Основной парсер входящих фреймов ─────────────────────────────────────────
 
+#[inline]
+fn client_request_id(id: i64) -> Option<i32> {
+    i32::try_from(id).ok()
+}
+
+fn rpc_reply_id_json(value: Option<&serde_json::Value>) -> Option<String> {
+    match value? {
+        serde_json::Value::Number(number) => Some(number.to_string()),
+        serde_json::Value::String(text) => serde_json::to_string(text).ok(),
+        _ => None,
+    }
+}
+
 pub(super) fn dispatch_frame(
     body: &[u8],
     event_tx: &Sender<LspEvent>,
@@ -439,12 +438,10 @@ pub(super) fn dispatch_frame(
         }
     };
     let header_id = header.id.as_ref().and_then(RpcId::as_i64);
+    let header_request_id = header_id.and_then(client_request_id);
     let header_pending_kind = if header.method.is_none() {
-        header_id.and_then(|req_id| {
-            pending_requests
-                .lock()
-                .ok()
-                .and_then(|mut p| p.remove(&(req_id as i32)))
+        header_request_id.and_then(|request_id| {
+            crate::platform::lock_recover(pending_requests).remove(&request_id)
         })
     } else {
         None
@@ -460,8 +457,16 @@ pub(super) fn dispatch_frame(
                 None,
             ),
         });
-        if let Some(event) = parse_publish_diagnostics_frame(body, server_name) {
-            let _ = event_tx.send(event);
+        match parse_publish_diagnostics_frame(body, server_name) {
+            Ok(event) => {
+                let _ = event_tx.send(event);
+            }
+            Err(error) => {
+                let _ = event_tx.send(LspEvent::Log {
+                    name: server_name,
+                    message: format!("[LSP RECV ERROR] invalid publishDiagnostics: {error}"),
+                });
+            }
         }
         return;
     }
@@ -484,10 +489,8 @@ pub(super) fn dispatch_frame(
                 let _ = event_tx.send(event);
             }
         }
-        if let Some(req_id) = header_id {
-            let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
-                request_id: req_id as i32,
-            });
+        if let Some(request_id) = header_request_id {
+            let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone { request_id });
         }
         return;
     }
@@ -511,10 +514,15 @@ pub(super) fn dispatch_frame(
     });
 
     let method = msg.get("method").and_then(|v| v.as_str());
-    let id = msg.get("id").and_then(|v| {
-        v.as_i64()
-            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-    });
+    let reply_id = rpc_reply_id_json(msg.get("id"));
+    let request_id = msg
+        .get("id")
+        .and_then(|value| {
+            value
+                .as_i64()
+                .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+        })
+        .and_then(client_request_id);
 
     match method {
         Some("textDocument/publishDiagnostics") => {
@@ -524,7 +532,7 @@ pub(super) fn dispatch_frame(
                     let version = params
                         .get("version")
                         .and_then(|v| v.as_i64())
-                        .map(|v| v as i32);
+                        .and_then(|value| i32::try_from(value).ok());
 
                     let mut items = Vec::new();
                     if let Some(diags) = params.get("diagnostics").and_then(|v| v.as_array()) {
@@ -573,13 +581,13 @@ pub(super) fn dispatch_frame(
             }
         }
         Some("client/registerCapability") | Some("client/unregisterCapability") => {
-            if let Some(req_id) = id {
+            if let Some(req_id) = reply_id.as_deref() {
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":null}}"#, req_id);
                 let _ = out_tx.send(reply.into_bytes());
             }
         }
         Some("workspace/configuration") => {
-            if let Some(req_id) = id {
+            if let Some(req_id) = reply_id.as_deref() {
                 let objs = if let Some(items) =
                     msg.pointer("/params/items").and_then(|v| v.as_array())
                 {
@@ -602,7 +610,7 @@ pub(super) fn dispatch_frame(
             }
         }
         Some(m) => {
-            if let Some(req_id) = id {
+            if let Some(req_id) = reply_id.as_deref() {
                 if m != "window/logMessage"
                     && m != "window/showMessage"
                     && m != "textDocument/publishDiagnostics"
@@ -617,24 +625,21 @@ pub(super) fn dispatch_frame(
             }
         }
         None => {
-            if let Some(req_id) = id {
+            if let Some(req_id) = request_id {
                 let pending_kind = header_pending_kind.or_else(|| {
-                    pending_requests
-                        .lock()
-                        .ok()
-                        .and_then(|mut p| p.remove(&(req_id as i32)))
+                    crate::platform::lock_recover(pending_requests).remove(&req_id)
                 });
 
                 if msg.get("error").is_some() {
                     match pending_kind {
                         Some(PendingRequestKind::WorkspaceDiagnostic) => {
                             let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                             });
                         }
                         Some(PendingRequestKind::InlayHint) => {
                             let _ = event_tx.send(LspEvent::InlayHintsResponse {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                                 hints: Vec::new(),
                             });
                         }
@@ -649,13 +654,13 @@ pub(super) fn dispatch_frame(
                             if result.get("contents").is_some() {
                                 if let Some(hover) = parse_hover_value(result) {
                                     let _ = event_tx.send(LspEvent::HoverResponse {
-                                        request_id: req_id as i32,
+                                        request_id: req_id,
                                         text: Some(hover),
                                     });
                                 }
                             } else if result.is_null() {
                                 let _ = event_tx.send(LspEvent::HoverResponse {
-                                    request_id: req_id as i32,
+                                    request_id: req_id,
                                     text: None,
                                 });
                             }
@@ -665,7 +670,7 @@ pub(super) fn dispatch_frame(
                                 let actions: Vec<CodeAction> =
                                     arr.iter().filter_map(parse_code_action_value).collect();
                                 let _ = event_tx.send(LspEvent::CodeActions {
-                                    request_id: req_id as i32,
+                                    request_id: req_id,
                                     actions,
                                 });
                             }
@@ -673,42 +678,42 @@ pub(super) fn dispatch_frame(
                         Some(PendingRequestKind::Definition) => {
                             let target = parse_definition_target(result);
                             let _ = event_tx.send(LspEvent::DefinitionResponse {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                                 target,
                             });
                         }
                         Some(PendingRequestKind::Completion) => {
                             let items = parse_completion_items(result);
                             let _ = event_tx.send(LspEvent::CompletionResponse {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                                 items,
                             });
                         }
                         Some(PendingRequestKind::SignatureHelp) => {
                             let parameters = parse_signature_help_parameters(result);
                             let _ = event_tx.send(LspEvent::SignatureHelpResponse {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                                 parameters,
                             });
                         }
                         Some(PendingRequestKind::InlayHint) => {
                             let hints = parse_inlay_hints(result);
                             let _ = event_tx.send(LspEvent::InlayHintsResponse {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                                 hints,
                             });
                         }
                         Some(PendingRequestKind::WorkspaceDiagnostic) => {
                             emit_workspace_diagnostics(result, event_tx, server_name);
                             let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
-                                request_id: req_id as i32,
+                                request_id: req_id,
                             });
                         }
                         None => {
                             if result.get("contents").is_some() {
                                 if let Some(hover) = parse_hover_value(result) {
                                     let _ = event_tx.send(LspEvent::HoverResponse {
-                                        request_id: req_id as i32,
+                                        request_id: req_id,
                                         text: Some(hover),
                                     });
                                 }
@@ -716,12 +721,12 @@ pub(super) fn dispatch_frame(
                                 let actions: Vec<CodeAction> =
                                     arr.iter().filter_map(parse_code_action_value).collect();
                                 let _ = event_tx.send(LspEvent::CodeActions {
-                                    request_id: req_id as i32,
+                                    request_id: req_id,
                                     actions,
                                 });
                             } else if result.is_null() {
                                 let _ = event_tx.send(LspEvent::HoverResponse {
-                                    request_id: req_id as i32,
+                                    request_id: req_id,
                                     text: None,
                                 });
                             }

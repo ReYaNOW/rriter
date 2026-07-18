@@ -32,7 +32,7 @@ impl Highlighter {
 
         let worker_control = Arc::new(HighlighterWorkerControl::new());
         let worker_control_for_thread = Arc::clone(&worker_control);
-        thread::Builder::new()
+        let spawn_result = thread::Builder::new()
             .name("rriter-highlighter".to_string())
             .spawn(move || {
                 #[cfg(test)]
@@ -1026,8 +1026,12 @@ impl Highlighter {
                 }
                 let _ = send_result;
                 }
-            })
-            .expect("failed to spawn RRiter highlighter worker");
+            });
+        if let Err(error) = spawn_result {
+            // Sending to the disconnected worker channel will fail harmlessly and
+            // the synchronous highlighter path remains available.
+            eprintln!("failed to spawn RRiter highlighter worker; using synchronous fallback: {error}");
+        }
         let worker = HighlighterWorker {
             control: worker_control,
             shutdown_tx: tx_in.clone(),
@@ -1051,6 +1055,17 @@ impl Highlighter {
             sync_byte_colors_buf: Vec::new(),
             pending_priority_anchor: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod highlighter_spawn_regression_tests {
+    #[test]
+    fn bug_69_highlighter_thread_spawn_failure_keeps_synchronous_fallback() {
+        let source = include_str!("highlighter_worker.rs");
+        assert!(source.contains("let spawn_result = thread::Builder::new()"));
+        assert!(source.contains("using synchronous fallback"));
+        assert!(!source.contains(".expect(\"failed to spawn RRiter highlighter worker\")"));
     }
 }
 

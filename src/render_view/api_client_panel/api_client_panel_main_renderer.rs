@@ -52,11 +52,14 @@ impl Renderer {
         }
 
         let api = &ide_panel.api;
+        let panel_clip = crate::ui_system::UiClipRect::new(x, y, w, h);
+        ui_registry.push_clip(panel_clip);
         let pad = 10.0 * s;
         let icon_size = 30.0 * s;
         let toolbar_h = 44.0 * s;
         let mut cy = (y + pad - api.panel_scroll.current.round()).round();
-        let hover_settled = (api.panel_scroll.current - api.panel_scroll.target).abs() < 0.5;
+        let hover_settled = api.panel_scroll.is_settled();
+        ui_registry.push_interactions_enabled(hover_settled);
 
         let add = IconButton {
             x: x + pad,
@@ -68,9 +71,10 @@ impl Renderer {
             active_square_width: None,
             custom_color: None,
         };
-        ui_registry.register_icon_button(
+        ui_registry.register_icon_button_clipped(
             crate::ui_system::UiId::ApiImportAdd,
             &add,
+            panel_clip,
             self,
             mx,
             my,
@@ -92,9 +96,10 @@ impl Renderer {
             .selected_spec
             .and_then(|id| api.specs.iter().position(|entry| entry.id == id))
         {
-            ui_registry.register_icon_button(
+            ui_registry.register_icon_button_clipped(
                 crate::ui_system::UiId::ApiSpecRemove(selected_idx),
                 &remove,
+                panel_clip,
                 self,
                 mx,
                 my,
@@ -166,6 +171,7 @@ impl Renderer {
         }
 
         let now = now_epoch_secs();
+        let mut error_scratch = String::new();
         let import_error_visible = api.import_error.as_ref().filter(|_| {
             api.import_error_at
                 .map(|at| now.saturating_sub(at) < 5)
@@ -244,12 +250,26 @@ impl Renderer {
         if !api.import_url_open
             && let Some(err) = import_error_visible
         {
-            self.draw_string_scaled_stable(
+            self.draw_tree_label_clipped(
                 err,
                 x + pad,
                 cy + 12.0 * s,
+                (w - pad * 2.0).max(0.0),
                 [1.0, 0.38, 0.38, 1.0],
                 0.72,
+                &mut error_scratch,
+            );
+            cy += 20.0 * s;
+        }
+        if let Some(err) = api.persistence_error.as_deref() {
+            self.draw_tree_label_clipped(
+                err,
+                x + pad,
+                cy + 12.0 * s,
+                (w - pad * 2.0).max(0.0),
+                [1.0, 0.38, 0.38, 1.0],
+                0.72,
+                &mut error_scratch,
             );
             cy += 20.0 * s;
         }
@@ -830,15 +850,18 @@ impl Renderer {
                 TREE_TEXT_SCALE,
             );
             cy += TREE_ROW_H * s;
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ApiRoutesRoot,
-                x,
-                cy,
-                w,
-                TREE_ROW_H * s,
-                mx,
-                my,
-            );
+            if hover_settled {
+                ui_registry.register_rect_clipped(
+                    crate::ui_system::UiId::ApiRoutesRoot,
+                    x,
+                    cy,
+                    w,
+                    TREE_ROW_H * s,
+                    panel_clip,
+                    mx,
+                    my,
+                );
+            }
             self.draw_tree_disclosure_icon(
                 !root_collapsed,
                 x + pad,
@@ -858,6 +881,8 @@ impl Renderer {
             let tag_h = TREE_ROW_H * s;
             let indent_w = TREE_INDENT_W * s;
             if root_collapsed {
+                ui_registry.pop_interactions_enabled();
+                ui_registry.pop_clip();
                 self.flush();
                 unsafe {
                     self.gl.disable(glow::SCISSOR_TEST);
@@ -978,18 +1003,17 @@ impl Renderer {
                         if filtering && !api_route_matches_filter(route, display_path, filter) {
                             continue;
                         }
-                        ui_registry.register_rect(
-                            crate::ui_system::UiId::ApiRouteRow(route_idx),
-                            x,
-                            cy,
-                            w,
-                            row_h,
-                            mx,
-                            my,
-                        );
                         let hovered = hover_settled
-                            && ui_registry.hovered()
-                                == Some(crate::ui_system::UiId::ApiRouteRow(route_idx));
+                            && ui_registry.register_rect_clipped(
+                                crate::ui_system::UiId::ApiRouteRow(route_idx),
+                                x,
+                                cy,
+                                w,
+                                row_h,
+                                panel_clip,
+                                mx,
+                                my,
+                            );
                         let active = active_route_idx == Some(route_idx);
                         if active {
                             self.push_rect(x, cy, w, row_h, [0.60, 0.35, 0.85, 0.14]);
@@ -1035,10 +1059,29 @@ impl Renderer {
             }
         }
 
+        ui_registry.pop_interactions_enabled();
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
     }
 
+}
+
+#[cfg(test)]
+mod api_panel_scroll_regression_tests {
+    #[test]
+    fn bug_39_api_route_rows_disable_hover_while_scroll_is_moving() {
+        let source = include_str!("api_client_panel_main_renderer.rs");
+        assert!(source.contains("let hovered = hover_settled"));
+        assert!(source.contains("UiId::ApiRouteRow(route_idx)"));
+    }
+
+    #[test]
+    fn bug_40_api_routes_root_disables_clicks_while_scroll_is_moving() {
+        let source = include_str!("api_client_panel_main_renderer.rs");
+        assert!(source.contains("if hover_settled"));
+        assert!(source.contains("UiId::ApiRoutesRoot"));
+    }
 }

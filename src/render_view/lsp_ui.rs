@@ -1,6 +1,47 @@
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+fn fit_lsp_action_widths(
+    natural: [f32; 3],
+    available_width: f32,
+    gap: f32,
+    minimum_width: f32,
+) -> [f32; 3] {
+    let usable = (available_width - gap * 2.0).max(0.0);
+    let natural_total = natural.iter().sum::<f32>();
+    if natural_total <= usable {
+        return natural;
+    }
+    if usable <= 0.0 {
+        return [0.0; 3];
+    }
+    let minimum_width = minimum_width.max(1.0);
+    if usable <= minimum_width * 3.0 {
+        let each = usable / 3.0;
+        return [each; 3];
+    }
+    let flexible = usable - minimum_width * 3.0;
+    let natural_extra = natural
+        .iter()
+        .map(|width| (width - minimum_width).max(0.0))
+        .sum::<f32>();
+    if natural_extra <= f32::EPSILON {
+        return [usable / 3.0; 3];
+    }
+    natural.map(|width| {
+        minimum_width + flexible * (width - minimum_width).max(0.0) / natural_extra
+    })
+}
+
+fn lsp_action_text_scale(natural_text_width: f32, button_width: f32, base_scale: f32, pad: f32) -> f32 {
+    let available = (button_width - pad * 2.0).max(1.0);
+    if natural_text_width <= available {
+        base_scale
+    } else {
+        (base_scale * available / natural_text_width.max(1.0)).clamp(0.52, base_scale)
+    }
+}
+
 fn lsp_action_label<'a>(
     item: &'a crate::app::LspActionItem,
     scratch: &'a mut String,
@@ -140,6 +181,9 @@ impl Renderer {
                 content_h.round() as i32,
             );
         }
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            content_x, content_y, content_w, content_h,
+        ));
 
         let pad_x = 12.0 * s;
         let text_scale = 0.92;
@@ -305,20 +349,42 @@ impl Renderer {
                 let label_fix_all = "Fix All";
                 let label_clear_logs = "Очистить";
 
-                let bw_restart = self.measure_ui_width(label_restart, 0.8) + btn_pad * 2.0;
-                let bw_toggle = self.measure_ui_width(label_toggle, 0.8) + btn_pad * 2.0;
-                let bw_stop = self.measure_ui_width(label_stop, 0.8) + btn_pad * 2.0;
-                let bw_logs = self.measure_ui_width(label_logs, 0.8) + btn_pad * 2.0;
-                let bw_fix_all = self.measure_ui_width(label_fix_all, 0.8) + btn_pad * 2.0;
-                let bw_clear_logs = self.measure_ui_width(label_clear_logs, 0.8) + btn_pad * 2.0;
+                let text_w_restart = self.measure_ui_width(label_restart, 0.8);
+                let text_w_toggle = self.measure_ui_width(label_toggle, 0.8);
+                let text_w_stop = self.measure_ui_width(label_stop, 0.8);
+                let text_w_logs = self.measure_ui_width(label_logs, 0.8);
+                let text_w_fix_all = self.measure_ui_width(label_fix_all, 0.8);
+                let text_w_clear_logs = self.measure_ui_width(label_clear_logs, 0.8);
+                let action_gap = 6.0 * s;
+                let action_available = (card_w - pad_x * 2.0).max(0.0);
+                let [bw_restart, bw_toggle, bw_stop] = fit_lsp_action_widths(
+                    [
+                        text_w_restart + btn_pad * 2.0,
+                        text_w_toggle + btn_pad * 2.0,
+                        text_w_stop + btn_pad * 2.0,
+                    ],
+                    action_available,
+                    action_gap,
+                    42.0 * s,
+                );
+                let [bw_fix_all, bw_logs, bw_clear_logs] = fit_lsp_action_widths(
+                    [
+                        text_w_fix_all + btn_pad * 2.0,
+                        text_w_logs + btn_pad * 2.0,
+                        text_w_clear_logs + btn_pad * 2.0,
+                    ],
+                    action_available,
+                    action_gap,
+                    42.0 * s,
+                );
 
                 let btn_x_restart = card_x + pad_x;
-                let btn_x_toggle = btn_x_restart + bw_restart + 6.0 * s;
-                let btn_x_stop = btn_x_toggle + bw_toggle + 6.0 * s;
+                let btn_x_toggle = btn_x_restart + bw_restart + action_gap;
+                let btn_x_stop = btn_x_toggle + bw_toggle + action_gap;
 
                 let btn_x_fix_all = card_x + pad_x;
-                let btn_x_logs = btn_x_fix_all + bw_fix_all + 6.0 * s;
-                let btn_x_clear_logs = btn_x_logs + bw_logs + 6.0 * s;
+                let btn_x_logs = btn_x_fix_all + bw_fix_all + action_gap;
+                let btn_x_clear_logs = btn_x_logs + bw_logs + action_gap;
 
                 let hover_restart = ui_registry.register_rect(
                     crate::ui_system::UiId::LspServerRestart(server_idx),
@@ -368,7 +434,7 @@ impl Renderer {
                     my,
                 );
                 let clear_logs_enabled = is_expanded && !info.logs.is_empty();
-                let clear_logs_fits = btn_x_clear_logs + bw_clear_logs <= card_x + card_w - pad_x;
+                let clear_logs_fits = bw_clear_logs > 0.0;
                 let hover_clear_logs = if clear_logs_enabled && clear_logs_fits {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::LspServerClearLogs(server_idx),
@@ -463,10 +529,10 @@ impl Renderer {
                 );
                 self.draw_string_scaled(
                     label_restart,
-                    (btn_x_restart + btn_pad).round(),
+                    (btn_x_restart + (bw_restart - text_w_restart * lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
                     self.theme.fg,
-                    0.8,
+                    lsp_action_text_scale(text_w_restart, bw_restart, 0.8, btn_pad),
                 );
 
                 self.push_rounded_rect(
@@ -479,19 +545,19 @@ impl Renderer {
                 );
                 self.draw_string_scaled(
                     label_toggle,
-                    (btn_x_toggle + btn_pad).round(),
+                    (btn_x_toggle + (bw_toggle - text_w_toggle * lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
                     self.theme.fg,
-                    0.8,
+                    lsp_action_text_scale(text_w_toggle, bw_toggle, 0.8, btn_pad),
                 );
 
                 self.push_rounded_rect(btn_x_stop, btn_y1, bw_stop, btn_h, 3.0 * s, btn_bg_stop);
                 self.draw_string_scaled(
                     label_stop,
-                    (btn_x_stop + btn_pad).round(),
+                    (btn_x_stop + (bw_stop - text_w_stop * lsp_action_text_scale(text_w_stop, bw_stop, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y1,
                     text_color_stop,
-                    0.8,
+                    lsp_action_text_scale(text_w_stop, bw_stop, 0.8, btn_pad),
                 );
 
                 self.push_rounded_rect(
@@ -504,19 +570,19 @@ impl Renderer {
                 );
                 self.draw_string_scaled(
                     label_fix_all,
-                    (btn_x_fix_all + btn_pad).round(),
+                    (btn_x_fix_all + (bw_fix_all - text_w_fix_all * lsp_action_text_scale(text_w_fix_all, bw_fix_all, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y2,
                     text_color_fix_all,
-                    0.8,
+                    lsp_action_text_scale(text_w_fix_all, bw_fix_all, 0.8, btn_pad),
                 );
 
                 self.push_rounded_rect(btn_x_logs, btn_y2, bw_logs, btn_h, 3.0 * s, btn_bg_logs);
                 self.draw_string_scaled(
                     label_logs,
-                    (btn_x_logs + btn_pad).round(),
+                    (btn_x_logs + (bw_logs - text_w_logs * lsp_action_text_scale(text_w_logs, bw_logs, 0.8, btn_pad) / 0.8) * 0.5).round(),
                     text_y2,
                     [0.8, 0.85, 1.0, 1.0],
-                    0.8,
+                    lsp_action_text_scale(text_w_logs, bw_logs, 0.8, btn_pad),
                 );
                 if is_expanded {
                     self.push_rounded_rect(
@@ -529,10 +595,10 @@ impl Renderer {
                     );
                     self.draw_string_scaled(
                         label_clear_logs,
-                        (btn_x_clear_logs + btn_pad).round(),
+                        (btn_x_clear_logs + (bw_clear_logs - text_w_clear_logs * lsp_action_text_scale(text_w_clear_logs, bw_clear_logs, 0.8, btn_pad) / 0.8) * 0.5).round(),
                         text_y2,
                         text_color_clear_logs,
-                        0.8,
+                        lsp_action_text_scale(text_w_clear_logs, bw_clear_logs, 0.8, btn_pad),
                     );
                 }
 
@@ -758,6 +824,9 @@ impl Renderer {
                                 inter_h.round() as i32,
                             );
                         }
+                        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+                            log_bg_x, inter_y1, log_bg_w, inter_h,
+                        ));
 
                         let line_h = 16.0 * s;
                         let inner_scroll_y = ide_panel
@@ -1069,6 +1138,7 @@ impl Renderer {
                             );
                         }
 
+                        ui_registry.pop_clip();
                         unsafe {
                             let sy = (self.height - (content_y + content_h)).round() as i32;
                             self.gl.scissor(
@@ -1109,6 +1179,7 @@ impl Renderer {
             );
         }
 
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);

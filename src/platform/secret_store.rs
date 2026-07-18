@@ -194,8 +194,15 @@ fn linux_secret_tool_store(purpose: &str, bytes: &[u8]) -> io::Result<()> {
     let stderr = child
         .take_stderr()
         .ok_or_else(|| io::Error::other("secret-tool stderr was not piped"))?;
-    let stdout_reader = std::thread::spawn(move || read_bounded(stdout));
-    let stderr_reader = std::thread::spawn(move || read_bounded(stderr));
+    let stdout_reader = super::spawn_named("rriter-secret-store-stdout", move || read_bounded(stdout))?;
+    let stderr_reader = match super::spawn_named("rriter-secret-store-stderr", move || read_bounded(stderr)) {
+        Ok(reader) => reader,
+        Err(error) => {
+            let _ = child.terminate(Duration::from_millis(200));
+            let _ = join_bounded_reader(stdout_reader);
+            return Err(error);
+        }
+    };
     let status = child
         .wait_timeout(Duration::from_secs(30))?
         .ok_or_else(|| {

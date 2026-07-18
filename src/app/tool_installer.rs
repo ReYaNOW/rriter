@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use winit::window::Window;
 
@@ -22,7 +22,6 @@ const INSTALL_EVENT_CAPACITY: usize = 256;
 const INSTALL_LOG_LIMIT: usize = 4096;
 const INSTALL_LOG_BYTES_LIMIT: usize = 1024 * 1024;
 const INSTALL_LINE_BYTES_LIMIT: usize = 16 * 1024;
-const INSTALL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const INSTALL_CANCELLED_MESSAGE: &str = "Установка отменена";
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const UV_INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -294,18 +293,7 @@ impl ToolInstaller {
             return Err("Другая установка уже выполняется".to_string());
         }
         self.join_finished_worker();
-        self.target = Some(kind);
-        self.phase = ToolInstallPhase::Idle;
-        self.detail = format!("Подготовка установки {}", kind.label());
-        self.logs.clear();
-        self.log_bytes = 0;
-        self.log_truncated = false;
-        self.log_scroll = ScrollState::new(7.0);
-        self.follow_log = true;
-        self.log_open = true;
-        self.revision = self.revision.wrapping_add(1);
-        self.push_log(ToolInstallLogKind::Info, self.detail.clone());
-
+        let initial_detail = format!("Подготовка установки {}", kind.label());
         let existing_uv = resolve_tool_kind(ToolKind::Uv).path;
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_worker = Arc::clone(&cancel);
@@ -315,16 +303,43 @@ impl ToolInstaller {
             window,
             dropped_lines: Arc::new(AtomicUsize::new(0)),
         };
-        self.cancel = Some(cancel);
-        self.rx = Some(rx);
-        self.worker = Some(thread::spawn(move || {
+        let worker = crate::platform::spawn_named("rriter-tool-installer", move || {
             let result = install_tool(kind, existing_uv, &cancel_for_worker, &reporter);
             reporter.send_control(terminal_install_event(
                 result,
                 cancel_for_worker.load(Ordering::Acquire),
             ));
-        }));
+        })
+        .map_err(|err| format!("Не удалось запустить установщик {}: {err}", kind.label()))?;
+
+        self.target = Some(kind);
+        self.phase = ToolInstallPhase::Idle;
+        self.detail = initial_detail;
+        self.logs.clear();
+        self.log_bytes = 0;
+        self.log_truncated = false;
+        self.log_scroll = ScrollState::new(7.0);
+        self.follow_log = true;
+        self.log_open = true;
+        self.revision = self.revision.wrapping_add(1);
+        self.push_log(ToolInstallLogKind::Info, self.detail.clone());
+        self.cancel = Some(cancel);
+        self.rx = Some(rx);
+        self.worker = Some(worker);
         Ok(())
+    }
+
+    pub(crate) fn report_external_error(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        if !self.is_running() {
+            self.target = None;
+            self.phase = ToolInstallPhase::Failed;
+            self.detail = message.clone();
+        }
+        self.log_open = true;
+        self.follow_log = true;
+        self.push_log(ToolInstallLogKind::Error, message);
+        self.revision = self.revision.wrapping_add(1);
     }
 
     pub(crate) fn cancel(&self) {
@@ -426,21 +441,33 @@ impl ToolInstaller {
         self.push_log(ToolInstallLogKind::Info, text.into());
     }
 
+    #[cfg(test)]
+    pub(crate) fn seed_running_worker_for_test(
+        &mut self,
+        duration: std::time::Duration,
+    ) -> Arc<AtomicBool> {
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.cancel = Some(cancel.clone());
+        self.worker = Some(std::thread::spawn(move || std::thread::sleep(duration)));
+        cancel
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_worker_for_test(&self) -> bool {
+        self.worker.is_some()
+    }
+
     pub(crate) fn shutdown(&mut self) {
         self.cancel();
-        let deadline = Instant::now() + INSTALL_SHUTDOWN_TIMEOUT;
-        while self
-            .worker
-            .as_ref()
-            .is_some_and(|worker| !worker.is_finished())
-            && Instant::now() < deadline
-        {
-            let _ = self.poll();
-            thread::sleep(Duration::from_millis(10));
-        }
-        self.join_finished_worker();
         self.rx = None;
         self.cancel = None;
+        if let Some(worker) = self.worker.take() {
+            if worker.is_finished() {
+                let _ = worker.join();
+            } else {
+                crate::platform::reap_unit_thread(worker);
+            }
+        }
     }
 
     fn push_log(&mut self, kind: ToolInstallLogKind, text: String) {
@@ -518,13 +545,13 @@ impl Drop for ToolInstaller {
 
 pub(crate) fn log_modal_height(window_height: f32, scale: f32) -> f32 {
     (520.0 * scale)
-        .min((window_height - 24.0 * scale).max(240.0 * scale))
+        .min((window_height - 24.0 * scale).max(0.0))
         .round()
 }
 
 pub(crate) fn log_viewport_height(window_height: f32, scale: f32) -> f32 {
     (log_modal_height(window_height, scale) - (145.0 * scale).round())
-        .max((80.0 * scale).round())
+        .max(0.0)
         .round()
 }
 

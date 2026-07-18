@@ -240,7 +240,7 @@ impl App {
                     path,
                     &self.file_extension,
                     &text,
-                    self.editor.version as i32,
+                    crate::editor::lsp_document_version(self.editor.version),
                 );
             }
             self.refresh_current_editor_git_base();
@@ -502,7 +502,7 @@ impl App {
                         path,
                         &self.file_extension,
                         &text,
-                        self.editor.version as i32,
+                        crate::editor::lsp_document_version(self.editor.version),
                     );
                 }
             }

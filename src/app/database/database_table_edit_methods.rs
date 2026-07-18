@@ -18,6 +18,39 @@ impl DatabaseDragUpdate {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn database_table_scroll_drag_target(
+    pointer: f32,
+    track_start: f32,
+    track_len: f32,
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    min_thumb_len: f32,
+    drag_offset: Option<f32>,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    let scale = scale.max(f32::EPSILON);
+    let max_scroll = (content_len - viewport_len).max(0.0);
+    let thumb = crate::scroll::scrollbar_thumb(
+        track_start,
+        track_len,
+        viewport_len,
+        content_len,
+        current_scroll * scale,
+        min_thumb_len,
+    )?;
+    let (offset, target) = crate::scroll::scrollbar_drag_target(
+        pointer,
+        track_start,
+        track_len,
+        thumb,
+        max_scroll,
+        drag_offset,
+    )?;
+    Some((offset, target / scale))
+}
+
 impl App {
     pub(crate) fn database_table_unavailable_text_index_at(
         &mut self,
@@ -447,11 +480,20 @@ impl App {
                         crate::app::database::civil_date_from_unix_days(days as i64);
                     (year, month)
                 });
+            let enum_index = if kind == DatabaseCellEditorKind::Enum {
+                column
+                    .enum_values
+                    .iter()
+                    .position(|option| option == &value)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
             state.grid.cell_editor = Some(DatabaseCellEditorState {
                 position,
                 kind,
                 input: crate::app::database::DatabaseDialogInput::new(value),
-                enum_index: 0,
+                enum_index,
                 calendar_year,
                 calendar_month,
                 error: None,
@@ -655,6 +697,7 @@ impl App {
         let pending = DatabasePendingJob {
             id: job_id,
             kind: DatabasePendingJobKind::BeginTableSave,
+            owner: crate::app::database::DatabaseJobOwner::Table(meta.tab_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: Some(meta.table_name.clone()),
@@ -679,66 +722,60 @@ impl App {
         );
     }
 
-    pub fn commit_database_table_transaction(&mut self) {
-        let Some(DatabaseTableModal::Review { tab_id, state, .. }) =
-            self.ide_panel.database.table_modal.as_mut()
-        else {
-            return;
-        };
-        if state.committing {
-            return;
-        }
-        state.committing = true;
-        let transaction_id = state.transaction_id;
-        let tab_id = *tab_id;
-        let Some((meta, _)) = self.database_table_meta_state(tab_id) else {
-            return;
-        };
-        let meta = meta.clone();
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob {
-            id: job_id,
-            kind: DatabasePendingJobKind::CommitTransaction,
-            connection_id: meta.connection_id,
-            database_name: Some(meta.database_name.clone()),
-            table_name: Some(meta.table_name.clone()),
-        };
-        self.send_database_command(
-            DatabaseCommand::CommitTransaction {
-                job_id,
-                transaction_id,
-            },
-            pending,
-        );
-    }
-
-    pub fn rollback_database_table_transaction(&mut self) {
+    fn finish_database_table_transaction(&mut self, commit: bool) {
         let Some(DatabaseTableModal::Review { tab_id, state, .. }) =
             self.ide_panel.database.table_modal.as_ref()
         else {
             return;
         };
+        if !database_table_transaction_finish_allowed(state.committing) {
+            return;
+        }
         let transaction_id = state.transaction_id;
         let tab_id = *tab_id;
         let Some((meta, _)) = self.database_table_meta_state(tab_id) else {
             return;
         };
         let meta = meta.clone();
+        if let Some(DatabaseTableModal::Review { state, .. }) =
+            self.ide_panel.database.table_modal.as_mut()
+        {
+            state.committing = true;
+        }
         let job_id = self.ide_panel.database.allocate_job_id();
+        let kind = if commit {
+            DatabasePendingJobKind::CommitTransaction
+        } else {
+            DatabasePendingJobKind::RollbackTransaction
+        };
         let pending = DatabasePendingJob {
             id: job_id,
-            kind: DatabasePendingJobKind::RollbackTransaction,
+            kind,
+            owner: crate::app::database::DatabaseJobOwner::Table(meta.tab_id),
             connection_id: meta.connection_id,
             database_name: Some(meta.database_name.clone()),
             table_name: Some(meta.table_name.clone()),
         };
-        self.send_database_command(
+        let command = if commit {
+            DatabaseCommand::CommitTransaction {
+                job_id,
+                transaction_id,
+            }
+        } else {
             DatabaseCommand::RollbackTransaction {
                 job_id,
                 transaction_id,
-            },
-            pending,
-        );
+            }
+        };
+        self.send_database_command(command, pending);
+    }
+
+    pub fn commit_database_table_transaction(&mut self) {
+        self.finish_database_table_transaction(true);
+    }
+
+    pub fn rollback_database_table_transaction(&mut self) {
+        self.finish_database_table_transaction(false);
     }
 
     pub fn request_database_table_refresh(
@@ -940,6 +977,11 @@ impl App {
         let horizontal_rect = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::DatabaseTableScrollX);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor)
+            .max(f32::EPSILON);
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return DatabaseDragUpdate::None;
         };
@@ -959,26 +1001,50 @@ impl App {
             let Some((_, rect_y, _, rect_h)) = vertical_rect else {
                 return DatabaseDragUpdate::None;
             };
-            let max_scroll = (state.grid.logical_row_count() as f32
-                * crate::app::database::DATABASE_GRID_ROW_HEIGHT
-                - state.grid.viewport_height).max(0.0);
-            let ratio = ((mouse_y - rect_y) / rect_h.max(1.0)).clamp(0.0, 1.0);
-            state.grid.scroll_y.target = ratio * max_scroll;
-            state.grid.scroll_y.current = state.grid.scroll_y.target;
+            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let content_h = state.grid.logical_row_count() as f32 * row_h;
+            let Some((_, target)) = database_table_scroll_drag_target(
+                mouse_y,
+                rect_y,
+                rect_h,
+                rect_h,
+                content_h,
+                state.grid.scroll_y.current,
+                (28.0 * scale).round(),
+                Some(state.grid.scroll_y.drag_offset),
+                scale,
+            ) else {
+                return DatabaseDragUpdate::None;
+            };
+            state.grid.scroll_y.target = target;
+            state.grid.scroll_y.current = target;
+            state.grid.scroll_y.velocity = 0.0;
             return DatabaseDragUpdate::Table(tab_id);
         }
         if state.grid.scroll_x.is_dragging {
             let Some((rect_x, _, rect_w, _)) = horizontal_rect else {
                 return DatabaseDragUpdate::None;
             };
-            let content = state
+            let content_w = state
                 .metadata
                 .as_ref()
-                .map_or(0.0, |metadata| state.grid.content_width(metadata));
-            let max_scroll = (content - state.grid.viewport_width).max(0.0);
-            let ratio = ((mouse_x - rect_x) / rect_w.max(1.0)).clamp(0.0, 1.0);
-            state.grid.scroll_x.target = ratio * max_scroll;
-            state.grid.scroll_x.current = state.grid.scroll_x.target;
+                .map_or(0.0, |metadata| state.grid.content_width(metadata) * scale);
+            let Some((_, target)) = database_table_scroll_drag_target(
+                mouse_x,
+                rect_x,
+                rect_w,
+                rect_w,
+                content_w,
+                state.grid.scroll_x.current,
+                (36.0 * scale).round(),
+                Some(state.grid.scroll_x.drag_offset),
+                scale,
+            ) else {
+                return DatabaseDragUpdate::None;
+            };
+            state.grid.scroll_x.target = target;
+            state.grid.scroll_x.current = target;
+            state.grid.scroll_x.velocity = 0.0;
             return DatabaseDragUpdate::Table(tab_id);
         }
         DatabaseDragUpdate::None
@@ -1298,6 +1364,40 @@ impl App {
         }
     }
 
+    pub(crate) fn page_database_table_enum_options(&mut self, next: bool) {
+        let Some(tab_id) = self.active_database_table_tab_id() else {
+            return;
+        };
+        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
+            return;
+        };
+        let Some((kind, column_index)) = state
+            .grid
+            .cell_editor
+            .as_ref()
+            .map(|editor| (editor.kind.clone(), editor.position.column))
+        else {
+            return;
+        };
+        if kind != DatabaseCellEditorKind::Enum {
+            return;
+        }
+        let option_count = state
+            .metadata
+            .as_ref()
+            .and_then(|metadata| metadata.columns.get(column_index))
+            .map_or(0, |column| column.enum_values.len());
+        let Some(editor) = state.grid.cell_editor.as_mut() else {
+            return;
+        };
+        let max_start = option_count.saturating_sub(1);
+        editor.enum_index = if next {
+            editor.enum_index.saturating_add(1).min(max_start)
+        } else {
+            editor.enum_index.saturating_sub(1)
+        };
+    }
+
     pub(crate) fn select_database_table_enum_option(&mut self, option: usize) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
@@ -1593,13 +1693,48 @@ impl App {
         let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
         let vertical_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableScrollY);
         let horizontal_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableScrollX);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor)
+            .max(f32::EPSILON);
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
         if horizontal {
+            let Some((track_x, _, track_w, _)) = horizontal_rect else { return; };
+            let content_w = state
+                .metadata
+                .as_ref()
+                .map_or(0.0, |metadata| state.grid.content_width(metadata) * scale);
+            let Some((offset, _)) = database_table_scroll_drag_target(
+                mouse.0,
+                track_x,
+                track_w,
+                track_w,
+                content_w,
+                state.grid.scroll_x.current,
+                (36.0 * scale).round(),
+                None,
+                scale,
+            ) else { return; };
             state.grid.scroll_x.is_dragging = true;
-            state.grid.scroll_x.drag_offset = mouse.0 - horizontal_rect.map_or(mouse.0, |rect| rect.0);
+            state.grid.scroll_x.drag_offset = offset;
         } else {
+            let Some((_, track_y, _, track_h)) = vertical_rect else { return; };
+            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let content_h = state.grid.logical_row_count() as f32 * row_h;
+            let Some((offset, _)) = database_table_scroll_drag_target(
+                mouse.1,
+                track_y,
+                track_h,
+                track_h,
+                content_h,
+                state.grid.scroll_y.current,
+                (28.0 * scale).round(),
+                None,
+                scale,
+            ) else { return; };
             state.grid.scroll_y.is_dragging = true;
-            state.grid.scroll_y.drag_offset = mouse.1 - vertical_rect.map_or(mouse.1, |rect| rect.1);
+            state.grid.scroll_y.drag_offset = offset;
         }
     }
 
@@ -1895,6 +2030,10 @@ fn edit_database_table_input(
 }
 
 
+fn database_table_transaction_finish_allowed(committing: bool) -> bool {
+    !committing
+}
+
 #[cfg(test)]
 mod database_table_edit_method_tests {
     use super::*;
@@ -1948,4 +2087,49 @@ mod database_table_edit_method_tests {
         assert_eq!(line_start_boundary(text, text.len()), 4);
         assert_eq!(line_end_boundary(text, 0), 3);
     }
+
+    #[test]
+    fn bug_17_table_scrollbar_drag_preserves_pointer_offset_inside_thumb() {
+        let scale = 1.0;
+        let track_start = 10.0;
+        let track_len = 200.0;
+        let viewport = 100.0;
+        let content = 400.0;
+        let current = 150.0;
+        let pointer = 100.0;
+        let (offset, initial_target) = database_table_scroll_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            viewport,
+            content,
+            current,
+            20.0,
+            None,
+            scale,
+        )
+        .expect("scrollbar drag starts");
+        assert_eq!(initial_target, current);
+
+        let (_, target) = database_table_scroll_drag_target(
+            pointer + 25.0,
+            track_start,
+            track_len,
+            viewport,
+            content,
+            current,
+            20.0,
+            Some(offset),
+            scale,
+        )
+        .expect("scrollbar drag continues");
+        assert!(target > current);
+        assert_eq!(target, 200.0);
+    }
+    #[test]
+    fn bug_59_table_transaction_finish_rejects_duplicate_commit_or_rollback() {
+        assert!(database_table_transaction_finish_allowed(false));
+        assert!(!database_table_transaction_finish_allowed(true));
+    }
+
 }

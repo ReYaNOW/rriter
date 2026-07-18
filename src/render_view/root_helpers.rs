@@ -8,6 +8,7 @@ pub mod api_client_panel;
 pub mod api_client_tab;
 mod editor_text_layer;
 mod hover_overlays;
+pub(crate) use hover_overlays::hover_trace_epoch_millis;
 mod ide_panels;
 pub mod lsp_ui;
 pub mod minimap_ui;

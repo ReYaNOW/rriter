@@ -1,11 +1,5 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportBlock {
-    pub start: usize,
-    pub end: usize,
-    pub keyword_start: usize,
-    pub keyword_end: usize,
-    pub line_count: usize,
-}
+pub use super::ImportBlock;
+use super::finish_import_block;
 
 pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
     let mut blocks = Vec::new();
@@ -45,10 +39,10 @@ pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
         }
 
         pending_blank_lines = 0;
-        finish_block(&mut current, &mut blocks);
+        finish_import_block(&mut current, &mut blocks);
     }
 
-    finish_block(&mut current, &mut blocks);
+    finish_import_block(&mut current, &mut blocks);
     blocks
 }
 
@@ -57,14 +51,6 @@ fn dart_import_keyword_len(trimmed: &str) -> Option<usize> {
         Some("import".len())
     } else {
         None
-    }
-}
-
-fn finish_block(current: &mut Option<ImportBlock>, blocks: &mut Vec<ImportBlock>) {
-    if let Some(block) = current.take() {
-        if block.line_count >= 2 && block.end > block.start {
-            blocks.push(block);
-        }
     }
 }
 

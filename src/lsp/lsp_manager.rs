@@ -63,8 +63,10 @@ pub struct LspManager {
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     pub ty_status: LspServerStatus,
-    /// Отключён ли ruff вручную
+    /// Отключены ли Python-серверы вручную целиком.
     pub python_disabled: bool,
+    ruff_disabled: bool,
+    ty_disabled: bool,
     ruff_unavailable: bool,
     ty_unavailable: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
@@ -105,6 +107,8 @@ impl LspManager {
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
             python_disabled: false,
+            ruff_disabled: false,
+            ty_disabled: false,
             ruff_unavailable: false,
             ty_unavailable: false,
             server_logs: HashMap::new(),
@@ -207,7 +211,7 @@ impl LspManager {
         if self.python.is_some() {
             return false;
         }
-        if self.ruff_unavailable {
+        if self.ruff_disabled || self.ruff_unavailable {
             return false;
         }
         self.python_status = LspServerStatus::Starting;
@@ -219,7 +223,7 @@ impl LspManager {
         if self.ty_process.is_some() {
             return false;
         }
-        if self.ty_unavailable {
+        if self.ty_disabled || self.ty_unavailable {
             return false;
         }
         self.ty_status = LspServerStatus::Starting;
@@ -325,6 +329,8 @@ impl LspManager {
     /// Отключить ruff (остановить и не перезапускать)
     pub fn disable_python(&mut self) {
         self.python_disabled = true;
+        self.ruff_disabled = true;
+        self.ty_disabled = true;
         self.python_status = LspServerStatus::Disabled;
         self.ty_status = LspServerStatus::Disabled;
         if let Some(p) = self.python.take() {
@@ -354,6 +360,8 @@ impl LspManager {
     /// Включить ruff обратно
     pub fn enable_python(&mut self) {
         self.python_disabled = false;
+        self.ruff_disabled = false;
+        self.ty_disabled = false;
         self.ruff_unavailable = false;
         self.ty_unavailable = false;
         if self.open_python_files.is_empty() {
@@ -370,6 +378,84 @@ impl LspManager {
             .as_ref()
             .map(|(_, text, _)| python_line_count(text.as_ref()));
         self.reopen_current_python_file();
+    }
+
+    pub fn restart_server(&mut self, name: &str) {
+        if self.open_python_files.is_empty() || self.python_disabled {
+            return;
+        }
+        let workspaces = self.active_workspaces.clone();
+        match name {
+            name if name == RUFF_SERVER.program => {
+                self.ruff_disabled = false;
+                self.ruff_unavailable = false;
+                if let Some(process) = self.python.take() {
+                    process.shutdown();
+                }
+                self.start_ruff_process_if_available(&workspaces);
+            }
+            name if name == TY_SERVER.program => {
+                self.ty_disabled = false;
+                self.ty_unavailable = false;
+                if let Some(process) = self.ty_process.take() {
+                    process.shutdown();
+                }
+                if self.start_ty_process_if_available(&workspaces) {
+                    self.reset_ty_workspace_state();
+                }
+            }
+            _ => return,
+        }
+        self.reopen_current_python_file();
+    }
+
+    pub fn set_server_enabled(&mut self, name: &str, enabled: bool) {
+        self.python_disabled = false;
+        let workspaces = self.active_workspaces.clone();
+        match name {
+            name if name == RUFF_SERVER.program => {
+                self.ruff_disabled = !enabled;
+                if enabled {
+                    self.ruff_unavailable = false;
+                    self.start_ruff_process_if_available(&workspaces);
+                    self.reopen_current_python_file();
+                } else {
+                    if let Some(process) = self.python.take() {
+                        process.shutdown();
+                    }
+                    self.python_status = LspServerStatus::Disabled;
+                    self.ruff_workspace_diagnostics.clear();
+                    self.ruff_workspace_diag_rx = None;
+                    self.ruff_workspace_diag_pending = false;
+                    self.ruff_workspace_diag_dirty = false;
+                }
+            }
+            name if name == TY_SERVER.program => {
+                self.ty_disabled = !enabled;
+                if enabled {
+                    self.ty_unavailable = false;
+                    if self.start_ty_process_if_available(&workspaces) {
+                        self.reset_ty_workspace_state();
+                    }
+                    self.reopen_current_python_file();
+                } else {
+                    if let Some(process) = self.ty_process.take() {
+                        process.shutdown();
+                    }
+                    self.ty_status = LspServerStatus::Disabled;
+                    self.ty_instant_diagnostics.clear();
+                    self.ty_diag_result_ids.clear();
+                    self.ty_workspace_diag_pending = None;
+                    self.ty_workspace_diag_dirty = false;
+                }
+            }
+            _ => return,
+        }
+        self.rebuild_merged_diagnostic_indices();
+    }
+
+    pub fn stop_server(&mut self, name: &str) {
+        self.set_server_enabled(name, false);
     }
 
     fn reopen_current_python_file(&mut self) {
@@ -545,7 +631,7 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         if let Some(proc) = &mut self.ty_process {
-            Some(proc.request_hover(&abs_path, line, col))
+            proc.request_hover(&abs_path, line, col)
         } else {
             None
         }
@@ -566,7 +652,7 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         if let Some(proc) = &mut self.ty_process {
-            Some(proc.request_definition(&abs_path, line, col))
+            proc.request_definition(&abs_path, line, col)
         } else {
             None
         }
@@ -593,7 +679,7 @@ impl LspManager {
         self.ensure_python();
         self.ty_process
             .as_mut()
-            .map(|proc| proc.request_completion(&abs_path, line, col, trigger))
+            .and_then(|proc| proc.request_completion(&abs_path, line, col, trigger))
     }
 
     pub fn request_ty_signature_help(
@@ -617,7 +703,7 @@ impl LspManager {
         self.ensure_python();
         self.ty_process
             .as_mut()
-            .map(|proc| proc.request_signature_help(&abs_path, line, col, trigger))
+            .and_then(|proc| proc.request_signature_help(&abs_path, line, col, trigger))
     }
 
     pub fn request_ty_inlay_hints(
@@ -640,7 +726,7 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         self.ensure_python();
-        self.ty_process.as_mut().map(|proc| {
+        self.ty_process.as_mut().and_then(|proc| {
             proc.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
         })
     }
@@ -701,6 +787,7 @@ impl LspManager {
         if !self.ty_workspace_diag_dirty
             || self.ty_workspace_diag_pending.is_some()
             || self.python_disabled
+            || self.ty_disabled
             || self.suppress_diagnostics
             || self.ty_status != LspServerStatus::Running
             || self.active_workspaces.is_empty()
@@ -715,8 +802,9 @@ impl LspManager {
         }
 
         let previous_result_ids_json = self.ty_workspace_result_ids_json();
-        if let Some(proc) = &mut self.ty_process {
-            let id = proc.request_workspace_diagnostics(previous_result_ids_json);
+        if let Some(proc) = &mut self.ty_process
+            && let Some(id) = proc.request_workspace_diagnostics(previous_result_ids_json)
+        {
             self.ty_workspace_diag_pending = Some(id);
             self.ty_workspace_diag_dirty = false;
         }
@@ -742,7 +830,7 @@ impl LspManager {
             std::env::current_dir().unwrap_or_default().join(path)
         };
         let proc = self.process_for_ext(ext)?;
-        Some(proc.request_code_actions(
+        proc.request_code_actions(
             &abs_path,
             start_line,
             start_col,
@@ -750,7 +838,7 @@ impl LspManager {
             end_col,
             relevant_diags,
             only,
-        ))
+        )
     }
 
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
@@ -1447,53 +1535,37 @@ impl LspManager {
             .collect()
     }
 
-    /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
-    pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+    fn request_source_action(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        action_kind: &str,
+    ) -> Option<i32> {
         let abs_path = if path.is_absolute() {
             path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
+        } else if let Some(workspace) = self.workspaces.first() {
+            workspace.join(path)
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        let proc = self.process_for_ext(ext)?;
-        let id = next_id();
-        let uri = path_to_uri(&abs_path);
-        let _ = proc.cmd_tx.send(Cmd::CodeAction {
-            id,
-            uri,
-            start_line: 0,
-            start_col: 0,
-            end_line: u32::MAX,
-            end_col: 0,
-            diagnostics_json: String::from("[]"),
-            only: Some(vec!["source.fixAll".to_string()]),
-        });
-        Some(id)
+        self.process_for_ext(ext)?.request_code_actions(
+            &abs_path,
+            0,
+            0,
+            u32::MAX,
+            0,
+            &[],
+            Some(vec![action_kind.to_string()]),
+        )
+    }
+
+    /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
+    pub fn request_fix_all(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
+        self.request_source_action(path, ext, "source.fixAll")
     }
 
     pub fn request_organize_imports(&mut self, path: &PathBuf, ext: &str) -> Option<i32> {
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        let proc = self.process_for_ext(ext)?;
-        let id = next_id();
-        let uri = path_to_uri(&abs_path);
-        let _ = proc.cmd_tx.send(Cmd::CodeAction {
-            id,
-            uri,
-            start_line: 0,
-            start_col: 0,
-            end_line: u32::MAX,
-            end_col: 0,
-            diagnostics_json: String::from("[]"),
-            only: Some(vec!["source.organizeImports".to_string()]),
-        });
-        Some(id)
+        self.request_source_action(path, ext, "source.organizeImports")
     }
 
     fn stop_processes(&mut self) {
@@ -1696,6 +1768,46 @@ mod lsp_manager_allocation_tests {
         assert_eq!(summaries[1].name, TY_SERVER.program);
         assert_eq!(summaries[1].log_count, 0);
         assert!(std::ptr::eq(summaries[1].status, &manager.ty_status));
+    }
+
+
+    #[test]
+    fn r2_070_restart_ty_does_not_mutate_ruff_disable_state() {
+        let mut manager = LspManager::new(Vec::new());
+        manager.ruff_disabled = true;
+        manager.ty_disabled = true;
+        manager.restart_server(TY_SERVER.program);
+        assert!(manager.ruff_disabled);
+        assert!(manager.ty_disabled, "without open files restart must remain a no-op");
+        let source = include_str!("lsp_manager.rs");
+        assert!(source.contains("name if name == TY_SERVER.program"));
+    }
+
+    #[test]
+    fn r2_071_toggling_ty_does_not_toggle_ruff() {
+        let mut manager = LspManager::new(Vec::new());
+        manager.ruff_disabled = false;
+        manager.ty_disabled = false;
+        manager.python_status = LspServerStatus::Running;
+        manager.ty_status = LspServerStatus::Running;
+        manager.set_server_enabled(TY_SERVER.program, false);
+        assert!(!manager.ruff_disabled);
+        assert!(manager.ty_disabled);
+        assert_eq!(manager.python_status, LspServerStatus::Running);
+        assert_eq!(manager.ty_status, LspServerStatus::Disabled);
+    }
+
+    #[test]
+    fn r2_072_stopping_ty_keeps_ruff_and_panel_server_available() {
+        let mut manager = LspManager::new(Vec::new());
+        manager.python_status = LspServerStatus::Running;
+        manager.ty_status = LspServerStatus::Running;
+        manager.stop_server(TY_SERVER.program);
+        let summaries = manager.server_summaries();
+        assert_eq!(*summaries[0].status, LspServerStatus::Running);
+        assert_eq!(*summaries[1].status, LspServerStatus::Disabled);
+        assert!(!manager.ruff_disabled);
+        assert!(manager.ty_disabled);
     }
 }
 

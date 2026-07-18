@@ -1265,3 +1265,107 @@ fn show_tab_path_in_explorer_opens_expands_selects_and_centers_file() {
     drop(app);
     std::fs::remove_dir_all(workspace).unwrap();
 }
+
+#[test]
+fn pending_action_save_existing_file_runs_only_after_successful_write() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-pending-save-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("saved.txt");
+    std::fs::write(&path, "old").unwrap();
+
+    app.editor = editor_with("new contents");
+    let _ = app.editor.insert_str("!");
+    app.file_path = Some(path.clone());
+    app.pending_action = PendingAction::CloseFile;
+    app.pending_action_ready = false;
+
+    app.begin_pending_action_save();
+
+    assert!(app.pending_action_ready);
+    assert!(!app.pending_action_waiting_for_save_as);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "new contents!");
+    assert!(!app.editor.is_dirty());
+
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn pending_action_save_failure_does_not_execute_action() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-pending-save-failure-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let path = std::env::temp_dir()
+        .join(unique)
+        .join("missing-parent")
+        .join("saved.txt");
+
+    app.editor = editor_with("new contents");
+    let _ = app.editor.insert_str("!");
+    app.file_path = Some(path);
+    app.pending_action = PendingAction::CloseFile;
+    app.pending_action_ready = false;
+
+    app.begin_pending_action_save();
+
+    assert!(!app.pending_action_ready);
+    assert!(app.editor.is_dirty());
+    assert!(app.ide_panel.file_tree_error.is_some());
+}
+
+#[test]
+fn save_as_selection_resumes_pending_action_only_after_success() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-pending-save-as-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("chosen.txt");
+
+    app.editor = editor_with("chosen contents");
+    let _ = app.editor.insert_str("!");
+    app.file_path = None;
+    app.pending_action = PendingAction::CloseFile;
+    app.pending_action_waiting_for_save_as = true;
+    app.pending_action_ready = false;
+
+    assert!(app.handle_save_as_selection(Some(path.clone())));
+    assert!(!app.pending_action_waiting_for_save_as);
+    assert!(app.pending_action_ready);
+    assert_eq!(app.file_path.as_deref(), Some(path.as_path()));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "chosen contents!");
+
+    app.pending_action_waiting_for_save_as = true;
+    app.pending_action_ready = false;
+    assert!(!app.handle_save_as_selection(None));
+    assert!(!app.pending_action_waiting_for_save_as);
+    assert!(!app.pending_action_ready);
+
+    std::fs::remove_dir_all(dir).unwrap();
+}

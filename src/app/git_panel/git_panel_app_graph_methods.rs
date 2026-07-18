@@ -2,12 +2,8 @@ impl App {
     pub fn refresh_git_panel(&mut self) {
         if self.ide_workspaces.is_empty() {
             self.ide_panel.git.snapshot = GitStatusSnapshot::default();
-            self.ide_panel.git.pending = false;
-            self.ide_panel.git.pending_label = None;
-            self.ide_panel.git.pending_started_at = None;
+            self.ide_panel.git.reset_async_state();
             self.ide_panel.git.pending_label_until = None;
-            self.ide_panel.git.status_refresh_pending = false;
-            self.ide_panel.git.status_refresh_dirty = false;
             return;
         }
         self.ide_panel.git.graph_refresh_after_status = true;
@@ -22,7 +18,8 @@ impl App {
         self.ide_panel.git.selected_file = None;
         self.ide_panel.git.branch_ahead_cache.clear();
         self.ide_panel.git.notice = None;
-        self.ide_panel.git.rx.retain(|rx| !rx.refresh);
+        self.ide_panel.git.rx.clear();
+        self.ide_panel.git.graph_rx.clear();
         self.ide_panel.git.status_refresh_pending = false;
         self.ide_panel.git.status_refresh_dirty = false;
         self.ide_panel.git.graph_cache.clear();
@@ -62,7 +59,7 @@ impl App {
                             .branch_ahead_cache
                             .extend(result.branch_ahead_cache);
                         let event = result.event;
-                        if event.request_id >= self.ide_panel.git.latest_request_id {
+                        if event.request_id == self.ide_panel.git.latest_request_id {
                             if receiver.refresh {
                                 refresh_rerun |= self.ide_panel.git.finish_status_refresh();
                             }
@@ -96,6 +93,10 @@ impl App {
                     Err(mpsc::TryRecvError::Disconnected) => {
                         if receiver.refresh {
                             refresh_rerun |= self.ide_panel.git.finish_status_refresh();
+                        }
+                        if receiver.request_id == self.ide_panel.git.latest_request_id {
+                            self.ide_panel.git.handle_status_disconnect(receiver.request_id);
+                            updated = true;
                         }
                         keep = false;
                         break;
@@ -162,10 +163,10 @@ impl App {
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
-        for rx in graph_receivers {
+        for receiver in graph_receivers {
             let mut keep = true;
             loop {
-                match rx.try_recv() {
+                match receiver.rx.try_recv() {
                     Ok(event) => {
                         let latest_for_root = self
                             .ide_panel
@@ -233,13 +234,17 @@ impl App {
                     }
                     Err(mpsc::TryRecvError::Empty) => break,
                     Err(mpsc::TryRecvError::Disconnected) => {
+                        self.ide_panel
+                            .git
+                            .handle_graph_disconnect(&receiver.repo_root, receiver.request_id);
+                        updated = true;
                         keep = false;
                         break;
                     }
                 }
             }
             if keep {
-                next_graph_rx.push(rx);
+                next_graph_rx.push(receiver);
             }
         }
         self.ide_panel.git.graph_rx = next_graph_rx;

@@ -1,3 +1,46 @@
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabaseModalGeometry {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scale: f32,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn database_modal_geometry(
+    viewport_w: f32,
+    viewport_h: f32,
+    base_scale: f32,
+    desired_w: f32,
+    desired_h: f32,
+    minimum_w: f32,
+    minimum_h: f32,
+) -> DatabaseModalGeometry {
+    let base_scale = base_scale.max(0.01);
+    let available_w = (viewport_w - 32.0 * base_scale).max(1.0);
+    let available_h = (viewport_h - 32.0 * base_scale).max(1.0);
+    let fit = (available_w / (minimum_w * base_scale).max(1.0))
+        .min(available_h / (minimum_h * base_scale).max(1.0))
+        .min(1.0)
+        .max(0.1);
+    let scale = base_scale * fit;
+    let w = (desired_w * scale).min(available_w).max(1.0).round();
+    let h = (desired_h * scale).min(available_h).max(1.0).round();
+    DatabaseModalGeometry {
+        x: ((viewport_w - w) * 0.5).max(0.0).round(),
+        y: ((viewport_h - h) * 0.5).max(0.0).round(),
+        w,
+        h,
+        scale,
+    }
+}
+
+fn database_host_key_buttons_horizontal(inner_w: f32, scale: f32) -> bool {
+    let total_w = (150.0 + 180.0 + 90.0 + 20.0) * scale;
+    total_w <= inner_w
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -97,36 +140,48 @@ impl Renderer {
 
         let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
         let scroll = database.scroll.current.round();
+        let hover_settled = database.scroll.is_settled();
+        let content_clip = crate::ui_system::UiClipRect::new(
+            panel_x,
+            content_y,
+            panel_w,
+            content_h,
+        );
         let mut logical_row = 0usize;
         let mut label_scratch = String::new();
         for (connection_idx, connection) in database.connections.iter().enumerate() {
             let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
             if row_y + row_h >= content_y && row_y <= content_y + content_h {
                 let selected = database.selected_connection == Some(connection.config.id);
-                let hovered = ui_registry.register_rect(
-                    UiId::DatabaseConnectionRow(connection_idx),
-                    panel_x,
-                    row_y,
-                    panel_w,
-                    row_h,
-                    mx,
-                    my,
-                );
+                let hovered = hover_settled
+                    && ui_registry.register_rect_clipped(
+                        UiId::DatabaseConnectionRow(connection_idx),
+                        panel_x,
+                        row_y,
+                        panel_w,
+                        row_h,
+                        content_clip,
+                        mx,
+                        my,
+                    );
                 if selected {
                     self.push_rect(panel_x, row_y, panel_w, row_h, [0.60, 0.35, 0.85, 0.24]);
                 } else if hovered {
                     self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.06]);
                 }
                 let arrow_x = panel_x + 6.0 * s;
-                ui_registry.register_rect(
-                    UiId::DatabaseConnectionArrow(connection_idx),
-                    arrow_x - 4.0 * s,
-                    row_y,
-                    18.0 * s,
-                    row_h,
-                    mx,
-                    my,
-                );
+                if hover_settled {
+                    ui_registry.register_rect_clipped(
+                        UiId::DatabaseConnectionArrow(connection_idx),
+                        arrow_x - 4.0 * s,
+                        row_y,
+                        18.0 * s,
+                        row_h,
+                        content_clip,
+                        mx,
+                        my,
+                    );
+                }
                 self.draw_tree_disclosure_icon(
                     connection.expanded,
                     arrow_x,
@@ -196,30 +251,35 @@ impl Renderer {
                             .selected_database
                             .as_ref()
                             .is_some_and(|(id, name)| *id == connection.config.id && name == &database_node.name);
-                        let hovered = ui_registry.register_rect(
-                            UiId::DatabaseRow(connection_idx, database_idx),
-                            panel_x,
-                            row_y,
-                            panel_w,
-                            row_h,
-                            mx,
-                            my,
-                        );
+                        let hovered = hover_settled
+                            && ui_registry.register_rect_clipped(
+                                UiId::DatabaseRow(connection_idx, database_idx),
+                                panel_x,
+                                row_y,
+                                panel_w,
+                                row_h,
+                                content_clip,
+                                mx,
+                                my,
+                            );
                         if selected {
                             self.push_rect(panel_x, row_y, panel_w, row_h, [0.35, 0.48, 0.72, 0.20]);
                         } else if hovered {
                             self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.05]);
                         }
                         let arrow_x = panel_x + 26.0 * s;
-                        ui_registry.register_rect(
-                            UiId::DatabaseArrow(connection_idx, database_idx),
-                            arrow_x - 4.0 * s,
-                            row_y,
-                            18.0 * s,
-                            row_h,
-                            mx,
-                            my,
-                        );
+                        if hover_settled {
+                            ui_registry.register_rect_clipped(
+                                UiId::DatabaseArrow(connection_idx, database_idx),
+                                arrow_x - 4.0 * s,
+                                row_y,
+                                18.0 * s,
+                                row_h,
+                                content_clip,
+                                mx,
+                                my,
+                            );
+                        }
                         self.draw_tree_disclosure_icon(
                             database_node.expanded,
                             arrow_x,
@@ -259,15 +319,17 @@ impl Renderer {
                         for (table_idx, table) in database_node.tables.iter().enumerate() {
                             let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
                             if row_y + row_h >= content_y && row_y <= content_y + content_h {
-                                let hovered = ui_registry.register_rect(
-                                    UiId::DatabaseTableRow(connection_idx, database_idx, table_idx),
-                                    panel_x,
-                                    row_y,
-                                    panel_w,
-                                    row_h,
-                                    mx,
-                                    my,
-                                );
+                                let hovered = hover_settled
+                                    && ui_registry.register_rect_clipped(
+                                        UiId::DatabaseTableRow(connection_idx, database_idx, table_idx),
+                                        panel_x,
+                                        row_y,
+                                        panel_w,
+                                        row_h,
+                                        content_clip,
+                                        mx,
+                                        my,
+                                    );
                                 if hovered {
                                     self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.05]);
                                 }
@@ -433,16 +495,20 @@ impl Renderer {
             mx,
             my,
         );
-        let width = (700.0 * s)
-            .min(self.width - 32.0 * s)
-            .max(420.0 * s)
-            .round();
-        let height = (self.height - 48.0 * s)
-            .min(780.0 * s)
-            .max(420.0 * s)
-            .round();
-        let x = ((self.width - width) * 0.5).round();
-        let y = ((self.height - height) * 0.5).round();
+        let geometry = database_modal_geometry(
+            self.width,
+            self.height,
+            s,
+            700.0,
+            780.0,
+            420.0,
+            420.0,
+        );
+        let s = geometry.scale;
+        let width = geometry.w;
+        let height = geometry.h;
+        let x = geometry.x;
+        let y = geometry.y;
         self.push_rounded_rect(x, y, width, height, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
         self.push_rounded_rect_border(
             x,
@@ -469,7 +535,13 @@ impl Renderer {
 
         let form_top = y + 48.0 * s;
         let footer = database_dialog_footer_layout(y, height, s);
-        let form_bottom = footer.form_bottom;
+        let form_bottom = footer.form_bottom.max(form_top);
+        let form_clip = crate::ui_system::UiClipRect::new(
+            x,
+            form_top,
+            width,
+            (form_bottom - form_top).max(0.0),
+        );
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -502,24 +574,26 @@ impl Renderer {
                 let field_w = (input_w - remember_w).max(80.0 * s).round();
                 let focused = dialog.focused == Some(field);
                 let eye_size = if field.is_secret() { field_h.round() } else { 0.0 };
-                ui_registry.register_text_input(
+                ui_registry.register_text_input_clipped(
                     UiId::DatabaseDialogField(field),
                     input_x.round(),
                     field_y.round(),
                     field_w,
                     field_h.round(),
+                    form_clip,
                     mx,
                     my,
                 );
                 if let Some((remember_id, enabled)) = remember {
                     let checkbox_x = (input_x + field_w + 6.0 * s).round();
                     let checkbox_w = (remember_w - 6.0 * s).max(40.0 * s).round();
-                    let hovered = ui_registry.register_rect(
+                    let hovered = ui_registry.register_rect_clipped(
                         remember_id,
                         checkbox_x,
                         field_y.round(),
                         checkbox_w,
                         field_h.round(),
+                        form_clip,
                         mx,
                         my,
                     );
@@ -574,9 +648,10 @@ impl Renderer {
                         active_square_width: None,
                         custom_color: None,
                     };
-                    ui_registry.register_icon_button(
+                    ui_registry.register_icon_button_clipped(
                         UiId::DatabaseDialogSecretEye(field),
                         &eye,
+                        form_clip,
                         self,
                         mx,
                         my,
@@ -597,12 +672,15 @@ impl Renderer {
             if dialog.ssh_enabled { "да" } else { "нет" },
             if dialog.jump_enabled { "да" } else { "нет" },
         );
-        self.draw_string_scaled_pixel_snapped(
+        let mut toggle_scratch = String::new();
+        self.draw_tree_label_clipped(
             &toggle_label,
             x + 20.0 * s,
             footer.summary_baseline,
+            (width - 40.0 * s).max(4.0),
             [0.66, 0.70, 0.80, 1.0],
             0.78,
+            &mut toggle_scratch,
         );
         let mut control_x = x + 20.0 * s;
         for (id, text, width) in [
@@ -827,26 +905,111 @@ fn draw_database_confirmation(
     use crate::ui_system::UiId;
     ui_registry.mark_overlay_start();
     renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, [0.0, 0.0, 0.0, 0.62]);
-    ui_registry.register_blocker(UiId::DatabaseDialogBackdrop, 0.0, 0.0, renderer.width, renderer.height, mx, my);
-    let w = (520.0 * s).min(renderer.width - 30.0 * s).round();
-    let h = (190.0 * s).round();
-    let x = ((renderer.width - w) * 0.5).round();
-    let y = ((renderer.height - h) * 0.5).round();
+    ui_registry.register_blocker(
+        UiId::DatabaseDialogBackdrop,
+        0.0,
+        0.0,
+        renderer.width,
+        renderer.height,
+        mx,
+        my,
+    );
+    let geometry = database_modal_geometry(
+        renderer.width,
+        renderer.height,
+        s,
+        520.0,
+        210.0,
+        300.0,
+        170.0,
+    );
+    let s = geometry.scale;
+    let (x, y, w, h) = (geometry.x, geometry.y, geometry.w, geometry.h);
     renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
-    renderer.draw_string_scaled_pixel_snapped(title, x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
-    renderer.draw_string_scaled_pixel_snapped(detail, x + 22.0 * s, y + 78.0 * s, [0.72, 0.74, 0.80, 1.0], 0.82);
+    let mut scratch = String::new();
+    renderer.draw_tree_label_clipped(
+        title,
+        x + 22.0 * s,
+        y + 36.0 * s,
+        (w - 44.0 * s).max(4.0),
+        renderer.theme.fg,
+        1.0,
+        &mut scratch,
+    );
+    renderer.draw_tree_label_clipped(
+        detail,
+        x + 22.0 * s,
+        y + 78.0 * s,
+        (w - 44.0 * s).max(4.0),
+        [0.72, 0.74, 0.80, 1.0],
+        0.82,
+        &mut scratch,
+    );
+    let inner_w = (w - 44.0 * s).max(1.0);
+    let button_h = 30.0 * s;
+    let gap = 10.0 * s;
+    let nominal_confirm = 96.0 * s;
+    let nominal_cancel = 92.0 * s;
+    let horizontal = inner_w >= nominal_confirm + nominal_cancel + gap;
+    let (confirm_x, confirm_y, confirm_w, cancel_x, cancel_y, cancel_w) = if horizontal {
+        let cancel_x = x + w - 22.0 * s - nominal_cancel;
+        (
+            cancel_x - gap - nominal_confirm,
+            y + h - 48.0 * s,
+            nominal_confirm,
+            cancel_x,
+            y + h - 48.0 * s,
+            nominal_cancel,
+        )
+    } else {
+        let full = inner_w;
+        (
+            x + 22.0 * s,
+            y + h - 84.0 * s,
+            full,
+            x + 22.0 * s,
+            y + h - 48.0 * s,
+            full,
+        )
+    };
     if confirm_enabled {
         ui_registry.register_button_view(
             confirm_id,
-            crate::widgets::ButtonView { x: x + w - 220.0 * s, y: y + h - 48.0 * s, w: 96.0 * s, h: 30.0 * s, text: "Удалить", icon: None, text_scale: 0.8, icon_size: 0.0 },
-            renderer, mx, my, s, false,
+            crate::widgets::ButtonView {
+                x: confirm_x,
+                y: confirm_y,
+                w: confirm_w,
+                h: button_h,
+                text: "Удалить",
+                icon: None,
+                text_scale: 0.8,
+                icon_size: 0.0,
+            },
+            renderer,
+            mx,
+            my,
+            s,
+            false,
         );
     }
     ui_registry.register_button_view(
         cancel_id,
-        crate::widgets::ButtonView { x: x + w - 114.0 * s, y: y + h - 48.0 * s, w: 92.0 * s, h: 30.0 * s, text: "Отмена", icon: None, text_scale: 0.8, icon_size: 0.0 },
-        renderer, mx, my, s, false,
+        crate::widgets::ButtonView {
+            x: cancel_x,
+            y: cancel_y,
+            w: cancel_w,
+            h: button_h,
+            text: "Отмена",
+            icon: None,
+            text_scale: 0.8,
+            icon_size: 0.0,
+        },
+        renderer,
+        mx,
+        my,
+        s,
+        false,
     );
 }
 
@@ -861,36 +1024,134 @@ fn draw_database_host_key_confirmation(
     use crate::ui_system::UiId;
     ui_registry.mark_overlay_start();
     renderer.push_rect(0.0, 0.0, renderer.width, renderer.height, [0.0, 0.0, 0.0, 0.64]);
-    ui_registry.register_blocker(UiId::DatabaseDialogBackdrop, 0.0, 0.0, renderer.width, renderer.height, mx, my);
-    let w = (620.0 * s).min(renderer.width - 30.0 * s);
-    let h = 240.0 * s;
-    let x = (renderer.width - w) * 0.5;
-    let y = (renderer.height - h) * 0.5;
+    ui_registry.register_blocker(
+        UiId::DatabaseDialogBackdrop,
+        0.0,
+        0.0,
+        renderer.width,
+        renderer.height,
+        mx,
+        my,
+    );
+    let geometry = database_modal_geometry(
+        renderer.width,
+        renderer.height,
+        s,
+        620.0,
+        300.0,
+        300.0,
+        230.0,
+    );
+    let s = geometry.scale;
+    let (x, y, w, h) = (geometry.x, geometry.y, geometry.w, geometry.h);
     renderer.push_rounded_rect(x, y, w, h, 8.0 * s, [0.12, 0.125, 0.16, 1.0]);
     ui_registry.register_blocker(UiId::DatabaseDialogBody, x, y, w, h, mx, my);
-    renderer.draw_string_scaled_pixel_snapped("Неизвестный SSH host key", x + 22.0 * s, y + 36.0 * s, renderer.theme.fg, 1.0);
-    for (idx, line) in detail.lines().enumerate() {
-        renderer.draw_string_scaled_pixel_snapped(line, x + 22.0 * s, y + (76.0 + idx as f32 * 24.0) * s, [0.72, 0.75, 0.82, 1.0], 0.82);
+    let mut scratch = String::new();
+    renderer.draw_tree_label_clipped(
+        "Неизвестный SSH host key",
+        x + 22.0 * s,
+        y + 36.0 * s,
+        (w - 44.0 * s).max(4.0),
+        renderer.theme.fg,
+        1.0,
+        &mut scratch,
+    );
+    for (idx, line) in detail.lines().take(4).enumerate() {
+        renderer.draw_tree_label_clipped(
+            line,
+            x + 22.0 * s,
+            y + (76.0 + idx as f32 * 24.0) * s,
+            (w - 44.0 * s).max(4.0),
+            [0.72, 0.75, 0.82, 1.0],
+            0.82,
+            &mut scratch,
+        );
     }
-    let by = y + h - 48.0 * s;
-    let mut bx = x + 22.0 * s;
-    for (id, text, width) in [
+    let buttons = [
         (UiId::DatabaseHostKeyTrustOnce, "Доверять один раз", 150.0),
         (UiId::DatabaseHostKeyTrustStore, "Доверять и сохранить", 180.0),
         (UiId::DatabaseHostKeyCancel, "Отмена", 90.0),
-    ] {
+    ];
+    let inner_w = (w - 44.0 * s).max(1.0);
+    let gap = 10.0 * s;
+    let horizontal = database_host_key_buttons_horizontal(inner_w, s);
+    let mut horizontal_offset = 0.0;
+    for (index, (id, text, nominal_w)) in buttons.iter().copied().enumerate() {
+        let (bx, by, bw) = if horizontal {
+            let bx = x + 22.0 * s + horizontal_offset;
+            horizontal_offset += nominal_w * s + gap;
+            (bx, y + h - 48.0 * s, nominal_w * s)
+        } else {
+            (
+                x + 22.0 * s,
+                y + h - (120.0 - index as f32 * 36.0) * s,
+                inner_w,
+            )
+        };
         ui_registry.register_button_view(
             id,
-            crate::widgets::ButtonView { x: bx, y: by, w: width * s, h: 30.0 * s, text, icon: None, text_scale: 0.78, icon_size: 0.0 },
-            renderer, mx, my, s, false,
+            crate::widgets::ButtonView {
+                x: bx,
+                y: by,
+                w: bw,
+                h: 30.0 * s,
+                text,
+                icon: None,
+                text_scale: 0.78,
+                icon_size: 0.0,
+            },
+            renderer,
+            mx,
+            my,
+            s,
+            false,
         );
-        bx += (width + 10.0) * s;
     }
 }
 
 #[cfg(test)]
 mod database_dialog_layout_tests {
-    use super::{database_context_action_label, database_dialog_footer_layout};
+    use super::*;
+
+    #[test]
+    fn bug_25_connection_modal_never_exceeds_small_viewport() {
+        let geometry = database_modal_geometry(300.0, 260.0, 1.0, 700.0, 780.0, 420.0, 420.0);
+        assert!(geometry.x >= 0.0);
+        assert!(geometry.y >= 0.0);
+        assert!(geometry.x + geometry.w <= 300.0 + 0.5);
+        assert!(geometry.y + geometry.h <= 260.0 + 0.5);
+    }
+
+    #[test]
+    fn bug_27_connection_summary_is_given_only_modal_inner_width() {
+        let geometry = database_modal_geometry(360.0, 500.0, 1.0, 700.0, 780.0, 420.0, 420.0);
+        let clipped_width = (geometry.w - 40.0 * geometry.scale).max(4.0);
+        assert!(clipped_width <= geometry.w);
+        assert!(geometry.x + 20.0 * geometry.scale + clipped_width <= geometry.x + geometry.w + 0.5);
+    }
+
+    #[test]
+    fn bug_28_host_key_buttons_stack_when_they_do_not_fit() {
+        assert!(database_host_key_buttons_horizontal(500.0, 1.0));
+        assert!(!database_host_key_buttons_horizontal(300.0, 1.0));
+        assert!(!database_host_key_buttons_horizontal(150.0, 0.75));
+    }
+
+    #[test]
+    fn bug_29_confirmation_modals_never_exceed_short_viewport() {
+        for desired_h in [230.0, 300.0] {
+            let geometry = database_modal_geometry(420.0, 150.0, 1.0, 620.0, desired_h, 300.0, 170.0);
+            assert!(geometry.y >= 0.0);
+            assert!(geometry.y + geometry.h <= 150.0 + 0.5);
+        }
+    }
+
+    #[test]
+    fn bug_30_database_tree_disables_hover_while_scroll_is_moving() {
+        let source = include_str!("ide_panel_database_renderer.rs");
+        assert!(source.contains("let hover_settled = database.scroll.is_settled();"));
+        assert!(source.contains("if hover_settled"));
+    }
 
     #[test]
     fn database_sql_actions_are_named_as_console_actions() {

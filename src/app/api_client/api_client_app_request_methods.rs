@@ -1,3 +1,7 @@
+pub(crate) fn api_request_disconnect_message(request_id: u64) -> String {
+    format!("HTTP-запрос #{request_id} неожиданно завершился")
+}
+
 fn api_editor_at_vertical_edge(editor: &Editor, down: bool) -> bool {
     let line_idx = editor
         .line_offsets
@@ -75,6 +79,28 @@ fn api_mock_route_wants_server(
 }
 
 impl crate::app::App {
+    fn allocate_api_request_id(&mut self) -> u64 {
+        let mut candidate = self.ide_panel.api.next_request_id.max(1);
+        loop {
+            let active_receiver = self
+                .api_request_rx
+                .iter()
+                .any(|(request_id, _)| *request_id == candidate);
+            let active_tab = self.tabs.iter().any(|tab| match &tab.kind {
+                crate::app::EditorTabKind::ApiClient(_, state) => {
+                    state.pending_request_id == Some(candidate)
+                }
+                _ => false,
+            });
+            let next = candidate.wrapping_add(1).max(1);
+            if !active_receiver && !active_tab {
+                self.ide_panel.api.next_request_id = next;
+                return candidate;
+            }
+            candidate = next;
+        }
+    }
+
     fn api_mock_request_wants_server(&self, route_idx: usize) -> bool {
         api_mock_route_wants_server(self.ide_panel.api.mock.mode, self.api_route_override(route_idx))
     }
@@ -888,8 +914,7 @@ impl crate::app::App {
             }
         };
         append_auth_query(&mut url, &auth_parts);
-        let request_id = self.ide_panel.api.next_request_id.max(1);
-        self.ide_panel.api.next_request_id = request_id.saturating_add(1).max(1);
+        let request_id = self.allocate_api_request_id();
         let job = ApiJobRequest {
             request_id,
             spec_id,
@@ -997,8 +1022,7 @@ impl crate::app::App {
                 return;
             }
         };
-        let request_id = self.ide_panel.api.next_request_id.max(1);
-        self.ide_panel.api.next_request_id = request_id.saturating_add(1).max(1);
+        let request_id = self.allocate_api_request_id();
         let job = ApiJobRequest {
             request_id,
             spec_id,
@@ -1026,6 +1050,19 @@ impl crate::app::App {
 
     pub fn poll_api_client(&mut self) -> bool {
         let mut changed = false;
+        match crate::platform::poll_optional_receiver(&mut self.api_openapi_export_rx) {
+            crate::platform::ReceiverPoll::Item(Ok(_)) => changed = true,
+            crate::platform::ReceiverPoll::Item(Err(error)) => {
+                self.ide_panel.api.persistence_error = Some(error);
+                changed = true;
+            }
+            crate::platform::ReceiverPoll::Empty => {}
+            crate::platform::ReceiverPoll::Disconnected => {
+                self.ide_panel.api.persistence_error =
+                    Some("Экспорт OpenAPI неожиданно завершился".to_string());
+                changed = true;
+            }
+        }
         let events = drain_api_mock_server_events();
         if !events.is_empty() {
             for event in events {
@@ -1156,26 +1193,39 @@ impl crate::app::App {
                     changed = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.ide_panel.api.body_json_validation_pending = None;
+                    self.ide_panel.api.handle_json_validation_disconnect();
+                    changed = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     self.ide_panel.api.body_json_validation_rx = Some(rx);
                 }
             }
         }
-        if let Some(rx) = &self.api_import_file_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.api_import_file_rx = None;
+        match crate::platform::poll_optional_receiver(&mut self.api_import_file_rx) {
+            crate::platform::ReceiverPoll::Item(result) => {
                 if let Some(path) = result {
                     self.start_api_local_import(path);
                 }
                 changed = true;
             }
+            crate::platform::ReceiverPoll::Empty => {}
+            crate::platform::ReceiverPoll::Disconnected => {
+                self.ide_panel.api.import_error = Some(
+                    "Окно выбора OpenAPI неожиданно завершилось".to_string(),
+                );
+                changed = true;
+            }
         }
-        if let Some(rx) = &self.api_body_file_rx {
-            if let Ok(result) = rx.try_recv() {
-                self.api_body_file_rx = None;
+        match crate::platform::poll_optional_receiver(&mut self.api_body_file_rx) {
+            crate::platform::ReceiverPoll::Item(result) => {
                 self.apply_api_body_file_pick(result);
+                changed = true;
+            }
+            crate::platform::ReceiverPoll::Empty => {}
+            crate::platform::ReceiverPoll::Disconnected => {
+                self.ide_panel.api.import_error = Some(
+                    "Окно выбора body-файла неожиданно завершилось".to_string(),
+                );
                 changed = true;
             }
         }
@@ -1205,6 +1255,7 @@ impl crate::app::App {
                     self.ide_panel.api.python_path_pick_rx = Some(rx);
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ide_panel.api.handle_python_path_disconnect();
                     changed = true;
                 }
             }
@@ -1224,11 +1275,9 @@ impl crate::app::App {
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
                     self.ide_panel.api.python_version_list_rx = Some(rx);
-                    changed = true;
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.ide_panel.api.mock_python_versions_loading = false;
-                    self.ide_panel.api.python_version_list_cancel = None;
+                    self.ide_panel.api.handle_python_versions_disconnect();
                     changed = true;
                 }
             }
@@ -1277,8 +1326,7 @@ impl crate::app::App {
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.ide_panel.api.mock_python_install_running = false;
-                        self.ide_panel.api.python_install_cancel = None;
+                        self.ide_panel.api.handle_python_install_disconnect();
                         keep = false;
                         changed = true;
                         break;
@@ -1293,13 +1341,23 @@ impl crate::app::App {
 
         let mut idx = 0usize;
         while idx < self.api_load_rx.len() {
-            match self.api_load_rx[idx].try_recv() {
+            match self.api_load_rx[idx].rx.try_recv() {
                 Ok(result) => {
                     self.api_load_rx.remove(idx);
+                    let Some(ticket) = self
+                        .ide_panel
+                        .api
+                        .finish_load(result.id, result.generation)
+                    else {
+                        changed = true;
+                        continue;
+                    };
                     match result.result {
                         Ok(payload) => {
                             let id = payload.entry.id;
-                            self.ide_panel.api.upsert_loaded(payload);
+                            self.ide_panel
+                                .api
+                                .upsert_loaded(payload, ticket.select_on_success);
                             self.update_api_tabs_after_model_load(id);
                             self.refresh_api_mock_server_snapshot();
                         }
@@ -1309,7 +1367,8 @@ impl crate::app::App {
                 }
                 Err(std::sync::mpsc::TryRecvError::Empty) => idx += 1,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.api_load_rx.remove(idx);
+                    let failed = self.api_load_rx.remove(idx);
+                    self.ide_panel.api.handle_load_disconnect(failed.id, failed.generation);
                     changed = true;
                 }
             }
@@ -1328,6 +1387,8 @@ impl crate::app::App {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.api_request_rx.remove(idx);
                     self.clear_api_pending_request(request_id);
+                    self.ide_panel.api.import_error =
+                        Some(api_request_disconnect_message(request_id));
                     changed = true;
                 }
             }
@@ -1422,7 +1483,7 @@ impl crate::app::App {
         if let Some(text) = focused_text {
             let old_version = self.ide_panel.api.input_editor.version;
             self.ide_panel.api.input_editor.set_text_clean(&text);
-            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+            self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
         }
     }
 

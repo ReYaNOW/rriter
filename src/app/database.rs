@@ -62,7 +62,7 @@ pub use database_table::{
     DATABASE_SQL_PREVIEW_LINE_HEIGHT, DATABASE_TABLE_DISCONNECTED_MESSAGE,
     database_calendar_weekday_monday, database_calendar_year_month,
     database_days_in_month, database_shift_calendar_month,
-    build_table_change_plan, count_public_table_rows, finish_table_transaction,
+    build_table_change_plan, count_public_table_rows,
     database_table_effective_order_by, load_public_table_chunk, validate_table_fragment,
 };
 
@@ -589,23 +589,11 @@ impl DatabasePersistedState {
         for entry in &mut self.query_history {
             entry.normalize();
         }
-        let history_limit = self.settings.sql_history_limit.min(MAX_SQL_HISTORY_ENTRIES);
-        if self.query_history.len() > history_limit {
-            let remove = self.query_history.len() - history_limit;
-            self.query_history.drain(0..remove);
-        }
-        while self.query_history.iter().map(|entry| {
-            entry.sql.len()
-                + entry.database_name.len()
-                + entry.error_summary.as_ref().map_or(0, String::len)
-                + 64
-        }).sum::<usize>() > MAX_SQL_HISTORY_BYTES
-        {
-            if self.query_history.is_empty() {
-                break;
-            }
-            self.query_history.remove(0);
-        }
+        database_query::trim_database_query_history(
+            &mut self.query_history,
+            self.settings.sql_history_limit.min(MAX_SQL_HISTORY_ENTRIES),
+            MAX_SQL_HISTORY_BYTES,
+        );
         self.selected_connection = self.selected_connection.filter(|id| ids.contains(id));
         self.selected_database = self.selected_database.take().filter(|(id, name)| {
             ids.contains(id) && !name.is_empty()
@@ -626,6 +614,12 @@ pub struct DatabaseSecretBundle {
     pub ssh_key_passphrase: Option<Zeroizing<String>>,
     pub jump_password: Option<Zeroizing<String>>,
     pub jump_key_passphrase: Option<Zeroizing<String>>,
+}
+
+impl Clone for DatabaseSecretBundle {
+    fn clone(&self) -> Self {
+        self.clone_for_job()
+    }
 }
 
 impl DatabaseSecretBundle {

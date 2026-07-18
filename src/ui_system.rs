@@ -268,6 +268,8 @@ pub enum UiId {
     DatabaseTableCell(usize, usize),
     DatabaseTableCellEditor,
     DatabaseTableEnumOption(usize),
+    DatabaseTableEnumPreviousPage,
+    DatabaseTableEnumNextPage,
     DatabaseTableDatePreviousMonth,
     DatabaseTableDateNextMonth,
     DatabaseTableDateDay(u8),
@@ -464,31 +466,137 @@ pub enum UiElement {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UiClipRect {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+pub(crate) fn fit_centered_rect(
+    window_w: f32,
+    window_h: f32,
+    desired_w: f32,
+    desired_h: f32,
+    margin: f32,
+) -> UiClipRect {
+    let window_w = window_w.max(0.0);
+    let window_h = window_h.max(0.0);
+    let margin = margin.max(0.0);
+    let w = desired_w.max(0.0).min((window_w - margin * 2.0).max(0.0));
+    let h = desired_h.max(0.0).min((window_h - margin * 2.0).max(0.0));
+    UiClipRect::new(
+        ((window_w - w) * 0.5).max(0.0).round(),
+        ((window_h - h) * 0.5).max(0.0).round(),
+        w.round(),
+        h.round(),
+    )
+}
+
+impl UiClipRect {
+    pub const fn new(x: f32, y: f32, w: f32, h: f32) -> Self {
+        Self { x, y, w, h }
+    }
+
+    pub fn intersect(self, x: f32, y: f32, w: f32, h: f32) -> Option<Self> {
+        if !self.x.is_finite()
+            || !self.y.is_finite()
+            || !self.w.is_finite()
+            || !self.h.is_finite()
+            || !x.is_finite()
+            || !y.is_finite()
+            || !w.is_finite()
+            || !h.is_finite()
+            || self.w <= 0.0
+            || self.h <= 0.0
+            || w <= 0.0
+            || h <= 0.0
+        {
+            return None;
+        }
+        let left = self.x.max(x);
+        let top = self.y.max(y);
+        let right = (self.x + self.w).min(x + w);
+        let bottom = (self.y + self.h).min(y + h);
+        (right > left && bottom > top).then_some(Self {
+            x: left,
+            y: top,
+            w: right - left,
+            h: bottom - top,
+        })
+    }
+
+    pub fn intersect_rect(self, other: Self) -> Option<Self> {
+        self.intersect(other.x, other.y, other.w, other.h)
+    }
+
+    pub fn contains(self, x: f32, y: f32) -> bool {
+        self.w > 0.0
+            && self.h > 0.0
+            && x >= self.x
+            && x <= self.x + self.w
+            && y >= self.y
+            && y <= self.y + self.h
+    }
+}
+
+pub(crate) fn point_in_rect(
+    mx: f32,
+    my: f32,
+    rect: (f32, f32, f32, f32),
+) -> bool {
+    rect.0.is_finite()
+        && rect.1.is_finite()
+        && rect.2.is_finite()
+        && rect.3.is_finite()
+        && rect.2 > 0.0
+        && rect.3 > 0.0
+        && mx >= rect.0
+        && mx <= rect.0 + rect.2
+        && my >= rect.1
+        && my <= rect.1 + rect.3
+}
+
+fn icon_hit_rect(
+    x: f32,
+    y: f32,
+    size: f32,
+    active_square_width: Option<f32>,
+) -> Option<UiClipRect> {
+    let (hit_x, hit_y, hit_w, hit_h) = if let Some(square_width) = active_square_width {
+        let square_y = (y + size * 0.5 - square_width * 0.5).round();
+        (0.0, square_y, square_width, square_width)
+    } else {
+        (x, y, size, size)
+    };
+    UiClipRect::new(hit_x, hit_y, hit_w, hit_h)
+        .intersect(hit_x, hit_y, hit_w, hit_h)
+}
+
 impl UiElement {
-    /// Проверяет, находится ли точка (mx, my) внутри элемента
+    fn valid_rect(x: f32, y: f32, w: f32, h: f32) -> bool {
+        x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0
+    }
+
+    /// Проверяет, находится ли точка (mx, my) внутри элемента.
     pub fn contains(&self, mx: f32, my: f32) -> bool {
+        if !mx.is_finite() || !my.is_finite() {
+            return false;
+        }
         match self {
-            UiElement::Button { x, y, w, h, .. } | UiElement::Rect { x, y, w, h, .. } => {
-                mx >= *x && mx <= x + w && my >= *y && my <= y + h
+            UiElement::Button { x, y, w, h, .. }
+            | UiElement::Rect { x, y, w, h, .. }
+            | UiElement::TextInput { x, y, w, h, .. } => {
+                Self::valid_rect(*x, *y, *w, *h)
+                    && mx >= *x
+                    && mx <= *x + *w
+                    && my >= *y
+                    && my <= *y + *h
             }
-            UiElement::IconButton {
-                x,
-                y,
-                size,
-                active_square_width,
-                custom_color: _,
-                id: _,
-            } => {
-                if let Some(sq_w) = active_square_width {
-                    let icon_center = y + size / 2.0;
-                    let sq_y = (icon_center - sq_w / 2.0).round();
-                    mx >= 0.0 && mx <= *sq_w && my >= sq_y && my <= sq_y + sq_w
-                } else {
-                    mx >= *x && mx <= x + size && my >= *y && my <= y + size
-                }
-            }
-            UiElement::TextInput { x, y, w, h, .. } => {
-                mx >= *x && mx <= x + w && my >= *y && my <= y + h
+            UiElement::IconButton { x, y, size, active_square_width, .. } => {
+                icon_hit_rect(*x, *y, *size, *active_square_width)
+                    .is_some_and(|rect| rect.contains(mx, my))
             }
         }
     }
@@ -506,6 +614,8 @@ impl UiElement {
 /// Реестр всех UI элементов на текущем кадре
 pub struct UiRegistry {
     elements: Vec<UiElement>,
+    clip_stack: Vec<UiClipRect>,
+    interaction_stack: Vec<bool>,
     hovered: Option<UiId>,
     wants_pointer: bool,
     wants_text: bool,
@@ -520,6 +630,8 @@ impl UiRegistry {
     pub fn new() -> Self {
         Self {
             elements: Vec::with_capacity(128),
+            clip_stack: Vec::with_capacity(4),
+            interaction_stack: Vec::with_capacity(4),
             hovered: None,
             wants_pointer: false,
             wants_text: false,
@@ -530,10 +642,66 @@ impl UiRegistry {
     /// Очищает реестр перед новым кадром
     pub fn clear(&mut self) {
         self.elements.clear();
+        self.clip_stack.clear();
+        self.interaction_stack.clear();
         self.hovered = None;
         self.wants_pointer = false;
         self.wants_text = false;
         self.overlay_mark = 0;
+    }
+
+    pub fn push_clip(&mut self, clip: UiClipRect) {
+        let clip = match self.clip_stack.last().copied() {
+            Some(parent) => parent.intersect_rect(clip),
+            None => Self::valid_rect(clip.x, clip.y, clip.w, clip.h),
+        }
+        .unwrap_or(UiClipRect::new(clip.x, clip.y, 0.0, 0.0));
+        self.clip_stack.push(clip);
+    }
+
+    pub fn pop_clip(&mut self) {
+        self.clip_stack.pop();
+    }
+
+    fn active_clip(&self) -> Option<UiClipRect> {
+        self.clip_stack.last().copied()
+    }
+
+    fn clipped_rect(
+        &self,
+        explicit_clip: UiClipRect,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+    ) -> Option<UiClipRect> {
+        let clip = match self.active_clip() {
+            Some(parent) => parent.intersect_rect(explicit_clip)?,
+            None => explicit_clip,
+        };
+        clip.intersect(x, y, w, h)
+    }
+
+    fn valid_rect(x: f32, y: f32, w: f32, h: f32) -> Option<UiClipRect> {
+        UiClipRect::new(x, y, w, h).intersect(x, y, w, h)
+    }
+
+    pub fn push_interactions_enabled(&mut self, enabled: bool) {
+        let enabled = self
+            .interaction_stack
+            .last()
+            .copied()
+            .unwrap_or(true)
+            && enabled;
+        self.interaction_stack.push(enabled);
+    }
+
+    pub fn pop_interactions_enabled(&mut self) {
+        self.interaction_stack.pop();
+    }
+
+    fn interactions_enabled(&self) -> bool {
+        self.interaction_stack.last().copied().unwrap_or(true)
     }
 
     /// Ставит метку: все элементы, зарегистрированные ПОСЛЕ этого вызова,
@@ -564,6 +732,16 @@ impl UiRegistry {
         scale: f32,
         pressed: bool,
     ) -> bool {
+        if !self.interactions_enabled() {
+            button.render(
+                renderer,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                scale,
+                false,
+            );
+            return false;
+        }
         self.register_button_view(id, button.as_view(), renderer, mx, my, scale, pressed)
     }
 
@@ -578,6 +756,25 @@ impl UiRegistry {
         scale: f32,
         pressed: bool,
     ) -> bool {
+        if !self.interactions_enabled() {
+            button.render(
+                renderer,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                scale,
+                false,
+            );
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            return self.register_button_view_clipped(
+                id, button, clip, renderer, mx, my, scale, pressed,
+            );
+        }
+        let Some(_) = Self::valid_rect(button.x, button.y, button.w, button.h) else {
+            button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
+            return false;
+        };
         let hovered = button.render(renderer, mx, my, scale, pressed);
 
         self.elements.push(UiElement::Button {
@@ -591,11 +788,57 @@ impl UiRegistry {
         if hovered {
             self.hovered = Some(id);
             self.wants_pointer = true;
+            self.wants_text = false;
         }
         hovered
     }
 
     /// Регистрирует иконочную кнопку
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn register_button_view_clipped(
+        &mut self,
+        id: UiId,
+        button: ButtonView<'_>,
+        clip: UiClipRect,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
+        if !self.interactions_enabled() {
+            button.render(
+                renderer,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                scale,
+                false,
+            );
+            return false;
+        }
+        let Some(rect) = self.clipped_rect(clip, button.x, button.y, button.w, button.h)
+        else {
+            return false;
+        };
+        let hovered = rect.contains(mx, my);
+        let render_mx = if hovered { mx } else { f32::NEG_INFINITY };
+        let render_my = if hovered { my } else { f32::NEG_INFINITY };
+        button.render(renderer, render_mx, render_my, scale, pressed && hovered);
+        self.elements.push(UiElement::Button {
+            id,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = true;
+            self.wants_text = false;
+        }
+        hovered
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn register_icon_button(
         &mut self,
@@ -607,6 +850,37 @@ impl UiRegistry {
         scale: f32,
         pressed: bool,
     ) -> bool {
+        if !self.interactions_enabled() {
+            icon_button.render(
+                renderer,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                scale,
+                false,
+            );
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            return self.register_icon_button_clipped(
+                id,
+                icon_button,
+                clip,
+                renderer,
+                mx,
+                my,
+                scale,
+                pressed,
+            );
+        }
+        let Some(_) = icon_hit_rect(
+            icon_button.x,
+            icon_button.y,
+            icon_button.size,
+            icon_button.active_square_width,
+        ) else {
+            icon_button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
+            return false;
+        };
         let hovered = icon_button.render(renderer, mx, my, scale, pressed);
 
         self.elements.push(UiElement::IconButton {
@@ -621,6 +895,65 @@ impl UiRegistry {
         if hovered {
             self.hovered = Some(id);
             self.wants_pointer = true;
+            self.wants_text = false;
+        }
+        hovered
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn register_icon_button_clipped(
+        &mut self,
+        id: UiId,
+        icon_button: &IconButton,
+        clip: UiClipRect,
+        renderer: &mut Renderer,
+        mx: f32,
+        my: f32,
+        scale: f32,
+        pressed: bool,
+    ) -> bool {
+        if !self.interactions_enabled() {
+            icon_button.render(
+                renderer,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+                scale,
+                false,
+            );
+            return false;
+        }
+        let Some(hit_rect) = icon_hit_rect(
+            icon_button.x,
+            icon_button.y,
+            icon_button.size,
+            icon_button.active_square_width,
+        ) else {
+            return false;
+        };
+        let Some(rect) = self.clipped_rect(
+            clip,
+            hit_rect.x,
+            hit_rect.y,
+            hit_rect.w,
+            hit_rect.h,
+        ) else {
+            return false;
+        };
+        let hovered = rect.contains(mx, my);
+        let render_mx = if hovered { mx } else { f32::NEG_INFINITY };
+        let render_my = if hovered { my } else { f32::NEG_INFINITY };
+        icon_button.render(renderer, render_mx, render_my, scale, pressed && hovered);
+        self.elements.push(UiElement::Rect {
+            id,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = true;
+            self.wants_text = false;
         }
         hovered
     }
@@ -636,12 +969,53 @@ impl UiRegistry {
         mx: f32,
         my: f32,
     ) -> bool {
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        if !self.interactions_enabled() {
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            return self.register_text_input_clipped(id, x, y, w, h, clip, mx, my);
+        }
+        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::TextInput { id, x, y, w, h });
 
         if hovered {
             self.hovered = Some(id);
+            self.wants_pointer = false;
+            self.wants_text = true;
+        }
+        hovered
+    }
+
+    pub fn register_text_input_clipped(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        clip: UiClipRect,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        if !self.interactions_enabled() {
+            return false;
+        }
+        let Some(rect) = self.clipped_rect(clip, x, y, w, h) else {
+            return false;
+        };
+        let hovered = rect.contains(mx, my);
+        self.elements.push(UiElement::TextInput {
+            id,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = false;
             self.wants_text = true;
         }
         hovered
@@ -658,7 +1032,30 @@ impl UiRegistry {
         mx: f32,
         my: f32,
     ) -> bool {
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        if !self.interactions_enabled() {
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            let Some(rect) = self.clipped_rect(clip, x, y, w, h) else {
+                return false;
+            };
+            let hovered = rect.contains(mx, my);
+            self.elements.push(UiElement::Rect {
+                id,
+                x: rect.x,
+                y: rect.y,
+                w: rect.w,
+                h: rect.h,
+            });
+            if hovered {
+                self.hovered = Some(id);
+                self.wants_pointer = false;
+                self.wants_text = true;
+            }
+            return hovered;
+        }
+        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });
 
@@ -696,8 +1093,65 @@ impl UiRegistry {
         mx: f32,
         my: f32,
     ) -> bool {
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        if !self.interactions_enabled() {
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            let Some(rect) = self.clipped_rect(clip, x, y, w, h) else {
+                return false;
+            };
+            let hovered = rect.contains(mx, my);
+            self.elements.push(UiElement::Rect {
+                id,
+                x: rect.x,
+                y: rect.y,
+                w: rect.w,
+                h: rect.h,
+            });
+            if hovered {
+                self.hovered = Some(id);
+                self.wants_pointer = false;
+                self.wants_text = false;
+            }
+            return hovered;
+        }
+        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let hovered = rect.contains(mx, my);
+
         self.elements.push(UiElement::Rect { id, x, y, w, h });
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = false;
+            self.wants_text = false;
+        }
+        hovered
+    }
+
+    pub fn register_blocker_clipped(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        clip: UiClipRect,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        if !self.interactions_enabled() {
+            return false;
+        }
+        let Some(rect) = self.clipped_rect(clip, x, y, w, h) else {
+            return false;
+        };
+        let hovered = rect.contains(mx, my);
+        self.elements.push(UiElement::Rect {
+            id,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
         if hovered {
             self.hovered = Some(id);
             self.wants_pointer = false;
@@ -717,13 +1171,54 @@ impl UiRegistry {
         mx: f32,
         my: f32,
     ) -> bool {
-        let hovered = mx >= x && mx <= x + w && my >= y && my <= y + h;
+        if !self.interactions_enabled() {
+            return false;
+        }
+        if let Some(clip) = self.active_clip() {
+            return self.register_rect_clipped(id, x, y, w, h, clip, mx, my);
+        }
+        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });
 
         if hovered {
             self.hovered = Some(id);
             self.wants_pointer = true;
+            self.wants_text = false;
+        }
+        hovered
+    }
+
+    pub fn register_rect_clipped(
+        &mut self,
+        id: UiId,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        clip: UiClipRect,
+        mx: f32,
+        my: f32,
+    ) -> bool {
+        if !self.interactions_enabled() {
+            return false;
+        }
+        let Some(rect) = self.clipped_rect(clip, x, y, w, h) else {
+            return false;
+        };
+        let hovered = rect.contains(mx, my);
+        self.elements.push(UiElement::Rect {
+            id,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
+        if hovered {
+            self.hovered = Some(id);
+            self.wants_pointer = true;
+            self.wants_text = false;
         }
         hovered
     }
@@ -931,4 +1426,262 @@ mod tests {
         assert!(text.contains(120.0, 22.0));
         assert!(rect.contains(12.0, 14.0));
     }
+
+    #[test]
+    fn clipped_hitboxes_are_limited_to_visible_region() {
+        let mut registry = UiRegistry::new();
+        let clip = UiClipRect::new(20.0, 20.0, 40.0, 30.0);
+
+        assert!(!registry.register_rect_clipped(
+            UiId::DatabaseQueryHistoryEntry(0),
+            0.0,
+            0.0,
+            10.0,
+            10.0,
+            clip,
+            5.0,
+            5.0,
+        ));
+        assert!(registry.register_rect_clipped(
+            UiId::DatabaseTableCell(1, 2),
+            0.0,
+            10.0,
+            80.0,
+            60.0,
+            clip,
+            30.0,
+            30.0,
+        ));
+        assert_eq!(
+            registry.rect_for(UiId::DatabaseTableCell(1, 2)),
+            Some((20.0, 20.0, 40.0, 30.0))
+        );
+        assert_eq!(registry.find_at(10.0, 30.0), None);
+        assert_eq!(
+            registry.find_at(30.0, 30.0),
+            Some(UiId::DatabaseTableCell(1, 2))
+        );
+    }
+
+    fn assert_partial_hitbox_clips(id: UiId) {
+        let mut registry = UiRegistry::new();
+        let clip = UiClipRect::new(20.0, 20.0, 40.0, 30.0);
+        assert!(registry.register_rect_clipped(
+            id,
+            0.0,
+            10.0,
+            80.0,
+            60.0,
+            clip,
+            30.0,
+            30.0,
+        ));
+        assert_eq!(registry.rect_for(id), Some((20.0, 20.0, 40.0, 30.0)));
+        assert_eq!(registry.find_at(10.0, 30.0), None);
+    }
+
+    #[test]
+    fn bug_18_table_header_hitbox_is_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseTableHeader(0));
+    }
+
+    #[test]
+    fn bug_19_table_column_resize_hitbox_is_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseTableColumnResize(0));
+    }
+
+    #[test]
+    fn bug_20_table_cell_hitbox_is_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseTableCell(2, 3));
+    }
+
+    #[test]
+    fn bug_21_table_row_gutter_hitbox_is_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseTableRow(0, 0, 2));
+    }
+
+    #[test]
+    fn bug_26_connection_form_controls_are_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseDialogField(
+            crate::app::database::DatabaseFormField::Host,
+        ));
+    }
+
+    #[test]
+    fn bug_31_database_tree_rows_are_clipped() {
+        assert_partial_hitbox_clips(UiId::DatabaseConnectionRow(1));
+    }
+
+    #[test]
+    fn bug_33_git_graph_rows_are_clipped() {
+        assert_partial_hitbox_clips(UiId::GitGraphCommit(0, 1));
+    }
+
+    #[test]
+    fn bug_35_problem_rows_are_clipped() {
+        assert_partial_hitbox_clips(UiId::ProblemJump(1));
+    }
+
+    #[test]
+    fn bug_36_problem_url_hitbox_is_clipped() {
+        assert_partial_hitbox_clips(UiId::ProblemUrl(1));
+    }
+
+    #[test]
+    fn bug_41_api_toolbar_hitboxes_are_clipped() {
+        assert_partial_hitbox_clips(UiId::ApiSpecOpen(0));
+    }
+
+    #[test]
+    fn clipped_text_inputs_and_blockers_never_register_zero_area_rectangles() {
+        let mut registry = UiRegistry::new();
+        let clip = UiClipRect::new(10.0, 10.0, 20.0, 20.0);
+        assert!(!registry.register_text_input_clipped(
+            UiId::DatabaseDialogField(crate::app::database::DatabaseFormField::Host),
+            40.0,
+            40.0,
+            20.0,
+            20.0,
+            clip,
+            45.0,
+            45.0,
+        ));
+        assert!(!registry.register_blocker_clipped(
+            UiId::DatabaseTableGridBody,
+            0.0,
+            0.0,
+            0.0,
+            10.0,
+            clip,
+            0.0,
+            0.0,
+        ));
+        assert_eq!(registry.find_at(45.0, 45.0), None);
+    }
+    #[test]
+    fn r2_011_clipped_icon_has_no_left_edge_phantom_hitbox() {
+        let mut registry = UiRegistry::new();
+        let icon = IconButton {
+            x: 300.0,
+            y: 40.0,
+            size: 20.0,
+            icon: None,
+            is_active: false,
+            icon_size: None,
+            active_square_width: None,
+            custom_color: None,
+        };
+        let clip = UiClipRect::new(290.0, 30.0, 40.0, 40.0);
+        let rect = clip.intersect(icon.x, icon.y, icon.size, icon.size).unwrap();
+        registry.elements.push(UiElement::Rect { id: UiId::SearchClose, x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+        assert_eq!(registry.find_at(1.0, 50.0), None);
+        assert_eq!(registry.find_at(305.0, 50.0), Some(UiId::SearchClose));
+    }
+
+    #[test]
+    fn r2_012_clipped_icon_never_reexpands_vertically() {
+        let mut registry = UiRegistry::new();
+        registry.elements.push(UiElement::Rect {
+            id: UiId::SearchClose,
+            x: 20.0,
+            y: 20.0,
+            w: 18.0,
+            h: 4.0,
+        });
+        assert_eq!(registry.find_at(25.0, 23.0), Some(UiId::SearchClose));
+        assert_eq!(registry.find_at(25.0, 28.0), None);
+    }
+
+    #[test]
+    fn r2_013_clipped_icon_hover_uses_visible_rect_only() {
+        let clip = UiClipRect::new(20.0, 20.0, 20.0, 10.0);
+        let visible = clip.intersect(20.0, 15.0, 20.0, 20.0).unwrap();
+        assert!(!visible.contains(30.0, 16.0));
+        assert!(visible.contains(30.0, 22.0));
+    }
+
+    #[test]
+    fn r2_014_clipped_button_hover_uses_visible_rect_only() {
+        let clip = UiClipRect::new(20.0, 20.0, 30.0, 10.0);
+        let visible = clip.intersect(10.0, 10.0, 60.0, 30.0).unwrap();
+        assert!(!visible.contains(15.0, 25.0));
+        assert!(visible.contains(25.0, 25.0));
+    }
+
+
+    #[test]
+    fn r3_001_explicit_clip_is_intersected_with_parent_clip() {
+        let mut registry = UiRegistry::new();
+        registry.push_clip(UiClipRect::new(10.0, 10.0, 20.0, 20.0));
+        assert!(registry.register_rect_clipped(
+            UiId::SearchClose,
+            0.0,
+            0.0,
+            100.0,
+            100.0,
+            UiClipRect::new(0.0, 0.0, 100.0, 100.0),
+            15.0,
+            15.0,
+        ));
+        assert_eq!(registry.rect_for(UiId::SearchClose), Some((10.0, 10.0, 20.0, 20.0)));
+        assert_eq!(registry.find_at(5.0, 5.0), None);
+    }
+
+    #[test]
+    fn r3_002_topmost_element_controls_cursor_shape() {
+        let mut registry = UiRegistry::new();
+        assert!(registry.register_text_input(
+            UiId::SearchInput, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,
+        ));
+        assert_eq!(registry.cursor_code(), 2);
+        assert!(registry.register_rect(
+            UiId::SearchClose, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,
+        ));
+        assert_eq!(registry.find_at(10.0, 10.0), Some(UiId::SearchClose));
+        assert_eq!(registry.cursor_code(), 1);
+    }
+
+    #[test]
+    fn r3_003_zero_sized_elements_are_not_registered() {
+        let mut registry = UiRegistry::new();
+        assert!(!registry.register_rect(
+            UiId::SearchClose, 1.0, 1.0, 0.0, 20.0, 1.0, 10.0,
+        ));
+        assert!(!registry.register_text_input(
+            UiId::SearchInput, 1.0, 1.0, 20.0, 0.0, 10.0, 1.0,
+        ));
+        assert_eq!(registry.find_at(1.0, 1.0), None);
+    }
+
+    #[test]
+    fn r3_004_negative_and_non_finite_rectangles_are_rejected_consistently() {
+        let mut registry = UiRegistry::new();
+        for (w, h) in [(-1.0, 10.0), (10.0, -1.0), (f32::NAN, 10.0), (10.0, f32::INFINITY)] {
+            assert!(!registry.register_rect(
+                UiId::SearchClose, 0.0, 0.0, w, h, 0.0, 0.0,
+            ));
+            assert!(!registry.register_rect_clipped(
+                UiId::SearchClose,
+                0.0,
+                0.0,
+                w,
+                h,
+                UiClipRect::new(0.0, 0.0, 100.0, 100.0),
+                0.0,
+                0.0,
+            ));
+        }
+        assert_eq!(registry.find_at(0.0, 0.0), None);
+    }
+
+    #[test]
+    fn r3_005_active_square_geometry_is_shared_by_clipped_and_unclipped_paths() {
+        let rect = icon_hit_rect(300.0, 20.0, 16.0, Some(40.0)).unwrap();
+        assert_eq!(rect, UiClipRect::new(0.0, 8.0, 40.0, 40.0));
+        let clipped = UiClipRect::new(0.0, 0.0, 25.0, 100.0)
+            .intersect_rect(rect)
+            .unwrap();
+        assert_eq!(clipped, UiClipRect::new(0.0, 8.0, 25.0, 40.0));
+    }
+
 }

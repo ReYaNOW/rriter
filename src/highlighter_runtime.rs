@@ -46,11 +46,18 @@ impl Highlighter {
         self.current_version = version;
         self.is_complete = true;
         self.pending_priority_anchor = None;
-        let _ = self.tx.send(HighlighterMessage::Restore {
-            text,
-            ext,
-            spans: self.spans.clone(),
-        });
+        if self
+            .tx
+            .send(HighlighterMessage::Restore {
+                text,
+                ext,
+                spans: self.spans.clone(),
+            })
+            .is_err()
+        {
+            self.pending_priority_anchor = None;
+            self.is_complete = true;
+        }
     }
 
     pub fn restart_cached_view(&mut self, version: u64, text: String, ext: String, anchor: usize) {
@@ -75,13 +82,31 @@ impl Highlighter {
         self.current_version = version;
         self.is_complete = false;
         self.pending_priority_anchor = None;
-        let _ = self.tx.send(HighlighterMessage::Reset {
-            request_id,
-            version,
-            text,
-            ext,
-            priority_anchor: anchor,
-        });
+        if self
+            .tx
+            .send(HighlighterMessage::Reset {
+                request_id,
+                version,
+                text,
+                ext,
+                priority_anchor: anchor,
+            })
+            .is_err()
+        {
+            self.pending_priority_anchor = None;
+            self.is_complete = self.sync_highlight_after_edit(
+                version,
+                None,
+                None,
+                None,
+                None,
+                std::time::Duration::from_millis(20),
+            );
+            if !self.is_complete {
+                self.spans.clear();
+                self.is_complete = true;
+            }
+        }
     }
 
     pub fn reset(&mut self, version: u64, text: String, ext: String, priority_anchor: usize) {
@@ -107,13 +132,31 @@ impl Highlighter {
         self.sync_tree = None;
         self.is_complete = false;
         self.pending_priority_anchor = None;
-        let _ = self.tx.send(HighlighterMessage::Reset {
-            request_id,
-            version,
-            text,
-            ext,
-            priority_anchor,
-        });
+        if self
+            .tx
+            .send(HighlighterMessage::Reset {
+                request_id,
+                version,
+                text,
+                ext,
+                priority_anchor,
+            })
+            .is_err()
+        {
+            self.pending_priority_anchor = None;
+            self.is_complete = self.sync_highlight_after_edit(
+                version,
+                None,
+                None,
+                None,
+                None,
+                std::time::Duration::from_millis(20),
+            );
+            if !self.is_complete {
+                self.spans.clear();
+                self.is_complete = true;
+            }
+        }
     }
 
     pub fn apply_edits(
@@ -158,15 +201,33 @@ impl Highlighter {
                 );
             }
             self.pending_priority_anchor = None;
-            let _ = self.tx.send(HighlighterMessage::Edits {
-                request_id: self.current_request_id,
-                version,
-                edits,
-                edit_start_byte: worker_edit_start_byte,
-                edit_end_byte: worker_edit_end_byte,
-                invalidate_start_byte,
-                invalidate_end_byte,
-            });
+            if self
+                .tx
+                .send(HighlighterMessage::Edits {
+                    request_id: self.current_request_id,
+                    version,
+                    edits,
+                    edit_start_byte: worker_edit_start_byte,
+                    edit_end_byte: worker_edit_end_byte,
+                    invalidate_start_byte,
+                    invalidate_end_byte,
+                })
+                .is_err()
+            {
+                self.pending_priority_anchor = None;
+                self.is_complete = self.sync_highlight_after_edit(
+                    version,
+                    worker_edit_start_byte,
+                    worker_edit_end_byte,
+                    invalidate_start_byte,
+                    invalidate_end_byte,
+                    std::time::Duration::from_millis(12),
+                );
+                if !self.is_complete {
+                    self.spans.clear();
+                    self.is_complete = true;
+                }
+            }
         }
     }
 
@@ -246,12 +307,19 @@ impl Highlighter {
         {
             return false;
         }
+        if self
+            .tx
+            .send(HighlighterMessage::Priority {
+                request_id: self.current_request_id,
+                version,
+                priority_anchor: anchor,
+            })
+            .is_err()
+        {
+            self.pending_priority_anchor = None;
+            return false;
+        }
         self.pending_priority_anchor = Some(anchor);
-        let _ = self.tx.send(HighlighterMessage::Priority {
-            request_id: self.current_request_id,
-            version,
-            priority_anchor: anchor,
-        });
         true
     }
 
@@ -261,28 +329,46 @@ impl Highlighter {
 
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
         let mut updated = false;
-        while let Ok((
-            request_id,
-            ver,
-            spans,
-            completions,
-            foldable_ranges,
-            syntax_errors,
-            tree,
-            is_complete,
-        )) = self.rx.try_recv()
-        {
-            updated |= self.apply_poll_result(
-                request_id,
-                current_editor_version,
-                ver,
-                spans,
-                completions,
-                foldable_ranges,
-                syntax_errors,
-                tree,
-                is_complete,
-            );
+        loop {
+            match self.rx.try_recv() {
+                Ok((
+                    request_id,
+                    ver,
+                    spans,
+                    completions,
+                    foldable_ranges,
+                    syntax_errors,
+                    tree,
+                    is_complete,
+                )) => {
+                    updated |= self.apply_poll_result(
+                        request_id,
+                        current_editor_version,
+                        ver,
+                        spans,
+                        completions,
+                        foldable_ranges,
+                        syntax_errors,
+                        tree,
+                        is_complete,
+                    );
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.pending_priority_anchor = None;
+                    if !self.is_complete {
+                        self.spans.clear();
+                        self.completions.clear();
+                        self.foldable_ranges.clear();
+                        self.syntax_errors.clear();
+                        self.sync_tree = None;
+                        self.current_version = current_editor_version;
+                        self.is_complete = true;
+                        updated = true;
+                    }
+                    break;
+                }
+            }
         }
         updated
     }
@@ -1430,4 +1516,54 @@ mod tests {
             .iter()
             .any(|span| span.start <= edit_at && span.end > edit_at));
     }
+
+    #[test]
+    fn r3_100_reset_send_failure_finishes_with_synchronous_fallback() {
+        let mut highlighter = Highlighter::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(rx);
+        highlighter.tx = tx;
+        highlighter.reset(9, "let value = 1;\n".to_string(), "rs".to_string(), 0);
+        assert!(highlighter.is_complete);
+        assert_eq!(highlighter.current_version, 9);
+        assert!(highlighter.pending_priority_anchor.is_none());
+    }
+
+    #[test]
+    fn r3_101_priority_send_failure_does_not_leave_pending_anchor() {
+        let mut highlighter = Highlighter::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(rx);
+        highlighter.tx = tx;
+        highlighter.current_request_id = 1;
+        highlighter.current_version = 1;
+        highlighter.sync_ext = "py".to_string();
+        highlighter.sync_text = "x = 1\n".repeat(TREE_SITTER_FULL_HIGHLIGHT_MAX_LINES + 20);
+        highlighter.spans.clear();
+        assert!(!highlighter.request_priority_highlight(1, 100));
+        assert!(highlighter.pending_priority_anchor.is_none());
+    }
+
+    #[test]
+    fn r3_102_worker_disconnect_clears_stale_pending_state() {
+        let mut highlighter = Highlighter::new();
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(tx);
+        highlighter.rx = rx;
+        highlighter.spans = vec![ColorSpan { start: 0, end: 1, color: DRACULA_FG }];
+        highlighter.completions = vec![CompletionItem { word: "stale".to_string(), kind: SymbolKind::Unknown, scope_start: 0, scope_end: 1 }];
+        highlighter.foldable_ranges = vec![(0, 1, false, false)];
+        highlighter.syntax_errors = vec![(0, 1)];
+        highlighter.pending_priority_anchor = Some(0);
+        highlighter.is_complete = false;
+        assert!(highlighter.poll(77));
+        assert!(highlighter.spans.is_empty());
+        assert!(highlighter.completions.is_empty());
+        assert!(highlighter.foldable_ranges.is_empty());
+        assert!(highlighter.syntax_errors.is_empty());
+        assert!(highlighter.pending_priority_anchor.is_none());
+        assert!(highlighter.is_complete);
+        assert_eq!(highlighter.current_version, 77);
+    }
+
 }

@@ -1,5 +1,33 @@
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SettingsModalLayout {
+    pub outer: crate::ui_system::UiClipRect,
+    pub inner: crate::ui_system::UiClipRect,
+    pub sidebar_w: f32,
+}
+
+pub(crate) fn settings_modal_layout(
+    width: f32,
+    height: f32,
+    scale: f32,
+) -> SettingsModalLayout {
+    let outer = crate::ui_system::fit_centered_rect(
+        width, height, 1000.0 * scale, 700.0 * scale, 20.0 * scale,
+    );
+    let pad_top = (35.0 * scale).min(outer.h * 0.2);
+    let pad_bottom = (30.0 * scale).min((outer.h - pad_top).max(0.0) * 0.2);
+    let pad_h = (40.0 * scale).min(outer.w * 0.2);
+    let inner = crate::ui_system::UiClipRect::new(
+        outer.x + pad_h,
+        outer.y + pad_top,
+        (outer.w - pad_h * 2.0).max(0.0),
+        (outer.h - pad_top - pad_bottom).max(0.0),
+    );
+    let sidebar_w = (200.0 * scale).min((inner.w * 0.35).max(0.0));
+    SettingsModalLayout { outer, inner, sidebar_w }
+}
+
 use crate::editor::Editor;
-use crate::renderer::{Renderer, glyph_quad_rect};
+use crate::renderer::Renderer;
 use glow::HasContext;
 
 fn compact_settings_text(text: &str, max_chars: usize) -> String {
@@ -79,14 +107,16 @@ impl Renderer {
             [0.0, 0.0, 0.0, overlay_alpha],
         );
 
-        let w = (1000.0 * s).min(self.width - 40.0 * s);
-        let h = (700.0 * s).min(self.height - 40.0 * s);
+        let layout = settings_modal_layout(self.width, self.height, s);
+        let fitted = layout.outer;
+        let w = fitted.w;
+        let h = fitted.h;
 
         let start_y = self.height + 100.0 * s;
-        let target_y = (self.height - h) / 2.0;
+        let target_y = fitted.y;
         let raw_y = start_y + (target_y - start_y) * anim_progress;
         let y = raw_y.round();
-        let x = ((self.width - w) / 2.0).round();
+        let x = fitted.x;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
         let bottom_color = [0.12, 0.13, 0.22, 1.0];
@@ -103,13 +133,10 @@ impl Renderer {
         self.push_rounded_rect_gradient(x, y, w, h, 10.0 * s, top_color, bottom_color);
 
         // 2. Внутренняя панель
-        let pad_top = 35.0 * s;
-        let pad_bottom = 30.0 * s;
-        let pad_h = 40.0 * s;
-        let ix = x + pad_h;
-        let iy = y + pad_top;
-        let iw = w - pad_h * 2.0;
-        let ih = h - pad_top - pad_bottom;
+        let ix = layout.inner.x;
+        let iy = layout.inner.y + (y - fitted.y);
+        let iw = layout.inner.w;
+        let ih = layout.inner.h;
 
         self.push_rounded_rect(
             ix - 1.0,
@@ -123,7 +150,7 @@ impl Renderer {
 
         self.flush();
 
-        let sidebar_w = 200.0 * s;
+        let sidebar_w = layout.sidebar_w;
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
@@ -172,6 +199,7 @@ impl Renderer {
         }
 
         let content_x = ix + sidebar_w + 30.0 * s;
+        let content_available_w = (ix + iw - content_x - 18.0 * s).max(1.0);
         let content_title_x = content_x - 14.0 * s;
         let mut content_y = iy + 40.0 * s;
 
@@ -221,6 +249,12 @@ impl Renderer {
                     ide_content_area_h.round() as i32,
                 );
             }
+            ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+                ide_content_area_x,
+                iy + 52.0 * s,
+                ide_content_area_w,
+                ide_content_area_h,
+            ));
 
             content_y -= ide_scroll_y.round();
 
@@ -235,7 +269,7 @@ impl Renderer {
 
             for (ws_idx, path) in ide_workspaces.iter().enumerate() {
                 let path_str = path.to_string_lossy();
-                let item_w = 460.0 * s;
+                let item_w = content_available_w;
                 let item_h = 36.0 * s;
 
                 self.push_rounded_rect(
@@ -255,12 +289,15 @@ impl Renderer {
                     [0.224, 0.231, 0.251, 1.0],
                 );
 
-                self.draw_string_scaled(
+                let mut path_scratch = String::new();
+                self.draw_tree_label_clipped(
                     &path_str,
                     (content_x + 10.0 * s).round(),
                     (content_y + item_h * 0.70).round(),
+                    (item_w - 54.0 * s).max(1.0),
                     self.theme.fg,
                     0.85,
+                    &mut path_scratch,
                 );
 
                 let del_btn_x = content_x + item_w - 34.0 * s;
@@ -294,7 +331,7 @@ impl Renderer {
                 crate::ui_system::UiId::SettingsIdeAddWorkspace,
                 content_x,
                 add_btn_y_reg,
-                190.0 * s,
+                (190.0 * s).min(content_available_w),
                 36.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -302,7 +339,7 @@ impl Renderer {
             let btn_add = crate::widgets::Button {
                 x: content_x,
                 y: add_btn_y_reg,
-                w: 190.0 * s,
+                w: (190.0 * s).min(content_available_w),
                 h: 36.0 * s,
                 text: "Добавить папку".to_string(),
                 icon: Some(crate::widgets::IconType::Plus),
@@ -312,7 +349,7 @@ impl Renderer {
             btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             content_y += 56.0 * s;
             // ── Разделитель ───────────────────────────────────────────────
-            self.push_rect(content_x, content_y, 460.0 * s, 1.0, [1.0, 1.0, 1.0, 0.07]);
+            self.push_rect(content_x, content_y, content_available_w, 1.0, [1.0, 1.0, 1.0, 0.07]);
             content_y += 20.0 * s;
 
             // ── Заголовок секции игноров ──────────────────────────────────
@@ -344,11 +381,14 @@ impl Renderer {
             content_y += 20.0 * s;
 
             // ── Поле ввода + кнопка «Добавить» ───────────────────────────
-            let input_w = 330.0 * s;
+            let add_gap = 10.0 * s;
+            let btn_add_w = (110.0 * s).min((content_available_w * 0.32).max(0.0));
+            let effective_gap = add_gap.min((content_available_w - btn_add_w).max(0.0));
+            let input_w = (content_available_w - effective_gap - btn_add_w).max(0.0);
             let input_h = 34.0 * s;
             let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
-            let input_hovered = ui_registry.register_text_input(
+            ui_registry.register_text_input(
                 crate::ui_system::UiId::SettingsIdeIgnoreInput,
                 content_x,
                 content_y,
@@ -358,173 +398,45 @@ impl Renderer {
                 self.last_mouse_y,
             );
 
-            let border_col = if settings_ignore_focused {
-                [0.55, 0.35, 0.80, 1.0]
-            } else if input_hovered {
-                [0.40, 0.28, 0.60, 1.0]
-            } else {
-                [0.28, 0.29, 0.35, 1.0]
-            };
-            self.push_rounded_rect(
-                content_x - 1.0,
-                content_y - 1.0,
-                input_w + 2.0,
-                input_h + 2.0,
-                6.0 * s,
-                border_col,
+            let full_text = settings_ignore_editor.get_full_text();
+            *settings_ignore_scroll_x = self.one_line_scroll_for_cursor(
+                &full_text,
+                settings_ignore_editor.cursor,
+                text_scale_input,
+                input_w - 16.0 * s,
+                *settings_ignore_scroll_x,
             );
-            self.push_rounded_rect(
+            self.draw_one_line_input_with_chrome(
+                &full_text,
+                settings_ignore_editor.cursor,
+                settings_ignore_editor.selection_anchor,
+                false,
+                settings_ignore_focused,
                 content_x,
                 content_y,
                 input_w,
                 input_h,
+                *settings_ignore_scroll_x,
+                blink_alpha,
+                text_scale_input,
+                0.0,
+                8.0 * s,
                 6.0 * s,
-                [0.11, 0.12, 0.16, 1.0],
             );
-
-            let text_y_mid = (content_y + input_h * 0.70).round();
-            let start_x = (content_x + 8.0 * s).round();
-            let full_text = settings_ignore_editor.get_full_text();
-
             if full_text.is_empty() {
                 self.draw_string_scaled(
                     "Паттерн или имя файла...",
-                    start_x,
-                    text_y_mid,
+                    (content_x + 8.0 * s).round(),
+                    (content_y + input_h * 0.70).round(),
                     [0.30, 0.32, 0.40, 1.0],
                     text_scale_input,
                 );
-                if settings_ignore_focused && blink_alpha > 0.5 {
-                    self.push_rect(
-                        start_x,
-                        (content_y + 6.0 * s).round(),
-                        (1.5 * s).max(1.0),
-                        input_h - 12.0 * s,
-                        [0.75, 0.45, 1.0, 1.0],
-                    );
-                }
-            } else {
-                let mut cursor_total_x = 0.0;
-                let mut total_text_width = 0.0;
-                for (byte_idx, c) in full_text.char_indices() {
-                    let adv = self
-                        .get_ui_glyph(c)
-                        .map(|g| Self::snapped_text_advance(g.advance, text_scale_input))
-                        .unwrap_or(10.0);
-                    if byte_idx < settings_ignore_editor.cursor {
-                        cursor_total_x += adv;
-                    }
-                    total_text_width += adv;
-                }
-
-                let max_text_w_exact = input_w - 16.0 * s;
-                if cursor_total_x - *settings_ignore_scroll_x > max_text_w_exact {
-                    *settings_ignore_scroll_x = cursor_total_x - max_text_w_exact;
-                }
-                if cursor_total_x - *settings_ignore_scroll_x < 0.0 {
-                    *settings_ignore_scroll_x = cursor_total_x;
-                }
-                *settings_ignore_scroll_x = (*settings_ignore_scroll_x)
-                    .min((total_text_width - max_text_w_exact).max(0.0))
-                    .max(0.0);
-
-                self.flush();
-                unsafe {
-                    self.gl.enable(glow::SCISSOR_TEST);
-                    let scissor_y = self.height - (content_y + input_h);
-                    self.gl.scissor(
-                        content_x.round() as i32,
-                        scissor_y.round() as i32,
-                        input_w.round() as i32,
-                        input_h.round() as i32,
-                    );
-                }
-
-                let sel_start = settings_ignore_editor
-                    .selection_anchor
-                    .unwrap_or(settings_ignore_editor.cursor)
-                    .min(settings_ignore_editor.cursor);
-                let sel_end = settings_ignore_editor
-                    .selection_anchor
-                    .unwrap_or(settings_ignore_editor.cursor)
-                    .max(settings_ignore_editor.cursor);
-
-                let mut current_x = (start_x - *settings_ignore_scroll_x).round();
-                let mut byte_idx = 0;
-                let mut cursor_draw_x = current_x;
-
-                for c in full_text.chars() {
-                    if byte_idx == settings_ignore_editor.cursor {
-                        cursor_draw_x = current_x;
-                    }
-                    let adv =
-                        self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * text_scale_input;
-
-                    if byte_idx >= sel_start && byte_idx < sel_end {
-                        self.push_rect(
-                            current_x,
-                            (content_y + 4.0 * s).round(),
-                            adv.ceil() + 1.0,
-                            input_h - 8.0 * s,
-                            [0.55, 0.35, 0.80, 0.50],
-                        );
-                    }
-
-                    if let Some(g) = self.get_ui_glyph(c) {
-                        let (q_x, q_y, q_w, q_h) =
-                            glyph_quad_rect(current_x, text_y_mid, g, text_scale_input);
-                        self.push_quad(
-                            q_x,
-                            q_y,
-                            q_w,
-                            q_h,
-                            g.u,
-                            g.v,
-                            g.uw,
-                            g.vh,
-                            [0.90, 0.88, 0.95, 1.0],
-                            g.is_emoji,
-                        );
-                    }
-                    current_x += adv;
-                    byte_idx += c.len_utf8();
-                }
-                if byte_idx == settings_ignore_editor.cursor {
-                    cursor_draw_x = current_x;
-                }
-
-                if settings_ignore_focused && sel_start == sel_end && blink_alpha > 0.5 {
-                    self.push_rect(
-                        cursor_draw_x,
-                        (content_y + 6.0 * s).round(),
-                        (1.5 * s).max(1.0),
-                        input_h - 12.0 * s,
-                        [0.75, 0.45, 1.0, 1.0],
-                    );
-                }
-
-                self.flush();
-                unsafe {
-                    self.gl.disable(glow::SCISSOR_TEST);
-                }
             }
 
             // Кнопка «Добавить» — неактивна если поле пустое или только пробелы
             let trimmed_input = full_text.trim();
-            let btn_add_x = content_x + input_w + 10.0 * s;
+            let btn_add_x = content_x + input_w + effective_gap;
             let btn_add_y = content_y;
-            let btn_add_w = 110.0 * s;
-
-            // Регистрируем поле ввода и кнопку добавления через ui_registry
-            ui_registry.register_rect(
-                crate::ui_system::UiId::SettingsIdeIgnoreInput,
-                content_x,
-                content_y,
-                input_w,
-                input_h,
-                self.last_mouse_x,
-                self.last_mouse_y,
-            );
             if !trimmed_input.is_empty() {
                 ui_registry.register_rect(
                     crate::ui_system::UiId::SettingsIdeAddIgnore,
@@ -601,7 +513,7 @@ impl Renderer {
             let pad_x = 12.0 * s;
             let chip_gap_x = 8.0 * s;
             let chip_gap_y = 8.0 * s;
-            let max_row_w = 460.0 * s;
+            let max_row_w = content_available_w;
             let mut chip_x = content_x;
 
             for (chip_idx, pattern) in ide_ignore_patterns.iter().enumerate() {
@@ -684,6 +596,7 @@ impl Renderer {
                 );
             }
 
+            ui_registry.pop_clip();
             self.flush();
             unsafe {
                 self.gl.disable(glow::SCISSOR_TEST);
@@ -731,6 +644,21 @@ impl Renderer {
                 );
             }
         } else if active_tab == 1 {
+            let tools_clip_y = iy + 52.0 * s;
+            let tools_clip_h = (iy + ih - tools_clip_y).max(0.0);
+            self.flush();
+            unsafe {
+                self.gl.enable(glow::SCISSOR_TEST);
+                self.gl.scissor(
+                    (ix + sidebar_w).round() as i32,
+                    (self.height - (tools_clip_y + tools_clip_h)).round() as i32,
+                    (iw - sidebar_w).max(0.0).round() as i32,
+                    tools_clip_h.round() as i32,
+                );
+            }
+            ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+                ix + sidebar_w, tools_clip_y, (iw - sidebar_w).max(0.0), tools_clip_h,
+            ));
             content_y = content_y.round();
             self.draw_string_scaled_stable(
                 "Внешние инструменты",
@@ -739,13 +667,14 @@ impl Renderer {
                 [0.82, 0.82, 0.86, 1.0],
                 1.0,
             );
-            let refresh_x = (content_x + 350.0 * s).round();
+            let refresh_w = (102.0 * s).min(content_available_w);
+            let refresh_x = (content_x + content_available_w - refresh_w).round();
             let refresh_y = (content_y - 18.0 * s).round();
             ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsRefreshTools,
                 refresh_x,
                 refresh_y,
-                102.0 * s,
+                refresh_w,
                 29.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -753,7 +682,7 @@ impl Renderer {
             crate::widgets::ButtonView {
                 x: refresh_x,
                 y: refresh_y,
-                w: 102.0 * s,
+                w: refresh_w,
                 h: 29.0 * s,
                 text: "Обновить",
                 icon: Some(crate::widgets::IconType::Reload),
@@ -781,7 +710,10 @@ impl Renderer {
 
             for kind in crate::platform::ToolKind::ALL {
                 let row_y = content_y.round();
-                let row_h = (47.0 * s).round().max(1.0);
+                let stacked_actions = content_available_w < 430.0 * s;
+                let row_h = ((if stacked_actions { 82.0 } else { 47.0 }) * s)
+                    .round()
+                    .max(1.0);
                 let resolution = crate::platform::resolve_tool_kind(kind);
                 let configured = tool_paths.get(kind);
                 let compact_path_chars = if kind.supports_managed_install() { 24 } else { 47 };
@@ -810,7 +742,7 @@ impl Renderer {
                 self.push_rounded_rect(
                     content_x,
                     row_y,
-                    (460.0 * s).round(),
+                    content_available_w.round(),
                     (row_h - (4.0 * s).round()).max(1.0),
                     5.0 * s,
                     [0.12, 0.13, 0.17, 1.0],
@@ -830,8 +762,21 @@ impl Renderer {
                     0.70,
                 );
 
+                let action_y = (row_y + if stacked_actions { 44.0 * s } else { 7.0 * s }).round();
+                let action_left = content_x + 8.0 * s;
+                let action_right = content_x + content_available_w - 8.0 * s;
+                let action_gap = (6.0 * s).min((action_right - action_left).max(0.0) * 0.08);
+                let action_count = usize::from(kind.supports_managed_install())
+                    + 1
+                    + usize::from(configured.is_some());
+                let action_w = ((action_right - action_left
+                    - action_gap * action_count.saturating_sub(1) as f32)
+                    / action_count.max(1) as f32)
+                    .max(0.0);
+                let mut action_x = action_left;
                 if kind.supports_managed_install() {
-                    let install_x = (content_x + 238.0 * s).round();
+                    let install_x = action_x.round();
+                    action_x += action_w + action_gap;
                     let install_disabled = tool_installer.is_running()
                         && !tool_installer.is_running_for(kind);
                     let install_text = if tool_installer.is_running_for(kind) {
@@ -845,8 +790,8 @@ impl Renderer {
                         ui_registry.register_rect(
                             crate::ui_system::UiId::SettingsToolInstall(kind.index()),
                             install_x,
-                            (row_y + 7.0 * s).round(),
-                            94.0 * s,
+                            action_y,
+                            action_w,
                             29.0 * s,
                             self.last_mouse_x,
                             self.last_mouse_y,
@@ -854,8 +799,8 @@ impl Renderer {
                     }
                     crate::widgets::ButtonView {
                         x: install_x,
-                        y: (row_y + 7.0 * s).round(),
-                        w: 94.0 * s,
+                        y: action_y,
+                        w: action_w,
                         h: 29.0 * s,
                         text: install_text,
                         icon: None,
@@ -871,15 +816,16 @@ impl Renderer {
                     );
                 }
 
-                let choose_x = (content_x + 338.0 * s).round();
-                let button_y = (row_y + 7.0 * s).round();
+                let choose_x = action_x.round();
+                action_x += action_w + action_gap;
+                let button_y = action_y;
                 let path_controls_disabled = tool_installer.is_running();
                 if !path_controls_disabled {
                     ui_registry.register_rect(
                         crate::ui_system::UiId::SettingsToolPick(kind.index()),
                         choose_x,
                         button_y,
-                        72.0 * s,
+                        action_w,
                         29.0 * s,
                         self.last_mouse_x,
                         self.last_mouse_y,
@@ -888,7 +834,7 @@ impl Renderer {
                 crate::widgets::ButtonView {
                     x: choose_x,
                     y: button_y,
-                    w: 72.0 * s,
+                    w: action_w,
                     h: 29.0 * s,
                     text: "Выбрать",
                     icon: None,
@@ -904,13 +850,13 @@ impl Renderer {
                 );
 
                 if configured.is_some() {
-                    let clear_x = (content_x + 416.0 * s).round();
+                    let clear_x = action_x.round();
                     if !path_controls_disabled {
                         ui_registry.register_rect(
                             crate::ui_system::UiId::SettingsToolClear(kind.index()),
                             clear_x,
                             button_y,
-                            36.0 * s,
+                            action_w,
                             29.0 * s,
                             self.last_mouse_x,
                             self.last_mouse_y,
@@ -919,7 +865,7 @@ impl Renderer {
                     crate::widgets::ButtonView {
                         x: clear_x,
                         y: button_y,
-                        w: 36.0 * s,
+                        w: action_w,
                         h: 29.0 * s,
                         text: "×",
                         icon: None,
@@ -943,7 +889,7 @@ impl Renderer {
                 self.push_rounded_rect(
                     content_x,
                     content_y,
-                    (460.0 * s).round(),
+                    content_available_w.round(),
                     panel_h,
                     5.0 * s,
                     [0.10, 0.11, 0.15, 1.0],
@@ -996,12 +942,17 @@ impl Renderer {
                 }
                 if !logs.is_empty() {
                     let button_y = (content_y + 7.0 * s).round();
-                    let open_log_x = (content_x + 242.0 * s).round();
+                    let copy_log_w = (104.0 * s).min(content_available_w * 0.48);
+                    let open_log_w = (100.0 * s).min(content_available_w * 0.48);
+                    let copy_log_x = (content_x + content_available_w - copy_log_w).round();
+                    let open_log_x = (copy_log_x - 6.0 * s - open_log_w)
+                        .max(content_x)
+                        .round();
                     ui_registry.register_rect(
                         crate::ui_system::UiId::SettingsOpenToolInstallLog,
                         open_log_x,
                         button_y,
-                        100.0 * s,
+                        open_log_w,
                         29.0 * s,
                         self.last_mouse_x,
                         self.last_mouse_y,
@@ -1009,7 +960,7 @@ impl Renderer {
                     crate::widgets::ButtonView {
                         x: open_log_x,
                         y: button_y,
-                        w: 100.0 * s,
+                        w: open_log_w,
                         h: 29.0 * s,
                         text: "Открыть лог",
                         icon: None,
@@ -1018,12 +969,11 @@ impl Renderer {
                     }
                     .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
 
-                    let copy_log_x = (content_x + 348.0 * s).round();
                     ui_registry.register_rect(
                         crate::ui_system::UiId::SettingsCopyToolInstallLog,
                         copy_log_x,
                         button_y,
-                        104.0 * s,
+                        copy_log_w,
                         29.0 * s,
                         self.last_mouse_x,
                         self.last_mouse_y,
@@ -1031,7 +981,7 @@ impl Renderer {
                     crate::widgets::ButtonView {
                         x: copy_log_x,
                         y: button_y,
-                        w: 104.0 * s,
+                        w: copy_log_w,
                         h: 29.0 * s,
                         text: "Копировать",
                         icon: None,
@@ -1053,21 +1003,29 @@ impl Renderer {
             );
             content_y += 13.0 * s;
             let directory_labels = ["Config", "Data", "Cache", "State"];
+            let dir_gap = 8.0 * s;
+            let dir_button_w = 102.0 * s;
+            let dir_columns = (((content_available_w + dir_gap) / (dir_button_w + dir_gap))
+                .floor() as usize)
+                .clamp(1, directory_labels.len());
             for (idx, label) in directory_labels.iter().enumerate() {
-                let button_x = content_x + idx as f32 * 112.0 * s;
+                let col = idx % dir_columns;
+                let row = idx / dir_columns;
+                let button_x = content_x + col as f32 * (dir_button_w + dir_gap);
+                let button_y = content_y + row as f32 * 37.0 * s;
                 ui_registry.register_rect(
                     crate::ui_system::UiId::SettingsOpenDirectory(idx),
                     button_x,
-                    content_y,
-                    102.0 * s,
+                    button_y,
+                    dir_button_w,
                     29.0 * s,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
                 crate::widgets::ButtonView {
                     x: button_x,
-                    y: content_y,
-                    w: 102.0 * s,
+                    y: button_y,
+                    w: dir_button_w,
                     h: 29.0 * s,
                     text: label,
                     icon: None,
@@ -1076,7 +1034,10 @@ impl Renderer {
                 }
                 .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             }
-            content_y += 40.0 * s;
+            content_y += ((directory_labels.len() + dir_columns - 1) / dir_columns) as f32
+                * 37.0
+                * s
+                + 3.0 * s;
 
             self.draw_string_scaled(
                 "Графика",
@@ -1099,13 +1060,14 @@ impl Renderer {
                 [0.56, 0.58, 0.66, 1.0],
                 0.74,
             );
-            let copy_x = content_x + 338.0 * s;
+            let copy_w = (114.0 * s).min(content_available_w);
+            let copy_x = content_x + content_available_w - copy_w;
             let copy_y = content_y - 17.0 * s;
             ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsCopyGraphicsDiagnostics,
                 copy_x,
                 copy_y,
-                114.0 * s,
+                copy_w,
                 29.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -1113,7 +1075,7 @@ impl Renderer {
             crate::widgets::ButtonView {
                 x: copy_x,
                 y: copy_y,
-                w: 114.0 * s,
+                w: copy_w,
                 h: 29.0 * s,
                 text: "Скопировать",
                 icon: Some(crate::widgets::IconType::Copy),
@@ -1121,6 +1083,11 @@ impl Renderer {
                 icon_size: 14.0 * s,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            ui_registry.pop_clip();
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
         } else if active_tab == 2 {
             self.draw_string_scaled(
                 "Размер шрифта: 14px",
@@ -1330,12 +1297,17 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) {
         let s = self.scale_factor;
-        let modal_w = (720.0 * s)
-            .min((self.width - 32.0 * s).max(320.0 * s))
-            .round();
-        let modal_h = crate::app::tool_installer::log_modal_height(self.height, s);
-        let modal_x = ((self.width - modal_w) * 0.5).round();
-        let modal_y = ((self.height - modal_h) * 0.5).round();
+        let fitted = crate::ui_system::fit_centered_rect(
+            self.width,
+            self.height,
+            720.0 * s,
+            crate::app::tool_installer::log_modal_height(self.height, s),
+            16.0 * s,
+        );
+        let modal_w = fitted.w;
+        let modal_h = fitted.h;
+        let modal_x = fitted.x;
+        let modal_y = fitted.y;
 
         self.flush();
         ui_registry.reset_cursor_state();

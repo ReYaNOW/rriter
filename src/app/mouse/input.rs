@@ -608,7 +608,7 @@ impl App {
                 let active = self.ide_panel.active_terminal;
                 let mut tracking = false;
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                    if term.grid.lock().unwrap().mouse_tracking {
+                    if crate::app::terminal::lock_terminal_grid(&term.grid).mouse_tracking {
                         tracking = true;
                     }
                 }
@@ -637,7 +637,7 @@ impl App {
                     let mut is_drag = false;
                     let mut cell_y = 1;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                        let mut grid = term.grid.lock().unwrap();
+                        let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                         let scrollback_len = if grid.is_alt {
                             0
                         } else {
@@ -820,28 +820,40 @@ impl App {
                         let scroll_x = cx + cw - 12.0 * s;
                         if mx >= scroll_x {
                             let item_h = 24.0 * s;
-                            let total_h = self.ide_panel.flat_diags.len() as f32 * item_h;
-                            let track_h = ch - 40.0 * s;
-                            if total_h > track_h {
-                                let max_scroll = total_h - track_h;
-                                let scroll_ratio = (self.ide_panel.problems_scroll.current
-                                    / max_scroll)
-                                    .clamp(0.0, 1.0);
-                                let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
-                                let list_y = cy + 40.0 * s;
-                                let thumb_y = list_y + scroll_ratio * (track_h - thumb_h);
-
-                                if my >= thumb_y && my <= thumb_y + thumb_h {
+                            let total_h = crate::app::problems_scroll_content_height(
+                                self.ide_panel.visible_problem_row_count(self.lsp.as_ref()),
+                                item_h,
+                            );
+                            let track_h = (ch - 40.0 * s).max(0.0);
+                            let list_y = cy + 40.0 * s;
+                            if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                                list_y,
+                                track_h,
+                                track_h,
+                                total_h,
+                                self.ide_panel.problems_scroll.current,
+                                20.0 * s,
+                            ) {
+                                let max_scroll = (total_h - track_h).max(0.0);
+                                    if my >= thumb.start && my <= thumb.start + thumb.len {
                                     self.ide_panel.problems_scroll.is_dragging = true;
-                                    self.ide_panel.problems_scroll.drag_offset = my - thumb_y;
+                                        self.ide_panel.problems_scroll.drag_offset = my - thumb.start;
                                     return;
                                 } else if my >= list_y && my <= list_y + track_h {
                                     self.ide_panel.problems_scroll.anim_speed = 15.0;
-                                    self.ide_panel.problems_scroll.drag_offset = thumb_h / 2.0;
-                                    let new_ratio = (my - list_y - thumb_h / 2.0)
-                                        / (track_h - thumb_h).max(1.0);
-                                    self.ide_panel.problems_scroll.target =
-                                        (new_ratio * max_scroll).clamp(0.0, max_scroll);
+                                    let Some((offset, target)) = crate::scroll::scrollbar_drag_target(
+                                        my,
+                                        list_y,
+                                        track_h,
+                                        thumb,
+                                        max_scroll,
+                                        None,
+                                    ) else {
+                                        return;
+                                    };
+                                    self.ide_panel.problems_scroll.drag_offset = offset;
+                                    self.ide_panel.problems_scroll.target = target;
+                                    self.ide_panel.problems_scroll.current = target;
                                     self.ide_panel.problems_scroll.is_dragging = true;
                                     self.window.as_ref().unwrap().request_redraw();
                                     return;
@@ -1354,11 +1366,11 @@ impl App {
                     }
                 }
                 if let Some(drag) = self.ide_panel.tab_drag.take() {
-                    if drag.threshold_passed && self.tabs.len() > 1 {
+                    if drag.threshold_passed
+                        && self.tabs.len() > 1
+                        && drag.start_idx < self.tabs.len()
+                    {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let tab_pad = 16.0 * s;
-                        let icon_size_tab = 20.0 * s;
-
                         let start_cx = if self.is_ide_mode {
                             let panel_left_w = self.ide_panel.left_width * s;
                             (48.0 * s + panel_left_w).round() + 1.0 - self.tab_scroll.current
@@ -1374,13 +1386,14 @@ impl App {
                         );
 
                         let mut widths = Vec::new();
-                        for (i, _tab) in self.tabs.iter().enumerate() {
+                        for (i, tab) in self.tabs.iter().enumerate() {
                             let title = &display_titles[i];
-                            let title_w =
-                                self.renderer.as_mut().unwrap().measure_ui_width(title, 1.0);
-                            let tab_w =
-                                tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
-                            widths.push(tab_w);
+                            widths.push(
+                                self.renderer
+                                    .as_mut()
+                                    .unwrap()
+                                    .editor_tab_width(tab, title, s),
+                            );
                         }
 
                         let mut initial_xs = vec![0.0; self.tabs.len()];

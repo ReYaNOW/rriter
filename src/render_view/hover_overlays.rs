@@ -1,3 +1,10 @@
+pub(crate) fn hover_trace_epoch_millis(now: std::time::SystemTime) -> u64 {
+    now.duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 use crate::editor::Editor;
 use crate::renderer::Renderer;
 use std::sync::atomic::Ordering;
@@ -478,10 +485,7 @@ impl Renderer {
 
         if crate::render_view::hover_trace_enabled() {
             static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
+            let now_ms = hover_trace_epoch_millis(std::time::SystemTime::now());
             let last_log = LAST_LOG.load(Ordering::Relaxed);
             if (is_error_hovered || has_type_popup || hover_byte_offset.is_some())
                 && now_ms - last_log > 500

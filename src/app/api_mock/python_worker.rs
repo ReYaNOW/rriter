@@ -85,10 +85,9 @@ pub fn call_python_route(
 }
 
 pub fn stop_python_worker() {
-    if let Ok(mut guard) = WORKER.lock() {
-        if let Some(mut worker) = guard.take() {
-            let _ = worker.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
-        }
+    let mut guard = crate::platform::lock_recover(&WORKER);
+    if let Some(mut worker) = guard.take() {
+        let _ = worker.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
     }
 }
 

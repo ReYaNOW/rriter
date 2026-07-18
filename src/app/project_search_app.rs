@@ -1,7 +1,7 @@
 use crate::app::project_search::{
     ProjectSearchField, ProjectSearchLayout, ProjectSearchQueryScrollAxis, ProjectSearchRequest,
     project_search_layout, project_search_line_end, project_search_query_viewport,
-    start_project_search_worker,
+    start_project_search_worker_cancellable,
 };
 use std::path::PathBuf;
 
@@ -32,9 +32,8 @@ impl crate::app::App {
 
     pub fn start_project_search(&mut self) {
         let query = self.ide_panel.project_search.query_editor.get_full_text();
-        self.ide_panel.project_search.generation =
-            self.ide_panel.project_search.generation.saturating_add(1);
-        let generation = self.ide_panel.project_search.generation;
+        self.ide_panel.project_search.cancel_running_worker();
+        let generation = self.ide_panel.project_search.advance_generation();
         self.ide_panel.project_search.has_run = true;
         self.ide_panel.project_search.error = None;
         self.ide_panel.project_search.elapsed_ms = None;
@@ -53,6 +52,7 @@ impl crate::app::App {
         if query.is_empty() {
             self.ide_panel.project_search.running_generation = None;
             self.ide_panel.project_search.rx = None;
+            self.ide_panel.project_search.worker_cancel = None;
             return;
         }
         let request = ProjectSearchRequest {
@@ -65,41 +65,60 @@ impl crate::app::App {
             ignore_patterns: self.ide_ignore_patterns.clone(),
         };
         self.ide_panel.project_search.running_generation = Some(generation);
-        self.ide_panel.project_search.rx = Some(start_project_search_worker(request));
+        let (rx, cancel) = start_project_search_worker_cancellable(request);
+        self.ide_panel.project_search.rx = Some(rx);
+        self.ide_panel.project_search.worker_cancel = Some(cancel);
         self.ide_panel.project_search.start_preview_worker();
         self.ide_panel.project_search.dirty = false;
     }
 
     pub fn poll_project_search(&mut self) -> bool {
         let mut messages = Vec::new();
+        let mut disconnected = false;
         if let Some(rx) = &self.ide_panel.project_search.rx {
-            while let Ok(message) = rx.try_recv() {
-                messages.push(message);
+            loop {
+                match rx.try_recv() {
+                    Ok(message) => messages.push(message),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
             }
-        }
-        if messages.is_empty() {
-            return false;
         }
         let mut updated = false;
         for message in messages {
             updated |= self.ide_panel.project_search.apply_message(message);
+        }
+        if disconnected {
+            updated |= self.ide_panel.project_search.handle_worker_disconnect();
         }
         updated
     }
 
     pub fn poll_project_search_previews(&mut self) -> bool {
         let mut messages = Vec::new();
+        let mut disconnected = false;
         if let Some(rx) = &self.ide_panel.project_search.preview_rx {
-            while let Ok(message) = rx.try_recv() {
-                messages.push(message);
+            loop {
+                match rx.try_recv() {
+                    Ok(message) => messages.push(message),
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                        disconnected = true;
+                        break;
+                    }
+                }
             }
-        }
-        if messages.is_empty() {
-            return false;
         }
         let mut updated = false;
         for message in messages {
             updated |= self.ide_panel.project_search.apply_preview_message(message);
+        }
+        if disconnected {
+            self.ide_panel.project_search.handle_preview_disconnect();
+            updated = true;
         }
         updated
     }

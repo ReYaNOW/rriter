@@ -18,7 +18,10 @@ use std::time::Instant;
 mod project_search_grep;
 #[path = "project_search_preview.rs"]
 mod project_search_preview;
-pub(crate) use project_search_preview::project_search_scrollbar_thumb;
+pub(crate) use project_search_preview::{
+    ProjectSearchPreviewKey, ProjectSearchPreviewRequest, ProjectSearchPreviewWorkerMessage,
+    project_search_scrollbar_thumb,
+};
 
 pub const PROJECT_SEARCH_FILE_CAP_BYTES: u64 = 8 * 1024 * 1024;
 pub const PROJECT_SEARCH_MATCH_CAP: usize = 10_000;
@@ -166,6 +169,7 @@ pub struct ProjectSearchState {
     pub generation: u64,
     pub running_generation: Option<u64>,
     pub rx: Option<Receiver<ProjectSearchWorkerMessage>>,
+    pub worker_cancel: Option<Arc<AtomicBool>>,
     pub preview_tx: Option<Sender<project_search_preview::ProjectSearchPreviewRequest>>,
     pub preview_rx: Option<Receiver<project_search_preview::ProjectSearchPreviewWorkerMessage>>,
     pub preview_pending: FxHashSet<project_search_preview::ProjectSearchPreviewKey>,
@@ -198,6 +202,7 @@ impl Default for ProjectSearchState {
             generation: 0,
             running_generation: None,
             rx: None,
+            worker_cancel: None,
             preview_tx: None,
             preview_rx: None,
             preview_pending: FxHashSet::default(),
@@ -218,6 +223,39 @@ impl Default for ProjectSearchState {
 }
 
 impl ProjectSearchState {
+    pub(crate) fn advance_generation(&mut self) -> u64 {
+        self.generation = self.generation.wrapping_add(1).max(1);
+        self.generation
+    }
+
+    pub(crate) fn cancel_running_worker(&mut self) {
+        if let Some(cancel) = self.worker_cancel.take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        self.rx = None;
+        self.running_generation = None;
+    }
+
+    pub(crate) fn handle_worker_disconnect(&mut self) -> bool {
+        self.rx = None;
+        self.worker_cancel = None;
+        if self.running_generation.take().is_some() {
+            self.error = Some("Поиск по проекту неожиданно завершился".to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn handle_preview_disconnect(&mut self) {
+        self.preview_tx = None;
+        self.preview_rx = None;
+        self.preview_pending.clear();
+        self.error.get_or_insert_with(||
+            "Предпросмотр результатов поиска неожиданно завершился".to_string()
+        );
+    }
+
     pub fn filter_enabled(&self) -> bool {
         self.has_run && self.running_generation.is_none() && !self.results.is_empty()
     }
@@ -457,19 +495,19 @@ pub(crate) fn project_search_query_viewport(
         text: ProjectSearchRect {
             x: rect.x + pad_x,
             y: rect.y + pad_y,
-            w: (rect.w - pad_x * 2.0 - scrollbar).max(1.0),
-            h: (rect.h - pad_y * 2.0 - scrollbar).max(1.0),
+            w: (rect.w - pad_x * 2.0 - scrollbar).max(0.0),
+            h: (rect.h - pad_y * 2.0 - scrollbar).max(0.0),
         },
         vertical_track: ProjectSearchRect {
             x: rect.x + rect.w - scrollbar,
             y: rect.y + track_pad,
             w: scrollbar,
-            h: (rect.h - scrollbar - track_pad * 2.0).max(1.0),
+            h: (rect.h - scrollbar - track_pad * 2.0).max(0.0),
         },
         horizontal_track: ProjectSearchRect {
             x: rect.x + track_pad,
             y: rect.y + rect.h - scrollbar,
-            w: (rect.w - scrollbar - track_pad * 2.0).max(1.0),
+            w: (rect.w - scrollbar - track_pad * 2.0).max(0.0),
             h: scrollbar,
         },
     }
@@ -582,13 +620,18 @@ pub fn project_search_layout(
     content_h: f32,
     scale: f32,
 ) -> ProjectSearchLayout {
-    let pad = PROJECT_SEARCH_PAD_X * scale;
+    let content_w = content_w.max(0.0);
+    let content_h = content_h.max(0.0);
+    let pad = (PROJECT_SEARCH_PAD_X * scale).min(content_w * 0.5);
     let gap = 7.0 * scale;
-    let button = PROJECT_SEARCH_SINGLE_H * scale;
-    let help = (22.0 * scale).round().max(18.0);
+    let desired_button = PROJECT_SEARCH_SINGLE_H * scale;
     let label_h = 18.0 * scale;
+    let inner_w = (content_w - pad * 2.0).max(0.0);
+    let show_buttons = inner_w >= desired_button * 2.0 + gap * 2.0 + 24.0 * scale;
+    let button = if show_buttons { desired_button } else { 0.0 };
+    let controls_w = if show_buttons { button * 2.0 + gap * 2.0 } else { 0.0 };
     let mut y = content_y + 9.0 * scale;
-    let query_w = (content_w - pad * 2.0 - button * 2.0 - gap * 2.0).max(40.0 * scale);
+    let query_w = (inner_w - controls_w).max(0.0);
     let query = ProjectSearchRect {
         x: content_x + pad,
         y: y + label_h,
@@ -596,45 +639,37 @@ pub fn project_search_layout(
         h: PROJECT_SEARCH_QUERY_H * scale,
     };
     let case_button = ProjectSearchRect {
-        x: query.x + query.w + gap,
+        x: query.x + query.w + if show_buttons { gap } else { 0.0 },
         y: query.y,
         w: button,
         h: button,
     };
     let run_button = ProjectSearchRect {
-        x: case_button.x + case_button.w + gap,
+        x: case_button.x + case_button.w + if show_buttons { gap } else { 0.0 },
         y: query.y,
         w: button,
         h: button,
     };
+    let help = (22.0 * scale).round().max(18.0).min(inner_w);
     let help_button = ProjectSearchRect {
-        x: content_x + content_w - pad - help,
+        x: (content_x + content_w - pad - help).max(content_x + pad),
         y: (query.y - 24.0 * scale).max(content_y + 2.0 * scale),
-        w: help,
-        h: help,
+        w: help.max(0.0),
+        h: help.max(0.0),
     };
 
     y = query.y + query.h + 9.0 * scale;
+    let field_w = inner_w.max(0.0);
     let include = ProjectSearchRect {
         x: content_x + pad,
         y: y + label_h,
-        w: (content_w - pad * 2.0).max(40.0 * scale),
+        w: field_w,
         h: PROJECT_SEARCH_SINGLE_H * scale,
     };
     y = include.y + include.h + 7.0 * scale;
-    let exclude = ProjectSearchRect {
-        x: content_x + pad,
-        y: y + label_h,
-        w: include.w,
-        h: PROJECT_SEARCH_SINGLE_H * scale,
-    };
+    let exclude = ProjectSearchRect { x: include.x, y: y + label_h, w: field_w, h: include.h };
     y = exclude.y + exclude.h + 22.0 * scale;
-    let filter = ProjectSearchRect {
-        x: content_x + pad,
-        y: y + label_h,
-        w: include.w,
-        h: PROJECT_SEARCH_SINGLE_H * scale,
-    };
+    let filter = ProjectSearchRect { x: include.x, y: y + label_h, w: field_w, h: include.h };
     let stats_y = filter.y + filter.h + 26.0 * scale;
     let list_y = stats_y + 8.0 * scale;
     ProjectSearchLayout {
@@ -658,17 +693,34 @@ pub fn project_search_layout(
 pub fn start_project_search_worker(
     request: ProjectSearchRequest,
 ) -> Receiver<ProjectSearchWorkerMessage> {
+    start_project_search_worker_cancellable(request).0
+}
+
+pub fn start_project_search_worker_cancellable(
+    request: ProjectSearchRequest,
+) -> (Receiver<ProjectSearchWorkerMessage>, Arc<AtomicBool>) {
     let (tx, rx) = channel();
-    std::thread::spawn(move || {
-        stream_project_search(request, tx);
-    });
-    rx
+    let generation = request.generation;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let worker_cancel = Arc::clone(&cancel);
+    let worker_tx = tx.clone();
+    if let Err(err) = crate::platform::spawn_named("rriter-project-search", move || {
+        stream_project_search(request, worker_tx, worker_cancel);
+    }) {
+        let _ = tx.send(ProjectSearchWorkerMessage::Done {
+            generation,
+            elapsed_ms: 0,
+            capped: false,
+            error: Some(format!("не удалось запустить поиск по проекту: {err}")),
+        });
+    }
+    (rx, cancel)
 }
 
 #[cfg(test)]
 pub fn run_project_search(request: ProjectSearchRequest) -> ProjectSearchWorkerResult {
     let (tx, rx) = channel();
-    stream_project_search(request, tx);
+    stream_project_search(request, tx, Arc::new(AtomicBool::new(false)));
     let mut result = ProjectSearchWorkerResult {
         files: Vec::new(),
         total_matches: 0,
@@ -776,9 +828,13 @@ fn push_project_search_ranges(
 fn stream_project_search(
     request: ProjectSearchRequest,
     tx: std::sync::mpsc::Sender<ProjectSearchWorkerMessage>,
+    cancel: Arc<AtomicBool>,
 ) {
     let started = Instant::now();
     let generation = request.generation;
+    if cancel.load(Ordering::Relaxed) {
+        return;
+    }
     if request.query.is_empty() {
         let _ = tx.send(ProjectSearchWorkerMessage::Done {
             generation,
@@ -851,7 +907,11 @@ fn stream_project_search(
         grep_pattern,
         request.case_sensitive,
         unicode_case_fallback,
+        Arc::clone(&cancel),
     );
+    if cancel.load(Ordering::Relaxed) {
+        return;
+    }
     let capped = caps.lock().map(|caps| caps.capped).unwrap_or(true);
     let elapsed_ms = started.elapsed().as_millis();
     profile.log(&query, backend, elapsed_ms, capped);
@@ -877,6 +937,7 @@ fn run_project_search_roots(
     grep_pattern: Option<Arc<str>>,
     case_sensitive: bool,
     unicode_case_fallback: bool,
+    cancel: Arc<AtomicBool>,
 ) {
     let mut roots = roots.into_iter();
     let Some(first_root) = roots.next() else {
@@ -906,6 +967,7 @@ fn run_project_search_roots(
         let caps = Arc::clone(&caps);
         let profile = Arc::clone(&profile);
         let capped_flag = Arc::clone(&capped_flag);
+        let cancel = Arc::clone(&cancel);
         let tx = tx.clone();
         let needle = Arc::clone(&needle);
         let grep_pattern = grep_pattern.as_ref().map(Arc::clone);
@@ -924,7 +986,7 @@ fn run_project_search_roots(
                 .build()
         });
         Box::new(move |entry: Result<ignore::DirEntry, ignore::Error>| {
-            if capped_flag.load(Ordering::Relaxed) {
+            if capped_flag.load(Ordering::Relaxed) || cancel.load(Ordering::Relaxed) {
                 return ignore::WalkState::Quit;
             }
             let Ok(entry) = entry else {
@@ -1074,20 +1136,16 @@ fn search_project_file(
         .read_ms
         .fetch_add(elapsed_ms_u64(read_started), Ordering::Relaxed);
     let mut matches = Vec::new();
-    let room = match caps.lock() {
-        Ok(caps)
-            if caps.capped
-                || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
-                || caps.matches >= PROJECT_SEARCH_MATCH_CAP =>
+    let room = {
+        let caps = crate::platform::lock_recover(caps);
+        if caps.capped
+            || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+            || caps.matches >= PROJECT_SEARCH_MATCH_CAP
         {
             capped_flag.store(true, Ordering::Relaxed);
             return None;
         }
-        Ok(caps) => PROJECT_SEARCH_MATCH_CAP.saturating_sub(caps.matches),
-        Err(_) => {
-            capped_flag.store(true, Ordering::Relaxed);
-            return None;
-        }
+        PROJECT_SEARCH_MATCH_CAP.saturating_sub(caps.matches)
     };
     let text = project_search_text(buf)?;
     let mut ranges = Vec::new();
@@ -1119,13 +1177,7 @@ fn search_project_file(
         return None;
     }
     let reached_cap = {
-        let mut caps = match caps.lock() {
-            Ok(caps) => caps,
-            Err(_) => {
-                capped_flag.store(true, Ordering::Relaxed);
-                return None;
-            }
-        };
+        let mut caps = crate::platform::lock_recover(caps);
         if caps.capped
             || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
             || caps.matches >= PROJECT_SEARCH_MATCH_CAP

@@ -1,17 +1,10 @@
 use crate::lsp::HoverLineKindPublic;
+pub use super::ImportBlock;
+use super::finish_import_block;
 use std::collections::HashMap;
 use tree_sitter::StreamingIterator;
 
 pub const DOCSTRING_TEXT: [f32; 4] = crate::highlighter::DRACULA_COMMENT;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct ImportBlock {
-    pub start: usize,
-    pub end: usize,
-    pub keyword_start: usize,
-    pub keyword_end: usize,
-    pub line_count: usize,
-}
 
 thread_local! {
     pub static TS_DIAG_PARSER: std::cell::RefCell<tree_sitter::Parser> = {
@@ -182,14 +175,6 @@ fn update_python_import_continuation(trimmed: &str, paren_depth: &mut i32, conti
         }
     }
     *continuing = *paren_depth > 0 || trimmed.ends_with('\\');
-}
-
-fn finish_import_block(current: &mut Option<ImportBlock>, blocks: &mut Vec<ImportBlock>) {
-    if let Some(block) = current.take() {
-        if block.line_count >= 2 && block.end > block.start {
-            blocks.push(block);
-        }
-    }
 }
 
 fn push_docstring_line_spans(

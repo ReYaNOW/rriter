@@ -1,3 +1,7 @@
+pub(crate) fn next_git_diff_version(current: u64) -> u64 {
+    current.wrapping_add(1).max(1)
+}
+
 use crate::app::git_panel::{GitFileEntry, GitFileStatus};
 use crate::app::{App, EditorTab, EditorTabKind, InlineGitPopup, InlineGitPopupLine};
 use crate::editor::{Editor, LineDiffHunk};
@@ -108,7 +112,13 @@ pub struct GitDiffPayload {
     pub worktree_format: crate::platform::TextFileFormat,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
+pub struct GitDiffReceiver {
+    pub meta: GitDiffTabMeta,
+    pub version: u64,
+    pub rx: mpsc::Receiver<GitDiffEvent>,
+}
+
 pub struct GitDiffEvent {
     pub meta: GitDiffTabMeta,
     pub result: Result<GitDiffPayload, String>,
@@ -672,30 +682,42 @@ impl App {
 
     fn spawn_git_diff_load(&mut self, meta: GitDiffTabMeta, version: u64, staged: bool) {
         let (tx, rx) = mpsc::channel();
-        self.git_diff_rx.push(rx);
-        std::thread::spawn(move || {
+        self.git_diff_rx.push(GitDiffReceiver {
+            meta: meta.clone(),
+            version,
+            rx,
+        });
+        let worker_tx = tx.clone();
+        let worker_meta = meta.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-git-diff", move || {
             let result = if staged {
                 load_git_diff_with_side(
-                    meta.repo_root.clone(),
-                    meta.rel_path.clone(),
-                    meta.old_rel_path.clone(),
-                    meta.status,
+                    worker_meta.repo_root.clone(),
+                    worker_meta.rel_path.clone(),
+                    worker_meta.old_rel_path.clone(),
+                    worker_meta.status,
                     true,
                 )
             } else {
                 load_git_diff(
-                    meta.repo_root.clone(),
-                    meta.rel_path.clone(),
-                    meta.old_rel_path.clone(),
-                    meta.status,
+                    worker_meta.repo_root.clone(),
+                    worker_meta.rel_path.clone(),
+                    worker_meta.old_rel_path.clone(),
+                    worker_meta.status,
                 )
             };
-            let _ = tx.send(GitDiffEvent {
-                meta,
+            let _ = worker_tx.send(GitDiffEvent {
+                meta: worker_meta,
                 result,
                 version,
             });
-        });
+        }) {
+            let _ = tx.send(GitDiffEvent {
+                meta,
+                result: Err(format!("Не удалось запустить загрузку Git diff: {err}")),
+                version,
+            });
+        }
     }
 
     pub(crate) fn reload_git_diff_tab(&mut self, tab_idx: usize) {
@@ -729,7 +751,7 @@ impl App {
         }) else {
             return;
         };
-        let version = current_version.saturating_add(1);
+        let version = next_git_diff_version(current_version);
         if let Some(tab) = self.tabs.get_mut(tab_idx)
             && let EditorTabKind::GitDiff(existing, state) = &mut tab.kind
         {
@@ -745,14 +767,21 @@ impl App {
         let mut updated = false;
         let mut next_rx = Vec::with_capacity(self.git_diff_rx.len());
         let receivers = std::mem::take(&mut self.git_diff_rx);
-        for rx in receivers {
-            match rx.try_recv() {
+        for receiver in receivers {
+            match receiver.rx.try_recv() {
                 Ok(event) => {
                     self.apply_git_diff_event(event);
                     updated = true;
                 }
-                Err(mpsc::TryRecvError::Empty) => next_rx.push(rx),
-                Err(mpsc::TryRecvError::Disconnected) => {}
+                Err(mpsc::TryRecvError::Empty) => next_rx.push(receiver),
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.apply_git_diff_event(GitDiffEvent {
+                        meta: receiver.meta,
+                        result: Err("Загрузка Git diff неожиданно завершилась".to_string()),
+                        version: receiver.version,
+                    });
+                    updated = true;
+                }
             }
         }
         self.git_diff_rx = next_rx;
@@ -1157,7 +1186,8 @@ impl App {
             self.inline_git_diff_rx = Some(rx);
             let editor_version = self.editor.version;
             let file_extension = self.file_extension.clone();
-            std::thread::spawn(move || {
+            let worker_tx = tx.clone();
+            if let Err(err) = crate::platform::spawn_named("rriter-inline-git-diff", move || {
                 let result = load_git_diff_with_side(
                     repo_root,
                     file.rel_path.into(),
@@ -1168,14 +1198,22 @@ impl App {
                 .map(|payload| {
                     build_inline_git_diff_payload(payload, file_extension, target_hunk.after_start)
                 });
-                let _ = tx.send(InlineGitDiffEvent {
+                let _ = worker_tx.send(InlineGitDiffEvent {
                     hunk_idx,
                     target_hunk,
                     anchor_line,
                     editor_version,
                     result,
                 });
-            });
+            }) {
+                let _ = tx.send(InlineGitDiffEvent {
+                    hunk_idx,
+                    target_hunk,
+                    anchor_line,
+                    editor_version,
+                    result: Err(format!("Не удалось запустить inline Git diff: {err}")),
+                });
+            }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -1287,7 +1325,7 @@ impl App {
         {
             let text = self.editor.get_full_text();
             let ext = self.file_extension.clone();
-            lsp.notify_change(path, &ext, &text, self.editor.version as i32);
+            lsp.notify_change(path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
             self.last_sent_version = self.editor.version;
         }
         if self.show_search && !self.search_editor.get_full_text().is_empty() {

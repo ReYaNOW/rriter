@@ -195,13 +195,7 @@ fn reserve_project_search_match(
     capped_flag: &AtomicBool,
     first_match_in_file: bool,
 ) -> bool {
-    let mut caps = match caps.lock() {
-        Ok(caps) => caps,
-        Err(_) => {
-            capped_flag.store(true, Ordering::Relaxed);
-            return false;
-        }
-    };
+    let mut caps = crate::platform::lock_recover(caps);
     if caps.capped
         || caps.matches >= PROJECT_SEARCH_MATCH_CAP
         || (first_match_in_file && caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP)

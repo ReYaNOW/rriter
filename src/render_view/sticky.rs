@@ -203,11 +203,6 @@ impl Renderer {
                 let end_byte = *editor.line_offsets.get(s_line + 1).unwrap_or(&editor.len());
                 let mut x = self.left_padding - render_scroll_x;
 
-                let mut span_idx = match spans.binary_search_by_key(&start_byte, |s| s.start) {
-                    Ok(idx) => idx,
-                    Err(idx) => idx.saturating_sub(1),
-                };
-
                 // Ограничиваем текст зоной редактора — не выходим за гаттер слева
                 self.flush();
                 unsafe {
@@ -224,53 +219,27 @@ impl Renderer {
                 let mut current_offset = start_byte;
                 while current_offset < end_byte {
                     let chunk = if current_offset < first_len {
-                        let e = end_byte.min(first_len);
-                        &first[current_offset..e]
+                        let chunk_end = end_byte.min(first_len);
+                        &first[current_offset..chunk_end]
                     } else {
-                        let st = current_offset - first_len;
-                        let e = end_byte - first_len;
-                        &second[st..e]
+                        let chunk_start = current_offset - first_len;
+                        let chunk_end = end_byte - first_len;
+                        &second[chunk_start..chunk_end]
                     };
-                    for c in chunk.chars() {
-                        let char_len = c.len_utf8();
-                        while span_idx < spans.len() && spans[span_idx].end <= current_offset {
-                            span_idx += 1;
-                        }
-                        let adv = if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
-                            0.0
-                        } else {
-                            self.char_advance(c)
-                        };
-                        if adv > 0.0 && c != ' ' && c != '\t' {
-                            if x + adv > 0.0 && x < self.width - minimap_w - 20.0 {
-                                if let Some(g) = self.get_glyph(c) {
-                                    let mut color = self.theme.fg;
-                                    if span_idx < spans.len()
-                                        && spans[span_idx].start <= current_offset
-                                    {
-                                        color = spans[span_idx].color;
-                                    }
-                                    let base_alpha = *color.get(3).unwrap_or(&1.0);
-                                    let draw_color =
-                                        [color[0], color[1], color[2], base_alpha * alpha];
-                                    self.push_quad(
-                                        x + g.offset_x,
-                                        rect_y + self.baseline_offset - g.offset_y,
-                                        g.width,
-                                        g.height,
-                                        g.u,
-                                        g.v,
-                                        g.uw,
-                                        g.vh,
-                                        draw_color,
-                                        g.is_emoji,
-                                    );
-                                }
-                            }
-                        }
-                        x += adv;
-                        current_offset += char_len;
+                    if chunk.is_empty() {
+                        break;
                     }
+                    x = self.draw_spanned_ui_line_pixel_snapped_alpha(
+                        chunk,
+                        spans,
+                        Some(current_offset),
+                        x,
+                        rect_y + self.baseline_offset,
+                        self.width - minimap_w - 20.0,
+                        1.0,
+                        alpha,
+                    );
+                    current_offset = current_offset.saturating_add(chunk.len());
                     if x > self.width - minimap_w - 20.0 {
                         break;
                     }

@@ -41,7 +41,7 @@ fn active_terminal_scrollbar_layout(
         .ide_panel
         .terminals
         .get(app.ide_panel.active_terminal)?;
-    let grid = terminal.grid.lock().ok()?;
+    let grid = crate::platform::lock_recover(&terminal.grid);
     if grid.is_alt {
         return None;
     }

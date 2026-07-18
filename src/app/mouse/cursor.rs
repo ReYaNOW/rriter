@@ -1129,17 +1129,35 @@ impl App {
             let cy = crate::render_view::ide_bottom_panel_y(wh, bottom_h, s);
 
             let item_h = 24.0 * s;
-            let total_h = self.ide_panel.flat_diags.len() as f32 * item_h;
-            let track_h = bottom_h - 40.0 * s;
+            let total_h = crate::app::problems_scroll_content_height(
+                self.ide_panel.visible_problem_row_count(self.lsp.as_ref()),
+                item_h,
+            );
+            let track_h = (bottom_h - 40.0 * s).max(0.0);
             let max_scroll = (total_h - track_h).max(0.0);
-            let thumb_h = (track_h / total_h * track_h).max(20.0 * s);
             let list_y = cy + 40.0 * s;
-
-            let ratio = (position.y as f32 - list_y - self.ide_panel.problems_scroll.drag_offset)
-                / (track_h - thumb_h).max(0.0001);
-            self.ide_panel.problems_scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
-            self.ide_panel.problems_scroll.current = self.ide_panel.problems_scroll.target;
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                list_y,
+                track_h,
+                track_h,
+                total_h,
+                self.ide_panel.problems_scroll.current,
+                20.0 * s,
+            ) && let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+                position.y as f32,
+                list_y,
+                track_h,
+                thumb,
+                max_scroll,
+                Some(self.ide_panel.problems_scroll.drag_offset),
+            ) {
+                self.ide_panel.problems_scroll.target = target;
+                self.ide_panel.problems_scroll.current = target;
+                self.ide_panel.problems_scroll.velocity = 0.0;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             return;
         } else if crate::app::mouse::HOVER_STATE.with(|s| {
             s.borrow()
@@ -1414,7 +1432,7 @@ impl App {
                 let py = position.y as f32;
                 let px = position.x as f32;
 
-                let mut grid = term.grid.lock().unwrap();
+                let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                 let scrollback_len = if grid.is_alt {
                     0
                 } else {

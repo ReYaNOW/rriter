@@ -1,5 +1,6 @@
 use super::database_postgres::{
     DatabaseBackendError, DatabaseBackendNotice, PostgresSession, connect_postgres,
+    rollback_postgres_transaction_after_error,
 };
 use super::database_ssh::SshConnectOptions;
 use super::{
@@ -773,8 +774,9 @@ pub async fn begin_table_transaction(
         settings.transaction_review_timeout_seconds.saturating_add(15)
     );
     if let Err(error) = session.client.batch_execute(&set_local).await {
-        let _ = session.client.batch_execute("ROLLBACK").await;
-        return Err(error.into());
+        return Err(
+            rollback_postgres_transaction_after_error(&session, error.into()).await,
+        );
     }
 
     let mut summary = DatabaseTableReviewSummary {
@@ -800,17 +802,23 @@ pub async fn begin_table_transaction(
         let rows = match session.client.query(&statement.sql, &refs).await {
             Ok(rows) => rows,
             Err(error) => {
-                let _ = session.client.batch_execute("ROLLBACK").await;
-                return Err(error.into());
+                return Err(
+                    rollback_postgres_transaction_after_error(&session, error.into()).await,
+                );
             }
         };
         if matches!(statement.kind, DatabaseChangeKind::Update | DatabaseChangeKind::Delete)
             && rows.len() != 1
         {
-            let _ = session.client.batch_execute("ROLLBACK").await;
-            return Err(DatabaseBackendError::InvalidConfiguration(
-                "Строка была изменена или удалена другим клиентом".to_string(),
-            ));
+            return Err(
+                rollback_postgres_transaction_after_error(
+                    &session,
+                    DatabaseBackendError::InvalidConfiguration(
+                        "Строка была изменена или удалена другим клиентом".to_string(),
+                    ),
+                )
+                .await,
+            );
         }
         match statement.kind {
             DatabaseChangeKind::Insert => summary.inserted_rows += rows.len(),
@@ -861,16 +869,6 @@ fn database_backend_notice_text(notice: &DatabaseBackendNotice) -> String {
     }
 }
 
-pub async fn finish_table_transaction(
-    session: &PostgresSession,
-    commit: bool,
-) -> Result<(), DatabaseBackendError> {
-    session
-        .client
-        .batch_execute(if commit { "COMMIT" } else { "ROLLBACK" })
-        .await?;
-    Ok(())
-}
 
 #[cfg(test)]
 mod tests {

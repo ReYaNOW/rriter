@@ -397,14 +397,17 @@ impl Renderer {
         ui_registry.reset_cursor_state();
         self.push_rect(0.0, 0.0, self.width, self.height, [0.0, 0.0, 0.0, 0.42]);
 
-        let w = (crate::app::file_tree::FILE_TREE_DIALOG_W * scale)
-            .min((self.width - 32.0 * scale).max(220.0 * scale))
-            .round();
-        let h = (430.0 * scale)
-            .min((self.height - 32.0 * scale).max(300.0 * scale))
-            .round();
-        let x = ((self.width - w) * 0.5).round();
-        let y = ((self.height - h) * 0.5).round();
+        let fitted = crate::ui_system::fit_centered_rect(
+            self.width,
+            self.height,
+            crate::app::file_tree::FILE_TREE_DIALOG_W * scale,
+            430.0 * scale,
+            16.0 * scale,
+        );
+        let w = fitted.w;
+        let h = fitted.h;
+        let x = fitted.x;
+        let y = fitted.y;
         let side_pad = crate::app::file_tree::FILE_TREE_DIALOG_SIDE_PAD * scale;
         ui_registry.register_blocker(
             crate::ui_system::UiId::ProjectSearchHelpPopup,
@@ -890,6 +893,14 @@ impl Renderer {
         scale: f32,
     ) {
         let state = &ide_panel.project_search;
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            layout.list.x,
+            layout.list.y,
+            layout.list.w,
+            layout.list.h,
+        ));
+        let interactions_settled = state.scroll.is_settled();
+        ui_registry.push_interactions_enabled(interactions_settled);
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -926,6 +937,8 @@ impl Renderer {
             unsafe {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
+            ui_registry.pop_interactions_enabled();
+            ui_registry.pop_clip();
             return;
         }
 
@@ -973,6 +986,8 @@ impl Renderer {
         self.scratch_buffer = scratch;
         self.draw_project_search_scrollbar(layout, state, ui_registry, scale);
 
+        ui_registry.pop_interactions_enabled();
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
@@ -995,15 +1010,17 @@ impl Renderer {
         let Some(file) = ide_panel.project_search.results.get(file_idx) else {
             return;
         };
-        ui_registry.register_rect(
-            crate::ui_system::UiId::ProjectSearchFileToggle(file_idx),
-            layout.list.x,
-            row_y,
-            layout.list.w - 10.0 * scale,
-            row_h,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
+        if hover_settled {
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ProjectSearchFileToggle(file_idx),
+                layout.list.x,
+                row_y,
+                layout.list.w - 10.0 * scale,
+                row_h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+        }
         if hover_settled
             && ui_registry.hovered()
                 == Some(crate::ui_system::UiId::ProjectSearchFileToggle(file_idx))
@@ -1103,15 +1120,17 @@ impl Renderer {
         let Some(mat) = file.matches.get(match_idx) else {
             return;
         };
-        ui_registry.register_rect(
-            crate::ui_system::UiId::ProjectSearchMatchJump(file_idx, match_idx),
-            layout.list.x,
-            row_y,
-            layout.list.w - 10.0 * scale,
-            row_h,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
+        if hover_settled {
+            ui_registry.register_rect(
+                crate::ui_system::UiId::ProjectSearchMatchJump(file_idx, match_idx),
+                layout.list.x,
+                row_y,
+                layout.list.w - 10.0 * scale,
+                row_h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+        }
         if hover_settled
             && ui_registry.hovered()
                 == Some(crate::ui_system::UiId::ProjectSearchMatchJump(file_idx, match_idx))

@@ -1,5 +1,5 @@
 use crate::app::api_mock::contract::api_mock_default_handler_body;
-use crate::app::api_mock::persist::{load_api_mocks, save_api_mocks};
+use crate::app::api_mock::persist::{load_api_mocks_checked, save_api_mocks};
 use crate::app::api_mock::server::{
     apply_api_mock_server_event, drain_api_mock_server_events, start_api_mock_server,
     stop_api_mock_server, update_api_mock_server_snapshot,
@@ -798,7 +798,22 @@ pub struct ApiLoadPayload {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ApiLoadResult {
     pub id: ApiSpecId,
+    pub generation: u64,
     pub result: Result<ApiLoadPayload, ApiLoadError>,
+}
+
+
+#[derive(Debug)]
+pub struct ApiLoadReceiver {
+    pub id: ApiSpecId,
+    pub generation: u64,
+    pub rx: Receiver<ApiLoadResult>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApiLoadTicket {
+    pub generation: u64,
+    pub select_on_success: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1280,6 +1295,9 @@ pub struct ApiClientState {
     pub import_error_at: Option<u64>,
     pub spec_remove_dialog: Option<ApiSpecRemoveDialog>,
     pub loading: FxHashSet<ApiSpecId>,
+    pub load_tickets: FxHashMap<ApiSpecId, ApiLoadTicket>,
+    pub next_load_generation: u64,
+    pub persistence_error: Option<String>,
     pub collapsed_tags: FxHashMap<ApiSpecId, FxHashSet<String>>,
     pub collapsed_route_roots: FxHashSet<ApiSpecId>,
     pub route_filter: String,
@@ -1462,6 +1480,9 @@ impl Default for ApiClientState {
             import_error_at: None,
             spec_remove_dialog: None,
             loading: FxHashSet::default(),
+            load_tickets: FxHashMap::default(),
+            next_load_generation: 1,
+            persistence_error: None,
             collapsed_tags: FxHashMap::default(),
             collapsed_route_roots: FxHashSet::default(),
             route_filter: String::new(),
@@ -1516,13 +1537,90 @@ impl Default for ApiClientState {
 }
 
 impl ApiClientState {
+    #[cfg(test)]
+    pub(crate) fn seed_body_json_validation(
+        &mut self,
+        spec_id: ApiSpecId,
+        route_idx: usize,
+        version: u64,
+        valid: bool,
+    ) {
+        self.body_json_validation = Some(ApiJsonValidationState {
+            spec_id,
+            route_idx,
+            version,
+            valid,
+        });
+        self.body_json_validation_pending = Some((spec_id, route_idx, version));
+    }
+
+    pub(crate) fn handle_json_validation_disconnect(&mut self) {
+        self.body_json_validation_pending = None;
+        self.body_json_validation = None;
+        self.body_json_validation_rx = None;
+        self.import_error = Some("Проверка JSON неожиданно завершилась".to_string());
+    }
+
+    pub(crate) fn handle_python_path_disconnect(&mut self) {
+        self.python_path_pick_rx = None;
+        self.mock.uv.last_error =
+            "Окно выбора Python/uv неожиданно завершилось".to_string();
+    }
+
+    pub(crate) fn handle_python_versions_disconnect(&mut self) {
+        self.python_version_list_rx = None;
+        self.mock_python_versions_loading = false;
+        self.python_version_list_cancel = None;
+        self.mock_python_versions.clear();
+        self.mock.uv.last_error =
+            "Загрузка списка Python неожиданно завершилась".to_string();
+    }
+
+    pub(crate) fn handle_python_install_disconnect(&mut self) {
+        self.python_install_rx = None;
+        self.mock_python_install_running = false;
+        self.python_install_cancel = None;
+        self.mock.uv.status =
+            crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
+        let message = "Установка Python неожиданно завершилась".to_string();
+        self.mock.uv.last_error = message.clone();
+        push_api_python_install_log(
+            self,
+            ApiPythonInstallLogLine {
+                text: message,
+                kind: ApiPythonInstallLogKind::Error,
+            },
+        );
+    }
+
+    pub(crate) fn handle_load_disconnect(&mut self, id: ApiSpecId, generation: u64) -> bool {
+        if self.finish_load(id, generation).is_none() {
+            return false;
+        }
+        self.mark_load_error(
+            id,
+            ApiLoadError::new(
+                ApiLoadErrorKind::Other,
+                "Загрузка OpenAPI неожиданно завершилась",
+            ),
+        );
+        true
+    }
+
     pub fn load_persisted() -> Self {
         let mut state = Self::default();
-        state.auth = load_api_auth();
-        state.mock = load_api_mocks();
+        let mut load_errors = Vec::new();
+        match load_api_auth_checked() {
+            Ok(auth) => state.auth = auth,
+            Err(error) => load_errors.push(error),
+        }
+        match load_api_mocks_checked() {
+            Ok(mock) => state.mock = mock,
+            Err(error) => load_errors.push(error),
+        }
         clear_legacy_api_python_runtime_message(&mut state);
-        if let Ok(content) = std::fs::read_to_string(api_specs_path()) {
-            if let Ok(saved) = serde_json::from_str::<ApiSpecsPersist>(&content) {
+        match load_api_specs_checked() {
+            Ok(Some(saved)) => {
                 state.specs = saved.specs;
                 state.selected_spec = saved.selected_spec;
                 state.next_id = saved.next_id.max(1);
@@ -1548,6 +1646,11 @@ impl ApiClientState {
                     }
                 }
             }
+            Ok(None) => {}
+            Err(error) => load_errors.push(error),
+        }
+        if !load_errors.is_empty() {
+            state.persistence_error = Some(load_errors.join("; "));
         }
         state
     }
@@ -1606,7 +1709,7 @@ impl ApiClientState {
         self.mock_python_install_running = false;
     }
 
-    pub fn persist(&self) {
+    pub fn persist(&mut self) {
         let saved = ApiSpecsPersist {
             specs: self.specs.clone(),
             selected_spec: self.selected_spec,
@@ -1619,11 +1722,21 @@ impl ApiClientState {
                     .unwrap_or(1),
             ),
         };
-        if let Ok(content) = serde_json::to_vec_pretty(&saved) {
-            let _ = crate::platform::atomic_write(&api_specs_path(), &content);
+        let result = (|| -> Result<(), String> {
+            let content = serde_json::to_vec_pretty(&saved)
+                .map_err(|err| format!("API specifications не сериализованы: {err}"))?;
+            crate::platform::atomic_write(&api_specs_path(), &content)
+                .map_err(|err| format!("API specifications не сохранены: {err}"))?;
+            save_api_auth(&self.auth)
+                .map_err(|err| format!("API credentials не сохранены: {err}"))?;
+            save_api_mocks(&self.mock)
+                .map_err(|err| format!("API mock configuration не сохранена: {err}"))?;
+            Ok(())
+        })();
+        self.persistence_error = result.err();
+        if let Some(error) = self.persistence_error.as_deref() {
+            eprintln!("RRiter: {error}");
         }
-        save_api_auth(&self.auth);
-        save_api_mocks(&self.mock);
     }
 
     pub fn body_json_valid_for(
@@ -1640,9 +1753,49 @@ impl ApiClientState {
     }
 
     pub fn alloc_spec_id(&mut self) -> ApiSpecId {
-        let id = ApiSpecId(self.next_id.max(1));
-        self.next_id = self.next_id.saturating_add(1).max(1);
-        id
+        let mut candidate = self.next_id.max(1);
+        loop {
+            let id = ApiSpecId(candidate);
+            let used = self.specs.iter().any(|entry| entry.id == id)
+                || self.models.contains_key(&id)
+                || self.loading.contains(&id)
+                || self.load_tickets.contains_key(&id);
+            candidate = candidate.wrapping_add(1).max(1);
+            if !used {
+                self.next_id = candidate;
+                return id;
+            }
+        }
+    }
+
+    pub fn begin_load(&mut self, id: ApiSpecId, select_on_success: bool) -> u64 {
+        let generation = self.next_load_generation.max(1);
+        self.next_load_generation = generation.wrapping_add(1).max(1);
+        self.loading.insert(id);
+        self.load_tickets.insert(
+            id,
+            ApiLoadTicket {
+                generation,
+                select_on_success,
+            },
+        );
+        generation
+    }
+
+    pub fn is_current_load(&self, id: ApiSpecId, generation: u64) -> bool {
+        self.load_tickets
+            .get(&id)
+            .is_some_and(|ticket| ticket.generation == generation)
+    }
+
+    pub fn finish_load(&mut self, id: ApiSpecId, generation: u64) -> Option<ApiLoadTicket> {
+        let ticket = self.load_tickets.get(&id).copied()?;
+        if ticket.generation != generation {
+            return None;
+        }
+        self.load_tickets.remove(&id);
+        self.loading.remove(&id);
+        Some(ticket)
     }
 
     pub fn selected_model(&self) -> Option<&ApiSpecModel> {
@@ -1703,9 +1856,8 @@ impl ApiClientState {
         self.route_scroll.target = 0.0;
     }
 
-    pub fn upsert_loaded(&mut self, payload: ApiLoadPayload) {
+    pub fn upsert_loaded(&mut self, payload: ApiLoadPayload, select_on_success: bool) {
         let id = payload.entry.id;
-        self.loading.remove(&id);
         if let Some(existing) = self.specs.iter_mut().find(|entry| entry.id == id) {
             *existing = payload.entry.clone();
         } else {
@@ -1715,15 +1867,23 @@ impl ApiClientState {
         if payload.resolved_host.is_some() {
             self.last_resolved_host = payload.resolved_host;
         }
-        self.select_spec(id);
-        if let Some(raw) = payload.raw_json {
-            save_url_cache(id, &raw);
+        if select_on_success || self.selected_spec.is_none() {
+            self.select_spec(id);
         }
+        let cache_error = payload
+            .raw_json
+            .as_deref()
+            .and_then(|raw| save_url_cache(id, raw).err());
         self.persist();
+        if let Some(error) = cache_error {
+            self.persistence_error = Some(match self.persistence_error.take() {
+                Some(existing) => format!("{existing}; {error}"),
+                None => error,
+            });
+        }
     }
 
     pub fn mark_load_error(&mut self, id: ApiSpecId, err: ApiLoadError) {
-        self.loading.remove(&id);
         if let Some(entry) = self.specs.iter_mut().find(|entry| entry.id == id) {
             entry.error = Some(err.message.clone());
             if matches!(entry.source, ApiSpecSource::Url(_)) {
@@ -1745,6 +1905,7 @@ impl ApiClientState {
         self.models.remove(&id);
         self.auth.retain_spec(id);
         self.loading.remove(&id);
+        self.load_tickets.remove(&id);
         self.clear_collapsed_tags_for_spec(id);
         self.collapsed_route_roots.remove(&id);
         self.expanded_mock_routes
@@ -1789,6 +1950,24 @@ struct ApiSpecsPersist {
     #[serde(default)]
     last_resolved_host: Option<ApiResolvedHost>,
     next_id: u64,
+}
+
+fn load_api_specs_checked() -> Result<Option<ApiSpecsPersist>, String> {
+    load_api_specs_from_checked(&api_specs_path())
+}
+
+fn load_api_specs_from_checked(path: &std::path::Path) -> Result<Option<ApiSpecsPersist>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("API specifications не прочитаны: {error}")),
+    };
+    serde_json::from_str::<ApiSpecsPersist>(&content)
+        .map(Some)
+        .map_err(|error| {
+            let backup_note = crate::platform::corrupt_file_backup_note(path);
+            format!("API specifications повреждены: {error}{backup_note}")
+        })
 }
 
 fn api_focus_targets_active_tab(

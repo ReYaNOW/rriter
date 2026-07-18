@@ -23,6 +23,22 @@ fn graphics_version_supported(version: &str, is_gles: bool) -> bool {
     })
 }
 
+fn require_graphics_attribute_location(
+    location: Option<u32>,
+    name: &str,
+) -> Result<u32, String> {
+    location.ok_or_else(|| format!("required shader attribute `{name}` is unavailable"))
+}
+
+fn required_graphics_attribute(
+    gl: &glow::Context,
+    program: glow::Program,
+    name: &str,
+) -> Result<u32, String> {
+    use glow::HasContext;
+    require_graphics_attribute_location(unsafe { gl.get_attrib_location(program, name) }, name)
+}
+
 impl Renderer {
     #[inline(always)]
     pub(crate) fn delayed_tooltip_anchor(
@@ -335,8 +351,12 @@ impl Renderer {
             gl.delete_shader(v_shader);
             gl.delete_shader(f_shader);
 
-            let vao = gl.create_vertex_array().unwrap();
-            let vbo = gl.create_buffer().unwrap();
+            let vao = gl
+                .create_vertex_array()
+                .map_err(|error| format!("failed to create vertex array: {error}"))?;
+            let vbo = gl
+                .create_buffer()
+                .map_err(|error| format!("failed to create vertex buffer: {error}"))?;
             gl.bind_vertex_array(Some(vao));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
 
@@ -344,23 +364,25 @@ impl Renderer {
             gl.buffer_data_size(glow::ARRAY_BUFFER, vbo_size, glow::DYNAMIC_DRAW);
 
             let stride = std::mem::size_of::<Vertex>() as i32;
-            let pos_loc = gl.get_attrib_location(program, "pos").unwrap();
+            let pos_loc = required_graphics_attribute(&gl, program, "pos")?;
             gl.vertex_attrib_pointer_f32(pos_loc, 2, glow::FLOAT, false, stride, 0);
             gl.enable_vertex_attrib_array(pos_loc);
-            let uv_loc = gl.get_attrib_location(program, "uv").unwrap();
+            let uv_loc = required_graphics_attribute(&gl, program, "uv")?;
             gl.vertex_attrib_pointer_f32(uv_loc, 2, glow::FLOAT, false, stride, 8);
             gl.enable_vertex_attrib_array(uv_loc);
-            let color_loc = gl.get_attrib_location(program, "color").unwrap();
+            let color_loc = required_graphics_attribute(&gl, program, "color")?;
             gl.vertex_attrib_pointer_f32(color_loc, 4, glow::FLOAT, false, stride, 16);
             gl.enable_vertex_attrib_array(color_loc);
-            let mode_loc = gl.get_attrib_location(program, "mode").unwrap();
+            let mode_loc = required_graphics_attribute(&gl, program, "mode")?;
             gl.vertex_attrib_pointer_f32(mode_loc, 1, glow::FLOAT, false, stride, 32);
             gl.enable_vertex_attrib_array(mode_loc);
-            let sdf_loc = gl.get_attrib_location(program, "sdf_params").unwrap();
+            let sdf_loc = required_graphics_attribute(&gl, program, "sdf_params")?;
             gl.vertex_attrib_pointer_f32(sdf_loc, 3, glow::FLOAT, false, stride, 36);
             gl.enable_vertex_attrib_array(sdf_loc);
 
-            let texture = gl.create_texture().unwrap();
+            let texture = gl
+                .create_texture()
+                .map_err(|error| format!("failed to create glyph atlas texture: {error}"))?;
             gl.active_texture(glow::TEXTURE0);
             gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             gl.pixel_store_i32(glow::UNPACK_ALIGNMENT, 1);
@@ -473,7 +495,7 @@ impl Renderer {
             let load_icon_from_memory = |data: &[u8], _name: &str| -> Option<glow::Texture> {
                 let img = image::load_from_memory(data).ok()?.into_rgba8();
                 let (w, h) = img.dimensions();
-                let tex = gl.create_texture().unwrap();
+                let tex = gl.create_texture().ok()?;
 
                 gl.bind_texture(glow::TEXTURE_2D, Some(tex));
                 gl.tex_image_2d(
@@ -561,6 +583,8 @@ impl Renderer {
                 frame_count: 0,
                 time_acc: 0.0,
                 search_scroll_x: 0.0,
+                git_commit_scroll_x: 0.0,
+                terminal_search_scroll_x: 0.0,
                 fps_string: String::new(),
                 search_res_string: String::new(),
                 scratch_buffer: String::with_capacity(256),
@@ -657,4 +681,25 @@ mod graphics_diagnostics_tests {
         assert!(!graphics_version_supported("3.2 INTEL", false));
         assert!(!graphics_version_supported("unknown", false));
     }
+
+    #[test]
+    fn bug_67_graphics_resource_allocation_errors_are_returned_not_unwrapped() {
+        let source = include_str!("renderer_init_methods.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production.contains("failed to create vertex array"));
+        assert!(production.contains("failed to create vertex buffer"));
+        assert!(production.contains("failed to create glyph atlas texture"));
+        assert!(!production.contains("create_vertex_array().unwrap"));
+        assert!(!production.contains("create_buffer().unwrap"));
+        assert!(!production.contains("create_texture().unwrap"));
+    }
+
+    #[test]
+    fn bug_68_missing_shader_attribute_returns_a_descriptive_error() {
+        assert_eq!(require_graphics_attribute_location(Some(7), "pos"), Ok(7));
+        let error = require_graphics_attribute_location(None, "sdf_params").unwrap_err();
+        assert!(error.contains("sdf_params"));
+        assert!(error.contains("unavailable"));
+    }
+
 }

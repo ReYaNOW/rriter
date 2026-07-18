@@ -244,15 +244,15 @@ fn parse_borrowed_diagnostic_value(v: &BorrowedDiagnostic<'_>) -> Diagnostic {
 pub(super) fn parse_publish_diagnostics_frame(
     body: &[u8],
     server_name: &'static str,
-) -> Option<LspEvent> {
-    let frame: PublishDiagnosticsFrame<'_> = serde_json::from_slice(body).ok()?;
+) -> Result<LspEvent, serde_json::Error> {
+    let frame: PublishDiagnosticsFrame<'_> = serde_json::from_slice(body)?;
     let items = frame
         .params
         .diagnostics
         .iter()
         .map(parse_borrowed_diagnostic_value)
         .collect::<Vec<_>>();
-    Some(LspEvent::Diagnostics {
+    Ok(LspEvent::Diagnostics {
         server_name,
         path: uri_to_path(frame.params.uri),
         version: frame.params.version,

@@ -566,6 +566,7 @@ impl Renderer {
             model
         };
         if tab_state.auth_view {
+            ui_registry.push_clip(crate::ui_system::UiClipRect::new(x, y, w, h));
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
@@ -699,6 +700,7 @@ impl Renderer {
                 }
             }
             self.restore_api_tab_clip(tab_clip);
+            ui_registry.pop_clip();
             self.flush();
             unsafe {
                 self.gl.disable(glow::SCISSOR_TEST);
@@ -744,6 +746,7 @@ impl Renderer {
             .is_some_and(|script| script.enabled);
 
         self.flush();
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(x, y, w, h));
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
@@ -3027,6 +3030,7 @@ impl Renderer {
             );
         }
 
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);

@@ -1,7 +1,32 @@
 use crate::editor::Editor;
 use crate::renderer::Renderer;
 use crate::widgets::IconButton;
-use glow::HasContext;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct SearchPanelGeometry {
+    pub x: f32,
+    pub w: f32,
+    pub input_w: f32,
+    pub close_x: f32,
+    pub close_size: f32,
+    pub counter_reserve: f32,
+}
+
+pub(crate) fn search_panel_geometry(scrollbar_x: f32, scale: f32) -> SearchPanelGeometry {
+    let w = (480.0 * scale).min((scrollbar_x - 8.0 * scale).max(0.0));
+    let x = (scrollbar_x - w - 8.0 * scale).max(0.0);
+    let btn_size = 36.0 * scale;
+    let gap = (10.0 * scale).min(w * 0.025);
+    let show_nav = w >= 250.0 * scale;
+    let show_case = w >= 330.0 * scale;
+    let count = 1 + usize::from(show_nav) * 2 + usize::from(show_case);
+    let controls = count as f32 * btn_size + count.saturating_sub(1) as f32 * gap;
+    let counter = if w >= 235.0 * scale { 52.0 * scale } else { 0.0 };
+    let input_w = (w - 20.0 * scale - controls - counter - 8.0 * scale).max(0.0);
+    let close_size = btn_size.min(w.max(0.0));
+    let close_x = (x + w - 10.0 * scale - close_size).max(x);
+    SearchPanelGeometry { x, w, input_w, close_x, close_size, counter_reserve: counter }
+}
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
@@ -22,19 +47,22 @@ impl Renderer {
         let wants_pointer = false;
         let s = self.scale_factor;
         let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
-        let search_w = 480.0 * s;
+        let geometry = search_panel_geometry(scrollbar_x, s);
+        let search_w = geometry.w;
         let search_h = 52.0 * s;
-        let search_x = scrollbar_x - search_w - 20.0 * s;
+        let search_x = geometry.x;
 
-        ui_registry.register_blocker(
-            crate::ui_system::UiId::SearchPanelBody,
-            search_x,
-            search_anim_y,
-            search_w,
-            search_h,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
+        if search_w > 0.0 && search_h > 0.0 {
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::SearchPanelBody,
+                search_x,
+                search_anim_y,
+                search_w,
+                search_h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+        }
 
         self.push_rounded_rect(
             search_x,
@@ -69,202 +97,96 @@ impl Renderer {
 
         let input_x = search_x + 10.0 * s;
         let input_y = search_anim_y + 11.0 * s;
-        let input_w = 215.0 * s;
         let input_h = 30.0 * s;
+        let btn_size = 36.0 * s;
+        let btn_gap = (10.0 * s).min(search_w * 0.025);
+        let show_nav = search_w >= 250.0 * s;
+        let show_case = search_w >= 330.0 * s;
+        let input_w = geometry.input_w;
+        let counter_reserve = geometry.counter_reserve;
 
-        let input_bg = self.theme.bg;
-        let input_border = if search_focused {
-            self.theme.sel
-        } else {
-            [0.3, 0.3, 0.3, 1.0]
-        };
-        self.push_rounded_rect(
-            input_x - 1.0,
-            input_y - 1.0,
-            input_w + 2.0,
-            input_h + 2.0,
-            4.0 * s,
-            input_border,
+        if input_w > 0.0 {
+            ui_registry.register_text_input(
+                crate::ui_system::UiId::SearchInput,
+                input_x,
+                input_y,
+                input_w,
+                input_h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
+        }
+        let text = search_editor.get_full_text();
+        self.search_scroll_x = self.one_line_scroll_for_cursor(
+            &text,
+            search_editor.cursor,
+            1.0,
+            (input_w - 10.0 * s).max(0.0),
+            self.search_scroll_x,
         );
-        self.push_rounded_rect(input_x, input_y, input_w, input_h, 4.0 * s, input_bg);
-
-        ui_registry.register_text_input(
-            crate::ui_system::UiId::SearchInput,
+        self.draw_one_line_input_with_chrome(
+            &text,
+            search_editor.cursor,
+            search_editor.selection_anchor,
+            false,
+            search_focused,
             input_x,
             input_y,
             input_w,
             input_h,
-            self.last_mouse_x,
-            self.last_mouse_y,
+            self.search_scroll_x,
+            blink_alpha,
+            1.0,
+            0.0,
+            5.0 * s,
+            4.0 * s,
         );
-
-        self.flush();
-        unsafe {
-            let text = search_editor.get_full_text();
-            let text_y = input_y + input_h / 2.0 + 6.0 * s;
-            let text_start_x = input_x + 5.0 * s;
-            let visible_width = input_w - 10.0 * s;
-
-            let mut cursor_total_x = 0.0;
-            let mut total_text_width = 0.0;
-            for (byte_idx, c) in text.char_indices() {
-                let char_to_measure = if c == '\n' { '↵' } else { c };
-                let adv = self
-                    .get_ui_glyph(char_to_measure)
-                    .map(|g| g.advance)
-                    .unwrap_or(10.0);
-                if byte_idx < search_editor.cursor {
-                    cursor_total_x += adv;
-                }
-                total_text_width += adv;
-            }
-
-            if cursor_total_x - self.search_scroll_x > visible_width {
-                self.search_scroll_x = cursor_total_x - visible_width;
-            }
-            if cursor_total_x - self.search_scroll_x < 0.0 {
-                self.search_scroll_x = cursor_total_x;
-            }
-            self.search_scroll_x = self
-                .search_scroll_x
-                .min(total_text_width - visible_width)
-                .max(0.0);
-
-            self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (input_y + input_h);
-            self.gl.scissor(
-                input_x as i32,
-                scissor_y as i32,
-                input_w as i32,
-                input_h as i32,
-            );
-
-            let sel_start = search_editor
-                .selection_anchor
-                .unwrap_or(search_editor.cursor)
-                .min(search_editor.cursor);
-            let sel_end = search_editor
-                .selection_anchor
-                .unwrap_or(search_editor.cursor)
-                .max(search_editor.cursor);
-
-            let mut current_x = text_start_x - self.search_scroll_x;
-            let mut byte_idx = 0;
-            let mut cursor_draw_x = current_x;
-
-            for c in text.chars() {
-                if byte_idx == search_editor.cursor {
-                    cursor_draw_x = current_x;
-                }
-
-                let char_to_render = if c == '\n' { '↵' } else { c };
-                let adv = self
-                    .get_ui_glyph(char_to_render)
-                    .map(|g| g.advance)
-                    .unwrap_or(10.0);
-
-                if byte_idx >= sel_start && byte_idx < sel_end {
-                    self.push_rect(
-                        current_x,
-                        input_y + 4.0 * s,
-                        adv,
-                        input_h - 8.0 * s,
-                        self.theme.sel,
-                    );
-                }
-
-                if let Some(g) = self.get_ui_glyph(char_to_render) {
-                    self.push_quad(
-                        current_x + g.offset_x,
-                        text_y - g.offset_y,
-                        g.width,
-                        g.height,
-                        g.u,
-                        g.v,
-                        g.uw,
-                        g.vh,
-                        self.theme.fg,
-                        g.is_emoji,
-                    );
-                }
-
-                current_x += adv;
-                byte_idx += c.len_utf8();
-            }
-            if byte_idx == search_editor.cursor {
-                cursor_draw_x = current_x;
-            }
-
-            if search_focused && sel_start == sel_end && blink_alpha > 0.5 {
-                self.push_rect(
-                    cursor_draw_x,
-                    input_y + 4.0 * s,
-                    2.0 * s,
-                    input_h - 8.0 * s,
-                    self.theme.fg,
-                );
-            }
-
-            self.flush();
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
 
         let text_y = input_y + input_h / 2.0 + 6.0 * s;
         let btn_y = search_anim_y + 8.0 * s;
-        let btn_size = 36.0 * s;
 
-        let mut current_x = search_x + search_w - 10.0 * s;
-
-        current_x -= btn_size;
+        let close_size = geometry.close_size;
+        let mut current_x = geometry.close_x;
         let btn_close = IconButton {
             x: current_x,
             y: btn_y,
-            size: btn_size,
+            size: close_size,
             icon: Some(crate::widgets::IconType::Close),
             is_active: false,
             icon_size: Some(26.0 * s),
             active_square_width: None,
             custom_color: None,
         };
-        current_x -= 10.0 * s;
+        current_x -= btn_gap;
 
-        current_x -= btn_size;
-        let btn_down = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::Down),
-            is_active: false,
-            icon_size: Some(37.0 * s),
-            active_square_width: None,
-            custom_color: None,
-        };
-        current_x -= 10.0 * s;
-
-        current_x -= btn_size;
-        let btn_up = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::Up),
-            is_active: false,
-            icon_size: Some(37.0 * s),
-            active_square_width: None,
-            custom_color: None,
-        };
-        current_x -= 10.0 * s;
-
-        current_x -= btn_size;
-        let btn_case = IconButton {
-            x: current_x,
-            y: btn_y,
-            size: btn_size,
-            icon: Some(crate::widgets::IconType::CaseMatch),
-            is_active: search_case_sensitive,
-            icon_size: Some(30.0 * s),
-            active_square_width: None,
-            custom_color: None,
-        };
+        let btn_down = if show_nav {
+            current_x -= btn_size;
+            let button = IconButton {
+                x: current_x, y: btn_y, size: btn_size,
+                icon: Some(crate::widgets::IconType::Down), is_active: false,
+                icon_size: Some(37.0 * s), active_square_width: None, custom_color: None,
+            };
+            current_x -= btn_gap;
+            Some(button)
+        } else { None };
+        let btn_up = if show_nav {
+            current_x -= btn_size;
+            let button = IconButton {
+                x: current_x, y: btn_y, size: btn_size,
+                icon: Some(crate::widgets::IconType::Up), is_active: false,
+                icon_size: Some(37.0 * s), active_square_width: None, custom_color: None,
+            };
+            current_x -= btn_gap;
+            Some(button)
+        } else { None };
+        let btn_case = if show_case {
+            current_x -= btn_size;
+            Some(IconButton {
+                x: current_x, y: btn_y, size: btn_size,
+                icon: Some(crate::widgets::IconType::CaseMatch), is_active: search_case_sensitive,
+                icon_size: Some(30.0 * s), active_square_width: None, custom_color: None,
+            })
+        } else { None };
 
         if search_results.len() != self.last_search_len
             || search_current_idx != self.last_search_idx
@@ -297,7 +219,7 @@ impl Renderer {
             (temp_res_text.as_str(), [0.6, 0.6, 0.6, 1.0])
         };
 
-        if !res_text.is_empty() {
+        if counter_reserve > 0.0 && !res_text.is_empty() {
             let counter_x = input_x + input_w + 10.0 * s;
             self.draw_string_mono_scaled(res_text, counter_x, text_y, text_color, 0.9);
         }
@@ -307,33 +229,21 @@ impl Renderer {
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
 
-        ui_registry.register_icon_button(
-            crate::ui_system::UiId::SearchCaseToggle,
-            &btn_case,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
-        ui_registry.register_icon_button(
-            crate::ui_system::UiId::SearchPrev,
-            &btn_up,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
-        ui_registry.register_icon_button(
-            crate::ui_system::UiId::SearchNext,
-            &btn_down,
-            self,
-            mx,
-            my,
-            s,
-            false,
-        );
+        if let Some(btn_case) = &btn_case {
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::SearchCaseToggle, btn_case, self, mx, my, s, false,
+            );
+        }
+        if let Some(btn_up) = &btn_up {
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::SearchPrev, btn_up, self, mx, my, s, false,
+            );
+        }
+        if let Some(btn_down) = &btn_down {
+            ui_registry.register_icon_button(
+                crate::ui_system::UiId::SearchNext, btn_down, self, mx, my, s, false,
+            );
+        }
         ui_registry.register_icon_button(
             crate::ui_system::UiId::SearchClose,
             &btn_close,

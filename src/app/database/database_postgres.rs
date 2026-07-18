@@ -393,6 +393,31 @@ fn install_rustls_provider() -> Result<(), DatabaseBackendError> {
         .map_err(DatabaseBackendError::InvalidConfiguration)
 }
 
+
+
+pub async fn finish_postgres_transaction(
+    session: &PostgresSession,
+    commit: bool,
+) -> Result<(), DatabaseBackendError> {
+    session
+        .client
+        .batch_execute(if commit { "COMMIT" } else { "ROLLBACK" })
+        .await?;
+    Ok(())
+}
+
+pub async fn rollback_postgres_transaction_after_error(
+    session: &PostgresSession,
+    primary: DatabaseBackendError,
+) -> DatabaseBackendError {
+    match finish_postgres_transaction(session, false).await {
+        Ok(()) => primary,
+        Err(rollback) => DatabaseBackendError::InvalidConfiguration(format!(
+            "{primary}; automatic ROLLBACK also failed: {rollback}"
+        )),
+    }
+}
+
 pub async fn test_database_connection(
     connection: &DatabaseConnectionConfig,
     secrets: &DatabaseSecretBundle,

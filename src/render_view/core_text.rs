@@ -33,6 +33,45 @@ fn pixel_snapped_ui_glyph_rect(
     ))
 }
 
+fn for_each_spanned_ui_char(
+    text: &str,
+    spans: &[crate::highlighter::ColorSpan],
+    base_offset: Option<usize>,
+    mut callback: impl FnMut(char, [f32; 4]),
+) {
+    let mut current_offset = base_offset.unwrap_or(usize::MAX);
+    let mut span_index = base_offset
+        .map(
+            |offset| match spans.binary_search_by_key(&offset, |span| span.start) {
+                Ok(index) => index,
+                Err(index) => index.saturating_sub(1),
+            },
+        )
+        .unwrap_or(0);
+    for ch in text.chars() {
+        if matches!(ch, '\n' | '\r') {
+            break;
+        }
+        let color = if base_offset.is_some() {
+            while span_index < spans.len() && spans[span_index].end <= current_offset {
+                span_index += 1;
+            }
+            if span_index < spans.len()
+                && spans[span_index].start <= current_offset
+                && current_offset < spans[span_index].end
+            {
+                spans[span_index].color
+            } else {
+                [f32::NAN; 4]
+            }
+        } else {
+            [f32::NAN; 4]
+        };
+        callback(ch, color);
+        current_offset = current_offset.saturating_add(ch.len_utf8());
+    }
+}
+
 pub(crate) fn wrapped_text_ranges(
     text: &str,
     max_width: f32,
@@ -214,6 +253,71 @@ mod tests {
             pixel_snapped_ui_glyph_rect(10.0, 100.0, 0.0, 0.0, 0.0, 10.0, 0.74),
             None
         );
+    }
+
+    #[test]
+    fn spanned_ui_chars_keep_utf8_offsets_and_exact_span_colors() {
+        let expected = [0.1, 0.2, 0.3, 1.0];
+        let spans = vec![crate::highlighter::ColorSpan {
+            start: 2,
+            end: 6,
+            color: expected,
+        }];
+        let mut seen = Vec::new();
+        for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {
+            seen.push((ch, color));
+        });
+        assert!(seen[0].1[0].is_nan());
+        assert_eq!(seen[1], ('а', expected));
+        assert_eq!(seen[2], ('б', expected));
+        assert!(seen[3].1[0].is_nan());
+    }
+
+    #[test]
+    fn bug_1_database_sql_renderer_uses_shared_spanned_utf8_walk() {
+        let expected = [0.1, 0.2, 0.3, 1.0];
+        let spans = [crate::highlighter::ColorSpan {
+            start: 7,
+            end: 9,
+            color: expected,
+        }];
+        let mut seen = Vec::new();
+        for_each_spanned_ui_char("SELECT Ж", &spans, Some(0), |ch, color| seen.push((ch, color)));
+        assert_eq!(seen.last(), Some(&('Ж', expected)));
+    }
+
+    #[test]
+    fn bug_2_api_python_renderer_uses_shared_utf8_byte_offsets() {
+        let expected = [0.9, 0.4, 0.2, 1.0];
+        let spans = [crate::highlighter::ColorSpan {
+            start: 2,
+            end: 6,
+            color: expected,
+        }];
+        let mut colored = Vec::new();
+        for_each_spanned_ui_char("xабy", &spans, Some(1), |ch, color| {
+            if !color[0].is_nan() {
+                colored.push(ch);
+            }
+        });
+        assert_eq!(colored, vec!['а', 'б']);
+    }
+
+    #[test]
+    fn bug_3_inline_git_renderer_emits_one_callback_per_character() {
+        let text = "a.Ж:b";
+        let mut visited = String::new();
+        for_each_spanned_ui_char(text, &[], None, |ch, _| visited.push(ch));
+        assert_eq!(visited, text);
+    }
+
+    #[test]
+    fn bug_4_punctuation_is_visited_once_without_duplicate_quad_workaround() {
+        let mut chars = Vec::new();
+        for_each_spanned_ui_char("a.:b", &[], None, |ch, _| chars.push(ch));
+        assert_eq!(chars, vec!['a', '.', ':', 'b']);
+        assert_eq!(chars.iter().filter(|&&ch| ch == '.').count(), 1);
+        assert_eq!(chars.iter().filter(|&&ch| ch == ':').count(), 1);
     }
 
     #[test]
@@ -1141,6 +1245,74 @@ impl Renderer {
                 draw_x += Self::snapped_text_advance(g.advance, scale);
             }
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_spanned_ui_line_pixel_snapped(
+        &mut self,
+        text: &str,
+        spans: &[crate::highlighter::ColorSpan],
+        base_offset: Option<usize>,
+        x: f32,
+        y: f32,
+        max_x: f32,
+        scale: f32,
+    ) {
+        let _ = self.draw_spanned_ui_line_pixel_snapped_alpha(
+            text, spans, base_offset, x, y, max_x, scale, 1.0,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_spanned_ui_line_pixel_snapped_alpha(
+        &mut self,
+        text: &str,
+        spans: &[crate::highlighter::ColorSpan],
+        base_offset: Option<usize>,
+        x: f32,
+        y: f32,
+        max_x: f32,
+        scale: f32,
+        alpha: f32,
+    ) -> f32 {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        let alpha = alpha.clamp(0.0, 1.0);
+        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+            if draw_x > max_x {
+                return;
+            }
+            if let Some(glyph) = self.get_ui_glyph(ch) {
+                let mut color = if span_color[0].is_nan() { self.theme.fg } else { span_color };
+                color[3] *= alpha;
+                if ch != ' ' && ch != '\t'
+                    && let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_ui_glyph_rect(
+                        draw_x,
+                        baseline_y,
+                        glyph.offset_x,
+                        glyph.offset_y,
+                        glyph.width,
+                        glyph.height,
+                        scale,
+                    )
+                {
+                    self.push_quad(
+                        q_x,
+                        q_y,
+                        q_w,
+                        q_h,
+                        glyph.u,
+                        glyph.v,
+                        glyph.uw,
+                        glyph.vh,
+                        color,
+                        glyph.is_emoji,
+                    );
+                }
+                draw_x += Self::snapped_text_advance(glyph.advance, scale);
+            }
+        });
+        draw_x
     }
 
     pub fn draw_string_mono_scaled(

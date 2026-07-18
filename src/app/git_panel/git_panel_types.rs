@@ -325,7 +325,7 @@ pub struct GitPanelState {
     pub graph_commit_limit: usize,
     pub graph_has_more: bool,
     pub graph_copied_commit: Option<(usize, usize)>,
-    graph_rx: Vec<mpsc::Receiver<GitGraphEvent>>,
+    graph_rx: Vec<GitGraphReceiver>,
     graph_next_request_id: u64,
     graph_latest_request_id: u64,
     graph_latest_request_by_root: FxHashMap<crate::platform::PathKey, u64>,
@@ -336,8 +336,15 @@ pub struct GitPanelState {
 
 struct GitPanelReceiver {
     rx: mpsc::Receiver<GitPanelTaskResult>,
+    request_id: u64,
     blocking: bool,
     refresh: bool,
+}
+
+struct GitGraphReceiver {
+    rx: mpsc::Receiver<GitGraphEvent>,
+    request_id: u64,
+    repo_root: PathBuf,
 }
 
 struct GitPanelTaskResult {
@@ -404,6 +411,83 @@ impl Default for GitPanelState {
 }
 
 impl GitPanelState {
+    pub(crate) fn allocate_status_request_id(&mut self) -> u64 {
+        let request_id = self.next_request_id.max(1);
+        self.next_request_id = request_id.wrapping_add(1).max(1);
+        self.latest_request_id = request_id;
+        request_id
+    }
+
+    pub(crate) fn allocate_graph_request_id(&mut self) -> u64 {
+        let request_id = self.graph_next_request_id.max(1);
+        self.graph_next_request_id = request_id.wrapping_add(1).max(1);
+        self.graph_latest_request_id = request_id;
+        request_id
+    }
+
+    pub(crate) fn reset_async_state(&mut self) {
+        self.rx.clear();
+        self.graph_rx.clear();
+        self.pending = false;
+        self.pending_label = None;
+        self.pending_started_at = None;
+        self.status_refresh_pending = false;
+        self.status_refresh_dirty = false;
+        self.stage_pending_workspace_idx = None;
+        self.graph_pending = false;
+        self.graph_pending_roots.clear();
+        self.graph_latest_request_by_root.clear();
+    }
+
+    pub(crate) fn handle_status_disconnect(&mut self, request_id: u64) {
+        if request_id == self.latest_request_id {
+            self.notice = Some("Git-операция неожиданно завершилась".to_string());
+        }
+    }
+
+    pub(crate) fn handle_graph_disconnect(&mut self, repo_root: &std::path::Path, request_id: u64) {
+        let key = crate::platform::PathKey::new(repo_root);
+        self.graph_pending_roots.remove(&key);
+        if self.graph_latest_request_by_root.get(&key).copied() == Some(request_id) {
+            self.graph_latest_request_by_root.remove(&key);
+            self.graph_notice = Some("Загрузка Git Graph неожиданно завершилась".to_string());
+            if self.graph_repo_root.as_ref().is_some_and(|root| crate::platform::paths_equal(root, repo_root)) {
+                self.graph_pending = false;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_graph_request_for_test(
+        &mut self,
+        repo_root: std::path::PathBuf,
+        request_id: u64,
+        active: bool,
+    ) {
+        let key = crate::platform::PathKey::new(&repo_root);
+        self.graph_latest_request_by_root.insert(key.clone(), request_id);
+        self.graph_pending_roots.insert(key);
+        if active {
+            self.graph_repo_root = Some(repo_root);
+            self.graph_pending = true;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_graph_next_request_id_for_test(&mut self, value: u64) {
+        self.graph_next_request_id = value;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn async_state_is_empty_for_test(&self) -> bool {
+        self.rx.is_empty()
+            && self.graph_rx.is_empty()
+            && self.graph_pending_roots.is_empty()
+            && self.graph_latest_request_by_root.is_empty()
+            && !self.pending
+            && !self.graph_pending
+    }
+
     fn begin_status_refresh(&mut self) -> bool {
         if self.status_refresh_pending {
             self.status_refresh_dirty = true;

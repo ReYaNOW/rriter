@@ -178,69 +178,17 @@ fn autocomplete_push_dedent_line(out: &mut Vec<String>, line: &str, base_indent:
     }
 }
 
-fn autocomplete_scan_brackets(
-    line: &str,
-    paren_depth: &mut i32,
-    bracket_depth: &mut i32,
-    brace_depth: &mut i32,
-    in_string: &mut bool,
-    string_char: &mut char,
-) {
-    for c in line.chars() {
-        if *in_string {
-            if c == '\\' {
-                continue;
-            }
-            if c == *string_char {
-                *in_string = false;
-            }
-        } else {
-            match c {
-                '"' | '\'' => {
-                    *in_string = true;
-                    *string_char = c;
-                }
-                '(' => *paren_depth += 1,
-                ')' => *paren_depth -= 1,
-                '[' => *bracket_depth += 1,
-                ']' => *bracket_depth -= 1,
-                '{' => *brace_depth += 1,
-                '}' => *brace_depth -= 1,
-                _ => {}
-            }
-        }
-    }
-}
-
 fn autocomplete_collect_assignment(lines: &[&str], idx: usize) -> String {
-    let mut paren_depth = 0;
-    let mut bracket_depth = 0;
-    let mut brace_depth = 0;
-    let mut in_string = false;
-    let mut string_char = ' ';
+    let mut delimiters = crate::languages::PythonDelimiterState::default();
     let mut statement_lines = vec![lines[idx].trim_end().to_string()];
 
-    autocomplete_scan_brackets(
-        lines[idx],
-        &mut paren_depth,
-        &mut bracket_depth,
-        &mut brace_depth,
-        &mut in_string,
-        &mut string_char,
-    );
+    delimiters.scan_line(lines[idx]);
     let mut curr_idx = idx;
-    while (paren_depth > 0 || bracket_depth > 0 || brace_depth > 0) && curr_idx + 1 < lines.len() {
+    while delimiters.has_open_delimiter() && curr_idx + 1 < lines.len() {
         curr_idx += 1;
         let line = lines[curr_idx].trim_end();
         statement_lines.push(line.to_string());
-        autocomplete_scan_brackets(
-            line,
-            &mut paren_depth,
-            &mut bracket_depth,
-            &mut brace_depth,
-            &mut in_string,
-            &mut string_char,
-        );
+        delimiters.scan_line(line);
     }
     statement_lines.join("\n")
 }

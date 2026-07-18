@@ -365,7 +365,7 @@ impl App {
                     let text = self.editor.get_full_text();
                     let ext = self.file_extension.clone();
                     let path = path.clone();
-                    lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                    lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
                 }
             }
             self.highlighter
@@ -454,7 +454,7 @@ impl App {
                             let text = self.editor.get_full_text();
                             let ext = self.file_extension.clone();
                             let path = path.clone();
-                            lsp.notify_change(&path, &ext, &text, self.editor.version as i32);
+                            lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
                         }
                     }
                     self.highlighter

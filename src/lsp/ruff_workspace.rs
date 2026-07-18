@@ -7,7 +7,7 @@ use std::time::Duration;
 
 pub(super) struct RuffWorkspaceResult {
     pub(super) workspaces: Vec<PathBuf>,
-    pub(super) diagnostics: HashMap<PathBuf, Vec<Diagnostic>>,
+    pub(super) diagnostics: Result<HashMap<PathBuf, Vec<Diagnostic>>, String>,
 }
 
 pub(super) fn collect_workspace_diagnostics(workspaces: Vec<PathBuf>) -> RuffWorkspaceResult {
@@ -27,7 +27,23 @@ impl super::LspManager {
         match rx.try_recv() {
             Ok(mut result) => {
                 self.ruff_workspace_diag_pending = false;
-                self.apply_ruff_workspace_diagnostics(&mut result)
+                match result.diagnostics.as_mut() {
+                    Ok(diagnostics) => {
+                        self.apply_ruff_workspace_diagnostics(&result.workspaces, diagnostics)
+                    }
+                    Err(error) => {
+                        self.server_logs
+                            .entry("ruff")
+                            .or_default()
+                            .push(super::LogEntry {
+                                text: format!("[LSP] Ruff workspace diagnostics failed: {error}"),
+                                spans: Vec::new(),
+                                folds: Vec::new(),
+                                created_at: std::time::Instant::now(),
+                            });
+                        0
+                    }
+                }
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {
                 self.ruff_workspace_diag_rx = Some(rx);
@@ -35,13 +51,28 @@ impl super::LspManager {
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.ruff_workspace_diag_pending = false;
+                self.ruff_workspace_diagnostics.clear();
+                self.python_status = super::LspServerStatus::Crashed;
+                self.server_logs
+                    .entry("ruff")
+                    .or_default()
+                    .push(super::LogEntry {
+                        text: "[LSP] Ruff workspace diagnostics worker disconnected".to_string(),
+                        spans: Vec::new(),
+                        folds: Vec::new(),
+                        created_at: std::time::Instant::now(),
+                    });
                 0
             }
         }
     }
 
-    fn apply_ruff_workspace_diagnostics(&mut self, result: &mut RuffWorkspaceResult) -> usize {
-        for workspace in &result.workspaces {
+    fn apply_ruff_workspace_diagnostics(
+        &mut self,
+        workspaces: &[PathBuf],
+        diagnostics: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+    ) -> usize {
+        for workspace in workspaces {
             self.ruff_workspace_diagnostics
                 .retain(|path, _| !crate::platform::path_is_within(path, workspace));
             self.merged_diagnostic_indices
@@ -50,7 +81,7 @@ impl super::LspManager {
 
         let mut received = 0usize;
         let active_workspaces = self.active_workspaces.clone();
-        for (path, items) in result.diagnostics.drain() {
+        for (path, items) in diagnostics.drain() {
             if !active_workspaces
                 .iter()
                 .any(|workspace| crate::platform::path_is_within(&path, workspace))
@@ -91,9 +122,7 @@ impl super::LspManager {
 
         let workspaces = self.active_workspaces.clone();
         let (tx, rx) = std::sync::mpsc::channel();
-        let spawn_result = std::thread::Builder::new()
-            .name("rriter-ruff-workspace".into())
-            .spawn(move || {
+        let spawn_result = crate::platform::spawn_named("rriter-ruff-workspace", move || {
                 let result = collect_workspace_diagnostics(workspaces);
                 let _ = tx.send(result);
             });
@@ -104,37 +133,57 @@ impl super::LspManager {
             self.ruff_workspace_diag_dirty = false;
         } else {
             self.ruff_workspace_diag_dirty = false;
+            self.python_status = super::LspServerStatus::Crashed;
+            self.server_logs
+                .entry("ruff")
+                .or_default()
+                .push(super::LogEntry {
+                    text: "[LSP] Ruff workspace diagnostics worker failed to start".to_string(),
+                    spans: Vec::new(),
+                    folds: Vec::new(),
+                    created_at: std::time::Instant::now(),
+                });
         }
     }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn run_ruff_workspace_check(workspaces: &[PathBuf]) -> HashMap<PathBuf, Vec<Diagnostic>> {
+fn run_ruff_workspace_check(
+    workspaces: &[PathBuf],
+) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, String> {
     if workspaces.is_empty() {
-        return HashMap::new();
+        return Ok(HashMap::new());
     }
 
-    let Some(output) = run_ruff_check_command(workspaces) else {
-        return HashMap::new();
-    };
+    let output = run_ruff_check_command(workspaces)?;
 
     if output.stdout.is_empty() && !output.status.success() {
-        return HashMap::new();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "ruff exited with {}{}",
+            output.status,
+            (!stderr.trim().is_empty())
+                .then(|| format!(": {}", stderr.trim()))
+                .unwrap_or_default()
+        ));
     }
 
-    parse_ruff_check_json(&output.stdout, workspaces).unwrap_or_default()
+    parse_ruff_check_json(&output.stdout, workspaces)
+        .map_err(|error| format!("invalid ruff JSON: {error}"))
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn run_ruff_check_command(workspaces: &[PathBuf]) -> Option<Output> {
-    let mut cmd = crate::platform::command_for_tool("ruff".as_ref(), "RRITER_RUFF_PATH").ok()?;
+fn run_ruff_check_command(workspaces: &[PathBuf]) -> Result<Output, String> {
+    let mut cmd = crate::platform::command_for_tool("ruff".as_ref(), "RRITER_RUFF_PATH")
+        .map_err(|error| error.to_string())?;
     cmd.arg("check")
         .arg("--output-format=json")
         .arg("--force-exclude");
     for workspace in workspaces {
         cmd.arg(workspace);
     }
-    crate::platform::run_command_output(&mut cmd, Duration::from_secs(120)).ok()
+    crate::platform::run_command_output(&mut cmd, Duration::from_secs(120))
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn parse_ruff_check_json(
@@ -466,4 +515,11 @@ mod tests {
         assert!(is_under_workspace(Path::new("/tmp/b/app.py"), &roots));
         assert!(!is_under_workspace(Path::new("/tmp/c/app.py"), &roots));
     }
+
+    #[test]
+    fn malformed_ruff_json_is_an_error_instead_of_an_empty_success() {
+        let error = parse_ruff_check_json(b"not json", &[ws()]).unwrap_err();
+        assert!(error.to_string().contains("expected"));
+    }
+
 }

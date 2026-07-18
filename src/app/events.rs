@@ -11,6 +11,7 @@ use winit::window::WindowId;
 
 mod window_runtime;
 mod about;
+pub(crate) use about::file_watcher_disconnect_message;
 mod source_hover;
 pub(crate) use source_hover::apply_source_hover_response_to_state;
 pub(crate) use source_hover::module_path_from_definition_path;
@@ -315,34 +316,9 @@ impl ApplicationHandler for App {
                             );
 
                         if btn_save.is_hovered(mx, my) {
-                            if self.save_current_file() {
-                                if let Some(w) = self.window.as_ref() {
-                                    App::update_window_title(
-                                        w,
-                                        &self.base_title,
-                                        self.editor.is_dirty(),
-                                    );
-                                }
-                                let action = self.pending_action;
-                                self.close_dialog();
-                                if action == PendingAction::Quit {
-                                    window_runtime::save_state_and_exit(self, event_loop);
-                                } else if action == PendingAction::OpenFile {
-                                    self.trigger_file_picker();
-                                } else if action == PendingAction::CloseFile {
-                                    self.close_current_file();
-                                }
-                            }
+                            self.begin_pending_action_save();
                         } else if btn_discard.is_hovered(mx, my) {
-                            let action = self.pending_action;
-                            self.close_dialog();
-                            if action == PendingAction::Quit {
-                                window_runtime::save_state_and_exit(self, event_loop);
-                            } else if action == PendingAction::OpenFile {
-                                self.trigger_file_picker();
-                            } else if action == PendingAction::CloseFile {
-                                self.close_current_file();
-                            }
+                            self.discard_pending_action_changes();
                         } else if btn_cancel.is_hovered(mx, my) {
                             self.close_dialog();
                         }
@@ -353,27 +329,59 @@ impl ApplicationHandler for App {
                         dw.request_redraw();
                     }
                     WindowEvent::RedrawRequested => {
-                        let gl_context = self.gl_context.as_ref().unwrap();
-                        let gl_surface = self.dialog_gl_surface.as_ref().unwrap();
-                        gl_context.make_current(gl_surface).unwrap();
+                        let redraw_result = (|| -> Result<(), String> {
+                            let gl_context = self
+                                .gl_context
+                                .as_ref()
+                                .ok_or_else(|| "GL context is unavailable".to_string())?;
+                            let gl_surface = self
+                                .dialog_gl_surface
+                                .as_ref()
+                                .ok_or_else(|| "dialog GL surface is unavailable".to_string())?;
+                            gl_context
+                                .make_current(gl_surface)
+                                .map_err(|error| format!("failed to activate dialog GL surface: {error}"))?;
 
-                        let r = self.renderer.as_mut().unwrap();
-                        let s = r.scale_factor;
-                        r.resize((660.0 * s) as u32, (260.0 * s) as u32);
+                            let r = self
+                                .renderer
+                                .as_mut()
+                                .ok_or_else(|| "renderer is unavailable".to_string())?;
+                            let s = r.scale_factor;
+                            r.resize((660.0 * s) as u32, (260.0 * s) as u32);
 
-                        unsafe {
-                            use glow::HasContext;
-                            r.gl.clear_color(0.12, 0.13, 0.22, 1.0);
-                            r.gl.clear(glow::COLOR_BUFFER_BIT);
+                            unsafe {
+                                use glow::HasContext;
+                                r.gl.clear_color(0.12, 0.13, 0.22, 1.0);
+                                r.gl.clear(glow::COLOR_BUFFER_BIT);
+                            }
+
+                            r.draw_dialog_window(&self.base_title);
+                            gl_surface
+                                .swap_buffers(gl_context)
+                                .map_err(|error| format!("failed to present dialog frame: {error}"))?;
+
+                            let main_surface = self
+                                .gl_surface
+                                .as_ref()
+                                .ok_or_else(|| "main GL surface is unavailable".to_string())?;
+                            gl_context
+                                .make_current(main_surface)
+                                .map_err(|error| format!("failed to restore main GL surface: {error}"))?;
+                            let mw = self
+                                .window
+                                .as_ref()
+                                .ok_or_else(|| "main window is unavailable".to_string())?
+                                .inner_size();
+                            self.renderer
+                                .as_mut()
+                                .ok_or_else(|| "renderer is unavailable".to_string())?
+                                .resize(mw.width, mw.height);
+                            Ok(())
+                        })();
+                        if let Err(error) = redraw_result {
+                            eprintln!("confirmation dialog disabled after GL error: {error}");
+                            self.close_dialog();
                         }
-
-                        r.draw_dialog_window(&self.base_title);
-                        gl_surface.swap_buffers(gl_context).unwrap();
-
-                        let main_surface = self.gl_surface.as_ref().unwrap();
-                        gl_context.make_current(main_surface).unwrap();
-                        let mw = self.window.as_ref().unwrap().inner_size();
-                        self.renderer.as_mut().unwrap().resize(mw.width, mw.height);
                     }
                     _ => {}
                 }
@@ -530,11 +538,10 @@ impl ApplicationHandler for App {
                         gl.clear_color(self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0);
                         gl.clear(glow::COLOR_BUFFER_BIT);
                     }
-                    self.gl_surface
-                        .as_ref()
-                        .unwrap()
-                        .swap_buffers(self.gl_context.as_ref().unwrap())
-                        .unwrap();
+                    if !self.present_main_surface() {
+                        event_loop.set_control_flow(ControlFlow::Wait);
+                        return;
+                    }
                     crate::platform::finish_present();
                     self.renderer
                         .as_mut()
@@ -1395,11 +1402,10 @@ impl ApplicationHandler for App {
                 };
 
                 let present_start = Instant::now();
-                self.gl_surface
-                    .as_ref()
-                    .unwrap()
-                    .swap_buffers(self.gl_context.as_ref().unwrap())
-                    .unwrap();
+                if !self.present_main_surface() {
+                    event_loop.set_control_flow(ControlFlow::Wait);
+                    return;
+                }
                 crate::platform::finish_present();
                 let present_elapsed = present_start.elapsed().as_secs_f32();
                 self.renderer

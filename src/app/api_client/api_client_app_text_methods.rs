@@ -1,3 +1,9 @@
+pub(crate) fn native_picker_can_start<T>(
+    receiver: &Option<std::sync::mpsc::Receiver<T>>,
+) -> bool {
+    crate::platform::receiver_slot_available(receiver)
+}
+
 impl crate::app::App {
     fn api_route_row_text(route: &ApiRouteRow, field: ApiRouteTextField) -> String {
         match field {
@@ -212,15 +218,18 @@ impl crate::app::App {
         let (tx, rx) = mpsc::channel();
         self.ide_panel.api.body_json_validation_pending = Some((spec_id, route_idx, version));
         self.ide_panel.api.body_json_validation_rx = Some(rx);
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-json-validation", move || {
             let valid = json_body_is_valid(&text);
-            let _ = tx.send(ApiJsonValidationResult {
-                spec_id,
-                route_idx,
-                version,
-                valid,
+            let _ = worker_tx.send(ApiJsonValidationResult {
+                spec_id, route_idx, version, valid,
             });
-        });
+        }) {
+            eprintln!("RRiter: не удалось запустить JSON validation worker: {err}");
+            let _ = tx.send(ApiJsonValidationResult {
+                spec_id, route_idx, version, valid: false,
+            });
+        }
     }
 
     fn api_text_scroll_for_ui(&self, id: crate::ui_system::UiId) -> f32 {
@@ -1146,6 +1155,10 @@ impl crate::app::App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_api_file_picker(&mut self) {
+        if !native_picker_can_start(&self.api_import_file_rx) {
+            self.ide_panel.api.import_error = Some("Окно выбора OpenAPI уже открыто".to_string());
+            return;
+        }
         if crate::platform::native_dialog_requires_main_thread() {
             if let Some(path) = crate::platform::pick_file_with_filter(
                 "Импорт openapi.json",
@@ -1158,14 +1171,16 @@ impl crate::app::App {
         }
         let (tx, rx) = mpsc::channel();
         self.api_import_file_rx = Some(rx);
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-file-picker", move || {
             let file = crate::platform::pick_file_with_filter(
-                "Импорт openapi.json",
-                "OpenAPI JSON",
-                &["json"],
+                "Импорт openapi.json", "OpenAPI JSON", &["json"],
             );
-            let _ = tx.send(file);
-        });
+            let _ = worker_tx.send(file);
+        }) {
+            self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор OpenAPI: {err}"));
+            self.api_import_file_rx = None;
+        }
     }
 
     fn trigger_api_body_file_picker(
@@ -1175,6 +1190,10 @@ impl crate::app::App {
         name: String,
         multi: bool,
     ) {
+        if !native_picker_can_start(&self.api_body_file_rx) {
+            self.ide_panel.api.import_error = Some("Окно выбора body-файла уже открыто".to_string());
+            return;
+        }
         if crate::platform::native_dialog_requires_main_thread() {
             let paths = if multi {
                 crate::platform::pick_files("Выбрать файл")
@@ -1193,25 +1212,30 @@ impl crate::app::App {
         }
         let (tx, rx) = mpsc::channel();
         self.api_body_file_rx = Some(rx);
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        let fallback_name = name.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-body-file-picker", move || {
             let paths = if multi {
                 crate::platform::pick_files("Выбрать файл")
             } else {
-                crate::platform::pick_file("Выбрать файл")
-                    .into_iter()
-                    .collect()
+                crate::platform::pick_file("Выбрать файл").into_iter().collect()
             };
-            let _ = tx.send(ApiBodyFilePickResult {
-                spec_id,
-                route_idx,
-                name,
-                paths,
+            let _ = worker_tx.send(ApiBodyFilePickResult {
+                spec_id, route_idx, name, paths,
             });
-        });
+        }) {
+            self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор body-файла: {err}"));
+            self.api_body_file_rx = None;
+            let _ = (spec_id, route_idx, fallback_name);
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_path_picker(&mut self, kind: ApiPythonPathPickKind) {
+        if !native_picker_can_start(&self.ide_panel.api.python_path_pick_rx) {
+            self.ide_panel.api.mock.uv.last_error = "Окно выбора Python/uv уже открыто".to_string();
+            return;
+        }
         let (tx, rx) = mpsc::channel();
         self.ide_panel.api.python_path_pick_rx = Some(rx);
         let title = match kind {
@@ -1223,10 +1247,14 @@ impl crate::app::App {
             let _ = tx.send(ApiPythonPathPickResult { kind, path });
             return;
         }
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-python-path-picker", move || {
             let path = crate::platform::pick_file(title);
-            let _ = tx.send(ApiPythonPathPickResult { kind, path });
-        });
+            let _ = worker_tx.send(ApiPythonPathPickResult { kind, path });
+        }) {
+            self.ide_panel.api.mock.uv.last_error = format!("Не удалось открыть выбор пути: {err}");
+            self.ide_panel.api.python_path_pick_rx = None;
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1248,7 +1276,8 @@ impl crate::app::App {
         self.ide_panel.api.mock_python_versions_scroll.target = 0.0;
         let cancel = Arc::new(AtomicBool::new(false));
         self.ide_panel.api.python_version_list_cancel = Some(cancel.clone());
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-python-list", move || {
             let mut command = Command::new(uv_path);
             command.arg("python").arg("list").arg("--all-versions");
             let result = crate::platform::run_command_output_cancelable(
@@ -1285,8 +1314,13 @@ impl crate::app::App {
                     error: Some(format!("Ошибка запуска uv: {err}")),
                 },
             };
-            let _ = tx.send(payload);
-        });
+            let _ = worker_tx.send(payload);
+        }) {
+            let _ = tx.send(ApiPythonVersionListResult {
+                rows: Vec::new(),
+                error: Some(format!("не удалось запустить worker списка Python: {err}")),
+            });
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -1316,7 +1350,8 @@ impl crate::app::App {
                 text: format!("uv python install {version}"),
                 kind: ApiPythonInstallLogKind::Info,
             });
-        std::thread::spawn(move || {
+        let worker_tx = tx.clone();
+        if let Err(err) = crate::platform::spawn_named("rriter-api-python-install", move || {
             let mut command = Command::new(uv_path);
             command.arg("python").arg("install").arg(&version);
             let result = crate::platform::run_command_streaming_cancelable(
@@ -1335,7 +1370,7 @@ impl crate::app::App {
                             ApiPythonInstallLogKind::Error
                         }
                     };
-                    let _ = tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
+                    let _ = worker_tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
                         text: line,
                         kind,
                     }));
@@ -1355,8 +1390,12 @@ impl crate::app::App {
                     Err(format!("uv завершился с кодом {:?}", status.code()))
                 }
             });
-            let _ = tx.send(ApiPythonInstallEvent::Done(result));
-        });
+            let _ = worker_tx.send(ApiPythonInstallEvent::Done(result));
+        }) {
+            let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
+                "не удалось запустить worker установки Python: {err}"
+            ))));
+        }
     }
 
     fn apply_api_body_file_pick(&mut self, result: ApiBodyFilePickResult) {
@@ -1391,14 +1430,18 @@ impl crate::app::App {
         ) {
             let old_version = self.ide_panel.api.input_editor.version;
             self.ide_panel.api.input_editor.set_text_clean(&new_value);
-            self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+            self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
         }
     }
 
     pub fn start_api_local_import(&mut self, path: PathBuf) {
         let id = self.ide_panel.api.alloc_spec_id();
-        self.ide_panel.api.loading.insert(id);
-        self.api_load_rx.push(spawn_load_local(id, path));
+        let generation = self.ide_panel.api.begin_load(id, true);
+        self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
+            id,
+            generation,
+            rx: spawn_load_local(id, generation, path),
+        });
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -1422,8 +1465,12 @@ impl crate::app::App {
         self.ide_panel.api.import_error_at = None;
         self.ide_panel.api.import_url_open = false;
         self.ide_panel.api.focused = None;
-        self.ide_panel.api.loading.insert(id);
-        self.api_load_rx.push(spawn_load_url(id, url));
+        let generation = self.ide_panel.api.begin_load(id, true);
+        self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
+            id,
+            generation,
+            rx: spawn_load_url(id, generation, url),
+        });
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -1440,10 +1487,22 @@ impl crate::app::App {
         else {
             return;
         };
-        self.ide_panel.api.loading.insert(id);
+        let generation = self.ide_panel.api.begin_load(id, false);
         match entry.source {
-            ApiSpecSource::Local(path) => self.api_load_rx.push(spawn_load_local(id, path)),
-            ApiSpecSource::Url(url) => self.api_load_rx.push(spawn_load_url(id, url)),
+            ApiSpecSource::Local(path) => self.api_load_rx.push(
+                crate::app::api_client::ApiLoadReceiver {
+                    id,
+                    generation,
+                    rx: spawn_load_local(id, generation, path),
+                },
+            ),
+            ApiSpecSource::Url(url) => self.api_load_rx.push(
+                crate::app::api_client::ApiLoadReceiver {
+                    id,
+                    generation,
+                    rx: spawn_load_url(id, generation, url),
+                },
+            ),
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -1464,10 +1523,22 @@ impl crate::app::App {
         else {
             return;
         };
-        self.ide_panel.api.loading.insert(id);
+        let generation = self.ide_panel.api.begin_load(id, false);
         match entry.source {
-            ApiSpecSource::Local(path) => self.api_load_rx.push(spawn_load_local(id, path)),
-            ApiSpecSource::Url(url) => self.api_load_rx.push(spawn_load_cached_url(id, url)),
+            ApiSpecSource::Local(path) => self.api_load_rx.push(
+                crate::app::api_client::ApiLoadReceiver {
+                    id,
+                    generation,
+                    rx: spawn_load_local(id, generation, path),
+                },
+            ),
+            ApiSpecSource::Url(url) => self.api_load_rx.push(
+                crate::app::api_client::ApiLoadReceiver {
+                    id,
+                    generation,
+                    rx: spawn_load_cached_url(id, generation, url),
+                },
+            ),
         }
     }
 
@@ -2008,7 +2079,7 @@ impl crate::app::App {
                 self.ide_panel.api.input_editor = editor;
             } else {
                 self.ide_panel.api.input_editor.set_text_clean(&text);
-                self.ide_panel.api.input_editor.version = old_version.saturating_add(1);
+                self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
             }
             self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
             self.ide_panel.api.input_editor.selection_anchor =

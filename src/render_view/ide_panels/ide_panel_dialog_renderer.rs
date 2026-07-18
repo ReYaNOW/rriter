@@ -1,5 +1,36 @@
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn one_line_scroll_for_cursor(
+        &mut self,
+        text: &str,
+        cursor: usize,
+        text_scale: f32,
+        visible_width: f32,
+        mut scroll_x: f32,
+    ) -> f32 {
+        let mut cursor_x = 0.0;
+        let mut total_width = 0.0;
+        for (byte_idx, ch) in text.char_indices() {
+            let advance = self
+                .get_ui_glyph(ch)
+                .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
+                .unwrap_or(10.0 * text_scale);
+            if byte_idx < cursor {
+                cursor_x += advance;
+            }
+            total_width += advance;
+        }
+        let visible_width = visible_width.max(1.0);
+        if cursor_x - scroll_x > visible_width {
+            scroll_x = cursor_x - visible_width;
+        } else if cursor_x < scroll_x {
+            scroll_x = cursor_x;
+        }
+        scroll_x
+            .min((total_width - visible_width).max(0.0))
+            .max(0.0)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_ide_bottom_panel(
         &mut self,
