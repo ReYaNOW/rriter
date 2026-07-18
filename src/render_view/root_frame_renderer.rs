@@ -1164,7 +1164,8 @@ impl Renderer {
                 editor_scroll_content_height(total_lines, self.line_height, editor_scroll_height);
             let thumb_h = (editor_scroll_height / total_content_height.max(editor_scroll_height)
                 * editor_scroll_height)
-                .max(20.0 * s);
+                .max(20.0 * s)
+                .min(editor_scroll_height.max(0.0));
             let thumb_y = tab_bar_h + scroll_ratio_y * (editor_scroll_height - thumb_h);
             if let Some(state) = active_git_diff_state {
                 let total = total_lines.max(1) as f32;

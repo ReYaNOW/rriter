@@ -111,6 +111,14 @@ impl App {
         }
     }
 
+    pub(crate) fn cancel_pending_action(&mut self) {
+        self.pending_action = PendingAction::None;
+        self.pending_action_waiting_for_save_as = false;
+        self.pending_action_ready = false;
+        self.pending_save_tabs.clear();
+        self.close_dialog();
+    }
+
     pub fn close_current_file(&mut self) {
         if self.is_ide_mode && self.tabs.len() > 1 {
             self.close_tab_at(self.active_tab);
@@ -252,12 +260,44 @@ impl App {
             .unwrap_or(false);
         if self.pending_action_waiting_for_save_as {
             self.pending_action_waiting_for_save_as = false;
-            self.pending_action_ready = saved;
+            if saved {
+                let active = self.active_tab;
+                self.pending_save_tabs.retain(|index| *index != active);
+                self.continue_pending_tab_saves();
+            } else {
+                self.cancel_pending_action();
+            }
         }
         saved
     }
 
     pub(crate) fn begin_pending_action_save(&mut self) {
+        if matches!(
+            self.pending_action,
+            PendingAction::Quit | PendingAction::CloseAllTabs | PendingAction::CloseTab(_)
+        ) {
+            if self.has_blocking_database_changes_for_pending_action() {
+                self.ide_panel.database.global_error = Some(
+                    "Сначала завершите или отмените изменения и активные транзакции БД"
+                        .to_string(),
+                );
+                self.cancel_pending_action();
+                return;
+            }
+            self.pending_save_tabs = match self.pending_action {
+                PendingAction::CloseTab(index) => self
+                    .tab_text_is_dirty(index)
+                    .then_some(index)
+                    .into_iter()
+                    .collect(),
+                _ => (0..self.tabs.len())
+                    .filter(|index| self.tab_text_is_dirty(*index))
+                    .collect(),
+            };
+            self.close_dialog();
+            self.continue_pending_tab_saves();
+            return;
+        }
         if self.file_path.is_none() && !self.active_tab_is_git_diff() {
             self.pending_action_waiting_for_save_as = true;
             self.close_dialog();
@@ -273,7 +313,34 @@ impl App {
     pub(crate) fn discard_pending_action_changes(&mut self) {
         self.close_dialog();
         self.pending_action_waiting_for_save_as = false;
+        self.pending_save_tabs.clear();
         self.pending_action_ready = true;
+    }
+
+    fn continue_pending_tab_saves(&mut self) {
+        loop {
+            let Some(index) = self.pending_save_tabs.first().copied() else {
+                self.pending_action_ready = true;
+                return;
+            };
+            if index >= self.tabs.len() || !self.tab_text_is_dirty(index) {
+                self.pending_save_tabs.remove(0);
+                continue;
+            }
+            if index != self.active_tab {
+                self.switch_to_tab(index);
+            }
+            if self.file_path.is_none() {
+                self.pending_action_waiting_for_save_as = true;
+                self.trigger_save_as_picker();
+                return;
+            }
+            if !self.save_current_file() {
+                self.cancel_pending_action();
+                return;
+            }
+            self.pending_save_tabs.remove(0);
+        }
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

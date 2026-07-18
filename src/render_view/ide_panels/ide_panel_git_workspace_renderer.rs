@@ -1,3 +1,18 @@
+pub(crate) fn git_message_input_geometry(
+    panel_x: f32,
+    panel_w: f32,
+    title_h: f32,
+    scale: f32,
+) -> crate::ui_system::UiClipRect {
+    let pad = (10.0 * scale).min((panel_w * 0.15).max(0.0));
+    crate::ui_system::UiClipRect::new(
+        panel_x + pad,
+        title_h + 8.0 * scale,
+        (panel_w - pad * 2.0).max(1.0),
+        30.0 * scale,
+    )
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -40,10 +55,11 @@ impl Renderer {
         let mut git_file_tooltip: Option<(usize, usize, String, f32, f32)> = None;
         let mut repo_action_menu: Option<(usize, f32, f32, f32)> = None;
 
-        let input_x = panel_x + pad;
-        let input_y = title_h + 8.0 * s;
-        let input_w = inner_w;
-        let input_h = 30.0 * s;
+        let input = git_message_input_geometry(panel_x, panel_w, title_h, s);
+        let input_x = input.x;
+        let input_y = input.y;
+        let input_w = input.w;
+        let input_h = input.h;
         let input_border = if ide_panel.git.message_focused {
             [0.60, 0.35, 0.85, 0.78]
         } else {

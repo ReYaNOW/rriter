@@ -147,10 +147,51 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockGuideClose => {
                 self.ide_panel.api.mock_guide_open = false;
             }
-            crate::ui_system::UiId::ApiMockGuideBody
-            | crate::ui_system::UiId::ApiMockGuideScrollY => {
+            crate::ui_system::UiId::ApiMockGuideBody => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
+            }
+            crate::ui_system::UiId::ApiMockGuideScrollY => {
+                self.commit_api_focus();
+                self.ide_panel.api.focused = None;
+                if let Some(rect) = self.ui_registry.rect_for(id) {
+                    let s = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.scale_factor)
+                        .unwrap_or(1.0);
+                    let pointer = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.last_mouse_y)
+                        .unwrap_or(rect.1);
+                    let max_scroll =
+                        crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
+                    let track_start = rect.1 + 7.0 * s;
+                    let track_len = (rect.3 - 14.0 * s).max(0.0);
+                    if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                        track_start,
+                        track_len,
+                        rect.3,
+                        rect.3 + max_scroll,
+                        self.ide_panel.api.mock_guide_scroll.current,
+                        28.0 * s,
+                    ) && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+                        pointer,
+                        track_start,
+                        track_len,
+                        thumb,
+                        max_scroll,
+                        None,
+                    ) {
+                        let scroll = &mut self.ide_panel.api.mock_guide_scroll;
+                        scroll.current = target;
+                        scroll.target = target;
+                        scroll.velocity = 0.0;
+                        scroll.drag_offset = drag_offset;
+                        scroll.is_dragging = true;
+                    }
+                }
             }
             crate::ui_system::UiId::ApiMockPythonManage => {
                 self.commit_api_focus();

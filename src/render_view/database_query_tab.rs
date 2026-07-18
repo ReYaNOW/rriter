@@ -510,6 +510,7 @@ impl Renderer {
                 s,
                 meta,
                 history,
+                state.history_selected,
                 state.result_view.scroll_y.current.clamp(0.0, max_y),
                 state.result_view.scroll_y.is_settled(),
                 ui,
@@ -595,6 +596,7 @@ impl Renderer {
         s: f32,
         meta: &crate::app::database::DatabaseQueryTabMeta,
         history: &[crate::app::database::DatabaseQueryHistoryEntry],
+        history_selected: usize,
         scroll_y: f32,
         hover_settled: bool,
         ui: &mut UiRegistry,
@@ -643,6 +645,7 @@ impl Renderer {
                         && my >= rect.y
                         && my <= rect.y + rect.h
                 });
+            let selected = visible_index == history_selected;
             self.push_rect(
                 x,
                 row_y,
@@ -650,6 +653,8 @@ impl Renderer {
                 entry_h,
                 if hovered {
                     [0.16, 0.17, 0.21, 1.0]
+                } else if selected {
+                    [0.20, 0.16, 0.28, 1.0]
                 } else {
                     [0.085, 0.09, 0.115, 1.0]
                 },
@@ -674,9 +679,14 @@ impl Renderer {
                 );
             }
             let status = if entry.succeeded { "OK" } else { "ERR" };
+            let row_count = if entry.returned_rows > 0 {
+                entry.returned_rows
+            } else {
+                entry.affected_rows
+            };
             let meta_text = format!(
                 "{status} · {} мс · {} строк",
-                entry.duration_ms, entry.affected_rows
+                entry.duration_ms, row_count
             );
             self.draw_string_scaled_pixel_snapped(
                 &meta_text,

@@ -330,8 +330,29 @@ impl Renderer {
                                         mx,
                                         my,
                                     );
-                                if hovered {
-                                    self.push_rect(panel_x, row_y, panel_w, row_h, [1.0, 1.0, 1.0, 0.05]);
+                                let selected = database.selected_table.as_ref().is_some_and(
+                                    |(id, database_name, table_name)| {
+                                        *id == connection.config.id
+                                            && database_name == &database_node.name
+                                            && table_name == &table.name
+                                    },
+                                );
+                                if selected {
+                                    self.push_rect(
+                                        panel_x,
+                                        row_y,
+                                        panel_w,
+                                        row_h,
+                                        [0.35, 0.48, 0.72, 0.20],
+                                    );
+                                } else if hovered {
+                                    self.push_rect(
+                                        panel_x,
+                                        row_y,
+                                        panel_w,
+                                        row_h,
+                                        [1.0, 1.0, 1.0, 0.05],
+                                    );
                                 }
                                 self.draw_atlas_icon(
                                     IconType::DatabaseTable,
@@ -552,9 +573,12 @@ impl Renderer {
                 (form_bottom - form_top).max(0.0) as i32,
             );
         }
-        let label_x = x + 22.0 * s;
-        let input_x = x + 220.0 * s;
-        let input_w = width - 244.0 * s;
+        let form_pad = (22.0 * s).min(width * 0.08);
+        let inner_w = (width - form_pad * 2.0).max(1.0);
+        let label_area = (198.0 * s).min(inner_w * 0.34);
+        let label_x = x + form_pad;
+        let input_x = label_x + label_area;
+        let input_w = (inner_w - label_area).max(1.0);
         let row_h = 38.0 * s;
         let mut row = 0usize;
         for field in dialog.visible_fields() {
@@ -562,16 +586,21 @@ impl Renderer {
             if row_y + row_h >= form_top && row_y <= form_bottom {
                 let field_h = (28.0 * s).round();
                 let field_y = (row_y + 4.0 * s).round();
-                self.draw_string_scaled_pixel_snapped(
+                let mut label_scratch = String::new();
+                self.draw_tree_label_clipped(
                     database_field_label(field),
                     label_x.round(),
                     Self::tree_row_text_y(field_y, field_h, s),
+                    (label_area - 6.0 * s).max(1.0),
                     [0.72, 0.75, 0.82, 1.0],
                     0.82,
+                    &mut label_scratch,
                 );
                 let remember = database_remember_control(field, dialog);
-                let remember_w = if remember.is_some() { 132.0 * s } else { 0.0 };
-                let field_w = (input_w - remember_w).max(80.0 * s).round();
+                let desired_remember_w = if remember.is_some() { 132.0 * s } else { 0.0 };
+                let remember_w = desired_remember_w
+                    .min((input_w - 80.0 * s).max(0.0));
+                let field_w = (input_w - remember_w).max(1.0).round();
                 let focused = dialog.focused == Some(field);
                 let eye_size = if field.is_secret() { field_h.round() } else { 0.0 };
                 ui_registry.register_text_input_clipped(
@@ -584,9 +613,9 @@ impl Renderer {
                     mx,
                     my,
                 );
-                if let Some((remember_id, enabled)) = remember {
+                if let Some((remember_id, enabled)) = remember.filter(|_| remember_w >= 42.0 * s) {
                     let checkbox_x = (input_x + field_w + 6.0 * s).round();
-                    let checkbox_w = (remember_w - 6.0 * s).max(40.0 * s).round();
+                    let checkbox_w = (remember_w - 6.0 * s).max(1.0).round();
                     let hovered = ui_registry.register_rect_clipped(
                         remember_id,
                         checkbox_x,

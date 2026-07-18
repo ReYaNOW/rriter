@@ -407,7 +407,7 @@ fn build_insert(
         sql,
         parameters,
         changed_cells: row.cells.iter().filter(|cell| !matches!(cell.value, DatabaseCellValue::Default)).count(),
-        row_label: format!("new row {}", row.absolute_index + 1),
+        row_label: "new row".to_string(),
     })
 }
 
@@ -462,7 +462,7 @@ fn build_update(
         sql,
         parameters,
         changed_cells,
-        row_label: format!("row {}", row.absolute_index + 1),
+        row_label: format!("row {}", row.absolute_index.saturating_add(1)),
     })
 }
 
@@ -493,7 +493,7 @@ fn build_delete(
         sql,
         parameters,
         changed_cells: 0,
-        row_label: format!("row {}", row.absolute_index + 1),
+        row_label: format!("row {}", row.absolute_index.saturating_add(1)),
     })
 }
 
@@ -1047,6 +1047,7 @@ mod tests {
     #[test]
     fn insert_keeps_identity_as_default_and_returns_actual_values() {
         let mut row = row(DatabaseRowState::Added);
+        row.absolute_index = usize::MAX;
         row.cells[0].set(DatabaseCellValue::Default);
         row.cells[1].set(DatabaseCellValue::Text("new".to_string()));
         let plan = build_table_change_plan(
@@ -1060,6 +1061,7 @@ mod tests {
             .sql
             .starts_with("INSERT INTO public.\"items\" (\"name\") VALUES"));
         assert!(plan.statements[0].sql.contains("RETURNING \"id\"::text"));
+        assert_eq!(plan.statements[0].row_label, "new row");
     }
 
     #[test]

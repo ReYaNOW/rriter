@@ -247,6 +247,94 @@ impl ToolInstaller {
         self.log_scroll.current
     }
 
+    pub(crate) fn log_scroll_is_dragging(&self) -> bool {
+        self.log_scroll.is_dragging
+    }
+
+    pub(crate) fn begin_log_scroll_drag(
+        &mut self,
+        pointer: f32,
+        track_start: f32,
+        track_len: f32,
+        viewport_len: f32,
+        content_len: f32,
+        min_thumb_len: f32,
+    ) -> bool {
+        let Some(thumb) = crate::scroll::scrollbar_thumb(
+            track_start,
+            track_len,
+            viewport_len,
+            content_len,
+            self.log_scroll.current,
+            min_thumb_len,
+        ) else {
+            return false;
+        };
+        let max_scroll = (content_len - viewport_len).max(0.0);
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return false;
+        };
+        self.log_scroll.target = target;
+        self.log_scroll.current = target;
+        self.log_scroll.velocity = 0.0;
+        self.log_scroll.drag_offset = drag_offset;
+        self.log_scroll.is_dragging = true;
+        self.follow_log = false;
+        true
+    }
+
+    pub(crate) fn drag_log_scroll(
+        &mut self,
+        pointer: f32,
+        track_start: f32,
+        track_len: f32,
+        viewport_len: f32,
+        content_len: f32,
+        min_thumb_len: f32,
+    ) -> bool {
+        if !self.log_scroll.is_dragging {
+            return false;
+        }
+        let Some(thumb) = crate::scroll::scrollbar_thumb(
+            track_start,
+            track_len,
+            viewport_len,
+            content_len,
+            self.log_scroll.current,
+            min_thumb_len,
+        ) else {
+            self.log_scroll.is_dragging = false;
+            return false;
+        };
+        let max_scroll = (content_len - viewport_len).max(0.0);
+        let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            thumb,
+            max_scroll,
+            Some(self.log_scroll.drag_offset),
+        ) else {
+            return false;
+        };
+        self.log_scroll.target = target;
+        self.log_scroll.current = target;
+        self.log_scroll.velocity = 0.0;
+        self.follow_log = false;
+        true
+    }
+
+    pub(crate) fn end_log_scroll_drag(&mut self) {
+        self.log_scroll.is_dragging = false;
+    }
+
     pub(crate) fn open_log(&mut self) {
         self.log_open = true;
         self.follow_log = true;

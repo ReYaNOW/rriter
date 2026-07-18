@@ -362,6 +362,38 @@ impl DatabaseGridSelection {
         }
     }
 
+    pub fn select_row_from_ordered(
+        &mut self,
+        row: usize,
+        extend: bool,
+        toggle: bool,
+        ordered_rows: &[usize],
+    ) {
+        if toggle || !extend {
+            self.select_row(row, extend, toggle);
+            return;
+        }
+        let anchor = self.selected_rows.first().copied().unwrap_or(row);
+        let Some(anchor_index) = ordered_rows.iter().position(|candidate| *candidate == anchor)
+        else {
+            self.select_row(row, false, false);
+            return;
+        };
+        let Some(row_index) = ordered_rows.iter().position(|candidate| *candidate == row) else {
+            self.select_row(row, false, false);
+            return;
+        };
+        let (start, end) = if anchor_index <= row_index {
+            (anchor_index, row_index)
+        } else {
+            (row_index, anchor_index)
+        };
+        self.anchor = None;
+        self.cursor = None;
+        self.selected_rows = ordered_rows[start..=end].to_vec();
+        self.selected_rows.sort_unstable();
+    }
+
     pub fn cell_range(&self) -> Option<(DatabaseCellPosition, DatabaseCellPosition)> {
         let a = self.anchor?;
         let b = self.cursor?;
@@ -783,6 +815,72 @@ impl DatabaseTableGridState {
         server_rows.saturating_add(self.added_rows.len())
     }
 
+    pub fn active_row_indices(&self) -> Vec<usize> {
+        let page_base = self.view.current_page.saturating_mul(self.view.limit);
+        let page_end = page_base.saturating_add(self.view.limit);
+        let mut rows = self
+            .chunks
+            .values()
+            .flat_map(|chunk| chunk.rows.iter())
+            .filter(|row| row.absolute_index >= page_base && row.absolute_index < page_end)
+            .map(|row| row.absolute_index)
+            .collect::<Vec<_>>();
+        rows.sort_unstable();
+        rows.dedup();
+        rows.extend(self.added_rows.iter().map(|row| row.absolute_index));
+        rows
+    }
+
+    pub fn row_indices_between(&self, first: usize, second: usize) -> Vec<usize> {
+        let rows = self.active_row_indices();
+        let first_index = rows.iter().position(|row| *row == first);
+        let second_index = rows.iter().position(|row| *row == second);
+        match (first_index, second_index) {
+            (Some(first_index), Some(second_index)) => {
+                let (start, end) = if first_index <= second_index {
+                    (first_index, second_index)
+                } else {
+                    (second_index, first_index)
+                };
+                rows[start..=end].to_vec()
+            }
+            _ if first == second && self.row(first).is_some() => vec![first],
+            _ => [first, second]
+                .into_iter()
+                .filter(|row| self.row(*row).is_some())
+                .collect(),
+        }
+    }
+
+    pub fn select_row(&mut self, row: usize, extend: bool, toggle: bool) {
+        let ordered_rows = self.active_row_indices();
+        self.selection
+            .select_row_from_ordered(row, extend, toggle, &ordered_rows);
+    }
+
+    pub fn next_added_row_index(&self) -> usize {
+        let used = self
+            .chunks
+            .values()
+            .flat_map(|chunk| chunk.rows.iter())
+            .chain(self.added_rows.iter())
+            .map(|row| row.absolute_index)
+            .collect::<std::collections::HashSet<_>>();
+        (0..=used.len())
+            .filter_map(|offset| usize::MAX.checked_sub(offset))
+            .find(|candidate| !used.contains(candidate))
+            .unwrap_or(usize::MAX)
+    }
+
+    pub fn can_page_next(&self) -> bool {
+        match self.count {
+            Some(count) => (self.view.current_page + 1)
+                .saturating_mul(self.view.limit)
+                < count as usize,
+            None => self.loaded_server_row_extent_on_page() >= self.view.limit,
+        }
+    }
+
     pub fn cycle_sort(&mut self, column: &DatabaseColumnInfo) {
         match (
             self.view.sorted_column.as_deref(),
@@ -809,7 +907,7 @@ impl DatabaseTableGridState {
     pub fn prepare_selection_restore(&mut self, metadata: &DatabaseTableMetadata) {
         let mut rows = self.selection.selected_rows.clone();
         let column = self.selection.cell_range().map(|(start, end)| {
-            rows.extend(start.row..=end.row);
+            rows.extend(self.row_indices_between(start.row, end.row));
             start.column
         });
         rows.sort_unstable();
@@ -1359,6 +1457,129 @@ mod tests {
             layout.horizontal_scrollbar_rect,
             Some(DatabaseGridRect { x: 10.0, y: 310.0, w: 490.0, h: 10.0 }),
         );
+    }
+
+
+    #[test]
+    fn unknown_count_pages_only_after_a_full_loaded_page() {
+        let mut grid = grid();
+        grid.view.limit = 2;
+        grid.insert_chunk(DatabaseTableChunk {
+            generation: DatabaseGeneration(1),
+            chunk_index: 0,
+            rows: vec![
+                DatabaseGridRow {
+                    absolute_index: 0,
+                    cells: Vec::new(),
+                    xmin: None,
+                    state: DatabaseRowState::Clean,
+                },
+                DatabaseGridRow {
+                    absolute_index: 1,
+                    cells: Vec::new(),
+                    xmin: None,
+                    state: DatabaseRowState::Clean,
+                },
+            ],
+            estimated_bytes: 0,
+        });
+        assert!(grid.can_page_next());
+        grid.chunks.get_mut(&0).unwrap().rows.pop();
+        assert!(!grid.can_page_next());
+    }
+
+    #[test]
+    fn added_row_indices_remain_unique_after_middle_deletion() {
+        let mut grid = grid();
+        grid.added_rows = vec![
+            DatabaseGridRow {
+                absolute_index: 5,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Added,
+            },
+            DatabaseGridRow {
+                absolute_index: 7,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Added,
+            },
+        ];
+        assert_eq!(grid.next_added_row_index(), usize::MAX);
+        grid.added_rows.push(DatabaseGridRow {
+            absolute_index: usize::MAX,
+            cells: Vec::new(),
+            xmin: None,
+            state: DatabaseRowState::Added,
+        });
+        assert_eq!(grid.next_added_row_index(), usize::MAX - 1);
+    }
+
+    #[test]
+    fn synthetic_added_row_ids_use_display_order_for_range_selection() {
+        let mut grid = grid();
+        grid.view.limit = 2;
+        grid.insert_chunk(DatabaseTableChunk {
+            generation: DatabaseGeneration(1),
+            chunk_index: 0,
+            rows: vec![DatabaseGridRow {
+                absolute_index: 0,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Clean,
+            }],
+            estimated_bytes: 0,
+        });
+        grid.added_rows = vec![
+            DatabaseGridRow {
+                absolute_index: usize::MAX,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Added,
+            },
+            DatabaseGridRow {
+                absolute_index: usize::MAX - 1,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Added,
+            },
+        ];
+
+        grid.select_row(0, false, false);
+        grid.select_row(usize::MAX - 1, true, false);
+
+        assert_eq!(
+            grid.selection.selected_rows,
+            vec![0, usize::MAX - 1, usize::MAX]
+        );
+        assert_eq!(
+            grid.row_indices_between(0, usize::MAX - 1),
+            vec![0, usize::MAX, usize::MAX - 1]
+        );
+    }
+
+    #[test]
+    fn unknown_count_logical_rows_include_loaded_extent_and_added_rows() {
+        let mut grid = grid();
+        grid.view.limit = 100;
+        grid.insert_chunk(DatabaseTableChunk {
+            generation: DatabaseGeneration(1),
+            chunk_index: 0,
+            rows: vec![DatabaseGridRow {
+                absolute_index: 8,
+                cells: Vec::new(),
+                xmin: None,
+                state: DatabaseRowState::Clean,
+            }],
+            estimated_bytes: 0,
+        });
+        grid.added_rows.push(DatabaseGridRow {
+            absolute_index: 9,
+            cells: Vec::new(),
+            xmin: None,
+            state: DatabaseRowState::Added,
+        });
+        assert_eq!(grid.logical_row_count(), 10);
     }
 
 }

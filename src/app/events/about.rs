@@ -14,15 +14,28 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
     }
 
+    if app.dialog_window.is_none()
+        && !app.pending_action_waiting_for_save_as
+        && !app.pending_action_ready
+        && matches!(app.pending_action, PendingAction::CloseTab(_))
+    {
+        app.show_action_dialog(event_loop, app.pending_action);
+        return;
+    }
+
     if app.pending_action_ready {
         app.pending_action_ready = false;
-        match app.pending_action {
+        let action = std::mem::replace(&mut app.pending_action, PendingAction::None);
+        match action {
+            PendingAction::None => {}
             PendingAction::Quit => {
                 window_runtime::save_state_and_exit(app, event_loop);
                 return;
             }
             PendingAction::OpenFile => app.trigger_file_picker(),
             PendingAction::CloseFile => app.close_current_file(),
+            PendingAction::CloseTab(index) => app.close_tab_at_unchecked(index),
+            PendingAction::CloseAllTabs => app.close_all_tabs_unchecked(),
         }
     }
 

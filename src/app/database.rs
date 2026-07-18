@@ -78,6 +78,17 @@ pub const MAX_DATABASE_CONNECTIONS: usize = 64;
 pub const MAX_DATABASES_PER_CONNECTION: usize = 512;
 pub const MAX_PUBLIC_TABLES_PER_DATABASE: usize = 10_000;
 pub const MAX_COLUMNS_PER_RESULT: usize = 512;
+
+pub(crate) fn truncate_utf8(value: &mut String, max_bytes: usize) {
+    if value.len() <= max_bytes {
+        return;
+    }
+    let mut boundary = max_bytes.min(value.len());
+    while boundary > 0 && !value.is_char_boundary(boundary) {
+        boundary -= 1;
+    }
+    value.truncate(boundary);
+}
 pub const DATABASE_CHUNK_SIZE: usize = 100;
 pub const MAX_CUSTOM_TABLE_LIMIT: usize = 10_000;
 pub const DEFAULT_TABLE_LIMIT: usize = 100;
@@ -469,19 +480,19 @@ impl Default for DatabaseTableViewState {
 impl DatabaseTableViewState {
     pub fn normalize(&mut self) {
         self.limit = self.limit.clamp(1, MAX_CUSTOM_TABLE_LIMIT);
-        self.where_clause.truncate(64 * 1024);
-        self.order_by.truncate(64 * 1024);
+        truncate_utf8(&mut self.where_clause, 64 * 1024);
+        truncate_utf8(&mut self.order_by, 64 * 1024);
         self.column_widths.truncate(MAX_COLUMNS_PER_RESULT);
         for width in &mut self.column_widths {
             width.width_px = width.width_px.clamp(60, 4_096);
-            width.column_name.truncate(256);
+            truncate_utf8(&mut width.column_name, 256);
         }
         self.selected_primary_keys
             .truncate(MAX_PERSISTED_SELECTED_PRIMARY_KEYS);
         for primary_key in &mut self.selected_primary_keys {
             primary_key.truncate(32);
             for value in primary_key {
-                value.truncate(4_096);
+                truncate_utf8(value, 4_096);
             }
         }
         if self.sorted_column.is_none() {
@@ -987,4 +998,31 @@ mod tests {
         let secrets = DatabaseSecretBundle::empty();
         assert!(secrets.is_empty());
     }
+
+    #[test]
+    fn utf8_truncation_never_splits_a_character() {
+        let mut value = "а🙂б".to_string();
+        truncate_utf8(&mut value, 5);
+        assert_eq!(value, "а");
+        assert!(value.len() <= 5);
+        assert!(value.is_char_boundary(value.len()));
+    }
+
+    #[test]
+    fn table_state_normalization_handles_unicode_at_all_limits() {
+        let mut state = DatabaseTableViewState::default();
+        state.where_clause = "🙂".repeat(64 * 1024 / 4 + 1);
+        state.order_by = "я".repeat(64 * 1024 / 2 + 1);
+        state.column_widths.push(DatabaseColumnWidth {
+            column_name: "Ж".repeat(129),
+            width_px: 200,
+        });
+        state.selected_primary_keys = vec![vec!["🙂".repeat(1_025)]];
+        state.normalize();
+        assert!(state.where_clause.len() <= 64 * 1024);
+        assert!(state.order_by.len() <= 64 * 1024);
+        assert!(state.column_widths[0].column_name.len() <= 256);
+        assert!(state.selected_primary_keys[0][0].len() <= 4_096);
+    }
+
 }

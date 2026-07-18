@@ -546,3 +546,14 @@ echo 'installed fake ruff'
     let _ = fs::remove_dir_all(layout.managed_root.parent().unwrap().parent().unwrap());
     let _ = fs::remove_dir_all(layout.cache.parent().unwrap());
 }
+
+#[test]
+fn tool_log_scrollbar_supports_click_drag_and_release() {
+    let mut installer = ToolInstaller::default();
+    assert!(installer.begin_log_scroll_drag(50.0, 0.0, 100.0, 100.0, 500.0, 20.0));
+    assert!(installer.log_scroll_is_dragging());
+    assert!(installer.drag_log_scroll(90.0, 0.0, 100.0, 100.0, 500.0, 20.0));
+    assert!(installer.log_scroll_y() > 0.0);
+    installer.end_log_scroll_drag();
+    assert!(!installer.log_scroll_is_dragging());
+}

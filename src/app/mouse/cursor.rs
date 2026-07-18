@@ -105,7 +105,9 @@ fn autocomplete_drag_target(
     let track_margin = autocomplete_scrollbar_track_margin(scale);
     let track_h = (rect_h - track_margin * 2.0).max(1.0);
     let total_h = total_items * step;
-    let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
+    let thumb_h = (rect_h / total_h * track_h)
+        .max(20.0 * scale)
+        .min(track_h.max(0.0));
     let max_scroll = ((total_items - visible_items) * step).max(0.0);
 
     let ratio = (py - rect_y - track_margin - drag_offset) / (track_h - thumb_h).max(1.0);
@@ -463,6 +465,62 @@ impl App {
             if let Some(renderer) = self.renderer.as_mut() {
                 let byte = renderer.git_graph_tooltip_byte_at(position.x as f32, position.y as f32);
                 renderer.git_graph_tooltip_selection_cursor = Some(byte);
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.ide_panel.api.mock_guide_scroll.is_dragging {
+            if let Some(rect) = self.ui_registry.rect_for(
+                crate::ui_system::UiId::ApiMockGuideScrollY,
+            ) {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let max_scroll =
+                    crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
+                let track_start = rect.1 + 7.0 * s;
+                let track_len = (rect.3 - 14.0 * s).max(0.0);
+                if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                    track_start,
+                    track_len,
+                    rect.3,
+                    rect.3 + max_scroll,
+                    self.ide_panel.api.mock_guide_scroll.current,
+                    28.0 * s,
+                ) && let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+                    position.y as f32,
+                    track_start,
+                    track_len,
+                    thumb,
+                    max_scroll,
+                    Some(self.ide_panel.api.mock_guide_scroll.drag_offset),
+                ) {
+                    let scroll = &mut self.ide_panel.api.mock_guide_scroll;
+                    scroll.current = target;
+                    scroll.target = target;
+                    scroll.velocity = 0.0;
+                }
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.tool_installer.log_scroll_is_dragging() {
+            if let Some(rect) = self.ui_registry.rect_for(
+                crate::ui_system::UiId::SettingsToolInstallLogScrollY,
+            ) {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let line_h = crate::app::tool_installer::log_line_height(s);
+                let content_h = (self.tool_installer.logs().len().max(1) as f32 * line_h
+                    + (12.0 * s).round())
+                .round();
+                self.tool_installer.drag_log_scroll(
+                    position.y as f32,
+                    rect.1 + 6.0 * s,
+                    rect.3 - 12.0 * s,
+                    rect.3,
+                    content_h,
+                    28.0 * s,
+                );
             }
             self.window.as_ref().unwrap().request_redraw();
             return;
@@ -927,32 +985,29 @@ impl App {
         let scrollbar_x = window_size.width as f32 - minimap_w - scrollbar_w;
 
         if self.is_dragging_settings_ignore {
-            let w = (1000.0 * s)
-                .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-            let x = ((self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0).round();
-            let content_x = x + 40.0 * s + 200.0 * s + 30.0 * s;
-            let start_x = content_x + 8.0 * s;
+            let window_size = self.window.as_ref().unwrap().inner_size();
+            let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
+                window_size.width as f32,
+                window_size.height as f32,
+                s,
+                self.settings_anim_progress,
+            );
+            let input = crate::render_view::settings_ui::settings_ignore_input_rect(
+                layout,
+                s,
+                self.ide_workspaces.len(),
+                self.settings_ide_scroll.current,
+            );
             let text = self.settings_ignore_editor.get_full_text();
-            let x_offset = (position.x as f32 - start_x + self.settings_ignore_scroll_x).max(0.0);
-            let mut current_x = 0.0;
-            let mut target_idx = text.len();
-            let mut byte_idx = 0;
-            for c in text.chars() {
-                let adv = self
-                    .renderer
-                    .as_mut()
-                    .unwrap()
-                    .get_ui_glyph(c)
-                    .map(|g| g.advance)
-                    .unwrap_or(10.0)
-                    * 0.95;
-                if x_offset <= current_x + adv / 2.0 {
-                    target_idx = byte_idx;
-                    break;
-                }
-                current_x += adv;
-                byte_idx += c.len_utf8();
-            }
+            let x_offset = (position.x as f32
+                - (input.x + 8.0 * s)
+                + self.settings_ignore_scroll_x)
+                .max(0.0);
+            let target_idx = self
+                .renderer
+                .as_mut()
+                .unwrap()
+                .one_line_cursor_from_x(&text, x_offset, 0.95);
             self.settings_ignore_editor.cursor = target_idx;
         } else if self.is_dragging_lsp_log {
             // Drag-selection в логах LSP
@@ -1189,7 +1244,7 @@ impl App {
                 let total_h = self.lsp_panel_total_h(s);
                 let track_h = ch - 10.0 * s;
                 let max_y = (total_h - ch).max(0.0);
-                let thumb_h = (ch / total_h * track_h).max(40.0 * s);
+                let thumb_h = (ch / total_h * track_h).max(40.0 * s).min(track_h.max(0.0));
                 let ratio =
                     (position.y as f32 - cy - 5.0 * s - self.ide_panel.lsp_scroll_y.drag_offset)
                         / (track_h - thumb_h).max(0.0001);
@@ -1259,7 +1314,9 @@ impl App {
                         if is_drag_y {
                             let max_y = (inner_total_h - log_bg_h).max(0.0);
                             let track_h = log_bg_h - 14.0 * s;
-                            let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s);
+                            let thumb_h = (log_bg_h / inner_total_h * track_h)
+                                .max(20.0 * s)
+                                .min(track_h.max(0.0));
                             let sy = self.ide_panel.lsp_logs_scroll_y.get_mut(&name).unwrap();
                             let ratio = (position.y as f32 - log_bg_y - 2.0 * s - sy.drag_offset)
                                 / (track_h - thumb_h).max(0.0001);
@@ -1268,8 +1325,9 @@ impl App {
                         } else if is_drag_x {
                             let max_x = (inner_max_w + 20.0 * s - log_bg_w).max(0.0);
                             let track_w = log_bg_w - 14.0 * s;
-                            let thumb_w =
-                                (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s);
+                            let thumb_w = (log_bg_w / (inner_max_w + 20.0 * s) * track_w)
+                                .max(20.0 * s)
+                                .min(track_w.max(0.0));
                             let sx = self.ide_panel.lsp_logs_scroll_x.get_mut(&name).unwrap();
                             let ratio = (position.x as f32 - log_bg_x - 2.0 * s - sx.drag_offset)
                                 / (track_w - thumb_w).max(0.0001);
@@ -1281,70 +1339,52 @@ impl App {
                 }
             }
         } else if self.is_dragging_search {
-            let search_w = 480.0 * s;
-            let input_x = if self.ide_panel.git.message_focused {
-                let panel_w = self.ide_panel.left_width * s;
-                let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
-                48.0 * s + pad
+            let (input_id, scroll_x, text) = if self.ide_panel.git.message_focused {
+                (
+                    crate::ui_system::UiId::GitMessageInput,
+                    self.renderer
+                        .as_ref()
+                        .map_or(0.0, |renderer| renderer.git_commit_scroll_x),
+                    self.ide_panel.git.message_editor.get_full_text(),
+                )
             } else if self.ide_panel.term_search_focused {
-                let panel_w = self.window.as_ref().unwrap().inner_size().width as f32 - 48.0 * s;
-                48.0 * s + panel_w - search_w - 20.0 * s + 10.0 * s
+                (
+                    crate::ui_system::UiId::TerminalSearchInput,
+                    self.renderer
+                        .as_ref()
+                        .map_or(0.0, |renderer| renderer.terminal_search_scroll_x),
+                    self.ide_panel.term_search_editor.get_full_text(),
+                )
             } else {
-                scrollbar_x - search_w - 20.0 * s + 10.0 * s
+                (
+                    crate::ui_system::UiId::SearchInput,
+                    self.renderer
+                        .as_ref()
+                        .map_or(0.0, |renderer| renderer.search_scroll_x),
+                    self.search_editor.get_full_text(),
+                )
             };
 
-            let text = if self.ide_panel.git.message_focused {
-                self.ide_panel.git.message_editor.get_full_text()
-            } else if self.ide_panel.term_search_focused {
-                self.ide_panel.term_search_editor.get_full_text()
-            } else {
-                self.search_editor.get_full_text()
-            };
-
-            let x_offset = (position.x as f32 - (input_x + 5.0 * s)
-                + self
-                    .renderer
-                    .as_ref()
-                    .map(|r| {
-                        if self.ide_panel.git.message_focused {
-                            r.search_scroll_x
-                        } else {
-                            0.0
-                        }
-                    })
-                    .unwrap_or(0.0))
-            .max(0.0);
-            let mut current_x = 0.0;
-            let mut target_idx = text.len();
-            let mut byte_idx = 0;
-
-            for c in text.chars() {
-                let adv = self
+            if let Some(rect) = self.ui_registry.rect_for(input_id) {
+                let x_offset = (position.x as f32 - (rect.0 + 5.0 * s) + scroll_x).max(0.0);
+                let target_idx = self
                     .renderer
                     .as_mut()
                     .unwrap()
-                    .get_ui_glyph(c)
-                    .map(|g| g.advance)
-                    .unwrap_or(10.0);
-                if x_offset <= current_x + adv / 2.0 {
-                    target_idx = byte_idx;
-                    break;
+                    .one_line_cursor_from_x(&text, x_offset, 1.0);
+                if self.ide_panel.git.message_focused {
+                    self.ide_panel.git.message_editor.cursor = target_idx;
+                } else if self.ide_panel.term_search_focused {
+                    self.ide_panel.term_search_editor.cursor = target_idx;
+                } else {
+                    self.search_editor.cursor = target_idx;
                 }
-                current_x += adv;
-                byte_idx += c.len_utf8();
-            }
-            if self.ide_panel.git.message_focused {
-                self.ide_panel.git.message_editor.cursor = target_idx;
-            } else if self.ide_panel.term_search_focused {
-                self.ide_panel.term_search_editor.cursor = target_idx;
-            } else {
-                self.search_editor.cursor = target_idx;
             }
         } else if self.scroll_x.is_dragging {
             let r = self.renderer.as_ref().unwrap();
             let track_w = scrollbar_x - padding;
             let max_x = r.max_scroll_x;
-            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s);
+            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s).min(track_w.max(0.0));
             let ratio = (position.x as f32 - padding - self.scroll_x.drag_offset)
                 / (track_w - thumb_w).max(0.0001);
             self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
@@ -1380,6 +1420,7 @@ impl App {
                 let is_minimap_drag = self.last_click_pos.0
                     >= (self.window.as_ref().unwrap().inner_size().width as f32 - minimap_w);
 
+                let track_h = editor_height;
                 let thumb_h = if is_minimap_drag {
                     let total_lines_f32 = self.editor.line_offsets.len() as f32;
                     let bottom_blank_lines =
@@ -1398,9 +1439,9 @@ impl App {
                     );
                     (editor_height / total_content_height.max(editor_height) * editor_height)
                         .max(20.0 * s)
+                        .min(track_h.max(0.0))
                 };
 
-                let track_h = editor_height;
                 let track_start_y = tab_bar_h;
                 let last_mouse_y = r.last_mouse_y;
 

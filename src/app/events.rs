@@ -295,7 +295,7 @@ impl ApplicationHandler for App {
             if _id == dw.id() {
                 match event {
                     WindowEvent::CloseRequested => {
-                        self.close_dialog();
+                        self.cancel_pending_action();
                     }
                     WindowEvent::MouseInput {
                         state: winit::event::ElementState::Pressed,
@@ -320,7 +320,7 @@ impl ApplicationHandler for App {
                         } else if btn_discard.is_hovered(mx, my) {
                             self.discard_pending_action_changes();
                         } else if btn_cancel.is_hovered(mx, my) {
-                            self.close_dialog();
+                            self.cancel_pending_action();
                         }
                     }
                     WindowEvent::CursorMoved { position, .. } => {
@@ -395,7 +395,7 @@ impl ApplicationHandler for App {
 
         match event {
             WindowEvent::CloseRequested => {
-                if self.editor.is_dirty() {
+                if self.has_unsaved_changes() {
                     self.show_action_dialog(event_loop, PendingAction::Quit);
                 } else {
                     window_runtime::save_state_and_exit(self, event_loop);
@@ -744,11 +744,10 @@ impl ApplicationHandler for App {
 
                 let mut over_search = false;
                 if self.show_search && self.search_anim_y > -10.0 {
-                    let search_w = 480.0 * s;
+                    let geometry = crate::render_view::search::search_panel_geometry(scrollbar_x, s);
                     let search_h = 52.0 * s;
-                    let search_x = scrollbar_x - search_w - 20.0 * s;
-                    if mx >= search_x
-                        && mx <= search_x + search_w
+                    if mx >= geometry.x
+                        && mx <= geometry.x + geometry.w
                         && my >= self.search_anim_y
                         && my <= self.search_anim_y + search_h
                     {
@@ -1327,16 +1326,16 @@ impl ApplicationHandler for App {
                     }
 
                     if self.show_search && self.search_anim_y > -10.0 {
-                        let search_w = 480.0 * s;
+                        let scrollbar_x = window_width - minimap_w - scrollbar_w;
+                        let geometry = crate::render_view::search::search_panel_geometry(scrollbar_x, s);
                         let search_h = 52.0 * s;
-                        let search_x = window_width - minimap_w - scrollbar_w - search_w - 20.0 * s;
-                        let input_x = search_x + 10.0 * s;
+                        let input_x = geometry.x + 10.0 * s;
                         let input_y = self.search_anim_y + 11.0 * s;
-                        let input_w = 260.0 * s;
+                        let input_w = geometry.input_w;
                         let input_h = 30.0 * s;
 
-                        if mx >= search_x
-                            && mx <= search_x + search_w
+                        if mx >= geometry.x
+                            && mx <= geometry.x + geometry.w
                             && my >= self.search_anim_y
                             && my <= self.search_anim_y + search_h
                         {

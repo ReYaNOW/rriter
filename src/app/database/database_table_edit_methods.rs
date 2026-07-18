@@ -378,8 +378,13 @@ impl App {
                 }
             }
         } else if let Some((start, end)) = state.grid.selection.cell_range() {
-            for row_index in start.row..=end.row {
-                if row_index > start.row {
+            for (line, row_index) in state
+                .grid
+                .row_indices_between(start.row, end.row)
+                .into_iter()
+                .enumerate()
+            {
+                if line > 0 {
                     output.push('\n');
                 }
                 if let Some(row) = state.grid.row(row_index) {
@@ -616,7 +621,9 @@ impl App {
             }
         }
         for row in &state.grid.added_rows {
-            operations.push(DatabaseChangePlanOperation::Insert(row.clone()));
+            if row.state == DatabaseRowState::Added {
+                operations.push(DatabaseChangePlanOperation::Insert(row.clone()));
+            }
         }
         crate::app::database::build_table_change_plan(
             metadata,

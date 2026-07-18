@@ -1369,3 +1369,103 @@ fn save_as_selection_resumes_pending_action_only_after_success() {
 
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn dirty_text_tab_requires_confirmation_before_close() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.tabs = vec![
+        tab_with("first.py", Some("/tmp/first.py"), "first"),
+        tab_with("second.py", Some("/tmp/second.py"), "second"),
+    ];
+    app.active_tab = 0;
+    app.sync_active_tab();
+    let _ = app.tabs[1].editor.insert_str(" changed");
+
+    app.close_tab_at(1);
+
+    assert_eq!(app.tabs.len(), 2);
+    assert!(matches!(app.pending_action, PendingAction::CloseTab(1)));
+    assert_eq!(app.active_tab, 1);
+}
+
+#[test]
+fn dirty_single_text_tab_requires_confirmation_for_legacy_close_index() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.tabs = vec![tab_with("scratch.py", None, "scratch")];
+    app.active_tab = 0;
+    app.sync_active_tab();
+    let _ = app.editor.insert_str(" changed");
+
+    app.close_tab_at(usize::MAX);
+
+    assert_eq!(app.tabs.len(), 1);
+    assert!(matches!(app.pending_action, PendingAction::CloseTab(0)));
+    assert!(!app.show_welcome);
+}
+
+#[test]
+fn unsaved_change_detection_includes_inactive_tabs() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.tabs = vec![
+        tab_with("clean.py", Some("/tmp/clean.py"), "clean"),
+        tab_with("dirty.py", Some("/tmp/dirty.py"), "dirty"),
+    ];
+    app.active_tab = 0;
+    app.sync_active_tab();
+    let _ = app.tabs[1].editor.insert_str(" changed");
+
+    assert!(app.has_unsaved_changes());
+}
+
+#[test]
+fn pending_quit_save_writes_every_dirty_text_tab() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-pending-save-tabs-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let first = dir.join("first.txt");
+    let second = dir.join("second.txt");
+    std::fs::write(&first, "first").unwrap();
+    std::fs::write(&second, "second").unwrap();
+
+    app.is_ide_mode = true;
+    app.tabs = vec![
+        tab_with("first.txt", first.to_str(), "first"),
+        tab_with("second.txt", second.to_str(), "second"),
+    ];
+    app.active_tab = 0;
+    app.sync_active_tab();
+    let _ = app.editor.insert_str(" active");
+    let _ = app.tabs[1].editor.insert_str(" inactive");
+    app.pending_action = PendingAction::Quit;
+
+    app.begin_pending_action_save();
+
+    assert!(app.pending_action_ready);
+    assert!(app.pending_save_tabs.is_empty());
+    assert_eq!(std::fs::read_to_string(&first).unwrap(), "first active");
+    assert_eq!(
+        std::fs::read_to_string(&second).unwrap(),
+        "second inactive"
+    );
+    std::fs::remove_dir_all(dir).unwrap();
+}

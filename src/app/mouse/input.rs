@@ -690,28 +690,27 @@ impl App {
 
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             if let Some(menu) = self.lsp_actions_menu.as_ref() {
-                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let menu_snapshot = menu.clone();
+                let layout = self
+                    .renderer
+                    .as_mut()
+                    .unwrap()
+                    .lsp_actions_menu_layout(&menu_snapshot);
                 let mut clicked_inside = false;
                 if state == ElementState::Pressed {
-                    let item_h = 36.0 * s;
-                    let menu_w = 320.0 * s;
-                    let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-                    let tab_bar_h = crate::render_view::editor_content_top_inset(
-                        self.show_welcome,
-                        self.is_ide_mode,
-                        self.active_tab_is_database_query(),
-                        s,
-                    );
-                    let menu_y = menu.menu_y + tab_bar_h;
-                    if mx >= menu.menu_x
-                        && mx <= menu.menu_x + menu_w
-                        && my >= menu_y
-                        && my <= menu_y + menu_h
+                    if mx >= layout.x
+                        && mx <= layout.x + layout.w
+                        && my >= layout.y
+                        && my <= layout.y + layout.h
                     {
                         clicked_inside = true;
-                        let rel_y = my - menu_y - 4.0 * s;
-                        let idx = (rel_y / item_h) as usize;
-                        if idx < menu.items.len() {
+                        let rel_y =
+                            my - layout.y - 4.0 * self.renderer.as_ref().unwrap().scale_factor;
+                        if rel_y >= 0.0 {
+                            let idx = (rel_y / layout.item_h) as usize;
+                            if idx >= menu.items.len() {
+                                return;
+                            }
                             let menu_clone = self.lsp_actions_menu.take().unwrap();
                             let item = menu_clone.items[idx].clone();
                             let cursor_line = menu_clone.cursor_line;
@@ -1276,17 +1275,19 @@ impl App {
                 self.is_dragging_lsp_log = false;
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let w = (1000.0 * s)
-                    .min(self.window.as_ref().unwrap().inner_size().width as f32 - 40.0 * s);
-                let h = (700.0 * s)
-                    .min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
-                let x = (self.window.as_ref().unwrap().inner_size().width as f32 - w) / 2.0;
-                let y = (self.window.as_ref().unwrap().inner_size().height as f32 - h) / 2.0;
+                let window_size = self.window.as_ref().unwrap().inner_size();
+                let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
+                    window_size.width as f32,
+                    window_size.height as f32,
+                    s,
+                    self.settings_anim_progress,
+                );
+                let outer = layout.outer;
 
                 let mx = self.renderer.as_ref().unwrap().last_mouse_x;
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
-                if mx < x || mx > x + w || my < y || my > y + h {
+                if !outer.contains(mx, my) {
                     self.show_settings = false;
                 } else {
                     // Ищем только среди оверлейных элементов настроек,
@@ -1297,34 +1298,21 @@ impl App {
                                 // Специальная обработка: позиционирование курсора по клику
                                 self.settings_ignore_focused = true;
                                 self.is_dragging_settings_ignore = true;
-                                let s = self.renderer.as_ref().unwrap().scale_factor;
-                                let pad_h = 40.0 * s;
-                                let sidebar_w = 200.0 * s;
-                                let ix = x + pad_h;
-                                let content_x = ix + sidebar_w + 30.0 * s;
+                                let input = crate::render_view::settings_ui::settings_ignore_input_rect(
+                                    layout,
+                                    s,
+                                    self.ide_workspaces.len(),
+                                    self.settings_ide_scroll.current,
+                                );
                                 let text = self.settings_ignore_editor.get_full_text();
-                                let start_x = content_x + 8.0 * s;
                                 let x_offset =
-                                    (mx - start_x + self.settings_ignore_scroll_x).max(0.0);
-                                let mut current_x = 0.0;
-                                let mut target_idx = text.len();
-                                let mut byte_idx = 0;
-                                for c in text.chars() {
-                                    let adv = self
-                                        .renderer
-                                        .as_mut()
-                                        .unwrap()
-                                        .get_ui_glyph(c)
-                                        .map(|g| g.advance)
-                                        .unwrap_or(10.0)
-                                        * 0.95;
-                                    if x_offset <= current_x + adv / 2.0 {
-                                        target_idx = byte_idx;
-                                        break;
-                                    }
-                                    current_x += adv;
-                                    byte_idx += c.len_utf8();
-                                }
+                                    (mx - (input.x + 8.0 * s) + self.settings_ignore_scroll_x)
+                                        .max(0.0);
+                                let target_idx = self
+                                    .renderer
+                                    .as_mut()
+                                    .unwrap()
+                                    .one_line_cursor_from_x(&text, x_offset, 0.95);
                                 self.settings_ignore_editor.cursor = target_idx;
                                 self.settings_ignore_editor.selection_anchor = Some(target_idx);
                             }
@@ -1620,6 +1608,8 @@ impl App {
             }
             self.ide_panel.lsp_scroll_x.is_dragging = false;
             self.ide_panel.lsp_scroll_y.is_dragging = false;
+            self.ide_panel.api.mock_guide_scroll.is_dragging = false;
+            self.tool_installer.end_log_scroll_drag();
             self.ide_panel.problems_scroll.is_dragging = false;
             self.ide_panel.git.graph_scroll.is_dragging = false;
             for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {

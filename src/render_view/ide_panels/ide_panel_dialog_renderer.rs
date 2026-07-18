@@ -1,5 +1,37 @@
+pub(crate) fn intersect_scissor_boxes(first: [i32; 4], second: [i32; 4]) -> [i32; 4] {
+    let left = first[0].max(second[0]);
+    let bottom = first[1].max(second[1]);
+    let right = first[0]
+        .saturating_add(first[2].max(0))
+        .min(second[0].saturating_add(second[2].max(0)));
+    let top = first[1]
+        .saturating_add(first[3].max(0))
+        .min(second[1].saturating_add(second[3].max(0)));
+    [left, bottom, (right - left).max(0), (top - bottom).max(0)]
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn one_line_cursor_from_x(
+        &mut self,
+        text: &str,
+        x_offset: f32,
+        text_scale: f32,
+    ) -> usize {
+        let mut current_x = 0.0;
+        for (byte_idx, ch) in text.char_indices() {
+            let advance = self
+                .get_ui_glyph(ch)
+                .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
+                .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0));
+            if x_offset <= current_x + advance * 0.5 {
+                return byte_idx;
+            }
+            current_x = (current_x + advance).round();
+        }
+        text.len()
+    }
+
     pub(crate) fn one_line_scroll_for_cursor(
         &mut self,
         text: &str,
@@ -644,12 +676,29 @@ impl Renderer {
 
         self.flush();
         unsafe {
+            let restore_scissor = self.gl.is_enabled(glow::SCISSOR_TEST);
+            let mut previous_scissor = [0i32; 4];
+            if restore_scissor {
+                self.gl
+                    .get_parameter_i32_slice(glow::SCISSOR_BOX, &mut previous_scissor);
+            }
             self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
+            let requested_scissor = [
                 text_start_x as i32,
                 (self.height - (y + h)).round().max(0.0) as i32,
                 content_w.round().max(1.0) as i32,
                 h.round().max(1.0) as i32,
+            ];
+            let active_scissor = if restore_scissor {
+                intersect_scissor_boxes(previous_scissor, requested_scissor)
+            } else {
+                requested_scissor
+            };
+            self.gl.scissor(
+                active_scissor[0],
+                active_scissor[1],
+                active_scissor[2],
+                active_scissor[3],
             );
 
             let scroll_x = scroll_x.round();
@@ -706,7 +755,16 @@ impl Renderer {
             }
 
             self.flush();
-            self.gl.disable(glow::SCISSOR_TEST);
+            if restore_scissor {
+                self.gl.scissor(
+                    previous_scissor[0],
+                    previous_scissor[1],
+                    previous_scissor[2],
+                    previous_scissor[3],
+                );
+            } else {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
         }
     }
 

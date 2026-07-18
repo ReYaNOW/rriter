@@ -439,35 +439,11 @@ impl App {
         match physical_key {
             PhysicalKey::Code(KeyCode::KeyQ) if ctrl => {
                 if self.is_ide_mode {
-                    // TODO: Спросить о сохранении несохраненных вкладок
-                    // Закрываем все вкладки и возвращаемся на Welcome Screen
-
-                    // 1. Уведомить LSP о закрытии всех файлов
-                    self.sync_active_tab(); // Синхронизируем последнюю активную вкладку
-                    if let Some(lsp) = &mut self.lsp {
-                        for tab in &self.tabs {
-                            if let Some(p) = &tab.file_path {
-                                lsp.notify_close(p, &tab.file_extension);
-                            }
-                        }
+                    if self.has_unsaved_changes() {
+                        self.show_action_dialog(event_loop, PendingAction::CloseAllTabs);
+                    } else {
+                        self.close_all_tabs_unchecked();
                     }
-
-                    // 2. Очистить все вкладки и сбросить состояние редактора до "пустого"
-                    self.tabs.clear();
-                    self.active_tab = 0;
-                    self.file_path = None;
-                    self.file_key = None;
-                    self.text_file_format = crate::platform::TextFileFormat::default();
-                    self.base_title = "Добро пожаловать".to_string();
-                    self.editor = Editor::new(8192);
-                    self.editor.set_original_text();
-                    self.highlighter
-                        .reset(self.editor.version, "".to_string(), "".to_string(), 0);
-                    self.show_welcome = true;
-                    self.autocomplete_active = false;
-                    self.scroll_y.stop_anim();
-                    self.scroll_x.stop_anim();
-                    self.save_tabs_state();
                 } else {
                     if self.editor.is_dirty() {
                         self.show_action_dialog(event_loop, PendingAction::CloseFile);

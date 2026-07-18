@@ -133,6 +133,7 @@ pub struct DatabaseQueryHistoryEntry {
     pub started_unix_ms: u128,
     pub duration_ms: u64,
     pub succeeded: bool,
+    pub returned_rows: u64,
     pub affected_rows: u64,
     pub error_summary: Option<String>,
 }
@@ -147,6 +148,7 @@ impl Default for DatabaseQueryHistoryEntry {
             started_unix_ms: 0,
             duration_ms: 0,
             succeeded: false,
+            returned_rows: 0,
             affected_rows: 0,
             error_summary: None,
         }
@@ -155,10 +157,10 @@ impl Default for DatabaseQueryHistoryEntry {
 
 impl DatabaseQueryHistoryEntry {
     pub fn normalize(&mut self) {
-        self.database_name.truncate(128);
-        self.sql.truncate(super::MAX_SQL_CONSOLE_BYTES);
+        super::truncate_utf8(&mut self.database_name, 128);
+        super::truncate_utf8(&mut self.sql, super::MAX_SQL_CONSOLE_BYTES);
         if let Some(error) = &mut self.error_summary {
-            error.truncate(4_096);
+            super::truncate_utf8(error, 4_096);
         }
     }
 }
@@ -190,13 +192,16 @@ pub fn database_query_results_height(
     scale: f32,
 ) -> f32 {
     let min_height = (DATABASE_QUERY_RESULTS_MIN_HEIGHT * scale).round();
-    let max_height = (window_height
+    let available_height = (window_height
         - bottom_panel_height
         - (DATABASE_QUERY_EDITOR_MIN_HEIGHT * scale).round())
-    .max(min_height);
-    (preferred_height.max(DATABASE_QUERY_RESULTS_MIN_HEIGHT) * scale)
-        .round()
-        .clamp(min_height, max_height)
+    .max(0.0);
+    let desired = (preferred_height.max(DATABASE_QUERY_RESULTS_MIN_HEIGHT) * scale).round();
+    if available_height < min_height {
+        available_height
+    } else {
+        desired.clamp(min_height, available_height)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -428,6 +433,7 @@ impl DatabaseQueryTabState {
                 .saturating_sub(self.running_started_unix_ms)
                 .min(u64::MAX as u128) as u64,
             succeeded: false,
+            returned_rows: 0,
             affected_rows: 0,
             error_summary: Some("Запрос отменён пользователем".to_string()),
         };
@@ -1406,7 +1412,7 @@ pub fn sanitize_history_sql(sql: &str) -> String {
         query_cursor = value_start + "<redacted>".len();
     }
 
-    output.truncate(super::MAX_SQL_CONSOLE_BYTES);
+    super::truncate_utf8(&mut output, super::MAX_SQL_CONSOLE_BYTES);
     output
 }
 
@@ -1965,6 +1971,54 @@ SELECT 2;  ";
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].started_unix_ms, 8);
         assert_eq!(history[1].started_unix_ms, 9);
+    }
+
+
+    #[test]
+    fn history_normalization_truncates_unicode_on_character_boundaries() {
+        let mut entry = DatabaseQueryHistoryEntry {
+            database_name: "я".repeat(100),
+            sql: "🙂".repeat(super::super::MAX_SQL_CONSOLE_BYTES / 4 + 2),
+            error_summary: Some("Ж".repeat(2_049)),
+            ..DatabaseQueryHistoryEntry::default()
+        };
+        entry.normalize();
+        assert!(entry.database_name.len() <= 128);
+        assert!(entry.sql.len() <= super::super::MAX_SQL_CONSOLE_BYTES);
+        assert!(entry.error_summary.as_ref().unwrap().len() <= 4_096);
+        assert!(entry.database_name.is_char_boundary(entry.database_name.len()));
+        assert!(entry.sql.is_char_boundary(entry.sql.len()));
+    }
+
+    #[test]
+    fn history_sanitizer_safely_bounds_long_unicode_sql() {
+        let sql = "🙂".repeat(super::super::MAX_SQL_CONSOLE_BYTES / 4 + 2);
+        let clean = sanitize_history_sql(&sql);
+        assert!(clean.len() <= super::super::MAX_SQL_CONSOLE_BYTES);
+        assert!(clean.is_char_boundary(clean.len()));
+    }
+
+    #[test]
+    fn query_result_height_never_exceeds_tiny_available_space() {
+        assert_eq!(database_query_results_height(260.0, 250.0, 0.0, 1.0), 30.0);
+        assert_eq!(database_query_results_height(260.0, 180.0, 0.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn old_history_json_defaults_returned_rows_to_zero() {
+        let json = r#"{
+            "connection_id": 1,
+            "database_name": "db",
+            "console_id": 2,
+            "sql": "select 1",
+            "started_unix_ms": 3,
+            "duration_ms": 4,
+            "succeeded": true,
+            "affected_rows": 0,
+            "error_summary": null
+        }"#;
+        let entry: DatabaseQueryHistoryEntry = serde_json::from_str(json).unwrap();
+        assert_eq!(entry.returned_rows, 0);
     }
 
 }

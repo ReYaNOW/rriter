@@ -150,7 +150,64 @@ impl App {
             return;
         }
 
+        let idx = if self.tabs.len() <= 1 { 0 } else { idx };
+        if idx >= self.tabs.len() {
+            return;
+        }
+
         if self.request_database_query_close(idx) || self.request_database_table_close(idx) {
+            return;
+        }
+
+        if self.tab_text_is_dirty(idx) {
+            if idx != self.active_tab {
+                self.switch_to_tab(idx);
+            }
+            self.pending_action = PendingAction::CloseTab(idx);
+            self.pending_action_ready = false;
+            self.pending_action_waiting_for_save_as = false;
+            self.pending_save_tabs.clear();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        self.close_tab_at_unchecked(idx);
+    }
+
+    pub(crate) fn tab_text_is_dirty(&self, idx: usize) -> bool {
+        self.tabs.get(idx).is_some_and(|tab| {
+            matches!(tab.kind, EditorTabKind::Normal)
+                && if idx == self.active_tab {
+                    self.editor.is_dirty()
+                } else {
+                    tab.editor.is_dirty()
+                }
+        })
+    }
+
+    pub(crate) fn has_blocking_database_changes_for_pending_action(&self) -> bool {
+        self.tabs.iter().any(|tab| match &tab.kind {
+            EditorTabKind::DatabaseTable(_, state) => {
+                state.grid.dirty() || state.grid.review.is_some()
+            }
+            EditorTabKind::DatabaseQuery(_, state) => state.review.is_some(),
+            _ => false,
+        })
+    }
+
+    pub(crate) fn has_unsaved_changes(&mut self) -> bool {
+        if self.is_ide_mode {
+            self.has_blocking_database_changes_for_pending_action()
+                || (0..self.tabs.len()).any(|index| self.tab_text_is_dirty(index))
+        } else {
+            self.editor.is_dirty()
+        }
+    }
+
+    pub(crate) fn close_tab_at_unchecked(&mut self, idx: usize) {
+        if idx >= self.tabs.len() {
             return;
         }
 
@@ -201,6 +258,26 @@ impl App {
         }
         self.save_tabs_state();
         self.start_file_watcher();
+    }
+
+    pub(crate) fn close_all_tabs_unchecked(&mut self) {
+        if !self.is_ide_mode {
+            self.close_current_file();
+            return;
+        }
+        if let Some(lsp) = &mut self.lsp {
+            for (index, tab) in self.tabs.iter().enumerate() {
+                if index != self.active_tab
+                    && let Some(path) = &tab.file_path
+                {
+                    lsp.notify_close(path, &tab.file_extension);
+                }
+            }
+        }
+        self.prepare_all_database_tabs_close();
+        self.tabs.clear();
+        self.active_tab = 0;
+        self.close_current_file();
     }
 
     pub fn open_file_in_tab(&mut self, path: PathBuf, add_to_history: bool) {

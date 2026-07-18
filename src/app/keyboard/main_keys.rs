@@ -176,6 +176,43 @@ impl App {
 
         if key_event.state == ElementState::Pressed {
             if self.active_tab_is_database_query() {
+                let history_open = self
+                    .active_database_query_meta_state()
+                    .is_some_and(|(_, state)| state.history_open);
+                if history_open {
+                    match key_event.physical_key {
+                        PhysicalKey::Code(KeyCode::ArrowDown) => {
+                            self.move_active_database_query_history_selection(1);
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::ArrowUp) => {
+                            self.move_active_database_query_history_selection(-1);
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::Home) => {
+                            self.set_active_database_query_history_selection(false);
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::End) => {
+                            self.set_active_database_query_history_selection(true);
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        PhysicalKey::Code(KeyCode::Enter)
+                        | PhysicalKey::Code(KeyCode::NumpadEnter) if !ctrl => {
+                            let selected = self
+                                .active_database_query_meta_state()
+                                .map_or(0, |(_, state)| state.history_selected);
+                            self.load_database_query_history_entry(selected);
+                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            return;
+                        }
+                        _ => {}
+                    }
+                }
                 match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::Escape) => {
                         let (running, reviewing, history_open) = self

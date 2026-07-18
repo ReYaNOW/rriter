@@ -311,6 +311,7 @@ impl App {
                                     started_unix_ms,
                                     duration_ms,
                                     succeeded: true,
+                                    returned_rows,
                                     affected_rows: changed_rows,
                                     error_summary: None,
                                 },
@@ -362,6 +363,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: true,
+                            returned_rows: review.returned_rows,
                             affected_rows: review.changed_rows,
                             error_summary: None,
                         });
@@ -406,6 +408,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: false,
+                            returned_rows: review.returned_rows,
                             affected_rows: review.changed_rows,
                             error_summary: Some("Транзакция отменена пользователем".to_string()),
                         });
@@ -439,6 +442,7 @@ impl App {
                             started_unix_ms: review.started_unix_ms,
                             duration_ms: review.duration_ms,
                             succeeded: false,
+                            returned_rows: review.returned_rows,
                             affected_rows: review.changed_rows,
                             error_summary: Some("Транзакция автоматически отменена по таймауту".to_string()),
                         });
@@ -518,6 +522,7 @@ impl App {
                     started_unix_ms,
                     duration_ms,
                     succeeded: false,
+                    returned_rows: 0,
                     affected_rows: 0,
                     error_summary: Some(message.clone()),
                 });

@@ -435,18 +435,14 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-        let shown = if mask && !focused && !value.is_empty() {
-            "••••••••".to_string()
-        } else {
-            value.to_string()
-        };
         self.draw_api_one_line_input(
             x,
             y,
             w,
             h,
             s,
-            &shown,
+            value,
+            mask,
             self.theme.fg,
             focused,
             input_scroll_x,

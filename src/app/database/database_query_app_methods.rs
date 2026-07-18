@@ -642,6 +642,56 @@ impl App {
         self.save_active_database_query();
     }
 
+    fn active_database_query_history_len(&self) -> usize {
+        let Some((meta, _)) = self.active_database_query_meta_state() else {
+            return 0;
+        };
+        self.ide_panel
+            .database
+            .persisted
+            .query_history
+            .iter()
+            .filter(|entry| {
+                entry.connection_id == meta.connection_id
+                    && entry.database_name == meta.database_name
+            })
+            .count()
+    }
+
+    pub(crate) fn move_active_database_query_history_selection(&mut self, delta: i32) {
+        let len = self.active_database_query_history_len();
+        if len == 0 {
+            return;
+        }
+        let Some((meta, _)) = self.active_database_query_meta_state() else {
+            return;
+        };
+        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
+            && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
+        {
+            state.history_selected = if delta < 0 {
+                state.history_selected.saturating_sub(delta.unsigned_abs() as usize)
+            } else {
+                state
+                    .history_selected
+                    .saturating_add(delta as usize)
+                    .min(len - 1)
+            };
+        }
+    }
+
+    pub(crate) fn set_active_database_query_history_selection(&mut self, last: bool) {
+        let len = self.active_database_query_history_len();
+        let Some((meta, _)) = self.active_database_query_meta_state() else {
+            return;
+        };
+        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
+            && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
+        {
+            state.history_selected = if last { len.saturating_sub(1) } else { 0 };
+        }
+    }
+
     pub fn show_active_database_query_completion(&mut self) {
         self.refresh_active_database_query_analysis();
         self.update_active_database_query_completion(true);

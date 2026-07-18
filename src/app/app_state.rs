@@ -123,9 +123,12 @@ pub struct InlineGitPopup {
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum PendingAction {
+    None,
     Quit,
     OpenFile,
     CloseFile,
+    CloseTab(usize),
+    CloseAllTabs,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -979,6 +982,7 @@ pub struct App {
     pub pending_action: PendingAction,
     pub pending_action_waiting_for_save_as: bool,
     pub pending_action_ready: bool,
+    pub pending_save_tabs: Vec<usize>,
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,

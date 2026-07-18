@@ -26,6 +26,41 @@ pub(crate) fn settings_modal_layout(
     SettingsModalLayout { outer, inner, sidebar_w }
 }
 
+pub(crate) fn animated_settings_modal_layout(
+    width: f32,
+    height: f32,
+    scale: f32,
+    anim_progress: f32,
+) -> SettingsModalLayout {
+    let mut layout = settings_modal_layout(width, height, scale);
+    let start_y = height + 100.0 * scale;
+    let target_y = layout.outer.y;
+    let animated_y = (start_y + (target_y - start_y) * anim_progress.clamp(0.0, 1.0)).round();
+    let dy = animated_y - target_y;
+    layout.outer.y += dy;
+    layout.inner.y += dy;
+    layout
+}
+
+pub(crate) fn settings_ignore_input_rect(
+    layout: SettingsModalLayout,
+    scale: f32,
+    workspace_count: usize,
+    ide_scroll_y: f32,
+) -> crate::ui_system::UiClipRect {
+    let content_x = layout.inner.x + layout.sidebar_w + 30.0 * scale;
+    let content_available_w =
+        (layout.inner.x + layout.inner.w - content_x - 18.0 * scale).max(1.0);
+    let add_gap = 10.0 * scale;
+    let button_w = (110.0 * scale).min((content_available_w * 0.32).max(0.0));
+    let effective_gap = add_gap.min((content_available_w - button_w).max(0.0));
+    let input_w = (content_available_w - effective_gap - button_w).max(0.0);
+    let input_y = layout.inner.y
+        + (272.0 + workspace_count as f32 * 46.0) * scale
+        - ide_scroll_y.round();
+    crate::ui_system::UiClipRect::new(content_x, input_y, input_w, 34.0 * scale)
+}
+
 use crate::editor::Editor;
 use crate::renderer::Renderer;
 use glow::HasContext;
@@ -107,15 +142,16 @@ impl Renderer {
             [0.0, 0.0, 0.0, overlay_alpha],
         );
 
-        let layout = settings_modal_layout(self.width, self.height, s);
+        let layout = animated_settings_modal_layout(
+            self.width,
+            self.height,
+            s,
+            anim_progress,
+        );
         let fitted = layout.outer;
         let w = fitted.w;
         let h = fitted.h;
-
-        let start_y = self.height + 100.0 * s;
-        let target_y = fitted.y;
-        let raw_y = start_y + (target_y - start_y) * anim_progress;
-        let y = raw_y.round();
+        let y = fitted.y;
         let x = fitted.x;
 
         let top_color = [0.26, 0.20, 0.36, 1.0];
@@ -134,7 +170,7 @@ impl Renderer {
 
         // 2. Внутренняя панель
         let ix = layout.inner.x;
-        let iy = layout.inner.y + (y - fitted.y);
+        let iy = layout.inner.y;
         let iw = layout.inner.w;
         let ih = layout.inner.h;
 
@@ -424,12 +460,15 @@ impl Renderer {
                 6.0 * s,
             );
             if full_text.is_empty() {
-                self.draw_string_scaled(
+                let mut placeholder_scratch = String::new();
+                self.draw_tree_label_clipped(
                     "Паттерн или имя файла...",
                     (content_x + 8.0 * s).round(),
                     (content_y + input_h * 0.70).round(),
+                    (input_w - 16.0 * s).max(1.0),
                     [0.30, 0.32, 0.40, 1.0],
                     text_scale_input,
+                    &mut placeholder_scratch,
                 );
             }
 
@@ -1455,75 +1494,82 @@ impl Renderer {
                 2.0 * s,
                 [0.56, 0.38, 0.70, 0.95],
             );
-        }
-
-        let button_y = (modal_y + modal_h - 43.0 * s).round();
-        let close_x = (modal_x + modal_w - 96.0 * s).round();
-        ui_registry.register_rect(
-            crate::ui_system::UiId::SettingsCloseToolInstallLog,
-            close_x,
-            button_y,
-            78.0 * s,
-            29.0 * s,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
-        crate::widgets::ButtonView {
-            x: close_x,
-            y: button_y,
-            w: 78.0 * s,
-            h: 29.0 * s,
-            text: "Закрыть",
-            icon: None,
-            text_scale: 0.72,
-            icon_size: 0.0,
-        }
-        .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-
-        let copy_x = (close_x - 120.0 * s).round();
-        ui_registry.register_rect(
-            crate::ui_system::UiId::SettingsCopyToolInstallLog,
-            copy_x,
-            button_y,
-            108.0 * s,
-            29.0 * s,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
-        crate::widgets::ButtonView {
-            x: copy_x,
-            y: button_y,
-            w: 108.0 * s,
-            h: 29.0 * s,
-            text: "Копировать",
-            icon: None,
-            text_scale: 0.70,
-            icon_size: 0.0,
-        }
-        .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-
-        if tool_installer.is_running() {
-            let cancel_x = (copy_x - 102.0 * s).round();
             ui_registry.register_rect(
-                crate::ui_system::UiId::SettingsCancelToolInstall,
-                cancel_x,
-                button_y,
-                90.0 * s,
-                29.0 * s,
+                crate::ui_system::UiId::SettingsToolInstallLogScrollY,
+                log_x + log_w - 16.0 * s,
+                log_y,
+                16.0 * s,
+                log_h,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );
+        }
+
+        let button_y = (modal_y + modal_h - 43.0 * s).round();
+        let inner_w = (modal_w - 36.0 * s).max(1.0);
+        let button_gap = (8.0 * s).min(inner_w * 0.04);
+        let running = tool_installer.is_running();
+        let base_widths: &[f32] = if running { &[90.0, 108.0, 78.0] } else { &[108.0, 78.0] };
+        let usable = (inner_w - button_gap * base_widths.len().saturating_sub(1) as f32).max(1.0);
+        let base_total = base_widths.iter().sum::<f32>() * s;
+        let ratio = (usable / base_total.max(1.0)).min(1.0);
+        let mut button_x = modal_x + 18.0 * s;
+        let mut draw_button = |renderer: &mut Self,
+                               ui_registry: &mut crate::ui_system::UiRegistry,
+                               id: crate::ui_system::UiId,
+                               label: &str,
+                               base_w: f32| {
+            let width = base_w * s * ratio;
+            ui_registry.register_rect(
+                id,
+                button_x,
+                button_y,
+                width,
+                29.0 * s,
+                renderer.last_mouse_x,
+                renderer.last_mouse_y,
+            );
             crate::widgets::ButtonView {
-                x: cancel_x,
+                x: button_x,
                 y: button_y,
-                w: 90.0 * s,
+                w: width,
                 h: 29.0 * s,
-                text: "Отменить",
+                text: label,
                 icon: None,
-                text_scale: 0.70,
+                text_scale: (0.70 * ratio).clamp(0.50, 0.70),
                 icon_size: 0.0,
             }
-            .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
+            .render(
+                renderer,
+                renderer.last_mouse_x,
+                renderer.last_mouse_y,
+                s,
+                false,
+            );
+            button_x += width + button_gap;
+        };
+        if running {
+            draw_button(
+                self,
+                ui_registry,
+                crate::ui_system::UiId::SettingsCancelToolInstall,
+                "Отменить",
+                90.0,
+            );
         }
+        draw_button(
+            self,
+            ui_registry,
+            crate::ui_system::UiId::SettingsCopyToolInstallLog,
+            "Копировать",
+            108.0,
+        );
+        draw_button(
+            self,
+            ui_registry,
+            crate::ui_system::UiId::SettingsCloseToolInstallLog,
+            "Закрыть",
+            78.0,
+        );
     }
 }

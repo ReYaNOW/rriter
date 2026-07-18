@@ -844,22 +844,29 @@ impl App {
         let page = self
             .database_table_meta_state(tab_id)
             .map(|(_, state)| {
-                let count = state.grid.count.unwrap_or(0) as usize;
-                let last = count.saturating_sub(1) / state.grid.view.limit;
-                (state.grid.view.current_page + 1).min(last)
+                if !state.grid.can_page_next() {
+                    return state.grid.view.current_page;
+                }
+                match state.grid.count {
+                    Some(count) => {
+                        let last = (count as usize).saturating_sub(1) / state.grid.view.limit;
+                        (state.grid.view.current_page + 1).min(last)
+                    }
+                    None => state.grid.view.current_page.saturating_add(1),
+                }
             })
             .unwrap_or(0);
         self.set_database_table_page(tab_id, page);
     }
 
     pub fn database_table_page_last(&mut self, tab_id: crate::app::database::DatabaseTabId) {
-        let page = self
-            .database_table_meta_state(tab_id)
-            .map(|(_, state)| {
-                let count = state.grid.count.unwrap_or(0) as usize;
-                count.saturating_sub(1) / state.grid.view.limit
+        let Some(page) = self.database_table_meta_state(tab_id).and_then(|(_, state)| {
+            state.grid.count.map(|count| {
+                (count as usize).saturating_sub(1) / state.grid.view.limit
             })
-            .unwrap_or(0);
+        }) else {
+            return;
+        };
         self.set_database_table_page(tab_id, page);
     }
 
@@ -983,13 +990,7 @@ impl App {
             state.error = metadata.read_only_reason.clone();
             return;
         }
-        let page_base = state.grid.view.current_page.saturating_mul(state.grid.view.limit);
-        let server_rows = state.grid.count.map_or(state.grid.view.limit, |count| {
-            (count as usize).saturating_sub(page_base).min(state.grid.view.limit)
-        });
-        let absolute_index = page_base
-            .saturating_add(server_rows)
-            .saturating_add(state.grid.added_rows.len());
+        let absolute_index = state.grid.next_added_row_index();
         let cells = metadata
             .columns
             .iter()
@@ -1008,7 +1009,7 @@ impl App {
             xmin: None,
             state: DatabaseRowState::Added,
         });
-        state.grid.selection.select_row(absolute_index, false, false);
+        state.grid.select_row(absolute_index, false, false);
     }
 
     pub fn delete_database_table_selection(
@@ -1029,12 +1030,24 @@ impl App {
         if rows.is_empty()
             && let Some((start, end)) = state.grid.selection.cell_range()
         {
-            rows.extend(start.row..=end.row);
+            rows.extend(state.grid.row_indices_between(start.row, end.row));
         }
         rows.sort_unstable();
         rows.dedup();
-        state.grid.added_rows.retain(|row| !rows.contains(&row.absolute_index));
-        for row_index in rows {
+        let removed_added: std::collections::HashSet<_> = state
+            .grid
+            .added_rows
+            .iter()
+            .filter_map(|row| rows.contains(&row.absolute_index).then_some(row.absolute_index))
+            .collect();
+        state
+            .grid
+            .added_rows
+            .retain(|row| !removed_added.contains(&row.absolute_index));
+        for row_index in rows.iter().copied() {
+            if removed_added.contains(&row_index) {
+                continue;
+            }
             if let Some(row) = state.grid.row_mut(row_index) {
                 row.state = if row.state == DatabaseRowState::Deleted {
                     DatabaseRowState::Clean
@@ -1043,6 +1056,7 @@ impl App {
                 };
             }
         }
+        state.grid.selection.clear();
     }
 
     pub fn undo_database_table_selection(
@@ -1053,7 +1067,21 @@ impl App {
             return;
         };
         if !state.grid.selection.selected_rows.is_empty() {
-            for row_index in state.grid.selection.selected_rows.clone() {
+            let rows = state.grid.selection.selected_rows.clone();
+            let added: std::collections::HashSet<_> = state
+                .grid
+                .added_rows
+                .iter()
+                .filter_map(|row| rows.contains(&row.absolute_index).then_some(row.absolute_index))
+                .collect();
+            state
+                .grid
+                .added_rows
+                .retain(|row| !added.contains(&row.absolute_index));
+            for row_index in rows {
+                if added.contains(&row_index) {
+                    continue;
+                }
                 if let Some(row) = state.grid.row_mut(row_index) {
                     row.state = DatabaseRowState::Clean;
                     for cell in &mut row.cells {
@@ -1061,10 +1089,11 @@ impl App {
                     }
                 }
             }
+            state.grid.selection.clear();
             return;
         }
         if let Some((start, end)) = state.grid.selection.cell_range() {
-            for row_index in start.row..=end.row {
+            for row_index in state.grid.row_indices_between(start.row, end.row) {
                 if let Some(row) = state.grid.row_mut(row_index) {
                     for column in start.column..=end.column {
                         if let Some(cell) = row.cells.get_mut(column) {

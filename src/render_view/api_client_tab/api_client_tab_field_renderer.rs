@@ -465,6 +465,7 @@ impl Renderer {
         h: f32,
         s: f32,
         shown: &str,
+        masked: bool,
         color: [f32; 4],
         focused: bool,
         input_scroll_x: f32,
@@ -495,40 +496,24 @@ impl Renderer {
             [0.13, 0.14, 0.18, 1.0],
         );
         ui_registry.register_text_input(id, x, y, w, h, mx, my);
-        let text_w = (w - 16.0 * s).max(1.0);
         let scroll_x = if focused { input_scroll_x.round() } else { 0.0 };
-        if focused {
-            let sel_h = (h - 10.0 * s).max(16.0 * s);
-            self.draw_api_editor_selection_one_line(
-                editor,
-                x + 8.0 * s,
-                y + (h - sel_h) * 0.5,
-                text_w,
-                sel_h,
-                text_scale,
-                scroll_x,
-            );
-        }
-        self.draw_api_one_line_clipped(
+        self.draw_one_line_selectable_text(
             shown,
-            x + 8.0 * s,
-            api_centered_text_y(y, h, s),
-            text_w,
+            if focused { editor.cursor } else { 0 },
+            if focused { editor.selection_anchor } else { None },
+            masked,
+            focused,
+            x,
+            y,
+            w,
+            h,
             scroll_x,
-            color,
+            blink_alpha,
             text_scale,
+            color,
+            0.0,
+            8.0 * s,
         );
-        if focused && blink_alpha > 0.5 {
-            let cursor_w = self.api_editor_cursor_x_one_line(editor, text_scale) - scroll_x;
-            let cursor_h = (h - 12.0 * s).max(16.0 * s);
-            self.push_rect(
-                x + 8.0 * s + cursor_w.clamp(0.0, text_w),
-                y + (h - cursor_h) * 0.5,
-                1.5 * s,
-                cursor_h,
-                self.theme.fg,
-            );
-        }
     }
 
     fn draw_api_one_line_clipped(

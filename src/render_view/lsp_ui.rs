@@ -42,6 +42,15 @@ fn lsp_action_text_scale(natural_text_width: f32, button_width: f32, base_scale:
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct LspActionsMenuLayout {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+    pub item_h: f32,
+}
+
 fn lsp_action_label<'a>(
     item: &'a crate::app::LspActionItem,
     scratch: &'a mut String,
@@ -151,6 +160,32 @@ mod tests {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn lsp_actions_menu_layout(
+        &mut self,
+        menu: &crate::app::LspActionsMenu,
+    ) -> LspActionsMenuLayout {
+        let s = self.scale_factor;
+        let item_h = 36.0 * s;
+        let mut menu_w = 320.0 * s;
+        let mut scratch = String::new();
+        for item in &menu.items {
+            let label = lsp_action_label(item, &mut scratch);
+            menu_w = menu_w.max(self.measure_ui_width(&label, 0.9) + 40.0 * s);
+        }
+        menu_w = menu_w.min((self.width - 8.0 * s).max(1.0));
+        let menu_h = (menu.items.len() as f32 * item_h + 8.0 * s)
+            .min((self.height - 8.0 * s).max(1.0));
+        let max_x = (self.width - menu_w - 4.0 * s).max(0.0);
+        let max_y = (self.height - menu_h - 4.0 * s).max(0.0);
+        LspActionsMenuLayout {
+            x: menu.menu_x.clamp(0.0, max_x),
+            y: menu.menu_y.clamp(0.0, max_y),
+            w: menu_w,
+            h: menu_h,
+            item_h,
+        }
+    }
+
     /// Рисует содержимое панели LSP серверов (левая панель)
     pub fn draw_lsp_servers_panel(
         &mut self,
@@ -614,22 +649,25 @@ impl Renderer {
                     let chip_h = 22.0 * s;
                     let chip_y = filter_y + 4.0 * s;
                     let mut chip_x = log_bg_x;
-                    let clear_w = 24.0 * s;
-                    let chip_pad = 8.0 * s;
-                    let label_case = if ide_panel.lsp_log_filter_case_sensitive {
+                    let compact = log_bg_w < 420.0 * s;
+                    let clear_w = if compact { 22.0 * s } else { 24.0 * s };
+                    let chip_pad = if compact { 5.0 * s } else { 8.0 * s };
+                    let label_case = if compact {
+                        if ide_panel.lsp_log_filter_case_sensitive { "A" } else { "a" }
+                    } else if ide_panel.lsp_log_filter_case_sensitive {
                         "Aa"
                     } else {
                         "aa"
                     };
-                    let label_send = "SEND";
-                    let label_recv = "RECV";
-                    let label_other = "ERR";
+                    let label_send = if compact { "S" } else { "SEND" };
+                    let label_recv = if compact { "R" } else { "RECV" };
+                    let label_other = if compact { "E" } else { "ERR" };
                     let case_w = self.measure_ui_width(label_case, 0.72) + chip_pad * 2.0;
                     let send_w = self.measure_ui_width(label_send, 0.72) + chip_pad * 2.0;
                     let recv_w = self.measure_ui_width(label_recv, 0.72) + chip_pad * 2.0;
                     let other_w = self.measure_ui_width(label_other, 0.72) + chip_pad * 2.0;
                     let chips_w = clear_w + case_w + send_w + recv_w + other_w + 5.0 * 6.0 * s;
-                    let input_w = (log_bg_w - chips_w).max(70.0 * s);
+                    let input_w = (log_bg_w - chips_w).max(1.0);
                     let input_hover = ui_registry.register_text_input(
                         crate::ui_system::UiId::LspLogsFilterInput,
                         chip_x,
@@ -660,35 +698,35 @@ impl Renderer {
                         4.0 * s,
                         [0.10, 0.10, 0.13, 1.0],
                     );
-                    let mut clipped_filter = String::new();
-                    let filter_draw = if lsp_log_filter_text.is_empty() {
-                        "Фильтр"
+                    let filter_empty = lsp_log_filter_text.is_empty();
+                    let filter_text = if filter_empty { "Фильтр" } else { lsp_log_filter_text.as_str() };
+                    let filter_scroll_x = if filter_empty {
+                        0.0
                     } else {
-                        let max_text_w = (input_w - 16.0 * s).max(0.0);
-                        let mut used_w = 0.0;
-                        for c in lsp_log_filter_text.chars() {
-                            let adv =
-                                self.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.78;
-                            if used_w + adv > max_text_w {
-                                clipped_filter.push('…');
-                                break;
-                            }
-                            clipped_filter.push(c);
-                            used_w += adv;
-                        }
-                        clipped_filter.as_str()
+                        self.one_line_scroll_for_cursor(
+                            filter_text,
+                            ide_panel.lsp_log_filter_editor.cursor,
+                            0.78,
+                            input_w - 16.0 * s,
+                            0.0,
+                        )
                     };
-                    let filter_color = if lsp_log_filter_text.is_empty() {
-                        [0.45, 0.45, 0.50, 1.0]
-                    } else {
-                        self.theme.fg
-                    };
-                    self.draw_string_scaled(
-                        filter_draw,
-                        chip_x + 8.0 * s,
-                        filter_y + filter_h / 2.0 + 5.0 * s,
-                        filter_color,
+                    self.draw_one_line_selectable_text(
+                        filter_text,
+                        if filter_empty { 0 } else { ide_panel.lsp_log_filter_editor.cursor },
+                        if filter_empty { None } else { ide_panel.lsp_log_filter_editor.selection_anchor },
+                        false,
+                        ide_panel.lsp_log_filter_focused && !filter_empty,
+                        chip_x,
+                        filter_y,
+                        input_w,
+                        filter_h,
+                        filter_scroll_x,
+                        1.0,
                         0.78,
+                        if filter_empty { [0.45, 0.45, 0.50, 1.0] } else { self.theme.fg },
+                        0.0,
+                        8.0 * s,
                     );
                     chip_x += input_w + 5.0 * s;
 
@@ -1091,7 +1129,7 @@ impl Renderer {
                             let max_y = (inner_total_h - log_bg_h).max(0.0);
                             let ratio = (inner_scroll_y / max_y).clamp(0.0, 1.0);
                             let track_h = log_bg_h - 14.0 * s;
-                            let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s);
+                            let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s).min(track_h.max(0.0));
                             let thumb_y = log_bg_y + 7.0 * s + ratio * (track_h - thumb_h);
                             self.push_rounded_rect(
                                 log_bg_x + log_bg_w - 8.0 * s,
@@ -1117,7 +1155,7 @@ impl Renderer {
                             let ratio = (inner_scroll_x / max_x).clamp(0.0, 1.0);
                             let track_w = log_bg_w - 14.0 * s;
                             let thumb_w =
-                                (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s);
+                                (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s).min(track_w.max(0.0));
                             let thumb_x = log_bg_x + 7.0 * s + ratio * (track_w - thumb_w);
                             self.push_rounded_rect(
                                 thumb_x,
@@ -1158,7 +1196,7 @@ impl Renderer {
         if max_scroll_y > 0.0 {
             let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
             let track_h = content_h - 10.0 * s;
-            let thumb_h = (content_h / total_h * track_h).max(40.0 * s);
+            let thumb_h = (content_h / total_h * track_h).max(40.0 * s).min(track_h.max(0.0));
             let thumb_y = content_y + 5.0 * s + ratio * (track_h - thumb_h);
             self.push_rounded_rect(
                 content_x + content_w - 12.0 * s,
@@ -1222,25 +1260,13 @@ impl Renderer {
         }
 
         let s = self.scale_factor;
-        let item_h = 36.0 * s;
-
-        let mut max_item_w = 320.0 * s;
+        let layout = self.lsp_actions_menu_layout(menu);
+        let item_h = layout.item_h;
+        let menu_w = layout.w;
+        let menu_h = layout.h;
+        let mx_pos = layout.x;
+        let my_pos = layout.y;
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
-        for item in &menu.items {
-            let label_str = lsp_action_label(item, &mut scratch);
-            let w = self.measure_ui_width(&label_str, 0.9) + 40.0 * s;
-            if w > max_item_w {
-                max_item_w = w;
-            }
-        }
-        let menu_w = max_item_w;
-        let menu_h = menu.items.len() as f32 * item_h + 8.0 * s;
-
-        // Подгоняем к экрану
-        let max_x = self.width - menu_w - 4.0 * s;
-        let max_y = self.height - menu_h - 4.0 * s;
-        let mx_pos = menu.menu_x.min(max_x).max(0.0);
-        let my_pos = menu.menu_y.min(max_y).max(0.0);
 
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;

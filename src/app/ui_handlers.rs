@@ -17,7 +17,7 @@ fn scrollbar_x_click_target(
     if track_w <= 0.0 || max_scroll <= 0.0 {
         return None;
     }
-    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w).max(40.0 * scale);
+    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w).max(40.0 * scale).min(track_w.max(0.0));
     let scroll_ratio = (current_scroll / max_scroll).clamp(0.0, 1.0);
     let thumb_x = track_x + scroll_ratio * (track_w - thumb_w);
     if mouse_x >= thumb_x && mouse_x <= thumb_x + thumb_w {
@@ -433,29 +433,13 @@ impl App {
                 self.search_focused = false;
                 self.ide_panel.git.message_focused = false;
                 self.is_dragging_search = true;
-                if let Some(r) = self.renderer.as_mut() {
-                    let mx = r.last_mouse_x;
-                    let s = r.scale_factor;
-                    let panel_w =
-                        self.window.as_ref().unwrap().inner_size().width as f32 - 48.0 * s;
-                    let search_w = 480.0 * s;
-                    let search_x = 48.0 * s + panel_w - search_w - 20.0 * s;
-                    let input_x = search_x + 10.0 * s;
-
+                let input_rect = self.ui_registry.rect_for(UiId::TerminalSearchInput);
+                if let (Some(rect), Some(r)) = (input_rect, self.renderer.as_mut()) {
                     let text = self.ide_panel.term_search_editor.get_full_text();
-                    let x_offset = (mx - (input_x + 5.0 * s)).max(0.0);
-                    let mut current_x = 0.0;
-                    let mut target_idx = text.len();
-                    let mut byte_idx = 0;
-                    for c in text.chars() {
-                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                        if x_offset <= current_x + adv / 2.0 {
-                            target_idx = byte_idx;
-                            break;
-                        }
-                        current_x += adv;
-                        byte_idx += c.len_utf8();
-                    }
+                    let x_offset = (r.last_mouse_x - (rect.0 + 5.0 * r.scale_factor)
+                        + r.terminal_search_scroll_x)
+                        .max(0.0);
+                    let target_idx = r.one_line_cursor_from_x(&text, x_offset, 1.0);
                     self.ide_panel.term_search_editor.cursor = target_idx;
                     self.ide_panel.term_search_editor.selection_anchor = Some(target_idx);
                 }
@@ -516,7 +500,7 @@ impl App {
                 }
             }
             UiId::DialogCancel => {
-                self.dialog_window = None;
+                self.cancel_pending_action();
                 self.window.as_ref().unwrap().request_redraw();
             }
 
@@ -630,6 +614,32 @@ impl App {
                 }
             }
             UiId::SettingsToolInstallLogBody => {}
+            UiId::SettingsToolInstallLogScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsToolInstallLogScrollY) {
+                    let s = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.scale_factor)
+                        .unwrap_or(1.0);
+                    let pointer = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.last_mouse_y)
+                        .unwrap_or(rect.1);
+                    let line_h = crate::app::tool_installer::log_line_height(s);
+                    let content_h = (self.tool_installer.logs().len().max(1) as f32 * line_h
+                        + (12.0 * s).round())
+                    .round();
+                    self.tool_installer.begin_log_scroll_drag(
+                        pointer,
+                        rect.1 + 6.0 * s,
+                        rect.3 - 12.0 * s,
+                        rect.3,
+                        content_h,
+                        28.0 * s,
+                    );
+                }
+            }
             UiId::SettingsOpenDirectory(idx) => {
                 let paths = crate::platform::app_paths();
                 let path = match idx {
@@ -1008,29 +1018,16 @@ impl App {
                 self.ide_panel.lsp_log_filter_focused = false;
                 self.ide_panel.file_tree_focused = false;
                 self.is_dragging_search = true;
-                if let Some(r) = self.renderer.as_mut() {
+                let input_rect = self.ui_registry.rect_for(UiId::GitMessageInput);
+                if let (Some(rect), Some(r)) = (input_rect, self.renderer.as_mut()) {
                     if !was_focused {
-                        r.search_scroll_x = 0.0;
+                        r.git_commit_scroll_x = 0.0;
                     }
-                    let s = r.scale_factor;
-                    let panel_w = self.ide_panel.left_width * s;
-                    let pad = (10.0 * s).min((panel_w * 0.15).max(0.0));
-                    let input_x = 48.0 * s + pad;
-                    let x_offset =
-                        (r.last_mouse_x - (input_x + 5.0 * s) + r.search_scroll_x).max(0.0);
+                    let x_offset = (r.last_mouse_x - (rect.0 + 5.0 * r.scale_factor)
+                        + r.git_commit_scroll_x)
+                        .max(0.0);
                     let text = self.ide_panel.git.message_editor.get_full_text();
-                    let mut current_x = 0.0;
-                    let mut target_idx = text.len();
-                    let mut byte_idx = 0;
-                    for c in text.chars() {
-                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                        if x_offset <= current_x + adv / 2.0 {
-                            target_idx = byte_idx;
-                            break;
-                        }
-                        current_x += adv;
-                        byte_idx += c.len_utf8();
-                    }
+                    let target_idx = r.one_line_cursor_from_x(&text, x_offset, 1.0);
                     self.ide_panel.git.message_editor.cursor = target_idx;
                     self.ide_panel.git.message_editor.selection_anchor = Some(target_idx);
                 }
@@ -1314,31 +1311,13 @@ impl App {
                 self.ide_panel.git.message_focused = false;
                 self.ide_panel.file_tree_focused = false;
                 self.is_dragging_search = true;
-                if let Some(r) = self.renderer.as_mut() {
-                    let mx = r.last_mouse_x;
-                    let s = r.scale_factor;
-                    let window_width = self.window.as_ref().unwrap().inner_size().width as f32;
-                    let minimap_w = r.minimap_width;
-                    let scrollbar_w = if r.max_scroll_x > 0.0 { 10.0 * s } else { 0.0 };
-                    let scrollbar_x = window_width - minimap_w - scrollbar_w;
-                    let search_w = 480.0 * s;
-                    let search_x = scrollbar_x - search_w - 20.0 * s;
-                    let input_x = search_x + 10.0 * s;
-
+                let input_rect = self.ui_registry.rect_for(UiId::SearchInput);
+                if let (Some(rect), Some(r)) = (input_rect, self.renderer.as_mut()) {
                     let text = self.search_editor.get_full_text();
-                    let x_offset = (mx - (input_x + 5.0 * s)).max(0.0);
-                    let mut current_x = 0.0;
-                    let mut target_idx = text.len();
-                    let mut byte_idx = 0;
-                    for c in text.chars() {
-                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0);
-                        if x_offset <= current_x + adv / 2.0 {
-                            target_idx = byte_idx;
-                            break;
-                        }
-                        current_x += adv;
-                        byte_idx += c.len_utf8();
-                    }
+                    let x_offset = (r.last_mouse_x - (rect.0 + 5.0 * r.scale_factor)
+                        + r.search_scroll_x)
+                        .max(0.0);
+                    let target_idx = r.one_line_cursor_from_x(&text, x_offset, 1.0);
                     self.search_editor.cursor = target_idx;
                     self.search_editor.selection_anchor = Some(target_idx);
                 }
@@ -1583,7 +1562,44 @@ impl App {
                 }
             }
             UiId::LspScrollY => {
-                self.ide_panel.lsp_scroll_y.is_dragging = true;
+                let started = self
+                    .ui_registry
+                    .rect_for(UiId::LspScrollY)
+                    .and_then(|rect| {
+                        let renderer = self.renderer.as_ref()?;
+                        let s = renderer.scale_factor;
+                        let track_start = rect.1 + 5.0 * s;
+                        let track_len = (rect.3 - 10.0 * s).max(0.0);
+                        let content_len = self.lsp_panel_total_h(s);
+                        let max_scroll = (content_len - rect.3).max(0.0);
+                        let thumb = crate::scroll::scrollbar_thumb(
+                            track_start,
+                            track_len,
+                            rect.3,
+                            content_len,
+                            self.ide_panel.lsp_scroll_y.current,
+                            40.0 * s,
+                        )?;
+                        let (drag_offset, target) = crate::scroll::scrollbar_drag_target(
+                            renderer.last_mouse_y,
+                            track_start,
+                            track_len,
+                            thumb,
+                            max_scroll,
+                            None,
+                        )?;
+                        Some((drag_offset, target))
+                    });
+                if let Some((drag_offset, target)) = started {
+                    let scroll = &mut self.ide_panel.lsp_scroll_y;
+                    scroll.current = target;
+                    scroll.target = target;
+                    scroll.velocity = 0.0;
+                    scroll.drag_offset = drag_offset;
+                    scroll.is_dragging = true;
+                } else {
+                    self.ide_panel.lsp_scroll_y.is_dragging = true;
+                }
             }
             UiId::LspScrollX => {
                 self.ide_panel.lsp_scroll_x.is_dragging = true;
@@ -1591,58 +1607,138 @@ impl App {
             UiId::LspLogScrollY(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
+                    let geometry = self
+                        .ui_registry
+                        .rect_for(UiId::LspLogScrollY(server_idx))
+                        .and_then(|rect| {
+                            let renderer = self.renderer.as_ref()?;
+                            let s = renderer.scale_factor;
+                            let (content_len, _) = self.lsp_server_inner_size(
+                                &self.ide_panel.lsp_servers[server_idx],
+                                s,
+                            );
+                            Some((
+                                renderer.last_mouse_y,
+                                rect.1 + 7.0 * s,
+                                (rect.3 - 14.0 * s).max(0.0),
+                                rect.3,
+                                content_len,
+                                20.0 * s,
+                            ))
+                        });
                     let scroll = self
                         .ide_panel
                         .lsp_logs_scroll_y
                         .entry(name)
                         .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    if let Some((pointer, track_start, track_len, viewport_len, content_len, min)) =
+                        geometry
+                    {
+                        let max_scroll = (content_len - viewport_len).max(0.0);
+                        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                            track_start,
+                            track_len,
+                            viewport_len,
+                            content_len,
+                            scroll.current,
+                            min,
+                        ) && let Some((drag_offset, target)) =
+                            crate::scroll::scrollbar_drag_target(
+                                pointer,
+                                track_start,
+                                track_len,
+                                thumb,
+                                max_scroll,
+                                None,
+                            )
+                        {
+                            scroll.current = target;
+                            scroll.target = target;
+                            scroll.velocity = 0.0;
+                            scroll.drag_offset = drag_offset;
+                        }
+                    }
                     scroll.is_dragging = true;
                 }
             }
             UiId::LspLogScrollX(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
+                    let geometry = self
+                        .ui_registry
+                        .rect_for(UiId::LspLogScrollX(server_idx))
+                        .and_then(|rect| {
+                            let renderer = self.renderer.as_ref()?;
+                            let s = renderer.scale_factor;
+                            let (_, max_line_w) = self.lsp_server_inner_size(
+                                &self.ide_panel.lsp_servers[server_idx],
+                                s,
+                            );
+                            Some((
+                                renderer.last_mouse_x,
+                                rect.0 + 7.0 * s,
+                                (rect.2 - 14.0 * s).max(0.0),
+                                rect.2,
+                                max_line_w + 20.0 * s,
+                                20.0 * s,
+                            ))
+                        });
                     let scroll = self
                         .ide_panel
                         .lsp_logs_scroll_x
                         .entry(name)
                         .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
+                    if let Some((pointer, track_start, track_len, viewport_len, content_len, min)) =
+                        geometry
+                    {
+                        let max_scroll = (content_len - viewport_len).max(0.0);
+                        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                            track_start,
+                            track_len,
+                            viewport_len,
+                            content_len,
+                            scroll.current,
+                            min,
+                        ) && let Some((drag_offset, target)) =
+                            crate::scroll::scrollbar_drag_target(
+                                pointer,
+                                track_start,
+                                track_len,
+                                thumb,
+                                max_scroll,
+                                None,
+                            )
+                        {
+                            scroll.current = target;
+                            scroll.target = target;
+                            scroll.velocity = 0.0;
+                            scroll.drag_offset = drag_offset;
+                        }
+                    }
                     scroll.is_dragging = true;
                 }
             }
             UiId::LspLogsFilterInput => {
                 self.ide_panel.lsp_log_filter_focused = true;
                 self.ide_panel.lsp_logs_focused = None;
-                let input_x = self
-                    .lsp_panel_bounds()
-                    .map(|(cx, _, _, _)| {
-                        let s = self
-                            .renderer
-                            .as_ref()
-                            .map(|r| r.scale_factor)
-                            .unwrap_or(1.0);
-                        cx + 24.0 * s
-                    })
-                    .unwrap_or(0.0);
-                if let Some(r) = self.renderer.as_mut() {
-                    let mx = r.last_mouse_x;
-                    let s = r.scale_factor;
-                    let text = self.ide_panel.lsp_log_filter_editor.get_full_text();
-                    let x_offset = (mx - (input_x + 8.0 * s)).max(0.0);
-                    let mut current_x = 0.0;
-                    let mut target_idx = text.len();
-                    let mut byte_idx = 0;
-                    for c in text.chars() {
-                        let adv = r.get_ui_glyph(c).map(|g| g.advance).unwrap_or(10.0) * 0.78;
-                        if x_offset <= current_x + adv / 2.0 {
-                            target_idx = byte_idx;
-                            break;
-                        }
-                        current_x += adv;
-                        byte_idx += c.len_utf8();
+                if let Some(rect) = self.ui_registry.rect_for(UiId::LspLogsFilterInput) {
+                    if let Some(r) = self.renderer.as_mut() {
+                        let mx = r.last_mouse_x;
+                        let s = r.scale_factor;
+                        let text = self.ide_panel.lsp_log_filter_editor.get_full_text();
+                        let scroll_x = r.one_line_scroll_for_cursor(
+                            &text,
+                            self.ide_panel.lsp_log_filter_editor.cursor,
+                            0.78,
+                            rect.2 - 16.0 * s,
+                            0.0,
+                        );
+                        let x_offset =
+                            (mx - (rect.0 + 8.0 * s) + scroll_x).max(0.0);
+                        let target_idx = r.one_line_cursor_from_x(&text, x_offset, 0.78);
+                        self.ide_panel.lsp_log_filter_editor.cursor = target_idx;
+                        self.ide_panel.lsp_log_filter_editor.selection_anchor = Some(target_idx);
                     }
-                    self.ide_panel.lsp_log_filter_editor.cursor = target_idx;
-                    self.ide_panel.lsp_log_filter_editor.selection_anchor = Some(target_idx);
                 }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -2163,7 +2259,7 @@ impl App {
                 let toggle = self.modifiers.control_key() || self.modifiers.super_key();
                 if let Some(tab) = self.active_database_table_tab_id()
                     && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
-                    state.grid.selection.select_row(row, extend, toggle);
+                    state.grid.select_row(row, extend, toggle);
                     state.grid.focused_input = None;
                 }
             }

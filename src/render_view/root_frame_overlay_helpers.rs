@@ -162,7 +162,7 @@ impl Renderer {
             [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
         );
 
-        let thumb_w = (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s);
+        let thumb_w = (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s).min(track_w.max(0.0));
         let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
         let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
 

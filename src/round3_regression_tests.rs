@@ -909,3 +909,55 @@ fn r3_116_behavioral_invariants_cover_clipping_disconnect_and_payload_queueing()
     assert!(matches!(panel.queue_command(crate::app::database::DatabaseCommand::Shutdown, second), crate::app::database::DatabaseQueueResult::Queued));
     assert_eq!(panel.queued_commands.len(), 1);
 }
+
+#[test]
+fn r3_117_animated_settings_layout_moves_outer_and_inner_together() {
+    let base = crate::render_view::settings_ui::settings_modal_layout(800.0, 600.0, 1.0);
+    let animated = crate::render_view::settings_ui::animated_settings_modal_layout(
+        800.0, 600.0, 1.0, 0.35,
+    );
+    let outer_delta = animated.outer.y - base.outer.y;
+    let inner_delta = animated.inner.y - base.inner.y;
+    assert!((outer_delta - inner_delta).abs() < 0.001);
+    assert_eq!(animated.outer.x, base.outer.x);
+    assert_eq!(animated.inner.x, base.inner.x);
+}
+
+#[test]
+fn r3_118_settings_ignore_input_stays_inside_content_width() {
+    for width in [120.0, 240.0, 480.0, 1000.0] {
+        for workspaces in [0, 1, 20] {
+            let layout = crate::render_view::settings_ui::settings_modal_layout(width, 700.0, 1.0);
+            let rect = crate::render_view::settings_ui::settings_ignore_input_rect(
+                layout, 1.0, workspaces, 0.0,
+            );
+            assert!(rect.w >= 0.0);
+            assert!(rect.x >= layout.inner.x - 0.001);
+            assert!(rect.x + rect.w <= layout.inner.x + layout.inner.w + 0.001);
+        }
+    }
+}
+
+#[test]
+fn r3_119_scrollbar_thumb_never_exceeds_tiny_track() {
+    for track in [0.0, 1.0, 5.0, 10.0] {
+        let thumb = crate::scroll::scrollbar_thumb(0.0, track, 10.0, 1000.0, 0.0, 40.0);
+        if let Some(thumb) = thumb {
+            assert!(thumb.len <= track + 0.001);
+        }
+    }
+}
+
+#[test]
+fn r3_120_nested_gl_scissor_is_intersected_not_replaced() {
+    let intersection = crate::render_view::intersect_scissor_boxes(
+        [20, 20, 10, 10],
+        [0, 0, 100, 100],
+    );
+    assert_eq!(intersection, [20, 20, 10, 10]);
+    let partial = crate::render_view::intersect_scissor_boxes(
+        [20, 20, 10, 10],
+        [25, 5, 20, 20],
+    );
+    assert_eq!(partial, [25, 20, 5, 5]);
+}

@@ -204,6 +204,7 @@ impl Renderer {
                 input_h,
                 s,
                 shown,
+                false,
                 color,
                 focused,
                 api.input_scroll_x.current,
@@ -485,6 +486,7 @@ impl Renderer {
             proxy_h,
             s,
             shown,
+            false,
             color,
             proxy_focused,
             api.input_scroll_x.current,
@@ -628,6 +630,7 @@ impl Renderer {
                 path_h,
                 s,
                 shown,
+                false,
                 color,
                 path_focused,
                 api.input_scroll_x.current,
@@ -892,10 +895,15 @@ impl Renderer {
             let filter_focused = matches!(api.focused, Some(ApiFocus::RouteFilter));
             let filter_h = 30.0 * s;
             let filter_gap = 8.0 * s;
-            let clear_size = filter_h;
             let filter_x = x + pad + indent_w;
+            let show_clear = w >= 96.0 * s;
+            let clear_size = if show_clear { filter_h } else { 0.0 };
             let clear_x = x + w - pad - clear_size;
-            let filter_w = (clear_x - filter_x - filter_gap).max(40.0 * s);
+            let filter_w = if show_clear {
+                (clear_x - filter_x - filter_gap).max(1.0)
+            } else {
+                (x + w - pad - filter_x).max(1.0)
+            };
             let filter_empty = api.route_filter.is_empty();
             self.draw_api_one_line_input(
                 filter_x,
@@ -908,6 +916,7 @@ impl Renderer {
                 } else {
                     api.route_filter.as_str()
                 },
+                false,
                 if filter_empty {
                     self.theme.line_num
                 } else {
@@ -923,29 +932,31 @@ impl Renderer {
                 my,
                 0.78,
             );
-            let clear = IconButton {
-                x: clear_x,
-                y: cy + 2.0 * s,
-                size: clear_size,
-                icon: Some(IconType::Close),
-                is_active: false,
-                icon_size: Some(17.0 * s),
-                active_square_width: None,
-                custom_color: if filter_empty {
-                    Some([1.0, 1.0, 1.0, 0.28])
-                } else {
-                    None
-                },
-            };
-            ui_registry.register_icon_button(
-                crate::ui_system::UiId::ApiRouteFilterClear,
-                &clear,
-                self,
-                mx,
-                my,
-                s,
-                false,
-            );
+            if show_clear {
+                let clear = IconButton {
+                    x: clear_x,
+                    y: cy + 2.0 * s,
+                    size: clear_size,
+                    icon: Some(IconType::Close),
+                    is_active: false,
+                    icon_size: Some(17.0 * s),
+                    active_square_width: None,
+                    custom_color: if filter_empty {
+                        Some([1.0, 1.0, 1.0, 0.28])
+                    } else {
+                        None
+                    },
+                };
+                ui_registry.register_icon_button(
+                    crate::ui_system::UiId::ApiRouteFilterClear,
+                    &clear,
+                    self,
+                    mx,
+                    my,
+                    s,
+                    false,
+                );
+            }
             cy += filter_h + 8.0 * s;
             let filter = api.route_filter.trim();
             let filtering = !filter.is_empty();

@@ -124,7 +124,7 @@ impl Renderer {
             return;
         }
         if let Some(message) = database_table_unavailable_message(state) {
-            let card_w = (w - 48.0 * s).clamp(280.0 * s, 720.0 * s).round();
+            let card_w = (w - 24.0 * s).clamp(1.0, 720.0 * s).round();
             let card_h = (108.0 * s).round();
             let card_x = (x + (w - card_w) * 0.5).round();
             let card_y = (y + (h - card_h) * 0.5).round();
@@ -295,90 +295,141 @@ impl Renderer {
         let toolbar_h = (TABLE_TOOLBAR_H * s).round();
         let x = x.round();
         let y = y.round();
-        let w = w.round();
+        let w = w.round().max(0.0);
         self.push_rect(x, y, w, toolbar_h, [0.105, 0.11, 0.14, 1.0]);
         let title = format!("{} / public.{}", meta.database_name, meta.table_name);
         let page_text = database_table_page_status(state);
         let page_w = self.measure_ui_width(&page_text, 0.82).round();
+        let show_page = w >= 230.0 * s;
+        let page_reserve = if show_page { page_w + 32.0 * s } else { 16.0 * s };
         let mut title_scratch = String::new();
         self.draw_tree_label_clipped(
             &title,
             x + (10.0 * s).round(),
             Self::tree_row_text_y(y, (34.0 * s).round(), s),
-            (w - page_w - 42.0 * s).max(30.0),
+            (w - page_reserve).max(1.0),
             [0.66, 0.69, 0.78, 1.0],
             0.88,
             &mut title_scratch,
         );
-        self.draw_string_scaled_pixel_snapped(
-            &page_text,
-            (x + w - page_w - 12.0 * s).round(),
-            Self::tree_row_text_y(y, (34.0 * s).round(), s),
-            self.theme.line_num,
-            0.82,
-        );
+        if show_page {
+            self.draw_string_scaled_pixel_snapped(
+                &page_text,
+                (x + w - page_w - 12.0 * s).round(),
+                Self::tree_row_text_y(y, (34.0 * s).round(), s),
+                self.theme.line_num,
+                0.82,
+            );
+        }
 
         let editable = state.metadata.as_ref().is_some_and(|metadata| metadata.editable);
         let dirty = state.grid.dirty();
         let button_y = y + (39.0 * s).round();
+        let button_h = 38.0 * s;
+        let gap = (4.0 * s).round();
         let mut bx = x + (8.0 * s).round();
-        for (id, text, icon, active, width) in [
-            (UiId::DatabaseTableAddRow, "Добавить", Some(IconType::Plus), editable, 108.0),
-            (UiId::DatabaseTableDeleteRows, "Удалить", Some(IconType::GitMinus), editable, 106.0),
-            (UiId::DatabaseTableUndo, "Отменить", Some(IconType::Rollback), dirty, 112.0),
-            (UiId::DatabaseTableSave, "Сохранить", Some(IconType::Save), dirty, 124.0),
-            (UiId::DatabaseTablePreview, "SQL", Some(IconType::Eye), dirty, 82.0),
-            (UiId::DatabaseTableRefresh, "", Some(IconType::Reload), true, 48.0),
-        ] {
+
+        let wide = w >= 920.0 * s;
+        let medium = w >= 520.0 * s;
+        let narrow = w >= 340.0 * s;
+        let nav_w = if wide { 40.0 * s } else { 36.0 * s };
+        let nav_gap = gap;
+        let nav_items: &[(UiId, &str, bool)] = if medium || wide {
+            &[
+                (UiId::DatabaseTablePageFirst, "≪", state.grid.view.current_page > 0),
+                (UiId::DatabaseTablePagePrevious, "‹", state.grid.view.current_page > 0),
+                (UiId::DatabaseTablePageNext, "›", database_table_has_next(state)),
+                (
+                    UiId::DatabaseTablePageLast,
+                    "≫",
+                    state.grid.count.is_some() && database_table_has_next(state),
+                ),
+            ]
+        } else {
+            &[
+                (UiId::DatabaseTablePagePrevious, "‹", state.grid.view.current_page > 0),
+                (UiId::DatabaseTablePageNext, "›", database_table_has_next(state)),
+            ]
+        };
+        let limit_w = if wide || medium { 84.0 * s } else { 0.0 };
+        let nav_total = nav_items.len() as f32 * nav_w
+            + nav_items.len().saturating_sub(1) as f32 * nav_gap
+            + if limit_w > 0.0 { nav_gap + limit_w } else { 0.0 };
+        let nav_start = (x + w - 8.0 * s - nav_total).max(x + 8.0 * s).round();
+        let action_end = (nav_start - gap).max(x + 8.0 * s);
+
+        let action_w = if wide { 0.0 } else if medium { 40.0 * s } else { 36.0 * s };
+        let actions: &[(UiId, &str, IconType, bool, f32)] = if wide {
+            &[
+                (UiId::DatabaseTableAddRow, "Добавить", IconType::Plus, editable, 108.0),
+                (UiId::DatabaseTableDeleteRows, "Удалить", IconType::GitMinus, editable, 106.0),
+                (UiId::DatabaseTableUndo, "Отменить", IconType::Rollback, dirty, 112.0),
+                (UiId::DatabaseTableSave, "Сохранить", IconType::Save, dirty, 124.0),
+                (UiId::DatabaseTablePreview, "SQL", IconType::Eye, dirty, 82.0),
+                (UiId::DatabaseTableRefresh, "", IconType::Reload, true, 48.0),
+            ]
+        } else if medium {
+            &[
+                (UiId::DatabaseTableAddRow, "", IconType::Plus, editable, 0.0),
+                (UiId::DatabaseTableDeleteRows, "", IconType::GitMinus, editable, 0.0),
+                (UiId::DatabaseTableUndo, "", IconType::Rollback, dirty, 0.0),
+                (UiId::DatabaseTableSave, "", IconType::Save, dirty, 0.0),
+                (UiId::DatabaseTablePreview, "", IconType::Eye, dirty, 0.0),
+                (UiId::DatabaseTableRefresh, "", IconType::Reload, true, 0.0),
+            ]
+        } else if narrow {
+            &[
+                (UiId::DatabaseTableAddRow, "", IconType::Plus, editable, 0.0),
+                (UiId::DatabaseTableDeleteRows, "", IconType::GitMinus, editable, 0.0),
+                (UiId::DatabaseTableUndo, "", IconType::Rollback, dirty, 0.0),
+                (UiId::DatabaseTableSave, "", IconType::Save, dirty, 0.0),
+                (UiId::DatabaseTableRefresh, "", IconType::Reload, true, 0.0),
+            ]
+        } else {
+            &[
+                (UiId::DatabaseTableAddRow, "", IconType::Plus, editable, 0.0),
+                (UiId::DatabaseTableSave, "", IconType::Save, dirty, 0.0),
+                (UiId::DatabaseTableRefresh, "", IconType::Reload, true, 0.0),
+            ]
+        };
+        for &(id, text, icon, active, normal_w) in actions {
+            let width = if wide { normal_w * s } else { action_w };
+            if bx + width > action_end {
+                break;
+            }
             draw_database_table_button(
-                self, ui, id, bx, button_y, width * s, 38.0 * s, text, icon, active, mx, my, s,
+                self, ui, id, bx, button_y, width, button_h, text, Some(icon), active, mx, my, s,
             );
-            bx += ((width + 6.0) * s).round();
+            bx += width + gap;
         }
 
-        let nav_w = (40.0 * s).round();
-        let nav_gap = (4.0 * s).round();
-        let nav_x = (x + w - 430.0 * s).max(bx + 8.0 * s).round();
-        for (index, (id, label, active)) in [
-            (UiId::DatabaseTablePageFirst, "≪", state.grid.view.current_page > 0),
-            (UiId::DatabaseTablePagePrevious, "‹", state.grid.view.current_page > 0),
-            (UiId::DatabaseTablePageNext, "›", database_table_has_next(state)),
-            (UiId::DatabaseTablePageLast, "≫", database_table_has_next(state)),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        let mut nav_x = nav_start;
+        for &(id, label, active) in nav_items {
+            if nav_x + nav_w > x + w - 8.0 * s {
+                break;
+            }
             draw_database_table_nav_button(
+                self, ui, id, nav_x, button_y, nav_w, button_h, label, active, mx, my, s,
+            );
+            nav_x += nav_w + nav_gap;
+        }
+        if limit_w > 0.0 && nav_x + limit_w <= x + w - 8.0 * s {
+            draw_database_table_button(
                 self,
                 ui,
-                id,
-                nav_x + index as f32 * (nav_w + nav_gap),
+                UiId::DatabaseTableLimit,
+                nav_x,
                 button_y,
-                nav_w,
-                38.0 * s,
-                label,
-                active,
+                limit_w,
+                button_h,
+                &format!("{} строк", state.grid.view.limit),
+                None,
+                true,
                 mx,
                 my,
                 s,
             );
         }
-        let limit_x = nav_x + 4.0 * (nav_w + nav_gap) + (6.0 * s).round();
-        draw_database_table_button(
-            self,
-            ui,
-            UiId::DatabaseTableLimit,
-            limit_x,
-            button_y,
-            84.0 * s,
-            38.0 * s,
-            &format!("{} строк", state.grid.view.limit),
-            None,
-            true,
-            mx,
-            my,
-            s,
-        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -394,44 +445,77 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        self.push_rect(x.round(), y.round(), w.round(), (TABLE_FILTER_H * s).round(), [0.085, 0.09, 0.115, 1.0]);
-        let label_w = 90.0 * s;
-        let gap = 12.0 * s;
-        let field_w = ((w - 2.0 * label_w - gap - 30.0 * s) * 0.5).max(120.0 * s);
+        let w = w.max(0.0);
+        self.push_rect(
+            x.round(),
+            y.round(),
+            w.round(),
+            (TABLE_FILTER_H * s).round(),
+            [0.085, 0.09, 0.115, 1.0],
+        );
+        let pad = 8.0 * s;
+        let gap = 8.0 * s;
         let input_y = y + 8.0 * s;
-        self.draw_string_scaled_pixel_snapped("WHERE", x + 10.0 * s, Self::tree_row_text_y(y, TABLE_FILTER_H * s, s), self.theme.line_num, 0.86);
-        draw_database_table_input(
-            self,
-            ui,
-            UiId::DatabaseTableWhereInput,
-            x + label_w,
-            input_y,
-            field_w,
-            38.0 * s,
-            &state.grid.where_input,
-            state.grid.focused_input == Some(crate::app::database::DatabaseTableInputTarget::Where),
-            mx,
-            my,
-            s,
-            blink_alpha,
+        let input_h = 38.0 * s;
+        let wide = w >= 620.0 * s;
+        let label_w = if wide { 90.0 * s } else { 24.0 * s };
+        let available = (w - pad * 2.0 - gap - label_w * 2.0).max(0.0);
+        let field_w = (available * 0.5).max(0.0);
+        let where_label = if wide { "WHERE" } else { "W" };
+        let order_label = if wide { "ORDER BY" } else { "O" };
+        self.draw_string_scaled_pixel_snapped(
+            where_label,
+            x + pad,
+            Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
+            self.theme.line_num,
+            0.86,
         );
-        let order_label_x = x + label_w + field_w + gap;
-        self.draw_string_scaled_pixel_snapped("ORDER BY", order_label_x, Self::tree_row_text_y(y, TABLE_FILTER_H * s, s), self.theme.line_num, 0.86);
-        draw_database_table_input(
-            self,
-            ui,
-            UiId::DatabaseTableOrderInput,
-            order_label_x + label_w,
-            input_y,
-            field_w,
-            38.0 * s,
-            &state.grid.order_by_input,
-            state.grid.focused_input == Some(crate::app::database::DatabaseTableInputTarget::OrderBy),
-            mx,
-            my,
-            s,
-            blink_alpha,
+        let where_x = x + pad + label_w;
+        if field_w >= 1.0 {
+            draw_database_table_input(
+                self,
+                ui,
+                UiId::DatabaseTableWhereInput,
+                where_x,
+                input_y,
+                field_w,
+                input_h,
+                &state.grid.where_input,
+                state.grid.focused_input
+                    == Some(crate::app::database::DatabaseTableInputTarget::Where),
+                mx,
+                my,
+                s,
+                blink_alpha,
+            );
+        }
+        let order_label_x = where_x + field_w + gap;
+        self.draw_string_scaled_pixel_snapped(
+            order_label,
+            order_label_x,
+            Self::tree_row_text_y(y, TABLE_FILTER_H * s, s),
+            self.theme.line_num,
+            0.86,
         );
+        let order_x = order_label_x + label_w;
+        if field_w >= 1.0 {
+            draw_database_table_input(
+                self,
+                ui,
+                UiId::DatabaseTableOrderInput,
+                order_x,
+                input_y,
+                field_w,
+                input_h,
+                &state.grid.order_by_input,
+                state.grid.focused_input
+                    == Some(crate::app::database::DatabaseTableInputTarget::OrderBy),
+                mx,
+                my,
+                s,
+                blink_alpha,
+            );
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -904,8 +988,9 @@ impl Renderer {
                 mx,
                 my,
             );
+            let display_number = page_base.saturating_add(relative).saturating_add(1);
             self.draw_string_scaled_pixel_snapped(
-                &(absolute + 1).to_string(),
+                &display_number.to_string(),
                 x + (8.0 * s).round(),
                 Self::tree_row_text_y(row_y, row_h, s).round(),
                 self.theme.line_num,
@@ -1105,14 +1190,12 @@ fn draw_database_table_input(
 }
 
 fn database_table_has_next(state: &crate::app::database::DatabaseTableTabState) -> bool {
-    state.grid.count.is_some_and(|count| {
-        (state.grid.view.current_page + 1).saturating_mul(state.grid.view.limit) < count as usize
-    })
+    state.grid.can_page_next()
 }
 
 fn database_server_rows_on_page(state: &crate::app::database::DatabaseTableTabState) -> usize {
     let base = state.grid.view.current_page.saturating_mul(state.grid.view.limit);
-    state.grid.count.map_or(state.grid.view.limit, |count| {
+    state.grid.count.map_or_else(|| state.grid.loaded_server_row_extent_on_page(), |count| {
         (count as usize).saturating_sub(base).min(state.grid.view.limit)
     })
 }

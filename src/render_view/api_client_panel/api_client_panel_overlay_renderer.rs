@@ -207,16 +207,19 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        if max_scroll > 0.0 {
-            let ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let track_h = content_h - 14.0 * s;
-            let thumb_h = (content_h / (content_h + max_scroll) * track_h).max(28.0 * s);
-            let thumb_y = content_y + 7.0 * s + ratio * (track_h - thumb_h);
+        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+            content_y + 7.0 * s,
+            (content_h - 14.0 * s).max(0.0),
+            content_h,
+            content_h + max_scroll,
+            scroll_y,
+            28.0 * s,
+        ) {
             self.push_rounded_rect(
                 box_x + box_w - 12.0 * s,
-                thumb_y,
+                thumb.start,
                 4.0 * s,
-                thumb_h,
+                thumb.len,
                 2.0 * s,
                 [1.0, 1.0, 1.0, 0.28],
             );
@@ -691,18 +694,20 @@ impl Renderer {
             [0.08, 0.09, 0.12, 1.0],
         );
         ui_registry.register_text_input(id, x, input_y, w, input_h, mx, my);
-        let (text, cursor) = if focused {
+        let (text, cursor, selection_anchor) = if focused {
             (
                 api.input_editor.get_full_text(),
                 Some(api.input_editor.cursor),
+                api.input_editor.selection_anchor,
             )
         } else {
-            (value, None)
+            (value, None, None)
         };
         let text = if text.is_empty() { "не задано".to_string() } else { text };
         self.draw_api_python_dialog_input_text(
             &text,
             cursor,
+            selection_anchor,
             x,
             input_y,
             w,
@@ -945,6 +950,7 @@ impl Renderer {
         &mut self,
         text: &str,
         cursor: Option<usize>,
+        selection_anchor: Option<usize>,
         input_x: f32,
         input_y: f32,
         input_w: f32,
@@ -954,11 +960,6 @@ impl Renderer {
     ) {
         let text_scale = crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE;
         let pad_x = 8.0 * s;
-        let input_x = input_x.round();
-        let input_y = input_y.round();
-        let input_w = input_w.round();
-        let input_h = input_h.round();
-        let text_y = (input_y + 23.0 * s).round();
         let visible_width = (input_w - pad_x * 2.0).max(0.0);
         let scroll_x = cursor
             .map(|cursor| {
@@ -980,34 +981,23 @@ impl Renderer {
         } else {
             self.theme.fg
         };
-        self.flush();
-        unsafe {
-            self.gl.enable(glow::SCISSOR_TEST);
-            let scissor_y = self.height - (input_y + input_h);
-            self.gl.scissor(input_x as i32, scissor_y as i32, input_w as i32, input_h as i32);
-        }
-        self.draw_string_scaled(
+        self.draw_one_line_selectable_text(
             text,
-            input_x + pad_x - scroll_x,
-            text_y,
-            text_color,
+            cursor.unwrap_or(0),
+            selection_anchor,
+            false,
+            cursor.is_some(),
+            input_x,
+            input_y,
+            input_w,
+            input_h,
+            scroll_x,
+            blink_alpha,
             text_scale,
+            text_color,
+            0.0,
+            pad_x,
         );
-        if let Some(cursor) = cursor.filter(|_| blink_alpha > 0.5) {
-            let prefix = text.get(..cursor).unwrap_or(text);
-            let cursor_x = input_x + pad_x + self.measure_ui_width(prefix, text_scale) - scroll_x;
-            self.push_rect(
-                cursor_x.min(input_x + input_w - pad_x),
-                input_y + 7.0 * s,
-                2.0 * s,
-                input_h - 14.0 * s,
-                self.theme.fg,
-            );
-        }
-        self.flush();
-        unsafe {
-            self.gl.disable(glow::SCISSOR_TEST);
-        }
     }
 
     #[allow(clippy::too_many_arguments)]

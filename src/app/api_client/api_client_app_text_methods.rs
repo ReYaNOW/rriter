@@ -494,6 +494,17 @@ impl crate::app::App {
         })
     }
 
+    fn api_one_line_text_scale_for_ui(id: crate::ui_system::UiId) -> f32 {
+        match id {
+            crate::ui_system::UiId::ApiRouteFilterInput => 0.78,
+            crate::ui_system::UiId::ApiMockPythonUvPathInput
+            | crate::ui_system::UiId::ApiMockPythonCustomPathInput => {
+                crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE
+            }
+            _ => crate::render_view::api_client_tab::API_ONE_LINE_INPUT_SCALE,
+        }
+    }
+
     fn api_one_line_max_scroll_x_for_ui(&mut self, id: crate::ui_system::UiId) -> f32 {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return 0.0;
@@ -508,7 +519,13 @@ impl crate::app::App {
         let Some(renderer) = self.renderer.as_mut() else {
             return 0.0;
         };
-        crate::app::one_line_input_max_scroll_x(renderer, &text, visible_w, 0.88, 20.0 * scale)
+        crate::app::one_line_input_max_scroll_x(
+            renderer,
+            &text,
+            visible_w,
+            Self::api_one_line_text_scale_for_ui(id),
+            20.0 * scale,
+        )
     }
 
     fn sync_api_one_line_scroll_target(&mut self, immediate: bool) {
@@ -538,7 +555,7 @@ impl crate::app::App {
             &self.ide_panel.api.input_editor,
             &mut self.ide_panel.api.input_scroll_x,
             visible_w,
-            0.88,
+            Self::api_one_line_text_scale_for_ui(id),
             10.0 * scale,
             immediate,
         );
@@ -1033,7 +1050,12 @@ impl crate::app::App {
             } else {
                 scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
             };
-            api_line_byte_at_x(renderer, &text, target_x, 0.88)
+            api_line_byte_at_x(
+                renderer,
+                &text,
+                target_x,
+                Self::api_one_line_text_scale_for_ui(id),
+            )
         };
         self.ide_panel.api.input_editor.cursor = cursor;
         self.ide_panel.api.input_editor.selection_anchor = Some(cursor);
@@ -1126,7 +1148,12 @@ impl crate::app::App {
             } else {
                 scroll_x + (mx - (rect.0 + 8.0 * scale)).clamp(0.0, visible_w)
             };
-            api_line_byte_at_x(renderer, &text, target_x, 0.88)
+            api_line_byte_at_x(
+                renderer,
+                &text,
+                target_x,
+                Self::api_one_line_text_scale_for_ui(id),
+            )
         };
         if self.ide_panel.api.input_editor.selection_anchor.is_none() {
             self.ide_panel.api.input_editor.selection_anchor =

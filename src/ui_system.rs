@@ -60,6 +60,7 @@ pub enum UiId {
     SettingsCopyToolInstallLog,
     SettingsToolInstallLogBackdrop,
     SettingsToolInstallLogBody,
+    SettingsToolInstallLogScrollY,
     SettingsOpenDirectory(usize),
     SettingsCopyGraphicsDiagnostics,
     SettingsRefreshTools,
