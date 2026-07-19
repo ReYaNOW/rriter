@@ -185,6 +185,14 @@ pub const DATABASE_QUERY_RESULTS_DEFAULT_HEIGHT: f32 = 260.0;
 pub const DATABASE_QUERY_RESULTS_MIN_HEIGHT: f32 = 140.0;
 pub const DATABASE_QUERY_EDITOR_MIN_HEIGHT: f32 = 220.0;
 
+pub fn database_query_results_visible(state: &DatabaseQueryTabState) -> bool {
+    state.history_open
+        || !state.results.is_empty()
+        || !state.messages.is_empty()
+        || state.review.is_some()
+        || state.error.is_some()
+}
+
 pub fn database_query_results_height(
     preferred_height: f32,
     window_height: f32,
@@ -263,15 +271,9 @@ impl Eq for DatabaseQueryResultViewState {}
 
 impl DatabaseQueryResultViewState {
     pub fn reset_scroll(&mut self) {
-        self.scroll_x.current = 0.0;
-        self.scroll_x.target = 0.0;
-        self.scroll_x.velocity = 0.0;
-        self.scroll_y.current = 0.0;
-        self.scroll_y.target = 0.0;
-        self.scroll_y.velocity = 0.0;
-        self.review_message_scroll_y.current = 0.0;
-        self.review_message_scroll_y.target = 0.0;
-        self.review_message_scroll_y.velocity = 0.0;
+        self.scroll_x.reset();
+        self.scroll_y.reset();
+        self.review_message_scroll_y.reset();
         self.review_message_max_scroll.set(0.0);
     }
 }
@@ -2002,6 +2004,29 @@ SELECT 2;  ";
     fn query_result_height_never_exceeds_tiny_available_space() {
         assert_eq!(database_query_results_height(260.0, 250.0, 0.0, 1.0), 30.0);
         assert_eq!(database_query_results_height(260.0, 180.0, 0.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn resetting_query_result_scroll_ends_all_active_drags() {
+        let mut state = DatabaseQueryResultViewState::default();
+        for scroll in [
+            &mut state.scroll_x,
+            &mut state.scroll_y,
+            &mut state.review_message_scroll_y,
+        ] {
+            scroll.current = 10.0;
+            scroll.target = 20.0;
+            scroll.velocity = 3.0;
+            scroll.is_dragging = true;
+            scroll.drag_offset = 4.0;
+        }
+        state.reset_scroll();
+        assert!(state.scroll_x.is_settled());
+        assert!(state.scroll_y.is_settled());
+        assert!(state.review_message_scroll_y.is_settled());
+        assert_eq!(state.scroll_x.drag_offset, 0.0);
+        assert_eq!(state.scroll_y.drag_offset, 0.0);
+        assert_eq!(state.review_message_scroll_y.drag_offset, 0.0);
     }
 
     #[test]

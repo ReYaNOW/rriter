@@ -166,43 +166,7 @@ impl crate::app::App {
         else {
             return String::new();
         };
-        match prop {
-            crate::ui_system::ApiMockContractFieldProp::Required
-            | crate::ui_system::ApiMockContractFieldProp::Nullable => String::new(),
-            crate::ui_system::ApiMockContractFieldProp::Default => {
-                field.default_value.clone().unwrap_or_default()
-            }
-            crate::ui_system::ApiMockContractFieldProp::Enum => field.enum_values.join(", "),
-            crate::ui_system::ApiMockContractFieldProp::MinLength => field
-                .constraints
-                .min_length
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            crate::ui_system::ApiMockContractFieldProp::MaxLength => field
-                .constraints
-                .max_length
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            crate::ui_system::ApiMockContractFieldProp::Pattern => {
-                field.constraints.pattern.clone().unwrap_or_default()
-            }
-            crate::ui_system::ApiMockContractFieldProp::Minimum => {
-                field.constraints.minimum.clone().unwrap_or_default()
-            }
-            crate::ui_system::ApiMockContractFieldProp::Maximum => {
-                field.constraints.maximum.clone().unwrap_or_default()
-            }
-            crate::ui_system::ApiMockContractFieldProp::MinItems => field
-                .constraints
-                .min_items
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-            crate::ui_system::ApiMockContractFieldProp::MaxItems => field
-                .constraints
-                .max_items
-                .map(|value| value.to_string())
-                .unwrap_or_default(),
-        }
+        crate::app::api_client::api_mock_contract_field_prop_value(field, prop)
     }
 
     pub(crate) fn commit_api_mock_contract_field_prop(

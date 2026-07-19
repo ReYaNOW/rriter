@@ -633,9 +633,7 @@ impl AutomationController {
                 let height = app.window.as_ref().map_or(renderer.height, |window| window.inner_size().height as f32);
                 let max_scroll = renderer.get_max_scroll(&app.editor, height);
                 let target = (max_scroll * fraction.clamp(0.0, 1.0)).round();
-                app.scroll_y.current = target;
-                app.scroll_y.target = target;
-                app.scroll_y.velocity = 0.0;
+                app.scroll_y.jump_to(target);
                 request_redraw(app);
                 StepResult::Done
             }
@@ -1384,9 +1382,7 @@ fn request_redraw(app: &App) {
 }
 
 fn reset_scroll(scroll: &mut crate::scroll::ScrollState) {
-    scroll.current = 0.0;
-    scroll.target = 0.0;
-    scroll.velocity = 0.0;
+    scroll.reset();
 }
 
 fn focus_main_editor_semantic(app: &mut App) {

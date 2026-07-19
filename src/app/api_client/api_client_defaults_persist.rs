@@ -360,7 +360,7 @@ fn append_mock_contract_inline_meta(
     append_inline_piece(
         out,
         &mut has_meta,
-        api_mock_contract_kind_label(field.kind),
+        crate::app::api_mock::types::api_mock_contract_kind_label(field.kind),
     );
     append_inline_opt_piece(out, &mut has_meta, "default", field.default_value.as_deref());
     append_inline_values_piece(out, &mut has_meta, "enum", &field.enum_values);
@@ -383,24 +383,6 @@ fn api_mock_contract_value_placeholder(
         ApiMockContractFieldKind::Bytes => "\"base64\"",
         ApiMockContractFieldKind::File => "file",
         ApiMockContractFieldKind::Any => "null",
-    }
-}
-
-fn api_mock_contract_kind_label(
-    kind: crate::app::api_mock::types::ApiMockContractFieldKind,
-) -> &'static str {
-    use crate::app::api_mock::types::ApiMockContractFieldKind;
-
-    match kind {
-        ApiMockContractFieldKind::String => "str",
-        ApiMockContractFieldKind::Integer => "int",
-        ApiMockContractFieldKind::Number => "float",
-        ApiMockContractFieldKind::Boolean => "bool",
-        ApiMockContractFieldKind::Array => "list",
-        ApiMockContractFieldKind::Object => "dict",
-        ApiMockContractFieldKind::Bytes => "bytes",
-        ApiMockContractFieldKind::File => "file",
-        ApiMockContractFieldKind::Any => "Any",
     }
 }
 
@@ -1410,6 +1392,7 @@ fn load_api_auth_from_checked(path: &std::path::Path) -> Result<ApiAuthStore, St
     parse_result
 }
 
+#[cfg(test)]
 fn load_api_auth() -> ApiAuthStore {
     load_api_auth_checked().unwrap_or_default()
 }
@@ -1569,6 +1552,48 @@ fn push_api_mock_server_log(api: &mut ApiClientState, text: String) {
 pub(crate) fn api_mock_server_log_max_scroll(line_count: usize, visible_h: f32, s: f32) -> f32 {
     let line_h = 20.0 * s;
     (line_count as f32 * line_h + 12.0 * s - visible_h).max(0.0)
+}
+
+pub(crate) fn api_mock_server_log_scrollbar_thumb(
+    rect: (f32, f32, f32, f32),
+    line_count: usize,
+    current: f32,
+    scale: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    let content_h = line_count as f32 * 20.0 * scale + 12.0 * scale;
+    crate::scroll::scrollbar_thumb(
+        rect.1 + 7.0 * scale,
+        (rect.3 - 14.0 * scale).max(0.0),
+        rect.3,
+        content_h,
+        current,
+        24.0 * scale,
+    )
+}
+
+pub(crate) fn api_mock_server_log_scrollbar_drag_target(
+    rect: (f32, f32, f32, f32),
+    line_count: usize,
+    current: f32,
+    pointer_y: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let max_scroll = api_mock_server_log_max_scroll(line_count, rect.3, scale);
+    let thumb = api_mock_server_log_scrollbar_thumb(
+        rect,
+        line_count,
+        current,
+        scale,
+    )?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_y,
+        rect.1 + 7.0 * scale,
+        (rect.3 - 14.0 * scale).max(0.0),
+        thumb,
+        max_scroll,
+        drag_offset,
+    )
 }
 
 pub(crate) fn api_mock_guide_max_scroll(visible_h: f32, s: f32) -> f32 {

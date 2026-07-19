@@ -604,6 +604,45 @@ fn autosave_only_runs_in_ide_mode() {
 }
 
 #[test]
+fn hidden_panel_and_settings_focus_flags_do_not_block_editor_input() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.show_welcome = false;
+    app.search_focused = false;
+    for slot in &mut app.ide_panel.slots {
+        slot.open = false;
+    }
+
+    app.settings_ignore_focused = true;
+    app.ide_panel.api.focused = Some(crate::app::api_client::ApiFocus::RouteFilter);
+    app.ide_panel.terminal_focused = true;
+    app.ide_panel.term_search_focused = true;
+    app.ide_panel.git.message_focused = true;
+    app.ide_panel.project_search.focused = Some(crate::app::project_search::ProjectSearchField::Query);
+    app.ide_panel.lsp_logs_focused = Some("rust-analyzer".to_string());
+    app.ide_panel.lsp_log_filter_focused = true;
+    app.ide_panel.file_tree_focused = true;
+
+    assert!(app.editor_has_input_focus());
+    assert!(!app.handle_api_client_ime_commit("hidden"));
+    assert_eq!(app.ide_panel.api.focused, None);
+
+    app.show_settings = true;
+    assert!(!app.editor_has_input_focus());
+    app.show_settings = false;
+
+    let terminal = app
+        .ide_panel
+        .slots
+        .iter_mut()
+        .find(|slot| slot.id == crate::app::PanelId::Terminal)
+        .unwrap();
+    terminal.open = true;
+    assert!(!app.editor_has_input_focus());
+}
+
+#[test]
 fn internal_editor_focus_loss_autosaves_dirty_file() {
     let Some(mut app) = test_app() else {
         return;
@@ -632,6 +671,7 @@ fn internal_editor_focus_loss_autosaves_dirty_file() {
     assert!(app.editor.is_dirty());
 
     let editor_was_focused = app.editor_has_input_focus();
+    app.ide_panel.open(crate::app::PanelId::Terminal);
     app.ide_panel.terminal_focused = true;
     assert!(app.autosave_after_editor_focus_change(editor_was_focused));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "old\nchanged\n");

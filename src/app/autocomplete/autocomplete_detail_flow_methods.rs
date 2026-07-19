@@ -123,8 +123,7 @@ impl App {
         self.autocomplete_active = false;
         self.autocomplete_selected_idx = 0;
         self.autocomplete_hovered_idx = None;
-        self.autocomplete_scroll.current = 0.0;
-        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_scroll.reset();
         self.autocomplete_rect = None;
         self.autocomplete_anchor = None;
         self.autocomplete_pending_request_id = None;
@@ -271,8 +270,7 @@ impl App {
         self.autocomplete_options.clear();
         self.autocomplete_selected_idx = 0;
         self.autocomplete_hovered_idx = None;
-        self.autocomplete_scroll.current = 0.0;
-        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_scroll.reset();
         self.autocomplete_rect = None;
         self.autocomplete_anchor = None;
         self.autocomplete_detail_request_id = None;

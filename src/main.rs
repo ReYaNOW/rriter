@@ -80,6 +80,7 @@ fn config_path() -> PathBuf {
     rriter_config_dir().join("config.json")
 }
 
+#[cfg(test)]
 fn parse_recent_files(content: &str) -> Vec<PathBuf> {
     parse_recent_files_checked(content).unwrap_or_default()
 }
@@ -172,6 +173,7 @@ pub enum OpenTabSnapshot {
     },
 }
 
+#[cfg(test)]
 fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
     parse_open_tabs_content_checked(content).unwrap_or_default()
 }
@@ -461,6 +463,7 @@ pub fn save_panel_state(state: &crate::app::IdePanelState) {
     }
 }
 
+#[cfg(test)]
 fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
     parse_panel_state_content_checked(content).unwrap_or_default()
 }
@@ -2124,6 +2127,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         last_click_time: Instant::now(),
         click_count: 0,
         last_click_pos: (0.0, 0.0),
+        last_click_ui_id: None,
 
         pending_action: PendingAction::None,
         pending_action_waiting_for_save_as: false,

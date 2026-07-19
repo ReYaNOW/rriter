@@ -979,6 +979,22 @@ mod tests {
         assert!(thumb <= 23.921906);
     }
 
+    #[test]
+    fn git_graph_drag_updates_rendered_scroll_immediately() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.current = 12.0;
+        scroll.target = 12.0;
+        scroll.velocity = 9.0;
+
+        apply_git_graph_scroll_drag(&mut scroll, 240.0, 7.0);
+
+        assert_eq!(scroll.current, 240.0);
+        assert_eq!(scroll.target, 240.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.drag_offset, 7.0);
+        assert!(scroll.is_dragging);
+    }
+
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {
         GitGraphCommit {
             oid: Arc::<str>::from(oid),
@@ -1918,4 +1934,20 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+}
+
+#[test]
+fn one_shot_git_receiver_delivers_success_before_normal_disconnect() {
+    let (tx, rx) = mpsc::channel();
+    tx.send(42usize).unwrap();
+    drop(tx);
+
+    assert!(matches!(
+        poll_one_shot_receiver(&rx),
+        OneShotReceiverPoll::Ready(42)
+    ));
+    assert!(matches!(
+        poll_one_shot_receiver(&rx),
+        OneShotReceiverPoll::Disconnected
+    ));
 }

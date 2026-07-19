@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use winit::window::Window;
 
 const UV_INSTALL_URL_UNIX: &str = "https://astral.sh/uv/install.sh";
@@ -310,7 +310,7 @@ impl ToolInstaller {
             self.log_scroll.current,
             min_thumb_len,
         ) else {
-            self.log_scroll.is_dragging = false;
+            self.log_scroll.end_drag();
             return false;
         };
         let max_scroll = (content_len - viewport_len).max(0.0);
@@ -332,7 +332,13 @@ impl ToolInstaller {
     }
 
     pub(crate) fn end_log_scroll_drag(&mut self) {
-        self.log_scroll.is_dragging = false;
+        self.log_scroll.end_drag();
+    }
+
+    pub(crate) fn stop_log_scroll_anim(&mut self) {
+        if !self.log_scroll.is_dragging {
+            self.log_scroll.stop_anim();
+        }
     }
 
     pub(crate) fn open_log(&mut self) {
@@ -343,6 +349,7 @@ impl ToolInstaller {
 
     pub(crate) fn close_log(&mut self) {
         self.log_open = false;
+        self.log_scroll.end_drag();
         self.log_scroll.stop_anim();
         self.revision = self.revision.wrapping_add(1);
     }

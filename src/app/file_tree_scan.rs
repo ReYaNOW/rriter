@@ -463,6 +463,12 @@ pub enum FileTreeScanMessage {
     Failed(String),
 }
 
+impl FileTreeScanMessage {
+    pub(super) fn is_terminal(&self) -> bool {
+        matches!(self, Self::IconsReady | Self::Failed(_))
+    }
+}
+
 /// Запускает фоновый поток сканирования. Возвращает канал для результата.
 pub fn spawn_scan(
     roots: Vec<PathBuf>,

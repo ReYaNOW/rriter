@@ -31,10 +31,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
-        self.is_dragging = false;
-        self.is_editor_drag_pending = false;
-        self.scroll_y.is_dragging = false;
-        self.scroll_x.is_dragging = false;
+        self.cancel_pointer_interactions();
         self.pending_action = action;
 
         if self.dialog_window.is_some() {
@@ -159,10 +156,8 @@ impl App {
 
         self.file_extension = String::new();
 
-        self.scroll_y.current = 0.0;
-        self.scroll_y.target = 0.0;
-        self.scroll_x.current = 0.0;
-        self.scroll_x.target = 0.0;
+        self.scroll_y.reset();
+        self.scroll_x.reset();
 
         if let Some(w) = self.window.as_ref() {
             App::update_window_title(w, &self.base_title, false);
@@ -660,11 +655,7 @@ impl App {
                 return false;
             };
             let scale = renderer.scale_factor;
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                44.0 * scale
-            };
+            let tab_bar_h = self.editor_top_inset(scale);
             let editor_bottom_h = if self.is_ide_mode {
                 self.ide_panel.editor_reserved_bottom_height(scale)
             } else {
@@ -765,10 +756,8 @@ impl App {
                     self.wait_for_current_highlight();
                 }
 
-                self.scroll_y.current = 0.0;
-                self.scroll_y.target = 0.0;
-                self.scroll_x.current = 0.0;
-                self.scroll_x.target = 0.0;
+                self.scroll_y.reset();
+                self.scroll_x.reset();
 
                 self.last_sent_version = u64::MAX;
                 self.search_results.clear();

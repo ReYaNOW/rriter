@@ -9,6 +9,34 @@ mod tests {
         &tail[..end_idx]
     }
 
+
+    #[test]
+    fn draggable_panels_share_one_full_content_dispatcher_in_both_groups() {
+        let side = include_str!("ide_panel_side_renderer.rs");
+        let bottom = include_str!("ide_panel_dialog_renderer.rs");
+        let dispatcher = source_between(
+            side,
+            "fn draw_ide_panel_content",
+            "pub(crate) fn draw_ide_side_panels",
+        );
+
+        for panel in [
+            "PanelId::Explorer",
+            "PanelId::Search",
+            "PanelId::Git",
+            "PanelId::ApiClient",
+            "PanelId::Database",
+            "PanelId::Terminal",
+            "PanelId::Problems",
+            "PanelId::LspServers",
+        ] {
+            assert!(dispatcher.contains(panel), "missing shared renderer for {panel}");
+        }
+        assert_eq!(side.matches("self.draw_ide_panel_content(").count(), 1);
+        assert_eq!(bottom.matches("self.draw_ide_panel_content(").count(), 1);
+        assert!(!bottom.contains("Плейсхолдер контента"));
+    }
+
     #[test]
     fn clipped_label_prefix_len_reserves_ellipsis_and_keeps_utf8_boundary() {
         assert_eq!(clipped_label_prefix_len("abcdef", 38.0, 8.0, |_| 10.0), 3);

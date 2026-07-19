@@ -1579,18 +1579,23 @@ impl Renderer {
 
         let scrollbar_alpha = pop.scrollbar_alpha;
         if max_scroll > 0.0 && scrollbar_alpha > 0.0 {
-            let track_h = box_h - 16.0 * s;
-            let thumb_h = (box_h / (layout.total_text_h + pad * 2.0) * track_h).max(20.0 * s);
-            let thumb_y = by + 8.0 * s + (scroll_y / max_scroll) * (track_h - thumb_h);
+            let Some(thumb) = crate::app::mouse::hover_popup_scrollbar_thumb(
+                (bx, by, box_w, box_h),
+                max_scroll,
+                scroll_y,
+                s,
+            ) else {
+                return (bx, by, box_w, box_h, max_scroll);
+            };
             let thumb_alpha = if fixed_visible_size { 0.34 } else { 0.2 };
             let scrollbar_clipped = clip_rect.is_some();
             if scrollbar_clipped { self.flush(); apply_scissor(&self.gl, self.height, bx, by, box_w, box_h); }
 
             self.push_rounded_rect(
                 bx + box_w - 8.0 * s,
-                thumb_y.round(),
+                thumb.start.round(),
                 4.0 * s,
-                thumb_h,
+                thumb.len,
                 2.0 * s,
                 [1.0, 1.0, 1.0, thumb_alpha * scrollbar_alpha * opacity],
             );

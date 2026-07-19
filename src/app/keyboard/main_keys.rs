@@ -468,7 +468,7 @@ impl App {
 
             if let PhysicalKey::Code(KeyCode::Escape) = key_event.physical_key {
                 if self.show_settings {
-                    self.show_settings = false;
+                    self.set_settings_visible(false);
                     self.window.as_ref().unwrap().request_redraw();
                     return;
                 }
@@ -476,7 +476,7 @@ impl App {
 
             if self.show_settings {
                 if let PhysicalKey::Code(KeyCode::F1) = key_event.physical_key {
-                    self.show_settings = false;
+                    self.set_settings_visible(false);
                     self.window.as_ref().unwrap().request_redraw();
                 }
                 return;
@@ -486,7 +486,7 @@ impl App {
                 && self.ide_panel.terminal_focused
                 && self.ide_panel.is_open(crate::app::PanelId::Terminal);
             if key_event.physical_key == PhysicalKey::Code(KeyCode::F1) && !term_focused {
-                self.show_settings = !self.show_settings;
+                self.set_settings_visible(!self.show_settings);
                 self.is_dragging = false;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -537,7 +537,9 @@ impl App {
                 return;
             }
 
-            if self.ide_panel.lsp_log_filter_focused {
+            if self.ide_panel.is_open(crate::app::PanelId::LspServers)
+                && self.ide_panel.lsp_log_filter_focused
+            {
                 self.handle_lsp_log_filter_keyboard_input(key_event);
                 return;
             }
@@ -570,7 +572,9 @@ impl App {
                 return;
             }
 
-            if let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone() {
+            if self.ide_panel.is_open(crate::app::PanelId::LspServers)
+                && let Some(focused_name) = self.ide_panel.lsp_logs_focused.clone()
+            {
                 if let Some(ed) = self.ide_panel.lsp_log_editors.get_mut(&focused_name) {
                     let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
                     let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -615,7 +619,10 @@ impl App {
                 }
             }
 
-            if self.ide_panel.term_show_search && self.ide_panel.term_search_focused {
+            if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+                && self.ide_panel.term_show_search
+                && self.ide_panel.term_search_focused
+            {
                 self.handle_terminal_search_keyboard_input(key_event);
             } else if self.show_search && self.search_focused {
                 self.handle_search_keyboard_input(key_event);

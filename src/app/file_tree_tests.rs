@@ -265,7 +265,9 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
         vec!["skip*".to_string()],
     );
 
-    let first = match rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+    let first_message = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+    assert!(!first_message.is_terminal());
+    let first = match first_message {
         FileTreeScanMessage::Nodes(nodes) => nodes,
         FileTreeScanMessage::IconsReady => panic!("scan must send nodes before icon signal"),
         FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
@@ -274,7 +276,12 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
 
     let names: Vec<_> = first.iter().map(|node| node.name.as_str()).collect();
 
+    assert!(second.is_terminal());
     assert!(matches!(second, FileTreeScanMessage::IconsReady));
+    assert!(matches!(
+        rx.recv_timeout(std::time::Duration::from_millis(50)),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    ));
     assert!(names.contains(&"keep_dir"));
     assert!(names.contains(&"keep.rs"));
     assert!(!names.contains(&"missing"));
@@ -757,4 +764,25 @@ fn preproduction_file_tree_copy_preserves_file_permissions() {
         0o740
     );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn file_tree_scrollbar_uses_panel_viewport_for_top_and_bottom_layouts() {
+    assert!(file_tree_scrollbar_layout(48.0, 32.0, 280.0, 500.0, 1.0, 5, 0.0).is_none());
+
+    let top = file_tree_scrollbar_layout(48.0, 32.0, 280.0, 300.0, 1.0, 40, 120.0)
+        .expect("long tree has a scrollbar");
+    let bottom = file_tree_scrollbar_layout(48.0, 640.0, 900.0, 220.0, 1.0, 40, 120.0)
+        .expect("bottom tree has a scrollbar");
+
+    assert_eq!(top.track_x, 316.0);
+    assert_eq!(top.track_y, 36.0);
+    assert_eq!(top.track_h, 292.0);
+    assert_eq!(top.max_scroll, 820.0);
+    assert_eq!(bottom.track_x, 936.0);
+    assert_eq!(bottom.track_y, 644.0);
+    assert_eq!(bottom.track_h, 212.0);
+    assert_eq!(bottom.max_scroll, 900.0);
+    assert!(top.thumb.start >= top.track_y);
+    assert!(bottom.thumb.start >= bottom.track_y);
 }

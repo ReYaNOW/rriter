@@ -496,19 +496,23 @@ impl App {
     }
 
     fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
+        let show_welcome = self.show_welcome;
+        let is_ide_mode = self.is_ide_mode;
+        let database_query = self.active_tab_is_database_query();
         if let Some(r) = self.renderer.as_mut() {
             let wh = self
                 .window
                 .as_ref()
                 .map(|w| w.inner_size().height as f32)
                 .unwrap_or(r.height);
-            let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                0.0
-            } else {
-                44.0 * r.scale_factor
-            };
-            let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * r.scale_factor
+            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                show_welcome,
+                is_ide_mode,
+                database_query,
+                r.scale_factor,
+            );
+            let panel_bottom_h = if self.is_ide_mode {
+                self.ide_panel.editor_reserved_bottom_height(r.scale_factor)
             } else {
                 0.0
             };
@@ -527,16 +531,14 @@ impl App {
                 .max(0.0)
                 .min(max_scroll)
                 .round();
-            self.scroll_y.target = target_y;
+            self.scroll_y.animate_to(target_y);
             self.scroll_y.anim_speed = 15.0;
-            self.scroll_x.target = 0.0;
+            self.scroll_x.animate_to(0.0);
             self.scroll_x.anim_speed = 15.0;
 
             if snap {
-                self.scroll_y.current = target_y;
-                self.scroll_y.velocity = 0.0;
-                self.scroll_x.current = 0.0;
-                self.scroll_x.velocity = 0.0;
+                self.scroll_y.jump_to(target_y);
+                self.scroll_x.jump_to(0.0);
             }
         }
     }
@@ -553,20 +555,36 @@ impl App {
         self.ctrl_definition = CtrlDefinitionState::default();
     }
 
+    pub(crate) fn set_settings_visible(&mut self, visible: bool) {
+        self.show_settings = visible;
+        if !visible {
+            self.settings_ignore_focused = false;
+            self.is_dragging_settings_ignore = false;
+            self.settings_scroll.end_drag();
+            self.settings_ide_scroll.end_drag();
+        }
+    }
+
     pub(crate) fn editor_has_input_focus(&self) -> bool {
+        use crate::app::PanelId;
+
         !self.show_welcome
             && !self.active_tab_is_git_diff()
             && !self.active_tab_is_api_client()
             && !self.search_focused
-            && !self.settings_ignore_focused
-            && self.ide_panel.api.focused.is_none()
-            && !self.ide_panel.terminal_focused
-            && !self.ide_panel.term_search_focused
-            && !self.ide_panel.git.message_focused
-            && self.ide_panel.project_search.focused.is_none()
-            && self.ide_panel.lsp_logs_focused.is_none()
-            && !self.ide_panel.lsp_log_filter_focused
-            && !self.ide_panel.file_tree_focused
+            && !(self.show_settings && self.settings_ignore_focused)
+            && !(self.ide_panel.is_open(PanelId::ApiClient)
+                && self.ide_panel.api.focused.is_some())
+            && !(self.ide_panel.is_open(PanelId::Terminal)
+                && (self.ide_panel.terminal_focused || self.ide_panel.term_search_focused))
+            && !(self.ide_panel.is_open(PanelId::Git) && self.ide_panel.git.message_focused)
+            && !(self.ide_panel.is_open(PanelId::Search)
+                && self.ide_panel.project_search.focused.is_some())
+            && !(self.ide_panel.is_open(PanelId::LspServers)
+                && (self.ide_panel.lsp_logs_focused.is_some()
+                    || self.ide_panel.lsp_log_filter_focused))
+            && !(self.ide_panel.is_open(PanelId::Explorer)
+                && self.ide_panel.file_tree_focused)
     }
 
     pub(crate) fn autosave_current_file_if_dirty(&mut self) -> bool {
@@ -670,12 +688,16 @@ impl App {
     pub(crate) fn ctrl_definition_target_under_mouse(&mut self) -> Option<DefinitionJumpTarget> {
         let target = self.ctrl_definition.target.clone()?;
         let source_range = self.ctrl_definition.source_range?;
+        let show_welcome = self.show_welcome;
+        let is_ide_mode = self.is_ide_mode;
+        let database_query = self.active_tab_is_database_query();
         let r = self.renderer.as_mut()?;
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            44.0 * r.scale_factor
-        };
+        let tab_bar_h = crate::render_view::editor_content_top_inset(
+            show_welcome,
+            is_ide_mode,
+            database_query,
+            r.scale_factor,
+        );
         let mouse_x = r.last_mouse_x;
         let mouse_y = r.last_mouse_y + self.scroll_y.current.round() - tab_bar_h;
         let byte = r.get_byte_at_xy(&self.editor, mouse_x, mouse_y);
@@ -722,12 +744,13 @@ impl App {
                     };
                     let line_str: String = row.iter().map(|c| c.c).collect();
                     for mat in re.find_iter(&line_str) {
-                        self.ide_panel.term_search_results.push((
-                            mat.start(),
-                            y,
-                            mat.end().saturating_sub(1),
-                            y,
-                        ));
+                        if let Some((start_col, end_col)) =
+                            terminal_match_cell_range(&line_str, mat.start(), mat.end())
+                        {
+                            self.ide_panel
+                                .term_search_results
+                                .push((start_col, y, end_col, y));
+                        }
                     }
                 }
             }
@@ -742,6 +765,24 @@ impl App {
     pub fn jump_to_terminal_search_result(&mut self) {
         if let Some(idx) = self.ide_panel.term_search_current_idx {
             if let Some(&(sx, sy, ex, ey)) = self.ide_panel.term_search_results.get(idx) {
+                let terminal_viewport = self.renderer.as_ref().map(|r| {
+                    let s = r.scale_factor;
+                    let char_h = r.line_height
+                        * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                    let (_, content_y, _, content_h, _) =
+                        crate::app::mouse::app_panel_scroll_rect(
+                            self,
+                            crate::app::PanelId::Terminal,
+                            s,
+                        );
+                    let (_, term_content_h) =
+                        crate::render_view::terminal_ui::terminal_body_rect(
+                            content_y,
+                            content_h,
+                            s,
+                        );
+                    (char_h, term_content_h, s)
+                });
                 if let Some(term) = self
                     .ide_panel
                     .terminals
@@ -749,10 +790,7 @@ impl App {
                 {
                     let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                     grid.selection = Some((sx, sy, ex, ey));
-                    if let Some(r) = self.renderer.as_ref() {
-                        let s = r.scale_factor;
-                        let char_h = r.line_height
-                            * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                    if let Some((char_h, term_content_h, s)) = terminal_viewport {
                         let total_lines = if grid.is_alt {
                             grid.lines.len()
                         } else {
@@ -760,20 +798,6 @@ impl App {
                         };
                         let offset_from_bottom = total_lines.saturating_sub(1).saturating_sub(sy);
 
-                        let bottom_h = self.ide_panel.bottom_height * s;
-                        let panel_y = crate::render_view::ide_bottom_panel_y(
-                            r.height,
-                            bottom_h,
-                            s,
-                        );
-                        let content_y = panel_y + 1.0 + 32.0 * s;
-                        let content_h = bottom_h - 1.0 - 32.0 * s;
-                        let (_, term_content_h) =
-                            crate::render_view::terminal_ui::terminal_body_rect(
-                                content_y,
-                                content_h,
-                                s,
-                            );
                         let max_scroll = if grid.is_alt {
                             0.0
                         } else {
@@ -785,8 +809,9 @@ impl App {
                             )
                         };
 
-                        term.scroll_y.target =
-                            (offset_from_bottom as f32 * char_h).clamp(0.0, max_scroll);
+                        term.scroll_y.animate_to(
+                            (offset_from_bottom as f32 * char_h).clamp(0.0, max_scroll),
+                        );
                     }
                 }
             }
@@ -851,6 +876,9 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn jump_to_search_result(&mut self) {
+        let show_welcome = self.show_welcome;
+        let is_ide_mode = self.is_ide_mode;
+        let database_query = self.active_tab_is_database_query();
         if let Some(idx) = self.search_current_idx {
             if let Some(&(start, end)) = self.search_results.get(idx) {
                 self.editor.cursor = end;
@@ -864,15 +892,20 @@ impl App {
 
                     let line_top_y = phys_line as f32 * r.line_height;
 
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                    let wh = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.inner_size().height as f32)
+                        .unwrap_or(r.height);
                     let s = r.scale_factor;
-                    let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                        0.0
-                    } else {
-                        44.0 * s
-                    };
-                    let panel_bottom_h = if self.is_ide_mode && self.ide_panel.any_bottom_open() {
-                        self.ide_panel.bottom_height * s
+                    let tab_bar_h = crate::render_view::editor_content_top_inset(
+                        show_welcome,
+                        is_ide_mode,
+                        database_query,
+                        s,
+                    );
+                    let panel_bottom_h = if self.is_ide_mode {
+                        self.ide_panel.editor_reserved_bottom_height(s)
                     } else {
                         0.0
                     };
@@ -883,7 +916,8 @@ impl App {
                         self.is_ide_mode,
                         s,
                     );
-                    self.scroll_y.target = (line_top_y - visible_h / 2.0).max(0.0);
+                    self.scroll_y
+                        .animate_to((line_top_y - visible_h / 2.0).max(0.0));
 
                     let max_s = r.get_max_scroll(&self.editor, visible_h);
                     self.scroll_y.clamp_target(0.0, max_s);
@@ -894,4 +928,35 @@ impl App {
         }
     }
 
+}
+
+fn terminal_match_cell_range(
+    line: &str,
+    match_start: usize,
+    match_end: usize,
+) -> Option<(usize, usize)> {
+    if match_start >= match_end
+        || match_end > line.len()
+        || !line.is_char_boundary(match_start)
+        || !line.is_char_boundary(match_end)
+    {
+        return None;
+    }
+    let start_col = line[..match_start].chars().count();
+    let end_exclusive_col = start_col + line[match_start..match_end].chars().count();
+    Some((start_col, end_exclusive_col.saturating_sub(1)))
+}
+
+#[cfg(test)]
+mod terminal_search_cell_tests {
+    use super::terminal_match_cell_range;
+
+    #[test]
+    fn terminal_search_converts_utf8_byte_offsets_to_cell_columns() {
+        let line = "λ中abc";
+        let start = line.find("abc").expect("query");
+        let end = start + "abc".len();
+        assert_eq!(terminal_match_cell_range(line, start, end), Some((2, 4)));
+        assert_eq!(terminal_match_cell_range(line, end, start), None);
+    }
 }

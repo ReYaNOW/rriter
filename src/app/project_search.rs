@@ -18,9 +18,10 @@ use std::time::Instant;
 mod project_search_grep;
 #[path = "project_search_preview.rs"]
 mod project_search_preview;
+pub(crate) use project_search_preview::project_search_scrollbar_thumb;
+#[cfg(test)]
 pub(crate) use project_search_preview::{
     ProjectSearchPreviewKey, ProjectSearchPreviewRequest, ProjectSearchPreviewWorkerMessage,
-    project_search_scrollbar_thumb,
 };
 
 pub const PROJECT_SEARCH_FILE_CAP_BYTES: u64 = 8 * 1024 * 1024;
@@ -297,9 +298,7 @@ impl ProjectSearchState {
 
     pub fn apply_live_filter(&mut self) {
         self.rebuild_flat_rows();
-        self.scroll.current = 0.0;
-        self.scroll.target = 0.0;
-        self.scroll.velocity = 0.0;
+        self.scroll.reset();
     }
 
     pub fn apply_message(&mut self, message: ProjectSearchWorkerMessage) -> bool {
@@ -422,9 +421,8 @@ impl ProjectSearchState {
             ProjectSearchQueryScrollAxis::Horizontal => &mut self.query_scroll_x,
             ProjectSearchQueryScrollAxis::Vertical => &mut self.query_scroll_y,
         };
+        scroll.jump_to(target);
         scroll.drag_offset = drag_offset;
-        scroll.target = target;
-        scroll.velocity = 0.0;
         scroll.anim_speed = 15.0;
         scroll.is_dragging = true;
         true
@@ -458,9 +456,10 @@ impl ProjectSearchState {
         if (scroll.target - target).abs() < 0.5 {
             return false;
         }
-        scroll.target = target;
-        scroll.velocity = 0.0;
+        scroll.jump_to(target);
+        scroll.drag_offset = drag_offset;
         scroll.anim_speed = 15.0;
+        scroll.is_dragging = true;
         true
     }
 
@@ -472,9 +471,7 @@ impl ProjectSearchState {
 
 fn set_scroll_immediate(scroll: &mut ScrollState, target: f32, max_scroll: f32) {
     let target = target.clamp(0.0, max_scroll);
-    scroll.current = target;
-    scroll.target = target;
-    scroll.velocity = 0.0;
+    scroll.jump_to(target);
 }
 
 pub(crate) fn project_search_query_line_height(scale: f32) -> f32 {
@@ -2049,6 +2046,8 @@ mod tests {
             1.0,
         ));
         assert!(state.query_scroll_y.target > 0.0);
+        assert_eq!(state.query_scroll_y.current, state.query_scroll_y.target);
+        assert!(state.query_scroll_y.is_dragging);
 
         assert!(state.start_query_scrollbar_drag(
             rect,
@@ -2057,6 +2056,8 @@ mod tests {
             1.0,
         ));
         assert!(state.query_scroll_x.target > 0.0);
+        assert_eq!(state.query_scroll_x.current, state.query_scroll_x.target);
+        assert!(state.query_scroll_x.is_dragging);
     }
 
     #[test]

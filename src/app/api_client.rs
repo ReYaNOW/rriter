@@ -34,6 +34,49 @@ pub const API_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
 pub const API_MAX_SPEC_BYTES: usize = 8 * 1024 * 1024;
 pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub const API_MANUAL_MOCK_SPEC_ID: ApiSpecId = ApiSpecId(0);
+pub(crate) fn api_mock_contract_field_prop_value(
+    field: &crate::app::api_mock::types::ApiMockContractField,
+    prop: crate::ui_system::ApiMockContractFieldProp,
+) -> String {
+    match prop {
+        crate::ui_system::ApiMockContractFieldProp::Required
+        | crate::ui_system::ApiMockContractFieldProp::Nullable => String::new(),
+        crate::ui_system::ApiMockContractFieldProp::Default => {
+            field.default_value.clone().unwrap_or_default()
+        }
+        crate::ui_system::ApiMockContractFieldProp::Enum => field.enum_values.join(", "),
+        crate::ui_system::ApiMockContractFieldProp::MinLength => field
+            .constraints
+            .min_length
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        crate::ui_system::ApiMockContractFieldProp::MaxLength => field
+            .constraints
+            .max_length
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        crate::ui_system::ApiMockContractFieldProp::Pattern => {
+            field.constraints.pattern.clone().unwrap_or_default()
+        }
+        crate::ui_system::ApiMockContractFieldProp::Minimum => {
+            field.constraints.minimum.clone().unwrap_or_default()
+        }
+        crate::ui_system::ApiMockContractFieldProp::Maximum => {
+            field.constraints.maximum.clone().unwrap_or_default()
+        }
+        crate::ui_system::ApiMockContractFieldProp::MinItems => field
+            .constraints
+            .min_items
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+        crate::ui_system::ApiMockContractFieldProp::MaxItems => field
+            .constraints
+            .max_items
+            .map(|value| value.to_string())
+            .unwrap_or_default(),
+    }
+}
+
 const API_MAX_MULTIPART_BODY_BYTES: usize = 64 * 1024 * 1024;
 const API_SCHEMA_MAX_DEPTH: usize = 12;
 const API_SCHEMA_MAX_COUNT: usize = 16_384;
@@ -899,6 +942,10 @@ pub struct ApiClientTabState {
     pub tab_scroll: ScrollState,
     pub body_scroll: ScrollState,
     pub body_scroll_x: ScrollState,
+    pub output_scroll: ScrollState,
+    pub output_scroll_x: ScrollState,
+    pub mock_static_response_scroll: ScrollState,
+    pub mock_static_response_scroll_x: ScrollState,
     pub response_scroll: ScrollState,
     pub response_scroll_x: ScrollState,
     pub focused_schema_pane: Option<ApiSchemaPaneFocus>,
@@ -969,6 +1016,10 @@ impl Default for ApiClientTabState {
             tab_scroll: ScrollState::new(7.0),
             body_scroll: ScrollState::new(7.0),
             body_scroll_x: ScrollState::new(7.0),
+            output_scroll: ScrollState::new(7.0),
+            output_scroll_x: ScrollState::new(7.0),
+            mock_static_response_scroll: ScrollState::new(7.0),
+            mock_static_response_scroll_x: ScrollState::new(7.0),
             response_scroll: ScrollState::new(7.0),
             response_scroll_x: ScrollState::new(7.0),
             focused_schema_pane: None,
@@ -980,6 +1031,41 @@ impl Default for ApiClientTabState {
 }
 
 impl ApiClientTabState {
+    pub fn reset_route_content(&mut self, route_idx: Option<usize>) {
+        self.route_idx = route_idx;
+        self.path_values.clear();
+        self.query_values.clear();
+        self.body_values.clear();
+        self.body_file_paths.clear();
+        self.body_json = "{\n  \n}".to_string();
+        self.response = None;
+        self.response_view = ApiResponseView::Body;
+        self.input_doc_view = ApiInputDocView::Input;
+        self.output_doc_view = ApiOutputDocView::Example;
+        self.input_schema_idx = 0;
+        self.input_schema_menu_open = false;
+        self.output_status_idx = 0;
+        self.output_example_idx = 0;
+        self.output_schema_idx = 0;
+        self.output_schema_menu_open = false;
+        self.output_schema_menu_anim = 0.0;
+        self.output_schema_menu_scroll.reset();
+        self.input_schema_collapsed.clear();
+        self.output_schema_collapsed.clear();
+        self.pending = false;
+        self.pending_request_id = None;
+        self.body_scroll.reset();
+        self.body_scroll_x.reset();
+        self.output_scroll.reset();
+        self.output_scroll_x.reset();
+        self.mock_static_response_scroll.reset();
+        self.mock_static_response_scroll_x.reset();
+        self.response_scroll.reset();
+        self.response_scroll_x.reset();
+        self.focused_schema_pane = None;
+        self.route_text_selection = None;
+    }
+
     pub fn remember_route_state(&mut self) {
         let Some(route_idx) = self.route_idx else {
             return;
@@ -1047,20 +1133,19 @@ impl ApiClientTabState {
         } else {
             0.0
         };
-        self.output_schema_menu_scroll.current = 0.0;
-        self.output_schema_menu_scroll.target = 0.0;
+        self.output_schema_menu_scroll.reset();
         self.input_schema_collapsed = saved.input_schema_collapsed;
         self.output_schema_collapsed = saved.output_schema_collapsed;
         self.pending = saved.pending;
         self.pending_request_id = saved.pending_request_id;
-        self.body_scroll.current = 0.0;
-        self.body_scroll.target = 0.0;
-        self.body_scroll_x.current = 0.0;
-        self.body_scroll_x.target = 0.0;
-        self.response_scroll.current = 0.0;
-        self.response_scroll.target = 0.0;
-        self.response_scroll_x.current = 0.0;
-        self.response_scroll_x.target = 0.0;
+        self.body_scroll.reset();
+        self.body_scroll_x.reset();
+        self.output_scroll.reset();
+        self.output_scroll_x.reset();
+        self.mock_static_response_scroll.reset();
+        self.mock_static_response_scroll_x.reset();
+        self.response_scroll.reset();
+        self.response_scroll_x.reset();
         self.focused_schema_pane = None;
         self.route_text_selection = None;
         true
@@ -1091,13 +1176,11 @@ impl ApiClientTabState {
             .iter()
             .find(|saved| saved.auth_view == auth_view && saved.route_idx == route_idx)
         {
-            self.tab_scroll.current = saved.current;
-            self.tab_scroll.target = saved.target;
+            self.tab_scroll.jump_to(saved.current);
+            self.tab_scroll.animate_to(saved.target);
         } else {
-            self.tab_scroll.current = 0.0;
-            self.tab_scroll.target = 0.0;
+            self.tab_scroll.reset();
         }
-        self.tab_scroll.is_dragging = false;
     }
 }
 
@@ -1852,8 +1935,7 @@ impl ApiClientState {
         for entry in &mut self.specs {
             entry.selected = entry.id == id;
         }
-        self.route_scroll.current = 0.0;
-        self.route_scroll.target = 0.0;
+        self.route_scroll.reset();
     }
 
     pub fn upsert_loaded(&mut self, payload: ApiLoadPayload, select_on_success: bool) {

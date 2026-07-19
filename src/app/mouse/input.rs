@@ -100,11 +100,15 @@ fn stop_api_tab_scroll_anims(state: &mut crate::app::api_client::ApiClientTabSta
     stop_scroll_anim(&mut state.tab_scroll);
     stop_scroll_anim(&mut state.body_scroll);
     stop_scroll_anim(&mut state.body_scroll_x);
+    stop_scroll_anim(&mut state.output_scroll);
+    stop_scroll_anim(&mut state.output_scroll_x);
+    stop_scroll_anim(&mut state.mock_static_response_scroll);
+    stop_scroll_anim(&mut state.mock_static_response_scroll_x);
     stop_scroll_anim(&mut state.response_scroll);
     stop_scroll_anim(&mut state.response_scroll_x);
 }
 
-fn stop_click_scroll_anims(app: &mut App) {
+pub(crate) fn stop_click_scroll_anims(app: &mut App) {
     stop_scroll_anim(&mut app.settings_scroll);
     stop_scroll_anim(&mut app.tab_scroll);
     stop_scroll_anim(&mut app.scroll_y);
@@ -116,11 +120,24 @@ fn stop_click_scroll_anims(app: &mut App) {
     }
 
     stop_scroll_anim(&mut app.ide_panel.explorer_scroll);
+    if let Some(dialog) = app.ide_panel.file_tree_rename_dialog.as_mut() {
+        stop_scroll_anim(&mut dialog.input_scroll_x);
+    }
     stop_scroll_anim(&mut app.ide_panel.project_search.scroll);
     stop_scroll_anim(&mut app.ide_panel.project_search.query_scroll_y);
     stop_scroll_anim(&mut app.ide_panel.project_search.query_scroll_x);
     stop_scroll_anim(&mut app.ide_panel.git.scroll);
     stop_scroll_anim(&mut app.ide_panel.git.graph_scroll);
+    stop_scroll_anim(&mut app.ide_panel.database.scroll);
+    if let Some(dialog) = app.ide_panel.database.dialog.as_mut() {
+        stop_scroll_anim(&mut dialog.scroll);
+    }
+    if let Ok(mut ddl) = app.ide_panel.database.ddl_hover.try_borrow_mut()
+        && let Some(state) = ddl.as_mut()
+    {
+        stop_scroll_anim(&mut state.popup.scroll);
+    }
+    app.stop_database_table_modal_scroll_anims();
     stop_scroll_anim(&mut app.ide_panel.lsp_scroll_y);
     stop_scroll_anim(&mut app.ide_panel.lsp_scroll_x);
     for scroll in app.ide_panel.lsp_logs_scroll_y.values_mut() {
@@ -133,6 +150,7 @@ fn stop_click_scroll_anims(app: &mut App) {
     for terminal in &mut app.ide_panel.terminals {
         stop_scroll_anim(&mut terminal.scroll_y);
     }
+    app.tool_installer.stop_log_scroll_anim();
 
     let api = &mut app.ide_panel.api;
     stop_scroll_anim(&mut api.panel_scroll);
@@ -156,12 +174,24 @@ fn stop_click_scroll_anims(app: &mut App) {
                 stop_scroll_anim(&mut state.grid.scroll_x);
                 stop_scroll_anim(&mut state.grid.scroll_y);
             }
-            _ => {}
+            crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                stop_scroll_anim(&mut state.result_view.scroll_x);
+                stop_scroll_anim(&mut state.result_view.scroll_y);
+                stop_scroll_anim(&mut state.result_view.review_message_scroll_y);
+            }
+            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) => {}
         }
     }
+
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        stop_scroll_anim(&mut state.diag_scroll);
+        if let Some(popup) = state.popup.as_mut() {
+            stop_scroll_anim(&mut popup.scroll);
+        }
+    });
 }
 
-#[cfg(test)]
 fn autocomplete_scroll_click_target(
     mouse_y: f32,
     rect_y: f32,
@@ -195,7 +225,118 @@ fn autocomplete_scroll_click_target(
     }
 }
 
+pub(super) fn apply_autocomplete_scroll_drag(
+    scroll: &mut crate::scroll::ScrollState,
+    target: f32,
+    drag_offset: f32,
+) {
+    scroll.jump_to(target);
+    scroll.drag_offset = drag_offset;
+    scroll.anim_speed = 15.0;
+    scroll.is_dragging = true;
+}
+
 impl App {
+    pub(crate) fn cancel_pointer_interactions(&mut self) {
+        self.finish_database_table_drag();
+        self.is_dragging = false;
+        self.is_editor_drag_pending = false;
+        self.is_dragging_search = false;
+        self.is_dragging_settings_ignore = false;
+        self.is_dragging_lsp_log = false;
+        self.autocomplete_detail_selecting = false;
+        self.ide_panel.is_dragging_terminal = false;
+        self.ide_panel.is_resizing_left = false;
+        self.ide_panel.is_resizing_bottom = false;
+        self.ide_panel.git.graph_resizing = false;
+        self.ide_panel.file_tree_drag = None;
+        self.ide_panel.tab_drag = None;
+        self.ide_panel.drag = None;
+        self.ide_panel.project_search.dragging_field = None;
+        self.ide_panel.file_tree_dialog_input_drag = None;
+        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+            dialog.dragging_field = None;
+        }
+        self.ide_panel.database.table_modal_input_dragging = false;
+
+        self.scroll_y.end_drag();
+        self.scroll_x.end_drag();
+        self.settings_scroll.end_drag();
+        self.settings_ide_scroll.end_drag();
+        self.autocomplete_scroll.end_drag();
+        self.ide_panel.explorer_scroll.end_drag();
+        self.ide_panel.project_search.scroll.end_drag();
+        self.ide_panel.project_search.query_scroll_y.end_drag();
+        self.ide_panel.project_search.query_scroll_x.end_drag();
+        self.ide_panel.lsp_scroll_x.end_drag();
+        self.ide_panel.lsp_scroll_y.end_drag();
+        self.ide_panel.api.mock_guide_scroll.end_drag();
+        self.ide_panel.api.mock_server_log_scroll.end_drag();
+        self.ide_panel.api.mock_python_install_log_scroll.end_drag();
+        self.ide_panel.problems_scroll.end_drag();
+        self.ide_panel.git.graph_scroll.end_drag();
+        for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
+            scroll.end_drag();
+        }
+        for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
+            scroll.end_drag();
+        }
+        for scroll in self.ide_panel.api.mock_python_scrolls.values_mut() {
+            scroll.end_drag();
+        }
+        for scroll in self.ide_panel.api.mock_python_scrolls_x.values_mut() {
+            scroll.end_drag();
+        }
+        for terminal in &mut self.ide_panel.terminals {
+            terminal.scroll_y.end_drag();
+        }
+        if let Some(popup) = &mut self.autocomplete_detail_popup {
+            popup.scroll.end_drag();
+        }
+        for tab in &mut self.tabs {
+            match &mut tab.kind {
+                crate::app::EditorTabKind::ApiClient(_, state) => {
+                    state.body_scroll.end_drag();
+                    state.body_scroll_x.end_drag();
+                    state.output_scroll.end_drag();
+                    state.output_scroll_x.end_drag();
+                    state.mock_static_response_scroll.end_drag();
+                    state.mock_static_response_scroll_x.end_drag();
+                    state.response_scroll.end_drag();
+                    state.response_scroll_x.end_drag();
+                    state.output_schema_menu_scroll.end_drag();
+                }
+                crate::app::EditorTabKind::DatabaseTable(_, state) => {
+                    state.grid.text_drag = None;
+                    state.grid.scroll_x.end_drag();
+                    state.grid.scroll_y.end_drag();
+                    state.unavailable_text_dragging = false;
+                    state.grid.column_resize = None;
+                }
+                crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                    state.result_view.scroll_x.end_drag();
+                    state.result_view.scroll_y.end_drag();
+                    state.result_view.review_message_scroll_y.end_drag();
+                    state.result_view.is_resizing_height = false;
+                    state.result_view.column_resize = None;
+                }
+                _ => {}
+            }
+        }
+        self.tool_installer.end_log_scroll_drag();
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.git_graph_tooltip_selecting = false;
+        }
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            if let Some(popup) = &mut state.popup {
+                popup.scroll.end_drag();
+            }
+            state.selecting = false;
+            state.diag_selecting = false;
+        });
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_input(
         &mut self,
@@ -232,7 +373,7 @@ impl App {
             self.finish_database_table_drag();
         }
         if state == ElementState::Released && self.autocomplete_detail_selecting {
-            self.autocomplete_detail_selecting = false;
+            self.cancel_pointer_interactions();
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -241,12 +382,14 @@ impl App {
         }
         if state == ElementState::Released {
             if let Some(popup) = &mut self.autocomplete_detail_popup {
-                popup.scroll.is_dragging = false;
+                popup.scroll.end_drag();
             }
-            if let Some(renderer) = self.renderer.as_mut()
-                && renderer.git_graph_tooltip_selecting
+            if self
+                .renderer
+                .as_ref()
+                .is_some_and(|renderer| renderer.git_graph_tooltip_selecting)
             {
-                renderer.git_graph_tooltip_selecting = false;
+                self.cancel_pointer_interactions();
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
@@ -510,22 +653,19 @@ impl App {
                             self.autocomplete_detail_rect,
                             self.autocomplete_detail_popup.as_mut(),
                         ) {
-                            let (_, by, _, box_h) = rect;
-                            let track_h = box_h - 16.0 * s;
-                            let thumb_h = (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
-                            let thumb_y = by
-                                + 8.0 * s
-                                + (popup.scroll.current / max_scroll) * (track_h - thumb_h);
-                            if my >= thumb_y && my <= thumb_y + thumb_h {
-                                popup.scroll.is_dragging = true;
-                                popup.scroll.drag_offset = my - thumb_y;
-                            } else {
+                            if let Some((drag_offset, target)) =
+                                crate::app::mouse::hover_popup_scrollbar_drag_target(
+                                    rect,
+                                    max_scroll,
+                                    popup.scroll.current,
+                                    my,
+                                    s,
+                                    None,
+                                )
+                            {
+                                popup.scroll.jump_to(target);
+                                popup.scroll.drag_offset = drag_offset;
                                 popup.scroll.anim_speed = 15.0;
-                                popup.scroll.drag_offset = thumb_h / 2.0;
-                                let ratio = (my - by - 8.0 * s - popup.scroll.drag_offset)
-                                    / (track_h - thumb_h).max(0.0001);
-                                popup.scroll.target = (ratio * max_scroll).clamp(0.0, max_scroll);
-                                popup.scroll.current = popup.scroll.target;
                                 popup.scroll.is_dragging = true;
                             }
                         }
@@ -553,6 +693,24 @@ impl App {
                 if in_main {
                     if let Some(rect) = self.autocomplete_rect {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
+                        if mx >= rect.0 + rect.2 - 14.0 * s {
+                            if let Some((drag_offset, target)) = autocomplete_scroll_click_target(
+                                my,
+                                rect.1,
+                                rect.3,
+                                self.autocomplete_scroll.current,
+                                self.autocomplete_options.len(),
+                                s,
+                            ) {
+                                apply_autocomplete_scroll_drag(
+                                    &mut self.autocomplete_scroll,
+                                    target,
+                                    drag_offset,
+                                );
+                            }
+                            self.window.as_ref().unwrap().request_redraw();
+                            return;
+                        }
                         if let Some(idx) = autocomplete_item_index_at(
                             mx,
                             my,
@@ -616,17 +774,17 @@ impl App {
                     let btn_code = terminal_mouse_button_code(button);
                     let is_pressed = state == ElementState::Pressed;
                     let s = self.renderer.as_ref().unwrap().scale_factor;
-                    let panel_x = 48.0 * s + 10.0 * s;
+                    let (terminal_panel_x, content_y, _, content_h, _) =
+                        super::app_panel_scroll_rect(
+                            self,
+                            crate::app::PanelId::Terminal,
+                            s,
+                        );
+                    let panel_x = terminal_panel_x + 10.0 * s;
                     let char_w = self.renderer.as_mut().unwrap().char_advance('A')
                         * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                     let char_h = self.renderer.as_ref().unwrap().line_height
                         * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-                    let bottom_h = self.ide_panel.bottom_height * s;
-                    let tab_h = 32.0 * s;
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let content_y =
-                        crate::render_view::ide_bottom_panel_y(wh, bottom_h, s) + 1.0 + tab_h;
-                    let content_h = bottom_h - 1.0 - tab_h;
                     let (term_content_y, term_content_h) =
                         crate::render_view::terminal_ui::terminal_body_rect(
                             content_y, content_h, s,
@@ -770,102 +928,62 @@ impl App {
 
             // Глобальная обработка декларативного UI
             if !self.show_settings && self.dialog_window.is_none() {
-                if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Problems) {
+                if self.is_ide_mode
+                    && let Some(layout) = super::problems_scrollbar_layout(self, self.renderer.as_ref().unwrap().scale_factor)
+                    && crate::ui_system::point_in_rect(
+                        mx,
+                        my,
+                        (
+                            layout.content_x,
+                            layout.content_y,
+                            layout.content_w,
+                            layout.content_h,
+                        ),
+                    )
+                {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-
-                    let is_top = self.ide_panel.slots.iter().any(|sl| {
-                        sl.id == crate::app::PanelId::Problems
-                            && sl.group == crate::app::PanelGroup::Top
-                    });
-                    let sb_w = 48.0 * s;
-                    let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                        self.ide_panel.bottom_height * s
-                    } else {
-                        0.0
-                    };
-
-                    let mut effective_bottom_h = panel_bottom_h;
-                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                        && !self.ide_panel.terminal_focused
+                    let scroll_x = layout.content_x + layout.content_w - 12.0 * s;
+                    if mx >= scroll_x
+                        && let Some(thumb) = crate::scroll::scrollbar_thumb(
+                            layout.list_y,
+                            layout.track_h,
+                            layout.track_h,
+                            layout.total_h,
+                            self.ide_panel.problems_scroll.current,
+                            20.0 * s,
+                        )
                     {
-                        effective_bottom_h = 0.0;
-                    }
-
-                    let (cx, cy, cw, ch) = if is_top {
-                        let panel_left_w = self.ide_panel.left_width * s;
-                        let title_h = 32.0 * s;
-                        (
-                            sb_w,
-                            title_h,
-                            panel_left_w,
-                            wh - title_h
-                                - effective_bottom_h
-                                - crate::render_view::ide_status_bar_height(s),
-                        )
-                    } else {
-                        let ww = self.window.as_ref().unwrap().inner_size().width as f32;
-                        let tab_h = 32.0 * s;
-                        let panel_y = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
-                        (
-                            sb_w,
-                            panel_y + 1.0 + tab_h,
-                            ww - sb_w,
-                            panel_bottom_h - 1.0 - tab_h,
-                        )
-                    };
-
-                    if mx >= cx && mx <= cx + cw && my >= cy && my <= cy + ch {
-                        let scroll_x = cx + cw - 12.0 * s;
-                        if mx >= scroll_x {
-                            let item_h = 24.0 * s;
-                            let total_h = crate::app::problems_scroll_content_height(
-                                self.ide_panel.visible_problem_row_count(self.lsp.as_ref()),
-                                item_h,
-                            );
-                            let track_h = (ch - 40.0 * s).max(0.0);
-                            let list_y = cy + 40.0 * s;
-                            if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                                list_y,
-                                track_h,
-                                track_h,
-                                total_h,
-                                self.ide_panel.problems_scroll.current,
-                                20.0 * s,
-                            ) {
-                                let max_scroll = (total_h - track_h).max(0.0);
-                                    if my >= thumb.start && my <= thumb.start + thumb.len {
-                                    self.ide_panel.problems_scroll.is_dragging = true;
-                                        self.ide_panel.problems_scroll.drag_offset = my - thumb.start;
-                                    return;
-                                } else if my >= list_y && my <= list_y + track_h {
-                                    self.ide_panel.problems_scroll.anim_speed = 15.0;
-                                    let Some((offset, target)) = crate::scroll::scrollbar_drag_target(
-                                        my,
-                                        list_y,
-                                        track_h,
-                                        thumb,
-                                        max_scroll,
-                                        None,
-                                    ) else {
-                                        return;
-                                    };
-                                    self.ide_panel.problems_scroll.drag_offset = offset;
-                                    self.ide_panel.problems_scroll.target = target;
-                                    self.ide_panel.problems_scroll.current = target;
-                                    self.ide_panel.problems_scroll.is_dragging = true;
-                                    self.window.as_ref().unwrap().request_redraw();
-                                    return;
-                                }
-                            }
-                        }
+                        let max_scroll = (layout.total_h - layout.track_h).max(0.0);
+                        let drag_offset = if my >= thumb.start && my <= thumb.start + thumb.len {
+                            my - thumb.start
+                        } else if my >= layout.list_y && my <= layout.list_y + layout.track_h {
+                            let Some((offset, target)) = crate::scroll::scrollbar_drag_target(
+                                my,
+                                layout.list_y,
+                                layout.track_h,
+                                thumb,
+                                max_scroll,
+                                None,
+                            ) else {
+                                return;
+                            };
+                            self.ide_panel.problems_scroll.jump_to(target);
+                            offset
+                        } else {
+                            return;
+                        };
+                        self.ide_panel.problems_scroll.anim_speed = 15.0;
+                        self.ide_panel.problems_scroll.drag_offset = drag_offset;
+                        self.ide_panel.problems_scroll.is_dragging = true;
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
                     }
                 }
 
                 if self.is_ide_mode {
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let sb_w = 48.0 * s;
-                    let panel_left_w = self.ide_panel.left_width * s;
+                    let panel_left_w = self.ide_panel.visible_left_width(s);
                     let panel_bottom_h = if self.ide_panel.any_bottom_open() {
                         self.ide_panel.bottom_height * s
                     } else {
@@ -1068,23 +1186,19 @@ impl App {
                             if let Some(rect) = state.rect {
                                 let max_scroll = state.max_scroll;
                                 if let Some(popup) = &mut state.popup {
-                                    let (_, by, _, box_h) = rect;
-                                    let track_h = box_h - 16.0 * s;
-                                    let thumb_h =
-                                        (box_h / (box_h + max_scroll) * track_h).max(20.0 * s);
-                                    let thumb_y = by
-                                        + 8.0 * s
-                                        + (popup.scroll.current / max_scroll) * (track_h - thumb_h);
-                                    if my >= thumb_y && my <= thumb_y + thumb_h {
-                                        popup.scroll.is_dragging = true;
-                                        popup.scroll.drag_offset = my - thumb_y;
-                                    } else {
+                                    if let Some((drag_offset, target)) =
+                                        crate::app::mouse::hover_popup_scrollbar_drag_target(
+                                            rect,
+                                            max_scroll,
+                                            popup.scroll.current,
+                                            my,
+                                            s,
+                                            None,
+                                        )
+                                    {
+                                        popup.scroll.jump_to(target);
+                                        popup.scroll.drag_offset = drag_offset;
                                         popup.scroll.anim_speed = 15.0;
-                                        popup.scroll.drag_offset = thumb_h / 2.0;
-                                        let ratio = (my - by - 8.0 * s - popup.scroll.drag_offset)
-                                            / (track_h - thumb_h).max(0.0001);
-                                        popup.scroll.target =
-                                            (ratio * max_scroll).clamp(0.0, max_scroll);
                                         popup.scroll.is_dragging = true;
                                     }
                                 }
@@ -1137,11 +1251,28 @@ impl App {
                     } else if clicked_id == crate::ui_system::UiId::GitGraphResize {
                         self.ide_panel.git.graph_resizing = true;
                         self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::FileTreeScrollY {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        if let Some(layout) = super::explorer_scrollbar_layout(self, s)
+                            && let Some((drag_offset, target)) =
+                                crate::scroll::scrollbar_drag_target(
+                                    my,
+                                    layout.track_y,
+                                    layout.track_h,
+                                    layout.thumb,
+                                    layout.max_scroll,
+                                    None,
+                                )
+                        {
+                            self.ide_panel.explorer_scroll.jump_to(target);
+                            self.ide_panel.explorer_scroll.drag_offset = drag_offset;
+                            self.ide_panel.explorer_scroll.is_dragging = true;
+                        }
+                        self.handle_ui_click(clicked_id);
                     } else if clicked_id == crate::ui_system::UiId::GitGraphScroll {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                         if let Some((rows_y, rows_h)) =
-                            super::git_graph_rows_bounds(&self.ide_panel, wh, s)
+                            super::git_graph_rows_bounds(self, s)
                             && let Some((drag_offset, target)) =
                                 crate::app::git_panel::git_graph_scroll_drag_target(
                                     my,
@@ -1153,10 +1284,11 @@ impl App {
                                     s,
                                 )
                         {
-                            self.ide_panel.git.graph_scroll.drag_offset = drag_offset;
-                            self.ide_panel.git.graph_scroll.target = target;
-                            self.ide_panel.git.graph_scroll.velocity = 0.0;
-                            self.ide_panel.git.graph_scroll.is_dragging = true;
+                            crate::app::git_panel::apply_git_graph_scroll_drag(
+                                &mut self.ide_panel.git.graph_scroll,
+                                target,
+                                drag_offset,
+                            );
                             let max_scroll = crate::app::git_panel::git_graph_max_scroll(
                                 self.ide_panel.git.graph_snapshot.len(),
                                 rows_h,
@@ -1273,6 +1405,8 @@ impl App {
             if state == ElementState::Released {
                 self.is_dragging_settings_ignore = false;
                 self.is_dragging_lsp_log = false;
+                self.settings_scroll.end_drag();
+                self.settings_ide_scroll.end_drag();
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let window_size = self.window.as_ref().unwrap().inner_size();
@@ -1288,7 +1422,7 @@ impl App {
                 let my = self.renderer.as_ref().unwrap().last_mouse_y;
 
                 if !outer.contains(mx, my) {
-                    self.show_settings = false;
+                    self.set_settings_visible(false);
                 } else {
                     // Ищем только среди оверлейных элементов настроек,
                     // чтобы фоновые элементы редактора не реагировали на клики.
@@ -1360,7 +1494,7 @@ impl App {
                     {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
                         let start_cx = if self.is_ide_mode {
-                            let panel_left_w = self.ide_panel.left_width * s;
+                            let panel_left_w = self.ide_panel.visible_left_width(s);
                             (48.0 * s + panel_left_w).round() + 1.0 - self.tab_scroll.current
                         } else {
                             -self.tab_scroll.current
@@ -1557,6 +1691,7 @@ impl App {
                         self.ide_panel
                             .slots
                             .extend(bottom_items.into_iter().map(|(_, s)| s));
+                        self.ide_panel.reconcile_moved_panel(drag.panel_id);
                     }
                     crate::save_panel_state(&self.ide_panel);
                 }
@@ -1570,62 +1705,7 @@ impl App {
                     crate::save_panel_state(&self.ide_panel);
                 }
             }
-            self.is_dragging = false;
-            self.is_editor_drag_pending = false;
-            self.ide_panel.is_dragging_terminal = false;
-            self.scroll_y.is_dragging = false;
-            self.is_dragging_search = false;
-            self.ide_panel.project_search.dragging_field = None;
-            self.ide_panel.project_search.scroll.is_dragging = false;
-            self.ide_panel.project_search.query_scroll_y.is_dragging = false;
-            self.ide_panel.project_search.query_scroll_x.is_dragging = false;
-            self.ide_panel.file_tree_dialog_input_drag = None;
-            if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
-                dialog.dragging_field = None;
-            }
-            self.ide_panel.database.table_modal_input_dragging = false;
-            for tab in &mut self.tabs {
-                if let crate::app::EditorTabKind::DatabaseTable(_, state) = &mut tab.kind {
-                    state.grid.text_drag = None;
-                    state.unavailable_text_dragging = false;
-                }
-            }
-            self.is_dragging_settings_ignore = false;
-            self.is_dragging_lsp_log = false;
-            self.autocomplete_scroll.is_dragging = false;
-            if let Some(popup) = &mut self.autocomplete_detail_popup {
-                popup.scroll.is_dragging = false;
-            }
-            self.scroll_x.is_dragging = false;
-            for tab in &mut self.tabs {
-                if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
-                    state.body_scroll_x.is_dragging = false;
-                    state.response_scroll_x.is_dragging = false;
-                }
-            }
-            for term in &mut self.ide_panel.terminals {
-                term.scroll_y.is_dragging = false;
-            }
-            self.ide_panel.lsp_scroll_x.is_dragging = false;
-            self.ide_panel.lsp_scroll_y.is_dragging = false;
-            self.ide_panel.api.mock_guide_scroll.is_dragging = false;
-            self.tool_installer.end_log_scroll_drag();
-            self.ide_panel.problems_scroll.is_dragging = false;
-            self.ide_panel.git.graph_scroll.is_dragging = false;
-            for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
-                scroll.is_dragging = false;
-            }
-            for scroll in self.ide_panel.lsp_logs_scroll_x.values_mut() {
-                scroll.is_dragging = false;
-            }
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                if let Some(popup) = &mut state.popup {
-                    popup.scroll.is_dragging = false;
-                }
-                state.selecting = false;
-                state.diag_selecting = false;
-            });
+            self.cancel_pointer_interactions();
             self.scroll_y.target = self.scroll_y.target.round();
             self.scroll_x.target = self.scroll_x.target.round();
             self.window.as_ref().unwrap().request_redraw();
@@ -1735,6 +1815,20 @@ mod tests {
         let (_, paged_target) =
             autocomplete_scroll_click_target(140.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
         assert!(paged_target > 0.0);
+    }
+
+    #[test]
+    fn autocomplete_scroll_drag_updates_rendered_position_immediately() {
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 12.0;
+        scroll.target = 20.0;
+        scroll.velocity = 9.0;
+        apply_autocomplete_scroll_drag(&mut scroll, 144.0, 8.0);
+        assert_eq!(scroll.current, 144.0);
+        assert_eq!(scroll.target, 144.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.drag_offset, 8.0);
+        assert!(scroll.is_dragging);
     }
 
     #[test]

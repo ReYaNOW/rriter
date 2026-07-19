@@ -90,6 +90,7 @@ fn load_api_mocks_from_checked(path: &Path) -> Result<ApiMockState, String> {
     }
 }
 
+#[cfg(test)]
 fn load_api_mocks_from(path: &Path) -> ApiMockState {
     load_api_mocks_from_checked(path).unwrap_or_default()
 }

@@ -78,6 +78,44 @@ fn api_mock_route_wants_server(
     }
 }
 
+fn api_route_index_by_identity(
+    model: &ApiSpecModel,
+    method: ApiMethod,
+    path: &str,
+) -> Option<usize> {
+    model
+        .routes
+        .iter()
+        .position(|route| route.method == method && route.path == path)
+}
+
+fn remap_api_route_memories(
+    state: &mut ApiClientTabState,
+    previous_routes: &[(ApiMethod, String)],
+    model: &ApiSpecModel,
+) {
+    state.route_states = state
+        .route_states
+        .drain(..)
+        .filter_map(|mut saved| {
+            let (method, path) = previous_routes.get(saved.route_idx)?;
+            saved.route_idx = api_route_index_by_identity(model, *method, path)?;
+            Some(saved)
+        })
+        .collect();
+    state.view_scrolls = state
+        .view_scrolls
+        .drain(..)
+        .filter_map(|mut saved| {
+            if let Some(route_idx) = saved.route_idx {
+                let (method, path) = previous_routes.get(route_idx)?;
+                saved.route_idx = Some(api_route_index_by_identity(model, *method, path)?);
+            }
+            Some(saved)
+        })
+        .collect();
+}
+
 impl crate::app::App {
     fn allocate_api_request_id(&mut self) -> u64 {
         let mut candidate = self.ide_panel.api.next_request_id.max(1);
@@ -310,7 +348,16 @@ impl crate::app::App {
         }
     }
 
+    fn api_client_keyboard_surface_visible(&self) -> bool {
+        self.active_tab_is_api_client()
+            || self.ide_panel.is_open(crate::app::PanelId::ApiClient)
+    }
+
     pub fn handle_api_client_ime_commit(&mut self, text: &str) -> bool {
+        if !self.api_client_keyboard_surface_visible() {
+            self.ide_panel.api.focused = None;
+            return false;
+        }
         if self.ide_panel.api.focused.is_none() {
             return self.active_tab_is_api_client();
         }
@@ -381,6 +428,10 @@ impl crate::app::App {
     }
 
     pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+        if !self.api_client_keyboard_surface_visible() {
+            self.ide_panel.api.focused = None;
+            return false;
+        }
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
         if key_event.state == winit::event::ElementState::Pressed
@@ -1355,10 +1406,23 @@ impl crate::app::App {
                     match result.result {
                         Ok(payload) => {
                             let id = payload.entry.id;
+                            let previous_routes = self
+                                .ide_panel
+                                .api
+                                .models
+                                .get(&id)
+                                .map(|model| {
+                                    model
+                                        .routes
+                                        .iter()
+                                        .map(|route| (route.method, route.path.clone()))
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
                             self.ide_panel
                                 .api
                                 .upsert_loaded(payload, ticket.select_on_success);
-                            self.update_api_tabs_after_model_load(id);
+                            self.update_api_tabs_after_model_load(id, &previous_routes);
                             self.refresh_api_mock_server_snapshot();
                         }
                         Err(err) => self.ide_panel.api.mark_load_error(result.id, err),
@@ -1396,64 +1460,97 @@ impl crate::app::App {
         changed
     }
 
-    fn update_api_tabs_after_model_load(&mut self, id: ApiSpecId) {
+    fn update_api_tabs_after_model_load(
+        &mut self,
+        id: ApiSpecId,
+        previous_routes: &[(ApiMethod, String)],
+    ) {
+        let title = self
+            .ide_panel
+            .api
+            .specs
+            .iter()
+            .find(|entry| entry.id == id)
+            .map(|entry| entry.title.clone());
+        let Some(model) = self.ide_panel.api.models.get(&id) else {
+            return;
+        };
         for tab in &mut self.tabs {
-            if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
-                && meta.spec_id == id
-            {
-                if let Some(entry) = self.ide_panel.api.specs.iter().find(|entry| entry.id == id) {
-                    meta.title = entry.title.clone();
-                    tab.base_title = entry.title.clone();
-                }
-                if let Some(model) = self.ide_panel.api.models.get(&id)
-                    && !model.routes.is_empty()
-                {
-                    let route_idx = state.route_idx.unwrap_or(0).min(model.routes.len() - 1);
-                    state.route_idx = Some(route_idx);
-                    if !state.auth_view {
-                        let route = &model.routes[route_idx];
-                        meta.route_identity = Some(ApiClientRouteIdentity::OpenApi {
-                            spec_id: id,
-                            route_idx,
-                        });
-                        meta.route_method = Some(route.method);
-                        meta.route_path = route.path.clone();
-                    }
-                    if state.path_values.is_empty()
-                        && state.query_values.is_empty()
-                        && state.body_values.is_empty()
-                        && state.body_json == ApiClientTabState::default().body_json
-                    {
-                        fill_api_tab_inputs(state, &model.routes[route_idx], model);
-                    }
-                }
+            let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind else {
+                continue;
+            };
+            if meta.spec_id != id {
+                continue;
+            }
+            if let Some(title) = &title {
+                meta.title = title.clone();
+                tab.base_title = title.clone();
+            }
+
+            remap_api_route_memories(state, previous_routes, model);
+            if model.routes.is_empty() {
+                state.reset_route_content(None);
+                state.tab_scroll.reset();
+                meta.route_identity = None;
+                meta.route_method = None;
+                meta.route_path.clear();
+                continue;
+            }
+
+            let previous_identity = meta
+                .route_method
+                .map(|method| (method, meta.route_path.as_str()))
+                .filter(|(_, path)| !path.is_empty())
+                .or_else(|| {
+                    state
+                        .route_idx
+                        .and_then(|route_idx| previous_routes.get(route_idx))
+                        .map(|(method, path)| (*method, path.as_str()))
+                });
+            let remapped_route_idx = previous_identity.and_then(|(method, path)| {
+                api_route_index_by_identity(model, method, path)
+            });
+            let route_idx = remapped_route_idx.unwrap_or(0);
+            if remapped_route_idx.is_some() {
+                state.route_idx = Some(route_idx);
+            } else {
+                state.reset_route_content(Some(route_idx));
+                fill_api_tab_inputs(state, &model.routes[route_idx], model);
+            }
+
+            if !state.auth_view {
+                let route = &model.routes[route_idx];
+                meta.route_identity = Some(ApiClientRouteIdentity::OpenApi {
+                    spec_id: id,
+                    route_idx,
+                });
+                meta.route_method = Some(route.method);
+                meta.route_path = route.path.clone();
             }
         }
     }
 
     fn apply_api_job_response(&mut self, result: ApiJobResponse) {
         let resolved = result.resolved_host.clone();
-        let focused_response = matches!(
-            self.ide_panel.api.focused,
-            Some(ApiFocus::Response { spec_id, route_idx })
-                if spec_id == result.spec_id && route_idx == result.route_idx
-        );
+        let focused_response = match self.ide_panel.api.focused {
+            Some(ApiFocus::Response { spec_id, route_idx }) => Some((spec_id, route_idx)),
+            _ => None,
+        };
         let mut focused_text = None;
         let mut applied = false;
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
                 && meta.spec_id == result.spec_id
             {
-                if state.route_idx == Some(result.route_idx)
-                    && state.pending_request_id == Some(result.request_id)
-                {
+                if state.pending_request_id == Some(result.request_id) {
                     state.pending = false;
                     state.pending_request_id = None;
-                    state.response_scroll.current = 0.0;
-                    state.response_scroll.target = 0.0;
-                    state.response_scroll_x.current = 0.0;
-                    state.response_scroll_x.target = 0.0;
-                    if focused_response {
+                    state.response_scroll.reset();
+                    state.response_scroll_x.reset();
+                    if state
+                        .route_idx
+                        .is_some_and(|route_idx| focused_response == Some((meta.spec_id, route_idx)))
+                    {
                         focused_text =
                             Some(api_response_text(&result, state.response_view).to_string());
                     }
@@ -1461,10 +1558,11 @@ impl crate::app::App {
                     applied = true;
                     break;
                 }
-                if let Some(saved) = state.route_states.iter_mut().find(|saved| {
-                    saved.route_idx == result.route_idx
-                        && saved.pending_request_id == Some(result.request_id)
-                }) {
+                if let Some(saved) = state
+                    .route_states
+                    .iter_mut()
+                    .find(|saved| saved.pending_request_id == Some(result.request_id))
+                {
                     saved.pending = false;
                     saved.pending_request_id = None;
                     saved.response = Some(result.clone());

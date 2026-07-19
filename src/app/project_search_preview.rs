@@ -180,8 +180,8 @@ impl ProjectSearchState {
         else {
             return false;
         };
+        self.scroll.jump_to(target);
         self.scroll.drag_offset = drag_offset;
-        self.scroll.target = target;
         self.scroll.anim_speed = 15.0;
         self.scroll.is_dragging = true;
         true
@@ -205,8 +205,11 @@ impl ProjectSearchState {
         if (self.scroll.target - target).abs() < 0.5 {
             return false;
         }
-        self.scroll.target = target;
+        let drag_offset = self.scroll.drag_offset;
+        self.scroll.jump_to(target);
+        self.scroll.drag_offset = drag_offset;
         self.scroll.anim_speed = 15.0;
+        self.scroll.is_dragging = true;
         true
     }
 }
@@ -535,4 +538,25 @@ mod tests {
         assert!(offset >= 0.0);
         assert!(target >= 0.0);
     }
+    #[test]
+    fn project_search_scrollbar_drag_updates_current_position_immediately() {
+        let mut state = ProjectSearchState::default();
+        state.has_run = true;
+        state.flat_rows = (0..40).map(ProjectSearchFlatRow::File).collect();
+        let layout = ProjectSearchLayout {
+            query: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            include: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            exclude: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            filter: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            case_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            run_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            help_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            stats_y: 0.0,
+            list: ProjectSearchRect { x: 10.0, y: 20.0, w: 200.0, h: 120.0 },
+        };
+        assert!(state.start_scrollbar_drag(&layout, 130.0, 1.0));
+        assert_eq!(state.scroll.current, state.scroll.target);
+        assert!(state.scroll.is_dragging);
+    }
+
 }

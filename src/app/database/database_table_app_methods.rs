@@ -221,9 +221,7 @@ impl App {
         self.autocomplete_mode = AutocompleteMode::Sql;
         self.autocomplete_pending_context_key = Some(context_key);
         if !same_context {
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
-            self.autocomplete_scroll.velocity = 0.0;
+            self.autocomplete_scroll.reset();
             self.autocomplete_anim_progress = 0.0;
         }
         self.autocomplete_anchor = anchor;
@@ -253,16 +251,18 @@ impl App {
         else {
             return false;
         };
-        let selected = self.autocomplete_options[self.autocomplete_selected_idx]
-            .0
+        let Some((selected_item, _)) = self
+            .autocomplete_options
+            .get(self.autocomplete_selected_idx)
+            .or_else(|| self.autocomplete_options.first())
+        else {
+            self.close_autocomplete();
+            return false;
+        };
+        let selected = selected_item
             .insert_text
             .clone()
-            .unwrap_or_else(|| {
-                self.autocomplete_options[self.autocomplete_selected_idx]
-                    .0
-                    .word
-                    .clone()
-            });
+            .unwrap_or_else(|| selected_item.word.clone());
         if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
             let input = match target {
                 DatabaseTableInputTarget::Where => &mut state.grid.where_input,
@@ -733,8 +733,7 @@ impl App {
                     state.grid.order_by_input.set_text(view.order_by.clone());
                     state.grid.begin_pending_view(view, false, false);
                     if vertical_context_changed {
-                        state.grid.scroll_y.current = 0.0;
-                        state.grid.scroll_y.target = 0.0;
+                        state.grid.scroll_y.reset();
                     }
                 }
                 DatabaseTableReloadAction::ApplyFilterView(view) => {
@@ -748,8 +747,7 @@ impl App {
                         .grid
                         .begin_pending_view(view, where_changed, order_by_changed);
                     if vertical_context_changed {
-                        state.grid.scroll_y.current = 0.0;
-                        state.grid.scroll_y.target = 0.0;
+                        state.grid.scroll_y.reset();
                     }
                 }
             }

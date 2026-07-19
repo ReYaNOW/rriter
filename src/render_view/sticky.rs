@@ -229,14 +229,13 @@ impl Renderer {
                     if chunk.is_empty() {
                         break;
                     }
-                    x = self.draw_spanned_ui_line_pixel_snapped_alpha(
+                    x = self.draw_spanned_editor_line_alpha(
                         chunk,
                         spans,
                         Some(current_offset),
                         x,
                         rect_y + self.baseline_offset,
                         self.width - minimap_w - 20.0,
-                        1.0,
                         alpha,
                     );
                     current_offset = current_offset.saturating_add(chunk.len());

@@ -180,6 +180,428 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn draw_explorer_panel(
+        &mut self,
+        panel_x: f32,
+        panel_y: f32,
+        panel_w: f32,
+        panel_h: f32,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        hit_mx: f32,
+        hit_my: f32,
+        is_ui_disabled: bool,
+    ) {
+        if panel_w <= 0.0 || panel_h <= 0.0 {
+            return;
+        }
+        let file_tree_overlay_open =
+            crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
+        self.flush();
+        let scissor_y = (self.height - (panel_y + panel_h)).round().max(0.0) as i32;
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                panel_x.round() as i32,
+                scissor_y,
+                panel_w.round().max(0.0) as i32,
+                panel_h.round().max(0.0) as i32,
+            );
+        }
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
+        ));
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
+        let indent_w = crate::render_view::tree_ui::TREE_INDENT_W * s;
+        let scroll = ide_panel.explorer_scroll.current.round();
+        let hover_settled = !ide_panel.explorer_scroll.is_dragging
+            && (ide_panel.explorer_scroll.current - ide_panel.explorer_scroll.target).abs() < 0.5;
+        ui_registry.push_interactions_enabled(hover_settled);
+        let content_h = panel_h;
+        let total_nodes = ide_panel.file_tree_nodes.len();
+
+        let tree_text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
+        if let Some(error) = ide_panel.file_tree_error.as_deref() {
+            let mut error_scratch = String::new();
+            self.draw_tree_label_clipped(
+                error,
+                panel_x + 8.0 * s,
+                panel_y + 8.0 * s,
+                (panel_w - 16.0 * s).max(0.0),
+                [0.95, 0.36, 0.36, 1.0],
+                0.72,
+                &mut error_scratch,
+            );
+        }
+        if total_nodes == 0 {
+            let hint = "Нет папок в проекте";
+            let tw = self.measure_ui_width(hint, tree_text_scale);
+            let tx = panel_x + (panel_w - tw) / 2.0;
+            self.draw_string_scaled(
+                hint,
+                tx,
+                panel_y + 30.0 * s,
+                [0.45, 0.45, 0.45, 1.0],
+                tree_text_scale,
+            );
+        } else {
+            let first_vis = (scroll / row_h).floor() as usize;
+            let last_vis =
+                (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
+            let mut label_scratch = String::new();
+
+            for i in first_vis..last_vis {
+                let node = &ide_panel.file_tree_nodes[i];
+                let row_y = panel_y + i as f32 * row_h - scroll;
+
+                if hover_settled && !file_tree_overlay_open {
+                    ui_registry.register_rect(
+                        crate::ui_system::UiId::FileTreeNode(i),
+                        panel_x,
+                        row_y,
+                        panel_w,
+                        row_h,
+                        hit_mx,
+                        hit_my,
+                    );
+                }
+
+                let is_hovered = hover_settled
+                    && !file_tree_overlay_open
+                    && ui_registry.hovered()
+                        == Some(crate::ui_system::UiId::FileTreeNode(i));
+                let is_selected = ide_panel
+                    .file_tree_selection
+                    .iter()
+                    .any(|path| crate::platform::paths_equal(path, &node.path));
+
+                if is_selected {
+                    self.push_rect(
+                        panel_x,
+                        row_y,
+                        panel_w,
+                        row_h,
+                        [0.60, 0.35, 0.85, 0.24],
+                    );
+                }
+
+                if is_hovered && !is_ui_disabled {
+                    self.push_rect(
+                        panel_x,
+                        row_y,
+                        panel_w,
+                        row_h,
+                        [1.0, 1.0, 1.0, 0.06],
+                    );
+                }
+
+                let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
+                let mut has_error = false;
+                let mut has_warn = false;
+                if !node.is_ignored {
+                    let severity = lsp.and_then(|l| {
+                        if node.is_dir {
+                            l.diagnostic_severity_under_path(&node.path)
+                        } else {
+                            l.diagnostic_severity_for_path(&node.path)
+                        }
+                    });
+                    if let Some(severity) = severity {
+                        has_error = severity == crate::lsp::DiagSeverity::Error;
+                        has_warn = severity == crate::lsp::DiagSeverity::Warning;
+                    }
+                }
+
+                let color: [f32; 4] = if node.is_ignored {
+                    [0.973, 0.584, 0.502, 0.8]
+                } else if node.is_dir {
+                    [0.78, 0.68, 1.0, 1.0]
+                } else {
+                    [0.651, 0.686, 0.918, 1.0]
+                };
+
+                let icon_size = 20.0 * s;
+                let icon_y = row_y + (row_h - icon_size) / 2.0;
+
+                if node.is_dir {
+                    let arrow_x = indent_x - 2.0 * s;
+                    if hover_settled && !file_tree_overlay_open {
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::FileTreeArrow(i),
+                            arrow_x - 4.0 * s,
+                            row_y,
+                            18.0 * s,
+                            row_h,
+                            hit_mx,
+                            hit_my,
+                        );
+                    }
+                    let arrow_color = if node.is_ignored {
+                        [0.973, 0.584, 0.502, 0.6]
+                    } else {
+                        [0.78, 0.68, 1.0, 0.7]
+                    };
+                    let label = self.draw_tree_dir_entry(
+                        &node.name,
+                        node.icon_key,
+                        indent_x,
+                        row_y,
+                        row_h,
+                        panel_x + panel_w - 10.0 * s,
+                        node.is_expanded,
+                        color,
+                        arrow_color,
+                        s,
+                        tree_text_scale,
+                        &mut label_scratch,
+                    );
+                    if has_error || has_warn {
+                        let sq_color = if has_error {
+                            self.theme.diag_error
+                        } else {
+                            self.theme.diag_warn
+                        };
+                        self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
+                    }
+                } else {
+                    let file_icon_x = crate::render_view::tree_ui::tree_icon_x(indent_x, s);
+                    self.draw_file_icon(
+                        node.icon_key,
+                        false,
+                        file_icon_x,
+                        icon_y,
+                        icon_size,
+                    );
+                    let text_x = file_icon_x + icon_size + 4.0 * s;
+                    let label = self.draw_tree_leaf_label(
+                        &node.name,
+                        text_x,
+                        row_y,
+                        row_h,
+                        panel_x + panel_w - 10.0 * s,
+                        color,
+                        s,
+                        tree_text_scale,
+                        &mut label_scratch,
+                    );
+                    if has_error || has_warn {
+                        let sq_color = if has_error {
+                            self.theme.diag_error
+                        } else {
+                            self.theme.diag_warn
+                        };
+                        self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
+                    }
+                }
+            }
+
+            if let Some(drag) = &ide_panel.file_tree_drag {
+                if drag.threshold_passed {
+                    if let Some(target_idx) = drag.target_idx {
+                        if target_idx < total_nodes {
+                            let row_y = panel_y + target_idx as f32 * row_h - scroll;
+                            self.push_rect(
+                                panel_x,
+                                row_y,
+                                panel_w,
+                                row_h,
+                                [0.52, 0.78, 0.58, 0.22],
+                            );
+                            self.push_rect(
+                                panel_x,
+                                row_y + row_h - 2.0,
+                                panel_w,
+                                2.0,
+                                [0.52, 0.78, 0.58, 0.85],
+                            );
+                        }
+                    }
+                    let label = if drag.paths.len() == 1 {
+                        drag.paths[0]
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("1 элемент")
+                            .to_string()
+                    } else {
+                        format!("{} элементов", drag.paths.len())
+                    };
+                    let ghost_w = self.measure_ui_width(&label, tree_text_scale) + 18.0 * s;
+                    let ghost_x = drag.current_x + 12.0 * s;
+                    let ghost_y = drag.current_y + 10.0 * s;
+                    self.push_rounded_rect(
+                        ghost_x,
+                        ghost_y,
+                        ghost_w,
+                        26.0 * s,
+                        5.0 * s,
+                        [0.12, 0.13, 0.18, 0.92],
+                    );
+                    self.draw_string_scaled(
+                        &label,
+                        ghost_x + 9.0 * s,
+                        ghost_y + 18.0 * s,
+                        self.theme.fg,
+                        tree_text_scale,
+                    );
+                }
+            }
+
+            if let Some(layout) = crate::app::file_tree::file_tree_scrollbar_layout(
+                panel_x,
+                panel_y,
+                panel_w,
+                content_h,
+                s,
+                total_nodes,
+                scroll,
+            ) {
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::FileTreeScrollY,
+                    layout.track_x,
+                    layout.track_y,
+                    layout.track_w,
+                    layout.track_h,
+                    hit_mx,
+                    hit_my,
+                );
+                self.push_rounded_rect(
+                    layout.track_x + (layout.track_w - 3.0 * s) * 0.5,
+                    layout.thumb.start,
+                    3.0 * s,
+                    layout.thumb.len,
+                    1.5 * s,
+                    [1.0, 1.0, 1.0, 0.22],
+                );
+            }
+        }
+
+        ui_registry.pop_interactions_enabled();
+        ui_registry.pop_clip();
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_ide_panel_content(
+        &mut self,
+        panel_id: crate::app::PanelId,
+        panel_x: f32,
+        panel_y: f32,
+        panel_w: f32,
+        panel_h: f32,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp_has_diagnostics: bool,
+        hit_mx: f32,
+        hit_my: f32,
+        is_ui_disabled: bool,
+        blink_alpha: f32,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+    ) {
+        match panel_id {
+            crate::app::PanelId::Explorer => self.draw_explorer_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                lsp,
+                ui_registry,
+                hit_mx,
+                hit_my,
+                is_ui_disabled,
+            ),
+            crate::app::PanelId::Search => self.draw_project_search_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                ui_registry,
+                blink_alpha,
+            ),
+            crate::app::PanelId::Git => self.draw_git_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                ui_registry,
+                hit_mx,
+                hit_my,
+                blink_alpha,
+            ),
+            crate::app::PanelId::ApiClient => self.draw_api_client_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                ui_registry,
+                hit_mx,
+                hit_my,
+                blink_alpha,
+                active_api_route,
+            ),
+            crate::app::PanelId::Database => self.draw_database_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                ui_registry,
+                hit_mx,
+                hit_my,
+            ),
+            crate::app::PanelId::Terminal => self.draw_terminal_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                ui_registry,
+                hit_mx,
+                hit_my,
+            ),
+            crate::app::PanelId::Problems => self.draw_problems_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                lsp,
+                ide_panel,
+                ui_registry,
+            ),
+            crate::app::PanelId::LspServers => self.draw_lsp_servers_panel(
+                panel_x,
+                panel_y,
+                panel_w,
+                panel_h,
+                s,
+                ide_panel,
+                lsp_has_diagnostics,
+                ui_registry,
+            ),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_ide_side_panels(
         &mut self,
         ide_panel: &crate::app::IdePanelState,
@@ -423,414 +845,34 @@ impl Renderer {
 
             // (Ручка ресайза была здесь, перенесена в конец блока левой панели)
 
-            // --- Project search ---
-            if ide_panel.is_open(crate::app::PanelId::Search) {
-                let is_top = ide_panel.slots.iter().any(|s| {
-                    s.id == crate::app::PanelId::Search && s.group == crate::app::PanelGroup::Top
-                });
-                if is_top {
-                    let panel_bottom_h = if ide_panel.any_bottom_open() {
-                        ide_panel.bottom_height * s
-                    } else {
-                        0.0
-                    };
-                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
-                    self.draw_project_search_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        (content_bottom - title_h).max(0.0),
-                        s,
-                        ide_panel,
-                        ui_registry,
-                        blink_alpha,
-                    );
-                }
-            }
-
-            // --- LSP серверы ---
-            if ide_panel.is_open(crate::app::PanelId::LspServers) {
-                let is_top = ide_panel.slots.iter().any(|s| {
-                    s.id == crate::app::PanelId::LspServers
-                        && s.group == crate::app::PanelGroup::Top
-                });
-                if is_top {
-                    self.draw_lsp_servers_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        real_height - title_h,
-                        s,
-                        ide_panel,
-                        lsp_has_diagnostics,
-                        ui_registry,
-                    );
-                }
-            }
-
-            // --- API клиент ---
-            if ide_panel.is_open(crate::app::PanelId::ApiClient) {
-                let is_top = ide_panel.slots.iter().any(|s| {
-                    s.id == crate::app::PanelId::ApiClient
-                        && s.group == crate::app::PanelGroup::Top
-                });
-                if is_top {
-                    let panel_bottom_h = if ide_panel.any_bottom_open() {
-                        ide_panel.bottom_height * s
-                    } else {
-                        0.0
-                    };
-                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
-                    self.draw_api_client_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        (content_bottom - title_h).max(0.0),
-                        s,
-                        ide_panel,
-                        ui_registry,
-                        hit_mx,
-                        hit_my,
-                        blink_alpha,
-                        active_api_route,
-                    );
-                }
-            }
-
-            // --- Базы данных ---
-            if ide_panel.is_open(crate::app::PanelId::Database) {
-                let is_top = ide_panel.slots.iter().any(|slot| {
-                    slot.id == crate::app::PanelId::Database
-                        && slot.group == crate::app::PanelGroup::Top
-                });
-                if is_top {
-                    let panel_bottom_h = if ide_panel.any_bottom_open() {
-                        ide_panel.bottom_height * s
-                    } else {
-                        0.0
-                    };
-                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
-                    self.draw_database_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        (content_bottom - title_h).max(0.0),
-                        s,
-                        ide_panel,
-                        ui_registry,
-                        hit_mx,
-                        hit_my,
-                    );
-                }
-            }
-
-            // --- Git ---
-            if ide_panel.is_open(crate::app::PanelId::Git) {
-                let is_top = ide_panel.slots.iter().any(|s| {
-                    s.id == crate::app::PanelId::Git && s.group == crate::app::PanelGroup::Top
-                });
-                if is_top {
-                    let panel_bottom_h = if ide_panel.any_bottom_open() {
-                        ide_panel.bottom_height * s
-                    } else {
-                        0.0
-                    };
-                    let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
-                    self.draw_git_panel(
-                        panel_x,
-                        title_h,
-                        panel_left_w,
-                        (content_bottom - title_h).max(0.0),
-                        s,
-                        ide_panel,
-                        ui_registry,
-                        hit_mx,
-                        hit_my,
-                        blink_alpha,
-                    );
-                }
-            }
-
-            // --- Дерево файлов проводника ---
-            if ide_panel.is_open(crate::app::PanelId::Explorer) {
-                let file_tree_overlay_open =
-                    crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
-                self.flush();
-                unsafe {
-                    self.gl.enable(glow::SCISSOR_TEST);
-                    self.gl.scissor(
-                        panel_x as i32,
-                        0,
-                        panel_left_w as i32,
-                        (real_height - title_h) as i32,
-                    );
-                }
-                ui_registry.push_clip(crate::ui_system::UiClipRect::new(
+            if let Some(slot) = ide_panel
+                .slots
+                .iter()
+                .find(|slot| slot.group == crate::app::PanelGroup::Top && slot.open)
+            {
+                let panel_bottom_h = if ide_panel.any_bottom_open() {
+                    ide_panel.bottom_height * s
+                } else {
+                    0.0
+                };
+                let content_bottom = ide_bottom_panel_y(real_height, panel_bottom_h, s);
+                self.draw_ide_panel_content(
+                    slot.id,
                     panel_x,
                     title_h,
                     panel_left_w,
-                    (real_height - title_h).max(0.0),
-                ));
-                let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
-                let indent_w = crate::render_view::tree_ui::TREE_INDENT_W * s;
-                let scroll = ide_panel.explorer_scroll.current.round();
-                let hover_settled =
-                    (ide_panel.explorer_scroll.current - ide_panel.explorer_scroll.target).abs()
-                        < 0.5;
-                ui_registry.push_interactions_enabled(hover_settled);
-                let content_h = real_height - title_h;
-                let total_nodes = ide_panel.file_tree_nodes.len();
-
-                let tree_text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
-                if let Some(error) = ide_panel.file_tree_error.as_deref() {
-                    let mut error_scratch = String::new();
-                    self.draw_tree_label_clipped(
-                        error,
-                        panel_x + 8.0 * s,
-                        title_h + 8.0 * s,
-                        (panel_left_w - 16.0 * s).max(0.0),
-                        [0.95, 0.36, 0.36, 1.0],
-                        0.72,
-                        &mut error_scratch,
-                    );
-                }
-                if total_nodes == 0 {
-                    let hint = "Нет папок в проекте";
-                    let tw = self.measure_ui_width(hint, tree_text_scale);
-                    let tx = panel_x + (panel_left_w - tw) / 2.0;
-                    self.draw_string_scaled(
-                        hint,
-                        tx,
-                        title_h + 30.0 * s,
-                        [0.45, 0.45, 0.45, 1.0],
-                        tree_text_scale,
-                    );
-                } else {
-                    let first_vis = (scroll / row_h).floor() as usize;
-                    let last_vis =
-                        (((scroll + content_h) / row_h).ceil() as usize + 1).min(total_nodes);
-                    let mut label_scratch = String::new();
-
-                    for i in first_vis..last_vis {
-                        let node = &ide_panel.file_tree_nodes[i];
-                        let row_y = title_h + i as f32 * row_h - scroll;
-
-                        if hover_settled && !file_tree_overlay_open {
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::FileTreeNode(i),
-                                panel_x,
-                                row_y,
-                                panel_left_w,
-                                row_h,
-                                hit_mx,
-                                hit_my,
-                            );
-                        }
-
-                        let is_hovered = hover_settled
-                            && !file_tree_overlay_open
-                            && ui_registry.hovered()
-                                == Some(crate::ui_system::UiId::FileTreeNode(i));
-                        let is_selected = ide_panel
-                            .file_tree_selection
-                            .iter()
-                            .any(|path| crate::platform::paths_equal(path, &node.path));
-
-                        if is_selected {
-                            self.push_rect(
-                                panel_x,
-                                row_y,
-                                panel_left_w,
-                                row_h,
-                                [0.60, 0.35, 0.85, 0.24],
-                            );
-                        }
-
-                        if is_hovered && !is_ui_disabled {
-                            self.push_rect(
-                                panel_x,
-                                row_y,
-                                panel_left_w,
-                                row_h,
-                                [1.0, 1.0, 1.0, 0.06],
-                            );
-                        }
-
-                        let indent_x = panel_x + 8.0 * s + node.depth as f32 * indent_w;
-                        let mut has_error = false;
-                        let mut has_warn = false;
-                        if !node.is_ignored {
-                            let severity = lsp.and_then(|l| {
-                                if node.is_dir {
-                                    l.diagnostic_severity_under_path(&node.path)
-                                } else {
-                                    l.diagnostic_severity_for_path(&node.path)
-                                }
-                            });
-                            if let Some(severity) = severity {
-                                has_error = severity == crate::lsp::DiagSeverity::Error;
-                                has_warn = severity == crate::lsp::DiagSeverity::Warning;
-                            }
-                        }
-
-                        let color: [f32; 4] = if node.is_ignored {
-                            [0.973, 0.584, 0.502, 0.8]
-                        } else if node.is_dir {
-                            [0.78, 0.68, 1.0, 1.0]
-                        } else {
-                            [0.651, 0.686, 0.918, 1.0]
-                        };
-
-                        let icon_size = 20.0 * s;
-                        let icon_y = row_y + (row_h - icon_size) / 2.0;
-
-                        if node.is_dir {
-                            let arrow_x = indent_x - 2.0 * s;
-                            if hover_settled && !file_tree_overlay_open {
-                                ui_registry.register_rect(
-                                    crate::ui_system::UiId::FileTreeArrow(i),
-                                    arrow_x - 4.0 * s,
-                                    row_y,
-                                    18.0 * s,
-                                    row_h,
-                                    hit_mx,
-                                    hit_my,
-                                );
-                            }
-                            let arrow_color = if node.is_ignored {
-                                [0.973, 0.584, 0.502, 0.6]
-                            } else {
-                                [0.78, 0.68, 1.0, 0.7]
-                            };
-                            let label = self.draw_tree_dir_entry(
-                                &node.name,
-                                node.icon_key,
-                                indent_x,
-                                row_y,
-                                row_h,
-                                panel_x + panel_left_w - 10.0 * s,
-                                node.is_expanded,
-                                color,
-                                arrow_color,
-                                s,
-                                tree_text_scale,
-                                &mut label_scratch,
-                            );
-                            if has_error || has_warn {
-                                let sq_color = if has_error {
-                                    self.theme.diag_error
-                                } else {
-                                    self.theme.diag_warn
-                                };
-                                self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
-                            }
-                        } else {
-                            let file_icon_x = crate::render_view::tree_ui::tree_icon_x(indent_x, s);
-                            self.draw_file_icon(
-                                node.icon_key,
-                                false,
-                                file_icon_x,
-                                icon_y,
-                                icon_size,
-                            );
-                            let text_x = file_icon_x + icon_size + 4.0 * s;
-                            let label = self.draw_tree_leaf_label(
-                                &node.name,
-                                text_x,
-                                row_y,
-                                row_h,
-                                panel_x + panel_left_w - 10.0 * s,
-                                color,
-                                s,
-                                tree_text_scale,
-                                &mut label_scratch,
-                            );
-                            if has_error || has_warn {
-                                let sq_color = if has_error {
-                                    self.theme.diag_error
-                                } else {
-                                    self.theme.diag_warn
-                                };
-                                self.push_squiggle(label.x, label.y + 2.0 * s, label.w, sq_color);
-                            }
-                        }
-                    }
-
-                    if let Some(drag) = &ide_panel.file_tree_drag {
-                        if drag.threshold_passed {
-                            if let Some(target_idx) = drag.target_idx {
-                                if target_idx < total_nodes {
-                                    let row_y = title_h + target_idx as f32 * row_h - scroll;
-                                    self.push_rect(
-                                        panel_x,
-                                        row_y,
-                                        panel_left_w,
-                                        row_h,
-                                        [0.52, 0.78, 0.58, 0.22],
-                                    );
-                                    self.push_rect(
-                                        panel_x,
-                                        row_y + row_h - 2.0,
-                                        panel_left_w,
-                                        2.0,
-                                        [0.52, 0.78, 0.58, 0.85],
-                                    );
-                                }
-                            }
-                            let label = if drag.paths.len() == 1 {
-                                drag.paths[0]
-                                    .file_name()
-                                    .and_then(|name| name.to_str())
-                                    .unwrap_or("1 элемент")
-                                    .to_string()
-                            } else {
-                                format!("{} элементов", drag.paths.len())
-                            };
-                            let ghost_w = self.measure_ui_width(&label, tree_text_scale) + 18.0 * s;
-                            let ghost_x = drag.current_x + 12.0 * s;
-                            let ghost_y = drag.current_y + 10.0 * s;
-                            self.push_rounded_rect(
-                                ghost_x,
-                                ghost_y,
-                                ghost_w,
-                                26.0 * s,
-                                5.0 * s,
-                                [0.12, 0.13, 0.18, 0.92],
-                            );
-                            self.draw_string_scaled(
-                                &label,
-                                ghost_x + 9.0 * s,
-                                ghost_y + 18.0 * s,
-                                self.theme.fg,
-                                tree_text_scale,
-                            );
-                        }
-                    }
-
-                    // Тонкий скроллбар
-                    let total_h = total_nodes as f32 * row_h;
-                    if total_h > content_h {
-                        let max_s = (total_h - content_h).max(1.0);
-                        let ratio = (scroll / max_s).clamp(0.0, 1.0);
-                        let thumb_h = (content_h / total_h * (content_h - 8.0 * s)).max(20.0 * s);
-                        let thumb_y = title_h + 4.0 * s + ratio * (content_h - 8.0 * s - thumb_h);
-                        self.push_rounded_rect(
-                            panel_x + panel_left_w - 5.0 * s,
-                            thumb_y,
-                            3.0 * s,
-                            thumb_h,
-                            1.5 * s,
-                            [1.0, 1.0, 1.0, 0.22],
-                        );
-                    }
-                }
-
-                ui_registry.pop_interactions_enabled();
-                ui_registry.pop_clip();
-                self.flush();
-                unsafe {
-                    self.gl.disable(glow::SCISSOR_TEST);
-                }
+                    (content_bottom - title_h).max(0.0),
+                    s,
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    lsp_has_diagnostics,
+                    hit_mx,
+                    hit_my,
+                    is_ui_disabled,
+                    blink_alpha,
+                    active_api_route,
+                );
             }
 
             // Подсветка ручки ресайза (wants_pointer=false — курсор управляется в events.rs через EwResize)

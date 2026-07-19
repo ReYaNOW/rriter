@@ -290,9 +290,7 @@ impl App {
         self.autocomplete_pending_context_key = Some(context_key);
         self.autocomplete_anchor = self.database_query_autocomplete_anchor();
         if !same_context {
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
-            self.autocomplete_scroll.velocity = 0.0;
+            self.autocomplete_scroll.reset();
             self.autocomplete_anim_progress = 0.0;
         }
         self.autocomplete_detail_popup = None;
@@ -1170,9 +1168,9 @@ impl App {
         let Some((_, state)) = self.active_database_query_meta_state_mut() else {
             return;
         };
-        state.result_view.scroll_x.is_dragging = false;
-        state.result_view.scroll_y.is_dragging = false;
-        state.result_view.review_message_scroll_y.is_dragging = false;
+        state.result_view.scroll_x.end_drag();
+        state.result_view.scroll_y.end_drag();
+        state.result_view.review_message_scroll_y.end_drag();
         state.result_view.is_resizing_height = false;
         state.result_view.column_resize = None;
     }

@@ -312,6 +312,9 @@ impl App {
             return true;
         }
 
+        if !self.ide_panel.is_open(crate::app::PanelId::Search) {
+            self.ide_panel.project_search.focused = None;
+        }
         if let Some(field) = self.ide_panel.project_search.focused {
             if field == crate::app::project_search::ProjectSearchField::Filter
                 && !self.ide_panel.project_search.filter_enabled()
@@ -346,6 +349,10 @@ impl App {
             return true;
         }
 
+        if !self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+            self.ide_panel.lsp_log_filter_focused = false;
+            self.ide_panel.lsp_logs_focused = None;
+        }
         if self.ide_panel.lsp_log_filter_focused {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
@@ -370,11 +377,16 @@ impl App {
         if self.handle_api_client_ime_commit(text) {
             return true;
         }
-        if self.ide_panel.lsp_logs_focused.is_some() {
+        if self.ide_panel.is_open(crate::app::PanelId::LspServers)
+            && self.ide_panel.lsp_logs_focused.is_some()
+        {
             return true;
         }
 
-        if self.ide_panel.term_show_search && self.ide_panel.term_search_focused {
+        if self.ide_panel.is_open(crate::app::PanelId::Terminal)
+            && self.ide_panel.term_show_search
+            && self.ide_panel.term_search_focused
+        {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
                 self.ide_panel.term_search_editor.insert_str(&clean);

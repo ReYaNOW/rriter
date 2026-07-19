@@ -1,6 +1,7 @@
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
+use crate::ui_system::UiId;
 use glutin::context::PossiblyCurrentContext;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -595,6 +596,13 @@ impl IdePanelState {
             .iter()
             .any(|s| s.group == PanelGroup::Bottom && s.open)
     }
+    pub fn visible_left_width(&self, scale: f32) -> f32 {
+        if self.any_top_open() {
+            self.left_width * scale
+        } else {
+            0.0
+        }
+    }
     pub fn open_bottom_panel_id(&self) -> Option<PanelId> {
         self.slots
             .iter()
@@ -638,6 +646,7 @@ impl IdePanelState {
         } else if id != PanelId::Git && group == Some(PanelGroup::Top) {
             self.git.message_focused = false;
         }
+        self.sync_focus_after_panel_layout();
     }
     pub fn open(&mut self, id: PanelId) {
         let mut group = None;
@@ -668,6 +677,7 @@ impl IdePanelState {
         } else if id != PanelId::Git {
             self.git.message_focused = false;
         }
+        self.sync_focus_after_panel_layout();
     }
     pub fn open_terminal_exclusive(&mut self) {
         for slot in &mut self.slots {
@@ -678,6 +688,7 @@ impl IdePanelState {
         self.terminal_focused = true;
         self.term_search_focused = false;
         self.git.message_focused = false;
+        self.sync_focus_after_panel_layout();
     }
     pub fn enforce_single_open_per_group(&mut self) {
         let mut top_seen = false;
@@ -696,6 +707,40 @@ impl IdePanelState {
                 *seen = true;
             }
         }
+        self.sync_focus_after_panel_layout();
+    }
+    pub fn reconcile_moved_panel(&mut self, moved_id: PanelId) {
+        let Some((group, is_open)) = self
+            .slots
+            .iter()
+            .find(|slot| slot.id == moved_id)
+            .map(|slot| (slot.group, slot.open))
+        else {
+            return;
+        };
+        if is_open {
+            for slot in &mut self.slots {
+                if slot.id != moved_id && slot.group == group {
+                    slot.open = false;
+                }
+            }
+        }
+        self.sync_focus_after_panel_layout();
+    }
+    fn sync_focus_after_panel_layout(&mut self) {
+        if !self.is_open(PanelId::Explorer) {
+            self.file_tree_focused = false;
+        }
+        if !self.is_open(PanelId::Search) {
+            self.project_search.focused = None;
+        }
+        if !self.is_open(PanelId::LspServers) {
+            self.lsp_log_filter_focused = false;
+            self.lsp_logs_focused = None;
+        }
+        if !self.is_open(PanelId::Git) {
+            self.git.message_focused = false;
+        }
         if !self.is_open(PanelId::Terminal) {
             self.terminal_focused = false;
             self.term_search_focused = false;
@@ -708,12 +753,12 @@ impl IdePanelState {
             .map(|s| s.open)
             .unwrap_or(false)
     }
+    pub fn bottom_terminal_is_transparent(&self) -> bool {
+        self.open_bottom_panel_id() == Some(PanelId::Terminal) && !self.terminal_focused
+    }
     pub fn bottom_panel_blocks_editor_hover(&self) -> bool {
-        self.slots.iter().any(|slot| {
-            slot.group == PanelGroup::Bottom
-                && slot.open
-                && (slot.id != PanelId::Terminal || self.terminal_focused)
-        })
+        self.open_bottom_panel_id()
+            .is_some_and(|id| id != PanelId::Terminal || self.terminal_focused)
     }
 }
 
@@ -919,6 +964,15 @@ pub(crate) fn shift_python_inlay_hints_for_edits(
 }
 
 impl App {
+    pub(crate) fn editor_top_inset(&self, scale: f32) -> f32 {
+        crate::render_view::editor_content_top_inset(
+            self.show_welcome,
+            self.is_ide_mode,
+            self.active_tab_is_database_query(),
+            scale,
+        )
+    }
+
     pub(crate) fn shift_current_python_inlay_hints_for_edits(&mut self, edits: &[SyncEdit]) {
         if self.python_inlay_hints.is_empty()
             || self.python_inlay_hint_path.as_ref() != self.file_path.as_ref()
@@ -978,6 +1032,7 @@ pub struct App {
     pub last_click_time: Instant,
     pub click_count: u8,
     pub last_click_pos: (f32, f32),
+    pub last_click_ui_id: Option<UiId>,
 
     pub pending_action: PendingAction,
     pub pending_action_waiting_for_save_as: bool,
@@ -1184,6 +1239,61 @@ mod tests {
     }
 
     #[test]
+    fn moving_an_open_panel_keeps_the_destination_group_exclusive() {
+        let mut panels = IdePanelState::default();
+        panels.open(PanelId::Explorer);
+        panels.open(PanelId::Terminal);
+
+        let explorer = panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::Explorer)
+            .expect("explorer slot");
+        explorer.group = PanelGroup::Bottom;
+        panels.reconcile_moved_panel(PanelId::Explorer);
+
+        assert!(panels.is_open(PanelId::Explorer));
+        assert!(!panels.is_open(PanelId::Terminal));
+        assert!(!panels.terminal_focused);
+        assert_eq!(
+            panels
+                .slots
+                .iter()
+                .filter(|slot| slot.group == PanelGroup::Bottom && slot.open)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn opening_a_peer_panel_clears_focus_owned_by_hidden_panels() {
+        let mut panels = IdePanelState::default();
+        panels.open(PanelId::Search);
+        panels.project_search.focused = Some(crate::app::project_search::ProjectSearchField::Query);
+        panels.open(PanelId::LspServers);
+        assert!(panels.project_search.focused.is_none());
+
+        panels.lsp_log_filter_focused = true;
+        panels.lsp_logs_focused = Some("rust-analyzer".to_string());
+        panels.open(PanelId::Explorer);
+        assert!(!panels.lsp_log_filter_focused);
+        assert!(panels.lsp_logs_focused.is_none());
+
+        panels.file_tree_focused = true;
+        panels.open(PanelId::Git);
+        assert!(!panels.file_tree_focused);
+    }
+
+    #[test]
+    fn hidden_top_group_has_no_visible_left_width() {
+        let mut panels = IdePanelState::default();
+        panels.left_width = 240.0;
+        assert_eq!(panels.visible_left_width(2.0), 0.0);
+        panels.open(PanelId::Explorer);
+        assert_eq!(panels.visible_left_width(2.0), 480.0);
+    }
+
+    #[test]
     fn open_terminal_exclusive_closes_bottom_peers_and_focuses_terminal() {
         let mut panels = IdePanelState::default();
         panels.toggle(PanelId::Problems);
@@ -1233,6 +1343,7 @@ mod tests {
         assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
 
         panels.terminal_focused = false;
+        assert!(panels.bottom_terminal_is_transparent());
         assert!(!panels.bottom_panel_blocks_editor_hover());
         assert_eq!(panels.editor_reserved_bottom_height(1.0), 0.0);
 
@@ -1253,6 +1364,7 @@ mod tests {
         }
         panels.bottom_height = 180.0;
         assert_eq!(panels.open_bottom_panel_id(), Some(PanelId::LspServers));
+        assert!(!panels.bottom_terminal_is_transparent());
         assert_eq!(panels.editor_reserved_bottom_height(2.0), 360.0);
     }
 

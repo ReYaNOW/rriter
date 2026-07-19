@@ -8,80 +8,6 @@ fn wheel_delta(delta: MouseScrollDelta, line_height: f32) -> (f32, f32) {
 }
 
 
-fn panel_scroll_rect(
-    is_top: bool,
-    scale: f32,
-    sidebar_w: f32,
-    left_width: f32,
-    bottom_height: f32,
-    effective_bottom_height: f32,
-    window_width: f32,
-    window_height: f32,
-) -> (f32, f32, f32, f32) {
-    let title_h = 32.0 * scale;
-    if is_top {
-        (
-            sidebar_w,
-            title_h,
-            left_width * scale,
-            window_height
-                - title_h
-                - effective_bottom_height
-                - crate::render_view::ide_status_bar_height(scale),
-        )
-    } else {
-        let tab_h = 32.0 * scale;
-        let panel_y = crate::render_view::ide_bottom_panel_y(window_height, bottom_height, scale);
-        (
-            sidebar_w,
-            panel_y + 1.0 + tab_h,
-            window_width - sidebar_w,
-            bottom_height - 1.0 - tab_h,
-        )
-    }
-}
-
-fn app_panel_scroll_rect(
-    app: &App,
-    panel_id: crate::app::PanelId,
-    scale: f32,
-    suppress_unfocused_terminal_bottom: bool,
-) -> (f32, f32, f32, f32, f32) {
-    let sidebar_w = 48.0 * scale;
-    let window_size = app.window.as_ref().unwrap().inner_size();
-    let window_w = window_size.width as f32;
-    let window_h = window_size.height as f32;
-    let panel_bottom_h = if app.ide_panel.any_bottom_open() {
-        app.ide_panel.bottom_height * scale
-    } else {
-        0.0
-    };
-    let is_top = app
-        .ide_panel
-        .slots
-        .iter()
-        .any(|sl| sl.id == panel_id && sl.group == crate::app::PanelGroup::Top);
-    let effective_bottom_h = if suppress_unfocused_terminal_bottom
-        && app.ide_panel.is_open(crate::app::PanelId::Terminal)
-        && !app.ide_panel.terminal_focused
-    {
-        0.0
-    } else {
-        panel_bottom_h
-    };
-    let (cx, cy, cw, ch) = panel_scroll_rect(
-        is_top,
-        scale,
-        sidebar_w,
-        app.ide_panel.left_width,
-        panel_bottom_h,
-        effective_bottom_h,
-        window_w,
-        window_h,
-    );
-    (cx, cy, cw, ch, window_h)
-}
-
 fn autocomplete_max_scroll(total_items: usize, scale: f32) -> f32 {
     let step = 36.0 * scale;
     let total_items = total_items as f32;
@@ -98,37 +24,6 @@ fn scroll_autocomplete_list(
     scroll.anim_speed = 7.0;
     scroll.scroll_by(dy);
     scroll.clamp_target(0.0, autocomplete_max_scroll(total_items, scale));
-}
-
-fn settings_ide_max_scroll(
-    workspace_count: usize,
-    ignore_chip_widths: impl IntoIterator<Item = f32>,
-    scale: f32,
-    window_height: f32,
-) -> f32 {
-    let ide_h = (700.0 * scale).min(window_height - 40.0 * scale);
-    let ih = ide_h - 35.0 * scale - 30.0 * scale;
-    let ide_content_area_h = ih - 52.0 * scale;
-
-    let workspace_h = workspace_count as f32 * 46.0 * scale + 126.0 * scale;
-    let chip_h = 28.0 * scale;
-    let chip_gap_y = 8.0 * scale;
-    let chip_gap_x = 8.0 * scale;
-    let max_row_w = 460.0 * scale;
-
-    let mut chip_rows = 1usize;
-    let mut cx = 0.0f32;
-    for cw in ignore_chip_widths {
-        if cx + cw > max_row_w && cx > 0.0 {
-            chip_rows += 1;
-            cx = 0.0;
-        }
-        cx += cw + chip_gap_x;
-    }
-
-    let ignore_h = 200.0 * scale + chip_rows as f32 * (chip_h + chip_gap_y);
-    let ide_total_h = workspace_h + ignore_h;
-    (ide_total_h - ide_content_area_h).max(0.0)
 }
 
 fn git_changes_total_height(git: &crate::app::git_panel::GitPanelState, scale: f32) -> f32 {
@@ -179,57 +74,19 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if self.scroll_database_text_modal(dx, dy, shift) {
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
-            match modal {
-                crate::app::database::DatabaseTableModal::SqlPreview {
-                    text,
-                    scroll_x,
-                    scroll_y,
-                    ..
-                } => {
-                    let renderer = self.renderer.as_ref().unwrap();
-                    let viewport_h = (renderer.height - 180.0 * s).max(1.0);
-                    let viewport_w = (renderer.width - 100.0 * s).max(1.0);
-                    let max_y = (text.lines().count().max(1) as f32
-                        * crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT
-                        * s
-                        - viewport_h)
-                        .max(0.0);
-                    let longest = text
-                        .lines()
-                        .map(|line| line.chars().count())
-                        .max()
-                        .unwrap_or(0) as f32;
-                    let max_x = (longest * 9.0 * s - viewport_w).max(0.0);
-                    if shift {
-                        scroll_x.anim_speed = 7.0;
-                        scroll_x.scroll_by(dy);
-                        scroll_x.clamp_target(0.0, max_x);
-                    } else {
-                        scroll_y.anim_speed = 7.0;
-                        scroll_y.scroll_by(dy);
-                        scroll_y.clamp_target(0.0, max_y);
-                        scroll_x.anim_speed = 7.0;
-                        scroll_x.scroll_by(dx);
-                        scroll_x.clamp_target(0.0, max_x);
-                    }
-                }
-                crate::app::database::DatabaseTableModal::MultilineEditor { input, scroll, .. } => {
-                    scroll.anim_speed = 7.0;
-                    scroll.scroll_by(dy);
-                    let max = (input.text().lines().count() as f32 * 21.0 * s - (self.renderer.as_ref().unwrap().height - 190.0 * s)).max(0.0);
-                    scroll.clamp_target(0.0, max);
-                }
-                crate::app::database::DatabaseTableModal::Review { state, scroll, .. } => {
-                    scroll.anim_speed = 7.0;
-                    scroll.scroll_by(dy);
-                    let lines = state.summary.notices.len() + state.summary.detail_rows.len();
-                    let max = (lines as f32 * 22.0 * s
-                        - (self.renderer.as_ref().unwrap().height - 260.0 * s))
-                        .max(0.0);
-                    scroll.clamp_target(0.0, max);
-                }
-                _ => {}
+            if let crate::app::database::DatabaseTableModal::Review { state, scroll, .. } = modal {
+                scroll.anim_speed = 7.0;
+                scroll.scroll_by(dy);
+                let lines = state.summary.notices.len() + state.summary.detail_rows.len();
+                let max = (lines as f32 * 22.0 * s
+                    - (self.renderer.as_ref().unwrap().height - 260.0 * s))
+                    .max(0.0);
+                scroll.clamp_target(0.0, max);
             }
             self.window.as_ref().unwrap().request_redraw();
             return;
@@ -398,17 +255,15 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let title_h = 32.0 * s;
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s, true);
+                app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
                 self.ide_panel.explorer_scroll.scroll_by(dy);
-                let row_h = 28.0 * s;
-                let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
                 let total_h = self.ide_panel.file_tree_nodes.len() as f32 * row_h;
-                let max_scroll = (total_h - (wh - title_h)).max(0.0);
+                let max_scroll = (total_h - ch).max(0.0);
                 self.ide_panel.explorer_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -420,7 +275,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Search, s, true);
+                app_panel_scroll_rect(self, crate::app::PanelId::Search, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if let Some(layout) = self.project_search_panel_layout() {
                     if crate::ui_system::point_in_rect(
@@ -452,7 +307,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Git, s, false);
+                app_panel_scroll_rect(self, crate::app::PanelId::Git, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
@@ -541,21 +396,11 @@ impl App {
 
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Database) {
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Database, s, false);
+                app_panel_scroll_rect(self, crate::app::PanelId::Database, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.database.scroll.anim_speed = 7.0;
                 self.ide_panel.database.scroll.scroll_by(dy);
-                let mut rows = 0usize;
-                for connection in &self.ide_panel.database.connections {
-                    rows += 1;
-                    if connection.expanded {
-                        for database in &connection.databases {
-                            rows += 1;
-                            if database.expanded { rows += database.tables.len(); }
-                        }
-                    }
-                }
-                let max_scroll = (rows as f32 * 28.0 * s - ch).max(0.0);
+                let max_scroll = self.ide_panel.database.max_tree_scroll(ch, s);
                 self.ide_panel.database.scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -567,7 +412,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::ApiClient, s, false);
+                app_panel_scroll_rect(self, crate::app::PanelId::ApiClient, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.api.panel_scroll.anim_speed = 7.0;
                 self.ide_panel.api.panel_scroll.scroll_by(dy);
@@ -586,16 +431,18 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Problems, s, true);
+            let Some(layout) = problems_scrollbar_layout(self, s) else {
+                return;
+            };
 
-            if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
+            if crate::ui_system::point_in_rect(
+                mx,
+                my,
+                (layout.content_x, layout.content_y, layout.content_w, layout.content_h),
+            ) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
                 self.ide_panel.problems_scroll.scroll_by(dy);
-                let row_h = 24.0 * s;
-                let total_h = self.ide_panel.flat_diags.len() as f32 * row_h;
-                let track_h = ch - 40.0 * s;
-                let max_scroll = (total_h - track_h).max(0.0);
+                let max_scroll = (layout.total_h - layout.track_h).max(0.0);
                 self.ide_panel.problems_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
@@ -607,7 +454,7 @@ impl App {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s, true);
+                app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if self.ide_panel.terminal_focused {
@@ -764,9 +611,16 @@ impl App {
 
         if self.show_settings && self.settings_tab == 0 {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            let h = self.window.as_ref().unwrap().inner_size().height as f32;
+            let window_size = self.window.as_ref().unwrap().inner_size();
+            let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
+                window_size.width as f32,
+                window_size.height as f32,
+                s,
+                self.settings_anim_progress,
+            );
             let pad_x = 12.0 * s;
-            let max_scroll = settings_ide_max_scroll(
+            let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
+                layout,
                 self.ide_workspaces.len(),
                 self.ide_ignore_patterns.iter().map(|p| {
                     self.renderer.as_mut().unwrap().measure_ui_width(p, 0.88)
@@ -774,7 +628,6 @@ impl App {
                         + 22.0 * s
                 }),
                 s,
-                h,
             );
 
             if max_scroll > 0.0 {
@@ -788,13 +641,20 @@ impl App {
         if self.show_settings && self.settings_tab == 4 {
             self.settings_scroll.anim_speed = 7.0;
             self.settings_scroll.scroll_by(dy);
-            let box_h = (700.0 * s)
-                .min(self.window.as_ref().unwrap().inner_size().height as f32 - 40.0 * s);
+            let window_size = self.window.as_ref().unwrap().inner_size();
+            let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
+                window_size.width as f32,
+                window_size.height as f32,
+                s,
+                self.settings_anim_progress,
+            );
+            let viewport_h =
+                crate::render_view::settings_ui::settings_faq_viewport_height(layout, s);
             let max_scroll = self
                 .renderer
                 .as_mut()
                 .unwrap()
-                .get_faq_max_scroll(&self.faq_editor, box_h);
+                .get_faq_max_scroll(&self.faq_editor, viewport_h);
             self.settings_scroll.clamp_target(0.0, max_scroll);
             self.window.as_ref().unwrap().request_redraw();
             return;
@@ -851,11 +711,7 @@ impl App {
         };
         let query_results_h = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::DatabaseQuery(_, state)
-                if state.history_open
-                    || !state.results.is_empty()
-                    || !state.messages.is_empty()
-                    || state.review.is_some()
-                    || state.error.is_some() =>
+                if crate::app::database::database_query_results_visible(state) =>
             {
                 Some(crate::app::database::database_query_results_height(
                     state.result_view.preferred_height,
@@ -914,11 +770,7 @@ impl App {
         if self.database_blocking_modal_open() {
             return;
         }
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
+        let tab_bar_h = crate::render_view::ide_tab_bar_height(self.show_welcome, self.is_ide_mode, s);
 
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if my >= 0.0 && my <= tab_bar_h && !self.tabs.is_empty() {
@@ -1016,7 +868,7 @@ impl App {
                         .max(1);
                     let row_h = 30.0 * s;
                     let max_scroll = (example_count as f32 * row_h - row_h * 6.0).max(0.0);
-                    return Some((meta.spec_id, route_idx, false, None, -max_scroll - 1.0));
+                    return Some((meta.spec_id, route_idx, id, None, -max_scroll - 1.0));
                 }
                 let rect_id = match id {
                     crate::ui_system::UiId::ApiInputSchemaFold(route_idx, _) => {
@@ -1027,195 +879,67 @@ impl App {
                     }
                     _ => id,
                 };
-                let rect = self.ui_registry.rect_for(rect_id)?;
-                let (meta, state) = self.active_api_tab()?;
-                let visible_h = (rect.3 - 16.0 * s).max(18.0 * s);
+                self.ui_registry.rect_for(rect_id)?;
+                let (spec_id, active_route_idx) = {
+                    let (meta, state) = self.active_api_tab()?;
+                    (meta.spec_id, state.route_idx)
+                };
                 match id {
                     crate::ui_system::UiId::ApiBodyInput(route_idx)
                     | crate::ui_system::UiId::ApiInputSchemaBody(route_idx)
                     | crate::ui_system::UiId::ApiInputSchemaFold(route_idx, _)
-                    | crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx)
-                        if state.route_idx == Some(route_idx) =>
+                        if active_route_idx == Some(route_idx) =>
                     {
-                        let is_static =
-                            matches!(id, crate::ui_system::UiId::ApiMockStaticResponseInput(_));
-                        let is_schema =
-                            matches!(
-                                id,
-                                crate::ui_system::UiId::ApiInputSchemaBody(_)
-                                    | crate::ui_system::UiId::ApiInputSchemaFold(_, _)
-                            );
-                        if is_schema
-                            && state.focused_schema_pane
-                                != Some(crate::app::api_client::ApiSchemaPaneFocus::Input)
-                        {
-                            return None;
-                        }
-                        let text = if is_schema {
-                            self.ide_panel
-                                .api
-                                .models
-                                .get(&meta.spec_id)
-                                .and_then(|model| {
-                                    model.routes.get(route_idx).map(|route| {
-                                        crate::app::api_client::api_route_input_schema_text(
-                                            route,
-                                            model,
-                                            state.input_schema_idx,
-                                            &state.input_schema_collapsed,
-                                        )
-                                    })
-                                })
-                                .unwrap_or_default()
-                        } else if is_static {
-                            if matches!(
-                                self.ide_panel.api.focused,
-                                Some(crate::app::api_client::ApiFocus::MockStaticResponse {
-                                    route_idx: focused_route,
-                                }) if focused_route == route_idx
-                            ) {
-                                self.ide_panel.api.input_editor.get_full_text()
-                            } else {
-                                let generated = self
-                                    .ide_panel
-                                    .api
-                                    .models
-                                    .get(&meta.spec_id)
-                                    .and_then(|model| {
-                                        model.routes.get(route_idx).map(|route| {
-                                            crate::app::api_client::api_generated_response_for_route(
-                                                route,
-                                                model,
-                                            )
-                                            .2
-                                        })
-                                    })
-                                    .unwrap_or_default();
-                                self.ide_panel
-                                    .api
-                                    .mock
-                                    .route_overrides
-                                    .iter()
-                                    .find(|item| {
-                                        self.ide_panel
-                                            .api
-                                            .models
-                                            .get(&meta.spec_id)
-                                            .and_then(|model| model.routes.get(route_idx))
-                                            .is_some_and(|route| {
-                                                item.method == route.method
-                                                    && item.path == route.path
-                                            })
-                                    })
-                                    .map(|item| match &item.response {
-                                        crate::app::api_mock::types::ApiMockResponse::Generated => {
-                                            generated.clone()
-                                        }
-                                        crate::app::api_mock::types::ApiMockResponse::Json(
-                                            text,
-                                        )
-                                        | crate::app::api_mock::types::ApiMockResponse::Text(
-                                            text,
-                                        ) => text.clone(),
-                                    })
-                                    .unwrap_or(generated)
-                            }
-                        } else if matches!(
-                            self.ide_panel.api.focused,
-                            Some(crate::app::api_client::ApiFocus::Body {
-                                spec_id,
-                                route_idx: focused_route,
-                            }) if spec_id == meta.spec_id && focused_route == route_idx
-                        ) {
-                            self.ide_panel.api.input_editor.get_full_text()
-                        } else {
-                            state.body_json.clone()
-                        };
-                        let max_scroll =
-                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
-                        Some((meta.spec_id, route_idx, true, None, max_scroll))
+                        let scroll_id = crate::ui_system::UiId::ApiBodyScrollY(route_idx);
+                        let max_scroll = self.api_text_max_scroll_y_for_ui(scroll_id);
+                        Some((
+                            spec_id,
+                            route_idx,
+                            crate::ui_system::UiId::ApiBodyInput(route_idx),
+                            None,
+                            max_scroll,
+                        ))
+                    }
+                    crate::ui_system::UiId::ApiOutputSchemaBody(route_idx)
+                    | crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, _)
+                        if active_route_idx == Some(route_idx) =>
+                    {
+                        let scroll_id = crate::ui_system::UiId::ApiOutputScrollY(route_idx);
+                        let max_scroll = self.api_text_max_scroll_y_for_ui(scroll_id);
+                        Some((
+                            spec_id,
+                            route_idx,
+                            crate::ui_system::UiId::ApiOutputSchemaBody(route_idx),
+                            None,
+                            max_scroll,
+                        ))
+                    }
+                    crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx)
+                        if active_route_idx == Some(route_idx) =>
+                    {
+                        let scroll_id =
+                            crate::ui_system::UiId::ApiMockStaticResponseScrollY(route_idx);
+                        let max_scroll = self.api_text_max_scroll_y_for_ui(scroll_id);
+                        Some((
+                            spec_id,
+                            route_idx,
+                            crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx),
+                            None,
+                            max_scroll,
+                        ))
                     }
                     crate::ui_system::UiId::ApiResponseBody(route_idx)
-                    | crate::ui_system::UiId::ApiOutputSchemaBody(route_idx)
-                    | crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, _)
-                        if state.route_idx == Some(route_idx) =>
+                        if active_route_idx == Some(route_idx) =>
                     {
-                        let is_schema =
-                            matches!(
-                                id,
-                                crate::ui_system::UiId::ApiOutputSchemaBody(_)
-                                    | crate::ui_system::UiId::ApiOutputSchemaFold(_, _)
-                            );
-                        if is_schema
-                            && state.focused_schema_pane
-                                != Some(crate::app::api_client::ApiSchemaPaneFocus::Output)
-                        {
-                            return None;
-                        }
-                        if !is_schema
-                            && !matches!(
-                                self.ide_panel.api.focused,
-                                Some(crate::app::api_client::ApiFocus::Response {
-                                    spec_id,
-                                    route_idx: focused_route,
-                                }) if spec_id == meta.spec_id && focused_route == route_idx
-                            )
-                        {
-                            return None;
-                        }
-                        let text = if is_schema {
-                            self.ide_panel
-                                .api
-                                .models
-                                .get(&meta.spec_id)
-                                .and_then(|model| {
-                                    model.routes.get(route_idx).map(|route| {
-                                        match state.output_doc_view {
-                                            crate::app::api_client::ApiOutputDocView::Example => {
-                                                crate::app::api_client::api_route_output_example_text_for(
-                                                    route,
-                                                    model,
-                                                    state.output_status_idx,
-                                                    state.output_example_idx,
-                                                )
-                                            }
-                                            crate::app::api_client::ApiOutputDocView::Schema => {
-                                                crate::app::api_client::api_route_output_schema_text_for(
-                                                    route,
-                                                    model,
-                                                    state.output_status_idx,
-                                                    state.output_schema_idx,
-                                                    &state.output_schema_collapsed,
-                                                )
-                                            }
-                                        }
-                                    })
-                                })
-                                .unwrap_or_default()
-                        } else if matches!(
-                            self.ide_panel.api.focused,
-                            Some(crate::app::api_client::ApiFocus::Response {
-                                spec_id,
-                                route_idx: focused_route,
-                            }) if spec_id == meta.spec_id && focused_route == route_idx
-                        ) {
-                            self.ide_panel.api.input_editor.get_full_text()
-                        } else {
-                            state
-                                .response
-                                .as_ref()
-                                .map(|response| {
-                                    crate::app::api_client::api_response_text(
-                                        response,
-                                        state.response_view,
-                                    )
-                                    .to_string()
-                                })
-                                .unwrap_or_default()
-                        };
-                        let max_scroll =
-                            crate::app::api_client::api_text_area_max_scroll(&text, visible_h, s);
-                        Some((meta.spec_id, route_idx, false, None, max_scroll))
+                        let scroll_id = crate::ui_system::UiId::ApiResponseScrollY(route_idx);
+                        let max_scroll = self.api_text_max_scroll_y_for_ui(scroll_id);
+                        Some((
+                            spec_id,
+                            route_idx,
+                            crate::ui_system::UiId::ApiResponseBody(route_idx),
+                            None,
+                            max_scroll,
+                        ))
                     }
                     crate::ui_system::UiId::ApiMockCombinedPython(route_idx)
                     | crate::ui_system::UiId::ApiMockContractInput(route_idx)
@@ -1250,7 +974,7 @@ impl App {
                             .ide_panel
                             .api
                             .models
-                            .get(&meta.spec_id)
+                            .get(&spec_id)
                             .and_then(|model| model.routes.get(route_idx))?;
                         let script = self
                             .ide_panel
@@ -1282,7 +1006,7 @@ impl App {
                         } else {
                             crate::app::api_client::api_mock_body_editor_text(&script.body)
                         };
-                        let model = self.ide_panel.api.models.get(&meta.spec_id)?;
+                        let model = self.ide_panel.api.models.get(&spec_id)?;
                         let contract = crate::app::api_mock::types::api_mock_effective_contract(
                             script, route, model,
                         );
@@ -1304,9 +1028,9 @@ impl App {
                                 s,
                             );
                         Some((
-                            meta.spec_id,
+                            spec_id,
                             route_idx,
-                            true,
+                            crate::ui_system::UiId::ApiMockBodyInput(route_idx),
                             Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Body),
                             (content_h - viewport_h).max(0.0),
                         ))
@@ -1314,7 +1038,7 @@ impl App {
                     _ => None,
                 }
             });
-            if let Some((spec_id, route_idx, body, mock_part, max_scroll)) = api_inner_scroll {
+            if let Some((spec_id, route_idx, scroll_target, mock_part, max_scroll)) = api_inner_scroll {
                 if max_scroll < 0.0 {
                     let menu_max_scroll = (-max_scroll - 1.0).max(0.0);
                     if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
@@ -1332,20 +1056,42 @@ impl App {
                 let horizontal_delta = if shift { dy } else { dx };
                 let prefer_horizontal = shift || dx.abs() > dy.abs();
                 if mock_part.is_none() && prefer_horizontal && horizontal_delta.abs() > 0.0 {
-                    let scroll_id = if body {
-                        crate::ui_system::UiId::ApiBodyScrollX(route_idx)
-                    } else {
-                        crate::ui_system::UiId::ApiResponseScrollX(route_idx)
+                    let scroll_id = match scroll_target {
+                        crate::ui_system::UiId::ApiBodyInput(_)
+                        | crate::ui_system::UiId::ApiInputSchemaBody(_) => {
+                            crate::ui_system::UiId::ApiBodyScrollX(route_idx)
+                        }
+                        crate::ui_system::UiId::ApiOutputSchemaBody(_) => {
+                            crate::ui_system::UiId::ApiOutputScrollX(route_idx)
+                        }
+                        crate::ui_system::UiId::ApiMockStaticResponseInput(_) => {
+                            crate::ui_system::UiId::ApiMockStaticResponseScrollX(route_idx)
+                        }
+                        crate::ui_system::UiId::ApiResponseBody(_) => {
+                            crate::ui_system::UiId::ApiResponseScrollX(route_idx)
+                        }
+                        _ => return,
                     };
                     let max_scroll_x = self.api_text_max_scroll_x_for_ui(scroll_id);
                     if max_scroll_x > 0.0
                         && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                         && state.route_idx == Some(route_idx)
                     {
-                        let scroll = if body {
-                            &mut state.body_scroll_x
-                        } else {
-                            &mut state.response_scroll_x
+                        let scroll = match scroll_target {
+                            crate::ui_system::UiId::ApiBodyInput(_)
+                            | crate::ui_system::UiId::ApiInputSchemaBody(_) => {
+                                &mut state.body_scroll_x
+                            }
+                            crate::ui_system::UiId::ApiOutputSchemaBody(_) => {
+                                &mut state.output_scroll_x
+                            }
+                            crate::ui_system::UiId::ApiMockStaticResponseInput(_) => {
+                                &mut state.mock_static_response_scroll_x
+                            }
+                            crate::ui_system::UiId::ApiResponseBody(_) => {
+                                &mut state.response_scroll_x
+                            }
+                            _ => return,
                         };
                         scroll.anim_speed = 7.0;
                         scroll.scroll_by(horizontal_delta);
@@ -1369,10 +1115,21 @@ impl App {
                     } else if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                         && state.route_idx == Some(route_idx)
                     {
-                        let scroll = if body {
-                            &mut state.body_scroll
-                        } else {
-                            &mut state.response_scroll
+                        let scroll = match scroll_target {
+                            crate::ui_system::UiId::ApiBodyInput(_)
+                            | crate::ui_system::UiId::ApiInputSchemaBody(_) => {
+                                &mut state.body_scroll
+                            }
+                            crate::ui_system::UiId::ApiOutputSchemaBody(_) => {
+                                &mut state.output_scroll
+                            }
+                            crate::ui_system::UiId::ApiMockStaticResponseInput(_) => {
+                                &mut state.mock_static_response_scroll
+                            }
+                            crate::ui_system::UiId::ApiResponseBody(_) => {
+                                &mut state.response_scroll
+                            }
+                            _ => return,
                         };
                         scroll.anim_speed = 7.0;
                         scroll.scroll_by(dy);
@@ -1511,11 +1268,11 @@ mod tests {
     #[test]
     fn panel_scroll_rect_covers_top_and_bottom_layouts() {
         assert_eq!(
-            panel_scroll_rect(true, 2.0, 96.0, 240.0, 360.0, 0.0, 1600.0, 1000.0),
-            (96.0, 64.0, 480.0, 876.0)
+            panel_scroll_rect(true, 2.0, 96.0, 240.0, 360.0, 1600.0, 1000.0),
+            (96.0, 64.0, 480.0, 516.0)
         );
         assert_eq!(
-            panel_scroll_rect(false, 2.0, 96.0, 240.0, 360.0, 360.0, 1600.0, 1000.0),
+            panel_scroll_rect(false, 2.0, 96.0, 240.0, 360.0, 1600.0, 1000.0),
             (96.0, 645.0, 1504.0, 295.0)
         );
     }
@@ -1589,12 +1346,22 @@ mod tests {
     #[test]
     fn settings_ide_max_scroll_counts_chip_wrapping() {
         assert_eq!(
-            settings_ide_max_scroll(0, std::iter::empty(), 1.0, 900.0),
+            crate::render_view::settings_ui::settings_ide_max_scroll(
+                crate::render_view::settings_ui::settings_modal_layout(1000.0, 900.0, 1.0),
+                0,
+                std::iter::empty(),
+                1.0,
+            ),
             0.0
         );
 
-        let no_wrap = settings_ide_max_scroll(2, [100.0, 120.0], 1.0, 500.0);
-        let wrapped = settings_ide_max_scroll(2, [430.0, 120.0, 450.0], 1.0, 500.0);
+        let layout = crate::render_view::settings_ui::settings_modal_layout(1000.0, 500.0, 1.0);
+        let no_wrap = crate::render_view::settings_ui::settings_ide_max_scroll(
+            layout, 2, [100.0, 120.0], 1.0,
+        );
+        let wrapped = crate::render_view::settings_ui::settings_ide_max_scroll(
+            layout, 2, [430.0, 120.0, 450.0], 1.0,
+        );
 
         assert!(no_wrap > 0.0);
         assert!(wrapped > no_wrap);

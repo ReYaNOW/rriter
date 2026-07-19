@@ -164,29 +164,38 @@ impl Renderer {
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
-            crate::app::database::DatabaseTableModal::MultilineEditor { input, scroll, error, .. } => {
-                let body_x = x + 18.0 * s;
-                let body_y = y + 50.0 * s;
-                let body_w = width - 36.0 * s;
-                let body_h = height - 112.0 * s;
-                self.push_rounded_rect_border(body_x, body_y, body_w, body_h, 4.0 * s, 1.0, [0.62,0.38,0.90,0.8], [0.055,0.06,0.08,1.0]);
-                ui.register_text_input(UiId::DatabaseTableModalInput, body_x, body_y, body_w, body_h, mx, my);
-                self.flush();
-                unsafe {
-                    self.gl.enable(glow::SCISSOR_TEST);
-                    self.gl.scissor(body_x as i32, (self.height - (body_y + body_h)).max(0.0) as i32, body_w as i32, body_h as i32);
-                }
-                let mut line_y = body_y + 22.0 * s - scroll.current;
-                for (line_index, line) in input.text().lines().enumerate() {
-                    self.draw_string_scaled_pixel_snapped(&(line_index + 1).to_string(), body_x + 8.0 * s, line_y, self.theme.line_num, 0.66);
-                    self.draw_string_scaled_pixel_snapped(line, body_x + 48.0 * s, line_y, self.theme.fg, 0.76);
-                    line_y += 21.0 * s;
-                }
-                self.flush();
-                unsafe { self.gl.disable(glow::SCISSOR_TEST) };
-                ui.register_rect(UiId::DatabaseTableModalScroll, body_x + body_w - 12.0 * s, body_y, 12.0 * s, body_h, mx, my);
+            crate::app::database::DatabaseTableModal::MultilineEditor {
+                input,
+                scroll_x,
+                scroll_y,
+                error,
+                ..
+            } => {
+                self.draw_database_sql_preview(
+                    x,
+                    y,
+                    width,
+                    height,
+                    s,
+                    input.text(),
+                    &[],
+                    input.cursor,
+                    input.selection_anchor,
+                    scroll_x.current,
+                    scroll_y.current,
+                    blink_alpha,
+                    ui,
+                    mx,
+                    my,
+                );
                 if let Some(error) = error.as_deref() {
-                    self.draw_string_scaled_pixel_snapped(error, x + 20.0 * s, y + height - 70.0 * s, [0.95,0.38,0.42,1.0], 0.72);
+                    self.draw_string_scaled_pixel_snapped(
+                        error,
+                        x + 20.0 * s,
+                        y + height - 70.0 * s,
+                        [0.95, 0.38, 0.42, 1.0],
+                        0.72,
+                    );
                 }
                 draw_modal_buttons(self, ui, x, y, width, height, s, &[(UiId::DatabaseTableModalPrimary, "Применить"), (UiId::DatabaseTableModalTertiary, "Как текст"), (UiId::DatabaseTableModalSecondary, "Отмена")], mx, my);
             }
@@ -313,11 +322,10 @@ impl Renderer {
         let scrollbar = (10.0 * s).round().max(10.0);
         let gutter_w = (54.0 * s).round();
         let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * s).round();
-        let line_count = text.lines().count().max(1);
+        let line_count = crate::app::database::database_multiline_line_count(text);
         let content_h = line_count as f32 * line_h;
-        let content_w = text
-            .lines()
-            .map(|line| self.database_code_text_width(line))
+        let content_w = crate::app::database::database_multiline_lines(text)
+            .map(|(_, line)| self.database_code_text_width(line))
             .fold(0.0_f32, f32::max)
             + (18.0 * s).round();
         let mut viewport_w = outer_w;
@@ -367,71 +375,61 @@ impl Renderer {
         }
         let first_line = (scroll_y / line_h).floor() as usize;
         let last_line = (first_line + (viewport_h / line_h).ceil() as usize + 2).min(line_count);
-        let mut byte_offset = 0usize;
-        for (line_index, raw_line) in text.split_inclusive('\n').enumerate() {
+        for (line_index, (byte_offset, line)) in
+            crate::app::database::database_multiline_lines(text).enumerate()
+        {
             if line_index >= last_line {
                 break;
             }
-            let raw_len = raw_line.len();
-            if line_index >= first_line {
-                let baseline = outer_y
-                    + (line_index as f32 + 1.0) * line_h
-                    - scroll_y
-                    - (4.0 * s).round();
-                self.draw_string_scaled_pixel_snapped(
-                    &(line_index + 1).to_string(),
-                    outer_x + (8.0 * s).round(),
-                    baseline,
-                    self.theme.line_num,
-                    0.78,
-                );
-                let line = raw_line.trim_end_matches(&['\r', '\n'][..]);
-                let line_end = byte_offset.saturating_add(line.len());
-                let selected_start = selection_start.max(byte_offset).min(line_end);
-                let selected_end = selection_end.max(byte_offset).min(line_end);
-                let text_x = code_x + (8.0 * s).round() - scroll_x;
-                if selected_start < selected_end {
-                    let prefix = &line[..selected_start - byte_offset];
-                    let selected = &line[selected_start - byte_offset..selected_end - byte_offset];
-                    let selected_x = text_x + self.database_code_text_width(prefix);
-                    let selected_w = self.database_code_text_width(selected).max(1.0);
-                    self.push_rect(
-                        selected_x.round(),
-                        (baseline - 19.0 * s).round(),
-                        selected_w.round(),
-                        line_h,
-                        self.theme.sel,
-                    );
-                }
-                if cursor >= byte_offset && cursor <= line_end && selection_start == selection_end {
-                    let prefix = &line[..cursor.min(line_end) - byte_offset];
-                    let caret_x = text_x + self.database_code_text_width(prefix);
-                    self.push_rect(
-                        caret_x.round(),
-                        (baseline - 19.0 * s).round(),
-                        (1.0 * s).round().max(1.0),
-                        line_h,
-                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], blink_alpha],
-                    );
-                }
-                self.draw_database_sql_line(
-                    line,
-                    byte_offset,
-                    spans,
-                    text_x,
-                    baseline,
-                    outer_x + viewport_w - (6.0 * s).round(),
-                );
+            if line_index < first_line {
+                continue;
             }
-            byte_offset = byte_offset.saturating_add(raw_len);
-        }
-        if text.is_empty() {
+            let baseline = outer_y
+                + (line_index as f32 + 1.0) * line_h
+                - scroll_y
+                - (4.0 * s).round();
             self.draw_string_scaled_pixel_snapped(
-                "1",
+                &(line_index + 1).to_string(),
                 outer_x + (8.0 * s).round(),
-                outer_y + line_h - (4.0 * s).round(),
+                baseline,
                 self.theme.line_num,
                 0.78,
+            );
+            let line_end = byte_offset.saturating_add(line.len());
+            let selected_start = selection_start.max(byte_offset).min(line_end);
+            let selected_end = selection_end.max(byte_offset).min(line_end);
+            let text_x = code_x + (8.0 * s).round() - scroll_x;
+            if selected_start < selected_end {
+                let prefix = &line[..selected_start - byte_offset];
+                let selected = &line[selected_start - byte_offset..selected_end - byte_offset];
+                let selected_x = text_x + self.database_code_text_width(prefix);
+                let selected_w = self.database_code_text_width(selected).max(1.0);
+                self.push_rect(
+                    selected_x.round(),
+                    (baseline - 19.0 * s).round(),
+                    selected_w.round(),
+                    line_h,
+                    self.theme.sel,
+                );
+            }
+            if cursor >= byte_offset && cursor <= line_end && selection_start == selection_end {
+                let prefix = &line[..cursor.min(line_end) - byte_offset];
+                let caret_x = text_x + self.database_code_text_width(prefix);
+                self.push_rect(
+                    caret_x.round(),
+                    (baseline - 19.0 * s).round(),
+                    (1.0 * s).round().max(1.0),
+                    line_h,
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], blink_alpha],
+                );
+            }
+            self.draw_database_sql_line(
+                line,
+                byte_offset,
+                spans,
+                text_x,
+                baseline,
+                outer_x + viewport_w - (6.0 * s).round(),
             );
         }
         self.flush();

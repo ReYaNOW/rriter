@@ -230,3 +230,21 @@ fn git_diff_staged_loader_reads_index_instead_of_worktree() {
     assert_eq!(payload.worktree_format, format);
     std::fs::remove_dir_all(root).ok();
 }
+
+#[test]
+fn pending_inline_git_popup_does_not_force_a_busy_redraw_loop() {
+    let source = include_str!("git_diff.rs");
+    let empty_branch = source
+        .split("Err(mpsc::TryRecvError::Empty) => {")
+        .nth(1)
+        .expect("inline Git popup empty branch");
+    let branch = empty_branch
+        .split("Err(mpsc::TryRecvError::Disconnected)")
+        .next()
+        .expect("empty branch body");
+    assert!(branch.contains("self.inline_git_diff_rx = Some(rx);"));
+    assert!(branch.contains("false"));
+    assert!(!branch.contains("
+                true
+"));
+}

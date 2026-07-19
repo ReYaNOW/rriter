@@ -277,7 +277,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.tab_drag.is_some() {
         if let Some(r) = app.renderer.as_ref() {
             let s = r.scale_factor;
-            let tab_x = (48.0 * s + app.ide_panel.left_width * s).round() + 1.0;
+            let tab_x = (48.0 * s + app.ide_panel.visible_left_width(s)).round() + 1.0;
             let tab_w = (r.width - tab_x).max(0.0);
             let mx = r.last_mouse_x;
             let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
@@ -503,6 +503,18 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             if state.body_scroll_x.update(dt) {
                 needs_redraw = true;
             }
+            if state.output_scroll.update(dt) {
+                needs_redraw = true;
+            }
+            if state.output_scroll_x.update(dt) {
+                needs_redraw = true;
+            }
+            if state.mock_static_response_scroll.update(dt) {
+                needs_redraw = true;
+            }
+            if state.mock_static_response_scroll_x.update(dt) {
+                needs_redraw = true;
+            }
             if state.response_scroll.update(dt) {
                 needs_redraw = true;
             }
@@ -562,8 +574,15 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 if scroll_x.update(dt) { needs_redraw = true; }
                 if scroll_y.update(dt) { needs_redraw = true; }
             }
-            crate::app::database::DatabaseTableModal::MultilineEditor { scroll, .. }
-            | crate::app::database::DatabaseTableModal::Review { scroll, .. } => {
+            crate::app::database::DatabaseTableModal::MultilineEditor {
+                scroll_x,
+                scroll_y,
+                ..
+            } => {
+                if scroll_x.update(dt) { needs_redraw = true; }
+                if scroll_y.update(dt) { needs_redraw = true; }
+            }
+            crate::app::database::DatabaseTableModal::Review { scroll, .. } => {
                 if scroll.update(dt) { needs_redraw = true; }
             }
             _ => {}
@@ -676,11 +695,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let s = app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
-    let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
-        0.0
-    } else {
-        38.0 * s
-    };
+    let tab_bar_h = app.editor_top_inset(s);
     let target_search_y = if app.show_search {
         tab_bar_h + 10.0 * s
     } else {
@@ -694,18 +709,27 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings {
-        if let Some(w) = app.window.as_ref() {
-            if let Some(r) = app.renderer.as_mut() {
+        if app.window.is_some() {
+            let terminal_panel = app.renderer.as_ref().map(|renderer| {
+                crate::app::mouse::app_panel_scroll_rect(
+                    app,
+                    crate::app::PanelId::Terminal,
+                    renderer.scale_factor,
+                )
+            });
+            if let (Some(r), Some((content_x, content_y, _, content_h, _))) =
+                (app.renderer.as_mut(), terminal_panel)
+            {
                 let s = r.scale_factor;
-                let wh = w.inner_size().height as f32;
                 let mx = r.last_mouse_x;
                 let my = r.last_mouse_y;
-                let panel_x = 48.0 * s + 10.0 * s;
+                let panel_x = content_x + 10.0 * s;
                 let char_w = r.char_advance('A')
                     * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                 let char_h = r.line_height
                     * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-                let (term_y, term_h) = terminal_content_bounds(wh, app.ide_panel.bottom_height, s);
+                let (term_y, term_h) =
+                    crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
                 let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
                 let drag_delta = drag_autoscroll_delta(my, term_y, term_y + term_h, edge);
 
@@ -785,11 +809,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     app.scroll_x.target += drag_scroll_delta_x.signum() * speed * dt;
                 }
 
-                let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * app.renderer.as_ref().unwrap().scale_factor
-                };
+                let tab_bar_h = crate::render_view::editor_content_top_inset(
+                    app.show_welcome,
+                    app.is_ide_mode,
+                    app.active_tab_is_database_query(),
+                    app.renderer.as_ref().unwrap().scale_factor,
+                );
                 app.editor.set_cursor_at_pos(
                     mx,
                     my - tab_bar_h + app.scroll_y.target,
@@ -803,20 +828,40 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
 
     if let Some(w) = app.window.as_ref() {
         let s = app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
-        let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
-        let panel_bottom_h = if app.is_ide_mode && app.ide_panel.any_bottom_open() {
+        let tab_bar_h = crate::render_view::editor_content_top_inset(
+            app.show_welcome,
+            app.is_ide_mode,
+            app.active_tab_is_database_query(),
+            s,
+        );
+        let window_h = w.inner_size().height as f32;
+        let full_bottom_panel_h = if app.is_ide_mode && app.ide_panel.any_bottom_open() {
             app.ide_panel.bottom_height * s
         } else {
             0.0
         };
+        let query_results_h = app.tabs.get(app.active_tab).map_or(0.0, |tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(_, state)
+                if crate::app::database::database_query_results_visible(state) =>
+            {
+                crate::app::database::database_query_results_height(
+                    state.result_view.preferred_height,
+                    window_h,
+                    full_bottom_panel_h,
+                    s,
+                )
+            }
+            _ => 0.0,
+        });
+        let editor_bottom_h = if app.is_ide_mode {
+            app.ide_panel.editor_reserved_bottom_height(s) + query_results_h
+        } else {
+            0.0
+        };
         let visible_h = crate::render_view::editor_view_height(
-            w.inner_size().height as f32,
+            window_h,
             tab_bar_h,
-            panel_bottom_h,
+            editor_bottom_h,
             app.is_ide_mode,
             s,
         );
@@ -1081,11 +1126,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             let current_mod = app.file_path.as_ref().and_then(|p| {
                                 module_path_from_definition_path(p, &app.ide_workspaces)
                             });
-                            let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
-                                0.0
-                            } else {
-                                38.0 * app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0)
-                            };
+                            let tab_bar_h = app.editor_top_inset(
+                                app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0),
+                            );
                             let render_scroll_y = app.scroll_y.current.round() - tab_bar_h;
                             let (anchor_x, anchor_y) = if let Some(renderer) = app.renderer.as_mut()
                             {

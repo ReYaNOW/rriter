@@ -375,17 +375,17 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        if max_scroll > 0.0 {
-            let ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let track_h = log_h - 14.0 * s;
-            let total_h = api.mock_server_logs.len() as f32 * 20.0 * s + 12.0 * s;
-            let thumb_h = (log_h / total_h * track_h).max(24.0 * s);
-            let thumb_y = log_y + 7.0 * s + ratio * (track_h - thumb_h);
+        if let Some(thumb) = crate::app::api_client::api_mock_server_log_scrollbar_thumb(
+            (log_x, log_y, log_w, log_h),
+            api.mock_server_logs.len(),
+            scroll_y,
+            s,
+        ) {
             self.push_rounded_rect(
                 log_x + log_w - 8.0 * s,
-                thumb_y,
+                thumb.start,
                 4.0 * s,
-                thumb_h,
+                thumb.len,
                 2.0 * s,
                 [1.0, 1.0, 1.0, 0.24],
             );

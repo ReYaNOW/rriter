@@ -351,7 +351,7 @@ impl App {
         let titles = self.tab_display_titles();
         if let Some(r) = self.renderer.as_mut() {
             let s = r.scale_factor;
-            let tab_x = (48.0 * s + self.ide_panel.left_width * s).round() + 1.0;
+            let tab_x = (48.0 * s + self.ide_panel.visible_left_width(s)).round() + 1.0;
             let viewport_w = (r.width - tab_x).max(0.0);
             if viewport_w <= 0.0 {
                 return;
@@ -384,8 +384,7 @@ impl App {
             }
 
             let target = target.clamp(0.0, max_scroll);
-            self.tab_scroll.target = target;
-            self.tab_scroll.current = target;
+            self.tab_scroll.jump_to(target);
         }
     }
 
@@ -406,23 +405,20 @@ impl App {
 
     fn clamp_tab_scroll_to_content_now(&mut self) {
         if !self.is_ide_mode || self.tabs.is_empty() {
-            self.tab_scroll.current = 0.0;
-            self.tab_scroll.target = 0.0;
+            self.tab_scroll.reset();
             return;
         }
 
         let titles = self.tab_display_titles();
         let Some(r) = self.renderer.as_mut() else {
-            self.tab_scroll.current = 0.0;
-            self.tab_scroll.target = 0.0;
+            self.tab_scroll.reset();
             return;
         };
         let s = r.scale_factor;
-        let tab_x = (48.0 * s + self.ide_panel.left_width * s).round() + 1.0;
+        let tab_x = (48.0 * s + self.ide_panel.visible_left_width(s)).round() + 1.0;
         let viewport_w = (r.width - tab_x).max(0.0);
         if viewport_w <= 0.0 {
-            self.tab_scroll.current = 0.0;
-            self.tab_scroll.target = 0.0;
+            self.tab_scroll.reset();
             return;
         }
 

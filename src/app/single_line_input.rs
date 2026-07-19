@@ -137,6 +137,29 @@ pub(crate) fn insert_single_line_text<T: SingleLineInputModel>(
     }
 }
 
+pub(crate) fn handle_input_history_shortcut<T: SingleLineInputModel>(
+    input: &mut T,
+    physical_key: PhysicalKey,
+    primary: bool,
+    shift: bool,
+) -> bool {
+    match physical_key {
+        PhysicalKey::Code(KeyCode::KeyZ) if primary && shift => {
+            input.redo();
+            true
+        }
+        PhysicalKey::Code(KeyCode::KeyZ) if primary => {
+            input.undo();
+            true
+        }
+        PhysicalKey::Code(KeyCode::KeyY) if primary => {
+            input.redo();
+            true
+        }
+        _ => false,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_single_line_input<T: SingleLineInputModel>(
     input: &mut T,
@@ -149,20 +172,11 @@ pub(crate) fn handle_single_line_input<T: SingleLineInputModel>(
     paste_text: Option<&str>,
     max_bytes: usize,
 ) -> Option<String> {
+    if handle_input_history_shortcut(input, physical_key, primary, shift) {
+        return None;
+    }
     match physical_key {
-        PhysicalKey::Code(KeyCode::KeyZ) if primary && shift => {
-            input.redo();
-            None
-        }
-        PhysicalKey::Code(KeyCode::KeyZ) if primary => {
-            input.undo();
-            None
-        }
-        PhysicalKey::Code(KeyCode::KeyY) if primary => {
-            input.redo();
-            None
-        }
-        PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyF) if primary => {
+        PhysicalKey::Code(KeyCode::KeyA) if primary => {
             input.select_all();
             None
         }
@@ -269,6 +283,26 @@ mod tests {
             64,
         );
         assert_eq!(input.selected_text(), Some("alpha "));
+    }
+
+    #[test]
+    fn primary_f_does_not_select_all_input_text() {
+        let mut input = DatabaseDialogInput::new("alpha beta");
+        input.set_cursor(5, false);
+        handle_single_line_input(
+            &mut input,
+            PhysicalKey::Code(KeyCode::KeyF),
+            Some("f"),
+            true,
+            false,
+            false,
+            false,
+            None,
+            64,
+        );
+        assert_eq!(input.cursor, 5);
+        assert_eq!(input.selection_anchor, None);
+        assert_eq!(input.text(), "alpha beta");
     }
 
     #[test]

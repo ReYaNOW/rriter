@@ -12,6 +12,8 @@ const FILE_TREE_UI: &str = include_str!("render_view/ide_panels/ide_panel_side_r
 const TERMINAL_UI: &str = include_str!("render_view/terminal_ui.rs");
 const SEARCH_UI: &str = include_str!("render_view/search.rs");
 const STICKY_UI: &str = include_str!("render_view/sticky.rs");
+const CORE_TEXT: &str = include_str!("render_view/core_text.rs");
+const EDITOR_TEXT: &str = include_str!("render_view/editor_text_layer.rs");
 const LSP_UI: &str = include_str!("render_view/lsp_ui.rs");
 const UI_SYSTEM: &str = include_str!("ui_system.rs");
 const API_STATE: &str = include_str!("app/api_client.rs");
@@ -255,9 +257,11 @@ fn r2_064_main_search_uses_shared_input_renderer() {
 }
 
 #[test]
-fn r2_065_sticky_lines_use_shared_pixel_snapped_span_renderer() {
-    has_all(STICKY_UI, &["draw_spanned_ui_line_pixel_snapped_alpha"]);
-    has_none(STICKY_UI, &["get_glyph(ch, 1.0)"]);
+fn r2_065_sticky_lines_use_the_same_editor_font_renderer() {
+    has_all(STICKY_UI, &["draw_spanned_editor_line_alpha"]);
+    has_none(STICKY_UI, &["draw_spanned_ui_line_pixel_snapped_alpha"]);
+    has_all(CORE_TEXT, &["fn push_editor_glyph", "self.get_glyph(ch)"]);
+    has_all(EDITOR_TEXT, &["self.push_editor_glyph"]);
 }
 
 clipped_control_test!(r2_066_partial_lsp_card_buttons_follow_outer_clip, LSP_UI, "LspServerRestart");

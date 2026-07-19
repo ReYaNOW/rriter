@@ -50,59 +50,55 @@ impl App {
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
         for receiver in receivers {
-            let mut keep = true;
-            loop {
-                match receiver.rx.try_recv() {
-                    Ok(result) => {
-                        self.ide_panel
-                            .git
-                            .branch_ahead_cache
-                            .extend(result.branch_ahead_cache);
-                        let event = result.event;
-                        if event.request_id == self.ide_panel.git.latest_request_id {
-                            if receiver.refresh {
-                                refresh_rerun |= self.ide_panel.git.finish_status_refresh();
-                            }
-                            let reload_graph =
-                                event.notice.as_deref().is_some_and(|notice| {
-                                    notice.starts_with("Committed ")
-                                        || notice == "Fetch done"
-                                        || notice == "Pull done"
-                                });
-                            self.ide_panel.git.apply_event(event);
-                            status_event_applied = true;
-                            self.ide_panel.git.pending = false;
-                            if reload_graph {
-                                reload_graph_cache = true;
-                                prefetch_graph_after_status = self.ide_panel.git.graph_open;
-                                force_prefetch_graph_after_status = prefetch_graph_after_status;
-                            } else if self.ide_panel.git.graph_refresh_after_status
-                                && self.ide_panel.git.graph_open
-                            {
-                                prefetch_graph_after_status = true;
-                            }
-                            updated = true;
-                        } else {
-                            if receiver.refresh && self.ide_panel.git.finish_status_refresh() {
-                                stale_refresh_dirty = true;
-                            }
-                            stale_seen = true;
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
+            let keep = match poll_one_shot_receiver(&receiver.rx) {
+                OneShotReceiverPoll::Ready(result) => {
+                    self.ide_panel
+                        .git
+                        .branch_ahead_cache
+                        .extend(result.branch_ahead_cache);
+                    let event = result.event;
+                    if event.request_id == self.ide_panel.git.latest_request_id {
                         if receiver.refresh {
                             refresh_rerun |= self.ide_panel.git.finish_status_refresh();
                         }
-                        if receiver.request_id == self.ide_panel.git.latest_request_id {
-                            self.ide_panel.git.handle_status_disconnect(receiver.request_id);
-                            updated = true;
+                        let reload_graph = event.notice.as_deref().is_some_and(|notice| {
+                            notice.starts_with("Committed ")
+                                || notice == "Fetch done"
+                                || notice == "Pull done"
+                        });
+                        self.ide_panel.git.apply_event(event);
+                        status_event_applied = true;
+                        self.ide_panel.git.pending = false;
+                        if reload_graph {
+                            reload_graph_cache = true;
+                            prefetch_graph_after_status = self.ide_panel.git.graph_open;
+                            force_prefetch_graph_after_status = prefetch_graph_after_status;
+                        } else if self.ide_panel.git.graph_refresh_after_status
+                            && self.ide_panel.git.graph_open
+                        {
+                            prefetch_graph_after_status = true;
                         }
-                        keep = false;
-                        break;
+                        updated = true;
+                    } else {
+                        if receiver.refresh && self.ide_panel.git.finish_status_refresh() {
+                            stale_refresh_dirty = true;
+                        }
+                        stale_seen = true;
                     }
+                    false
                 }
-            }
+                OneShotReceiverPoll::Pending => true,
+                OneShotReceiverPoll::Disconnected => {
+                    if receiver.refresh {
+                        refresh_rerun |= self.ide_panel.git.finish_status_refresh();
+                    }
+                    if receiver.request_id == self.ide_panel.git.latest_request_id {
+                        self.ide_panel.git.handle_status_disconnect(receiver.request_id);
+                        updated = true;
+                    }
+                    false
+                }
+            };
             if keep {
                 next_rx.push(receiver);
             }
@@ -164,85 +160,81 @@ impl App {
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
         for receiver in graph_receivers {
-            let mut keep = true;
-            loop {
-                match receiver.rx.try_recv() {
-                    Ok(event) => {
-                        let latest_for_root = self
+            let keep = match poll_one_shot_receiver(&receiver.rx) {
+                OneShotReceiverPoll::Ready(event) => {
+                    let latest_for_root = self
+                        .ide_panel
+                        .git
+                        .graph_latest_request_by_root
+                        .get(&crate::platform::PathKey::new(&event.repo_root))
+                        .copied();
+                    if latest_for_root == Some(event.request_id) {
+                        self.ide_panel.git.graph_latest_request_id = self
                             .ide_panel
                             .git
-                            .graph_latest_request_by_root
-                            .get(&crate::platform::PathKey::new(&event.repo_root))
-                            .copied();
-                        if latest_for_root == Some(event.request_id) {
-                            self.ide_panel.git.graph_latest_request_id = self
-                                .ide_panel
-                                .git
-                                .graph_latest_request_id
-                                .max(event.request_id);
-                            self.ide_panel
-                                .git
-                                .graph_latest_request_by_root
-                                .remove(&crate::platform::PathKey::new(&event.repo_root));
-                            self.ide_panel
-                                .git
-                                .graph_pending_roots
-                                .remove(&crate::platform::PathKey::new(&event.repo_root));
-                            let same_workspace =
-                                self.ide_panel.git.graph_workspace_idx == Some(event.workspace_idx);
-                            let same_root = self
-                                .ide_panel
-                                .git
-                                .graph_repo_root
-                                .as_ref()
-                                .is_some_and(|root| crate::platform::paths_equal(root, &event.repo_root));
-                            if same_workspace && same_root {
-                                if event.offset == 0 {
-                                    self.apply_git_graph_result(
-                                        event.commits,
-                                        event.lane_count,
-                                        event.notice,
-                                        event.limit,
-                                        event.has_more,
-                                        event.reset_scroll,
-                                    );
-                                } else if event.offset == self.ide_panel.git.graph_snapshot.len() {
-                                    self.append_git_graph_result(
-                                        event.commits,
-                                        event.limit,
-                                        event.has_more,
-                                    );
-                                }
-                            } else if event.offset == 0 {
-                                let cache_entry = GitGraphCacheEntry {
-                                    commits: event.commits,
-                                    lane_count: event.lane_count.max(1),
-                                    notice: event.notice,
-                                    limit: event.limit,
-                                    has_more: event.has_more,
-                                };
-                                self.ide_panel
-                                    .git
-                                    .graph_cache
-                                    .insert(
-                                        crate::platform::PathKey::new(&event.repo_root),
-                                        cache_entry,
-                                    );
-                            }
-                            updated = true;
-                        }
-                    }
-                    Err(mpsc::TryRecvError::Empty) => break,
-                    Err(mpsc::TryRecvError::Disconnected) => {
+                            .graph_latest_request_id
+                            .max(event.request_id);
                         self.ide_panel
                             .git
-                            .handle_graph_disconnect(&receiver.repo_root, receiver.request_id);
+                            .graph_latest_request_by_root
+                            .remove(&crate::platform::PathKey::new(&event.repo_root));
+                        self.ide_panel
+                            .git
+                            .graph_pending_roots
+                            .remove(&crate::platform::PathKey::new(&event.repo_root));
+                        let same_workspace =
+                            self.ide_panel.git.graph_workspace_idx == Some(event.workspace_idx);
+                        let same_root = self
+                            .ide_panel
+                            .git
+                            .graph_repo_root
+                            .as_ref()
+                            .is_some_and(|root| {
+                                crate::platform::paths_equal(root, &event.repo_root)
+                            });
+                        if same_workspace && same_root {
+                            if event.offset == 0 {
+                                self.apply_git_graph_result(
+                                    event.commits,
+                                    event.lane_count,
+                                    event.notice,
+                                    event.limit,
+                                    event.has_more,
+                                    event.reset_scroll,
+                                );
+                            } else if event.offset == self.ide_panel.git.graph_snapshot.len() {
+                                self.append_git_graph_result(
+                                    event.commits,
+                                    event.limit,
+                                    event.has_more,
+                                );
+                            }
+                        } else if event.offset == 0 {
+                            let cache_entry = GitGraphCacheEntry {
+                                commits: event.commits,
+                                lane_count: event.lane_count.max(1),
+                                notice: event.notice,
+                                limit: event.limit,
+                                has_more: event.has_more,
+                            };
+                            self.ide_panel.git.graph_cache.insert(
+                                crate::platform::PathKey::new(&event.repo_root),
+                                cache_entry,
+                            );
+                        }
                         updated = true;
-                        keep = false;
-                        break;
                     }
+                    false
                 }
-            }
+                OneShotReceiverPoll::Pending => true,
+                OneShotReceiverPoll::Disconnected => {
+                    self.ide_panel
+                        .git
+                        .handle_graph_disconnect(&receiver.repo_root, receiver.request_id);
+                    updated = true;
+                    false
+                }
+            };
             if keep {
                 next_graph_rx.push(receiver);
             }
@@ -294,8 +286,7 @@ impl App {
         self.ide_panel.git.graph_commit_limit = GIT_GRAPH_LIMIT_STEP;
         self.ide_panel.git.graph_has_more = false;
         self.ide_panel.git.graph_copied_commit = None;
-        self.ide_panel.git.graph_scroll.current = 0.0;
-        self.ide_panel.git.graph_scroll.target = 0.0;
+        self.ide_panel.git.graph_scroll.reset();
         if !self.apply_cached_git_graph_for_selected(true) {
             self.load_git_graph_for_selected_workspace();
         }
@@ -373,9 +364,7 @@ impl App {
         self.ide_panel.git.graph_has_more = has_more;
         self.ide_panel.git.graph_pending = false;
         if reset_scroll {
-            self.ide_panel.git.graph_scroll.set_target(0.0);
-            self.ide_panel.git.graph_scroll.current = 0.0;
-            self.ide_panel.git.graph_scroll.velocity = 0.0;
+            self.ide_panel.git.graph_scroll.reset();
         }
     }
 

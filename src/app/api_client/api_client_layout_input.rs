@@ -1,25 +1,47 @@
+pub(crate) const API_PANEL_TOOLBAR_ADVANCE: f32 = 44.0;
+pub(crate) const API_PANEL_IMPORT_ERROR_ADVANCE: f32 = 20.0;
+pub(crate) const API_PANEL_PERSISTENCE_ERROR_ADVANCE: f32 = 20.0;
+pub(crate) const API_PANEL_UV_ERROR_ADVANCE: f32 = 22.0;
+pub(crate) const API_PANEL_MANUAL_ROUTE_ADVANCE: f32 = 38.0;
+pub(crate) const API_PANEL_SPEC_CARD_ADVANCE: f32 = 122.0;
+pub(crate) const API_PANEL_TREE_ROW_ADVANCE: f32 = 28.0;
+pub(crate) const API_PANEL_FILTER_ADVANCE: f32 = 38.0;
+
+pub(crate) fn api_panel_import_error_visible(api: &ApiClientState, now: u64) -> bool {
+    api.import_error.is_some()
+        && api
+            .import_error_at
+            .map(|at| now.saturating_sub(at) < 5)
+            .unwrap_or(true)
+}
+
 pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) -> f32 {
     let pad = 10.0 * scale;
-    let mut content_h = pad + 40.0 * scale;
+    let mut content_h = pad + API_PANEL_TOOLBAR_ADVANCE * scale;
     if api.import_menu_open {
         content_h += 28.0 * scale * 2.0 + 12.0 * scale;
     }
     if api.import_url_open {
         content_h += 42.0 * scale;
     }
-    if api.import_error.is_some() {
-        content_h += 24.0 * scale;
+    if api_panel_import_error_visible(api, now_epoch_secs()) {
+        content_h += API_PANEL_IMPORT_ERROR_ADVANCE * scale;
     }
-    content_h += 434.0 * scale + api.mock.manual_routes.len().min(8) as f32 * 34.0 * scale;
-    if api.specs.is_empty() {
-        content_h += 34.0 * scale;
+    if api.persistence_error.is_some() {
+        content_h += API_PANEL_PERSISTENCE_ERROR_ADVANCE * scale;
     }
-    content_h += api.specs.len() as f32 * 122.0 * scale;
+    content_h += 434.0 * scale;
+    if !api.mock.uv.last_error.is_empty() {
+        content_h += API_PANEL_UV_ERROR_ADVANCE * scale;
+    }
+    content_h += api.mock.manual_routes.len().min(8) as f32
+        * API_PANEL_MANUAL_ROUTE_ADVANCE
+        * scale;
+    content_h += api.specs.len() as f32 * API_PANEL_SPEC_CARD_ADVANCE * scale;
     if let Some(model) = api.selected_model() {
-        content_h += 28.0 * scale;
-        content_h += 34.0 * scale;
+        content_h += API_PANEL_TREE_ROW_ADVANCE * scale * 2.0;
         if !api.collapsed_route_roots.contains(&model.id) {
-            content_h += 38.0 * scale;
+            content_h += API_PANEL_FILTER_ADVANCE * scale;
             let filter = api.route_filter.trim();
             let filtering = !filter.is_empty();
             for group in &model.route_groups {
@@ -45,9 +67,9 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
                 if matching_routes == 0 {
                     continue;
                 }
-                content_h += 28.0 * scale;
+                content_h += API_PANEL_TREE_ROW_ADVANCE * scale;
                 if filtering || !api.tag_collapsed(model.id, route.tag.as_str()) {
-                    content_h += matching_routes as f32 * 30.0 * scale;
+                    content_h += matching_routes as f32 * API_PANEL_TREE_ROW_ADVANCE * scale;
                 }
             }
         }
@@ -927,4 +949,62 @@ where
 {
     let longest = text.split('\n').map(&mut measure).fold(0.0, f32::max);
     (longest - visible_w.max(1.0) + 20.0).max(0.0)
+}
+
+pub(crate) fn api_text_scrollbar_x_drag_target(
+    rect: (f32, f32, f32, f32),
+    current: f32,
+    max_scroll: f32,
+    pointer_x: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    if max_scroll <= 0.0 || rect.2 <= 0.0 {
+        return None;
+    }
+    let thumb = crate::scroll::scrollbar_thumb(
+        rect.0,
+        rect.2,
+        rect.2,
+        rect.2 + max_scroll,
+        current,
+        22.0 * scale,
+    )?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_x,
+        rect.0,
+        rect.2,
+        thumb,
+        max_scroll,
+        drag_offset,
+    )
+}
+
+pub(crate) fn api_text_scrollbar_y_drag_target(
+    rect: (f32, f32, f32, f32),
+    current: f32,
+    max_scroll: f32,
+    pointer_y: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    if max_scroll <= 0.0 || rect.3 <= 0.0 {
+        return None;
+    }
+    let thumb = crate::scroll::scrollbar_thumb(
+        rect.1,
+        rect.3,
+        rect.3,
+        rect.3 + max_scroll,
+        current,
+        22.0 * scale,
+    )?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_y,
+        rect.1,
+        rect.3,
+        thumb,
+        max_scroll,
+        drag_offset,
+    )
 }

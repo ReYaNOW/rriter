@@ -239,34 +239,15 @@ impl Renderer {
 
         let get_inner_size =
             |info: &crate::lsp::LspServerInfo, renderer: &mut Self| -> (f32, f32) {
-                if let Some(log_ed) = lsp_log_editors.get(info.name) {
-                    let mut lines = 0;
-                    let mut max_w = 0.0f32;
-                    let mut phys_line = 0;
-                    let (first, second) = log_ed.text_parts();
-                    while phys_line < log_ed.line_offsets.len() {
-                        let start = log_ed.line_offsets[phys_line];
-                        let end = if phys_line + 1 < log_ed.line_offsets.len() {
-                            log_ed.line_offsets[phys_line + 1].saturating_sub(1)
-                        } else {
-                            log_ed.len()
-                        };
-                        let w = renderer.measure_width(first, second, start, end) * 0.7;
-                        if w > max_w {
-                            max_w = w;
-                        }
-                        lines += 1;
-                        if log_ed.folded_lines.contains(&phys_line) {
-                            if let Some(&fold_end) = log_ed.foldable_lines.get(&phys_line) {
-                                phys_line = fold_end;
-                            }
-                        }
-                        phys_line += 1;
-                    }
-                    (lines as f32 * 16.0 * s, max_w)
-                } else {
-                    (0.0, 0.0)
-                }
+                lsp_log_editors.get(info.name).map_or((0.0, 0.0), |log_editor| {
+                    crate::app::lsp_actions::lsp_log_inner_size_by(
+                        log_editor,
+                        s,
+                        |first, second, start, end| {
+                            renderer.measure_width(first, second, start, end) * 0.7
+                        },
+                    )
+                })
             };
 
         let mut total_h = 8.0 * s;
@@ -1126,54 +1107,67 @@ impl Renderer {
                         self.flush();
 
                         if inner_total_h > log_bg_h {
-                            let max_y = (inner_total_h - log_bg_h).max(0.0);
-                            let ratio = (inner_scroll_y / max_y).clamp(0.0, 1.0);
-                            let track_h = log_bg_h - 14.0 * s;
-                            let thumb_h = (log_bg_h / inner_total_h * track_h).max(20.0 * s).min(track_h.max(0.0));
-                            let thumb_y = log_bg_y + 7.0 * s + ratio * (track_h - thumb_h);
-                            self.push_rounded_rect(
-                                log_bg_x + log_bg_w - 8.0 * s,
-                                thumb_y,
-                                4.0 * s,
-                                thumb_h,
-                                2.0 * s,
-                                [1.0, 1.0, 1.0, 0.22],
-                            );
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::LspLogScrollY(server_idx),
-                                log_bg_x + log_bg_w - 14.0 * s,
-                                log_bg_y,
-                                14.0 * s,
-                                log_bg_h,
-                                mx,
-                                my,
-                            );
+                            let track_h = (log_bg_h - 14.0 * s).max(0.0);
+                            if let Some(thumb) =
+                                crate::app::lsp_actions::lsp_log_scrollbar_thumb(
+                                    log_bg_y + 7.0 * s,
+                                    track_h,
+                                    log_bg_h,
+                                    inner_total_h,
+                                    inner_scroll_y,
+                                    s,
+                                )
+                            {
+                                self.push_rounded_rect(
+                                    log_bg_x + log_bg_w - 8.0 * s,
+                                    thumb.start,
+                                    4.0 * s,
+                                    thumb.len,
+                                    2.0 * s,
+                                    [1.0, 1.0, 1.0, 0.22],
+                                );
+                                ui_registry.register_rect(
+                                    crate::ui_system::UiId::LspLogScrollY(server_idx),
+                                    log_bg_x + log_bg_w - 14.0 * s,
+                                    log_bg_y,
+                                    14.0 * s,
+                                    log_bg_h,
+                                    mx,
+                                    my,
+                                );
+                            }
                         }
 
                         if inner_max_w + 20.0 * s > log_bg_w {
-                            let max_x = (inner_max_w + 20.0 * s - log_bg_w).max(0.0);
-                            let ratio = (inner_scroll_x / max_x).clamp(0.0, 1.0);
-                            let track_w = log_bg_w - 14.0 * s;
-                            let thumb_w =
-                                (log_bg_w / (inner_max_w + 20.0 * s) * track_w).max(20.0 * s).min(track_w.max(0.0));
-                            let thumb_x = log_bg_x + 7.0 * s + ratio * (track_w - thumb_w);
-                            self.push_rounded_rect(
-                                thumb_x,
-                                log_bg_y + log_bg_h - 8.0 * s,
-                                thumb_w,
-                                4.0 * s,
-                                2.0 * s,
-                                [1.0, 1.0, 1.0, 0.22],
-                            );
-                            ui_registry.register_rect(
-                                crate::ui_system::UiId::LspLogScrollX(server_idx),
-                                log_bg_x,
-                                log_bg_y + log_bg_h - 14.0 * s,
-                                log_bg_w,
-                                14.0 * s,
-                                mx,
-                                my,
-                            );
+                            let track_w = (log_bg_w - 14.0 * s).max(0.0);
+                            if let Some(thumb) =
+                                crate::app::lsp_actions::lsp_log_scrollbar_thumb(
+                                    log_bg_x + 7.0 * s,
+                                    track_w,
+                                    log_bg_w,
+                                    inner_max_w + 20.0 * s,
+                                    inner_scroll_x,
+                                    s,
+                                )
+                            {
+                                self.push_rounded_rect(
+                                    thumb.start,
+                                    log_bg_y + log_bg_h - 8.0 * s,
+                                    thumb.len,
+                                    4.0 * s,
+                                    2.0 * s,
+                                    [1.0, 1.0, 1.0, 0.22],
+                                );
+                                ui_registry.register_rect(
+                                    crate::ui_system::UiId::LspLogScrollX(server_idx),
+                                    log_bg_x,
+                                    log_bg_y + log_bg_h - 14.0 * s,
+                                    log_bg_w,
+                                    14.0 * s,
+                                    mx,
+                                    my,
+                                );
+                            }
                         }
 
                         ui_registry.pop_clip();

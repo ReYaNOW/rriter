@@ -1,3 +1,7 @@
+fn clamped_settings_tab(active_tab: usize, tab_count: usize) -> usize {
+    active_tab.min(tab_count.saturating_sub(1))
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SettingsModalLayout {
     pub outer: crate::ui_system::UiClipRect,
@@ -61,6 +65,73 @@ pub(crate) fn settings_ignore_input_rect(
     crate::ui_system::UiClipRect::new(content_x, input_y, input_w, 34.0 * scale)
 }
 
+
+pub(crate) fn settings_ide_content_height(
+    workspace_count: usize,
+    ignore_chip_widths: impl IntoIterator<Item = f32>,
+    max_row_width: f32,
+    scale: f32,
+) -> f32 {
+    let workspace_h = workspace_count as f32 * 46.0 * scale + 126.0 * scale;
+    let chip_h = 28.0 * scale;
+    let chip_gap_y = 8.0 * scale;
+    let chip_gap_x = 8.0 * scale;
+    let max_row_w = max_row_width.max(1.0);
+    let mut chip_rows = 1usize;
+    let mut row_w = 0.0;
+    for width in ignore_chip_widths {
+        if row_w + width > max_row_w && row_w > 0.0 {
+            chip_rows += 1;
+            row_w = 0.0;
+        }
+        row_w += width + chip_gap_x;
+    }
+    let ignore_h = 160.0 * scale + chip_rows as f32 * (chip_h + chip_gap_y);
+    workspace_h + ignore_h
+}
+
+pub(crate) fn settings_ide_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
+    (layout.inner.h - 52.0 * scale).max(0.0)
+}
+
+pub(crate) fn settings_faq_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
+    // FAQ starts 70 px below the inner top and keeps a 20 px bottom inset.
+    (layout.inner.h - 90.0 * scale).max(0.0)
+}
+
+pub(crate) fn settings_ide_max_scroll(
+    layout: SettingsModalLayout,
+    workspace_count: usize,
+    ignore_chip_widths: impl IntoIterator<Item = f32>,
+    scale: f32,
+) -> f32 {
+    let max_row_width = (layout.inner.w - layout.sidebar_w - 48.0 * scale).max(1.0);
+    (settings_ide_content_height(
+        workspace_count,
+        ignore_chip_widths,
+        max_row_width,
+        scale,
+    ) - settings_ide_viewport_height(layout, scale))
+        .max(0.0)
+}
+
+pub(crate) fn settings_scrollbar_thumb(
+    track_y: f32,
+    track_h: f32,
+    max_scroll: f32,
+    current: f32,
+    scale: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    crate::scroll::scrollbar_thumb(
+        track_y,
+        track_h,
+        track_h,
+        track_h + max_scroll,
+        current,
+        40.0 * scale,
+    )
+}
+
 use crate::editor::Editor;
 use crate::renderer::Renderer;
 use glow::HasContext;
@@ -81,7 +152,7 @@ fn compact_settings_path(path: &std::path::Path, max_chars: usize) -> String {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
-    pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, dialog_height: f32) -> f32 {
+    pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, viewport_height: f32) -> f32 {
         let scale = self.scale_factor;
         let mut total_h = 0.0;
 
@@ -98,12 +169,7 @@ impl Renderer {
         }
 
         total_h += 80.0 * scale;
-        let pad_top = 35.0 * scale;
-        let pad_bottom = 30.0 * scale;
-        let title_h = 40.0 * scale;
-        let content_h = dialog_height - pad_top - pad_bottom - title_h - 20.0 * scale;
-
-        (total_h - content_h).max(0.0)
+        (total_h - viewport_height.max(0.0)).max(0.0)
     }
 
     pub(crate) fn draw_settings(
@@ -190,6 +256,7 @@ impl Renderer {
         self.push_rect(ix + sidebar_w, iy, 1.0, ih, [1.0, 1.0, 1.0, 0.05]);
 
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
+        let active_tab = clamped_settings_tab(active_tab, tabs.len());
         let mut tab_y = iy + 20.0 * s;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
@@ -642,44 +709,40 @@ impl Renderer {
             }
 
             // ── Скроллбар для вкладки IDE ─────────────────────────────────
-            let ide_total_h = {
-                let workspace_h = ide_workspaces.len() as f32 * 46.0 * s + 126.0 * s;
-                let ignore_h = {
-                    let chip_rows = if ide_ignore_patterns.is_empty() {
-                        1
-                    } else {
-                        let mut rows = 1usize;
-                        let mut cx2 = 0.0f32;
-                        for p in ide_ignore_patterns.iter() {
-                            let tw = self.measure_ui_width(p, 0.88);
-                            let cw2 = tw + pad_x * 2.0 + 22.0 * s;
-                            if cx2 + cw2 > max_row_w && cx2 > 0.0 {
-                                rows += 1;
-                                cx2 = 0.0;
-                            }
-                            cx2 += cw2 + chip_gap_x;
-                        }
-                        rows
-                    };
-                    // Убрана плашка «Скрыты всегда» (-dlabel_h - 18.0 * s)
-                    160.0 * s + chip_rows as f32 * (chip_h + chip_gap_y)
-                };
-                workspace_h + ignore_h
-            };
+            let ide_total_h = settings_ide_content_height(
+                ide_workspaces.len(),
+                ide_ignore_patterns.iter().map(|pattern| {
+                    self.measure_ui_width(pattern, 0.88) + pad_x * 2.0 + 22.0 * s
+                }),
+                content_available_w,
+                s,
+            );
             let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
-            if max_scroll > 0.0 {
-                let ratio = (ide_scroll_y / max_scroll).clamp(0.0, 1.0);
+            if let Some(thumb) = settings_scrollbar_thumb(
+                iy + 52.0 * s,
+                ide_content_area_h,
+                max_scroll,
+                ide_scroll_y,
+                s,
+            ) {
                 let track_h = ide_content_area_h;
-                let thumb_h = (ide_content_area_h / ide_total_h * track_h).max(40.0 * s);
-                let thumb_y = (iy + 52.0 * s + ratio * (track_h - thumb_h)).round();
                 let sb_x = (ix + iw - 14.0 * s).round();
                 self.push_rounded_rect(
                     sb_x,
-                    thumb_y,
+                    thumb.start.round(),
                     6.0 * s,
-                    thumb_h,
+                    thumb.len,
                     3.0 * s,
                     [0.7, 0.33, 0.54, 1.0],
+                );
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsIdeScrollY,
+                    sb_x - 5.0 * s,
+                    iy + 52.0 * s,
+                    16.0 * s,
+                    track_h,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
                 );
             }
         } else if active_tab == 1 {
@@ -1288,23 +1351,29 @@ impl Renderer {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
 
-            let max_scroll = self.get_faq_max_scroll(faq_editor, h);
-            let total_content_h = text_area_h + max_scroll;
-
-            if max_scroll > 0.0 {
-                let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
+            let max_scroll = self.get_faq_max_scroll(faq_editor, text_area_h);
+            if let Some(thumb) = settings_scrollbar_thumb(
+                text_area_y, text_area_h, max_scroll, scroll_y, s,
+            ) {
                 let track_h = text_area_h;
-                let thumb_h = (text_area_h / total_content_h * track_h).max(40.0 * s);
-                let thumb_y = (text_area_y + scroll_ratio * (track_h - thumb_h)).round();
                 let scroll_x = (start_x + cw + 5.0 * s).round();
 
                 self.push_rounded_rect(
                     scroll_x,
-                    thumb_y,
+                    thumb.start.round(),
                     6.0 * s,
-                    thumb_h,
+                    thumb.len,
                     3.0 * s,
                     [0.7, 0.33, 0.54, 1.0],
+                );
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::SettingsFaqScrollY,
+                    scroll_x - 5.0 * s,
+                    text_area_y,
+                    16.0 * s,
+                    track_h,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
                 );
             }
         } else if active_tab == 5 {
@@ -1571,5 +1640,48 @@ impl Renderer {
             "Закрыть",
             78.0,
         );
+    }
+}
+
+#[cfg(test)]
+mod settings_ui_tests {
+    use super::{
+        clamped_settings_tab, settings_ide_content_height, settings_ide_max_scroll,
+        settings_faq_viewport_height, settings_modal_layout, settings_scrollbar_thumb,
+    };
+
+    #[test]
+    fn invalid_settings_tab_is_clamped_before_rendering() {
+        assert_eq!(clamped_settings_tab(0, 6), 0);
+        assert_eq!(clamped_settings_tab(99, 6), 5);
+        assert_eq!(clamped_settings_tab(4, 0), 0);
+    }
+
+    #[test]
+    fn ide_scroll_height_uses_the_same_wrapping_model_as_rendering() {
+        let no_wrap = settings_ide_content_height(2, [100.0, 120.0], 460.0, 1.0);
+        let wrapped = settings_ide_content_height(2, [430.0, 120.0, 450.0], 460.0, 1.0);
+        assert!(wrapped > no_wrap);
+
+        let layout = settings_modal_layout(1000.0, 500.0, 1.0);
+        let max_row_width = (layout.inner.w - layout.sidebar_w - 48.0).max(1.0);
+        let rendered_height =
+            settings_ide_content_height(2, [430.0, 120.0, 450.0], max_row_width, 1.0);
+        let max_scroll = settings_ide_max_scroll(layout, 2, [430.0, 120.0, 450.0], 1.0);
+        assert_eq!(max_scroll, (rendered_height - (layout.inner.h - 52.0)).max(0.0));
+    }
+
+    #[test]
+    fn faq_viewport_matches_the_rendered_text_clip() {
+        let layout = settings_modal_layout(1000.0, 700.0, 1.0);
+        assert_eq!(settings_faq_viewport_height(layout, 1.0), layout.inner.h - 90.0);
+    }
+
+    #[test]
+    fn settings_scrollbar_thumb_matches_shared_scroll_geometry() {
+        let thumb = settings_scrollbar_thumb(50.0, 300.0, 600.0, 300.0, 1.0)
+            .expect("scrollbar should be visible");
+        assert_eq!(thumb.start, 150.0);
+        assert_eq!(thumb.len, 100.0);
     }
 }

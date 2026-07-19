@@ -105,6 +105,7 @@ fn test_app() -> Option<App> {
         last_click_time: now,
         click_count: 0,
         last_click_pos: (0.0, 0.0),
+        last_click_ui_id: None,
         pending_action: PendingAction::None,
         pending_action_waiting_for_save_as: false,
         pending_action_ready: false,
@@ -290,6 +291,24 @@ fn autocomplete_filters_scores_scrolls_and_applies_selected_completion() {
     assert!(!app.autocomplete_active);
     assert_eq!(app.autocomplete_selected_idx, 0);
     assert_eq!(app.autocomplete_scroll.target, 0.0);
+}
+
+#[test]
+fn applying_autocomplete_recovers_from_a_stale_selected_index() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("pri");
+    app.editor.cursor = 3;
+    app.highlighter.completions = vec![completion("print", SymbolKind::Function, 0, 100)];
+    app.update_autocomplete();
+    assert_eq!(app.autocomplete_options.len(), 1);
+
+    app.autocomplete_selected_idx = usize::MAX;
+    app.apply_autocomplete();
+
+    assert_eq!(app.editor.get_full_text(), "print");
+    assert!(!app.autocomplete_active);
 }
 #[test]
 fn ty_import_autocomplete_waits_for_prefix_and_requires_module() {

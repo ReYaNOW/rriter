@@ -982,7 +982,13 @@ impl Renderer {
         }
     }
 
-    fn api_schema_text_max_scroll(&mut self, text: &str, w: f32, h: f32, s: f32) -> f32 {
+    pub(crate) fn api_schema_text_max_scroll(
+        &mut self,
+        text: &str,
+        w: f32,
+        h: f32,
+        s: f32,
+    ) -> f32 {
         let line_h = api_text_area_line_height(s);
         let lines = text
             .split('\n')
@@ -1186,6 +1192,10 @@ impl Renderer {
         h: f32,
         s: f32,
         scroll_y: f32,
+        id: crate::ui_system::UiId,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
     ) {
         let max_scroll = crate::app::api_client::api_text_area_max_scroll(text, h, s);
         if max_scroll <= 0.5 {
@@ -1197,6 +1207,7 @@ impl Renderer {
         let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
         let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
         self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
+        ui_registry.register_rect(id, x - 5.0 * s, y, 13.0 * s, h, mx, my);
     }
 
     fn draw_api_schema_scrollbar(
@@ -1208,6 +1219,10 @@ impl Renderer {
         h: f32,
         s: f32,
         scroll_y: f32,
+        id: crate::ui_system::UiId,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
     ) {
         let max_scroll = self.api_schema_text_max_scroll(text, w, h, s);
         if max_scroll <= 0.5 {
@@ -1219,6 +1234,7 @@ impl Renderer {
         let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
         let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
         self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
+        ui_registry.register_rect(id, x - 5.0 * s, y, 13.0 * s, h, mx, my);
     }
 
     #[allow(clippy::too_many_arguments)]

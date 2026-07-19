@@ -9,14 +9,18 @@ impl crate::app::App {
         let spec_id = meta.spec_id;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.output_schema_menu_open = false;
-            state.output_schema_menu_scroll.is_dragging = false;
+            state.output_schema_menu_scroll.end_drag();
             true
         } else {
             false
         }
     }
 
-    pub fn handle_api_client_click(&mut self, id: crate::ui_system::UiId) -> bool {
+    pub fn handle_api_client_click(
+        &mut self,
+        id: crate::ui_system::UiId,
+        same_click_target: bool,
+    ) -> bool {
         if matches!(
             id,
             crate::ui_system::UiId::ApiImportUrlInput
@@ -60,7 +64,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiImportUrlInput => {
                 self.ide_panel.api.import_url_open = true;
                 self.focus_api_input(ApiFocus::ImportUrl);
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiImportUrlConfirm => {
                 self.commit_api_focus();
@@ -93,27 +97,32 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockServerLogScrollY => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                let mx = self
-                    .renderer
-                    .as_ref()
-                    .map(|renderer| renderer.last_mouse_y)
-                    .unwrap_or(0.0);
-                if let Some(rect) = self
-                    .ui_registry
-                    .rect_for(crate::ui_system::UiId::ApiMockServerLogArea)
-                {
-                    let max_scroll = api_mock_server_log_max_scroll(
-                        self.ide_panel.api.mock_server_logs.len(),
-                        rect.3,
-                        self.renderer
-                            .as_ref()
-                            .map(|renderer| renderer.scale_factor)
-                            .unwrap_or(1.0),
-                    );
-                    let ratio = ((mx - rect.1) / rect.3.max(1.0)).clamp(0.0, 1.0);
-                    self.ide_panel.api.mock_server_log_scroll.target = ratio * max_scroll;
-                    self.ide_panel.api.mock_server_log_scroll.current =
-                        self.ide_panel.api.mock_server_log_scroll.target;
+                if let Some(rect) = self.ui_registry.rect_for(id) {
+                    let scale = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.scale_factor)
+                        .unwrap_or(1.0);
+                    let pointer_y = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.last_mouse_y)
+                        .unwrap_or(rect.1);
+                    if let Some((drag_offset, target)) =
+                        api_mock_server_log_scrollbar_drag_target(
+                            rect,
+                            self.ide_panel.api.mock_server_logs.len(),
+                            self.ide_panel.api.mock_server_log_scroll.current,
+                            pointer_y,
+                            scale,
+                            None,
+                        )
+                    {
+                        let scroll = &mut self.ide_panel.api.mock_server_log_scroll;
+                        scroll.jump_to(target);
+                        scroll.drag_offset = drag_offset;
+                        scroll.is_dragging = true;
+                    }
                 }
             }
             crate::ui_system::UiId::ApiMockModeSelect => {
@@ -136,7 +145,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockProxyBaseInput => {
                 self.focus_api_input(ApiFocus::MockProxyBase);
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiMockGuideOpen => {
                 self.commit_api_focus();
@@ -245,7 +254,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPythonUvPathInput => {
                 self.focus_api_input(ApiFocus::MockPythonUvPath);
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiMockPythonVersionInput => {
                 self.commit_api_focus();
@@ -260,8 +269,7 @@ impl crate::app::App {
                 if let Some(row) = self.ide_panel.api.mock_python_versions.get(idx) {
                     self.ide_panel.api.mock.uv.python_version = row.version.clone();
                     self.ide_panel.api.mock_python_version_picker_open = false;
-                    self.ide_panel.api.mock_python_versions_scroll.current = 0.0;
-                    self.ide_panel.api.mock_python_versions_scroll.target = 0.0;
+                    self.ide_panel.api.mock_python_versions_scroll.reset();
                     self.ide_panel.api.persist();
                 }
             }
@@ -271,11 +279,11 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPythonCustomPathInput => {
                 self.focus_api_input(ApiFocus::MockPythonCustomPath);
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiMockManualRoutePath(manual_idx) => {
                 self.focus_api_input(ApiFocus::MockManualPath { manual_idx });
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiMockRouteEnable(route_idx) => {
                 self.toggle_api_route_mock(route_idx);
@@ -380,20 +388,20 @@ impl crate::app::App {
                     field_idx,
                     prop,
                 });
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiMockStaticResponseInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockStaticResponse { route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockCombinedPython(_) => {}
             crate::ui_system::UiId::ApiMockContractInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockContract { route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockSignature { route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockAddManualRoute => {
                 self.add_api_manual_route();
@@ -403,11 +411,11 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockPrelude { route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockBody { route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockPreludeReset(route_idx) => {
                 self.reset_api_route_python_part(route_idx, ApiMockSourcePart::Prelude);
@@ -560,9 +568,7 @@ impl crate::app::App {
                     self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
                     self.ide_panel.api.input_editor.cursor = 0;
                     self.ide_panel.api.input_editor.selection_anchor = None;
-                    self.ide_panel.api.input_scroll_x.current = 0.0;
-                    self.ide_panel.api.input_scroll_x.target = 0.0;
-                    self.ide_panel.api.input_scroll_x.velocity = 0.0;
+                    self.ide_panel.api.input_scroll_x.reset();
                     self.pulse_api_cursor_blink();
                 }
             }
@@ -642,7 +648,7 @@ impl crate::app::App {
                     _ => ApiFocus::AuthValue { spec_id, scheme },
                 };
                 self.focus_api_input(focus);
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiAuthSave(_) => {
                 self.commit_api_focus();
@@ -794,10 +800,8 @@ impl crate::app::App {
                 };
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.response_view = view;
-                    state.response_scroll.current = 0.0;
-                    state.response_scroll.target = 0.0;
-                    state.response_scroll_x.current = 0.0;
-                    state.response_scroll_x.target = 0.0;
+                    state.response_scroll.reset();
+                    state.response_scroll_x.reset();
                 }
                 self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
             }
@@ -818,10 +822,8 @@ impl crate::app::App {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.input_doc_view = view;
                     state.input_schema_menu_open = false;
-                    state.body_scroll.current = 0.0;
-                    state.body_scroll.target = 0.0;
-                    state.body_scroll_x.current = 0.0;
-                    state.body_scroll_x.target = 0.0;
+                    state.body_scroll.reset();
+                    state.body_scroll_x.reset();
                 }
                 if matches!(view, ApiInputDocView::Schema) {
                     self.focus_api_input(ApiFocus::InputSchema { spec_id, route_idx });
@@ -852,10 +854,8 @@ impl crate::app::App {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.input_schema_idx = media_idx;
                     state.input_schema_menu_open = false;
-                    state.body_scroll.current = 0.0;
-                    state.body_scroll.target = 0.0;
-                    state.body_scroll_x.current = 0.0;
-                    state.body_scroll_x.target = 0.0;
+                    state.body_scroll.reset();
+                    state.body_scroll_x.reset();
                 }
             }
             crate::ui_system::UiId::ApiOutputExampleTab(route_idx)
@@ -874,10 +874,8 @@ impl crate::app::App {
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.output_doc_view = view;
-                    state.response_scroll.current = 0.0;
-                    state.response_scroll.target = 0.0;
-                    state.response_scroll_x.current = 0.0;
-                    state.response_scroll_x.target = 0.0;
+                    state.output_scroll.reset();
+                    state.output_scroll_x.reset();
                     if view != ApiOutputDocView::Example {
                         state.output_schema_menu_open = false;
                     }
@@ -906,12 +904,9 @@ impl crate::app::App {
                     state.output_example_idx = 0;
                     state.output_schema_idx = 0;
                     state.output_schema_menu_open = false;
-                    state.output_schema_menu_scroll.current = 0.0;
-                    state.output_schema_menu_scroll.target = 0.0;
-                    state.response_scroll.current = 0.0;
-                    state.response_scroll.target = 0.0;
-                    state.response_scroll_x.current = 0.0;
-                    state.response_scroll_x.target = 0.0;
+                    state.output_schema_menu_scroll.reset();
+                    state.output_scroll.reset();
+                    state.output_scroll_x.reset();
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -951,8 +946,7 @@ impl crate::app::App {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     if can_open {
                         state.output_schema_menu_open = !state.output_schema_menu_open;
-                        state.output_schema_menu_scroll.current = 0.0;
-                        state.output_schema_menu_scroll.target = 0.0;
+                        state.output_schema_menu_scroll.reset();
                     } else {
                         state.output_schema_menu_open = false;
                     }
@@ -974,10 +968,8 @@ impl crate::app::App {
                         state.output_schema_idx = media_idx;
                     }
                     state.output_schema_menu_open = false;
-                    state.response_scroll.current = 0.0;
-                    state.response_scroll.target = 0.0;
-                    state.response_scroll_x.current = 0.0;
-                    state.response_scroll_x.target = 0.0;
+                    state.output_scroll.reset();
+                    state.output_scroll_x.reset();
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -998,7 +990,7 @@ impl crate::app::App {
                 }
                 let spec_id = meta.spec_id;
                 self.focus_api_input(ApiFocus::InputSchema { spec_id, route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.focused_schema_pane =
                         Some(crate::app::api_client::ApiSchemaPaneFocus::Input);
@@ -1048,7 +1040,7 @@ impl crate::app::App {
                 }
                 let spec_id = meta.spec_id;
                 self.focus_api_input(ApiFocus::OutputSchema { spec_id, route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.focused_schema_pane =
                         Some(crate::app::api_client::ApiSchemaPaneFocus::Output);
@@ -1115,7 +1107,7 @@ impl crate::app::App {
                     route_idx,
                     name,
                 });
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiQueryParamInput(route_idx, param_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -1136,7 +1128,7 @@ impl crate::app::App {
                     route_idx,
                     name,
                 });
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiBodyInput(route_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -1146,31 +1138,19 @@ impl crate::app::App {
                 self.is_dragging = true;
                 self.ide_panel.is_dragging_terminal = false;
                 self.focus_api_input(ApiFocus::Body { spec_id, route_idx });
-                self.place_api_cursor_from_last_click(id, true);
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
-            crate::ui_system::UiId::ApiBodyScrollX(route_idx) => {
-                let Some((meta, state)) = self.active_api_tab() else {
-                    return true;
-                };
-                if state.route_idx != Some(route_idx) {
-                    return true;
-                }
-                let spec_id = meta.spec_id;
-                let max_scroll = self.api_text_max_scroll_x_for_ui(id);
-                let mx = self
-                    .renderer
-                    .as_ref()
-                    .map(|renderer| renderer.last_mouse_x)
-                    .unwrap_or(0.0);
-                if let Some(rect) = self.ui_registry.rect_for(id)
-                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
-                {
-                    state.body_scroll_x.is_dragging = true;
-                    state.body_scroll_x.drag_offset = 0.0;
-                    let ratio = (mx - rect.0) / rect.2.max(0.0001);
-                    state.body_scroll_x.target = (ratio * max_scroll).clamp(0.0, max_scroll);
-                    state.body_scroll_x.current = state.body_scroll_x.target;
-                }
+            crate::ui_system::UiId::ApiBodyScrollX(_)
+            | crate::ui_system::UiId::ApiOutputScrollX(_)
+            | crate::ui_system::UiId::ApiMockStaticResponseScrollX(_)
+            | crate::ui_system::UiId::ApiResponseScrollX(_) => {
+                self.start_api_text_scrollbar_x_drag(id);
+            }
+            crate::ui_system::UiId::ApiBodyScrollY(_)
+            | crate::ui_system::UiId::ApiOutputScrollY(_)
+            | crate::ui_system::UiId::ApiMockStaticResponseScrollY(_)
+            | crate::ui_system::UiId::ApiResponseScrollY(_) => {
+                self.start_api_text_scrollbar_y_drag(id);
             }
             crate::ui_system::UiId::ApiBodyFieldInput(route_idx, prop_idx) => {
                 let Some((meta, _)) = self.active_api_tab() else {
@@ -1200,7 +1180,7 @@ impl crate::app::App {
                     route_idx,
                     name,
                 });
-                self.place_api_cursor_from_last_click(id, false);
+                self.place_api_cursor_from_last_click(id, false, same_click_target);
             }
             crate::ui_system::UiId::ApiBodyAllowedValue(route_idx, prop_idx, value_idx) => {
                 self.commit_api_focus();
@@ -1297,31 +1277,7 @@ impl crate::app::App {
                 self.is_dragging = true;
                 self.ide_panel.is_dragging_terminal = false;
                 self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
-                self.place_api_cursor_from_last_click(id, true);
-            }
-            crate::ui_system::UiId::ApiResponseScrollX(route_idx) => {
-                let Some((meta, state)) = self.active_api_tab() else {
-                    return true;
-                };
-                if state.route_idx != Some(route_idx) {
-                    return true;
-                }
-                let spec_id = meta.spec_id;
-                let max_scroll = self.api_text_max_scroll_x_for_ui(id);
-                let mx = self
-                    .renderer
-                    .as_ref()
-                    .map(|renderer| renderer.last_mouse_x)
-                    .unwrap_or(0.0);
-                if let Some(rect) = self.ui_registry.rect_for(id)
-                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
-                {
-                    state.response_scroll_x.is_dragging = true;
-                    state.response_scroll_x.drag_offset = 0.0;
-                    let ratio = (mx - rect.0) / rect.2.max(0.0001);
-                    state.response_scroll_x.target = (ratio * max_scroll).clamp(0.0, max_scroll);
-                    state.response_scroll_x.current = state.response_scroll_x.target;
-                }
+                self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiTabBody => {
                 self.commit_api_focus();

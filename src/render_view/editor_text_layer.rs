@@ -714,50 +714,26 @@ impl Renderer {
 
                     if !is_newline && !is_hidden && c != ' ' && c != '\t' {
                         if x - render_scroll_x + adv > 0.0 {
-                            if let Some(g) = self.get_glyph(c) {
-                                let mut current_color = self.theme.fg;
-                                if span_idx < spans.len() && spans[span_idx].start <= current_offset
-                                {
-                                    current_color = spans[span_idx].color;
-                                }
-                                if folded_keyword_range.is_some_and(|(start, end)| {
-                                    current_offset >= start && current_offset < end
-                                }) {
-                                    current_color = [0.55, 0.62, 0.80, 1.0];
-                                }
-
-                                if is_unused {
-                                    current_color = self.theme.unused;
-                                }
-
-                                self.push_quad(
-                                    x - render_scroll_x + g.offset_x,
-                                    y - g.offset_y,
-                                    g.width,
-                                    g.height,
-                                    g.u,
-                                    g.v,
-                                    g.uw,
-                                    g.vh,
-                                    current_color,
-                                    g.is_emoji,
-                                );
-
-                                if c == '.' || c == ':' {
-                                    self.push_quad(
-                                        x - render_scroll_x + g.offset_x + 1.0,
-                                        y - g.offset_y,
-                                        g.width,
-                                        g.height,
-                                        g.u,
-                                        g.v,
-                                        g.uw,
-                                        g.vh,
-                                        current_color,
-                                        g.is_emoji,
-                                    );
-                                }
+                            let mut current_color = self.theme.fg;
+                            if span_idx < spans.len() && spans[span_idx].start <= current_offset {
+                                current_color = spans[span_idx].color;
                             }
+                            if folded_keyword_range.is_some_and(|(start, end)| {
+                                current_offset >= start && current_offset < end
+                            }) {
+                                current_color = [0.55, 0.62, 0.80, 1.0];
+                            }
+
+                            if is_unused {
+                                current_color = self.theme.unused;
+                            }
+
+                            self.push_editor_glyph(
+                                c,
+                                x - render_scroll_x,
+                                y,
+                                current_color,
+                            );
                         }
                     }
 

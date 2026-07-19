@@ -956,8 +956,7 @@ impl App {
             self.autocomplete_pending_request_path = None;
             self.autocomplete_pending_context_key = None;
             self.autocomplete_anim_progress = 0.0;
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
+            self.autocomplete_scroll.reset();
             self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
             self.trace_autocomplete_state("request_ty:imports_empty_prefix");
             return;
@@ -1241,8 +1240,7 @@ impl App {
         }
         self.autocomplete_selected_idx = 0;
         self.autocomplete_hovered_idx = None;
-        self.autocomplete_scroll.current = 0.0;
-        self.autocomplete_scroll.target = 0.0;
+        self.autocomplete_scroll.reset();
         self.refresh_autocomplete_detail_popup();
         if self.autocomplete_apply_pending_response {
             self.autocomplete_apply_pending_response = false;

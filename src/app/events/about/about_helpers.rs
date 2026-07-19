@@ -50,11 +50,7 @@ fn python_inlay_hint_request_range(
 
     let renderer = app.renderer.as_ref()?;
     let s = renderer.scale_factor;
-    let tab_bar_h = if app.show_welcome || !app.is_ide_mode {
-        0.0
-    } else {
-        44.0 * s
-    };
+    let tab_bar_h = app.editor_top_inset(s);
     let editor_bottom_h = if app.is_ide_mode {
         app.ide_panel.editor_reserved_bottom_height(s)
     } else {
@@ -227,15 +223,6 @@ fn drag_autoscroll_speed(delta: f32, is_top_edge: bool) -> f32 {
 fn drag_autoscroll_editor_bottom(window_height: f32, editor_top: f32, scale: f32) -> f32 {
     let bottom_gap = DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale;
     (window_height - bottom_gap).max(editor_top + 24.0 * scale)
-}
-
-fn terminal_content_bounds(window_height: f32, bottom_height: f32, scale: f32) -> (f32, f32) {
-    let bottom_h = bottom_height * scale;
-    let tab_h = 32.0 * scale;
-    let content_y =
-        crate::render_view::ide_bottom_panel_y(window_height, bottom_h, scale) + 1.0 + tab_h;
-    let content_h = bottom_h - 1.0 - tab_h;
-    crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, scale)
 }
 
 fn terminal_drag_cell(

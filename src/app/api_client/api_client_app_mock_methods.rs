@@ -1920,9 +1920,15 @@ impl crate::app::App {
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return true;
         }
-        let item = self.autocomplete_options[self.autocomplete_selected_idx]
-            .0
-            .clone();
+        let Some((item, _)) = self
+            .autocomplete_options
+            .get(self.autocomplete_selected_idx)
+            .or_else(|| self.autocomplete_options.first())
+        else {
+            self.close_autocomplete();
+            return true;
+        };
+        let item = item.clone();
         let edit_text = self.ide_panel.api.input_editor.get_full_text();
         let virtual_source =
             self.api_mock_route_context(route_idx)

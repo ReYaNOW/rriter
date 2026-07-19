@@ -274,8 +274,8 @@ impl Renderer {
         };
 
         let real_height = self.height;
-        let panel_left_w = if is_ide_mode && ide_panel.any_top_open() {
-            ide_panel.left_width * s
+        let panel_left_w = if is_ide_mode {
+            ide_panel.visible_left_width(s)
         } else {
             0.0
         };
@@ -291,11 +291,7 @@ impl Renderer {
         let database_query_modal_open = active_database_query
             .is_some_and(|(_, state)| state.review.is_some());
         let database_query_results_open = active_database_query.is_some_and(|(_, state)| {
-            state.history_open
-                || !state.results.is_empty()
-                || !state.messages.is_empty()
-                || state.review.is_some()
-                || state.error.is_some()
+            crate::app::database::database_query_results_visible(state)
         });
         let database_query_results_h = if database_query_results_open {
             active_database_query.map_or(0.0, |(_, state)| {
@@ -351,11 +347,8 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-        let tab_bar_visual_h = if show_welcome || !is_ide_mode {
-            0.0
-        } else {
-            44.0 * s
-        };
+        let tab_bar_visual_h =
+            crate::render_view::ide_tab_bar_height(show_welcome, is_ide_mode, s);
         let tab_bar_h = crate::render_view::editor_content_top_inset(
             show_welcome,
             is_ide_mode,
@@ -533,6 +526,8 @@ impl Renderer {
                     ui_my,
                     panel_bottom_h,
                     is_ui_disabled,
+                    blink_alpha,
+                    active_api_route,
                 );
             }
             if is_ide_mode {
@@ -626,6 +621,8 @@ impl Renderer {
                     ui_my,
                     panel_bottom_h,
                     is_ui_disabled,
+                    blink_alpha,
+                    active_api_route,
                 );
             }
             self.draw_status_bar(
@@ -1312,6 +1309,8 @@ impl Renderer {
                 ui_my,
                 panel_bottom_h,
                 is_ui_disabled,
+                blink_alpha,
+                active_api_route,
             );
         }
 

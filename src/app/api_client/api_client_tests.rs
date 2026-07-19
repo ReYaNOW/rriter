@@ -452,6 +452,43 @@ mod tests {
     }
 
     #[test]
+    fn api_mock_server_log_scrollbar_drag_preserves_thumb_offset() {
+        let rect = (100.0, 200.0, 14.0, 120.0);
+        let line_count = 30;
+        let current = 180.0;
+        let thumb = api_mock_server_log_scrollbar_thumb(
+            rect,
+            line_count,
+            current,
+            1.0,
+        )
+        .expect("scrollbar thumb");
+        let pointer = thumb.start + 5.0;
+        let (offset, target) = api_mock_server_log_scrollbar_drag_target(
+            rect,
+            line_count,
+            current,
+            pointer,
+            1.0,
+            None,
+        )
+        .expect("drag starts");
+        assert_eq!(offset, 5.0);
+        assert_eq!(target, current);
+
+        let (_, moved) = api_mock_server_log_scrollbar_drag_target(
+            rect,
+            line_count,
+            target,
+            pointer + 20.0,
+            1.0,
+            Some(offset),
+        )
+        .expect("drag continues");
+        assert!(moved > target);
+    }
+
+    #[test]
     fn api_text_area_horizontal_scroll_uses_longest_line() {
         let max = api_text_area_max_scroll_x("short\nvery-long-line", 40.0, |line| {
             line.len() as f32 * 10.0
@@ -461,6 +498,84 @@ mod tests {
             api_text_area_max_scroll_x("tiny", 100.0, |line| line.len() as f32 * 10.0),
             0.0
         );
+    }
+
+    #[test]
+    fn api_text_scrollbar_drag_preserves_pointer_offset_inside_thumb() {
+        let rect = (100.0, 0.0, 200.0, 10.0);
+        let max_scroll = 600.0;
+        let current = 300.0;
+        let thumb = crate::scroll::scrollbar_thumb(
+            rect.0,
+            rect.2,
+            rect.2,
+            rect.2 + max_scroll,
+            current,
+            22.0,
+        )
+        .expect("scrollbar thumb");
+        let pointer = thumb.start + 7.0;
+        let (offset, initial_target) = api_text_scrollbar_x_drag_target(
+            rect,
+            current,
+            max_scroll,
+            pointer,
+            1.0,
+            None,
+        )
+        .expect("drag starts");
+        assert_eq!(offset, 7.0);
+        assert_eq!(initial_target, current);
+
+        let (_, moved_target) = api_text_scrollbar_x_drag_target(
+            rect,
+            initial_target,
+            max_scroll,
+            pointer + 20.0,
+            1.0,
+            Some(offset),
+        )
+        .expect("drag continues");
+        assert!(moved_target > initial_target);
+    }
+
+    #[test]
+    fn api_text_vertical_scrollbar_drag_preserves_pointer_offset_inside_thumb() {
+        let rect = (0.0, 100.0, 10.0, 200.0);
+        let max_scroll = 600.0;
+        let current = 300.0;
+        let thumb = crate::scroll::scrollbar_thumb(
+            rect.1,
+            rect.3,
+            rect.3,
+            rect.3 + max_scroll,
+            current,
+            22.0,
+        )
+        .expect("scrollbar thumb");
+        let pointer = thumb.start + 7.0;
+        let (offset, initial_target) = api_text_scrollbar_y_drag_target(
+            rect,
+            current,
+            max_scroll,
+            pointer,
+            1.0,
+            None,
+        )
+        .expect("drag starts");
+        assert_eq!(offset, 7.0);
+        assert_eq!(initial_target, current);
+
+        let (_, moved_target) = api_text_scrollbar_y_drag_target(
+            rect,
+            initial_target,
+            max_scroll,
+            pointer + 20.0,
+            1.0,
+            Some(offset),
+        )
+        .expect("drag continues");
+        assert!(moved_target > initial_target);
     }
 
     #[test]
@@ -1925,6 +2040,137 @@ mod tests {
     }
 
     #[test]
+    fn api_route_memories_follow_route_identity_after_model_reorder() {
+        let mut old_model = parse_openapi_model(ApiSpecId(29), &form_spec()).expect("parse");
+        let mut first = old_model.routes[0].clone();
+        first.method = ApiMethod::Get;
+        first.path = "/first".to_string();
+        let mut second = old_model.routes[0].clone();
+        second.method = ApiMethod::Post;
+        second.path = "/second".to_string();
+        old_model.routes = vec![first, second];
+        let previous_routes = old_model
+            .routes
+            .iter()
+            .map(|route| (route.method, route.path.clone()))
+            .collect::<Vec<_>>();
+        let mut reordered = old_model.clone();
+        reordered.routes.reverse();
+
+        let mut state = ApiClientTabState {
+            route_idx: Some(0),
+            body_json: "first".to_string(),
+            ..Default::default()
+        };
+        state.remember_route_state();
+        state.tab_scroll.current = 10.0;
+        state.tab_scroll.target = 12.0;
+        state.remember_view_scroll();
+        state.route_idx = Some(1);
+        state.body_json = "second".to_string();
+        state.remember_route_state();
+        state.tab_scroll.current = 20.0;
+        state.tab_scroll.target = 22.0;
+        state.remember_view_scroll();
+
+        remap_api_route_memories(&mut state, &previous_routes, &reordered);
+
+        assert_eq!(
+            state
+                .route_states
+                .iter()
+                .find(|saved| saved.body_json == "first")
+                .map(|saved| saved.route_idx),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .route_states
+                .iter()
+                .find(|saved| saved.body_json == "second")
+                .map(|saved| saved.route_idx),
+            Some(0)
+        );
+        assert_eq!(
+            state
+                .view_scrolls
+                .iter()
+                .find(|saved| saved.current == 10.0)
+                .and_then(|saved| saved.route_idx),
+            Some(1)
+        );
+        assert_eq!(
+            state
+                .view_scrolls
+                .iter()
+                .find(|saved| saved.current == 20.0)
+                .and_then(|saved| saved.route_idx),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn resetting_api_route_content_clears_pending_and_all_inner_scrolls() {
+        let mut state = ApiClientTabState {
+            route_idx: Some(7),
+            pending: true,
+            pending_request_id: Some(99),
+            response: Some(ApiJobResponse {
+                request_id: 99,
+                spec_id: ApiSpecId(29),
+                route_idx: 7,
+                status: Some(200),
+                elapsed_ms: 1,
+                server_reach_ms: None,
+                timing_text: String::new(),
+                headers: Vec::new(),
+                headers_text: String::new(),
+                curl_text: String::new(),
+                body: "stale".to_string(),
+                truncated: false,
+                error: None,
+                resolved_host: None,
+            }),
+            ..Default::default()
+        };
+        for scroll in [
+            &mut state.body_scroll,
+            &mut state.body_scroll_x,
+            &mut state.output_scroll,
+            &mut state.output_scroll_x,
+            &mut state.mock_static_response_scroll,
+            &mut state.mock_static_response_scroll_x,
+            &mut state.response_scroll,
+            &mut state.response_scroll_x,
+        ] {
+            scroll.current = 20.0;
+            scroll.target = 30.0;
+            scroll.is_dragging = true;
+        }
+
+        state.reset_route_content(Some(2));
+
+        assert_eq!(state.route_idx, Some(2));
+        assert!(!state.pending);
+        assert_eq!(state.pending_request_id, None);
+        assert!(state.response.is_none());
+        for scroll in [
+            &state.body_scroll,
+            &state.body_scroll_x,
+            &state.output_scroll,
+            &state.output_scroll_x,
+            &state.mock_static_response_scroll,
+            &state.mock_static_response_scroll_x,
+            &state.response_scroll,
+            &state.response_scroll_x,
+        ] {
+            assert_eq!(scroll.current, 0.0);
+            assert_eq!(scroll.target, 0.0);
+            assert!(!scroll.is_dragging);
+        }
+    }
+
+    #[test]
     fn api_focus_order_tabs_through_form_fields() {
         let model = parse_openapi_model(ApiSpecId(23), &form_spec()).expect("parse");
         let state = ApiClientTabState {
@@ -2143,6 +2389,55 @@ mod tests {
             api_tab_max_scroll(Some(&without_description), &tab_state, None, 180.0, 1.0);
         assert!(tab_max > without_description_max);
         assert_eq!(api_tab_max_scroll(None, &tab_state, None, 180.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn api_panel_scroll_height_matches_optional_rows_and_manual_route_stride() {
+        let mut state = ApiClientState::default();
+        let base = api_panel_max_scroll(&state, 0.0, 1.0);
+
+        state.persistence_error = Some("persist failed".to_string());
+        assert_eq!(
+            api_panel_max_scroll(&state, 0.0, 1.0) - base,
+            API_PANEL_PERSISTENCE_ERROR_ADVANCE
+        );
+
+        state.persistence_error = None;
+        state.mock.uv.last_error = "python failed".to_string();
+        assert_eq!(
+            api_panel_max_scroll(&state, 0.0, 1.0) - base,
+            API_PANEL_UV_ERROR_ADVANCE
+        );
+
+        state.mock.uv.last_error.clear();
+        state
+            .mock
+            .manual_routes
+            .push(crate::app::api_mock::types::ApiManualRoute {
+                stable_id: "manual-test".to_string(),
+                method: ApiMethod::Get,
+                path: "/test".to_string(),
+                enabled: true,
+                response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                python: None,
+                input_fields: Vec::new(),
+                output_fields: Vec::new(),
+            });
+        assert_eq!(
+            api_panel_max_scroll(&state, 0.0, 1.0) - base,
+            API_PANEL_MANUAL_ROUTE_ADVANCE
+        );
+    }
+
+    #[test]
+    fn api_panel_import_error_visibility_uses_same_timeout_as_renderer() {
+        let mut state = ApiClientState::default();
+        state.import_error = Some("failed".to_string());
+        state.import_error_at = Some(100);
+        assert!(api_panel_import_error_visible(&state, 104));
+        assert!(!api_panel_import_error_visible(&state, 105));
+        state.import_error_at = None;
+        assert!(api_panel_import_error_visible(&state, u64::MAX));
     }
 
     #[test]

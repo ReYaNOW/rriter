@@ -481,6 +481,58 @@ where
     text.len()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct FileTreeScrollbarLayout {
+    pub track_x: f32,
+    pub track_y: f32,
+    pub track_w: f32,
+    pub track_h: f32,
+    pub thumb: crate::scroll::ScrollbarThumb,
+    pub max_scroll: f32,
+}
+
+pub(crate) fn file_tree_scrollbar_layout(
+    panel_x: f32,
+    panel_y: f32,
+    panel_w: f32,
+    panel_h: f32,
+    scale: f32,
+    total_nodes: usize,
+    current_scroll: f32,
+) -> Option<FileTreeScrollbarLayout> {
+    if !panel_x.is_finite()
+        || !panel_y.is_finite()
+        || !panel_w.is_finite()
+        || !panel_h.is_finite()
+        || !scale.is_finite()
+        || scale <= 0.0
+        || panel_w <= 0.0
+        || panel_h <= 0.0
+    {
+        return None;
+    }
+    let row_h = crate::render_view::tree_ui::TREE_ROW_H * scale;
+    let content_h = total_nodes as f32 * row_h;
+    let track_y = panel_y + 4.0 * scale;
+    let track_h = (panel_h - 8.0 * scale).max(0.0);
+    let thumb = crate::scroll::scrollbar_thumb(
+        track_y,
+        track_h,
+        panel_h,
+        content_h,
+        current_scroll,
+        20.0 * scale,
+    )?;
+    Some(FileTreeScrollbarLayout {
+        track_x: panel_x + panel_w - 12.0 * scale,
+        track_y,
+        track_w: 12.0 * scale,
+        track_h,
+        thumb,
+        max_scroll: (content_h - panel_h).max(0.0),
+    })
+}
+
 #[cfg(test)]
 fn insert_file_tree_name_text(editor: &mut Editor, text: &str) {
     crate::app::single_line_input::insert_single_line_text(
@@ -617,47 +669,54 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn poll_file_tree(&mut self) -> bool {
         let mut updated = false;
-        let mut disconnected = false;
+        let mut finished = false;
         let mut reveal_path = None;
         if let Some(rx) = &self.file_tree_rx {
             loop {
                 match rx.try_recv() {
-                    Ok(crate::app::file_tree::FileTreeScanMessage::Nodes(nodes)) => {
-                        let selected_path = if self.ide_panel.file_tree_selection.len() == 1 {
-                            self.ide_panel.file_tree_selection.iter().next().cloned()
-                        } else {
-                            None
-                        };
-                        let selected_was_visible = selected_path.as_ref().is_some_and(|path| {
-                            self.ide_panel
-                                .file_tree_nodes
-                                .iter()
-                                .any(|node| crate::platform::paths_equal(&node.path, path))
-                        });
-                        self.ide_panel.file_tree_nodes = nodes;
-                        self.ide_panel
-                            .file_tree_selection
-                            .retain(|path| path.exists());
-                        if !selected_was_visible
-                            && selected_path.as_ref().is_some_and(|path| {
+                    Ok(message) => {
+                        let terminal = message.is_terminal();
+                        match message {
+                            crate::app::file_tree::FileTreeScanMessage::Nodes(nodes) => {
+                                let selected_path =
+                                    if self.ide_panel.file_tree_selection.len() == 1 {
+                                        self.ide_panel.file_tree_selection.iter().next().cloned()
+                                    } else {
+                                        None
+                                    };
+                                let selected_was_visible =
+                                    selected_path.as_ref().is_some_and(|path| {
+                                        self.ide_panel.file_tree_nodes.iter().any(|node| {
+                                            crate::platform::paths_equal(&node.path, path)
+                                        })
+                                    });
+                                self.ide_panel.file_tree_nodes = nodes;
                                 self.ide_panel
-                                    .file_tree_nodes
-                                    .iter()
-                                    .any(|node| crate::platform::paths_equal(&node.path, path))
-                            })
-                        {
-                            reveal_path = selected_path;
+                                    .file_tree_selection
+                                    .retain(|path| path.exists());
+                                if !selected_was_visible
+                                    && selected_path.as_ref().is_some_and(|path| {
+                                        self.ide_panel.file_tree_nodes.iter().any(|node| {
+                                            crate::platform::paths_equal(&node.path, path)
+                                        })
+                                    })
+                                {
+                                    reveal_path = selected_path;
+                                }
+                                updated = true;
+                            }
+                            crate::app::file_tree::FileTreeScanMessage::IconsReady => {
+                                updated = true;
+                            }
+                            crate::app::file_tree::FileTreeScanMessage::Failed(error) => {
+                                apply_file_tree_scan_error(&mut self.ide_panel, error);
+                                updated = true;
+                            }
                         }
-                        updated = true;
-                    }
-                    Ok(crate::app::file_tree::FileTreeScanMessage::IconsReady) => {
-                        updated = true;
-                    }
-                    Ok(crate::app::file_tree::FileTreeScanMessage::Failed(error)) => {
-                        apply_file_tree_scan_error(&mut self.ide_panel, error);
-                        disconnected = true;
-                        updated = true;
-                        break;
+                        if terminal {
+                            finished = true;
+                            break;
+                        }
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => break,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
@@ -665,14 +724,14 @@ impl App {
                             &mut self.ide_panel,
                             "Фоновое сканирование дерева файлов неожиданно завершилось",
                         );
-                        disconnected = true;
+                        finished = true;
                         updated = true;
                         break;
                     }
                 }
             }
         }
-        if disconnected {
+        if finished {
             self.file_tree_rx = None;
         }
         if let Some(path) = reveal_path {
@@ -708,9 +767,7 @@ impl App {
         let target = (row_center - viewport_h * 0.5)
             .clamp(0.0, max_scroll)
             .round();
-        self.ide_panel.explorer_scroll.current = target;
-        self.ide_panel.explorer_scroll.target = target;
-        self.ide_panel.explorer_scroll.velocity = 0.0;
+        self.ide_panel.explorer_scroll.jump_to(target);
         true
     }
 
@@ -810,7 +867,12 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_file_tree_left_click(&mut self, node_idx: usize, arrow: bool) {
+    pub fn handle_file_tree_left_click(
+        &mut self,
+        node_idx: usize,
+        arrow: bool,
+        same_click_target: bool,
+    ) {
         let Some(node) = self.ide_panel.file_tree_nodes.get(node_idx).cloned() else {
             return;
         };
@@ -852,9 +914,12 @@ impl App {
         });
 
         let now = std::time::Instant::now();
-        let double_click = (self.last_click_pos.0 - mx).abs() < 5.0
-            && (self.last_click_pos.1 - my).abs() < 5.0
-            && now.duration_since(self.last_click_time).as_millis() < 400;
+        let double_click = crate::app::ui_handlers::repeated_ui_click(
+            same_click_target,
+            now.duration_since(self.last_click_time),
+            mx - self.last_click_pos.0,
+            my - self.last_click_pos.1,
+        );
         self.last_click_time = now;
         self.last_click_pos = (mx, my);
         if double_click {
@@ -1440,21 +1505,17 @@ impl App {
         }
         let r = self.renderer.as_ref()?;
         let s = r.scale_factor;
-        let sb_w = 48.0 * s;
-        let panel_left_w = if self.ide_panel.any_top_open() {
-            self.ide_panel.left_width * s
-        } else {
-            return None;
-        };
-        if mx < sb_w || mx > sb_w + panel_left_w {
-            return None;
-        }
-        let title_h = 32.0 * s;
-        if my < title_h {
+        let (panel_x, panel_y, panel_w, panel_h, _) =
+            crate::app::mouse::app_panel_scroll_rect(
+                self,
+                crate::app::PanelId::Explorer,
+                s,
+            );
+        if !crate::ui_system::point_in_rect(mx, my, (panel_x, panel_y, panel_w, panel_h)) {
             return None;
         }
-        let row_h = 28.0 * s;
-        let content_y = my - title_h + self.ide_panel.explorer_scroll.current;
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
+        let content_y = my - panel_y + self.ide_panel.explorer_scroll.current;
         if content_y < 0.0 {
             return None;
         }
@@ -1478,10 +1539,13 @@ impl App {
             return false;
         };
         let s = r.scale_factor;
-        let sb_w = 48.0 * s;
-        let panel_left_w = self.ide_panel.left_width * s;
-        let title_h = 32.0 * s;
-        mx >= sb_w && mx <= sb_w + panel_left_w && my >= title_h
+        let (panel_x, panel_y, panel_w, panel_h, _) =
+            crate::app::mouse::app_panel_scroll_rect(
+                self,
+                crate::app::PanelId::Explorer,
+                s,
+            );
+        crate::ui_system::point_in_rect(mx, my, (panel_x, panel_y, panel_w, panel_h))
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

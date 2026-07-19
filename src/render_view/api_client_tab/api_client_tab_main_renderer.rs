@@ -1058,7 +1058,8 @@ impl Renderer {
                     content_w - 20.0 * s,
                     editor_h - 16.0 * s,
                 );
-                let static_scroll_y = tab_state.body_scroll.current.round();
+                let static_scroll_y = tab_state.mock_static_response_scroll.current.round();
+                let static_scroll_x = tab_state.mock_static_response_scroll_x.current.round();
                 if self.begin_api_text_clip(clip, tab_clip) {
                     if static_focused {
                         let text_top = api_text_area_top_from_baseline(cy + 29.0 * s, s);
@@ -1070,7 +1071,7 @@ impl Renderer {
                             editor_h - 16.0 * s,
                             s,
                             static_scroll_y,
-                            0.0,
+                            static_scroll_x,
                         );
                     }
                     self.draw_json_text_area(
@@ -1081,7 +1082,7 @@ impl Renderer {
                         editor_h - 16.0 * s,
                         s,
                         static_scroll_y,
-                        0.0,
+                        static_scroll_x,
                         false,
                     );
                     if static_focused && blink_alpha > 0.5 {
@@ -1094,7 +1095,7 @@ impl Renderer {
                             editor_h - 16.0 * s,
                             s,
                             static_scroll_y,
-                            0.0,
+                            static_scroll_x,
                         );
                     }
                     self.restore_api_tab_clip(tab_clip);
@@ -1106,6 +1107,22 @@ impl Renderer {
                     editor_h - 16.0 * s,
                     s,
                     static_scroll_y,
+                    crate::ui_system::UiId::ApiMockStaticResponseScrollY(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
+                );
+                self.draw_api_text_scrollbar_x(
+                    &static_text,
+                    x + pad + 8.0 * s,
+                    cy + editor_h - 12.0 * s,
+                    content_w - 16.0 * s,
+                    content_w - 20.0 * s,
+                    static_scroll_x,
+                    crate::ui_system::UiId::ApiMockStaticResponseScrollX(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
                 );
                 cy += editor_h + 14.0 * s;
             } else {
@@ -1926,6 +1943,10 @@ impl Renderer {
                     schema_h - 16.0 * s,
                     s,
                     tab_state.body_scroll.current.round(),
+                    crate::ui_system::UiId::ApiBodyScrollY(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
                 );
                 self.restore_api_tab_clip(tab_clip);
             }
@@ -2208,6 +2229,10 @@ impl Renderer {
                             body_h - 16.0 * s,
                             s,
                             tab_state.body_scroll.current,
+                            crate::ui_system::UiId::ApiBodyScrollY(route_idx),
+                            ui_registry,
+                            mx,
+                            my,
                         );
                         if body_focused && blink_alpha > 0.5 {
                             let text_top = api_text_area_top_from_baseline(cy + 29.0 * s, s);
@@ -2454,8 +2479,8 @@ impl Renderer {
                         content_w - 20.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
-                        0.0,
+                        tab_state.output_scroll.current.round(),
+                        tab_state.output_scroll_x.current.round(),
                     );
                 }
                 if tab_state.output_doc_view == ApiOutputDocView::Schema {
@@ -2466,8 +2491,8 @@ impl Renderer {
                         content_w - 20.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
-                        0.0,
+                        tab_state.output_scroll.current.round(),
+                        tab_state.output_scroll_x.current.round(),
                         false,
                         false,
                         route_idx,
@@ -2483,8 +2508,8 @@ impl Renderer {
                         content_w - 20.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
-                        0.0,
+                        tab_state.output_scroll.current.round(),
+                        tab_state.output_scroll_x.current.round(),
                         false,
                     );
                 }
@@ -2497,8 +2522,8 @@ impl Renderer {
                         content_w - 20.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
-                        0.0,
+                        tab_state.output_scroll.current.round(),
+                        tab_state.output_scroll_x.current.round(),
                     );
                 }
                 if tab_state.output_doc_view == ApiOutputDocView::Schema {
@@ -2509,7 +2534,11 @@ impl Renderer {
                         content_w - 20.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
+                        tab_state.output_scroll.current.round(),
+                        crate::ui_system::UiId::ApiOutputScrollY(route_idx),
+                        ui_registry,
+                        mx,
+                        my,
                     );
                 } else {
                     self.draw_api_text_scrollbar(
@@ -2518,10 +2547,26 @@ impl Renderer {
                         cy + 8.0 * s,
                         output_h - 16.0 * s,
                         s,
-                        tab_state.response_scroll.current.round(),
+                        tab_state.output_scroll.current.round(),
+                        crate::ui_system::UiId::ApiOutputScrollY(route_idx),
+                        ui_registry,
+                        mx,
+                        my,
                     );
                 }
                 self.restore_api_tab_clip(tab_clip);
+                self.draw_api_text_scrollbar_x(
+                    &output_text,
+                    x + pad + 8.0 * s,
+                    cy + output_h - 12.0 * s,
+                    content_w - 16.0 * s,
+                    content_w - 20.0 * s,
+                    tab_state.output_scroll_x.current,
+                    crate::ui_system::UiId::ApiOutputScrollX(route_idx),
+                    ui_registry,
+                    mx,
+                    my,
+                );
             }
             if show_example_menu && tab_state.output_schema_menu_anim > 0.01 {
                 let menu_x = x + pad;
@@ -2980,6 +3025,10 @@ impl Renderer {
                         resp_h - 16.0 * s,
                         s,
                         tab_state.response_scroll.current,
+                        crate::ui_system::UiId::ApiResponseScrollY(route_idx),
+                        ui_registry,
+                        mx,
+                        my,
                     );
                     if response_focused && blink_alpha > 0.5 {
                         let text_top = api_text_area_top_from_baseline(cy + 29.0 * s, s);
@@ -2995,20 +3044,18 @@ impl Renderer {
                         );
                     }
                     self.restore_api_tab_clip(tab_clip);
-                    if response_focused {
-                        self.draw_api_text_scrollbar_x(
-                            &response_text,
-                            x + pad + 8.0 * s,
-                            cy + resp_h - 12.0 * s,
-                            content_w - 16.0 * s,
-                            content_w - 20.0 * s,
-                            tab_state.response_scroll_x.current,
-                            crate::ui_system::UiId::ApiResponseScrollX(route_idx),
-                            ui_registry,
-                            mx,
-                            my,
-                        );
-                    }
+                    self.draw_api_text_scrollbar_x(
+                        &response_text,
+                        x + pad + 8.0 * s,
+                        cy + resp_h - 12.0 * s,
+                        content_w - 16.0 * s,
+                        content_w - 20.0 * s,
+                        tab_state.response_scroll_x.current,
+                        crate::ui_system::UiId::ApiResponseScrollX(route_idx),
+                        ui_registry,
+                        mx,
+                        my,
+                    );
                 }
                 if response.truncated {
                     self.draw_string_scaled_stable(

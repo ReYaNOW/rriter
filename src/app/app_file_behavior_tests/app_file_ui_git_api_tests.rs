@@ -1844,3 +1844,66 @@ fn api_mock_hover_clears_old_popup_when_crossing_mock_editors() {
         *state = crate::app::mouse::HoverState::default();
     });
 }
+
+#[test]
+fn cancelling_pointer_interactions_ends_api_scroll_drags_across_shared_states() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let spec_id = open_api_mock_test_route(&mut app);
+    let (_, state) = app.active_api_tab_mut_for(spec_id).expect("active API tab");
+    for scroll in [
+        &mut state.body_scroll,
+        &mut state.body_scroll_x,
+        &mut state.output_scroll,
+        &mut state.output_scroll_x,
+        &mut state.mock_static_response_scroll,
+        &mut state.mock_static_response_scroll_x,
+        &mut state.response_scroll,
+        &mut state.response_scroll_x,
+        &mut state.output_schema_menu_scroll,
+    ] {
+        scroll.is_dragging = true;
+        scroll.drag_offset = 5.0;
+    }
+    let mut python_scroll = crate::scroll::ScrollState::new(7.0);
+    python_scroll.is_dragging = true;
+    python_scroll.drag_offset = 4.0;
+    app.ide_panel.api.mock_python_scrolls.insert(
+        (
+            0,
+            crate::app::api_mock::ty_check::ApiMockSourcePart::Body,
+        ),
+        python_scroll,
+    );
+    app.ide_panel.is_resizing_left = true;
+    app.ide_panel.git.graph_resizing = true;
+
+    app.cancel_pointer_interactions();
+
+    let (_, state) = app.active_api_tab().expect("active API tab");
+    for scroll in [
+        &state.body_scroll,
+        &state.body_scroll_x,
+        &state.output_scroll,
+        &state.output_scroll_x,
+        &state.mock_static_response_scroll,
+        &state.mock_static_response_scroll_x,
+        &state.response_scroll,
+        &state.response_scroll_x,
+        &state.output_schema_menu_scroll,
+    ] {
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+    }
+    let python_scroll = app
+        .ide_panel
+        .api
+        .mock_python_scrolls
+        .get(&(0, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+        .expect("python scroll");
+    assert!(!python_scroll.is_dragging);
+    assert_eq!(python_scroll.drag_offset, 0.0);
+    assert!(!app.ide_panel.is_resizing_left);
+    assert!(!app.ide_panel.git.graph_resizing);
+}

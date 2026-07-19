@@ -257,6 +257,16 @@ pub(crate) fn git_graph_near_load_more(scroll_target: f32, max_scroll: f32, scal
     scroll_target >= (max_scroll - GIT_GRAPH_ROW_H * scale * 14.0).max(0.0)
 }
 
+pub(crate) fn apply_git_graph_scroll_drag(
+    scroll: &mut crate::scroll::ScrollState,
+    target: f32,
+    drag_offset: f32,
+) {
+    scroll.jump_to(target);
+    scroll.drag_offset = drag_offset;
+    scroll.is_dragging = true;
+}
+
 pub(crate) fn git_graph_scroll_drag_target(
     pointer_y: f32,
     rows_y: f32,
@@ -350,6 +360,20 @@ struct GitGraphReceiver {
 struct GitPanelTaskResult {
     event: GitPanelEvent,
     branch_ahead_cache: BranchAheadCache,
+}
+
+enum OneShotReceiverPoll<T> {
+    Pending,
+    Ready(T),
+    Disconnected,
+}
+
+fn poll_one_shot_receiver<T>(rx: &mpsc::Receiver<T>) -> OneShotReceiverPoll<T> {
+    match rx.try_recv() {
+        Ok(value) => OneShotReceiverPoll::Ready(value),
+        Err(mpsc::TryRecvError::Empty) => OneShotReceiverPoll::Pending,
+        Err(mpsc::TryRecvError::Disconnected) => OneShotReceiverPoll::Disconnected,
+    }
 }
 
 struct GitActionOutcome {

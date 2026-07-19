@@ -562,8 +562,7 @@ impl App {
                 self.autocomplete_options = local_options;
                 self.autocomplete_anim_progress = 0.0;
                 self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
-                self.autocomplete_scroll.current = 0.0;
-                self.autocomplete_scroll.target = 0.0;
+                self.autocomplete_scroll.reset();
                 self.autocomplete_mode = AutocompleteMode::TreeSitter;
                 self.autocomplete_active = true;
                 self.autocomplete_selected_idx = 0;
@@ -604,8 +603,7 @@ impl App {
             } else if source.is_api_mock() {
                 self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
             }
-            self.autocomplete_scroll.current = 0.0;
-            self.autocomplete_scroll.target = 0.0;
+            self.autocomplete_scroll.reset();
             self.autocomplete_mode = AutocompleteMode::TreeSitter;
             self.autocomplete_active = true;
             self.autocomplete_selected_idx = 0;
@@ -676,9 +674,15 @@ impl App {
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return;
         }
-        let selected_item = self.autocomplete_options[self.autocomplete_selected_idx]
-            .0
-            .clone();
+        let Some((selected_item, _)) = self
+            .autocomplete_options
+            .get(self.autocomplete_selected_idx)
+            .or_else(|| self.autocomplete_options.first())
+        else {
+            self.close_autocomplete();
+            return;
+        };
+        let selected_item = selected_item.clone();
         if selected_item.text_edit.is_some() || !selected_item.additional_text_edits.is_empty() {
             self.apply_lsp_completion_item(&selected_item);
             self.close_autocomplete();

@@ -29,6 +29,15 @@ fn scrollbar_x_click_target(
     }
 }
 
+pub(crate) fn repeated_ui_click(
+    same_target: bool,
+    elapsed: std::time::Duration,
+    dx: f32,
+    dy: f32,
+) -> bool {
+    same_target && elapsed < std::time::Duration::from_millis(400) && dx * dx + dy * dy < 25.0
+}
+
 fn content_y_hits_visual_text_row(
     content_y: f32,
     line_height: f32,
@@ -56,6 +65,21 @@ mod tests {
         assert!(jump.1 <= 800.0);
 
         assert!(scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 0.0, 1.0).is_none());
+    }
+
+
+    #[test]
+    fn repeated_click_requires_the_same_ui_target() {
+        let elapsed = std::time::Duration::from_millis(100);
+        assert!(repeated_ui_click(true, elapsed, 2.0, 1.0));
+        assert!(!repeated_ui_click(false, elapsed, 0.0, 0.0));
+        assert!(!repeated_ui_click(
+            true,
+            std::time::Duration::from_millis(400),
+            0.0,
+            0.0,
+        ));
+        assert!(!repeated_ui_click(true, elapsed, 5.0, 0.0));
     }
 
     #[test]
@@ -112,6 +136,8 @@ impl App {
     /// Обрабатывает клик по UI элементу
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
+        let same_click_target = self.last_click_ui_id == Some(id);
+        self.last_click_ui_id = Some(id);
         match id {
             UiId::DatabasePanelBody
             | UiId::DatabaseAdd
@@ -205,7 +231,7 @@ impl App {
             | UiId::DatabaseQueryReviewMessagesScrollY
             | UiId::DatabaseQueryCommit
             | UiId::DatabaseQueryRollback => {
-                self.handle_database_ui_click(id);
+                self.handle_database_ui_click(id, same_click_target);
             }
             UiId::ApiImportAdd
             | UiId::ApiImportFile
@@ -250,6 +276,7 @@ impl App {
             | UiId::ApiInputSchemaMenuItem(_, _)
             | UiId::ApiInputSchemaBody(_)
             | UiId::ApiInputSchemaFold(_, _)
+            | UiId::ApiBodyScrollY(_)
             | UiId::ApiBodyScrollX(_)
             | UiId::ApiBodyFieldInput(_, _)
             | UiId::ApiBodyAllowedValue(_, _, _)
@@ -261,10 +288,13 @@ impl App {
             | UiId::ApiOutputSchemaMenuItem(_, _)
             | UiId::ApiOutputSchemaBody(_)
             | UiId::ApiOutputSchemaFold(_, _)
+            | UiId::ApiOutputScrollY(_)
+            | UiId::ApiOutputScrollX(_)
             | UiId::ApiResponseBodyTab(_)
             | UiId::ApiResponseHeadersTab(_)
             | UiId::ApiResponseCurlTab(_)
             | UiId::ApiResponseBody(_)
+            | UiId::ApiResponseScrollY(_)
             | UiId::ApiResponseScrollX(_)
             | UiId::ApiResponseUseAccessToken(_, _)
             | UiId::ApiResponseSaveRefreshToken(_, _)
@@ -313,6 +343,8 @@ impl App {
             | UiId::ApiMockContractFieldAddConstraint(_, _, _)
             | UiId::ApiMockContractFieldAddConstraintOption(_, _, _, _)
             | UiId::ApiMockStaticResponseInput(_)
+            | UiId::ApiMockStaticResponseScrollY(_)
+            | UiId::ApiMockStaticResponseScrollX(_)
             | UiId::ApiMockCombinedPython(_)
             | UiId::ApiMockContractInput(_)
             | UiId::ApiMockSignatureInput(_)
@@ -329,7 +361,7 @@ impl App {
             | UiId::ApiMockManualRoutePath(_)
             | UiId::ApiMockManualRouteRemove(_)
             | UiId::ApiTabBody => {
-                self.handle_api_client_click(id);
+                self.handle_api_client_click(id, same_click_target);
             }
             UiId::HoverPopupScroll
             | UiId::StatusBar
@@ -560,6 +592,41 @@ impl App {
             UiId::SettingsIdeIgnoreInput => {
                 self.settings_ignore_focused = true;
                 self.window.as_ref().unwrap().request_redraw();
+            }
+            UiId::SettingsIdeScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsIdeScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    let window_size = self.window.as_ref().map(|window| window.inner_size());
+                    if let Some(window_size) = window_size {
+                        let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
+                            window_size.width as f32, window_size.height as f32, s, self.settings_anim_progress,
+                        );
+                        let pad_x = 12.0 * s;
+                        let widths = self.ide_ignore_patterns.iter().map(|pattern| {
+                            self.renderer.as_mut().unwrap().measure_ui_width(pattern, 0.88)
+                                + pad_x * 2.0 + 22.0 * s
+                        }).collect::<Vec<_>>();
+                        let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
+                            layout, self.ide_workspaces.len(), widths, s,
+                        );
+                        crate::app::mouse::begin_scrollbar_drag(
+                            &mut self.settings_ide_scroll, pointer, rect.1, rect.3, max_scroll, 40.0 * s,
+                        );
+                    }
+                }
+            }
+            UiId::SettingsFaqScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsFaqScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    let max_scroll = self.renderer.as_mut().map(|renderer| {
+                        renderer.get_faq_max_scroll(&self.faq_editor, rect.3)
+                    }).unwrap_or(0.0);
+                    crate::app::mouse::begin_scrollbar_drag(
+                        &mut self.settings_scroll, pointer, rect.1, rect.3, max_scroll, 40.0 * s,
+                    );
+                }
             }
             UiId::SettingsToolPick(idx) => {
                 if !self.tool_installer.is_running()
@@ -834,13 +901,14 @@ impl App {
                     .map(|r| (r.last_mouse_x, r.last_mouse_y))
                     .unwrap_or((0.0, 0.0));
                 let now = std::time::Instant::now();
-                let same_target =
-                    self.ide_panel.git.selected_file == Some((workspace_idx, file_idx));
                 let dx = mx - self.last_click_pos.0;
                 let dy = my - self.last_click_pos.1;
-                let double_click = same_target
-                    && dx * dx + dy * dy < 25.0
-                    && now.duration_since(self.last_click_time).as_millis() < 400;
+                let double_click = repeated_ui_click(
+                    same_click_target,
+                    now.duration_since(self.last_click_time),
+                    dx,
+                    dy,
+                );
                 self.ide_panel.git.selected_file = Some((workspace_idx, file_idx));
                 self.last_click_time = now;
                 self.last_click_pos = (mx, my);
@@ -1065,13 +1133,14 @@ impl App {
 
             // File tree
             UiId::FileTreeNode(idx) => {
-                self.handle_file_tree_left_click(idx, false);
+                self.handle_file_tree_left_click(idx, false, same_click_target);
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::FileTreeArrow(idx) => {
-                self.handle_file_tree_left_click(idx, true);
+                self.handle_file_tree_left_click(idx, true, same_click_target);
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::FileTreeScrollY => {}
             UiId::FileTreeMenuItem(idx) => {
                 self.handle_file_tree_context_item(idx);
                 self.window.as_ref().unwrap().request_redraw();
@@ -1297,10 +1366,12 @@ impl App {
                     let max_scroll = r.get_max_scroll(&self.editor, wh);
                     let ry = slot_index as f32 * r.line_height;
                     let padding = r.line_height * 3.0;
-                    self.scroll_y.target = (line_y - ry - padding)
-                        .max(0.0)
-                        .clamp(0.0, max_scroll)
-                        .round();
+                    self.scroll_y.animate_to(
+                        (line_y - ry - padding)
+                            .max(0.0)
+                            .clamp(0.0, max_scroll)
+                            .round(),
+                    );
                     self.scroll_y.anim_speed = 15.0;
                 }
                 self.window.as_ref().unwrap().request_redraw();
@@ -1508,10 +1579,12 @@ impl App {
                     let now = std::time::Instant::now();
                     let dx = mx - self.last_click_pos.0;
                     let dy = my - self.last_click_pos.1;
-                    let dist_sq = dx * dx + dy * dy;
-
-                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0
-                    {
+                    if repeated_ui_click(
+                        same_click_target,
+                        now.duration_since(self.last_click_time),
+                        dx,
+                        dy,
+                    ) {
                         self.click_count += 1;
                     } else {
                         self.click_count = 1;
@@ -1634,21 +1707,15 @@ impl App {
                     if let Some((pointer, track_start, track_len, viewport_len, content_len, min)) =
                         geometry
                     {
-                        let max_scroll = (content_len - viewport_len).max(0.0);
-                        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                            track_start,
-                            track_len,
-                            viewport_len,
-                            content_len,
-                            scroll.current,
-                            min,
-                        ) && let Some((drag_offset, target)) =
-                            crate::scroll::scrollbar_drag_target(
+                        if let Some((drag_offset, target)) =
+                            crate::app::lsp_actions::lsp_log_scrollbar_drag_target(
                                 pointer,
                                 track_start,
                                 track_len,
-                                thumb,
-                                max_scroll,
+                                viewport_len,
+                                content_len,
+                                scroll.current,
+                                min / 20.0,
                                 None,
                             )
                         {
@@ -1691,21 +1758,15 @@ impl App {
                     if let Some((pointer, track_start, track_len, viewport_len, content_len, min)) =
                         geometry
                     {
-                        let max_scroll = (content_len - viewport_len).max(0.0);
-                        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                            track_start,
-                            track_len,
-                            viewport_len,
-                            content_len,
-                            scroll.current,
-                            min,
-                        ) && let Some((drag_offset, target)) =
-                            crate::scroll::scrollbar_drag_target(
+                        if let Some((drag_offset, target)) =
+                            crate::app::lsp_actions::lsp_log_scrollbar_drag_target(
                                 pointer,
                                 track_start,
                                 track_len,
-                                thumb,
-                                max_scroll,
+                                viewport_len,
+                                content_len,
+                                scroll.current,
+                                min / 20.0,
                                 None,
                             )
                         {
@@ -1917,10 +1978,12 @@ impl App {
                     let now = std::time::Instant::now();
                     let dx = mx - self.last_click_pos.0;
                     let dy = my - self.last_click_pos.1;
-                    let dist_sq = dx * dx + dy * dy;
-
-                    if now.duration_since(self.last_click_time).as_millis() < 400 && dist_sq < 25.0
-                    {
+                    if repeated_ui_click(
+                        same_click_target,
+                        now.duration_since(self.last_click_time),
+                        dx,
+                        dy,
+                    ) {
                         self.click_count += 1;
                     } else {
                         self.click_count = 1;
@@ -1939,7 +2002,7 @@ impl App {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
-    fn handle_database_ui_click(&mut self, id: UiId) {
+    fn handle_database_ui_click(&mut self, id: UiId, same_click_target: bool) {
         use crate::app::database::{
             DatabaseConnectionColor, PostgresTlsMode, SshHostKeyPolicy,
         };
@@ -2242,9 +2305,12 @@ impl App {
                     let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
                         (renderer.last_mouse_x, renderer.last_mouse_y)
                     });
-                    let double = now.duration_since(self.last_click_time).as_millis() < 400
-                        && (mouse.0 - self.last_click_pos.0).powi(2)
-                            + (mouse.1 - self.last_click_pos.1).powi(2) < 25.0;
+                    let double = repeated_ui_click(
+                        same_click_target,
+                        now.duration_since(self.last_click_time),
+                        mouse.0 - self.last_click_pos.0,
+                        mouse.1 - self.last_click_pos.1,
+                    );
                     self.last_click_time = now;
                     self.last_click_pos = mouse;
                     if double {
@@ -2263,7 +2329,21 @@ impl App {
                     state.grid.focused_input = None;
                 }
             }
-            UiId::DatabaseTableCell(row, column) => self.handle_database_table_cell_click(row, column),
+            UiId::DatabaseTableCell(row, column) => {
+                let now = std::time::Instant::now();
+                let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
+                    (renderer.last_mouse_x, renderer.last_mouse_y)
+                });
+                let double = repeated_ui_click(
+                    same_click_target,
+                    now.duration_since(self.last_click_time),
+                    mouse.0 - self.last_click_pos.0,
+                    mouse.1 - self.last_click_pos.1,
+                );
+                self.last_click_time = now;
+                self.last_click_pos = mouse;
+                self.handle_database_table_cell_click(row, column, double);
+            }
             UiId::DatabaseTableEnumOption(option) => self.select_database_table_enum_option(option),
             UiId::DatabaseTableEnumPreviousPage => self.page_database_table_enum_options(false),
             UiId::DatabaseTableEnumNextPage => self.page_database_table_enum_options(true),
@@ -2296,10 +2376,12 @@ impl App {
                 let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
                     (renderer.last_mouse_x, renderer.last_mouse_y)
                 });
-                let double = now.duration_since(self.last_click_time).as_millis() < 400
-                    && (mouse.0 - self.last_click_pos.0).powi(2)
-                        + (mouse.1 - self.last_click_pos.1).powi(2)
-                        < 25.0;
+                let double = repeated_ui_click(
+                    same_click_target,
+                    now.duration_since(self.last_click_time),
+                    mouse.0 - self.last_click_pos.0,
+                    mouse.1 - self.last_click_pos.1,
+                );
                 self.last_click_time = now;
                 self.last_click_pos = mouse;
                 if double {

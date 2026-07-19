@@ -10,6 +10,103 @@ pub(crate) fn lsp_server_logs_h_for_content(inner_total_h: f32, content_h: f32, 
     (inner_total_h + 54.0 * s).clamp(min_h, max_h)
 }
 
+pub(crate) fn lsp_log_scrollbar_thumb(
+    track_start: f32,
+    track_len: f32,
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    scale: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    crate::scroll::scrollbar_thumb(
+        track_start,
+        track_len,
+        viewport_len,
+        content_len,
+        current_scroll,
+        20.0 * scale,
+    )
+}
+
+pub(crate) fn lsp_log_scrollbar_drag_target(
+    pointer: f32,
+    track_start: f32,
+    track_len: f32,
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let thumb = lsp_log_scrollbar_thumb(
+        track_start,
+        track_len,
+        viewport_len,
+        content_len,
+        current_scroll,
+        scale,
+    )?;
+    crate::scroll::scrollbar_drag_target(
+        pointer,
+        track_start,
+        track_len,
+        thumb,
+        (content_len - viewport_len).max(0.0),
+        drag_offset,
+    )
+}
+
+pub(crate) fn lsp_log_inner_size_by<F>(
+    log_editor: &crate::editor::Editor,
+    scale: f32,
+    mut measure_line: F,
+) -> (f32, f32)
+where
+    F: FnMut(&str, &str, usize, usize) -> f32,
+{
+    let mut visible_lines = 0usize;
+    let mut max_width = 0.0f32;
+    let mut physical_line = 0usize;
+    let (first, second) = log_editor.text_parts();
+    while physical_line < log_editor.line_offsets.len() {
+        let start = log_editor.line_offsets[physical_line];
+        let end = if physical_line + 1 < log_editor.line_offsets.len() {
+            log_editor.line_offsets[physical_line + 1].saturating_sub(1)
+        } else {
+            log_editor.len()
+        };
+        max_width = max_width.max(measure_line(first, second, start, end));
+        visible_lines += 1;
+        if log_editor.folded_lines.contains(&physical_line)
+            && let Some(&fold_end) = log_editor.foldable_lines.get(&physical_line)
+        {
+            physical_line = fold_end;
+        }
+        physical_line += 1;
+    }
+    (visible_lines as f32 * 16.0 * scale, max_width)
+}
+
+fn lsp_log_monospace_line_width(
+    first: &str,
+    second: &str,
+    start: usize,
+    end: usize,
+    scale: f32,
+) -> f32 {
+    let first_len = first.len();
+    let mut chars = 0usize;
+    if start < first_len {
+        chars += first[start..end.min(first_len)].chars().count();
+    }
+    if end > first_len {
+        chars += second[start.saturating_sub(first_len)..end - first_len]
+            .chars()
+            .count();
+    }
+    chars as f32 * 7.5 * scale
+}
+
 pub(crate) fn lsp_server_logs_h_for_row(
     inner_total_h: f32,
     content_y: f32,
@@ -66,44 +163,16 @@ impl App {
     /// Возвращает (x, y, w, h) области LSP-панели или None если не открыта
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn lsp_panel_bounds(&self) -> Option<(f32, f32, f32, f32)> {
-        let s = self.renderer.as_ref()?.scale_factor;
-        let is_top = self.ide_panel.slots.iter().any(|sl| {
-            sl.id == crate::app::PanelId::LspServers && sl.group == crate::app::PanelGroup::Top
-        });
-        if is_top {
-            let wh = self.window.as_ref()?.inner_size().height as f32;
-            let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-                self.ide_panel.bottom_height * s
-            } else {
-                0.0
-            };
-            Some((
-                48.0 * s,
-                32.0 * s,
-                self.ide_panel.left_width * s,
-                wh - 32.0 * s - panel_bottom_h,
-            ))
-        } else {
-            let first = self
-                .ide_panel
-                .slots
-                .iter()
-                .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)?;
-            if first.id != crate::app::PanelId::LspServers {
-                return None;
-            }
-            let tab_h = 32.0 * s;
-            let panel_bottom_h = self.ide_panel.bottom_height * s;
-            let wh = self.window.as_ref()?.inner_size().height as f32;
-            let ww = self.window.as_ref()?.inner_size().width as f32;
-            let panel_y = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
-            Some((
-                48.0 * s,
-                panel_y + 1.0 + tab_h,
-                ww - 48.0 * s,
-                panel_bottom_h - 1.0 - tab_h,
-            ))
+        if !self.ide_panel.is_open(crate::app::PanelId::LspServers) {
+            return None;
         }
+        let s = self.renderer.as_ref()?.scale_factor;
+        let (x, y, w, h, _) = crate::app::mouse::app_panel_scroll_rect(
+            self,
+            crate::app::PanelId::LspServers,
+            s,
+                );
+        Some((x, y, w, h))
     }
 
     /// Подсчитывает суммарную высоту LSP-панели с учётом свёрнутых блоков
@@ -133,33 +202,14 @@ impl App {
         info: &crate::lsp::LspServerInfo,
         s: f32,
     ) -> (f32, f32) {
-        if let Some(log_ed) = self.ide_panel.lsp_log_editors.get(info.name) {
-            let mut lines = 0;
-            let mut max_w = 0.0f32;
-            let mut phys_line = 0;
-            while phys_line < log_ed.line_offsets.len() {
-                let start = log_ed.line_offsets[phys_line];
-                let end = if phys_line + 1 < log_ed.line_offsets.len() {
-                    log_ed.line_offsets[phys_line + 1].saturating_sub(1)
-                } else {
-                    log_ed.len()
-                };
-                let w = (end.saturating_sub(start)) as f32 * 7.5 * s;
-                if w > max_w {
-                    max_w = w;
-                }
-                lines += 1;
-                if log_ed.folded_lines.contains(&phys_line) {
-                    if let Some(&fold_end) = log_ed.foldable_lines.get(&phys_line) {
-                        phys_line = fold_end;
-                    }
-                }
-                phys_line += 1;
-            }
-            (lines as f32 * 16.0 * s, max_w)
-        } else {
-            (0.0, 0.0)
-        }
+        self.ide_panel
+            .lsp_log_editors
+            .get(info.name)
+            .map_or((0.0, 0.0), |log_editor| {
+                lsp_log_inner_size_by(log_editor, s, |first, second, start, end| {
+                    lsp_log_monospace_line_width(first, second, start, end, s)
+                })
+            })
     }
 
     /// Открывает меню быстрых действий LSP для текущей строки
@@ -506,4 +556,48 @@ mod tests {
         );
         assert_eq!(build_noqa_comment(Some("# noqa: F401"), &[]), "# noqa");
     }
+    #[test]
+    fn lsp_log_scrollbar_drag_uses_the_rendered_track_origin() {
+        let track_start = 107.0;
+        let track_len = 186.0;
+        let viewport_len = 200.0;
+        let content_len = 600.0;
+        let current = 150.0;
+        let thumb = lsp_log_scrollbar_thumb(
+            track_start,
+            track_len,
+            viewport_len,
+            content_len,
+            current,
+            1.0,
+        )
+        .unwrap();
+        let pointer_offset = thumb.len * 0.35;
+        let pointer = thumb.start + pointer_offset;
+        let (offset, target) = lsp_log_scrollbar_drag_target(
+            pointer,
+            track_start,
+            track_len,
+            viewport_len,
+            content_len,
+            current,
+            1.0,
+            None,
+        )
+        .unwrap();
+        assert!((offset - pointer_offset).abs() < 0.001);
+        assert!((target - current).abs() < 0.001);
+    }
+
+    #[test]
+    fn lsp_log_inner_size_counts_unicode_characters_not_utf8_bytes() {
+        let mut editor = crate::editor::Editor::new(32);
+        editor.set_text_clean("λ中a\nsecond");
+        let (height, width) = lsp_log_inner_size_by(&editor, 1.0, |first, second, start, end| {
+            lsp_log_monospace_line_width(first, second, start, end, 1.0)
+        });
+        assert_eq!(height, 32.0);
+        assert_eq!(width, 6.0 * 7.5);
+    }
+
 }

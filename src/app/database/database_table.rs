@@ -41,7 +41,8 @@ pub enum DatabaseTableModal {
         tab_id: super::DatabaseTabId,
         position: super::DatabaseCellPosition,
         input: DatabaseDialogInput,
-        scroll: crate::scroll::ScrollState,
+        scroll_x: crate::scroll::ScrollState,
+        scroll_y: crate::scroll::ScrollState,
         error: Option<String>,
     },
     Review {
@@ -49,6 +50,45 @@ pub enum DatabaseTableModal {
         state: super::DatabaseTableReviewState,
         scroll: crate::scroll::ScrollState,
     },
+}
+
+
+pub(crate) fn database_multiline_line_count(text: &str) -> usize {
+    text.as_bytes()
+        .iter()
+        .filter(|byte| **byte == b'\n')
+        .count()
+        .saturating_add(1)
+}
+
+pub(crate) fn database_multiline_lines(
+    text: &str,
+) -> impl Iterator<Item = (usize, &str)> {
+    let mut start = 0usize;
+    let mut finished = false;
+    std::iter::from_fn(move || {
+        if finished {
+            return None;
+        }
+        let line_start = start;
+        let remainder = &text[line_start..];
+        let raw_end = if let Some(relative_end) = remainder.find('\n') {
+            let raw_end = line_start.saturating_add(relative_end);
+            start = raw_end.saturating_add(1);
+            raw_end
+        } else {
+            finished = true;
+            text.len()
+        };
+        let line_end = if raw_end > line_start
+            && text.as_bytes().get(raw_end - 1) == Some(&b'\r')
+        {
+            raw_end - 1
+        } else {
+            raw_end
+        };
+        Some((line_start, &text[line_start..line_end]))
+    })
 }
 
 
@@ -924,6 +964,20 @@ mod tests {
             xmin: Some("7".to_string()),
             state,
         }
+    }
+
+    #[test]
+    fn multiline_lines_keep_empty_and_trailing_visual_rows() {
+        assert_eq!(database_multiline_line_count(""), 1);
+        assert_eq!(database_multiline_line_count("a\n"), 2);
+        assert_eq!(
+            database_multiline_lines("a\n").collect::<Vec<_>>(),
+            vec![(0, "a"), (2, "")]
+        );
+        assert_eq!(
+            database_multiline_lines("Ж\r\nnext").collect::<Vec<_>>(),
+            vec![(0, "Ж"), (4, "next")]
+        );
     }
 
     #[test]

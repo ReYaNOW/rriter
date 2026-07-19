@@ -454,7 +454,7 @@ impl App {
                 return;
             }
             PhysicalKey::Code(KeyCode::F1) => {
-                self.show_settings = !self.show_settings;
+                self.set_settings_visible(!self.show_settings);
                 self.is_dragging = false;
                 return;
             }

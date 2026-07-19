@@ -1,3 +1,39 @@
+pub(crate) fn hover_popup_scrollbar_thumb(
+    rect: (f32, f32, f32, f32),
+    max_scroll: f32,
+    current_scroll: f32,
+    scale: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    let (_, y, _, height) = rect;
+    crate::scroll::scrollbar_thumb(
+        y + 8.0 * scale,
+        (height - 16.0 * scale).max(0.0),
+        height,
+        height + max_scroll.max(0.0),
+        current_scroll,
+        20.0 * scale,
+    )
+}
+
+pub(crate) fn hover_popup_scrollbar_drag_target(
+    rect: (f32, f32, f32, f32),
+    max_scroll: f32,
+    current_scroll: f32,
+    pointer_y: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let thumb = hover_popup_scrollbar_thumb(rect, max_scroll, current_scroll, scale)?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_y,
+        rect.1 + 8.0 * scale,
+        (rect.3 - 16.0 * scale).max(0.0),
+        thumb,
+        max_scroll.max(0.0),
+        drag_offset,
+    )
+}
+
 #[derive(Debug, Clone)]
 pub struct HoverPopup {
     pub text: String,
@@ -108,8 +144,7 @@ impl Default for HoverState {
 impl HoverState {
     pub fn reset_diagnostic_popup(&mut self) {
         self.diag_rect = None;
-        self.diag_scroll.target = 0.0;
-        self.diag_scroll.current = 0.0;
+        self.diag_scroll.reset();
         self.diag_max_scroll = 0.0;
         self.diag_hover_timer = 0.0;
         self.diag_hover_timer_idx = None;
@@ -134,8 +169,7 @@ impl HoverState {
             return;
         }
         self.diag_rect = None;
-        self.diag_scroll.target = 0.0;
-        self.diag_scroll.current = 0.0;
+        self.diag_scroll.reset();
         self.diag_max_scroll = 0.0;
         self.diag_anim_progress = 0.0;
         self.diag_selection_anchor = None;
@@ -352,8 +386,7 @@ impl HoverState {
         if self.stale_combined_popup {
             self.diag_hover_ready_after_stale = true;
             self.diag_rect = None;
-            self.diag_scroll.target = 0.0;
-            self.diag_scroll.current = 0.0;
+            self.diag_scroll.reset();
             self.diag_max_scroll = 0.0;
             self.diag_anim_progress = 0.0;
             self.hovered_diags.clear();
@@ -615,4 +648,29 @@ pub fn is_in_hover_popup_or_bridge(
     };
 
     on_line_x && on_line_y
+}
+
+#[cfg(test)]
+mod scrollbar_tests {
+    use super::*;
+
+    #[test]
+    fn hover_scrollbar_drag_preserves_pointer_offset() {
+        let rect = (20.0, 40.0, 320.0, 180.0);
+        let max_scroll = 420.0;
+        let current = 140.0;
+        let thumb = hover_popup_scrollbar_thumb(rect, max_scroll, current, 1.0).unwrap();
+        let pointer_offset = thumb.len * 0.4;
+        let (offset, target) = hover_popup_scrollbar_drag_target(
+            rect,
+            max_scroll,
+            current,
+            thumb.start + pointer_offset,
+            1.0,
+            None,
+        )
+        .unwrap();
+        assert!((offset - pointer_offset).abs() < 0.001);
+        assert!((target - current).abs() < 0.001);
+    }
 }

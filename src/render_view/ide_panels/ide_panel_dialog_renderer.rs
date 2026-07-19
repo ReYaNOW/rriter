@@ -74,7 +74,9 @@ impl Renderer {
         mx: f32,
         my: f32,
         panel_bottom_h: f32,
-        _is_ui_disabled: bool,
+        is_ui_disabled: bool,
+        blink_alpha: f32,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
         let sb_w = 48.0 * s;
         let panel_x = sb_w;
@@ -161,61 +163,31 @@ impl Renderer {
             self.push_rect(panel_x, panel_y, panel_w, 2.0, [0.60, 0.35, 0.85, 0.4]);
         }
 
-        // Плейсхолдер контента
         let content_y = panel_y + 1.0 + tab_h;
         let content_h = panel_bottom_h - 1.0 - tab_h;
         if content_h > 8.0 * s {
             if let Some(slot) = ide_panel
                 .slots
                 .iter()
-                .find(|sl| sl.group == crate::app::PanelGroup::Bottom && sl.open)
+                .find(|slot| slot.group == crate::app::PanelGroup::Bottom && slot.open)
             {
-                if slot.id == crate::app::PanelId::LspServers {
-                    self.draw_lsp_servers_panel(
-                        panel_x,
-                        content_y,
-                        panel_w,
-                        content_h,
-                        s,
-                        ide_panel,
-                        lsp_has_diagnostics,
-                        ui_registry,
-                    );
-                } else if slot.id == crate::app::PanelId::Problems {
-                    self.draw_problems_panel(
-                        panel_x,
-                        content_y,
-                        panel_w,
-                        content_h,
-                        s,
-                        lsp,
-                        ide_panel,
-                        ui_registry,
-                    );
-                } else if slot.id == crate::app::PanelId::Terminal {
-                    self.draw_terminal_panel(
-                        panel_x,
-                        content_y,
-                        panel_w,
-                        content_h,
-                        s,
-                        ide_panel,
-                        ui_registry,
-                        mx,
-                        my,
-                    );
-                } else {
-                    let label = slot.id.label();
-                    let lw = self.measure_ui_width(label, 0.85);
-                    let col = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.18];
-                    self.draw_string_scaled(
-                        label,
-                        panel_x + (panel_w - lw) / 2.0,
-                        content_y + content_h / 2.0 + 6.0 * s,
-                        col,
-                        0.85,
-                    );
-                }
+                self.draw_ide_panel_content(
+                    slot.id,
+                    panel_x,
+                    content_y,
+                    panel_w,
+                    content_h,
+                    s,
+                    ide_panel,
+                    lsp,
+                    ui_registry,
+                    lsp_has_diagnostics,
+                    mx,
+                    my,
+                    is_ui_disabled,
+                    blink_alpha,
+                    active_api_route,
+                );
             }
         }
     }

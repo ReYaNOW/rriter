@@ -65,6 +65,7 @@ pub use database_table::{
     build_table_change_plan, count_public_table_rows,
     database_table_effective_order_by, load_public_table_chunk, validate_table_fragment,
 };
+pub(crate) use database_table::{database_multiline_line_count, database_multiline_lines};
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

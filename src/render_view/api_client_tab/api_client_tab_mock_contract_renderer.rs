@@ -634,7 +634,7 @@ impl Renderer {
         let value = if is_focused {
             input_editor.get_full_text()
         } else {
-            api_mock_contract_prop_value(field, prop)
+            crate::app::api_client::api_mock_contract_field_prop_value(field, prop)
         };
         if matches!(prop, crate::ui_system::ApiMockContractFieldProp::Enum) {
             self.push_rounded_rect_border(
@@ -770,7 +770,7 @@ fn api_mock_contract_field_type_label(
         ApiMockContractFieldKind::Array => {
             let item = field
                 .item_kind
-                .map(api_mock_contract_kind_label)
+                .map(crate::app::api_mock::types::api_mock_contract_kind_label)
                 .unwrap_or("Any");
             format!("list[{item}]")
         }
@@ -778,24 +778,6 @@ fn api_mock_contract_field_type_label(
         ApiMockContractFieldKind::Bytes => "bytes".to_string(),
         ApiMockContractFieldKind::File => "file".to_string(),
         ApiMockContractFieldKind::Any => "Any".to_string(),
-    }
-}
-
-fn api_mock_contract_kind_label(
-    kind: crate::app::api_mock::types::ApiMockContractFieldKind,
-) -> &'static str {
-    use crate::app::api_mock::types::ApiMockContractFieldKind;
-
-    match kind {
-        ApiMockContractFieldKind::String => "str",
-        ApiMockContractFieldKind::Integer => "int",
-        ApiMockContractFieldKind::Number => "float",
-        ApiMockContractFieldKind::Boolean => "bool",
-        ApiMockContractFieldKind::Array => "list",
-        ApiMockContractFieldKind::Object => "dict",
-        ApiMockContractFieldKind::Bytes => "bytes",
-        ApiMockContractFieldKind::File => "file",
-        ApiMockContractFieldKind::Any => "Any",
     }
 }
 
@@ -832,49 +814,6 @@ const API_MOCK_CONTRACT_PROP_LABEL_SCALE: f32 = 0.82;
 
 fn api_mock_contract_prop_label_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
     api_centered_text_y(row_y.round(), row_h.round(), scale)
-}
-
-fn api_mock_contract_prop_value(
-    field: &crate::app::api_mock::types::ApiMockContractField,
-    prop: crate::ui_system::ApiMockContractFieldProp,
-) -> String {
-    match prop {
-        crate::ui_system::ApiMockContractFieldProp::Required
-        | crate::ui_system::ApiMockContractFieldProp::Nullable => String::new(),
-        crate::ui_system::ApiMockContractFieldProp::Default => {
-            field.default_value.clone().unwrap_or_default()
-        }
-        crate::ui_system::ApiMockContractFieldProp::Enum => field.enum_values.join(", "),
-        crate::ui_system::ApiMockContractFieldProp::MinLength => field
-            .constraints
-            .min_length
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        crate::ui_system::ApiMockContractFieldProp::MaxLength => field
-            .constraints
-            .max_length
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        crate::ui_system::ApiMockContractFieldProp::Pattern => {
-            field.constraints.pattern.clone().unwrap_or_default()
-        }
-        crate::ui_system::ApiMockContractFieldProp::Minimum => {
-            field.constraints.minimum.clone().unwrap_or_default()
-        }
-        crate::ui_system::ApiMockContractFieldProp::Maximum => {
-            field.constraints.maximum.clone().unwrap_or_default()
-        }
-        crate::ui_system::ApiMockContractFieldProp::MinItems => field
-            .constraints
-            .min_items
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-        crate::ui_system::ApiMockContractFieldProp::MaxItems => field
-            .constraints
-            .max_items
-            .map(|value| value.to_string())
-            .unwrap_or_default(),
-    }
 }
 
 fn api_mock_contract_text_props(

@@ -8,8 +8,10 @@ pub mod api_client_panel;
 pub mod api_client_tab;
 mod editor_text_layer;
 mod hover_overlays;
+#[cfg(test)]
 pub(crate) use hover_overlays::hover_trace_epoch_millis;
 mod ide_panels;
+#[cfg(test)]
 pub(crate) use ide_panels::intersect_scissor_boxes;
 pub mod lsp_ui;
 pub mod minimap_ui;
@@ -33,16 +35,25 @@ pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
 pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 30.0;
 
+pub(crate) fn ide_tab_bar_height(show_welcome: bool, is_ide_mode: bool, scale: f32) -> f32 {
+    if show_welcome || !is_ide_mode {
+        0.0
+    } else {
+        44.0 * scale
+    }
+}
+
 pub(crate) fn editor_content_top_inset(
     show_welcome: bool,
     is_ide_mode: bool,
     database_query: bool,
     scale: f32,
 ) -> f32 {
+    let tab_bar = ide_tab_bar_height(show_welcome, is_ide_mode, scale);
     if show_welcome || !is_ide_mode {
-        0.0
+        tab_bar
     } else {
-        (44.0 + if database_query { 40.0 } else { 0.0 }) * scale
+        tab_bar + if database_query { 40.0 * scale } else { 0.0 }
     }
 }
 
@@ -646,6 +657,8 @@ mod tests {
 
     #[test]
     fn editor_content_top_inset_includes_database_console_toolbar() {
+        assert_eq!(ide_tab_bar_height(false, true, 1.0), 44.0);
+        assert_eq!(ide_tab_bar_height(true, true, 1.0), 0.0);
         assert_eq!(editor_content_top_inset(false, true, false, 1.0), 44.0);
         assert_eq!(editor_content_top_inset(false, true, true, 1.0), 84.0);
         assert_eq!(editor_content_top_inset(false, true, true, 1.5), 126.0);

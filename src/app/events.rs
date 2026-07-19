@@ -11,6 +11,7 @@ use winit::window::WindowId;
 
 mod window_runtime;
 mod about;
+#[cfg(test)]
 pub(crate) use about::file_watcher_disconnect_message;
 mod source_hover;
 pub(crate) use source_hover::apply_source_hover_response_to_state;
@@ -423,10 +424,7 @@ impl ApplicationHandler for App {
                     self.render_suspended = true;
                     self.last_frame = Instant::now();
                     self.close_autocomplete();
-                    self.is_dragging = false;
-                    self.is_editor_drag_pending = false;
-                    self.scroll_x.is_dragging = false;
-                    self.scroll_y.is_dragging = false;
+                    self.cancel_pointer_interactions();
                     crate::app::mouse::suppress_hover_popup_until_mouse_move(
                         self.renderer.as_mut(),
                     );
@@ -1060,9 +1058,7 @@ impl ApplicationHandler for App {
                     let s = r.scale_factor;
                     let sb_w = 48.0 * s;
 
-                    // Используем фактическую ширину панели, а не проверку any_top_open()
-                    // Потому что панель может быть открыта через bottom группу
-                    let panel_left_w = self.ide_panel.left_width * s;
+                    let panel_left_w = self.ide_panel.visible_left_width(s);
                     let panel_bottom_h = if self.ide_panel.any_bottom_open() {
                         self.ide_panel.bottom_height * s
                     } else {
@@ -1070,12 +1066,11 @@ impl ApplicationHandler for App {
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let mut effective_bottom_h = panel_bottom_h;
-                    if self.ide_panel.is_open(crate::app::PanelId::Terminal)
-                        && !self.ide_panel.terminal_focused
-                    {
-                        effective_bottom_h = 0.0;
-                    }
+                    let effective_bottom_h = if self.ide_panel.bottom_terminal_is_transparent() {
+                        0.0
+                    } else {
+                        panel_bottom_h
+                    };
 
                     if panel_left_w > 0.0 {
                         let resize_x = sb_w + panel_left_w;
@@ -1302,15 +1297,8 @@ impl ApplicationHandler for App {
                         0.0
                     };
 
-                    let is_terminal_bottom = self.is_ide_mode
-                        && self.ide_panel.slots.iter().any(|sl| {
-                            sl.group == crate::app::PanelGroup::Bottom
-                                && sl.open
-                                && sl.id == crate::app::PanelId::Terminal
-                        });
-
                     let is_transparent_terminal =
-                        is_terminal_bottom && !self.ide_panel.terminal_focused;
+                        self.is_ide_mode && self.ide_panel.bottom_terminal_is_transparent();
 
                     if panel_bottom_h > 0.0 && my >= window_height - panel_bottom_h {
                         if !is_transparent_terminal {

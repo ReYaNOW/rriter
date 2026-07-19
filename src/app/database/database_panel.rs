@@ -131,10 +131,19 @@ impl DatabaseFormField {
 }
 
 #[derive(Clone, PartialEq)]
+struct DatabaseDialogInputSnapshot {
+    value: Zeroizing<String>,
+    cursor: usize,
+    selection_anchor: Option<usize>,
+}
+
+#[derive(Clone, PartialEq)]
 pub struct DatabaseDialogInput {
     value: Zeroizing<String>,
     pub cursor: usize,
     pub selection_anchor: Option<usize>,
+    undo_stack: Vec<DatabaseDialogInputSnapshot>,
+    redo_stack: Vec<DatabaseDialogInputSnapshot>,
 }
 
 impl Eq for DatabaseDialogInput {}
@@ -163,6 +172,8 @@ impl DatabaseDialogInput {
             value,
             cursor,
             selection_anchor: None,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
         }
     }
 
@@ -175,6 +186,8 @@ impl DatabaseDialogInput {
         self.value = Zeroizing::new(value.into());
         self.cursor = self.value.len();
         self.selection_anchor = None;
+        self.undo_stack.clear();
+        self.redo_stack.clear();
     }
 
     pub fn selected_range(&self) -> Option<(usize, usize)> {
@@ -206,24 +219,81 @@ impl DatabaseDialogInput {
         self.value.get(start..end)
     }
 
+    fn snapshot(&self) -> DatabaseDialogInputSnapshot {
+        DatabaseDialogInputSnapshot {
+            value: Zeroizing::new(self.value.to_string()),
+            cursor: self.cursor,
+            selection_anchor: self.selection_anchor,
+        }
+    }
+
+    fn restore_snapshot(&mut self, snapshot: DatabaseDialogInputSnapshot) {
+        self.value.zeroize();
+        self.value = snapshot.value;
+        self.cursor = snapshot.cursor.min(self.value.len());
+        self.selection_anchor = snapshot
+            .selection_anchor
+            .map(|anchor| clamp_to_char_boundary(self.value.as_str(), anchor));
+    }
+
+    fn finish_edit(&mut self, before: DatabaseDialogInputSnapshot) {
+        if self.value.as_str() == before.value.as_str() {
+            return;
+        }
+        if self.undo_stack.len() >= 100 {
+            self.undo_stack.remove(0);
+        }
+        self.undo_stack.push(before);
+        self.redo_stack.clear();
+    }
+
+    fn delete_selection_inner(&mut self) -> bool {
+        let Some((start, end)) = self.selected_range() else {
+            return false;
+        };
+        self.value.replace_range(start..end, "");
+        self.cursor = start;
+        self.selection_anchor = None;
+        true
+    }
+
+    pub fn undo(&mut self) {
+        let Some(previous) = self.undo_stack.pop() else {
+            return;
+        };
+        let current = self.snapshot();
+        self.restore_snapshot(previous);
+        self.redo_stack.push(current);
+    }
+
+    pub fn redo(&mut self) {
+        let Some(next) = self.redo_stack.pop() else {
+            return;
+        };
+        let current = self.snapshot();
+        self.restore_snapshot(next);
+        self.undo_stack.push(current);
+    }
+
     pub fn insert(&mut self, text: &str, max_bytes: usize) {
-        self.delete_selection();
-        if self.value.len() >= max_bytes {
-            return;
+        let before = self.snapshot();
+        self.delete_selection_inner();
+        if self.value.len() < max_bytes {
+            let available = max_bytes - self.value.len();
+            let mut end = text.len().min(available);
+            while end > 0 && !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            if end > 0 {
+                self.value.insert_str(self.cursor, &text[..end]);
+                self.cursor += end;
+            }
         }
-        let available = max_bytes - self.value.len();
-        let mut end = text.len().min(available);
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        if end == 0 {
-            return;
-        }
-        self.value.insert_str(self.cursor, &text[..end]);
-        self.cursor += end;
+        self.finish_edit(before);
     }
 
     pub fn replace_range(&mut self, start: usize, end: usize, text: &str, max_bytes: usize) {
+        let before = self.snapshot();
         let start = clamp_to_char_boundary(self.value.as_str(), start.min(self.value.len()));
         let end = clamp_to_char_boundary(self.value.as_str(), end.min(self.value.len())).max(start);
         let removed = end.saturating_sub(start);
@@ -235,58 +305,60 @@ impl DatabaseDialogInput {
         self.value.replace_range(start..end, &text[..insert_end]);
         self.cursor = start + insert_end;
         self.selection_anchor = None;
+        self.finish_edit(before);
     }
 
     pub fn delete_selection(&mut self) -> bool {
-        let Some((start, end)) = self.selected_range() else {
-            return false;
-        };
-        self.value.replace_range(start..end, "");
-        self.cursor = start;
-        self.selection_anchor = None;
-        true
+        let before = self.snapshot();
+        let deleted = self.delete_selection_inner();
+        self.finish_edit(before);
+        deleted
     }
 
     pub fn backspace(&mut self) {
-        if self.delete_selection() || self.cursor == 0 {
-            return;
+        let before = self.snapshot();
+        if !self.delete_selection_inner() && self.cursor > 0 {
+            let previous = self.value[..self.cursor]
+                .char_indices()
+                .next_back()
+                .map(|(idx, _)| idx)
+                .unwrap_or(0);
+            self.value.replace_range(previous..self.cursor, "");
+            self.cursor = previous;
         }
-        let previous = self.value[..self.cursor]
-            .char_indices()
-            .next_back()
-            .map(|(idx, _)| idx)
-            .unwrap_or(0);
-        self.value.replace_range(previous..self.cursor, "");
-        self.cursor = previous;
+        self.finish_edit(before);
     }
 
     pub fn delete_forward(&mut self) {
-        if self.delete_selection() || self.cursor >= self.value.len() {
-            return;
+        let before = self.snapshot();
+        if !self.delete_selection_inner() && self.cursor < self.value.len() {
+            let next = self.value[self.cursor..]
+                .char_indices()
+                .nth(1)
+                .map(|(idx, _)| self.cursor + idx)
+                .unwrap_or(self.value.len());
+            self.value.replace_range(self.cursor..next, "");
         }
-        let next = self.value[self.cursor..]
-            .char_indices()
-            .nth(1)
-            .map(|(idx, _)| self.cursor + idx)
-            .unwrap_or(self.value.len());
-        self.value.replace_range(self.cursor..next, "");
+        self.finish_edit(before);
     }
 
     pub fn delete_word_backward(&mut self) {
-        if self.delete_selection() || self.cursor == 0 {
-            return;
+        let before = self.snapshot();
+        if !self.delete_selection_inner() && self.cursor > 0 {
+            let start = previous_word_boundary(self.value.as_str(), self.cursor);
+            self.value.replace_range(start..self.cursor, "");
+            self.cursor = start;
         }
-        let start = previous_word_boundary(self.value.as_str(), self.cursor);
-        self.value.replace_range(start..self.cursor, "");
-        self.cursor = start;
+        self.finish_edit(before);
     }
 
     pub fn delete_word_forward(&mut self) {
-        if self.delete_selection() || self.cursor >= self.value.len() {
-            return;
+        let before = self.snapshot();
+        if !self.delete_selection_inner() && self.cursor < self.value.len() {
+            let end = next_word_boundary(self.value.as_str(), self.cursor);
+            self.value.replace_range(self.cursor..end, "");
         }
-        let end = next_word_boundary(self.value.as_str(), self.cursor);
-        self.value.replace_range(self.cursor..end, "");
+        self.finish_edit(before);
     }
 
     pub fn move_left(&mut self, selecting: bool) {
@@ -1278,6 +1350,40 @@ impl DatabasePanelState {
         self.global_error = None;
     }
 
+    pub(crate) fn visible_tree_row_count(&self) -> usize {
+        let mut rows = 0usize;
+        for connection in &self.connections {
+            rows += 1;
+            if !connection.expanded {
+                continue;
+            }
+            if connection.loading && connection.databases.is_empty() {
+                rows += 1;
+            }
+            for database in &connection.databases {
+                rows += 1;
+                if !database.expanded {
+                    continue;
+                }
+                if database.loading && database.tables.is_empty() {
+                    rows += 1;
+                }
+                rows += database.tables.len();
+            }
+        }
+        rows
+    }
+
+    pub(crate) fn max_tree_scroll(&self, panel_height: f32, scale: f32) -> f32 {
+        if !panel_height.is_finite() || !scale.is_finite() || panel_height <= 0.0 || scale <= 0.0 {
+            return 0.0;
+        }
+        let toolbar_h = 34.0 * scale;
+        let viewport_h = (panel_height - toolbar_h).max(0.0);
+        let row_h = crate::render_view::tree_ui::TREE_ROW_H * scale;
+        (self.visible_tree_row_count() as f32 * row_h - viewport_h).max(0.0)
+    }
+
     pub fn selected_connection_refresh_enabled(&self) -> bool {
         self.selected_connection.is_some() && self.pending_job.is_none()
     }
@@ -1389,6 +1495,33 @@ mod tests {
         let mut panel = DatabasePanelState::from_persisted(persisted);
         assert_eq!(panel.allocate_connection_id(), DatabaseConnectionId(41));
         assert_eq!(panel.allocate_job_id(), DatabaseJobId(1));
+    }
+
+    #[test]
+    fn database_tree_scroll_counts_loading_rows_and_excludes_toolbar_from_viewport() {
+        let mut panel = DatabasePanelState::default();
+        let mut connection = DatabaseConnectionNode::new(config(1));
+        connection.expanded = true;
+        connection.loading = true;
+        assert_eq!(panel.visible_tree_row_count(), 0);
+
+        panel.connections.push(connection);
+        assert_eq!(panel.visible_tree_row_count(), 2);
+
+        let mut database = DatabaseDatabaseNode::new("main".to_string());
+        database.expanded = true;
+        database.loading = true;
+        panel.connections[0].loading = false;
+        panel.connections[0].databases.push(database);
+        assert_eq!(panel.visible_tree_row_count(), 3);
+
+        panel.connections[0].databases[0].loading = false;
+        panel.connections[0].databases[0].tables = vec![
+            DatabaseTableInfo { name: "a".to_string(), partitioned: false },
+            DatabaseTableInfo { name: "b".to_string(), partitioned: false },
+        ];
+        assert_eq!(panel.visible_tree_row_count(), 4);
+        assert_eq!(panel.max_tree_scroll(100.0, 1.0), 46.0);
     }
 
     #[test]
@@ -1795,5 +1928,13 @@ impl crate::app::single_line_input::SingleLineInputModel for DatabaseDialogInput
 
     fn move_end(&mut self, selecting: bool) {
         DatabaseDialogInput::move_end(self, selecting);
+    }
+
+    fn undo(&mut self) {
+        DatabaseDialogInput::undo(self);
+    }
+
+    fn redo(&mut self) {
+        DatabaseDialogInput::redo(self);
     }
 }

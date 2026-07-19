@@ -1,5 +1,6 @@
 use super::*;
 use std::collections::HashMap;
+use std::time::Instant;
 
 fn test_roots(name: &str) -> (PathBuf, PathBuf) {
     let base = std::env::temp_dir().join(format!(

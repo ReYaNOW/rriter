@@ -98,6 +98,40 @@ impl ScrollState {
         self.velocity = 0.0;
     }
 
+    pub fn jump_to(&mut self, target: f32) {
+        if !target.is_finite() {
+            return;
+        }
+        self.current = target;
+        self.target = target;
+        self.velocity = 0.0;
+        self.is_dragging = false;
+        self.drag_offset = 0.0;
+    }
+
+    pub fn animate_to(&mut self, target: f32) {
+        if !target.is_finite() {
+            return;
+        }
+        self.target = target;
+        self.velocity = 0.0;
+        self.is_dragging = false;
+        self.drag_offset = 0.0;
+    }
+
+    pub fn end_drag(&mut self) {
+        self.is_dragging = false;
+        self.drag_offset = 0.0;
+    }
+
+    pub fn reset(&mut self) {
+        self.current = 0.0;
+        self.target = 0.0;
+        self.velocity = 0.0;
+        self.is_dragging = false;
+        self.drag_offset = 0.0;
+    }
+
     fn sanitize_non_finite(&mut self) -> bool {
         let mut changed = false;
         if !self.current.is_finite() {
@@ -119,6 +153,10 @@ impl ScrollState {
         if !self.drag_offset.is_finite() {
             self.drag_offset = 0.0;
             changed = true;
+        }
+        if changed {
+            self.is_dragging = false;
+            self.drag_offset = 0.0;
         }
         changed
     }
@@ -204,6 +242,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ending_drag_preserves_scroll_position_and_clears_pointer_offset() {
+        let mut scroll = ScrollState::new(7.0);
+        scroll.current = 12.0;
+        scroll.target = 18.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 5.0;
+
+        scroll.end_drag();
+
+        assert_eq!(scroll.current, 12.0);
+        assert_eq!(scroll.target, 18.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+    }
+
+    #[test]
     fn scroll_state_clamps_animates_and_stops_end_to_end() {
         let mut scroll = ScrollState::new(15.0);
 
@@ -228,9 +282,46 @@ mod tests {
         assert_eq!(scroll.velocity, 0.0);
         assert!(scroll.is_settled());
 
+        scroll.current = 8.0;
+        scroll.target = 12.0;
+        scroll.velocity = 3.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 4.0;
+        scroll.reset();
+        assert_eq!(scroll.current, 0.0);
+        assert_eq!(scroll.target, 0.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+        assert!(scroll.is_settled());
+
         scroll.is_dragging = true;
         assert!(!scroll.is_settled());
         assert!(!scroll.update(0.016));
+
+        scroll.drag_offset = 3.0;
+        scroll.jump_to(24.0);
+        assert_eq!(scroll.current, 24.0);
+        assert_eq!(scroll.target, 24.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+
+        scroll.is_dragging = true;
+        scroll.drag_offset = 5.0;
+        scroll.velocity = 8.0;
+        scroll.animate_to(48.0);
+        assert_eq!(scroll.current, 24.0);
+        assert_eq!(scroll.target, 48.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+
+        scroll.is_dragging = true;
+        scroll.drag_offset = f32::NAN;
+        assert!(scroll.update(0.016));
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
     }
 
     #[test]
@@ -254,13 +345,15 @@ mod tests {
         scroll.current = f32::NAN;
         scroll.target = f32::INFINITY;
         scroll.velocity = f32::NEG_INFINITY;
-        scroll.drag_offset = f32::NAN;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 7.0;
 
         assert!(scroll.update(0.016));
         assert_eq!(scroll.current, 0.0);
         assert_eq!(scroll.target, 0.0);
         assert_eq!(scroll.velocity, 0.0);
         assert_eq!(scroll.drag_offset, 0.0);
+        assert!(!scroll.is_dragging);
         assert!(scroll.is_settled());
     }
 

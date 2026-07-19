@@ -119,6 +119,20 @@ pub struct ApiManualRoute {
     pub output_fields: Vec<ApiMockField>,
 }
 
+pub(crate) fn api_mock_contract_kind_label(kind: ApiMockContractFieldKind) -> &'static str {
+    match kind {
+        ApiMockContractFieldKind::String => "str",
+        ApiMockContractFieldKind::Integer => "int",
+        ApiMockContractFieldKind::Number => "float",
+        ApiMockContractFieldKind::Boolean => "bool",
+        ApiMockContractFieldKind::Array => "list",
+        ApiMockContractFieldKind::Object => "dict",
+        ApiMockContractFieldKind::Bytes => "bytes",
+        ApiMockContractFieldKind::File => "file",
+        ApiMockContractFieldKind::Any => "Any",
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApiMockPythonScript {
     #[serde(default = "default_mock_python_enabled")]

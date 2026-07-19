@@ -358,6 +358,77 @@ mod tests {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    #[inline(always)]
+    pub(crate) fn push_editor_glyph(
+        &mut self,
+        ch: char,
+        x: f32,
+        baseline_y: f32,
+        color: [f32; 4],
+    ) {
+        let Some(glyph) = self.get_glyph(ch) else {
+            return;
+        };
+        self.push_quad(
+            x + glyph.offset_x,
+            baseline_y - glyph.offset_y,
+            glyph.width,
+            glyph.height,
+            glyph.u,
+            glyph.v,
+            glyph.uw,
+            glyph.vh,
+            color,
+            glyph.is_emoji,
+        );
+        if matches!(ch, '.' | ':') {
+            self.push_quad(
+                x + glyph.offset_x + 1.0,
+                baseline_y - glyph.offset_y,
+                glyph.width,
+                glyph.height,
+                glyph.u,
+                glyph.v,
+                glyph.uw,
+                glyph.vh,
+                color,
+                glyph.is_emoji,
+            );
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_spanned_editor_line_alpha(
+        &mut self,
+        text: &str,
+        spans: &[crate::highlighter::ColorSpan],
+        base_offset: Option<usize>,
+        x: f32,
+        y: f32,
+        max_x: f32,
+        alpha: f32,
+    ) -> f32 {
+        let mut draw_x = x;
+        let alpha = alpha.clamp(0.0, 1.0);
+        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+            if draw_x > max_x {
+                return;
+            }
+            let advance = self.char_advance(ch);
+            if !matches!(ch, ' ' | '\t') {
+                let mut color = if span_color[0].is_nan() {
+                    self.theme.fg
+                } else {
+                    span_color
+                };
+                color[3] *= alpha;
+                self.push_editor_glyph(ch, draw_x, y, color);
+            }
+            draw_x += advance;
+        });
+        draw_x
+    }
+
     #[inline]
     pub(crate) fn snapped_text_advance(advance: f32, scale: f32) -> f32 {
         let px = (advance * scale).round();

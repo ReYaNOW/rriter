@@ -43,8 +43,7 @@ impl crate::app::App {
         self.ide_panel.project_search.collapsed.clear();
         self.ide_panel.project_search.reset_preview_worker();
         self.ide_panel.project_search.total_matches = 0;
-        self.ide_panel.project_search.scroll.target = 0.0;
-        self.ide_panel.project_search.scroll.current = 0.0;
+        self.ide_panel.project_search.scroll.reset();
         if self.ide_panel.project_search.focused == Some(ProjectSearchField::Filter) {
             self.ide_panel.project_search.focused = None;
             self.ide_panel.project_search.dragging_field = None;
@@ -264,22 +263,17 @@ impl crate::app::App {
         }
         let renderer = self.renderer.as_ref()?;
         let scale = renderer.scale_factor;
-        let wh = self
-            .window
-            .as_ref()
-            .map(|window| window.inner_size().height as f32)
-            .unwrap_or(renderer.height);
-        let panel_bottom_h = if self.ide_panel.any_bottom_open() {
-            self.ide_panel.bottom_height * scale
-        } else {
-            0.0
-        };
-        let content_bottom = crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, scale);
+        let (panel_x, panel_y, panel_w, panel_h, _) =
+            crate::app::mouse::app_panel_scroll_rect(
+                self,
+                crate::app::PanelId::Search,
+                scale,
+            );
         Some(project_search_layout(
-            48.0 * scale,
-            32.0 * scale,
-            self.ide_panel.left_width * scale,
-            (content_bottom - 32.0 * scale).max(0.0),
+            panel_x,
+            panel_y,
+            panel_w,
+            panel_h,
             scale,
         ))
     }
@@ -435,10 +429,8 @@ impl crate::app::App {
             end_col,
         );
         if !was_active {
-            self.scroll_y.current = self.scroll_y.target;
-            self.scroll_y.velocity = 0.0;
-            self.scroll_x.current = self.scroll_x.target;
-            self.scroll_x.velocity = 0.0;
+            self.scroll_y.jump_to(self.scroll_y.target);
+            self.scroll_x.jump_to(self.scroll_x.target);
         }
     }
 

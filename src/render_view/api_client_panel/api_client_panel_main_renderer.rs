@@ -56,7 +56,7 @@ impl Renderer {
         ui_registry.push_clip(panel_clip);
         let pad = 10.0 * s;
         let icon_size = 30.0 * s;
-        let toolbar_h = 44.0 * s;
+        let toolbar_h = crate::app::api_client::API_PANEL_TOOLBAR_ADVANCE * s;
         let mut cy = (y + pad - api.panel_scroll.current.round()).round();
         let hover_settled = api.panel_scroll.is_settled();
         ui_registry.push_interactions_enabled(hover_settled);
@@ -172,11 +172,10 @@ impl Renderer {
 
         let now = now_epoch_secs();
         let mut error_scratch = String::new();
-        let import_error_visible = api.import_error.as_ref().filter(|_| {
-            api.import_error_at
-                .map(|at| now.saturating_sub(at) < 5)
-                .unwrap_or(true)
-        });
+        let import_error_visible = api
+            .import_error
+            .as_ref()
+            .filter(|_| crate::app::api_client::api_panel_import_error_visible(api, now));
 
         if api.import_url_open {
             let input_h = 32.0 * s;
@@ -244,7 +243,7 @@ impl Renderer {
                     [1.0, 0.38, 0.38, 1.0],
                     0.72,
                 );
-                cy += 20.0 * s;
+                cy += crate::app::api_client::API_PANEL_IMPORT_ERROR_ADVANCE * s;
             }
         }
 
@@ -260,7 +259,7 @@ impl Renderer {
                 0.72,
                 &mut error_scratch,
             );
-            cy += 20.0 * s;
+            cy += crate::app::api_client::API_PANEL_IMPORT_ERROR_ADVANCE * s;
         }
         if let Some(err) = api.persistence_error.as_deref() {
             self.draw_tree_label_clipped(
@@ -272,7 +271,7 @@ impl Renderer {
                 0.72,
                 &mut error_scratch,
             );
-            cy += 20.0 * s;
+            cy += crate::app::api_client::API_PANEL_PERSISTENCE_ERROR_ADVANCE * s;
         }
 
         cy += 10.0 * s;
@@ -530,7 +529,7 @@ impl Renderer {
                 [1.0, 0.70, 0.42, 1.0],
                 0.66,
             );
-            cy += 22.0 * s;
+            cy += crate::app::api_client::API_PANEL_UV_ERROR_ADVANCE * s;
         }
         let python_manage = ButtonView {
             x: x + pad,
@@ -680,7 +679,7 @@ impl Renderer {
                 s,
                 false,
             );
-            cy += 38.0 * s;
+            cy += crate::app::api_client::API_PANEL_MANUAL_ROUTE_ADVANCE * s;
         }
 
         if api.specs.is_empty() {
@@ -822,7 +821,7 @@ impl Renderer {
                     false,
                 );
             }
-            cy += card_h + 10.0 * s;
+            cy += crate::app::api_client::API_PANEL_SPEC_CARD_ADVANCE * s;
         }
 
         if let Some(model) = api.selected_model() {

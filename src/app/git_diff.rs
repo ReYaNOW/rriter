@@ -811,7 +811,7 @@ impl App {
             }
             Err(mpsc::TryRecvError::Empty) => {
                 self.inline_git_diff_rx = Some(rx);
-                true
+                false
             }
             Err(mpsc::TryRecvError::Disconnected) => {
                 self.inline_git_popup = None;
@@ -854,8 +854,7 @@ impl App {
             self.editor.set_original_text();
             self.refresh_active_git_diff_highlight();
             self.scroll_active_git_diff_to_first_change();
-            self.scroll_x.current = 0.0;
-            self.scroll_x.target = 0.0;
+            self.scroll_x.reset();
         } else {
             self.tabs[tab_idx].text_file_format = worktree_format;
             self.tabs[tab_idx].editor = new_editor_with_text(&text, event.version);
@@ -905,8 +904,7 @@ impl App {
             .active_git_diff_state()
             .and_then(GitDiffState::first_changed_line)
         else {
-            self.scroll_y.current = 0.0;
-            self.scroll_y.target = 0.0;
+            self.scroll_y.reset();
             return;
         };
         self.set_active_git_diff_current_hunk_for_line(line);
@@ -924,11 +922,7 @@ impl App {
             .as_ref()
             .map(|r| {
                 let s = r.scale_factor;
-                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * s
-                };
+                let tab_bar_h = self.editor_top_inset(s);
                 let panel_bottom_h = if self.is_ide_mode {
                     self.ide_panel.editor_reserved_bottom_height(s)
                 } else {
@@ -945,8 +939,7 @@ impl App {
             .unwrap_or(line_height * 12.0);
         let line_y = self.editor_visual_y_for_line(line, line_height);
         let target = (line_y - visible_h * GIT_DIFF_FOCUS_RATIO).max(0.0).round();
-        self.scroll_y.current = target;
-        self.scroll_y.target = target;
+        self.scroll_y.jump_to(target);
     }
 
     fn animate_active_git_diff_to_line(&mut self, line: usize) {
@@ -960,11 +953,7 @@ impl App {
             self.scroll_active_git_diff_to_line(line);
             return;
         };
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
+        let tab_bar_h = self.editor_top_inset(s);
         let panel_bottom_h = if self.is_ide_mode {
             self.ide_panel.editor_reserved_bottom_height(s)
         } else {
@@ -985,7 +974,7 @@ impl App {
             .map(|r| r.get_max_scroll(&self.editor, visible_h))
             .unwrap_or(target);
         let target = target.clamp(0.0, max_s).round();
-        self.scroll_y.target = target;
+        self.scroll_y.animate_to(target);
         self.scroll_y.anim_speed = 10.0;
     }
 
@@ -997,15 +986,10 @@ impl App {
             .unwrap_or(20.0);
         let Some((renderer_h, s)) = self.renderer.as_ref().map(|r| (r.height, r.scale_factor))
         else {
-            self.scroll_y.current = line as f32 * line_height;
-            self.scroll_y.target = self.scroll_y.current;
+            self.scroll_y.jump_to(line as f32 * line_height);
             return;
         };
-        let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-            0.0
-        } else {
-            38.0 * s
-        };
+        let tab_bar_h = self.editor_top_inset(s);
         let panel_bottom_h = if self.is_ide_mode {
             self.ide_panel.editor_reserved_bottom_height(s)
         } else {
@@ -1026,7 +1010,7 @@ impl App {
             .map(|r| r.get_max_scroll(&self.editor, visible_h))
             .unwrap_or(target);
         let target = target.clamp(0.0, max_s).round();
-        self.scroll_y.target = target;
+        self.scroll_y.animate_to(target);
         self.scroll_y.anim_speed = 10.0;
     }
 
@@ -1351,11 +1335,7 @@ impl App {
             .as_ref()
             .map(|r| {
                 let s = r.scale_factor;
-                let tab_bar_h = if self.show_welcome || !self.is_ide_mode {
-                    0.0
-                } else {
-                    38.0 * s
-                };
+                let tab_bar_h = self.editor_top_inset(s);
                 let panel_bottom_h = if self.is_ide_mode {
                     self.ide_panel.editor_reserved_bottom_height(s)
                 } else {
