@@ -6,6 +6,14 @@
 use serde::Deserialize;
 use std::borrow::Cow;
 
+fn json_u32_field(value: &serde_json::Value, field: &str) -> Option<u32> {
+    u32::try_from(value.get(field)?.as_u64()?).ok()
+}
+
+fn json_usize(value: &serde_json::Value) -> Option<usize> {
+    usize::try_from(value.as_u64()?).ok()
+}
+
 #[derive(Deserialize)]
 pub(super) struct RpcHeader<'a> {
     #[serde(borrow)]
@@ -326,10 +334,10 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
     let start = range.get("start")?;
     let end = range.get("end")?;
 
-    let sl = start.get("line")?.as_u64()? as u32;
-    let sc = start.get("character")?.as_u64()? as u32;
-    let el = end.get("line")?.as_u64()? as u32;
-    let ec = end.get("character")?.as_u64()? as u32;
+    let sl = json_u32_field(start, "line")?;
+    let sc = json_u32_field(start, "character")?;
+    let el = json_u32_field(end, "line")?;
+    let ec = json_u32_field(end, "character")?;
 
     let severity = match v.get("severity").and_then(|s| s.as_u64()).unwrap_or(1) {
         1 => DiagSeverity::Error,
@@ -367,8 +375,8 @@ pub(super) fn parse_diagnostic_value(v: &serde_json::Value) -> Option<Diagnostic
     let mut tags = Vec::new();
     if let Some(tags_arr) = v.get("tags").and_then(|t| t.as_array()) {
         for t in tags_arr {
-            if let Some(tag_id) = t.as_u64() {
-                tags.push(tag_id as u32);
+            if let Some(tag_id) = t.as_u64().and_then(|value| u32::try_from(value).ok()) {
+                tags.push(tag_id);
             }
         }
     }
@@ -415,10 +423,10 @@ pub(super) fn parse_text_edit_value(v: &serde_json::Value) -> Option<TextChange>
     let start = range.get("start")?;
     let end_r = range.get("end")?;
 
-    let sl = start.get("line")?.as_u64()? as u32;
-    let sc = start.get("character")?.as_u64()? as u32;
-    let el = end_r.get("line")?.as_u64()? as u32;
-    let ec = end_r.get("character")?.as_u64()? as u32;
+    let sl = json_u32_field(start, "line")?;
+    let sc = json_u32_field(start, "character")?;
+    let el = json_u32_field(end_r, "line")?;
+    let ec = json_u32_field(end_r, "character")?;
 
     let new_text = v
         .get("newText")
@@ -443,10 +451,10 @@ fn parse_completion_text_edit_value(v: &serde_json::Value) -> Option<TextChange>
     let end_r = replace.get("end")?;
     let new_text = v.get("newText").and_then(|t| t.as_str()).unwrap_or("");
     Some(TextChange {
-        start_line: start.get("line")?.as_u64()? as u32,
-        start_col: start.get("character")?.as_u64()? as u32,
-        end_line: end_r.get("line")?.as_u64()? as u32,
-        end_col: end_r.get("character")?.as_u64()? as u32,
+        start_line: json_u32_field(start, "line")?,
+        start_col: json_u32_field(start, "character")?,
+        end_line: json_u32_field(end_r, "line")?,
+        end_col: json_u32_field(end_r, "character")?,
         new_text: new_text.to_string(),
     })
 }
@@ -516,17 +524,17 @@ pub(super) fn parse_hover_value(v: &serde_json::Value) -> Option<String> {
 }
 
 fn definition_position(v: &serde_json::Value) -> Option<(u32, u32)> {
-    let line = v.get("line")?.as_u64()? as u32;
-    let col = v.get("character")?.as_u64()? as u32;
+    let line = json_u32_field(v, "line")?;
+    let col = json_u32_field(v, "character")?;
     Some((line, col))
 }
 
 pub(super) fn parse_definition_target(v: &serde_json::Value) -> Option<DefinitionTarget> {
     if let Some(uri) = v.get("uri").and_then(|u| u.as_str()) {
-        let (line, col) = v
-            .pointer("/range/start")
-            .and_then(definition_position)
-            .unwrap_or((0, 0));
+        let (line, col) = match v.pointer("/range/start") {
+            Some(position) => definition_position(position)?,
+            None => (0, 0),
+        };
         return Some(DefinitionTarget {
             path: uri_to_path(uri),
             line,
@@ -534,11 +542,13 @@ pub(super) fn parse_definition_target(v: &serde_json::Value) -> Option<Definitio
         });
     }
     if let Some(uri) = v.get("targetUri").and_then(|u| u.as_str()) {
-        let (line, col) = v
+        let position = v
             .pointer("/targetSelectionRange/start")
-            .or_else(|| v.pointer("/targetRange/start"))
-            .and_then(definition_position)
-            .unwrap_or((0, 0));
+            .or_else(|| v.pointer("/targetRange/start"));
+        let (line, col) = match position {
+            Some(position) => definition_position(position)?,
+            None => (0, 0),
+        };
         return Some(DefinitionTarget {
             path: uri_to_path(uri),
             line,
@@ -1012,8 +1022,8 @@ fn parse_signature_parameter_label(
         return signature_parameter_name(text);
     }
     let range = label.as_array()?;
-    let start = range.first()?.as_u64()? as usize;
-    let end = range.get(1)?.as_u64()? as usize;
+    let start = json_usize(range.first()?)?;
+    let end = json_usize(range.get(1)?)?;
     signature_label
         .get(start..end)
         .and_then(signature_parameter_name)
@@ -1026,8 +1036,8 @@ pub(super) fn parse_signature_help_parameters(result: &serde_json::Value) -> Vec
     };
     let active = result
         .get("activeSignature")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(0) as usize;
+        .and_then(json_usize)
+        .unwrap_or(0);
     let signature = signatures.get(active).or_else(|| signatures.first());
     let Some(signature) = signature else {
         return Vec::new();
@@ -1068,8 +1078,8 @@ fn parse_inlay_hint_label(v: &serde_json::Value) -> Option<String> {
 
 pub(super) fn parse_inlay_hint_value(v: &serde_json::Value) -> Option<LspInlayHint> {
     let pos = v.get("position")?;
-    let line = pos.get("line")?.as_u64()? as u32;
-    let col = pos.get("character")?.as_u64()? as u32;
+    let line = json_u32_field(pos, "line")?;
+    let col = json_u32_field(pos, "character")?;
     let label = parse_inlay_hint_label(v.get("label")?)?;
     Some(LspInlayHint { line, col, label })
 }

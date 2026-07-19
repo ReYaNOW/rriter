@@ -65,6 +65,9 @@ impl ScrollState {
             self.velocity = 0.0;
         }
         self.target = self.target.clamp(min, max);
+        if self.target == self.current {
+            self.velocity = 0.0;
+        }
     }
 
     pub fn clamp_current(&mut self, min: f32, max: f32) {
@@ -74,6 +77,9 @@ impl ScrollState {
             self.velocity = 0.0;
         }
         self.current = self.current.clamp(min, max);
+        if self.current == self.target {
+            self.velocity = 0.0;
+        }
     }
 
     pub fn scroll_by(&mut self, delta: f32) {
@@ -198,7 +204,7 @@ pub(crate) fn scrollbar_thumb(
     let len = (viewport_len / content_len * track_len)
         .max(min_thumb_len)
         .min(track_len);
-    let ratio = (current_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
+    let ratio = (current_scroll / max_scroll).clamp(0.0, 1.0);
     Some(ScrollbarThumb {
         start: track_start + ratio * (track_len - len),
         len,
@@ -337,6 +343,37 @@ mod tests {
         assert!(target <= 300.0);
 
         assert!(scrollbar_thumb(0.0, 100.0, 100.0, 100.0, 0.0, 20.0).is_none());
+    }
+
+    #[test]
+    fn scrollbar_thumb_reaches_track_end_for_subpixel_overflow() {
+        let thumb = scrollbar_thumb(0.0, 100.0, 100.0, 100.5, 0.5, 20.0)
+            .expect("subpixel overflow is still scrollable");
+
+        assert!((thumb.start + thumb.len - 100.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn clamping_a_settled_scroll_clears_stale_velocity() {
+        let mut scroll = ScrollState::new(15.0);
+        scroll.current = 50.0;
+        scroll.target = 100.0;
+        scroll.velocity = 120.0;
+
+        scroll.clamp_target(0.0, 50.0);
+        assert_eq!(scroll.target, 50.0);
+        assert_eq!(scroll.velocity, 0.0);
+
+        scroll.scroll_by(-10.0);
+        assert!(scroll.update(0.016));
+        assert!(scroll.current < 50.0);
+
+        scroll.current = 40.0;
+        scroll.target = 30.0;
+        scroll.velocity = -80.0;
+        scroll.clamp_current(30.0, 30.0);
+        assert_eq!(scroll.current, 30.0);
+        assert_eq!(scroll.velocity, 0.0);
     }
 
     #[test]

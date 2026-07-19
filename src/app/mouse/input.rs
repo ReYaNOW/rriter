@@ -865,7 +865,11 @@ impl App {
                         let rel_y =
                             my - layout.y - 4.0 * self.renderer.as_ref().unwrap().scale_factor;
                         if rel_y >= 0.0 {
-                            let idx = (rel_y / layout.item_h) as usize;
+                            let visible_idx = (rel_y / layout.item_h) as usize;
+                            if visible_idx >= layout.visible_items {
+                                return;
+                            }
+                            let idx = layout.first_visible + visible_idx;
                             if idx >= menu.items.len() {
                                 return;
                             }

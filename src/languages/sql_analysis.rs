@@ -108,7 +108,7 @@ pub fn analyze_sql(sql: &str) -> SqlAnalysis {
 }
 
 pub fn completion_context(sql: &str, cursor: usize) -> SqlCompletionContext {
-    let cursor = cursor.min(sql.len());
+    let cursor = super::sql::clamp_sql_offset(sql, cursor);
     let (prefix, qualifier, replace_range) = identifier_fragment(sql, cursor);
     let Some(tree) = parse_sql(sql) else {
         return SqlCompletionContext {
@@ -1358,5 +1358,12 @@ mod tests {
                 && diagnostic.severity == SqlDiagnosticSeverity::Error
                 && diagnostic.range.start < diagnostic.range.end
         }));
+    }
+
+    #[test]
+    fn a4_b010_completion_clamps_mid_utf8_cursor_without_panicking() {
+        let context = completion_context("SELECT Ж FROM items", "SELECT ".len() + 1);
+        assert!(context.replace_range.start <= context.replace_range.end);
+        assert!(context.replace_range.end <= "SELECT Ж FROM items".len());
     }
 }

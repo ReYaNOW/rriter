@@ -1488,3 +1488,83 @@ fn r3_096_lsp_drop_reaps_unfinished_supervisor_without_blocking() {
     drop(process);
     assert!(started.elapsed() < Duration::from_millis(80));
 }
+
+
+#[test]
+fn lsp_position_clamps_oversized_column_to_requested_line_end() {
+    let text = "a😀\nline";
+    assert_eq!(lsp_pos_to_offset(text, 0, 99), "a😀".len());
+    assert_eq!(lsp_pos_to_offset(text, 1, 99), text.len());
+}
+
+#[test]
+fn lsp_frame_reader_accepts_reordered_extra_headers() {
+    let body = br#"{"jsonrpc":"2.0","id":1}"#;
+    let mut frame = format!(
+        "Content-Type: application/vscode-jsonrpc; charset=utf-8\r\ncontent-length: {}\r\nX-Test: yes\r\n\r\n",
+        body.len()
+    )
+    .into_bytes();
+    frame.extend_from_slice(body);
+    let mut reader = std::io::Cursor::new(frame);
+    let mut header = String::new();
+
+    assert_eq!(read_lsp_frame(&mut reader, &mut header).unwrap(), Some(body.to_vec()));
+    assert_eq!(read_lsp_frame(&mut reader, &mut header).unwrap(), None);
+}
+
+#[test]
+fn lsp_frame_reader_rejects_oversized_body_before_allocation() {
+    let frame = format!("Content-Length: {}\r\n\r\n", LSP_MAX_FRAME_BYTES + 1);
+    let mut reader = std::io::Cursor::new(frame.into_bytes());
+    let mut header = String::new();
+
+    let error = read_lsp_frame(&mut reader, &mut header).unwrap_err();
+    assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+}
+
+#[test]
+fn open_file_diagnostics_do_not_regress_to_older_or_versionless_results() {
+    let path = PathBuf::from("/tmp/ws/app.py");
+    let (ruff, _cmd_rx, event_tx) = test_process_with_events(&RUFF_SERVER);
+    let mut manager = LspManager::new(vec![PathBuf::from("/tmp/ws")]);
+    manager.note_open_python_file(path.clone(), 1);
+    manager.python = Some(ruff);
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server_name: RUFF_SERVER.program,
+            path: path.clone(),
+            version: Some(5),
+            items: vec![test_diag("new", DiagSeverity::Error, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server_name: RUFF_SERVER.program,
+            path: path.clone(),
+            version: Some(3),
+            items: vec![test_diag("old", DiagSeverity::Warning, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+
+    event_tx
+        .send(LspEvent::Diagnostics {
+            server_name: RUFF_SERVER.program,
+            path: path.clone(),
+            version: None,
+            items: vec![test_diag("versionless", DiagSeverity::Info, None)],
+            result_id: None,
+        })
+        .unwrap();
+    manager.poll();
+
+    let (version, diagnostics) = manager.instant_diagnostics.get(&path).unwrap();
+    assert_eq!(*version, 5);
+    assert_eq!(diagnostics[0].message.as_ref(), "new");
+}

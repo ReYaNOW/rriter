@@ -19,7 +19,7 @@ use crate::app::api_client::{
     api_schema_is_array_input,
     api_schema_is_file_input, api_schema_is_multi_file_input, api_text_area_baseline_offset,
     api_text_area_line_height, api_text_area_max_scroll_x, api_text_area_top_from_baseline,
-    json_body_is_valid, write_api_path_display,
+    api_content_type_is_json, json_body_is_valid, write_api_path_display,
 };
 use crate::app::api_mock::contract::{
     api_mock_contract_from_state_text, api_mock_handler_signature_text,

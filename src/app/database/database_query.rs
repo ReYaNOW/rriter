@@ -513,10 +513,10 @@ pub fn query_execution_target(
     if let Some((start, end)) = selection {
         let start = start.min(text.len());
         let end = end.min(text.len());
-        if start < end {
-            let sql = text.get(start..end)?.trim();
+        if start < end && let Some(raw) = text.get(start..end) {
+            let sql = raw.trim();
             if !sql.is_empty() {
-                let leading = text.get(start..end)?.len() - text.get(start..end)?.trim_start().len();
+                let leading = raw.len() - raw.trim_start().len();
                 return Some((sql.to_string(), start.saturating_add(leading)));
             }
         }
@@ -1086,7 +1086,8 @@ pub async fn begin_user_query_transaction(
     })?;
     let result = execute_simple_query(&session, &execution.text, &statements, settings).await;
     match result {
-        Ok((result_sets, effects)) => {
+        Ok((result_sets, mut effects)) => {
+            mark_explain_analyze_side_effects(mode, &statements, &mut effects);
             let messages = session
                 .drain_server_notices()
                 .into_iter()
@@ -1114,6 +1115,24 @@ pub async fn begin_user_query_transaction(
             let error = rollback_postgres_transaction_after_error(&session, error).await;
             Err(DatabaseQueryExecutionError { error, diagnostic })
         }
+    }
+}
+
+fn mark_explain_analyze_side_effects(
+    mode: DatabaseQueryMode,
+    statements: &[SqlStatement],
+    effects: &mut SqlExecutionEffects,
+) {
+    if mode == DatabaseQueryMode::ExplainAnalyze
+        && statements.iter().any(|statement| {
+            !matches!(
+                statement.kind,
+                crate::languages::sql::SqlStatementKind::Query
+                    | crate::languages::sql::SqlStatementKind::Explain
+            )
+        })
+    {
+        effects.has_other_effect = true;
     }
 }
 
@@ -1437,6 +1456,15 @@ mod tests {
     }
 
     #[test]
+    fn a4_b004_invalid_utf8_selection_falls_back_to_current_statement() {
+        let text = "SELECT Ж;\nSELECT 2;";
+        assert_eq!(
+            query_execution_target(text, Some((7, 8)), text.len()),
+            Some(("SELECT 2;".to_string(), "SELECT Ж;\n".len()))
+        );
+    }
+
+    #[test]
     fn postgres_character_offsets_map_unicode_to_bytes() {
         assert_eq!(postgres_character_to_byte("Жx", 0), 0);
         assert_eq!(postgres_character_to_byte("Жx", 1), 2);
@@ -1530,6 +1558,22 @@ mod tests {
         let mut effects = SqlExecutionEffects::default();
         effects.record_command(crate::languages::sql::SqlStatementKind::Definition, 0);
         assert_eq!(effects.changed_rows, 0);
+        assert!(effects.requires_review());
+    }
+
+    #[test]
+    fn a4_b007_explain_analyze_mutation_marks_effects_for_review() {
+        let statements = crate::languages::sql::validate_managed_user_sql(
+            "UPDATE items SET value = 2",
+        )
+        .unwrap();
+        let mut effects = SqlExecutionEffects::default();
+        mark_explain_analyze_side_effects(
+            DatabaseQueryMode::ExplainAnalyze,
+            &statements,
+            &mut effects,
+        );
+        assert!(effects.has_other_effect);
         assert!(effects.requires_review());
     }
 

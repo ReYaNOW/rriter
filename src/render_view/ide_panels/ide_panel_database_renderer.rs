@@ -7,6 +7,36 @@ struct DatabaseModalGeometry {
     scale: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabasePanelContentLayout {
+    error_y: f32,
+    error_h: f32,
+    content_y: f32,
+    content_h: f32,
+}
+
+fn database_panel_content_layout(
+    panel_y: f32,
+    panel_h: f32,
+    toolbar_h: f32,
+    scale: f32,
+    has_global_error: bool,
+) -> DatabasePanelContentLayout {
+    let remaining_h = (panel_h - toolbar_h).max(0.0);
+    let error_h = if has_global_error {
+        (44.0 * scale).min(remaining_h)
+    } else {
+        0.0
+    };
+    let error_y = panel_y + toolbar_h;
+    DatabasePanelContentLayout {
+        error_y,
+        error_h,
+        content_y: error_y + error_h,
+        content_h: (remaining_h - error_h).max(0.0),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn database_modal_geometry(
     viewport_w: f32,
@@ -125,8 +155,68 @@ impl Renderer {
             );
         }
 
-        let content_y = panel_y + toolbar_h;
-        let content_h = (panel_h - toolbar_h).max(0.0);
+        let panel_layout = database_panel_content_layout(
+            panel_y,
+            panel_h,
+            toolbar_h,
+            s,
+            database.global_error.is_some(),
+        );
+        if let Some(error) = database.global_error.as_deref()
+            && panel_layout.error_h > 0.0
+        {
+            self.push_rect(
+                panel_x,
+                panel_layout.error_y,
+                panel_w,
+                panel_layout.error_h,
+                [0.34, 0.12, 0.15, 1.0],
+            );
+            let copy_size = (17.0 * s).min((panel_layout.error_h - 8.0 * s).max(0.0));
+            let copy_slot_w = if copy_size > 0.0 { 30.0 * s } else { 0.0 };
+            let mut scratch = String::new();
+            self.draw_tree_label_clipped(
+                error,
+                panel_x + 8.0 * s,
+                Self::tree_row_text_y(
+                    panel_layout.error_y,
+                    panel_layout.error_h,
+                    s,
+                ),
+                (panel_w - 16.0 * s - copy_slot_w).max(4.0),
+                [1.0, 0.74, 0.76, 1.0],
+                0.78,
+                &mut scratch,
+            );
+            if copy_size > 0.0 && panel_w >= 40.0 * s {
+                let copy_x = panel_x + panel_w - 8.0 * s - copy_size;
+                let copy_y = panel_layout.error_y
+                    + (panel_layout.error_h - copy_size) * 0.5;
+                let hovered = ui_registry.register_rect(
+                    UiId::DatabaseGlobalErrorCopy,
+                    copy_x - 4.0 * s,
+                    copy_y - 4.0 * s,
+                    copy_size + 8.0 * s,
+                    copy_size + 8.0 * s,
+                    mx,
+                    my,
+                );
+                self.draw_atlas_icon(
+                    IconType::Copy,
+                    copy_x,
+                    copy_y,
+                    copy_size,
+                    if hovered {
+                        [1.0, 1.0, 1.0, 1.0]
+                    } else {
+                        [0.88, 0.70, 0.72, 1.0]
+                    },
+                );
+            }
+        }
+
+        let content_y = panel_layout.content_y;
+        let content_h = panel_layout.content_h;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -1206,5 +1296,23 @@ mod database_dialog_layout_tests {
         assert!(layout.summary_baseline < layout.toggle_y);
         assert!(layout.toggle_y + 30.0 < layout.actions_y);
         assert!(layout.actions_y + 30.0 <= 610.0);
+    }
+
+    #[test]
+    fn database_global_error_reserves_space_above_tree_content() {
+        let without_error = database_panel_content_layout(20.0, 400.0, 34.0, 1.0, false);
+        let with_error = database_panel_content_layout(20.0, 400.0, 34.0, 1.0, true);
+
+        assert_eq!(without_error.error_h, 0.0);
+        assert_eq!(without_error.content_y, 54.0);
+        assert_eq!(with_error.error_y, 54.0);
+        assert_eq!(with_error.error_h, 44.0);
+        assert_eq!(with_error.content_y, 98.0);
+        assert_eq!(with_error.content_h, without_error.content_h - 44.0);
+
+        let short = database_panel_content_layout(0.0, 40.0, 34.0, 1.0, true);
+        assert_eq!(short.error_h, 6.0);
+        assert_eq!(short.content_h, 0.0);
+        assert!(short.content_y <= 40.0);
     }
 }

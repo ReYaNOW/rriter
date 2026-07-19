@@ -161,7 +161,9 @@ pub(crate) fn apply_completion_plan_to_editor(
         (plan.primary_start, plan.target_cursor)
     {
         for op in &plan.ops {
-            if op.end <= primary_start {
+            let strictly_before_primary = op.end < primary_start
+                || (op.end == primary_start && op.start < primary_start);
+            if strictly_before_primary {
                 let old_len = op.end.saturating_sub(op.start);
                 let delta = op.new_text.len() as isize - old_len as isize;
                 target_cursor = ((target_cursor as isize) + delta).max(0) as usize;

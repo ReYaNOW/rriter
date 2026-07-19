@@ -1290,22 +1290,29 @@ fn collect_unicode_case_insensitive_matches(
         return;
     }
     let mut lower = String::with_capacity(text.len());
-    let mut byte_to_original = Vec::with_capacity(text.len() + 1);
+    let mut lower_byte_spans = Vec::with_capacity(text.len());
     for (idx, ch) in text.char_indices() {
+        let source_end = idx + ch.len_utf8();
         for lowered in ch.to_lowercase() {
             let mut buf = [0u8; 4];
             let encoded = lowered.encode_utf8(&mut buf);
             for _ in 0..encoded.len() {
-                byte_to_original.push(idx);
+                lower_byte_spans.push((idx, source_end));
             }
             lower.push(lowered);
         }
     }
-    byte_to_original.push(text.len());
     for (idx, found) in lower.match_indices(&query) {
         let end = idx + found.len();
-        let start_orig = byte_to_original.get(idx).copied().unwrap_or(text.len());
-        let end_orig = byte_to_original.get(end).copied().unwrap_or(text.len());
+        let start_orig = lower_byte_spans
+            .get(idx)
+            .map(|(start, _)| *start)
+            .unwrap_or(text.len());
+        let end_orig = end
+            .checked_sub(1)
+            .and_then(|last| lower_byte_spans.get(last))
+            .map(|(_, source_end)| *source_end)
+            .unwrap_or(start_orig);
         if end_orig >= start_orig && !emit(start_orig, end_orig) {
             break;
         }
@@ -1739,6 +1746,20 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("rriter_project_search_{name}_{nanos}"))
+    }
+
+    #[test]
+    fn unicode_case_insensitive_match_maps_lowercase_expansion_to_source_character() {
+        let text = "İstanbul";
+        let mut ranges = Vec::new();
+
+        collect_unicode_case_insensitive_matches(text, b"i", |start, end| {
+            ranges.push((start, end));
+            true
+        });
+
+        assert_eq!(ranges, vec![(0, "İ".len())]);
+        assert_eq!(&text[ranges[0].0..ranges[0].1], "İ");
     }
 
     #[test]

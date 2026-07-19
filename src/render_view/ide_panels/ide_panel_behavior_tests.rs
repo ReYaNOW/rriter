@@ -140,6 +140,32 @@ mod tests {
     }
 
     #[test]
+    fn dialog_button_text_baseline_is_pixel_stable_at_fractional_scale() {
+        for scale in [1.0, 1.25, 1.5, 1.75] {
+            let btn_y = 180.0;
+            let btn_h = 34.0 * scale;
+            let baseline = dialog_button_text_baseline(btn_y, btn_h, scale);
+            let visual_center = btn_y + btn_h * 0.5 + 5.0 * scale;
+
+            assert_eq!(baseline.fract(), 0.0);
+            assert!((baseline - visual_center).abs() <= 0.5);
+        }
+    }
+
+    #[test]
+    fn project_search_help_compresses_before_reaching_close_button() {
+        let short_h = 268.0;
+        let factor = project_search_help_content_factor(short_h, 1.0);
+        let content_bottom = 58.0 + 255.0 * factor;
+        let close_button_top = short_h - 64.0;
+
+        assert!(factor < 1.0);
+        assert!(factor >= 0.45);
+        assert!(content_bottom <= close_button_top - 12.0 + f32::EPSILON);
+        assert_eq!(project_search_help_content_factor(420.0, 1.0), 1.0);
+    }
+
+    #[test]
     fn git_row_hover_stays_visual_even_when_stage_click_is_locked() {
         assert!(git_row_visual_hovered(
             84.0, 128.0, 48.0, 112.0, 260.0, 28.0, false
@@ -210,6 +236,29 @@ mod tests {
         let (partial_bg, partial_mark) = git_checkbox_color(false, true, true);
         assert!(partial_bg[3] > 0.0);
         assert!(partial_mark[3] > 0.0);
+    }
+
+    #[test]
+    fn git_pending_state_dims_stage_checkboxes_like_other_disabled_controls() {
+        let (active_bg, active_mark) = git_stage_checkbox_color(true, false, false, false);
+        let (pending_bg, pending_mark) = git_stage_checkbox_color(true, false, false, true);
+
+        assert!(pending_bg[3] < active_bg[3]);
+        assert!(pending_mark[3] < active_mark[3]);
+        assert_eq!(&pending_bg[..3], &active_bg[..3]);
+    }
+
+    #[test]
+    fn git_simple_tooltip_layout_stays_inside_window_and_clips_long_text() {
+        let layout = git_simple_tooltip_layout(320.0, 180.0, 310.0, 170.0, 900.0, 1.0)
+            .expect("tooltip layout");
+
+        assert!(layout.x >= 8.0);
+        assert!(layout.y >= 8.0);
+        assert!(layout.x + layout.w <= 312.0);
+        assert!(layout.y + layout.h <= 172.0);
+        assert!(layout.text_w <= layout.w - 24.0 + f32::EPSILON);
+        assert!(layout.w < 900.0 + 24.0);
     }
 
     #[test]

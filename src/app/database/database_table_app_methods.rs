@@ -848,7 +848,7 @@ impl App {
                 match state.grid.count {
                     Some(count) => {
                         let last = (count as usize).saturating_sub(1) / state.grid.view.limit;
-                        (state.grid.view.current_page + 1).min(last)
+                        state.grid.view.current_page.saturating_add(1).min(last)
                     }
                     None => state.grid.view.current_page.saturating_add(1),
                 }

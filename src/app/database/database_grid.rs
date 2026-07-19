@@ -874,7 +874,7 @@ impl DatabaseTableGridState {
 
     pub fn can_page_next(&self) -> bool {
         match self.count {
-            Some(count) => (self.view.current_page + 1)
+            Some(count) => self.view.current_page.saturating_add(1)
                 .saturating_mul(self.view.limit)
                 < count as usize,
             None => self.loaded_server_row_extent_on_page() >= self.view.limit,
@@ -1485,6 +1485,15 @@ mod tests {
         });
         assert!(grid.can_page_next());
         grid.chunks.get_mut(&0).unwrap().rows.pop();
+        assert!(!grid.can_page_next());
+    }
+
+    #[test]
+    fn a4_b003_maximum_page_never_overflows_next_page_check() {
+        let mut grid = grid();
+        grid.view.current_page = usize::MAX;
+        grid.view.limit = 100;
+        grid.count = Some(u64::MAX);
         assert!(!grid.can_page_next());
     }
 

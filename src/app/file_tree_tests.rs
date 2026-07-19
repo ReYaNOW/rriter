@@ -587,6 +587,37 @@ fn file_tree_prunes_duplicate_and_nested_paths_before_batch_operations() {
     );
 }
 
+#[test]
+fn file_tree_batch_move_undo_preflights_all_destinations_before_mutating() {
+    let root = test_root("file_tree_batch_move_undo_preflight");
+    let _ = std::fs::remove_dir_all(&root);
+    let old_dir = root.join("old");
+    let new_dir = root.join("new");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    std::fs::create_dir_all(&new_dir).unwrap();
+
+    let old_a = old_dir.join("a.txt");
+    let old_b = old_dir.join("b.txt");
+    let new_a = new_dir.join("a.txt");
+    let new_b = new_dir.join("b.txt");
+    std::fs::write(&new_a, "a").unwrap();
+    std::fs::write(&new_b, "b").unwrap();
+    std::fs::write(&old_b, "occupied").unwrap();
+
+    let error = undo_moved_pairs(&[
+        (old_a.clone(), new_a.clone()),
+        (old_b.clone(), new_b.clone()),
+    ])
+    .unwrap_err();
+
+    assert!(error.retryable);
+    assert!(new_a.exists());
+    assert!(new_b.exists());
+    assert!(!old_a.exists());
+    assert_eq!(std::fs::read_to_string(&old_b).unwrap(), "occupied");
+    let _ = std::fs::remove_dir_all(root);
+}
+
 #[cfg(unix)]
 #[test]
 fn file_tree_copy_preserves_symlinks_without_following_cycles() {

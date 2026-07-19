@@ -841,6 +841,21 @@ impl LspManager {
         )
     }
 
+    fn should_accept_diagnostics_version(
+        existing_version: Option<i32>,
+        incoming_version: Option<i32>,
+        is_open_file: bool,
+    ) -> bool {
+        if !is_open_file {
+            return true;
+        }
+        match (existing_version, incoming_version) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(existing), Some(incoming)) => incoming >= existing,
+        }
+    }
+
     /// Опрашивает события от всех серверов. Вызывать раз в кадр.
     /// Обновляет self.diagnostics при получении новых диагностик.
     pub fn poll(&mut self) -> Vec<LspEvent> {
@@ -867,26 +882,44 @@ impl LspManager {
                     ..
                 } => {
                     if !self.suppress_diagnostics {
-                        let v = version.unwrap_or(0);
-                        received_diagnostics = received_diagnostics.saturating_add(items.len());
-                        self.compact_diagnostic_text(items);
-
-                        if *server_name == TY_SERVER.program {
-                            if let Some(result_id) = result_id.as_ref() {
-                                self.ty_diag_result_ids
-                                    .insert(path.clone(), result_id.clone());
-                            }
-                            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                            self.ty_instant_diagnostics
-                                .insert(path.clone(), (v, items));
+                        let is_ty = *server_name == TY_SERVER.program;
+                        let existing_version = if is_ty {
+                            self.ty_instant_diagnostics.get(path).map(|(version, _)| *version)
                         } else {
-                            let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
-                            self.instant_diagnostics
-                                .insert(path.clone(), (v, items));
-                        }
+                            self.instant_diagnostics.get(path).map(|(version, _)| *version)
+                        };
+                        let is_open_file = self
+                            .open_python_files
+                            .contains_key(&crate::platform::PathKey::new(path));
+                        if Self::should_accept_diagnostics_version(
+                            existing_version,
+                            *version,
+                            is_open_file,
+                        ) {
+                            let stored_version = version.unwrap_or(0);
+                            received_diagnostics =
+                                received_diagnostics.saturating_add(items.len());
+                            self.compact_diagnostic_text(items);
 
-                        self.dirty_diagnostics = true;
-                        self.last_change = None;
+                            if is_ty {
+                                if let Some(result_id) = result_id.as_ref() {
+                                    self.ty_diag_result_ids
+                                        .insert(path.clone(), result_id.clone());
+                                }
+                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+                                self.ty_instant_diagnostics
+                                    .insert(path.clone(), (stored_version, items));
+                            } else {
+                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+                                self.instant_diagnostics
+                                    .insert(path.clone(), (stored_version, items));
+                            }
+
+                            self.dirty_diagnostics = true;
+                            self.last_change = None;
+                        } else {
+                            items.clear();
+                        }
                     }
                 }
                 LspEvent::StatusChanged { name, status } => {
@@ -1603,6 +1636,9 @@ pub fn lsp_pos_to_offset(text: &str, line: u32, col: u32) -> usize {
             return i;
         }
         if ch == '\n' {
+            if cur_line == line {
+                return i;
+            }
             cur_line += 1;
             cur_col = 0;
         } else {

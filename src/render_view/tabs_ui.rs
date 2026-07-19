@@ -39,6 +39,15 @@ fn tab_icon_rect(
     (x, y, visual_size)
 }
 
+fn active_dragged_tab_index(
+    tab_drag: Option<&crate::app::TabDragState>,
+    tab_count: usize,
+) -> Option<usize> {
+    tab_drag
+        .filter(|drag| drag.threshold_passed && drag.start_idx < tab_count)
+        .map(|drag| drag.start_idx)
+}
+
 fn tab_diagnostic_severity_for_path(
     lsp: Option<&crate::lsp::LspManager>,
     path: Option<&std::path::PathBuf>,
@@ -169,8 +178,8 @@ impl Renderer {
         let mut order: Vec<usize> = (0..tabs.len()).collect();
         let mut actual_xs = initial_xs.clone();
 
-        let is_dragging = tab_drag.map(|d| d.threshold_passed).unwrap_or(false);
-        let dragged_idx = tab_drag.map(|d| d.start_idx);
+        let dragged_idx = active_dragged_tab_index(tab_drag, tabs.len());
+        let is_dragging = dragged_idx.is_some();
 
         if let Some(drag) = tab_drag {
             if drag.threshold_passed && drag.start_idx < tabs.len() {
@@ -667,6 +676,29 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stale_dragged_tab_index_is_rejected_before_render_ordering() {
+        let valid = crate::app::TabDragState {
+            start_idx: 1,
+            start_x: 10.0,
+            current_x: 20.0,
+            threshold_passed: true,
+        };
+        let stale = crate::app::TabDragState {
+            start_idx: 3,
+            ..valid.clone()
+        };
+
+        assert_eq!(active_dragged_tab_index(Some(&valid), 2), Some(1));
+        assert_eq!(active_dragged_tab_index(Some(&stale), 2), None);
+
+        let pending = crate::app::TabDragState {
+            threshold_passed: false,
+            ..valid
+        };
+        assert_eq!(active_dragged_tab_index(Some(&pending), 2), None);
+    }
 
     #[test]
     fn tab_path_external_detection_requires_absolute_outside_workspace() {

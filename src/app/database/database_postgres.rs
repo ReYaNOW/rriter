@@ -342,12 +342,18 @@ async fn connect_postgres_stream(
                 &mut make_tls,
                 hostname,
             )
-            .expect("rustls connector construction is infallible");
+            .map_err(|error| tls_connector_error(hostname, &error))?;
             let (client, connection) = config.connect_raw(stream, tls).await?;
             let (driver, notice_rx) = spawn_connection_driver(connection);
             Ok((client, driver, notice_rx, warnings.len()))
         }
     }
+}
+
+fn tls_connector_error(hostname: &str, error: &dyn std::fmt::Display) -> DatabaseBackendError {
+    DatabaseBackendError::InvalidConfiguration(format!(
+        "invalid PostgreSQL TLS server name {hostname:?}: {error}"
+    ))
 }
 
 fn spawn_connection_driver<S, T>(
@@ -568,5 +574,13 @@ mod tests {
         assert!(message.contains("system OpenSSH failed"));
         assert!(message.contains("built-in SSH fallback failed"));
         assert!(!message.contains("actual-password"));
+    }
+
+    #[test]
+    fn a4_b012_tls_connector_failure_is_returned_instead_of_panicking() {
+        let error = tls_connector_error("bad host name", &"invalid dns name");
+        let message = error.to_string();
+        assert!(message.contains("bad host name"));
+        assert!(message.contains("invalid dns name"));
     }
 }

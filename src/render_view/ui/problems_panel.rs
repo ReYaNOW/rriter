@@ -1,5 +1,13 @@
 use super::*;
 
+fn problems_empty_state_visible(visible_row_count: usize) -> bool {
+    visible_row_count == 0
+}
+
+fn problems_group_expanded(is_collapsed: bool) -> bool {
+    !is_collapsed
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub fn draw_problems_panel(
@@ -139,7 +147,7 @@ impl Renderer {
         );
         let visible_row_count = ide_panel.visible_problem_row_count(lsp);
 
-        if ide_panel.flat_diags.is_empty() {
+        if problems_empty_state_visible(visible_row_count) {
             let hint = "Нет ляпов";
             let tw = self.measure_ui_width(hint, text_scale);
             self.draw_string_scaled(
@@ -185,20 +193,13 @@ impl Renderer {
                         }
 
                         let is_collapsed = ide_panel.problems_collapsed.contains(path);
-                        let arrow_icon = if is_collapsed {
-                            crate::widgets::IconType::Up
-                        } else {
-                            crate::widgets::IconType::Down
-                        };
-
                         let icon_sz = 22.0 * s;
                         let icon_x = content_x + pad_x - 3.0 * s;
-                        let icon_y = current_y + (item_h - icon_sz) / 2.0;
-                        self.draw_atlas_icon(
-                            arrow_icon,
+                        self.draw_tree_disclosure_icon(
+                            problems_group_expanded(is_collapsed),
                             icon_x,
-                            icon_y,
-                            icon_sz,
+                            current_y,
+                            item_h,
                             [0.6, 0.6, 0.6, 1.0],
                         );
 
@@ -444,5 +445,22 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{problems_empty_state_visible, problems_group_expanded};
+
+    #[test]
+    fn problems_empty_state_uses_visible_rows_after_filtering() {
+        assert!(problems_empty_state_visible(0));
+        assert!(!problems_empty_state_visible(1));
+    }
+
+    #[test]
+    fn problems_group_disclosure_matches_expanded_state() {
+        assert!(problems_group_expanded(false));
+        assert!(!problems_group_expanded(true));
     }
 }

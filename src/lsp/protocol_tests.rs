@@ -990,3 +990,38 @@ fn preproduction_position_request_builders_share_valid_trigger_encoding() {
     assert_eq!(signature["method"], "textDocument/signatureHelp");
     assert_eq!(signature["params"]["context"]["triggerKind"], 1);
 }
+
+
+#[test]
+fn protocol_rejects_positions_that_do_not_fit_internal_integer_types() {
+    let overflow = u64::from(u32::MAX) + 1;
+    let diagnostic = serde_json::json!({
+        "range": {
+            "start": {"line": overflow, "character": 0},
+            "end": {"line": overflow, "character": 1}
+        },
+        "message": "bad"
+    });
+    assert!(parse_diagnostic_value(&diagnostic).is_none());
+
+    let edit = serde_json::json!({
+        "range": {
+            "start": {"line": 0, "character": overflow},
+            "end": {"line": 0, "character": overflow}
+        },
+        "newText": "x"
+    });
+    assert!(parse_text_edit_value(&edit).is_none());
+
+    let inlay = serde_json::json!({
+        "position": {"line": overflow, "character": 0},
+        "label": "hint"
+    });
+    assert!(parse_inlay_hint_value(&inlay).is_none());
+
+    let definition = serde_json::json!({
+        "uri": "file:///tmp/example.py",
+        "range": {"start": {"line": overflow, "character": 0}}
+    });
+    assert!(parse_definition_target(&definition).is_none());
+}

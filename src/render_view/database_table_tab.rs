@@ -19,6 +19,20 @@ struct DatabasePopupPlacement {
     scale: f32,
 }
 
+fn database_enum_option_text_layout(
+    popup_x: f32,
+    popup_w: f32,
+    option_y: f32,
+    option_h: f32,
+    scale: f32,
+) -> (f32, f32, f32) {
+    (
+        popup_x + (7.0 * scale).round(),
+        Renderer::tree_row_text_y(option_y, option_h, scale),
+        (popup_w - 14.0 * scale).max(4.0),
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 fn database_popup_placement(
     anchor_x: f32,
@@ -556,8 +570,6 @@ impl Renderer {
             total_rows_h,
         );
         let viewport = layout.viewport;
-        let show_x = viewport.show_x;
-        let show_y = viewport.show_y;
         let data_w = viewport.data_w;
         let body_h = viewport.body_h;
         let rows_h = viewport.rows_h;
@@ -875,11 +887,18 @@ impl Renderer {
                                 [0.20, 0.18, 0.29, 1.0],
                             );
                         }
+                        let (text_x, text_y, text_w) = database_enum_option_text_layout(
+                            popup_x,
+                            popup_w,
+                            option_y,
+                            option_h,
+                            placement.scale,
+                        );
                         self.draw_tree_label_clipped(
                             "↑ Предыдущие",
-                            popup_x + (7.0 * placement.scale).round(),
-                            Self::tree_row_text_y(option_y, option_h, placement.scale),
-                            (popup_w - 14.0 * placement.scale).max(4.0),
+                            text_x,
+                            text_y,
+                            text_w,
                             self.theme.line_num,
                             0.84,
                             &mut scratch,
@@ -902,11 +921,18 @@ impl Renderer {
                             mx,
                             my,
                         );
+                        let (text_x, text_y, text_w) = database_enum_option_text_layout(
+                            popup_x,
+                            popup_w,
+                            option_y,
+                            option_h,
+                            placement.scale,
+                        );
                         self.draw_tree_label_clipped(
                             option,
-                            popup_x + (7.0 * s).round(),
-                            Self::tree_row_text_y(option_y, option_h, s),
-                            (popup_w - 14.0 * s).max(4.0),
+                            text_x,
+                            text_y,
+                            text_w,
                             self.theme.fg,
                             0.84,
                             &mut scratch,
@@ -934,11 +960,18 @@ impl Renderer {
                                 [0.20, 0.18, 0.29, 1.0],
                             );
                         }
+                        let (text_x, text_y, text_w) = database_enum_option_text_layout(
+                            popup_x,
+                            popup_w,
+                            option_y,
+                            option_h,
+                            placement.scale,
+                        );
                         self.draw_tree_label_clipped(
                             "Следующие ↓",
-                            popup_x + (7.0 * placement.scale).round(),
-                            Self::tree_row_text_y(option_y, option_h, placement.scale),
-                            (popup_w - 14.0 * placement.scale).max(4.0),
+                            text_x,
+                            text_y,
+                            text_w,
                             self.theme.line_num,
                             0.84,
                             &mut scratch,
@@ -1003,18 +1036,9 @@ impl Renderer {
         draw_database_table_scrollbars(
             self,
             ui,
-            x,
-            y,
-            body_w,
-            body_h,
-            data_x,
-            data_w,
-            rows_y,
-            rows_h,
+            &layout,
             metadata,
             state,
-            show_x,
-            show_y,
             mx,
             my,
             s,
@@ -1642,72 +1666,73 @@ fn database_visible_columns(
 fn draw_database_table_scrollbars(
     renderer: &mut Renderer,
     ui: &mut UiRegistry,
-    x: f32,
-    y: f32,
-    body_w: f32,
-    body_h: f32,
-    data_x: f32,
-    data_w: f32,
-    rows_y: f32,
-    rows_h: f32,
+    layout: &crate::app::database::DatabaseGridLayout,
     metadata: &crate::app::database::DatabaseTableMetadata,
     state: &crate::app::database::DatabaseTableTabState,
-    show_x: bool,
-    show_y: bool,
     mx: f32,
     my: f32,
     s: f32,
 ) {
-    let track = (SCROLLBAR_W * s).round().max(10.0);
-    if show_y {
+    let track_color = [0.055, 0.058, 0.075, 1.0];
+    let thumb_color = [0.62, 0.38, 0.82, 0.9];
+    let (vertical_rect, horizontal_rect) = database_table_scrollbar_rects(layout);
+    if let Some(rect) = vertical_rect {
         let total_h = state.grid.logical_row_count() as f32
             * (crate::app::database::DATABASE_GRID_ROW_HEIGHT * s).round();
-        let max_y = crate::app::database::database_grid_max_scroll(
-            state.grid.logical_row_count(),
-            (crate::app::database::DATABASE_GRID_ROW_HEIGHT * s).round(),
-            rows_h,
-        );
-        let sy_x = (x + body_w).round();
-        renderer.push_rect(sy_x, y, track, body_h, [0.055, 0.058, 0.075, 1.0]);
-        ui.register_rect(UiId::DatabaseTableScrollY, sy_x, rows_y, track, rows_h, mx, my);
-        if max_y > 0.0 {
-            let thumb_h = (rows_h / total_h.max(1.0) * rows_h)
-                .max((28.0 * s).round())
-                .min(rows_h)
-                .round();
-            let ratio = (state.grid.scroll_y.current * s / max_y).clamp(0.0, 1.0);
+        renderer.push_rect(rect.x, rect.y, rect.w, rect.h, track_color);
+        ui.register_rect(UiId::DatabaseTableScrollY, rect.x, rect.y, rect.w, rect.h, mx, my);
+        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+            rect.y,
+            rect.h,
+            layout.body_rect.h,
+            total_h,
+            state.grid.scroll_y.current * s,
+            (28.0 * s).round(),
+        ) {
             renderer.push_rounded_rect(
-                sy_x + (3.0 * s).round(),
-                (rows_y + ratio * (rows_h - thumb_h)).round(),
-                (6.0 * s).round(),
-                thumb_h,
+                rect.x + (2.0 * s).round(),
+                thumb.start.round(),
+                (rect.w - 4.0 * s).max(4.0).round(),
+                thumb.len.round(),
                 (3.0 * s).round(),
-                [0.62, 0.38, 0.82, 0.9],
+                thumb_color,
             );
         }
     }
-    if show_x {
+    if let Some(rect) = horizontal_rect {
         let content_w = (state.grid.content_width(metadata) * s).round();
-        let max_x = (content_w - data_w).max(0.0);
-        let sx_y = (y + body_h).round();
-        renderer.push_rect(x, sx_y, body_w, track, [0.055, 0.058, 0.075, 1.0]);
-        ui.register_rect(UiId::DatabaseTableScrollX, data_x, sx_y, data_w, track, mx, my);
-        if max_x > 0.0 {
-            let thumb_w = (data_w / content_w.max(1.0) * data_w)
-                .max((36.0 * s).round())
-                .min(data_w)
-                .round();
-            let ratio = (state.grid.scroll_x.current * s / max_x).clamp(0.0, 1.0);
+        renderer.push_rect(rect.x, rect.y, rect.w, rect.h, track_color);
+        ui.register_rect(UiId::DatabaseTableScrollX, rect.x, rect.y, rect.w, rect.h, mx, my);
+        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+            rect.x,
+            rect.w,
+            layout.body_rect.w,
+            content_w,
+            state.grid.scroll_x.current * s,
+            (36.0 * s).round(),
+        ) {
             renderer.push_rounded_rect(
-                (data_x + ratio * (data_w - thumb_w)).round(),
-                sx_y + (3.0 * s).round(),
-                thumb_w,
-                (6.0 * s).round(),
+                thumb.start.round(),
+                rect.y + (2.0 * s).round(),
+                thumb.len.round(),
+                (rect.h - 4.0 * s).max(4.0).round(),
                 (3.0 * s).round(),
-                [0.62, 0.38, 0.82, 0.9],
+                thumb_color,
             );
         }
     }
+}
+
+fn database_table_scrollbar_rects(
+    layout: &crate::app::database::DatabaseGridLayout,
+) -> (
+    Option<crate::app::database::DatabaseGridRect>,
+    Option<crate::app::database::DatabaseGridRect>,
+) {
+    (
+        layout.vertical_scrollbar_rect,
+        layout.horizontal_scrollbar_rect,
+    )
 }
 
 
@@ -1750,6 +1775,28 @@ mod database_table_renderer_tests {
         assert!(placement.w <= 140.0);
         assert!(placement.h <= 120.0);
         assert!(placement.y + placement.h <= 120.0 + 0.5);
+    }
+
+    #[test]
+    fn a4_b002_enum_option_text_uses_fitted_popup_scale() {
+        let (x, y, w) = database_enum_option_text_layout(10.0, 100.0, 20.0, 14.0, 0.5);
+        assert_eq!(x, 14.0);
+        assert_eq!(w, 93.0);
+        assert_eq!(y, Renderer::tree_row_text_y(20.0, 14.0, 0.5));
+    }
+
+    #[test]
+    fn a4_b001_table_scrollbar_tracks_match_shared_hitbox_rects() {
+        let layout = crate::app::database::database_grid_layout(
+            0.0, 10.0, 500.0, 300.0, 50.0, 12.0, 40.0, 700.0, 800.0,
+        );
+        let (vertical, horizontal) = database_table_scrollbar_rects(&layout);
+        let vertical = vertical.unwrap();
+        let horizontal = horizontal.unwrap();
+        assert_eq!(vertical.y, layout.body_rect.y);
+        assert_eq!(vertical.h, layout.body_rect.h);
+        assert_eq!(horizontal.x, layout.body_rect.x);
+        assert_eq!(horizontal.w, layout.body_rect.w);
     }
 
     #[test]

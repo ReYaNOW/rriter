@@ -1,5 +1,14 @@
 use crate::app::App;
 
+pub(crate) fn lsp_actions_menu_screen_y(
+    cursor_y: f32,
+    scroll_y: f32,
+    line_height: f32,
+    editor_top_inset: f32,
+) -> f32 {
+    cursor_y - scroll_y + line_height + editor_top_inset
+}
+
 pub(crate) fn lsp_server_logs_h_for_content(inner_total_h: f32, content_h: f32, s: f32) -> f32 {
     let max_fit = (content_h - 152.0 * s).max(0.0);
     if max_fit < 68.0 * s {
@@ -238,9 +247,20 @@ impl App {
 
         // Вычисляем позицию меню (под курсором)
         let (cx, cy) = self.renderer.as_mut().unwrap().get_cursor_xy(&self.editor);
-        let _s = self.renderer.as_ref().unwrap().scale_factor;
+        let s = self.renderer.as_ref().unwrap().scale_factor;
         let menu_x = cx.max(self.renderer.as_ref().unwrap().left_padding);
-        let menu_y = cy - self.scroll_y.current + self.renderer.as_ref().unwrap().line_height;
+        let editor_top_inset = crate::render_view::editor_content_top_inset(
+            self.show_welcome,
+            self.is_ide_mode,
+            self.active_tab_is_database_query(),
+            s,
+        );
+        let menu_y = lsp_actions_menu_screen_y(
+            cy,
+            self.scroll_y.current,
+            self.renderer.as_ref().unwrap().line_height,
+            editor_top_inset,
+        );
 
         // Начальные элементы: noqa варианты
         let mut items: Vec<crate::app::LspActionItem> = Vec::new();
@@ -598,6 +618,11 @@ mod tests {
         });
         assert_eq!(height, 32.0);
         assert_eq!(width, 6.0 * 7.5);
+    }
+
+    #[test]
+    fn lsp_action_menu_anchor_includes_editor_top_inset_once() {
+        assert_eq!(lsp_actions_menu_screen_y(120.0, 30.0, 20.0, 44.0), 154.0);
     }
 
 }

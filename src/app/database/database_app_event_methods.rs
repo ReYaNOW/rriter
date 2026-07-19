@@ -67,7 +67,9 @@ impl App {
             | DatabaseEvent::JobCancelled { job_id } => Some(*job_id),
             DatabaseEvent::Busy { requested_job_id, .. } => Some(*requested_job_id),
             DatabaseEvent::TransactionExpired { .. }
-            | DatabaseEvent::QueryTransactionExpired { .. } => None,
+            | DatabaseEvent::TransactionExpiryFailed { .. }
+            | DatabaseEvent::QueryTransactionExpired { .. }
+            | DatabaseEvent::QueryTransactionExpiryFailed { .. } => None,
         };
         let pending = self.ide_panel.database.pending_job.clone();
         if let Some(job_id) = event_job_id
@@ -421,9 +423,9 @@ impl App {
             }
             DatabaseEvent::QueryTransactionExpired {
                 connection_id,
+                transaction_id,
                 database_name,
                 console_id,
-                ..
             } => {
                 let mut history = None;
                 if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
@@ -433,7 +435,12 @@ impl App {
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
                 {
-                    if let Some(review) = state.review.take() {
+                    if database_transaction_matches(
+                        state.review.as_ref().map(|review| review.transaction_id),
+                        transaction_id,
+                    )
+                        && let Some(review) = state.review.take()
+                    {
                         history = Some(crate::app::database::DatabaseQueryHistoryEntry {
                             connection_id,
                             database_name: database_name.clone(),
@@ -446,9 +453,49 @@ impl App {
                             affected_rows: review.changed_rows,
                             error_summary: Some("Транзакция автоматически отменена по таймауту".to_string()),
                         });
+                        state.running = false;
+                        state.error = Some("Транзакция SQL-консоли автоматически отменена по таймауту".to_string());
                     }
+                }
+                if let Some(history) = history {
+                    self.record_database_query_history(history);
+                }
+            }
+            DatabaseEvent::QueryTransactionExpiryFailed {
+                connection_id,
+                transaction_id,
+                database_name,
+                console_id,
+                message,
+            } => {
+                let mut history = None;
+                if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
+                    EditorTabKind::DatabaseQuery(meta, _) => {
+                        meta.connection_id == connection_id && meta.console_id == console_id
+                    }
+                    _ => false,
+                }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
+                    && database_transaction_matches(
+                        state.review.as_ref().map(|review| review.transaction_id),
+                        transaction_id,
+                    )
+                    && let Some(review) = state.review.take()
+                {
+                    let error = format!("Не удалось автоматически отменить транзакцию: {message}");
+                    history = Some(crate::app::database::DatabaseQueryHistoryEntry {
+                        connection_id,
+                        database_name,
+                        console_id,
+                        sql: review.sql,
+                        started_unix_ms: review.started_unix_ms,
+                        duration_ms: review.duration_ms,
+                        succeeded: false,
+                        returned_rows: review.returned_rows,
+                        affected_rows: review.changed_rows,
+                        error_summary: Some(error.clone()),
+                    });
                     state.running = false;
-                    state.error = Some("Транзакция SQL-консоли автоматически отменена по таймауту".to_string());
+                    state.error = Some(error);
                 }
                 if let Some(history) = history {
                     self.record_database_query_history(history);
@@ -563,7 +610,19 @@ impl App {
                 self.finish_database_active_job(false);
                 self.finish_rolled_back_database_table();
             }
-            DatabaseEvent::TransactionExpired { connection_id, database_name, table_name, .. } => {
+            DatabaseEvent::TransactionExpired {
+                connection_id,
+                transaction_id,
+                database_name,
+                table_name,
+            } => {
+                if !database_table_review_matches(
+                    self.ide_panel.database.table_modal.as_ref(),
+                    transaction_id,
+                ) {
+                    self.drain_database_command_queue();
+                    return;
+                }
                 self.ide_panel.database.table_modal = None;
                 for tab in &mut self.tabs {
                     if let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind
@@ -576,6 +635,37 @@ impl App {
                 }
                 self.ide_panel.database.global_error = Some(format!(
                     "Транзакция public.{table_name} в базе {database_name} автоматически отменена по таймауту"
+                ));
+            }
+            DatabaseEvent::TransactionExpiryFailed {
+                connection_id,
+                transaction_id,
+                database_name,
+                table_name,
+                message,
+            } => {
+                if !database_table_review_matches(
+                    self.ide_panel.database.table_modal.as_ref(),
+                    transaction_id,
+                ) {
+                    self.drain_database_command_queue();
+                    return;
+                }
+                self.ide_panel.database.table_modal = None;
+                for tab in &mut self.tabs {
+                    if let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind
+                        && meta.connection_id == connection_id
+                        && meta.database_name == database_name
+                        && meta.table_name == table_name
+                    {
+                        state.grid.pending_close_after_save = false;
+                        state.error = Some(format!(
+                            "Не удалось автоматически отменить транзакцию: {message}"
+                        ));
+                    }
+                }
+                self.ide_panel.database.global_error = Some(format!(
+                    "Не удалось автоматически отменить транзакцию public.{table_name} в базе {database_name}: {message}"
                 ));
             }
             DatabaseEvent::ConnectionSecretsSaved { connection, .. } => {
@@ -879,6 +969,26 @@ fn database_event_matches_active_job(
     event_job_id.is_none() || event_job_id == active_job_id
 }
 
+fn database_table_review_matches(
+    modal: Option<&crate::app::database::DatabaseTableModal>,
+    transaction_id: crate::app::database::DatabaseTransactionId,
+) -> bool {
+    let current = match modal {
+        Some(crate::app::database::DatabaseTableModal::Review { state, .. }) => {
+            Some(state.transaction_id)
+        }
+        _ => None,
+    };
+    database_transaction_matches(current, transaction_id)
+}
+
+fn database_transaction_matches(
+    current: Option<crate::app::database::DatabaseTransactionId>,
+    event: crate::app::database::DatabaseTransactionId,
+) -> bool {
+    current == Some(event)
+}
+
 #[cfg(test)]
 mod database_app_event_method_regression_tests {
     use super::*;
@@ -891,5 +1001,14 @@ mod database_app_event_method_regression_tests {
         assert!(database_event_matches_active_job(Some(active), Some(active)));
         assert!(!database_event_matches_active_job(Some(old), None));
         assert!(database_event_matches_active_job(None, Some(active)));
+    }
+
+    #[test]
+    fn a4_b008_stale_expiry_cannot_close_newer_review() {
+        let old = crate::app::database::DatabaseTransactionId(10);
+        let current = crate::app::database::DatabaseTransactionId(11);
+        assert!(!database_transaction_matches(Some(current), old));
+        assert!(database_transaction_matches(Some(current), current));
+        assert!(!database_transaction_matches(None, old));
     }
 }

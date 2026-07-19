@@ -34,6 +34,20 @@ pub const API_FETCH_TIMEOUT: Duration = Duration::from_secs(12);
 pub const API_MAX_SPEC_BYTES: usize = 8 * 1024 * 1024;
 pub const API_MAX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 pub const API_MANUAL_MOCK_SPEC_ID: ApiSpecId = ApiSpecId(0);
+
+pub(crate) fn api_content_type_is_json(content_type: &str) -> bool {
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    media_type == "application/json"
+        || media_type
+            .split_once('/')
+            .is_some_and(|(_, subtype)| subtype.ends_with("+json"))
+}
+
 pub(crate) fn api_mock_contract_field_prop_value(
     field: &crate::app::api_mock::types::ApiMockContractField,
     prop: crate::ui_system::ApiMockContractFieldProp,

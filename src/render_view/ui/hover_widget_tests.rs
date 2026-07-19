@@ -125,6 +125,7 @@ fn test_diag_popup_byte_at_chooses_nearest_line_and_side() {
             w: 8.0,
             h: 16.0,
             byte_offset: 3,
+            byte_len: 1,
         });
         chars.push(super::DiagChar {
             x: 30.0,
@@ -132,6 +133,7 @@ fn test_diag_popup_byte_at_chooses_nearest_line_and_side() {
             w: 8.0,
             h: 16.0,
             byte_offset: 4,
+            byte_len: 1,
         });
         chars.push(super::DiagChar {
             x: 10.0,
@@ -139,6 +141,7 @@ fn test_diag_popup_byte_at_chooses_nearest_line_and_side() {
             w: 8.0,
             h: 16.0,
             byte_offset: 20,
+            byte_len: 1,
         });
     });
 
@@ -543,4 +546,45 @@ fn test_hover_content_scissor_stays_inside_animated_frame() {
     let old_scissor = compute_animated_scissor(10.0, 20.0, 100.0, 100.0, 500.0, 300.0, 0.25);
     assert!(old_scissor.0 < frame.0);
     assert!(old_scissor.2 > frame.2);
+}
+
+
+#[test]
+fn diagnostic_hit_test_uses_full_utf8_character_length() {
+    super::DIAG_CHARS.with(|chars| {
+        let mut chars = chars.borrow_mut();
+        chars.clear();
+        chars.push(super::DiagChar {
+            x: 10.0,
+            y: 20.0,
+            w: 8.0,
+            h: 16.0,
+            byte_offset: 0,
+            byte_len: "я".len(),
+        });
+    });
+
+    assert_eq!(super::diag_popup_byte_at(20.0, 25.0), "я".len());
+    super::DIAG_CHARS.with(|chars| chars.borrow_mut().clear());
+}
+
+#[test]
+fn diagnostic_wrapping_keeps_original_offsets_and_ignores_visual_indent() {
+    let message = "  alpha beta";
+    let lines = super::diagnostic_message_lines(message, &[], 0, 8.0, 2.0, |_| 1.0);
+
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[1][0].ch, ' ');
+    assert!(!lines[1][0].selectable);
+    assert_eq!(lines[1][1].ch, ' ');
+    assert!(!lines[1][1].selectable);
+    let beta = lines[1].iter().find(|item| item.ch == 'b').unwrap();
+    assert!(beta.selectable);
+    assert_eq!(beta.byte_offset, message.find("beta").unwrap());
+}
+
+#[test]
+fn hover_y_position_clamps_fallback_to_viewport_top_range() {
+    let y = compute_hover_y_position(50.0, 20.0, 100.0, 100.0, 1.0);
+    assert_eq!(y, 40.0);
 }

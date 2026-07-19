@@ -3,6 +3,31 @@ use crate::ui_system::{UiId, UiRegistry};
 use crate::widgets::ButtonView;
 use glow::HasContext;
 
+pub(crate) fn database_table_review_body_height(
+    viewport_w: f32,
+    viewport_h: f32,
+    scale: f32,
+) -> f32 {
+    let fitted = crate::ui_system::fit_centered_rect(
+        viewport_w,
+        viewport_h,
+        780.0 * scale,
+        620.0 * scale,
+        16.0 * scale,
+    );
+    (fitted.h - 180.0 * scale).max(0.0)
+}
+
+pub(crate) fn database_table_review_max_scroll(
+    viewport_w: f32,
+    viewport_h: f32,
+    scale: f32,
+    line_count: usize,
+) -> f32 {
+    let body_h = database_table_review_body_height(viewport_w, viewport_h, scale);
+    (line_count as f32 * 22.0 * scale - body_h).max(0.0)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -217,7 +242,7 @@ impl Renderer {
                     0.78,
                 );
                 let body_y = y + 112.0 * s;
-                let body_h = height - 180.0 * s;
+                let body_h = database_table_review_body_height(self.width, self.height, s);
                 let body_x = x + 18.0 * s;
                 let body_w = width - 36.0 * s;
                 self.push_rect(body_x, body_y, body_w, body_h, [0.06, 0.065, 0.085,1.0]);
@@ -266,7 +291,13 @@ impl Renderer {
                 let content_h = total_lines as f32 * 22.0 * s;
                 if content_h > body_h {
                     let thumb_h = (body_h / content_h * body_h).max(30.0 * s).min(body_h);
-                    let max_scroll = (content_h - body_h).max(1.0);
+                    let max_scroll = database_table_review_max_scroll(
+                        self.width,
+                        self.height,
+                        s,
+                        total_lines,
+                    )
+                    .max(1.0);
                     let ratio = (scroll.current / max_scroll).clamp(0.0, 1.0);
                     self.push_rounded_rect(
                         body_x + body_w - 8.0 * s,
@@ -514,4 +545,23 @@ fn draw_modal_buttons(renderer: &mut Renderer, ui: &mut UiRegistry, x: f32, y: f
 
 fn now_unix_ms() -> u128 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |value| value.as_millis())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{database_table_review_body_height, database_table_review_max_scroll};
+
+    #[test]
+    fn database_review_scroll_uses_fitted_modal_body_height() {
+        let body_h = database_table_review_body_height(900.0, 700.0, 1.0);
+        assert_eq!(body_h, 440.0);
+        assert_eq!(database_table_review_max_scroll(900.0, 700.0, 1.0, 30), 220.0);
+
+        let compact_body_h = database_table_review_body_height(500.0, 400.0, 1.0);
+        assert!(compact_body_h < body_h);
+        assert_eq!(
+            database_table_review_max_scroll(500.0, 400.0, 1.0, 30),
+            (30.0 * 22.0 - compact_body_h).max(0.0)
+        );
+    }
 }

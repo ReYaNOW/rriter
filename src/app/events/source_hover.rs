@@ -695,23 +695,20 @@ pub(super) fn source_attribute_hover_from_definition_file(
     None
 }
 
-pub(crate) fn source_function_signature_from_text(
-    text: &str,
-    symbol: &str,
-    module_path: Option<&str>,
-) -> Option<String> {
+fn source_function_name_offset(text: &str, symbol: &str) -> Option<usize> {
     if symbol.is_empty() {
         return None;
     }
     let mut byte = 0usize;
-    for line in text.lines() {
+    for raw_line in text.split_inclusive('\n') {
+        let line = raw_line.trim_end_matches(['\r', '\n']);
         let trimmed = line.trim_start();
         let rest = trimmed
             .strip_prefix("async def ")
             .or_else(|| trimmed.strip_prefix("def "));
         if let Some(rest) = rest {
             let Some(open_paren) = rest.find('(') else {
-                byte = byte.saturating_add(line.len()).saturating_add(1);
+                byte = byte.saturating_add(raw_line.len());
                 continue;
             };
             let open_bracket = rest.find('[').unwrap_or(open_paren);
@@ -723,15 +720,23 @@ pub(crate) fn source_function_signature_from_text(
                 } else {
                     "def "
                 };
-                let offset = byte + indent + def_prefix.len();
-                let mut editor = crate::editor::Editor::new(text.len().saturating_add(1));
-                editor.insert_str(text);
-                return source_signature_for_hover(&editor, offset, false, None, module_path);
+                return Some(byte + indent + def_prefix.len());
             }
         }
-        byte = byte.saturating_add(line.len()).saturating_add(1);
+        byte = byte.saturating_add(raw_line.len());
     }
     None
+}
+
+pub(crate) fn source_function_signature_from_text(
+    text: &str,
+    symbol: &str,
+    module_path: Option<&str>,
+) -> Option<String> {
+    let offset = source_function_name_offset(text, symbol)?;
+    let mut editor = crate::editor::Editor::new(text.len().saturating_add(1));
+    editor.insert_str(text);
+    source_signature_for_hover(&editor, offset, false, None, module_path)
 }
 
 fn source_class_signature_from_text(text: &str, symbol: &str) -> Option<String> {
@@ -1453,4 +1458,20 @@ where
     state.selection_cursor = None;
     state.selecting = false;
     true
+}
+
+
+#[cfg(test)]
+mod agent3_regression_tests {
+    use super::*;
+
+    #[test]
+    fn source_function_offset_counts_crlf_bytes_exactly() {
+        let text = "# first\r\n# second\r\ndef target(value: int) -> int:\r\n    return value\r\n";
+        assert_eq!(
+            source_function_name_offset(text, "target"),
+            text.find("target")
+        );
+        assert!(source_function_signature_from_text(text, "target", Some("sample")).is_some());
+    }
 }

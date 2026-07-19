@@ -213,7 +213,7 @@ pub fn contains_top_level_semicolon(sql: &str) -> bool {
 }
 
 pub fn statement_range_at(sql: &str, cursor: usize) -> Option<Range<usize>> {
-    let cursor = cursor.min(sql.len());
+    let cursor = clamp_sql_offset(sql, cursor);
     let statements = scanned_statements(sql);
     if let Some(statement) = statements
         .iter()
@@ -227,6 +227,14 @@ pub fn statement_range_at(sql: &str, cursor: usize) -> Option<Range<usize>> {
         .find(|statement| statement.range.start >= cursor)
         .or_else(|| statements.last())
         .map(|statement| statement.range.clone())
+}
+
+pub fn clamp_sql_offset(sql: &str, offset: usize) -> usize {
+    let mut offset = offset.min(sql.len());
+    while offset > 0 && !sql.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    offset
 }
 
 pub fn validate_managed_user_sql(sql: &str) -> Result<Vec<SqlStatement>, SqlValidationError> {
@@ -276,14 +284,44 @@ pub fn validate_managed_user_sql(sql: &str) -> Result<Vec<SqlStatement>, SqlVali
 
 fn classify_words(words: &[String]) -> SqlStatementKind {
     match words.first().map(String::as_str) {
-        Some("SELECT" | "SHOW" | "TABLE" | "VALUES" | "WITH") => SqlStatementKind::Query,
+        Some("SELECT" | "SHOW" | "TABLE" | "VALUES") => SqlStatementKind::Query,
+        Some("WITH") if words.iter().skip(1).any(|word| is_side_effect_keyword(word)) => {
+            SqlStatementKind::Other
+        }
+        Some("WITH") => SqlStatementKind::Query,
         Some("INSERT" | "UPDATE" | "DELETE" | "MERGE") => SqlStatementKind::Mutation,
         Some("CREATE" | "ALTER" | "DROP" | "TRUNCATE" | "COMMENT" | "GRANT" | "REVOKE") => {
             SqlStatementKind::Definition
         }
+        Some("EXPLAIN")
+            if words.iter().any(|word| word == "ANALYZE")
+                && words.iter().skip(1).any(|word| is_side_effect_keyword(word)) =>
+        {
+            SqlStatementKind::Other
+        }
         Some("EXPLAIN") => SqlStatementKind::Explain,
         _ => SqlStatementKind::Other,
     }
+}
+
+fn is_side_effect_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "INSERT"
+            | "UPDATE"
+            | "DELETE"
+            | "MERGE"
+            | "CREATE"
+            | "ALTER"
+            | "DROP"
+            | "TRUNCATE"
+            | "COMMENT"
+            | "GRANT"
+            | "REVOKE"
+            | "DO"
+            | "CALL"
+            | "COPY"
+    )
 }
 
 fn is_transaction_control(words: &[String]) -> bool {
@@ -513,6 +551,113 @@ fn is_word_continue(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
+pub fn contains_sql_token_outside_literals_and_comments(sql: &str, token: &[u8]) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+    let bytes = sql.as_bytes();
+    let mut state = ScanState::Normal;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        match &mut state {
+            ScanState::Normal => {
+                if bytes[index..].starts_with(token) {
+                    return true;
+                }
+                match bytes[index] {
+                    b'\'' => {
+                        state = ScanState::SingleQuoted;
+                        index += 1;
+                    }
+                    b'"' => {
+                        state = ScanState::DoubleQuoted;
+                        index += 1;
+                    }
+                    b'-' if bytes.get(index + 1) == Some(&b'-') => {
+                        state = ScanState::LineComment;
+                        index += 2;
+                    }
+                    b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                        state = ScanState::BlockComment { depth: 1 };
+                        index += 2;
+                    }
+                    b'$' => {
+                        if let Some((delimiter, next_index)) = dollar_quote_delimiter(bytes, index) {
+                            state = ScanState::DollarQuoted { delimiter };
+                            index = next_index;
+                        } else {
+                            index += 1;
+                        }
+                    }
+                    _ => index += 1,
+                }
+            }
+            ScanState::SingleQuoted => {
+                if bytes[index] == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\'') {
+                        index += 2;
+                    } else {
+                        state = ScanState::Normal;
+                        index += 1;
+                    }
+                } else if bytes[index] == b'\\' && bytes.get(index + 1).is_some() {
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            ScanState::DoubleQuoted => {
+                if bytes[index] == b'"' {
+                    if bytes.get(index + 1) == Some(&b'"') {
+                        index += 2;
+                    } else {
+                        state = ScanState::Normal;
+                        index += 1;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            ScanState::LineComment => {
+                if bytes[index] == b'\n' {
+                    state = ScanState::Normal;
+                }
+                index += 1;
+            }
+            ScanState::BlockComment { depth } => {
+                if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+                    *depth = depth.saturating_add(1);
+                    index += 2;
+                } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                    *depth = depth.saturating_sub(1);
+                    index += 2;
+                    if *depth == 0 {
+                        state = ScanState::Normal;
+                    }
+                } else {
+                    index += 1;
+                }
+            }
+            ScanState::DollarQuoted { delimiter } => {
+                if bytes[index..].starts_with(delimiter) {
+                    index = index.saturating_add(delimiter.len());
+                    state = ScanState::Normal;
+                } else {
+                    index += 1;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn push_next_utf8_char(sql: &str, index: &mut usize, out: &mut String) -> Option<char> {
+    let ch = sql.get(*index..)?.chars().next()?;
+    out.push(ch);
+    *index = (*index).saturating_add(ch.len_utf8());
+    Some(ch)
+}
+
 pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
     if sql.trim().is_empty() {
         return Ok(String::new());
@@ -622,14 +767,13 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                 }
                 _ => {
                     write_pending_space(&mut out, &mut pending_space, line_start);
-                    out.push(bytes[index] as char);
+                    push_next_utf8_char(sql, &mut index, &mut out);
                     line_start = false;
-                    index += 1;
                 }
             },
             ScanState::SingleQuoted => {
-                out.push(bytes[index] as char);
                 if bytes[index] == b'\'' {
+                    out.push('\'');
                     if bytes.get(index + 1) == Some(&b'\'') {
                         out.push('\'');
                         index += 2;
@@ -638,15 +782,16 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                         index += 1;
                     }
                 } else if bytes[index] == b'\\' && bytes.get(index + 1).is_some() {
-                    out.push(bytes[index + 1] as char);
-                    index += 2;
-                } else {
+                    out.push('\\');
                     index += 1;
+                    push_next_utf8_char(sql, &mut index, &mut out);
+                } else {
+                    push_next_utf8_char(sql, &mut index, &mut out);
                 }
             }
             ScanState::DoubleQuoted => {
-                out.push(bytes[index] as char);
                 if bytes[index] == b'"' {
+                    out.push('"');
                     if bytes.get(index + 1) == Some(&b'"') {
                         out.push('"');
                         index += 2;
@@ -655,13 +800,11 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                         index += 1;
                     }
                 } else {
-                    index += 1;
+                    push_next_utf8_char(sql, &mut index, &mut out);
                 }
             }
             ScanState::LineComment => {
-                let ch = bytes[index] as char;
-                out.push(ch);
-                index += 1;
+                let ch = push_next_utf8_char(sql, &mut index, &mut out).unwrap_or_default();
                 if ch == '\n' {
                     state = ScanState::Normal;
                     line_start = true;
@@ -680,12 +823,10 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                         state = ScanState::Normal;
                     }
                 } else {
-                    let ch = bytes[index] as char;
-                    out.push(ch);
+                    let ch = push_next_utf8_char(sql, &mut index, &mut out).unwrap_or_default();
                     if ch == '\n' {
                         line_start = true;
                     }
-                    index += 1;
                 }
             }
             ScanState::DollarQuoted { delimiter } => {
@@ -694,12 +835,10 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                     index += delimiter.len();
                     state = ScanState::Normal;
                 } else {
-                    let ch = bytes[index] as char;
-                    out.push(ch);
+                    let ch = push_next_utf8_char(sql, &mut index, &mut out).unwrap_or_default();
                     if ch == '\n' {
                         line_start = true;
                     }
-                    index += 1;
                 }
             }
         }
@@ -909,5 +1048,49 @@ mod tests {
     #[test]
     fn conservative_formatter_refuses_invalid_sql() {
         assert!(format_sql_conservative("SELECT FROM").is_err());
+    }
+
+    #[test]
+    fn a4_b005_token_search_ignores_comments_and_quoted_bodies() {
+        assert!(contains_sql_token_outside_literals_and_comments("id == 1", b"=="));
+        assert!(!contains_sql_token_outside_literals_and_comments(
+            "id = 1 /* == */ AND note = $$==$$ -- ==\n",
+            b"==",
+        ));
+    }
+
+    #[test]
+    fn a4_b006_data_changing_cte_requires_review_classification() {
+        let statements = validate_managed_user_sql(
+            "WITH changed AS (UPDATE items SET value = 2 RETURNING id) SELECT id FROM changed;",
+        )
+        .unwrap();
+        assert_eq!(statements[0].kind, SqlStatementKind::Other);
+    }
+
+    #[test]
+    fn a4_b007_explain_analyze_mutation_requires_review_classification() {
+        let statements = validate_managed_user_sql("EXPLAIN ANALYZE UPDATE items SET value = 2;")
+            .unwrap();
+        assert_eq!(statements[0].kind, SqlStatementKind::Other);
+        let readonly = validate_managed_user_sql("EXPLAIN ANALYZE SELECT * FROM items;").unwrap();
+        assert_eq!(readonly[0].kind, SqlStatementKind::Explain);
+    }
+
+    #[test]
+    fn a4_b011_formatter_preserves_unicode_in_every_scanner_state() {
+        let sql = "SELECT \"Имя\", 'Жук', $$Привет$$ FROM \"таблица\" /* комментарий */; -- хвост";
+        let formatted = format_sql_conservative(sql).unwrap();
+        for expected in ["Имя", "Жук", "Привет", "таблица", "комментарий", "хвост"] {
+            assert!(formatted.contains(expected), "missing {expected}: {formatted}");
+        }
+        assert!(!formatted.contains('Ð'));
+    }
+
+    #[test]
+    fn a4_b010_sql_offsets_snap_to_previous_utf8_boundary() {
+        assert_eq!(clamp_sql_offset("Ж", 1), 0);
+        assert_eq!(clamp_sql_offset("Ж", 2), 2);
+        assert_eq!(clamp_sql_offset("Ж", usize::MAX), 2);
     }
 }

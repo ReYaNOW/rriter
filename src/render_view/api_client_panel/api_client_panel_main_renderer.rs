@@ -571,7 +571,7 @@ impl Renderer {
             false,
         );
         cy += btn_h + 14.0 * s;
-        for (manual_idx, route) in api.mock.manual_routes.iter().enumerate().take(8) {
+        for (manual_idx, route) in api.mock.manual_routes.iter().enumerate() {
             let row_y = cy.round();
             let method_x = x + pad;
             let method_y = row_y + 2.0 * s;
@@ -1081,6 +1081,14 @@ impl Renderer {
 
 #[cfg(test)]
 mod api_panel_scroll_regression_tests {
+    #[test]
+    fn all_manual_routes_are_rendered_without_a_hidden_fixed_cap() {
+        let source = include_str!("api_client_panel_main_renderer.rs");
+        assert!(source.contains("api.mock.manual_routes.iter().enumerate()"));
+        let stale_cap = ["manual_routes.iter().enumerate()", ".take(8)"].concat();
+        assert!(!source.contains(&stale_cap));
+    }
+
     #[test]
     fn bug_39_api_route_rows_disable_hover_while_scroll_is_moving() {
         let source = include_str!("api_client_panel_main_renderer.rs");

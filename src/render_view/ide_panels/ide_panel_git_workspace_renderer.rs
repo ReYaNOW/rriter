@@ -1023,8 +1023,12 @@ impl Renderer {
                             }
                         }
 
-                        let (checkbox_color, check_color) =
-                            git_checkbox_color(file.staged, false, workspace_disabled);
+                        let (checkbox_color, check_color) = git_stage_checkbox_color(
+                            file.staged,
+                            false,
+                            workspace_disabled,
+                            ide_panel.git.pending,
+                        );
                         self.push_rounded_rect(
                             check_x,
                             check_y,
@@ -1111,7 +1115,7 @@ impl Renderer {
                         let check_size = folder_layout.check_size;
                         let check_x = folder_layout.check_x;
                         let check_y = folder_layout.check_y;
-                        let (checkbox_color, check_color) = git_checkbox_color(
+                        let (checkbox_color, check_color) = git_stage_checkbox_color(
                             matches!(
                                 folder_stage,
                                 Some(crate::app::git_panel::GitFolderStageState::All)
@@ -1121,6 +1125,7 @@ impl Renderer {
                                 Some(crate::app::git_panel::GitFolderStageState::Partial)
                             ),
                             workspace_disabled,
+                            ide_panel.git.pending,
                         );
                         self.push_rounded_rect(
                             check_x,

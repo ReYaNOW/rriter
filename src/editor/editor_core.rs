@@ -157,6 +157,23 @@ pub enum EditOp {
     },
 }
 
+fn edit_op_size(op: &EditOp) -> usize {
+    match op {
+        EditOp::Insert { text, .. } | EditOp::Delete { text, .. } => text.len(),
+        EditOp::Replace {
+            old_text, new_text, ..
+        } => old_text.len().max(new_text.len()),
+    }
+}
+
+fn clamp_text_cursor_to_char_boundary(text: &str, cursor: usize) -> usize {
+    let mut cursor = cursor.min(text.len());
+    while cursor > 0 && !text.is_char_boundary(cursor) {
+        cursor -= 1;
+    }
+    cursor
+}
+
 #[derive(Clone)]
 pub struct HistoryStep {
     pub op: EditOp,
@@ -740,13 +757,7 @@ impl Editor {
             }
         }
         if !merge {
-            let size = match &step.op {
-                EditOp::Insert { text, .. } => text.len(),
-                EditOp::Delete { text, .. } => text.len(),
-                EditOp::Replace {
-                    old_text, new_text, ..
-                } => old_text.len().max(new_text.len()),
-            };
+            let size = edit_op_size(&step.op);
             if size > 0 {
                 self.history.push_back(step);
                 self.history_size += size;
@@ -755,13 +766,7 @@ impl Editor {
         // Урезаем лимит памяти на историю: 5 МБ на вкладку (вместо 50 МБ)
         while self.history_size > 5 * 1024 * 1024 {
             if let Some(old) = self.history.pop_front() {
-                let old_size = match &old.op {
-                    EditOp::Insert { text, .. } => text.len(),
-                    EditOp::Delete { text, .. } => text.len(),
-                    EditOp::Replace {
-                        old_text, new_text, ..
-                    } => old_text.len().max(new_text.len()),
-                };
+                let old_size = edit_op_size(&old.op);
                 self.history_size -= old_size;
             }
         }
@@ -769,6 +774,7 @@ impl Editor {
 
     pub fn undo(&mut self) -> Option<UndoRedoDelta> {
         if let Some(mut step) = self.history.pop_back() {
+            self.history_size = self.history_size.saturating_sub(edit_op_size(&step.op));
             self.is_working_history = true;
             let delta = match &mut step.op {
                 EditOp::Insert { offset, text } => {
@@ -805,8 +811,6 @@ impl Editor {
                         len,
                     });
 
-                    let ins_len = old_text.len();
-                    self.shift_folds_insert(*offset, ins_len);
                     self.cursor = *offset;
                     self.insert_str_internal(old_text);
 
@@ -863,8 +867,6 @@ impl Editor {
                         len,
                     });
 
-                    let ins_len = new_text.len();
-                    self.shift_folds_insert(*offset, ins_len);
                     self.cursor = *offset;
                     self.insert_str_internal(new_text);
 
@@ -873,6 +875,7 @@ impl Editor {
             };
             self.cursor = self.valid_cursor(step.cursor_after);
             self.selection_anchor = None;
+            self.history_size = self.history_size.saturating_add(edit_op_size(&step.op));
             self.history.push_back(step);
             self.is_working_history = false;
             self.version = next_editor_version(self.version);
@@ -934,7 +937,7 @@ impl Editor {
         let saved_hashes = self.saved_hashes.clone();
         let git_base_text = self.git_base_text.clone();
         let version = next_editor_version(self.version);
-        let cursor = self.cursor.min(text.len());
+        let cursor = clamp_text_cursor_to_char_boundary(text, self.cursor);
 
         let capacity = text.len() + 8192;
         self.data = vec![0; capacity];

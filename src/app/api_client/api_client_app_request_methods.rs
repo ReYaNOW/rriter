@@ -2,6 +2,63 @@ pub(crate) fn api_request_disconnect_message(request_id: u64) -> String {
     format!("HTTP-запрос #{request_id} неожиданно завершился")
 }
 
+fn api_request_disconnect_response(
+    request_id: u64,
+    spec_id: ApiSpecId,
+    route_idx: usize,
+) -> ApiJobResponse {
+    ApiJobResponse {
+        request_id,
+        spec_id,
+        route_idx,
+        status: None,
+        elapsed_ms: 0,
+        server_reach_ms: None,
+        timing_text: String::new(),
+        headers: Vec::new(),
+        headers_text: String::new(),
+        curl_text: String::new(),
+        body: String::new(),
+        truncated: false,
+        error: Some(ApiLoadError::new(
+            ApiLoadErrorKind::Io,
+            api_request_disconnect_message(request_id),
+        )),
+        resolved_host: None,
+    }
+}
+
+fn apply_api_request_disconnect_to_state(
+    state: &mut ApiClientTabState,
+    spec_id: ApiSpecId,
+    request_id: u64,
+) -> bool {
+    if state.pending_request_id == Some(request_id) {
+        let route_idx = state.route_idx.unwrap_or(0);
+        state.pending = false;
+        state.pending_request_id = None;
+        state.response_scroll.reset();
+        state.response_scroll_x.reset();
+        state.response = Some(api_request_disconnect_response(request_id, spec_id, route_idx));
+        return true;
+    }
+    let Some(saved) = state
+        .route_states
+        .iter_mut()
+        .find(|saved| saved.pending_request_id == Some(request_id))
+    else {
+        return false;
+    };
+    saved.pending = false;
+    saved.pending_request_id = None;
+    saved.response = Some(api_request_disconnect_response(
+        request_id,
+        spec_id,
+        saved.route_idx,
+    ));
+    true
+}
+
 fn api_editor_at_vertical_edge(editor: &Editor, down: bool) -> bool {
     let line_idx = editor
         .line_offsets
@@ -839,10 +896,15 @@ impl crate::app::App {
         let use_mock_server = wants_mock_server && mock_server_running;
         let method = route.method;
         let path = route.path.clone();
-        let is_json_body = route
+        let body_content_type = route
             .request_body
             .as_ref()
-            .is_some_and(|body| !body.is_multipart && !body.is_form_urlencoded);
+            .filter(|body| !body.is_multipart && !body.is_form_urlencoded)
+            .map(|body| body.content_type.trim().to_string())
+            .filter(|content_type| !content_type.is_empty());
+        let is_json_body = body_content_type
+            .as_deref()
+            .is_some_and(api_content_type_is_json);
         let is_multipart_body = route
             .request_body
             .as_ref()
@@ -873,7 +935,7 @@ impl crate::app::App {
                 api_multipart_parts_for_route(route, model, &body_values, &body_file_paths)
             });
         let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
-        let body_json = (method.can_send_body() && is_json_body)
+        let body_json = (method.can_send_body() && body_content_type.is_some())
             .then_some(body_json_text.clone())
             .filter(|body| !body.trim().is_empty());
         if wants_mock_server && !use_mock_server {
@@ -982,6 +1044,7 @@ impl crate::app::App {
                 ApiJobMockTarget::None
             },
             auth_parts,
+            body_content_type: method.can_send_body().then_some(body_content_type).flatten(),
             body_json,
             body_form,
             body_multipart,
@@ -1083,6 +1146,7 @@ impl crate::app::App {
             url,
             mock_target: ApiJobMockTarget::Mock,
             auth_parts: Vec::new(),
+            body_content_type: None,
             body_json: None,
             body_form: None,
             body_multipart: None,
@@ -1450,9 +1514,14 @@ impl crate::app::App {
                 Err(std::sync::mpsc::TryRecvError::Empty) => idx += 1,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.api_request_rx.remove(idx);
-                    self.clear_api_pending_request(request_id);
-                    self.ide_panel.api.import_error =
-                        Some(api_request_disconnect_message(request_id));
+                    for tab in &mut self.tabs {
+                        let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind else {
+                            continue;
+                        };
+                        if apply_api_request_disconnect_to_state(state, meta.spec_id, request_id) {
+                            break;
+                        }
+                    }
                     changed = true;
                 }
             }
@@ -1585,25 +1654,4 @@ impl crate::app::App {
         }
     }
 
-    fn clear_api_pending_request(&mut self, request_id: u64) {
-        for tab in &mut self.tabs {
-            if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
-                && state.pending_request_id == Some(request_id)
-            {
-                state.pending = false;
-                state.pending_request_id = None;
-                break;
-            }
-            if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind
-                && let Some(saved) = state
-                    .route_states
-                    .iter_mut()
-                    .find(|saved| saved.pending_request_id == Some(request_id))
-            {
-                saved.pending = false;
-                saved.pending_request_id = None;
-                break;
-            }
-        }
-    }
 }

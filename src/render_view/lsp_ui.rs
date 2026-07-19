@@ -49,6 +49,42 @@ pub(crate) struct LspActionsMenuLayout {
     pub w: f32,
     pub h: f32,
     pub item_h: f32,
+    pub first_visible: usize,
+    pub visible_items: usize,
+}
+
+fn lsp_actions_visible_window(
+    item_count: usize,
+    selected: usize,
+    menu_h: f32,
+    item_h: f32,
+    vertical_padding: f32,
+) -> (usize, usize) {
+    if item_count == 0 || item_h <= 0.0 || !item_h.is_finite() {
+        return (0, 0);
+    }
+    let visible = (((menu_h - vertical_padding).max(0.0) / item_h).floor() as usize)
+        .min(item_count);
+    if visible == 0 {
+        return (0, 0);
+    }
+    let selected = selected.min(item_count - 1);
+    let first = selected
+        .saturating_add(1)
+        .saturating_sub(visible)
+        .min(item_count - visible);
+    (first, visible)
+}
+
+fn lsp_action_group(item: &crate::app::LspActionItem) -> u8 {
+    match item {
+        crate::app::LspActionItem::CodeAction(_) => 1,
+        crate::app::LspActionItem::AddNoqa { .. }
+        | crate::app::LspActionItem::AddNoqaAll => 2,
+        crate::app::LspActionItem::FixAll
+        | crate::app::LspActionItem::OrganizeImports
+        | crate::app::LspActionItem::CompleteImports => 3,
+    }
 }
 
 fn lsp_action_label<'a>(
@@ -103,7 +139,7 @@ fn lsp_action_label<'a>(
 
 #[cfg(test)]
 mod tests {
-    use super::lsp_action_label;
+    use super::{lsp_action_label, lsp_actions_visible_window};
 
     #[test]
     fn lsp_action_label_formats_code_actions_and_noqa_codes() {
@@ -156,6 +192,13 @@ mod tests {
             "Подсказки импортов"
         );
     }
+
+    #[test]
+    fn lsp_action_menu_keeps_selected_item_inside_visible_rows() {
+        assert_eq!(lsp_actions_visible_window(10, 0, 116.0, 36.0, 8.0), (0, 3));
+        assert_eq!(lsp_actions_visible_window(10, 7, 116.0, 36.0, 8.0), (5, 3));
+        assert_eq!(lsp_actions_visible_window(2, 1, 116.0, 36.0, 8.0), (0, 2));
+    }
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -175,6 +218,13 @@ impl Renderer {
         menu_w = menu_w.min((self.width - 8.0 * s).max(1.0));
         let menu_h = (menu.items.len() as f32 * item_h + 8.0 * s)
             .min((self.height - 8.0 * s).max(1.0));
+        let (first_visible, visible_items) = lsp_actions_visible_window(
+            menu.items.len(),
+            menu.selected,
+            menu_h,
+            item_h,
+            8.0 * s,
+        );
         let max_x = (self.width - menu_w - 4.0 * s).max(0.0);
         let max_y = (self.height - menu_h - 4.0 * s).max(0.0);
         LspActionsMenuLayout {
@@ -183,6 +233,8 @@ impl Renderer {
             w: menu_w,
             h: menu_h,
             item_h,
+            first_visible,
+            visible_items,
         }
     }
 
@@ -650,7 +702,7 @@ impl Renderer {
                     let chips_w = clear_w + case_w + send_w + recv_w + other_w + 5.0 * 6.0 * s;
                     let input_w = (log_bg_w - chips_w).max(1.0);
                     let input_hover = ui_registry.register_text_input(
-                        crate::ui_system::UiId::LspLogsFilterInput,
+                        crate::ui_system::UiId::LspLogsFilterInput(server_idx),
                         chip_x,
                         filter_y,
                         input_w,
@@ -747,7 +799,7 @@ impl Renderer {
                     draw_chip(
                         self,
                         ui_registry,
-                        crate::ui_system::UiId::LspLogsFilterClear,
+                        crate::ui_system::UiId::LspLogsFilterClear(server_idx),
                         "×",
                         !lsp_log_filter_text.is_empty(),
                         chip_x,
@@ -757,7 +809,7 @@ impl Renderer {
                     draw_chip(
                         self,
                         ui_registry,
-                        crate::ui_system::UiId::LspLogsFilterCase,
+                        crate::ui_system::UiId::LspLogsFilterCase(server_idx),
                         label_case,
                         ide_panel.lsp_log_filter_case_sensitive,
                         chip_x,
@@ -767,7 +819,7 @@ impl Renderer {
                     draw_chip(
                         self,
                         ui_registry,
-                        crate::ui_system::UiId::LspLogsFilterSend,
+                        crate::ui_system::UiId::LspLogsFilterSend(server_idx),
                         label_send,
                         ide_panel.lsp_log_filter_show_send,
                         chip_x,
@@ -777,7 +829,7 @@ impl Renderer {
                     draw_chip(
                         self,
                         ui_registry,
-                        crate::ui_system::UiId::LspLogsFilterRecv,
+                        crate::ui_system::UiId::LspLogsFilterRecv(server_idx),
                         label_recv,
                         ide_panel.lsp_log_filter_show_recv,
                         chip_x,
@@ -787,7 +839,7 @@ impl Renderer {
                     draw_chip(
                         self,
                         ui_registry,
-                        crate::ui_system::UiId::LspLogsFilterOther,
+                        crate::ui_system::UiId::LspLogsFilterOther(server_idx),
                         label_other,
                         ide_panel.lsp_log_filter_show_other,
                         chip_x,
@@ -1295,18 +1347,22 @@ impl Renderer {
             [0.12, 0.13, 0.17, 1.0],
         );
 
-        let mut prev_group = 0;
-        for (i, item) in menu.items.iter().enumerate() {
-            let item_y = my_pos + 4.0 * s + i as f32 * item_h;
+        let mut prev_group = layout
+            .first_visible
+            .checked_sub(1)
+            .and_then(|index| menu.items.get(index))
+            .map_or(0, lsp_action_group);
+        for (visible_row, (i, item)) in menu
+            .items
+            .iter()
+            .enumerate()
+            .skip(layout.first_visible)
+            .take(layout.visible_items)
+            .enumerate()
+        {
+            let item_y = my_pos + 4.0 * s + visible_row as f32 * item_h;
 
-            let group = match item {
-                crate::app::LspActionItem::CodeAction(_) => 1,
-                crate::app::LspActionItem::AddNoqa { .. }
-                | crate::app::LspActionItem::AddNoqaAll => 2,
-                crate::app::LspActionItem::FixAll
-                | crate::app::LspActionItem::OrganizeImports
-                | crate::app::LspActionItem::CompleteImports => 3,
-            };
+            let group = lsp_action_group(item);
 
             if prev_group != 0 && group != prev_group {
                 self.push_rect(

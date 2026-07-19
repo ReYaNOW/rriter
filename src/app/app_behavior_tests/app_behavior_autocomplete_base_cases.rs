@@ -1359,3 +1359,32 @@ fn pending_ty_context_enter_applies_first_response_without_newline() {
     assert!(!app.autocomplete_apply_pending_response);
     assert!(!app.editor.get_full_text().contains('\n'));
 }
+
+
+#[test]
+fn zero_length_primary_completion_edit_does_not_shift_cursor_twice() {
+    let mut editor = editor_with("abcQ");
+    let plan = CompletionApplyPlan {
+        ops: vec![
+            CompletionTextEditOp {
+                start: 3,
+                end: 3,
+                new_text: "x".to_string(),
+            },
+            CompletionTextEditOp {
+                start: 4,
+                end: 4,
+                new_text: "tail".to_string(),
+            },
+        ],
+        primary_start: Some(3),
+        target_cursor: Some(4),
+        fallback_insert: String::new(),
+        fallback_prefix_len: 0,
+    };
+
+    apply_completion_plan_to_editor(&mut editor, plan);
+
+    assert_eq!(editor.get_full_text(), "abcxQtail");
+    assert_eq!(editor.cursor, 4);
+}

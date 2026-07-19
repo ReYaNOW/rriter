@@ -426,104 +426,108 @@ impl Renderer {
             self.theme.fg,
             1.0,
         );
+        let content_factor = project_search_help_content_factor(h, scale);
+        let content_scale = scale * content_factor;
         let popup_y = (y + 58.0 * scale).round();
         let mut cy = project_search_row_text_y(
             popup_y,
-            project_search_scaled_step(28.0, scale).max(1.0),
-            scale,
+            project_search_scaled_step(28.0, content_scale).max(1.0),
+            content_scale,
         );
         let content_x = x + side_pad;
         self.draw_project_search_help_line(
             "Ищет только внутри открытых рабочих областей.",
             content_x,
             cy,
-            0.72,
+            0.72 * content_factor,
             [0.80, 0.82, 0.88, 1.0],
         );
-        cy += project_search_scaled_step(20.0, scale);
+        cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
             "Учитывает .gitignore, .ignore и настройки игнора.",
             content_x,
             cy,
-            0.72,
+            0.72 * content_factor,
             [0.80, 0.82, 0.88, 1.0],
         );
-        cy += project_search_scaled_step(26.0, scale);
+        cy += project_search_scaled_step(26.0, content_scale);
         self.draw_project_search_help_line(
             "Шаблоны include / exclude",
             content_x,
             cy,
-            0.78,
+            0.78 * content_factor,
             [0.96, 0.94, 1.0, 1.0],
         );
-        cy += project_search_scaled_step(21.0, scale);
+        cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
             "Через запятую. Пустое include = все файлы.",
             content_x,
             cy,
-            0.70,
+            0.70 * content_factor,
             [0.76, 0.78, 0.84, 1.0],
         );
-        cy += project_search_scaled_step(23.0, scale);
+        cy += project_search_scaled_step(23.0, content_scale);
         self.draw_project_search_help_code_row(
             content_x,
             cy,
             &["./src", "./app", "**/*.py"],
-            scale,
+            content_scale,
+            content_factor,
         );
-        cy += project_search_scaled_step(25.0, scale);
+        cy += project_search_scaled_step(25.0, content_scale);
         self.draw_project_search_help_code_row(
             content_x,
             cy,
             &["src/**/*.rs", "target", "*.lock"],
-            scale,
+            content_scale,
+            content_factor,
         );
-        cy += project_search_scaled_step(28.0, scale);
+        cy += project_search_scaled_step(28.0, content_scale);
         self.draw_project_search_help_line(
             "Фильтровать",
             content_x,
             cy,
-            0.78,
+            0.78 * content_factor,
             [0.96, 0.94, 1.0, 1.0],
         );
-        cy += project_search_scaled_step(21.0, scale);
+        cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
             "После поиска скрывает файлы по тексту или простому *.rs.",
             content_x,
             cy,
-            0.70,
+            0.70 * content_factor,
             [0.76, 0.78, 0.84, 1.0],
         );
-        cy += project_search_scaled_step(20.0, scale);
+        cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
             "Сложные glob-шаблоны тут не применяются.",
             content_x,
             cy,
-            0.70,
+            0.70 * content_factor,
             [0.76, 0.78, 0.84, 1.0],
         );
-        cy += project_search_scaled_step(28.0, scale);
+        cy += project_search_scaled_step(28.0, content_scale);
         self.draw_project_search_help_line(
             "Поиск",
             content_x,
             cy,
-            0.78,
+            0.78 * content_factor,
             [0.96, 0.94, 1.0, 1.0],
         );
-        cy += project_search_scaled_step(21.0, scale);
+        cy += project_search_scaled_step(21.0, content_scale);
         self.draw_project_search_help_line(
             "Literal-only. Ctrl+Enter или кнопка запуска.",
             content_x,
             cy,
-            0.70,
+            0.70 * content_factor,
             [0.76, 0.78, 0.84, 1.0],
         );
-        cy += project_search_scaled_step(20.0, scale);
+        cy += project_search_scaled_step(20.0, content_scale);
         self.draw_project_search_help_line(
             "Кнопка Aa включает чувствительность к регистру.",
             content_x,
             cy,
-            0.70,
+            0.70 * content_factor,
             [0.76, 0.78, 0.84, 1.0],
         );
         let btn_w = 112.0 * scale;
@@ -559,9 +563,10 @@ impl Renderer {
         y: f32,
         parts: &[&str],
         scale: f32,
+        text_factor: f32,
     ) {
         for part in parts {
-            let text_scale = 0.68;
+            let text_scale = 0.68 * text_factor;
             let w = self.measure_ui_width(part, text_scale) + 10.0 * scale;
             self.push_rounded_rect(
                 x.round(),

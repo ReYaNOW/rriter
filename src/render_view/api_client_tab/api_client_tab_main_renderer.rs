@@ -2060,7 +2060,7 @@ impl Renderer {
                 );
                 let validates_json = !body.is_multipart
                     && !body.is_form_urlencoded
-                    && body.content_type.to_ascii_lowercase().contains("json");
+                    && api_content_type_is_json(&body.content_type);
                 if validates_json {
                     let valid = if body_focused {
                         ide_panel

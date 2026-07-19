@@ -83,9 +83,13 @@ impl App {
                 scroll.anim_speed = 7.0;
                 scroll.scroll_by(dy);
                 let lines = state.summary.notices.len() + state.summary.detail_rows.len();
-                let max = (lines as f32 * 22.0 * s
-                    - (self.renderer.as_ref().unwrap().height - 260.0 * s))
-                    .max(0.0);
+                let renderer = self.renderer.as_ref().unwrap();
+                let max = crate::render_view::database_table_tab_overlay::database_table_review_max_scroll(
+                    renderer.width,
+                    renderer.height,
+                    s,
+                    lines,
+                );
                 scroll.clamp_target(0.0, max);
             }
             self.window.as_ref().unwrap().request_redraw();

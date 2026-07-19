@@ -110,6 +110,22 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
 }
 
 #[inline(always)]
+pub(crate) fn terminal_tab_body_width(tab_w: f32, close_visible: bool, scale: f32) -> f32 {
+    (tab_w - if close_visible { 32.0 * scale } else { 0.0 }).max(0.0)
+}
+
+#[inline(always)]
+pub(crate) fn terminal_body_hitbox(
+    panel_x: f32,
+    term_y: f32,
+    panel_w: f32,
+    term_h: f32,
+) -> Option<crate::ui_system::UiClipRect> {
+    (panel_w > 0.0 && term_h > 0.0)
+        .then(|| crate::ui_system::UiClipRect::new(panel_x, term_y, panel_w, term_h))
+}
+
+#[inline(always)]
 pub(crate) fn terminal_text_padding(scale: f32) -> (f32, f32) {
     (8.0 * scale, 8.0 * scale)
 }
@@ -353,7 +369,7 @@ impl Renderer {
                 crate::ui_system::UiId::TerminalTab(i),
                 cx,
                 cy,
-                (tab_w - if close_visible { close_sz + 4.0 * s } else { 0.0 }).max(0.0),
+                terminal_tab_body_width(tab_w, close_visible, s),
                 term_tab_h,
                 mx,
                 my,
@@ -398,13 +414,18 @@ impl Renderer {
 
         let (term_content_y, term_content_h) = terminal_body_rect(content_y, content_h, s);
 
-        if ide_panel.terminal_focused {
+        if let Some(hitbox) = terminal_body_hitbox(
+            panel_x,
+            term_content_y,
+            panel_w,
+            term_content_h,
+        ) {
             ui_registry.register_blocker(
                 crate::ui_system::UiId::TerminalBody,
-                panel_x,
-                term_content_y,
-                panel_w,
-                term_content_h,
+                hitbox.x,
+                hitbox.y,
+                hitbox.w,
+                hitbox.h,
                 mx,
                 my,
             );
@@ -977,6 +998,22 @@ mod tests {
         assert!(first_row_y >= top);
         assert!(first_row_y < top + char_h);
         assert_eq!(terminal_max_scroll(rows, char_h, term_h, 1.0), 0.0);
+    }
+
+    #[test]
+    fn terminal_tab_body_hitbox_stops_before_close_control() {
+        assert_eq!(terminal_tab_body_width(120.0, true, 1.0), 88.0);
+        assert_eq!(terminal_tab_body_width(120.0, false, 1.0), 120.0);
+        assert_eq!(terminal_tab_body_width(20.0, true, 1.0), 0.0);
+    }
+
+    #[test]
+    fn terminal_body_hitbox_is_available_even_before_terminal_has_focus() {
+        let hitbox = terminal_body_hitbox(48.0, 400.0, 952.0, 300.0).expect("body hitbox");
+
+        assert_eq!(hitbox, crate::ui_system::UiClipRect::new(48.0, 400.0, 952.0, 300.0));
+        assert!(terminal_body_hitbox(48.0, 400.0, 0.0, 300.0).is_none());
+        assert!(terminal_body_hitbox(48.0, 400.0, 952.0, 0.0).is_none());
     }
 
     #[test]

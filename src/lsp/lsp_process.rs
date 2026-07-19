@@ -312,46 +312,19 @@ fn spawn_server(
             let mut reader = BufReader::with_capacity(128 * 1024, stdout);
             let mut header_buf = String::with_capacity(64);
             loop {
-                header_buf.clear();
-                match reader.read_line(&mut header_buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(_) => {}
-                }
-                let content_len =
-                    if let Some(rest) = header_buf.trim().strip_prefix("Content-Length:") {
-                        match rest.trim().parse::<usize>() {
-                            Ok(n) => n,
-                            Err(_) => continue,
-                        }
-                    } else {
-                        continue;
-                    };
-
-                // Пропускаем \r\n разделитель
-                header_buf.clear();
-                if reader.read_line(&mut header_buf).unwrap_or(0) == 0 {
-                    break;
-                }
-
-                if content_len == 0 {
-                    continue;
-                }
-
-                let mut body = vec![0u8; content_len];
-                let mut read = 0;
-                while read < content_len {
-                    match std::io::Read::read(&mut reader, &mut body[read..]) {
-                        Ok(0) => {
-                            break;
-                        }
-                        Ok(n) => read += n,
-                        Err(_) => {
-                            break;
-                        }
+                let body = match read_lsp_frame(&mut reader, &mut header_buf) {
+                    Ok(Some(body)) => body,
+                    Ok(None) => break,
+                    Err(error) => {
+                        let _ = event_tx.send(LspEvent::Log {
+                            name: def.program,
+                            message: format!("invalid LSP frame: {error}"),
+                        });
+                        break;
                     }
-                }
-                if read < content_len {
-                    break;
+                };
+                if body.is_empty() {
+                    continue;
                 }
 
                 dispatch_frame(
@@ -368,6 +341,65 @@ fn spawn_server(
     }
 
     Ok(SpawnedProcess { child, out_tx })
+}
+
+const LSP_MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const LSP_MAX_HEADER_BYTES: usize = 64 * 1024;
+
+fn read_lsp_frame<R: BufRead>(reader: &mut R, header_buf: &mut String) -> io::Result<Option<Vec<u8>>> {
+    let mut content_len = None;
+    let mut header_bytes = 0usize;
+    let mut saw_header = false;
+
+    loop {
+        header_buf.clear();
+        let read = reader.read_line(header_buf)?;
+        if read == 0 {
+            if saw_header {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "LSP header block ended before the blank separator",
+                ));
+            }
+            return Ok(None);
+        }
+        saw_header = true;
+        header_bytes = header_bytes.saturating_add(read);
+        if header_bytes > LSP_MAX_HEADER_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "LSP header block is too large",
+            ));
+        }
+
+        let line = header_buf.trim_end_matches(['\r', '\n']);
+        if line.is_empty() {
+            break;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if name.trim().eq_ignore_ascii_case("Content-Length") {
+            let parsed = value.trim().parse::<usize>().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid LSP Content-Length")
+            })?;
+            content_len = Some(parsed);
+        }
+    }
+
+    let content_len = content_len.ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidData, "missing LSP Content-Length")
+    })?;
+    if content_len > LSP_MAX_FRAME_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "LSP frame exceeds the configured size limit",
+        ));
+    }
+
+    let mut body = vec![0u8; content_len];
+    std::io::Read::read_exact(reader, &mut body)?;
+    Ok(Some(body))
 }
 
 // ── Supervisor тред ───────────────────────────────────────────────────────────

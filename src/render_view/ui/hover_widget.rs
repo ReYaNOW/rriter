@@ -9,6 +9,16 @@ pub struct DiagChar {
     pub w: f32,
     pub h: f32,
     pub byte_offset: usize,
+    pub byte_len: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DiagnosticVisualChar {
+    ch: char,
+    color: [f32; 4],
+    byte_offset: usize,
+    byte_len: usize,
+    selectable: bool,
 }
 
 thread_local! {
@@ -40,6 +50,95 @@ fn normalize_diagnostic_message(message: &str) -> String {
         }
     }
     out
+}
+
+
+fn diagnostic_message_lines<F>(
+    message: &str,
+    spans: &[crate::highlighter::ColorSpan],
+    base_offset: usize,
+    max_text_w: f32,
+    min_wrap_w: f32,
+    mut char_advance: F,
+) -> Vec<Vec<DiagnosticVisualChar>>
+where
+    F: FnMut(char) -> f32,
+{
+    let mut lines = Vec::new();
+    let mut cur_line_w = 0.0;
+    let mut cur_line: Vec<DiagnosticVisualChar> = Vec::new();
+    let mut last_space_idx = None;
+    let mut current_indent: Vec<DiagnosticVisualChar> = Vec::new();
+    let mut counting_indent = true;
+
+    for (offset, ch) in message.char_indices() {
+        if ch == '\n' {
+            lines.push(std::mem::take(&mut cur_line));
+            cur_line_w = 0.0;
+            last_space_idx = None;
+            current_indent.clear();
+            counting_indent = true;
+            continue;
+        }
+
+        if counting_indent {
+            if ch == ' ' || ch == '│' || ch == '├' || ch == '└' || ch == '─' {
+                current_indent.push(DiagnosticVisualChar {
+                    ch: ' ',
+                    color: [0.0, 0.0, 0.0, 0.0],
+                    byte_offset: 0,
+                    byte_len: 0,
+                    selectable: false,
+                });
+            } else {
+                counting_indent = false;
+            }
+        }
+
+        let advance = char_advance(ch);
+        if cur_line_w + advance > max_text_w && cur_line_w > min_wrap_w {
+            if let Some(space_pos) = last_space_idx {
+                let mut remainder = cur_line.split_off(space_pos);
+                if remainder.first().is_some_and(|item| item.ch == ' ') {
+                    remainder.remove(0);
+                }
+                lines.push(std::mem::take(&mut cur_line));
+                cur_line = current_indent.clone();
+                cur_line.extend(remainder);
+            } else {
+                lines.push(std::mem::take(&mut cur_line));
+                cur_line = current_indent.clone();
+            }
+            cur_line_w = cur_line.iter().map(|item| char_advance(item.ch)).sum();
+            last_space_idx = None;
+        }
+
+        let mut color = [0.972, 0.972, 0.949, 1.0];
+        for span in spans {
+            if offset >= span.start && offset < span.end {
+                color = span.color;
+                break;
+            }
+        }
+
+        cur_line.push(DiagnosticVisualChar {
+            ch,
+            color,
+            byte_offset: base_offset.saturating_add(offset),
+            byte_len: ch.len_utf8(),
+            selectable: true,
+        });
+        cur_line_w += advance;
+
+        if ch == ' ' {
+            last_space_idx = Some(cur_line.len() - 1);
+        }
+    }
+
+    if !cur_line.is_empty() {
+        lines.push(cur_line);
+    }
+    lines
 }
 
 fn diagnostic_copy_text(diagnostic: &Diagnostic) -> String {
@@ -77,7 +176,9 @@ pub fn compute_hover_y_position(
             }
         }
     }
-    target_by
+
+    let max_top = (max_y - box_h).max(min_y);
+    target_by.clamp(min_y, max_top)
 }
 
 #[cfg(test)]
@@ -415,7 +516,7 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
                 if dist < best_x_dist {
                     best_x_dist = dist;
                     closest = if mx > cx {
-                        c.byte_offset + c.w as usize * 0 + 1
+                        c.byte_offset.saturating_add(c.byte_len)
                     } else {
                         c.byte_offset
                     };
@@ -527,7 +628,6 @@ impl Renderer {
         let mut popup_text = String::new();
 
         DIAG_CHARS.with(|c| c.borrow_mut().clear());
-        let mut global_byte_offset = 0;
         let (sel_anchor, sel_cursor) = crate::app::mouse::HOVER_STATE.with(|s| {
             let s = s.borrow();
             (s.diag_selection_anchor, s.diag_selection_cursor)
@@ -559,68 +659,15 @@ impl Renderer {
                 }
             });
 
-            let mut lines = Vec::new();
-            let mut cur_line_w = 0.0;
-            let mut cur_line: Vec<(char, [f32; 4])> = Vec::new();
-            let mut last_space_idx = None;
-            let mut current_indent: Vec<(char, [f32; 4])> = Vec::new();
-            let mut counting_indent = true;
-
-            for (offset, c) in clean_msg.char_indices() {
-                if c == '\n' {
-                    lines.push(std::mem::take(&mut cur_line));
-                    cur_line_w = 0.0;
-                    last_space_idx = None;
-                    current_indent.clear();
-                    counting_indent = true;
-                    continue;
-                }
-
-                if counting_indent {
-                    if c == ' ' || c == '│' || c == '├' || c == '└' || c == '─' {
-                        current_indent.push((' ', [0.0, 0.0, 0.0, 0.0]));
-                    } else {
-                        counting_indent = false;
-                    }
-                }
-
-                let adv = self.char_advance(c);
-                if cur_line_w + adv > max_text_w && cur_line_w > 40.0 * s {
-                    if let Some(space_pos) = last_space_idx {
-                        let mut remainder = cur_line.split_off(space_pos);
-                        if !remainder.is_empty() && remainder[0].0 == ' ' {
-                            remainder.remove(0);
-                        }
-                        lines.push(std::mem::take(&mut cur_line));
-                        cur_line = current_indent.clone();
-                        cur_line.extend(remainder);
-                        cur_line_w = cur_line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
-                    } else {
-                        lines.push(std::mem::take(&mut cur_line));
-                        cur_line = current_indent.clone();
-                        cur_line_w = cur_line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
-                    }
-                    last_space_idx = None;
-                }
-
-                let mut color = [0.972, 0.972, 0.949, 1.0];
-                for span in &spans {
-                    if offset >= span.start && offset < span.end {
-                        color = span.color;
-                        break;
-                    }
-                }
-
-                cur_line.push((c, color));
-                cur_line_w += adv;
-
-                if c == ' ' {
-                    last_space_idx = Some(cur_line.len() - 1);
-                }
-            }
-            if !cur_line.is_empty() {
-                lines.push(cur_line);
-            }
+            let message_base_offset = popup_text.len().saturating_sub(clean_msg.len());
+            let lines = diagnostic_message_lines(
+                &clean_msg,
+                &spans,
+                message_base_offset,
+                max_text_w,
+                40.0 * s,
+                |ch| self.char_advance(ch),
+            );
 
             let source_str = diag.source.as_deref().unwrap_or("LSP");
             let code_str = diag.code.as_deref().unwrap_or("");
@@ -637,7 +684,7 @@ impl Renderer {
 
             let mut max_line_w = 0.0;
             for line in &lines {
-                let w: f32 = line.iter().map(|&(ch, _)| self.char_advance(ch)).sum();
+                let w: f32 = line.iter().map(|item| self.char_advance(item.ch)).sum();
                 if w > max_line_w {
                     max_line_w = w;
                 }
@@ -645,7 +692,7 @@ impl Renderer {
 
             let last_line_w = lines
                 .last()
-                .map(|l| l.iter().map(|&(ch, _)| self.char_advance(ch)).sum::<f32>())
+                .map(|l| l.iter().map(|item| self.char_advance(item.ch)).sum::<f32>())
                 .unwrap_or(0.0);
             let mut line_count = lines.len();
             let source_on_new_line = last_line_w + source_full_w + 10.0 * s > max_text_w;
@@ -845,34 +892,43 @@ impl Renderer {
             let mut draw_x = (bx + pad).round();
 
             for line in lines {
-                for &(c, color) in line {
-                    let adv = self.char_advance(c);
-                    let char_len = c.len_utf8();
+                for item in line {
+                    let adv = self.char_advance(item.ch);
                     let ch_y = text_y.round() - line_h * 0.75;
 
-                    DIAG_CHARS.with(|chars| {
-                        chars.borrow_mut().push(DiagChar {
-                            x: draw_x,
-                            y: ch_y,
-                            w: adv,
-                            h: line_h,
-                            byte_offset: global_byte_offset,
+                    if item.selectable {
+                        DIAG_CHARS.with(|chars| {
+                            chars.borrow_mut().push(DiagChar {
+                                x: draw_x,
+                                y: ch_y,
+                                w: adv,
+                                h: line_h,
+                                byte_offset: item.byte_offset,
+                                byte_len: item.byte_len,
+                            });
                         });
-                    });
 
-                    if has_sel && global_byte_offset >= sel_start && global_byte_offset < sel_end {
-                        self.push_rect(draw_x, ch_y, adv, line_h, self.theme.sel);
+                        if has_sel
+                            && item.byte_offset >= sel_start
+                            && item.byte_offset < sel_end
+                        {
+                            self.push_rect(draw_x, ch_y, adv, line_h, self.theme.sel);
+                        }
                     }
 
                     let mut b = [0; 4];
-                    let s_str = c.encode_utf8(&mut b);
-                    self.draw_string_mono_scaled(s_str, draw_x, text_y.round(), color, 1.0);
+                    let s_str = item.ch.encode_utf8(&mut b);
+                    self.draw_string_mono_scaled(
+                        s_str,
+                        draw_x,
+                        text_y.round(),
+                        item.color,
+                        1.0,
+                    );
                     draw_x += adv;
-                    global_byte_offset += char_len;
                 }
                 text_y += line_h;
                 draw_x = (bx + pad).round();
-                global_byte_offset += 1;
             }
 
             if !*source_on_new_line {

@@ -176,7 +176,7 @@ pub(super) fn cross_volume_move(src: &Path, dst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
+fn validate_move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
     if !crate::platform::path_entry_exists(src) {
         return Err(format!("Не найдено: {}", src.display()));
     }
@@ -188,6 +188,11 @@ pub(super) fn move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
             return Err(format!("Не найдена папка: {}", parent.display()));
         }
     }
+    Ok(())
+}
+
+pub(super) fn move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
+    validate_move_path_exact(src, dst)?;
     if src == dst {
         return Ok(());
     }
@@ -196,6 +201,58 @@ pub(super) fn move_path_exact(src: &Path, dst: &Path) -> Result<(), String> {
         Err(error) if crate::platform::is_cross_device_error(&error) => cross_volume_move(src, dst),
         Err(error) => Err(error.to_string()),
     }
+}
+
+#[derive(Debug)]
+pub(super) struct UndoMovedPairsError {
+    pub(super) message: String,
+    pub(super) retryable: bool,
+}
+
+pub(super) fn undo_moved_pairs(
+    pairs: &[(PathBuf, PathBuf)],
+) -> Result<(), UndoMovedPairsError> {
+    for (old_path, new_path) in pairs.iter().rev() {
+        validate_move_path_exact(new_path, old_path).map_err(|message| UndoMovedPairsError {
+            message,
+            retryable: true,
+        })?;
+    }
+
+    let mut restored: Vec<(PathBuf, PathBuf)> = Vec::with_capacity(pairs.len());
+    for (old_path, new_path) in pairs.iter().rev() {
+        if let Err(error) = move_path_exact(new_path, old_path) {
+            let mut rollback_errors = Vec::new();
+            for (restored_old, restored_new) in restored.iter().rev() {
+                if let Err(rollback) = move_path_exact(restored_old, restored_new) {
+                    rollback_errors.push(format!(
+                        "{} -> {}: {rollback}",
+                        restored_old.display(),
+                        restored_new.display()
+                    ));
+                }
+            }
+            let retryable = rollback_errors.is_empty();
+            let rollback_suffix = if retryable {
+                "; уже отменённые перемещения восстановлены".to_string()
+            } else {
+                format!(
+                    "; часть перемещений не удалось восстановить: {}",
+                    rollback_errors.join("; ")
+                )
+            };
+            return Err(UndoMovedPairsError {
+                message: format!(
+                    "Не удалось отменить перемещение {} -> {}: {error}{rollback_suffix}",
+                    new_path.display(),
+                    old_path.display()
+                ),
+                retryable,
+            });
+        }
+        restored.push((old_path.to_path_buf(), new_path.to_path_buf()));
+    }
+    Ok(())
 }
 
 pub(super) fn prune_nested_paths(paths: &[PathBuf]) -> Vec<PathBuf> {

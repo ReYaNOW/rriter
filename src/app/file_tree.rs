@@ -609,12 +609,16 @@ impl App {
                 selection.extend(trashed.into_iter().map(|entry| entry.original_path));
             }
             FileTreeUndoAction::Moved { pairs } => {
-                for (old_path, new_path) in pairs.iter().rev() {
-                    move_path_exact(new_path, old_path)?;
+                if let Err(error) = undo_moved_pairs(&pairs) {
+                    if error.retryable {
+                        self.push_file_tree_undo(FileTreeUndoAction::Moved { pairs });
+                    }
+                    return Err(error.message);
+                }
+                for (old_path, new_path) in &pairs {
                     self.update_open_paths_after_file_tree_rename(new_path, old_path);
                     selection.push(old_path.clone());
                 }
-                selection.reverse();
             }
             FileTreeUndoAction::Renamed { old_path, new_path } => {
                 move_path_exact(&new_path, &old_path)?;

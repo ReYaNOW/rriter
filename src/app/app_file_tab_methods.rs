@@ -211,6 +211,8 @@ impl App {
             return;
         }
 
+        normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
+
         if self.tabs.len() <= 1 {
             // close_current_file() prepares all database tabs before clearing the
             // final IDE tab, so do not save/remove this tab twice here.
@@ -261,6 +263,7 @@ impl App {
     }
 
     pub(crate) fn close_all_tabs_unchecked(&mut self) {
+        self.ide_panel.tab_drag = None;
         if !self.is_ide_mode {
             self.close_current_file();
             return;
@@ -930,6 +933,20 @@ impl App {
 
 }
 
+fn normalize_tab_drag_after_close(
+    tab_drag: &mut Option<crate::app::TabDragState>,
+    closed_idx: usize,
+) {
+    let Some(drag) = tab_drag.as_mut() else {
+        return;
+    };
+    if drag.start_idx == closed_idx {
+        *tab_drag = None;
+    } else if drag.start_idx > closed_idx {
+        drag.start_idx -= 1;
+    }
+}
+
 fn terminal_match_cell_range(
     line: &str,
     match_start: usize,
@@ -949,7 +966,7 @@ fn terminal_match_cell_range(
 
 #[cfg(test)]
 mod terminal_search_cell_tests {
-    use super::terminal_match_cell_range;
+    use super::{normalize_tab_drag_after_close, terminal_match_cell_range};
 
     #[test]
     fn terminal_search_converts_utf8_byte_offsets_to_cell_columns() {
@@ -958,5 +975,20 @@ mod terminal_search_cell_tests {
         let end = start + "abc".len();
         assert_eq!(terminal_match_cell_range(line, start, end), Some((2, 4)));
         assert_eq!(terminal_match_cell_range(line, end, start), None);
+    }
+
+    #[test]
+    fn closing_tabs_normalizes_or_cancels_active_drag() {
+        let mut drag = Some(crate::app::TabDragState {
+            start_idx: 3,
+            start_x: 10.0,
+            current_x: 40.0,
+            threshold_passed: true,
+        });
+        normalize_tab_drag_after_close(&mut drag, 1);
+        assert_eq!(drag.as_ref().map(|state| state.start_idx), Some(2));
+
+        normalize_tab_drag_after_close(&mut drag, 2);
+        assert!(drag.is_none());
     }
 }

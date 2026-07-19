@@ -319,6 +319,13 @@ pub enum DatabaseEvent {
         database_name: String,
         console_id: SqlConsoleId,
     },
+    QueryTransactionExpiryFailed {
+        connection_id: DatabaseConnectionId,
+        transaction_id: DatabaseTransactionId,
+        database_name: String,
+        console_id: SqlConsoleId,
+        message: String,
+    },
     QueryFailed {
         connection_id: DatabaseConnectionId,
         job_id: DatabaseJobId,
@@ -358,6 +365,13 @@ pub enum DatabaseEvent {
         transaction_id: DatabaseTransactionId,
         database_name: String,
         table_name: String,
+    },
+    TransactionExpiryFailed {
+        connection_id: DatabaseConnectionId,
+        transaction_id: DatabaseTransactionId,
+        database_name: String,
+        table_name: String,
+        message: String,
     },
     ConnectionSecretsSaved {
         job_id: DatabaseJobId,
@@ -509,11 +523,7 @@ async fn worker_loop(
         if let Some(transaction) = pending.take() {
             tokio::select! {
                 _ = tokio::time::sleep_until(transaction.deadline) => {
-                    let event = rollback_pending_transaction_event(
-                        &transaction,
-                        pending_expired_event(&transaction),
-                        transaction.job_id,
-                    ).await;
+                    let event = rollback_expired_transaction_event(&transaction).await;
                     let _ = event_tx.send(event);
                 }
                 command = command_rx.recv() => {
@@ -976,6 +986,53 @@ async fn rollback_pending_transaction_event(
     }
 }
 
+async fn rollback_expired_transaction_event(transaction: &PendingTransaction) -> DatabaseEvent {
+    match finish_pending_transaction(transaction, false).await {
+        Ok(()) => pending_expired_event(transaction),
+        Err(error) => pending_expiry_failure_event(transaction, error.to_string()),
+    }
+}
+
+fn pending_expiry_failure_event(
+    transaction: &PendingTransaction,
+    message: String,
+) -> DatabaseEvent {
+    expiry_failure_event(
+        transaction.connection_id,
+        transaction.transaction_id,
+        &transaction.database_name,
+        &transaction.target,
+        message,
+    )
+}
+
+fn expiry_failure_event(
+    connection_id: DatabaseConnectionId,
+    transaction_id: DatabaseTransactionId,
+    database_name: &str,
+    target: &PendingTransactionTarget,
+    message: String,
+) -> DatabaseEvent {
+    match target {
+        PendingTransactionTarget::Table { table_name } => DatabaseEvent::TransactionExpiryFailed {
+            connection_id,
+            transaction_id,
+            database_name: database_name.to_string(),
+            table_name: table_name.clone(),
+            message,
+        },
+        PendingTransactionTarget::Query { console_id } => {
+            DatabaseEvent::QueryTransactionExpiryFailed {
+                connection_id,
+                transaction_id,
+                database_name: database_name.to_string(),
+                console_id: *console_id,
+                message,
+            }
+        }
+    }
+}
+
 fn pending_finished_event(
     transaction: PendingTransaction,
     job_id: DatabaseJobId,
@@ -1256,6 +1313,29 @@ mod tests {
             }
             _ => panic!("host-key retry changed the command variant"),
         }
+    }
+
+    #[test]
+    fn a4_b009_expiry_rollback_failure_keeps_transaction_identity() {
+        let event = expiry_failure_event(
+            DatabaseConnectionId(4),
+            DatabaseTransactionId(9),
+            "analytics",
+            &PendingTransactionTarget::Query {
+                console_id: SqlConsoleId(7),
+            },
+            "network lost".to_string(),
+        );
+        assert_eq!(
+            event,
+            DatabaseEvent::QueryTransactionExpiryFailed {
+                connection_id: DatabaseConnectionId(4),
+                transaction_id: DatabaseTransactionId(9),
+                database_name: "analytics".to_string(),
+                console_id: SqlConsoleId(7),
+                message: "network lost".to_string(),
+            }
+        );
     }
 
 }

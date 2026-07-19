@@ -1032,6 +1032,7 @@ mod tests {
                     value: "cookie-1".to_string(),
                 },
             ],
+            body_content_type: Some("application/json".to_string()),
             body_json: Some(r#"{"name":"O'Reilly"}"#.to_string()),
             body_form: None,
             body_multipart: None,
@@ -2423,9 +2424,24 @@ mod tests {
                 input_fields: Vec::new(),
                 output_fields: Vec::new(),
             });
+        for idx in 1..9 {
+            state
+                .mock
+                .manual_routes
+                .push(crate::app::api_mock::types::ApiManualRoute {
+                    stable_id: format!("manual-test-{idx}"),
+                    method: ApiMethod::Get,
+                    path: format!("/test/{idx}"),
+                    enabled: true,
+                    response: crate::app::api_mock::types::ApiMockResponse::Generated,
+                    python: None,
+                    input_fields: Vec::new(),
+                    output_fields: Vec::new(),
+                });
+        }
         assert_eq!(
             api_panel_max_scroll(&state, 0.0, 1.0) - base,
-            API_PANEL_MANUAL_ROUTE_ADVANCE
+            9.0 * API_PANEL_MANUAL_ROUTE_ADVANCE
         );
     }
 
@@ -2790,4 +2806,134 @@ fn preproduction_corrupt_api_specs_are_reported_and_backed_up() {
             .starts_with("api_specs.corrupt-")
     }));
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn request_body_content_type_matches_openapi_media_type() {
+    assert!(api_content_type_is_json("application/json"));
+    assert!(api_content_type_is_json(
+        "Application/Problem+Json; charset=utf-8"
+    ));
+    assert!(!api_content_type_is_json("text/plain"));
+    assert!(!api_content_type_is_json("application/xml"));
+
+    let client = reqwest::blocking::Client::new();
+    let request = apply_api_request_body(
+        client.post("https://api.example.test/text"),
+        Some("text/plain; charset=utf-8"),
+        Some("plain payload"),
+        None,
+        None,
+    )
+    .build()
+    .expect("request");
+    assert_eq!(
+        request.headers()[reqwest::header::CONTENT_TYPE],
+        "text/plain; charset=utf-8"
+    );
+    assert_eq!(
+        request.body().and_then(reqwest::blocking::Body::as_bytes),
+        Some(b"plain payload".as_slice())
+    );
+
+    let job = ApiJobRequest {
+        request_id: 1,
+        spec_id: ApiSpecId(1),
+        route_idx: 0,
+        method: ApiMethod::Post,
+        url: "https://api.example.test/text".to_string(),
+        mock_target: ApiJobMockTarget::None,
+        auth_parts: Vec::new(),
+        body_content_type: Some("text/plain; charset=utf-8".to_string()),
+        body_json: Some("plain payload".to_string()),
+        body_form: None,
+        body_multipart: None,
+        resolved_host: None,
+    };
+    let curl = format_api_curl_command_for_platform(&job, crate::platform::PlatformKind::Linux);
+    assert!(curl.contains("Content-Type: text/plain; charset=utf-8"));
+    assert!(curl.contains("--data-binary 'plain payload'"));
+}
+
+#[test]
+fn bodyless_post_does_not_invent_json_content_type_or_body() {
+    let client = reqwest::blocking::Client::new();
+    let request = apply_api_request_body(
+        client.post("https://api.example.test/ping"),
+        None,
+        None,
+        None,
+        None,
+    )
+    .build()
+    .expect("request");
+    assert!(!request.headers().contains_key(reqwest::header::CONTENT_TYPE));
+    assert!(request.body().is_none());
+
+    let job = ApiJobRequest {
+        request_id: 2,
+        spec_id: ApiSpecId(1),
+        route_idx: 0,
+        method: ApiMethod::Post,
+        url: "https://api.example.test/ping".to_string(),
+        mock_target: ApiJobMockTarget::None,
+        auth_parts: Vec::new(),
+        body_content_type: None,
+        body_json: None,
+        body_form: None,
+        body_multipart: None,
+        resolved_host: None,
+    };
+    let curl = format_api_curl_command_for_platform(&job, crate::platform::PlatformKind::Linux);
+    assert!(!curl.contains("Content-Type:"));
+    assert!(!curl.contains("--data-binary"));
+}
+
+#[test]
+fn request_worker_disconnect_is_attached_to_the_pending_response() {
+    let mut state = ApiClientTabState {
+        route_idx: Some(4),
+        pending: true,
+        pending_request_id: Some(77),
+        ..Default::default()
+    };
+    state.response_scroll.current = 20.0;
+    state.response_scroll_x.current = 12.0;
+
+    assert!(apply_api_request_disconnect_to_state(
+        &mut state,
+        ApiSpecId(8),
+        77
+    ));
+    assert!(!state.pending);
+    assert_eq!(state.pending_request_id, None);
+    assert_eq!(state.response_scroll.current, 0.0);
+    assert_eq!(state.response_scroll_x.current, 0.0);
+    let response = state.response.expect("disconnect response");
+    assert_eq!(response.request_id, 77);
+    assert_eq!(response.spec_id, ApiSpecId(8));
+    assert_eq!(response.route_idx, 4);
+    assert_eq!(
+        response.error.expect("disconnect error").kind,
+        ApiLoadErrorKind::Io
+    );
+}
+
+#[test]
+fn multipart_limit_counts_text_fields_headers_and_final_boundary() {
+    let parts = vec![ApiMultipartPart::Text {
+        name: "note".to_string(),
+        value: "payload".to_string(),
+    }];
+    let (_, encoded) = build_multipart_body_with_limit(&parts, 31, usize::MAX)
+        .expect("unlimited multipart");
+    let error = build_multipart_body_with_limit(&parts, 31, encoded.len().saturating_sub(1))
+        .expect_err("one byte below exact encoded size must fail");
+    assert_eq!(error.kind, ApiLoadErrorKind::TooLarge);
+
+    let (_, empty) = build_multipart_body_with_limit(&[], 32, usize::MAX)
+        .expect("empty multipart");
+    let error = build_multipart_body_with_limit(&[], 32, empty.len().saturating_sub(1))
+        .expect_err("final boundary must count toward the limit");
+    assert_eq!(error.kind, ApiLoadErrorKind::TooLarge);
 }

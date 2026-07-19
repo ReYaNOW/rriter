@@ -764,10 +764,10 @@ impl Renderer {
             };
             self.push_rounded_rect(bx, btn_y, btn_w, btn_h, 5.0 * s, bg);
             let tw = self.measure_ui_width(label, 0.86);
-            self.draw_string_scaled(
+            self.draw_string_scaled_stable(
                 label,
-                bx + (btn_w - tw) / 2.0,
-                btn_y + 21.0 * s,
+                (bx + (btn_w - tw) / 2.0).round(),
+                dialog_button_text_baseline(btn_y, btn_h, s),
                 self.theme.fg,
                 0.86,
             );

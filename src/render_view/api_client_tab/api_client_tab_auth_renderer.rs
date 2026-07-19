@@ -265,9 +265,10 @@ impl Renderer {
             } else {
                 value
             };
-            let token_label_w = self.measure_ui_width("token", API_FIELD_META_SCALE);
+            const TOKEN_LABEL: &str = "токен";
+            let token_label_w = self.measure_ui_width(TOKEN_LABEL, API_FIELD_META_SCALE);
             self.draw_string_scaled_stable(
-                "токен",
+                TOKEN_LABEL,
                 input_x - token_label_w - 10.0 * s,
                 api_centered_text_y(y + 14.0 * s, 30.0 * s, s),
                 [0.68, 0.70, 0.78, 1.0],
@@ -875,5 +876,22 @@ impl Renderer {
         }
         self.draw_api_table_row_separator(x, y, w, row_h, s);
         y + row_h
+    }
+}
+
+#[cfg(test)]
+mod api_auth_renderer_regression_tests {
+    #[test]
+    fn token_label_measurement_uses_the_drawn_text() {
+        let source = include_str!("api_client_tab_auth_renderer.rs");
+        assert!(source.contains("const TOKEN_LABEL: &str = \"токен\";"));
+        assert!(source.contains("measure_ui_width(TOKEN_LABEL, API_FIELD_META_SCALE)"));
+        let stale_measurement = [
+            "measure_ui_width(",
+            "\"token\"",
+            ", API_FIELD_META_SCALE)",
+        ]
+        .concat();
+        assert!(!source.contains(&stale_measurement));
     }
 }

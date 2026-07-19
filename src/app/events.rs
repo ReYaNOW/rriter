@@ -764,14 +764,7 @@ impl ApplicationHandler for App {
                 }
 
                 // LSP actions menu — рисуем поверх всего
-                if let Some(mut menu) = self.lsp_actions_menu.clone() {
-                    let tab_bar_h = crate::render_view::editor_content_top_inset(
-                        self.show_welcome,
-                        self.is_ide_mode,
-                        self.active_tab_is_database_query(),
-                        s,
-                    );
-                    menu.menu_y += tab_bar_h;
+                if let Some(menu) = self.lsp_actions_menu.clone() {
                     let wants = self
                         .renderer
                         .as_mut()

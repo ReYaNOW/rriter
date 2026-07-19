@@ -12,6 +12,41 @@ struct DatabaseSettingsRow {
     value: String,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabaseSettingsControlLayout {
+    label_w: f32,
+    minus_x: f32,
+    value_x: f32,
+    value_w: f32,
+    plus_x: f32,
+    button_w: f32,
+}
+
+fn database_settings_control_layout(
+    content_x: f32,
+    content_w: f32,
+    scale: f32,
+) -> DatabaseSettingsControlLayout {
+    let content_w = content_w.max(1.0);
+    let gap = (8.0 * scale).min(content_w * 0.08).max(1.0);
+    let button_w = (30.0 * scale)
+        .min(((content_w - gap * 2.0 - 1.0) * 0.5).max(1.0));
+    let max_value_w = (content_w - button_w * 2.0 - gap * 2.0).max(1.0);
+    let value_w = (108.0 * scale).min(max_value_w);
+    let controls_w = button_w * 2.0 + gap * 2.0 + value_w;
+    let minus_x = content_x + (content_w - controls_w).max(0.0);
+    let value_x = minus_x + button_w + gap;
+    let plus_x = value_x + value_w + gap;
+    DatabaseSettingsControlLayout {
+        label_w: (minus_x - content_x - 12.0 * scale).max(0.0),
+        minus_x,
+        value_x,
+        value_w,
+        plus_x,
+        button_w,
+    }
+}
+
 fn connection_color_label(color: DatabaseConnectionColor) -> &'static str {
     match color {
         DatabaseConnectionColor::Blue => "Синий",
@@ -81,6 +116,7 @@ impl Renderer {
         &mut self,
         settings: &DatabaseSettings,
         content_x: f32,
+        content_w: f32,
         mut content_y: f32,
         ui_registry: &mut UiRegistry,
     ) {
@@ -95,25 +131,31 @@ impl Renderer {
             0.82,
         );
         content_y += 34.0 * s;
+        let controls = database_settings_control_layout(content_x, content_w, s);
 
         for (index, row) in database_settings_rows(settings).iter().enumerate() {
             let row_y = content_y.round();
-            self.draw_string_scaled_pixel_snapped(
+            let mut label_scratch = String::new();
+            self.draw_tree_label_clipped(
                 row.label,
                 content_x,
                 Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
+                controls.label_w,
                 [0.82, 0.82, 0.86, 1.0],
                 0.86,
+                &mut label_scratch,
             );
 
-            let minus_x = (content_x + 300.0 * s).round();
-            let value_x = (minus_x + 38.0 * s).round();
-            let plus_x = (value_x + 116.0 * s).round();
+            let minus_x = controls.minus_x.round();
+            let value_x = controls.value_x.round();
+            let plus_x = controls.plus_x.round();
+            let button_w = controls.button_w.round().max(1.0);
+            let value_box_w = controls.value_w.round().max(1.0);
             ui_registry.register_rect(
                 UiId::SettingsDatabaseAdjust(index, -1),
                 minus_x,
                 row_y,
-                30.0 * s,
+                button_w,
                 30.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -122,7 +164,7 @@ impl Renderer {
                 UiId::SettingsDatabaseAdjust(index, 1),
                 plus_x,
                 row_y,
-                30.0 * s,
+                button_w,
                 30.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -131,7 +173,7 @@ impl Renderer {
             ButtonView {
                 x: minus_x,
                 y: row_y,
-                w: 30.0 * s,
+                w: button_w,
                 h: 30.0 * s,
                 text: "−",
                 icon: None,
@@ -149,7 +191,7 @@ impl Renderer {
             self.push_rounded_rect(
                 value_x,
                 row_y,
-                108.0 * s,
+                value_box_w,
                 30.0 * s,
                 5.0 * s,
                 [0.20, 0.21, 0.26, 1.0],
@@ -157,7 +199,7 @@ impl Renderer {
             let value_w = self.measure_ui_width(&row.value, 0.78);
             self.draw_string_scaled_pixel_snapped(
                 &row.value,
-                (value_x + (108.0 * s - value_w) * 0.5).round(),
+                (value_x + (value_box_w - value_w) * 0.5).round(),
                 Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
                 [0.92, 0.92, 0.95, 1.0],
                 0.78,
@@ -166,7 +208,7 @@ impl Renderer {
             ButtonView {
                 x: plus_x,
                 y: row_y,
-                w: 30.0 * s,
+                w: button_w,
                 h: 30.0 * s,
                 text: "+",
                 icon: None,
@@ -248,5 +290,16 @@ mod tests {
         labels.dedup();
         assert_eq!(labels.len(), 8);
         assert!(labels.iter().all(|label| !label.is_empty()));
+    }
+
+    #[test]
+    fn database_setting_controls_fit_narrow_content_widths() {
+        for width in [120.0, 220.0, 520.0] {
+            let layout = database_settings_control_layout(50.0, width, 1.0);
+            assert!(layout.label_w >= 0.0);
+            assert!(layout.minus_x >= 50.0);
+            assert!(layout.plus_x + layout.button_w <= 50.0 + width + 0.001);
+            assert!(layout.value_w >= 1.0);
+        }
     }
 }

@@ -4,7 +4,7 @@ use super::types::{
     ApiMockContractField, ApiMockContractFieldKind, ApiMockRouteDecision, ApiMockRuntimeRoute,
     ApiMockServerEvent, ApiMockServerSnapshot, ApiMockServerStatus,
 };
-use crate::app::api_client::ApiMethod;
+use crate::app::api_client::{API_MAX_RESPONSE_BYTES, ApiMethod};
 use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::State;
@@ -54,11 +54,11 @@ pub fn drain_api_mock_server_events() -> Vec<ApiMockServerEvent> {
 }
 
 pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), String> {
+    let mut server = crate::platform::lock_recover(&SERVER);
+    reap_finished_server(&mut server);
     if SERVER_STOPPING.load(Ordering::Acquire) {
         return Err("Mock server is still stopping".to_string());
     }
-    let mut server = crate::platform::lock_recover(&SERVER);
-    reap_finished_server(&mut server);
     if server.is_some() {
         return Ok(());
     }
@@ -102,19 +102,43 @@ pub fn stop_api_mock_server() {
     if SERVER_STOPPING.swap(true, Ordering::AcqRel) {
         return;
     }
-    let mut handle = crate::platform::lock_recover(&SERVER).take();
-    if let Some(handle) = handle.as_mut() {
-        if let Some(shutdown) = handle.shutdown.take() {
-            let _ = shutdown.send(());
-        }
-        if handle.finished.recv_timeout(Duration::from_secs(2)).is_ok()
-            && let Some(thread) = handle.thread.take()
-        {
+    let mut server = crate::platform::lock_recover(&SERVER);
+    reap_finished_server(&mut server);
+    let Some(mut handle) = server.take() else {
+        SERVER_STOPPING.store(false, Ordering::Release);
+        drop(server);
+        stop_python_worker();
+        return;
+    };
+    if let Some(shutdown) = handle.shutdown.take() {
+        let _ = shutdown.send(());
+    }
+    let finished = !matches!(
+        handle.finished.recv_timeout(Duration::from_secs(2)),
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    );
+    let still_stopping = retain_or_join_stopping_server(&mut server, handle, finished);
+    if !still_stopping {
+        SERVER_STOPPING.store(false, Ordering::Release);
+    }
+    drop(server);
+    stop_python_worker();
+}
+
+fn retain_or_join_stopping_server(
+    server: &mut Option<ApiMockServerHandle>,
+    mut handle: ApiMockServerHandle,
+    finished: bool,
+) -> bool {
+    if finished {
+        if let Some(thread) = handle.thread.take() {
             let _ = thread.join();
         }
+        false
+    } else {
+        *server = Some(handle);
+        true
     }
-    SERVER_STOPPING.store(false, Ordering::Release);
-    stop_python_worker();
 }
 
 fn reap_finished_server(server: &mut Option<ApiMockServerHandle>) -> bool {
@@ -132,6 +156,7 @@ fn reap_finished_server(server: &mut Option<ApiMockServerHandle>) -> bool {
     {
         let _ = thread.join();
     }
+    SERVER_STOPPING.store(false, Ordering::Release);
     true
 }
 
@@ -428,15 +453,12 @@ fn multipart_values(
     body: &Bytes,
     content_type: &str,
 ) -> Option<BTreeMap<String, Vec<MultipartValue>>> {
-    let boundary = content_type
-        .split(';')
-        .filter_map(|part| part.trim().strip_prefix("boundary="))
-        .next()?
-        .trim_matches('"');
+    let boundary = mime_parameter_value(content_type, "boundary")?;
     if boundary.is_empty() {
         return None;
     }
     let marker = format!("--{boundary}").into_bytes();
+    let delimiter = format!("\r\n--{boundary}").into_bytes();
     let bytes = body.as_ref();
     let mut cursor = find_bytes(bytes, &marker)?;
     let mut out = BTreeMap::<String, Vec<MultipartValue>>::new();
@@ -459,20 +481,13 @@ fn multipart_values(
         };
         let header_end = cursor.saturating_add(header_len);
         let value_start = header_end.saturating_add(4);
-        let Some(next_marker) = find_bytes(&bytes[value_start..], &marker) else {
+        let Some(next_delimiter) = find_bytes(&bytes[value_start..], &delimiter) else {
             break;
         };
-        let mut value_end = value_start.saturating_add(next_marker);
-        if value_end >= 2
-            && bytes
-                .get(value_end - 2..value_end)
-                .is_some_and(|tail| tail == b"\r\n")
-        {
-            value_end -= 2;
-        }
+        let value_end = value_start.saturating_add(next_delimiter);
         let header_text = String::from_utf8_lossy(&bytes[cursor..header_end]);
         let Some(name) = multipart_field_name(&header_text) else {
-            cursor = value_start.saturating_add(next_marker);
+            cursor = value_end.saturating_add(2);
             continue;
         };
         let value_bytes = &bytes[value_start..value_end];
@@ -487,7 +502,7 @@ fn multipart_values(
             MultipartValue::Text(String::from_utf8_lossy(value_bytes).into_owned())
         };
         out.entry(name).or_default().push(value);
-        cursor = value_start.saturating_add(next_marker);
+        cursor = value_end.saturating_add(2);
     }
     Some(out)
 }
@@ -513,24 +528,25 @@ fn multipart_content_type(headers: &str) -> Option<String> {
 fn multipart_disposition_value(headers: &str, key: &str) -> Option<String> {
     for line in headers.lines() {
         let line = line.trim();
-        if !line
-            .to_ascii_lowercase()
-            .starts_with("content-disposition:")
-        {
+        let Some((name, value)) = line.split_once(':') else {
             continue;
-        }
-        for part in line.split(';').skip(1) {
-            let part = part.trim();
-            let Some(value) = part
-                .strip_prefix(key)
-                .and_then(|rest| rest.strip_prefix('='))
-            else {
-                continue;
-            };
-            return Some(value.trim_matches('"').to_string());
+        };
+        if name.trim().eq_ignore_ascii_case("content-disposition") {
+            return mime_parameter_value(value, key);
         }
     }
     None
+}
+
+fn mime_parameter_value(value: &str, key: &str) -> Option<String> {
+    value.split(';').skip(1).find_map(|part| {
+        let (name, value) = part.split_once('=')?;
+        if !name.trim().eq_ignore_ascii_case(key) {
+            return None;
+        }
+        let value = value.trim().trim_matches('"').trim().to_string();
+        (!value.is_empty()).then_some(value)
+    })
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -762,7 +778,7 @@ async fn proxy_request(
         }
     }
     match request.send().await {
-        Ok(upstream) => {
+        Ok(mut upstream) => {
             let status =
                 StatusCode::from_u16(upstream.status().as_u16()).unwrap_or(StatusCode::BAD_GATEWAY);
             let mut builder = Response::builder().status(status);
@@ -774,7 +790,7 @@ async fn proxy_request(
                     builder = builder.header(name, value);
                 }
             }
-            let bytes = match upstream.bytes().await {
+            let bytes = match read_proxy_body_limited(&mut upstream, API_MAX_RESPONSE_BYTES).await {
                 Ok(bytes) => bytes,
                 Err(error) => return proxy_body_read_error_response(error),
             };
@@ -784,6 +800,40 @@ async fn proxy_request(
         }
         Err(err) => response_text(StatusCode::BAD_GATEWAY, "text/plain", err.to_string()),
     }
+}
+
+async fn read_proxy_body_limited(
+    upstream: &mut reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    loop {
+        let chunk = upstream
+            .chunk()
+            .await
+            .map_err(|error| error.to_string())?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        append_proxy_chunk_limited(&mut body, &chunk, max_bytes)?;
+    }
+    Ok(body)
+}
+
+fn append_proxy_chunk_limited(
+    body: &mut Vec<u8>,
+    chunk: &[u8],
+    max_bytes: usize,
+) -> Result<(), String> {
+    if body
+        .len()
+        .checked_add(chunk.len())
+        .is_none_or(|len| len > max_bytes)
+    {
+        return Err("upstream response exceeds limit".to_string());
+    }
+    body.extend_from_slice(chunk);
+    Ok(())
 }
 
 fn proxy_body_read_error_response(error: impl std::fmt::Display) -> Response {
@@ -1023,6 +1073,78 @@ mod tests {
         );
         assert_eq!(image.get("size"), Some(&serde_json::json!(3)));
         assert_eq!(values.get("title"), Some(&serde_json::json!("pic")));
+    }
+
+    #[test]
+    fn multipart_binary_marker_text_is_not_treated_as_a_delimiter() {
+        let body = Bytes::from_static(
+            b"--rr\r\nContent-Disposition: form-data; name=\"file\"; filename=\"blob.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nprefix--rrsuffix\r\n--rr--\r\n",
+        );
+        let parts = multipart_values(&body, "multipart/form-data; boundary=rr").expect("parts");
+        let value = parts
+            .get("file")
+            .and_then(|values| values.first())
+            .expect("file");
+        let MultipartValue::File {
+            content_base64,
+            size,
+            ..
+        } = value
+        else {
+            panic!("expected file");
+        };
+        assert_eq!(*size, b"prefix--rrsuffix".len());
+        assert_eq!(content_base64, &base64_encode(b"prefix--rrsuffix"));
+    }
+
+    #[test]
+    fn multipart_parameters_accept_case_and_optional_whitespace() {
+        let body = Bytes::from_static(
+            b"--rr\r\nContent-Disposition: form-data; Name = \"title\"\r\n\r\npic\r\n--rr--\r\n",
+        );
+        let parts = multipart_values(&body, "multipart/form-data; Boundary = \"rr\"")
+            .expect("parts");
+        assert_eq!(
+            parts.get("title"),
+            Some(&vec![MultipartValue::Text("pic".to_string())])
+        );
+    }
+
+    #[test]
+    fn timed_out_server_stop_retains_the_live_handle() {
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            let _ = finished_tx.send(());
+        });
+        let snapshot = ApiMockServerSnapshot {
+            bind_host: "127.0.0.1".to_string(),
+            port: 4010,
+            mode: crate::app::api_mock::types::ApiMockMode::MockAll,
+            proxy_base_url: String::new(),
+            python_runtime: Default::default(),
+            routes: Vec::new(),
+        };
+        let handle = ApiMockServerHandle {
+            shutdown: None,
+            snapshot: Arc::new(Mutex::new(snapshot)),
+            finished: finished_rx,
+            thread: Some(thread),
+        };
+        let mut server = None;
+
+        assert!(retain_or_join_stopping_server(&mut server, handle, false));
+        let mut retained = server.take().expect("retained handle");
+        retained.thread.take().expect("thread").join().unwrap();
+    }
+
+    #[test]
+    fn proxy_response_limit_counts_every_chunk() {
+        let mut body = Vec::new();
+        append_proxy_chunk_limited(&mut body, b"1234", 6).expect("first chunk");
+        let error = append_proxy_chunk_limited(&mut body, b"789", 6)
+            .expect_err("combined chunks exceed limit");
+        assert!(error.contains("exceeds limit"));
+        assert_eq!(body, b"1234");
     }
 
     #[test]

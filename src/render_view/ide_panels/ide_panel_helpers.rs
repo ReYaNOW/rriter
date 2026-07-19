@@ -37,6 +37,68 @@ fn centered_dialog_button_positions(x: f32, w: f32, btn_w: f32, gap: f32) -> (f3
     (first_x, first_x + btn_w + gap)
 }
 
+fn dialog_button_text_baseline(btn_y: f32, btn_h: f32, scale: f32) -> f32 {
+    (btn_y + btn_h * 0.5 + 5.0 * scale).round()
+}
+
+fn project_search_help_content_factor(dialog_h: f32, scale: f32) -> f32 {
+    if scale <= 0.0 {
+        return 1.0;
+    }
+    let reserved = 134.0 * scale;
+    let desired_content_span = 255.0 * scale;
+    ((dialog_h - reserved).max(0.0) / desired_content_span).clamp(0.45, 1.0)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GitSimpleTooltipLayout {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    text_w: f32,
+}
+
+fn git_simple_tooltip_layout(
+    window_w: f32,
+    window_h: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    measured_text_w: f32,
+    scale: f32,
+) -> Option<GitSimpleTooltipLayout> {
+    let margin = 8.0 * scale;
+    let pad_x = 12.0 * scale;
+    let max_w = (window_w - margin * 2.0).max(0.0);
+    let max_h = (window_h - margin * 2.0).max(0.0);
+    if max_w <= 1.0 || max_h <= 1.0 {
+        return None;
+    }
+    let h = (30.0 * scale).min(max_h).max(1.0);
+    let w = (measured_text_w + pad_x * 2.0).min(max_w).max(1.0);
+    let preferred_x = anchor_x + 14.0 * scale;
+    let preferred_y = anchor_y + 18.0 * scale;
+    let x = if preferred_x + w <= window_w - margin {
+        preferred_x
+    } else {
+        anchor_x - 14.0 * scale - w
+    }
+    .clamp(margin, (window_w - margin - w).max(margin));
+    let y = if preferred_y + h <= window_h - margin {
+        preferred_y
+    } else {
+        anchor_y - 10.0 * scale - h
+    }
+    .clamp(margin, (window_h - margin - h).max(margin));
+    Some(GitSimpleTooltipLayout {
+        x: x.round(),
+        y: y.round(),
+        w: w.round(),
+        h: h.round(),
+        text_w: (w - pad_x * 2.0).max(0.0).round(),
+    })
+}
+
 fn file_tree_menu_group(action: crate::app::file_tree::FileTreeMenuAction) -> u8 {
     match action {
         crate::app::file_tree::FileTreeMenuAction::CreateFile
@@ -121,6 +183,19 @@ fn git_checkbox_color(
             [0.0; 4],
         )
     }
+}
+
+fn git_stage_checkbox_color(
+    staged: bool,
+    partial: bool,
+    workspace_disabled: bool,
+    git_pending: bool,
+) -> ([f32; 4], [f32; 4]) {
+    git_checkbox_color(
+        staged,
+        partial,
+        git_stage_controls_disabled(workspace_disabled, git_pending),
+    )
 }
 
 fn render_git_disabled_button(renderer: &mut Renderer, button: &Button, s: f32) {

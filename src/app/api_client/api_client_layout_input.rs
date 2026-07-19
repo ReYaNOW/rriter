@@ -34,9 +34,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     if !api.mock.uv.last_error.is_empty() {
         content_h += API_PANEL_UV_ERROR_ADVANCE * scale;
     }
-    content_h += api.mock.manual_routes.len().min(8) as f32
-        * API_PANEL_MANUAL_ROUTE_ADVANCE
-        * scale;
+    content_h += api.mock.manual_routes.len() as f32 * API_PANEL_MANUAL_ROUTE_ADVANCE * scale;
     content_h += api.specs.len() as f32 * API_PANEL_SPEC_CARD_ADVANCE * scale;
     if let Some(model) = api.selected_model() {
         content_h += API_PANEL_TREE_ROW_ADVANCE * scale * 2.0;

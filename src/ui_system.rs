@@ -75,12 +75,12 @@ pub enum UiId {
     LspServerClearLogs(usize),
     LspServerFixAll(usize),
     LspLogFoldToggle(usize, usize), // (server_idx, line_idx)
-    LspLogsFilterInput,
-    LspLogsFilterClear,
-    LspLogsFilterCase,
-    LspLogsFilterSend,
-    LspLogsFilterRecv,
-    LspLogsFilterOther,
+    LspLogsFilterInput(usize),
+    LspLogsFilterClear(usize),
+    LspLogsFilterCase(usize),
+    LspLogsFilterSend(usize),
+    LspLogsFilterRecv(usize),
+    LspLogsFilterOther(usize),
 
     // API client
     ApiImportAdd,
@@ -224,6 +224,7 @@ pub enum UiId {
 
     // Database tools
     DatabasePanelBody,
+    DatabaseGlobalErrorCopy,
     DatabaseAdd,
     DatabaseDelete,
     DatabaseRefresh,
@@ -696,6 +697,11 @@ impl UiRegistry {
         UiClipRect::new(x, y, w, h).intersect(x, y, w, h)
     }
 
+    fn button_rect(button: ButtonView<'_>) -> Option<UiClipRect> {
+        let (x, y, w, h) = button.pixel_snapped_rect();
+        Self::valid_rect(x, y, w, h)
+    }
+
     pub fn push_interactions_enabled(&mut self, enabled: bool) {
         let enabled = self
             .interaction_stack
@@ -781,7 +787,7 @@ impl UiRegistry {
                 id, button, clip, renderer, mx, my, scale, pressed,
             );
         }
-        let Some(_) = Self::valid_rect(button.x, button.y, button.w, button.h) else {
+        let Some(rect) = Self::button_rect(button) else {
             button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         };
@@ -789,10 +795,10 @@ impl UiRegistry {
 
         self.elements.push(UiElement::Button {
             id,
-            x: button.x,
-            y: button.y,
-            w: button.w,
-            h: button.h,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
         });
 
         if hovered {
@@ -826,8 +832,16 @@ impl UiRegistry {
             );
             return false;
         }
-        let Some(rect) = self.clipped_rect(clip, button.x, button.y, button.w, button.h)
-        else {
+        let Some(button_rect) = Self::button_rect(button) else {
+            return false;
+        };
+        let Some(rect) = self.clipped_rect(
+            clip,
+            button_rect.x,
+            button_rect.y,
+            button_rect.w,
+            button_rect.h,
+        ) else {
             return false;
         };
         let hovered = rect.contains(mx, my);
@@ -1317,6 +1331,27 @@ mod tests {
     use super::*;
 
     #[test]
+    fn button_registry_rect_matches_pixel_snapped_render_hitbox() {
+        let button = ButtonView {
+            x: 10.6,
+            y: 4.6,
+            w: 20.2,
+            h: 10.2,
+            text: "",
+            icon: None,
+            text_scale: 1.0,
+            icon_size: 0.0,
+        };
+        let rect = UiRegistry::button_rect(button).expect("valid button rect");
+
+        assert_eq!(rect, UiClipRect::new(11.0, 5.0, 20.0, 10.0));
+        assert!(button.is_pixel_snapped_hovered(30.9, 14.9));
+        assert!(rect.contains(30.9, 14.9));
+        assert!(!button.is_pixel_snapped_hovered(31.1, 14.9));
+        assert!(!rect.contains(31.1, 14.9));
+    }
+
+    #[test]
     fn ui_registry_hit_testing_overlay_and_cursor_state_end_to_end() {
         let mut registry = UiRegistry::new();
 
@@ -1692,6 +1727,37 @@ mod tests {
             .intersect_rect(rect)
             .unwrap();
         assert_eq!(clipped, UiClipRect::new(0.0, 8.0, 25.0, 40.0));
+    }
+
+    #[test]
+    fn lsp_log_filter_hitboxes_remain_distinct_for_multiple_servers() {
+        let mut registry = UiRegistry::new();
+        registry.register_text_input(
+            UiId::LspLogsFilterInput(0),
+            10.0,
+            10.0,
+            80.0,
+            24.0,
+            -1.0,
+            -1.0,
+        );
+        registry.register_text_input(
+            UiId::LspLogsFilterInput(1),
+            10.0,
+            50.0,
+            80.0,
+            24.0,
+            -1.0,
+            -1.0,
+        );
+        assert_eq!(
+            registry.rect_for(UiId::LspLogsFilterInput(0)),
+            Some((10.0, 10.0, 80.0, 24.0))
+        );
+        assert_eq!(
+            registry.rect_for(UiId::LspLogsFilterInput(1)),
+            Some((10.0, 50.0, 80.0, 24.0))
+        );
     }
 
 }

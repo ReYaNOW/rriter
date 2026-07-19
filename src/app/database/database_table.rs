@@ -310,33 +310,7 @@ pub fn validate_table_fragment(fragment: &str, label: &str) -> Result<(), String
 }
 
 fn contains_unquoted_double_equals(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let mut index = 0usize;
-    let mut quote = None;
-    while index + 1 < bytes.len() {
-        let byte = bytes[index];
-        if let Some(active) = quote {
-            if byte == active {
-                if index + 1 < bytes.len() && bytes[index + 1] == active {
-                    index += 2;
-                    continue;
-                }
-                quote = None;
-            }
-            index += 1;
-            continue;
-        }
-        if byte == b'\'' || byte == b'"' {
-            quote = Some(byte);
-            index += 1;
-            continue;
-        }
-        if byte == b'=' && bytes[index + 1] == b'=' {
-            return true;
-        }
-        index += 1;
-    }
-    false
+    crate::languages::sql::contains_sql_token_outside_literals_and_comments(text, b"==")
 }
 
 pub fn database_table_effective_order_by(view: &super::DatabaseTableViewState) -> String {
@@ -1032,6 +1006,8 @@ mod tests {
             "WHERE содержит недопустимый оператор ==; используйте ="
         );
         assert!(validate_table_fragment("name = 'a==b'", "WHERE").is_ok());
+        assert!(validate_table_fragment("id = 1 /* == */", "WHERE").is_ok());
+        assert!(validate_table_fragment("note = $$==$$ -- ==\n", "WHERE").is_ok());
     }
 
     #[test]

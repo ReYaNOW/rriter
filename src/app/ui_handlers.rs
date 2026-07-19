@@ -48,6 +48,28 @@ fn content_y_hits_visual_text_row(
         .any(|line| content_y >= line.y_offset && content_y < line.y_offset + line_height)
 }
 
+fn editor_interaction_view_height(
+    window_height: f32,
+    tab_bar_height: f32,
+    panel_bottom_height: f32,
+    query_results_height: f32,
+    is_ide_mode: bool,
+    scale: f32,
+) -> f32 {
+    let reserved_bottom_height = if is_ide_mode {
+        panel_bottom_height + query_results_height
+    } else {
+        0.0
+    };
+    crate::render_view::editor_view_height(
+        window_height,
+        tab_bar_height,
+        reserved_bottom_height,
+        is_ide_mode,
+        scale,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -65,6 +87,24 @@ mod tests {
         assert!(jump.1 <= 800.0);
 
         assert!(scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn editor_pointer_viewport_matches_rendered_bottom_reservations() {
+        let viewport = editor_interaction_view_height(1000.0, 40.0, 300.0, 160.0, true, 1.0);
+        assert_eq!(
+            viewport,
+            1000.0
+                - 40.0
+                - 300.0
+                - 160.0
+                - crate::render_view::ide_status_bar_height(1.0)
+        );
+
+        assert_eq!(
+            editor_interaction_view_height(1000.0, 40.0, 300.0, 160.0, false, 1.0),
+            960.0
+        );
     }
 
 
@@ -133,6 +173,51 @@ mod tests {
 }
 
 impl App {
+    fn editor_interaction_bottom_heights(&self, window_height: f32, scale: f32) -> (f32, f32) {
+        if !self.is_ide_mode {
+            return (0.0, 0.0);
+        }
+        let panel_bottom_height = self.ide_panel.editor_reserved_bottom_height(scale);
+        let open_panel_height = if self.ide_panel.any_bottom_open() {
+            self.ide_panel.bottom_height * scale
+        } else {
+            0.0
+        };
+        let query_results_height = self.tabs.get(self.active_tab).map_or(0.0, |tab| {
+            match &tab.kind {
+                crate::app::EditorTabKind::DatabaseQuery(_, state)
+                    if crate::app::database::database_query_results_visible(state) =>
+                {
+                    crate::app::database::database_query_results_height(
+                        state.result_view.preferred_height,
+                        window_height,
+                        open_panel_height,
+                        scale,
+                    )
+                }
+                _ => 0.0,
+            }
+        });
+        (panel_bottom_height, query_results_height)
+    }
+
+    fn editor_interaction_metrics(&self) -> Option<(f32, f32, f32, f32)> {
+        let renderer = self.renderer.as_ref()?;
+        let window_height = self
+            .window
+            .as_ref()
+            .map_or(renderer.height, |window| window.inner_size().height as f32);
+        let scale = renderer.scale_factor;
+        let (panel_bottom_height, query_results_height) =
+            self.editor_interaction_bottom_heights(window_height, scale);
+        Some((
+            window_height,
+            scale,
+            panel_bottom_height,
+            query_results_height,
+        ))
+    }
+
     /// Обрабатывает клик по UI элементу
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_ui_click(&mut self, id: UiId) {
@@ -140,6 +225,7 @@ impl App {
         self.last_click_ui_id = Some(id);
         match id {
             UiId::DatabasePanelBody
+            | UiId::DatabaseGlobalErrorCopy
             | UiId::DatabaseAdd
             | UiId::DatabaseDelete
             | UiId::DatabaseRefresh
@@ -1350,7 +1436,11 @@ impl App {
             UiId::StickyLine(target_byte, slot_index) => {
                 self.editor.cursor = target_byte;
                 self.editor.selection_anchor = None;
-                if let Some(r) = self.renderer.as_mut() {
+                let database_query_tab = self.active_tab_is_database_query();
+                let metrics = self.editor_interaction_metrics();
+                if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
+                    (metrics, self.renderer.as_mut())
+                {
                     let phys_line = self
                         .editor
                         .line_offsets
@@ -1362,8 +1452,21 @@ impl App {
                         .copied()
                         .unwrap_or(phys_line);
                     let line_y = visual_line as f32 * r.line_height;
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let max_scroll = r.get_max_scroll(&self.editor, wh);
+                    let tab_bar_h = crate::render_view::editor_content_top_inset(
+                        self.show_welcome,
+                        self.is_ide_mode,
+                        database_query_tab,
+                        s,
+                    );
+                    let editor_height = editor_interaction_view_height(
+                        wh,
+                        tab_bar_h,
+                        panel_bottom_h,
+                        query_results_h,
+                        self.is_ide_mode,
+                        s,
+                    );
+                    let max_scroll = r.get_max_scroll(&self.editor, editor_height);
                     let ry = slot_index as f32 * r.line_height;
                     let padding = r.line_height * 3.0;
                     self.scroll_y.animate_to(
@@ -1396,21 +1499,29 @@ impl App {
             }
             UiId::EditorScrollbarY => {
                 let database_query_tab = self.active_tab_is_database_query();
-                if let Some(r) = self.renderer.as_mut() {
+                let metrics = self.editor_interaction_metrics();
+                if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
+                    (metrics, self.renderer.as_mut())
+                {
                     self.scroll_y.is_dragging = true;
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     self.last_click_pos = (mx, my);
 
-                    let s = r.scale_factor;
                     let tab_bar_h = crate::render_view::editor_content_top_inset(
                         self.show_welcome,
                         self.is_ide_mode,
                         database_query_tab,
                         s,
                     );
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let editor_height = (wh - tab_bar_h).max(0.0);
+                    let editor_height = editor_interaction_view_height(
+                        wh,
+                        tab_bar_h,
+                        panel_bottom_h,
+                        query_results_h,
+                        self.is_ide_mode,
+                        s,
+                    );
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {
@@ -1449,22 +1560,30 @@ impl App {
             UiId::EditorMinimap => {
                 self.scroll_y.is_dragging = true;
                 let database_query_tab = self.active_tab_is_database_query();
-                if let Some(r) = self.renderer.as_mut() {
+                let metrics = self.editor_interaction_metrics();
+                if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
+                    (metrics, self.renderer.as_mut())
+                {
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     self.last_click_pos = (mx, my);
                     self.last_click_time =
                         std::time::Instant::now() - std::time::Duration::from_millis(200);
 
-                    let s = r.scale_factor;
                     let tab_bar_h = crate::render_view::editor_content_top_inset(
                         self.show_welcome,
                         self.is_ide_mode,
                         database_query_tab,
                         s,
                     );
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                    let editor_height = (wh - tab_bar_h).max(0.0);
+                    let editor_height = editor_interaction_view_height(
+                        wh,
+                        tab_bar_h,
+                        panel_bottom_h,
+                        query_results_h,
+                        self.is_ide_mode,
+                        s,
+                    );
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {
@@ -1511,17 +1630,26 @@ impl App {
             UiId::EditorScrollbarX => {
                 self.scroll_x.is_dragging = true;
                 let database_query_tab = self.active_tab_is_database_query();
-                if let Some(r) = self.renderer.as_mut() {
+                let metrics = self.editor_interaction_metrics();
+                if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
+                    (metrics, self.renderer.as_mut())
+                {
                     let mx = r.last_mouse_x;
-                    let s = r.scale_factor;
-                    let wh = self.window.as_ref().unwrap().inner_size().height as f32;
                     let tab_bar_h = crate::render_view::editor_content_top_inset(
                         self.show_welcome,
                         self.is_ide_mode,
                         database_query_tab,
                         s,
                     );
-                    let max_y = r.get_max_scroll(&self.editor, wh - tab_bar_h);
+                    let editor_height = editor_interaction_view_height(
+                        wh,
+                        tab_bar_h,
+                        panel_bottom_h,
+                        query_results_h,
+                        self.is_ide_mode,
+                        s,
+                    );
+                    let max_y = r.get_max_scroll(&self.editor, editor_height);
                     let scrollbar_w = if max_y > 0.0 { 10.0 * s } else { 0.0 };
                     let track_x = r.left_padding;
                     let track_w = r.width - r.minimap_width - scrollbar_w - track_x;
@@ -1779,10 +1907,13 @@ impl App {
                     scroll.is_dragging = true;
                 }
             }
-            UiId::LspLogsFilterInput => {
+            UiId::LspLogsFilterInput(server_idx) => {
                 self.ide_panel.lsp_log_filter_focused = true;
                 self.ide_panel.lsp_logs_focused = None;
-                if let Some(rect) = self.ui_registry.rect_for(UiId::LspLogsFilterInput) {
+                if let Some(rect) = self
+                    .ui_registry
+                    .rect_for(UiId::LspLogsFilterInput(server_idx))
+                {
                     if let Some(r) = self.renderer.as_mut() {
                         let mx = r.last_mouse_x;
                         let s = r.scale_factor;
@@ -1805,7 +1936,7 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::LspLogsFilterClear => {
+            UiId::LspLogsFilterClear(_) => {
                 let old_version = self.ide_panel.lsp_log_filter_editor.version;
                 self.ide_panel.lsp_log_filter_editor = Editor::new(256);
                 self.ide_panel.lsp_log_filter_editor.version = old_version + 1;
@@ -1814,7 +1945,7 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::LspLogsFilterCase => {
+            UiId::LspLogsFilterCase(_) => {
                 self.ide_panel.lsp_log_filter_case_sensitive =
                     !self.ide_panel.lsp_log_filter_case_sensitive;
                 self.ide_panel.lsp_log_filter_dirty = true;
@@ -1822,21 +1953,21 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::LspLogsFilterSend => {
+            UiId::LspLogsFilterSend(_) => {
                 self.ide_panel.lsp_log_filter_show_send = !self.ide_panel.lsp_log_filter_show_send;
                 self.ide_panel.lsp_log_filter_dirty = true;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
-            UiId::LspLogsFilterRecv => {
+            UiId::LspLogsFilterRecv(_) => {
                 self.ide_panel.lsp_log_filter_show_recv = !self.ide_panel.lsp_log_filter_show_recv;
                 self.ide_panel.lsp_log_filter_dirty = true;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
-            UiId::LspLogsFilterOther => {
+            UiId::LspLogsFilterOther(_) => {
                 self.ide_panel.lsp_log_filter_show_other =
                     !self.ide_panel.lsp_log_filter_show_other;
                 self.ide_panel.lsp_log_filter_dirty = true;
@@ -2030,6 +2161,11 @@ impl App {
             UiId::DatabasePanelBody | UiId::DatabaseDialogBody | UiId::DatabaseDdlBody
             | UiId::DatabaseDdlScroll | UiId::DatabaseTableGridBody
             | UiId::DatabaseTableModalBody => {}
+            UiId::DatabaseGlobalErrorCopy => {
+                if let Some(error) = self.ide_panel.database.global_error.clone() {
+                    self.set_clipboard_text(error);
+                }
+            }
             UiId::DatabaseTableBody => {
                 if let Some(tab_id) = self.active_database_table_tab_id()
                     && let Some((_, state)) = self.database_table_meta_state_mut(tab_id)

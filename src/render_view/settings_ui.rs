@@ -3,6 +3,40 @@ fn clamped_settings_tab(active_tab: usize, tab_count: usize) -> usize {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+struct SettingsSidebarTabMetrics {
+    top: f32,
+    row_h: f32,
+    gap: f32,
+}
+
+fn settings_sidebar_tab_metrics(
+    inner_h: f32,
+    tab_count: usize,
+    scale: f32,
+) -> SettingsSidebarTabMetrics {
+    let top = (20.0 * scale).min((inner_h * 0.10).max(0.0));
+    if tab_count == 0 {
+        return SettingsSidebarTabMetrics {
+            top,
+            row_h: 0.0,
+            gap: 0.0,
+        };
+    }
+    let bottom = (20.0 * scale).min((inner_h - top).max(0.0) * 0.12);
+    let available = (inner_h - top - bottom).max(0.0);
+    let desired_gap = 4.0 * scale;
+    let gap = if tab_count > 1 {
+        desired_gap.min(available / (tab_count - 1) as f32)
+    } else {
+        0.0
+    };
+    let row_h = ((available - gap * tab_count.saturating_sub(1) as f32)
+        / tab_count as f32)
+        .clamp(0.0, 36.0 * scale);
+    SettingsSidebarTabMetrics { top, row_h, gap }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct SettingsModalLayout {
     pub outer: crate::ui_system::UiClipRect,
     pub inner: crate::ui_system::UiClipRect,
@@ -257,16 +291,20 @@ impl Renderer {
 
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
         let active_tab = clamped_settings_tab(active_tab, tabs.len());
-        let mut tab_y = iy + 20.0 * s;
+        let tab_metrics = settings_sidebar_tab_metrics(ih, tabs.len(), s);
+        let mut tab_y = iy + tab_metrics.top;
         for (i, title) in tabs.iter().enumerate() {
             let tab_rect_y = tab_y;
-            let tab_rect_h = 36.0 * s;
+            let tab_rect_h = tab_metrics.row_h;
+            if tab_rect_h <= 0.0 {
+                break;
+            }
 
             let is_hovered = ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsTab(i),
                 ix + 10.0 * s,
                 tab_rect_y,
-                sidebar_w - 20.0 * s,
+                (sidebar_w - 20.0 * s).max(0.0),
                 tab_rect_h,
                 self.last_mouse_x,
                 self.last_mouse_y,
@@ -276,7 +314,7 @@ impl Renderer {
                 self.push_rounded_rect(
                     ix + 10.0 * s,
                     tab_rect_y,
-                    sidebar_w - 20.0 * s,
+                    (sidebar_w - 20.0 * s).max(0.0),
                     tab_rect_h,
                     6.0 * s,
                     [1.0, 1.0, 1.0, 0.1],
@@ -285,7 +323,7 @@ impl Renderer {
                 self.push_rounded_rect(
                     ix + 10.0 * s,
                     tab_rect_y,
-                    sidebar_w - 20.0 * s,
+                    (sidebar_w - 20.0 * s).max(0.0),
                     tab_rect_h,
                     6.0 * s,
                     [1.0, 1.0, 1.0, 0.05],
@@ -297,8 +335,14 @@ impl Renderer {
             } else {
                 [0.7, 0.7, 0.7, 1.0]
             };
-            self.draw_string_scaled(title, ix + 25.0 * s, tab_y + 24.0 * s, color, 0.95);
-            tab_y += tab_rect_h + 4.0 * s;
+            self.draw_string_scaled_stable(
+                title,
+                (ix + 25.0 * s).round(),
+                (tab_y + tab_rect_h * 0.5 + 5.0 * s).round(),
+                color,
+                0.95,
+            );
+            tab_y += tab_rect_h + tab_metrics.gap;
         }
 
         let content_x = ix + sidebar_w + 30.0 * s;
@@ -1380,6 +1424,7 @@ impl Renderer {
             self.draw_database_settings_tab(
                 database_settings,
                 content_x,
+                content_available_w,
                 content_y,
                 ui_registry,
             );
@@ -1648,6 +1693,7 @@ mod settings_ui_tests {
     use super::{
         clamped_settings_tab, settings_ide_content_height, settings_ide_max_scroll,
         settings_faq_viewport_height, settings_modal_layout, settings_scrollbar_thumb,
+        settings_sidebar_tab_metrics,
     };
 
     #[test]
@@ -1655,6 +1701,21 @@ mod settings_ui_tests {
         assert_eq!(clamped_settings_tab(0, 6), 0);
         assert_eq!(clamped_settings_tab(99, 6), 5);
         assert_eq!(clamped_settings_tab(4, 0), 0);
+    }
+
+    #[test]
+    fn settings_sidebar_tabs_fit_inside_short_modal() {
+        let layout = settings_modal_layout(720.0, 300.0, 1.0);
+        let metrics = settings_sidebar_tab_metrics(layout.inner.h, 6, 1.0);
+        let bottom = metrics.top + metrics.row_h * 6.0 + metrics.gap * 5.0;
+
+        assert!(metrics.row_h < 36.0);
+        assert!(bottom <= layout.inner.h + f32::EPSILON);
+
+        let normal = settings_sidebar_tab_metrics(635.0, 6, 1.0);
+        assert_eq!(normal.top, 20.0);
+        assert_eq!(normal.row_h, 36.0);
+        assert_eq!(normal.gap, 4.0);
     }
 
     #[test]

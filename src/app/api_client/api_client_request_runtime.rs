@@ -6,6 +6,7 @@ pub struct ApiJobRequest {
     pub url: String,
     pub mock_target: ApiJobMockTarget,
     pub auth_parts: Vec<ApiPreparedAuthPart>,
+    pub body_content_type: Option<String>,
     pub body_json: Option<String>,
     pub body_form: Option<Vec<ApiInputValue>>,
     pub body_multipart: Option<Vec<ApiMultipartPart>>,
@@ -97,22 +98,40 @@ pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
 
 fn send_api_request_body(
     request: reqwest::blocking::RequestBuilder,
+    body_content_type: Option<&str>,
     body_json: Option<&str>,
     body_form: Option<&[ApiInputValue]>,
     multipart_body: Option<(String, Vec<u8>)>,
 ) -> Result<reqwest::blocking::Response, reqwest::Error> {
+    apply_api_request_body(
+        request,
+        body_content_type,
+        body_json,
+        body_form,
+        multipart_body,
+    )
+    .send()
+}
+
+fn apply_api_request_body(
+    request: reqwest::blocking::RequestBuilder,
+    body_content_type: Option<&str>,
+    body_json: Option<&str>,
+    body_form: Option<&[ApiInputValue]>,
+    multipart_body: Option<(String, Vec<u8>)>,
+) -> reqwest::blocking::RequestBuilder {
     if let Some((content_type, body)) = multipart_body {
         request
             .header("Content-Type", content_type)
             .body(body)
-            .send()
     } else if let Some(fields) = body_form {
-        request.form(&api_form_pairs(fields)).send()
+        request.form(&api_form_pairs(fields))
+    } else if let Some(content_type) = body_content_type {
+        request
+            .header("Content-Type", content_type)
+            .body(body_json.unwrap_or_default().to_string())
     } else {
         request
-            .header("Content-Type", "application/json")
-            .body(body_json.unwrap_or_default().to_string())
-            .send()
     }
 }
 
@@ -184,48 +203,85 @@ fn build_multipart_body(
     parts: &[ApiMultipartPart],
     request_id: u64,
 ) -> Result<(String, Vec<u8>), ApiLoadError> {
+    build_multipart_body_with_limit(parts, request_id, API_MAX_MULTIPART_BODY_BYTES)
+}
+
+fn build_multipart_body_with_limit(
+    parts: &[ApiMultipartPart],
+    request_id: u64,
+    max_bytes: usize,
+) -> Result<(String, Vec<u8>), ApiLoadError> {
     let boundary = format!("rriter-api-{}-{}", request_id, now_epoch_secs());
     let mut body = Vec::new();
     for part in parts {
         match part {
             ApiMultipartPart::Text { name, value } => {
-                push_multipart_field(&mut body, &boundary, name, None, value.as_bytes());
+                push_multipart_field_limited(
+                    &mut body,
+                    &boundary,
+                    name,
+                    None,
+                    value.as_bytes(),
+                    max_bytes,
+                )?;
             }
             ApiMultipartPart::File { name, path } => {
-                let size = std::fs::metadata(path)
-                    .ok()
-                    .and_then(|meta| usize::try_from(meta.len()).ok())
-                    .unwrap_or(0);
-                if body.len().saturating_add(size) > API_MAX_MULTIPART_BODY_BYTES {
-                    return Err(ApiLoadError::new(
-                        ApiLoadErrorKind::TooLarge,
-                        "multipart body больше лимита",
-                    ));
-                }
-                let bytes = std::fs::read(path).map_err(|err| {
-                    ApiLoadError::new(ApiLoadErrorKind::Io, format!("файл не прочитан: {}", err))
-                })?;
                 let file_name = path
                     .file_name()
                     .and_then(|name| name.to_str())
                     .unwrap_or("file");
-                push_multipart_field(&mut body, &boundary, name, Some(file_name), &bytes);
+                let overhead = multipart_field_encoded_len(&boundary, name, Some(file_name), 0)
+                    .ok_or_else(api_multipart_too_large_error)?;
+                let available = max_bytes
+                    .checked_sub(body.len())
+                    .and_then(|remaining| remaining.checked_sub(overhead))
+                    .ok_or_else(api_multipart_too_large_error)?;
+                let read_limit = u64::try_from(available)
+                    .unwrap_or(u64::MAX)
+                    .saturating_add(1);
+                let file = std::fs::File::open(path).map_err(|err| {
+                    ApiLoadError::new(ApiLoadErrorKind::Io, format!("файл не прочитан: {err}"))
+                })?;
+                let mut bytes = Vec::with_capacity(available.min(64 * 1024));
+                file.take(read_limit).read_to_end(&mut bytes).map_err(|err| {
+                    ApiLoadError::new(ApiLoadErrorKind::Io, format!("файл не прочитан: {err}"))
+                })?;
+                if bytes.len() > available {
+                    return Err(api_multipart_too_large_error());
+                }
+                push_multipart_field_limited(
+                    &mut body,
+                    &boundary,
+                    name,
+                    Some(file_name),
+                    &bytes,
+                    max_bytes,
+                )?;
             }
         }
     }
+    let final_len = 2usize
+        .checked_add(boundary.len())
+        .and_then(|len| len.checked_add(4))
+        .ok_or_else(api_multipart_too_large_error)?;
+    ensure_multipart_capacity(body.len(), final_len, max_bytes)?;
     body.extend_from_slice(b"--");
     body.extend_from_slice(boundary.as_bytes());
     body.extend_from_slice(b"--\r\n");
     Ok((format!("multipart/form-data; boundary={boundary}"), body))
 }
 
-fn push_multipart_field(
+fn push_multipart_field_limited(
     body: &mut Vec<u8>,
     boundary: &str,
     name: &str,
     file_name: Option<&str>,
     bytes: &[u8],
-) {
+    max_bytes: usize,
+) -> Result<(), ApiLoadError> {
+    let additional = multipart_field_encoded_len(boundary, name, file_name, bytes.len())
+        .ok_or_else(api_multipart_too_large_error)?;
+    ensure_multipart_capacity(body.len(), additional, max_bytes)?;
     body.extend_from_slice(b"--");
     body.extend_from_slice(boundary.as_bytes());
     body.extend_from_slice(b"\r\nContent-Disposition: form-data; name=\"");
@@ -239,6 +295,51 @@ fn push_multipart_field(
     body.extend_from_slice(b"\r\n\r\n");
     body.extend_from_slice(bytes);
     body.extend_from_slice(b"\r\n");
+    Ok(())
+}
+
+fn multipart_field_encoded_len(
+    boundary: &str,
+    name: &str,
+    file_name: Option<&str>,
+    value_len: usize,
+) -> Option<usize> {
+    let mut len = 2usize
+        .checked_add(boundary.len())?
+        .checked_add(b"\r\nContent-Disposition: form-data; name=\"".len())?
+        .checked_add(name.len())?
+        .checked_add(1)?;
+    if let Some(file_name) = file_name {
+        len = len
+            .checked_add(b"; filename=\"".len())?
+            .checked_add(file_name.len())?
+            .checked_add(b"\"\r\nContent-Type: application/octet-stream".len())?;
+    }
+    len.checked_add(4)?
+        .checked_add(value_len)?
+        .checked_add(2)
+}
+
+fn ensure_multipart_capacity(
+    current_len: usize,
+    additional: usize,
+    max_bytes: usize,
+) -> Result<(), ApiLoadError> {
+    if current_len
+        .checked_add(additional)
+        .is_some_and(|total| total <= max_bytes)
+    {
+        Ok(())
+    } else {
+        Err(api_multipart_too_large_error())
+    }
+}
+
+fn api_multipart_too_large_error() -> ApiLoadError {
+    ApiLoadError::new(
+        ApiLoadErrorKind::TooLarge,
+        "multipart body больше лимита",
+    )
 }
 
 fn push_multipart_quoted(out: &mut Vec<u8>, value: &str) {
@@ -301,6 +402,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
                 let req = apply_auth_to_builder(client.post(&job.url), &job.auth_parts);
                 send_api_request_body(
                     req,
+                    job.body_content_type.as_deref(),
                     job.body_json.as_deref(),
                     job.body_form.as_deref(),
                     multipart_body,
@@ -310,6 +412,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
                 let req = apply_auth_to_builder(client.put(&job.url), &job.auth_parts);
                 send_api_request_body(
                     req,
+                    job.body_content_type.as_deref(),
                     job.body_json.as_deref(),
                     job.body_form.as_deref(),
                     multipart_body,
@@ -319,6 +422,7 @@ fn run_api_request(job: ApiJobRequest) -> ApiJobResponse {
                 let req = apply_auth_to_builder(client.patch(&job.url), &job.auth_parts);
                 send_api_request_body(
                     req,
+                    job.body_content_type.as_deref(),
                     job.body_json.as_deref(),
                     job.body_form.as_deref(),
                     multipart_body,
@@ -500,8 +604,8 @@ fn format_api_curl_command_for_platform(
                 push_curl_arg(&mut out, "--data-urlencode", &field, shell);
             }
         }
-    } else if job.method.can_send_body() {
-        push_curl_header(&mut out, "Content-Type", "application/json", shell);
+    } else if let Some(content_type) = job.body_content_type.as_deref() {
+        push_curl_header(&mut out, "Content-Type", content_type, shell);
         push_curl_arg(
             &mut out,
             "--data-binary",

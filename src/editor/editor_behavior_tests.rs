@@ -28,6 +28,60 @@ mod tests {
     }
 
     #[test]
+    fn replace_undo_redo_shifts_fold_offsets_once() {
+        let mut editor = Editor::new(64);
+        editor.insert_str("aaaa\nbbbb\ncccc\ndddd\n");
+        editor.clear_history();
+        editor.foldable_ranges_bytes.push((10, 20, false));
+        editor.folded_start_bytes.insert(10);
+
+        editor.replace_range(0, 2, "x");
+        assert_eq!(editor.foldable_ranges_bytes, vec![(9, 19, false)]);
+        assert!(editor.folded_start_bytes.contains(&9));
+
+        editor.undo();
+        assert_eq!(editor.foldable_ranges_bytes, vec![(10, 20, false)]);
+        assert!(editor.folded_start_bytes.contains(&10));
+
+        editor.redo();
+        assert_eq!(editor.foldable_ranges_bytes, vec![(9, 19, false)]);
+        assert!(editor.folded_start_bytes.contains(&9));
+    }
+
+    #[test]
+    fn history_size_tracks_steps_moved_between_undo_and_redo() {
+        let mut editor = Editor::new(16);
+        editor.insert_str("abc");
+        assert_eq!(editor.history_size, 3);
+
+        editor.undo();
+        assert_eq!(editor.history_size, 0);
+
+        editor.redo();
+        assert_eq!(editor.history_size, 3);
+
+        editor.undo();
+        editor.insert_str("x");
+        assert_eq!(editor.history_size, 1);
+        assert!(editor.redo_stack.is_empty());
+    }
+
+    #[test]
+    fn preserving_history_snaps_cursor_to_new_text_utf8_boundary() {
+        let mut editor = Editor::new(8);
+        editor.insert_str("a");
+        editor.clear_history();
+        editor.cursor = 1;
+
+        editor.set_text_preserve_history("é");
+
+        assert_eq!(editor.cursor, 0);
+        assert!(editor.get_full_text().is_char_boundary(editor.cursor));
+        assert_eq!(editor.backspace(), None);
+        assert_eq!(editor.get_full_text(), "é");
+    }
+
+    #[test]
     fn editor_navigation_selection_indent_and_utf8_end_to_end() {
         let mut editor = Editor::new(16);
         editor.insert_str("def main:\n    привет\n");

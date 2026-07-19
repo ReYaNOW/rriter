@@ -102,8 +102,22 @@ pub struct ButtonStyle {
 }
 
 impl<'a> ButtonView<'a> {
+    pub(crate) fn pixel_snapped_rect(&self) -> (f32, f32, f32, f32) {
+        (
+            self.x.round(),
+            self.y.round(),
+            self.w.round(),
+            self.h.round(),
+        )
+    }
+
     pub fn is_hovered(&self, mx: f32, my: f32) -> bool {
         mx >= self.x && mx <= self.x + self.w && my >= self.y && my <= self.y + self.h
+    }
+
+    pub(crate) fn is_pixel_snapped_hovered(&self, mx: f32, my: f32) -> bool {
+        let (x, y, w, h) = self.pixel_snapped_rect();
+        mx >= x && mx <= x + w && my >= y && my <= y + h
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -147,11 +161,8 @@ impl<'a> ButtonView<'a> {
         enabled: bool,
         style: Option<ButtonStyle>,
     ) -> bool {
-        let x = self.x.round();
-        let y = self.y.round();
-        let w = self.w.round();
-        let h = self.h.round();
-        let hovered = enabled && mx >= x && mx <= x + w && my >= y && my <= y + h;
+        let (x, y, w, h) = self.pixel_snapped_rect();
+        let hovered = enabled && self.is_pixel_snapped_hovered(mx, my);
 
         let standard = ButtonStyle {
             border: renderer.theme.sel,

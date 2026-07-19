@@ -4,24 +4,31 @@ impl Renderer {
     fn draw_git_file_tooltip(&mut self, text: &str, mouse_x: f32, mouse_y: f32, s: f32) {
         let tooltip_scale = 0.88;
         let pad_x = 12.0 * s;
-        let tooltip_h = 30.0 * s;
-        let tooltip_w = self.measure_ui_width(text, tooltip_scale) + pad_x * 2.0;
-        let tooltip_x = mouse_x + 14.0 * s;
-        let tooltip_y = mouse_y + 18.0 * s;
+        let measured_text_w = self.measure_ui_width(text, tooltip_scale);
+        let Some(layout) = git_simple_tooltip_layout(
+            self.width,
+            self.height,
+            mouse_x,
+            mouse_y,
+            measured_text_w,
+            s,
+        ) else {
+            return;
+        };
 
         self.push_rounded_rect(
-            tooltip_x,
-            tooltip_y,
-            tooltip_w,
-            tooltip_h,
+            layout.x,
+            layout.y,
+            layout.w,
+            layout.h,
             6.0 * s,
             self.theme.sel,
         );
         self.push_rounded_rect(
-            tooltip_x + 1.0,
-            tooltip_y + 1.0,
-            tooltip_w - 2.0,
-            tooltip_h - 2.0,
+            layout.x + 1.0,
+            layout.y + 1.0,
+            (layout.w - 2.0).max(0.0),
+            (layout.h - 2.0).max(0.0),
             5.0 * s,
             [
                 self.theme.minimap_bg[0],
@@ -30,13 +37,17 @@ impl Renderer {
                 0.98,
             ],
         );
-        self.draw_string_scaled(
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        self.draw_tree_label_clipped(
             text,
-            tooltip_x + pad_x,
-            tooltip_y + tooltip_h / 2.0 + 5.0 * s,
+            layout.x + pad_x,
+            (layout.y + layout.h * 0.5 + 5.0 * s).round(),
+            layout.text_w,
             self.theme.fg,
             tooltip_scale,
+            &mut scratch,
         );
+        self.scratch_buffer = scratch;
     }
 
     pub(crate) fn draw_git_file_tooltip_overlay(
