@@ -74,11 +74,17 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
-        let query_diagnostics = tabs.get(active_tab).and_then(|tab| match &tab.kind {
-            crate::app::EditorTabKind::DatabaseQuery(_, state) => {
-                Some(state.editor_diagnostics.as_slice())
+        let query_hover_source = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(meta, state) => {
+                Some((meta.console_id.0, state.editor_diagnostics.as_slice()))
             }
             _ => None,
+        });
+        let query_diagnostics = query_hover_source.map(|(_, diagnostics)| diagnostics);
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            state
+                .borrow_mut()
+                .set_database_query_hover_context(query_hover_source.map(|(id, _)| id));
         });
         let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(diagnostics) = query_diagnostics {
             (
@@ -1357,6 +1363,12 @@ impl Renderer {
                         | crate::ui_system::UiId::InlineGitRollbackHunk
                 )
             );
+        let hover_blocked_by_database_query_results = active_database_query.is_some()
+            && crate::app::mouse::HoverState::database_query_results_block_hover_at(
+                ui_registry,
+                mx,
+                my,
+            );
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
         if hover_blocked_by_status_bar {
@@ -1364,6 +1376,8 @@ impl Renderer {
         } else if hover_blocked_by_bottom_panel {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if hover_blocked_by_inline_git {
+            crate::app::mouse::clear_hover_popup(Some(self));
+        } else if hover_blocked_by_database_query_results {
             crate::app::mouse::clear_hover_popup(Some(self));
         } else if file_tree_overlay_open {
             crate::app::mouse::clear_hover_popup(Some(self));

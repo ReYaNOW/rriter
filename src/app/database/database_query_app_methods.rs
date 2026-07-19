@@ -1233,6 +1233,18 @@ fn adjust_usize(value: &mut usize, delta: i32, step: usize) {
 mod database_query_app_method_tests {
     use super::*;
 
+    fn editor_diagnostics(text: &str) -> Vec<crate::lsp::Diagnostic> {
+        let mut editor = crate::editor::Editor::new(text.len().saturating_add(1));
+        let _ = editor.insert_str(text);
+        let analysis = crate::languages::sql_analysis::analyze_sql(text);
+        database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &editor.line_offsets,
+        )
+    }
+
     fn diagnostic(start_col: u32, end_col: u32) -> crate::lsp::Diagnostic {
         crate::lsp::Diagnostic {
             start_line: 0,
@@ -1263,6 +1275,74 @@ mod database_query_app_method_tests {
         let normalized = normalize_database_query_text_offset(text, inside);
         assert_eq!(normalized, 1);
         assert!(text.is_char_boundary(normalized));
+    }
+
+    #[test]
+    fn query_problem_navigation_uses_the_selected_sql_warning_end() {
+        let text = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let diagnostics = editor_diagnostics(text);
+        let public_start = text.find("public").expect("public");
+        let public_range = public_start..public_start + "public".len();
+
+        for (code, expected_token) in [("SQL119", "*"), ("SQL117", "LIMIT 100")] {
+            let index = diagnostics
+                .iter()
+                .position(|diagnostic| diagnostic.code.as_deref() == Some(code))
+                .expect("warning index");
+            let diagnostic = &diagnostics[index];
+            let start = crate::lsp::lsp_pos_to_offset(
+                text,
+                diagnostic.start_line,
+                diagnostic.start_col,
+            );
+            let offset = database_query_diagnostic_navigation_offset(text, diagnostic);
+
+            assert_eq!(text.get(start..offset), Some(expected_token));
+            assert!(!public_range.contains(&offset));
+        }
+    }
+
+    #[test]
+    fn query_problem_navigation_preserves_sorted_row_identity() {
+        let text = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let diagnostics = editor_diagnostics(text);
+        let flat_diags = (0..diagnostics.len()).collect::<Vec<_>>();
+
+        for code in ["SQL119", "SQL117"] {
+            let row = flat_diags
+                .iter()
+                .position(|index| diagnostics[*index].code.as_deref() == Some(code))
+                .expect("problem row");
+            let diagnostic_index = flat_diags[row];
+            let diagnostic = &diagnostics[diagnostic_index];
+            let expected_end = crate::lsp::lsp_pos_to_offset(
+                text,
+                diagnostic.end_line,
+                diagnostic.end_col,
+            );
+
+            assert_eq!(
+                database_query_diagnostic_navigation_offset(text, diagnostic),
+                expected_end
+            );
+            assert_eq!(diagnostic.code.as_deref(), Some(code));
+        }
+    }
+
+    #[test]
+    fn query_problem_navigation_handles_unicode_before_sql119() {
+        let text = "SELECT 'Ж', *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let diagnostics = editor_diagnostics(text);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code.as_deref() == Some("SQL119"))
+            .expect("SQL119");
+        let offset = database_query_diagnostic_navigation_offset(text, diagnostic);
+
+        assert_eq!(text.get(offset.saturating_sub(1)..offset), Some("*"));
+        assert!(text.is_char_boundary(offset));
+        let public_start = text.find("public").expect("public");
+        assert!(offset < public_start);
     }
 
     #[test]

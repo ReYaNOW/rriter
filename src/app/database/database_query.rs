@@ -1448,6 +1448,15 @@ pub fn history_started_now() -> u128 {
 mod tests {
     use super::*;
 
+    fn test_line_offsets(text: &str) -> Vec<usize> {
+        std::iter::once(0)
+            .chain(
+                text.char_indices()
+                    .filter_map(|(index, ch)| (ch == '\n').then_some(index + 1)),
+            )
+            .collect()
+    }
+
     #[test]
     fn execution_target_prefers_selection_then_statement() {
         let text = "select 1;\nselect 2;";
@@ -1629,6 +1638,64 @@ mod tests {
         assert_eq!(diagnostic.source.as_deref(), Some("PostgreSQL"));
         assert!(diagnostic.message.contains("detail"));
         assert!(diagnostic.message.contains("Подсказка: hint"));
+    }
+
+    #[test]
+    fn sql_warning_ranges_round_trip_through_lsp_positions() {
+        let text = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let analysis = analyze_sql(text);
+        let diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &test_line_offsets(text),
+        );
+
+        for code in ["SQL117", "SQL119"] {
+            let source = analysis
+                .diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code == code)
+                .expect("source diagnostic");
+            let editor = diagnostics
+                .iter()
+                .find(|diagnostic| diagnostic.code.as_deref() == Some(code))
+                .expect("editor diagnostic");
+            let start = crate::lsp::lsp_pos_to_offset(
+                text,
+                editor.start_line,
+                editor.start_col,
+            );
+            let end = crate::lsp::lsp_pos_to_offset(text, editor.end_line, editor.end_col);
+
+            assert_eq!(start..end, source.range);
+        }
+    }
+
+    #[test]
+    fn sql_warning_lsp_round_trip_is_utf16_safe_before_star() {
+        let text = "SELECT 'Ж', *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let analysis = analyze_sql(text);
+        let diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &test_line_offsets(text),
+        );
+        let source = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "SQL119")
+            .expect("SQL119 source");
+        let editor = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code.as_deref() == Some("SQL119"))
+            .expect("SQL119 editor");
+
+        let start = crate::lsp::lsp_pos_to_offset(text, editor.start_line, editor.start_col);
+        let end = crate::lsp::lsp_pos_to_offset(text, editor.end_line, editor.end_col);
+        assert_eq!(start..end, source.range);
+        assert_eq!(text.get(start..end), Some("*"));
     }
 
     #[test]

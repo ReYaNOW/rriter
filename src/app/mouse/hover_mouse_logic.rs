@@ -208,6 +208,16 @@ pub(crate) fn update_editor_hover_state_for_cursor(
         return Some(false);
     }
     if is_text_area {
+        if !state.diagnostic_type_hover_enabled {
+            if let Some(diag_byte) = diag_hover_byte {
+                if !in_hover_popup {
+                    state.set_diagnostic_only_hover_target(diag_byte);
+                }
+            } else if !in_hover_popup {
+                move_type_hover_to_empty_space(state);
+            }
+            return Some(false);
+        }
         let normalized = normalize_hover_byte(editor, byte_offset);
         if normalized.is_none() {
             if let Some(diag_byte) = diag_hover_byte {

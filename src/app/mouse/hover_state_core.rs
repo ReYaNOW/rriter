@@ -97,6 +97,8 @@ pub struct HoverState {
     pub hovered_diag_type_target: Option<usize>,
     pub popup_diag_type_target: Option<usize>,
     pub stale_combined_popup: bool,
+    pub diagnostic_type_hover_enabled: bool,
+    pub database_query_hover_context: Option<u64>,
     pub diag_hover_ready_after_stale: bool,
     pub diag_anim_progress: f32,
     pub diag_text: String,
@@ -132,6 +134,8 @@ impl Default for HoverState {
             hovered_diag_type_target: None,
             popup_diag_type_target: None,
             stale_combined_popup: false,
+            diagnostic_type_hover_enabled: true,
+            database_query_hover_context: None,
             diag_hover_ready_after_stale: false,
             diag_anim_progress: 0.0,
             diag_text: String::new(),
@@ -142,6 +146,77 @@ impl Default for HoverState {
 }
 
 impl HoverState {
+    pub fn database_query_results_block_hover_at(
+        ui: &crate::ui_system::UiRegistry,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) -> bool {
+        if matches!(
+            ui.find_at(pointer_x, pointer_y),
+            Some(
+                crate::ui_system::UiId::DatabaseQueryResultBody
+                    | crate::ui_system::UiId::DatabaseQueryResultResize
+                    | crate::ui_system::UiId::DatabaseQueryResultTab(_)
+                    | crate::ui_system::UiId::DatabaseQueryHistoryEntry(_)
+                    | crate::ui_system::UiId::DatabaseQueryColumnResize(_)
+                    | crate::ui_system::UiId::DatabaseQueryScrollY
+                    | crate::ui_system::UiId::DatabaseQueryScrollX
+            )
+        ) {
+            return true;
+        }
+        ui.rect_for(crate::ui_system::UiId::DatabaseQueryResultResize)
+            .is_some_and(|(x, y, w, h)| {
+                pointer_x >= x
+                    && pointer_x <= x + w
+                    && pointer_y >= y + h * 0.5
+            })
+    }
+
+    fn reset_hover_for_source_change(&mut self) {
+        self.request_id = None;
+        self.definition_request_id = None;
+        self.popup = None;
+        self.pending_popup = None;
+        self.timer = 0.0;
+        self.byte_offset = None;
+        self.rect = None;
+        self.max_scroll = 0.0;
+        self.selection_anchor = None;
+        self.selection_cursor = None;
+        self.selecting = false;
+        self.reset_diagnostic_popup();
+    }
+
+    pub fn set_database_query_hover_context(&mut self, context: Option<u64>) {
+        let diagnostic_type_hover_enabled = context.is_none();
+        if self.database_query_hover_context == context
+            && self.diagnostic_type_hover_enabled == diagnostic_type_hover_enabled
+        {
+            return;
+        }
+        self.database_query_hover_context = context;
+        self.diagnostic_type_hover_enabled = diagnostic_type_hover_enabled;
+        self.reset_hover_for_source_change();
+    }
+
+    pub fn set_diagnostic_only_hover_target(&mut self, byte_offset: usize) {
+        if self.byte_offset == Some(byte_offset) {
+            return;
+        }
+        self.request_id = None;
+        self.definition_request_id = None;
+        self.popup = None;
+        self.pending_popup = None;
+        self.timer = 0.0;
+        self.byte_offset = Some(byte_offset);
+        self.rect = None;
+        self.max_scroll = 0.0;
+        self.selection_anchor = None;
+        self.selection_cursor = None;
+        self.selecting = false;
+    }
+
     pub fn reset_diagnostic_popup(&mut self) {
         self.diag_rect = None;
         self.diag_scroll.reset();
@@ -295,6 +370,11 @@ impl HoverState {
         diagnostic: HoveredDiagnostic,
         type_target: Option<usize>,
     ) -> Option<usize> {
+        let type_target = if self.diagnostic_type_hover_enabled {
+            type_target
+        } else {
+            None
+        };
         if self.stale_combined_popup {
             return self.effective_hovered_diag_type_target(type_target);
         }
@@ -345,6 +425,9 @@ impl HoverState {
     }
 
     pub fn combined_type_target(&self) -> Option<usize> {
+        if !self.diagnostic_type_hover_enabled {
+            return None;
+        }
         self.popup_diag_type_target
             .or(self.hovered_diag_type_target)
             .or_else(|| {
@@ -357,6 +440,10 @@ impl HoverState {
     }
 
     pub fn update_hovered_diag_type_target_for_frame(&mut self, type_target: Option<usize>) {
+        if !self.diagnostic_type_hover_enabled {
+            self.hovered_diag_type_target = None;
+            return;
+        }
         if !self.stale_combined_popup
             && !(type_target.is_none() && self.has_active_combined_type_popup())
         {
@@ -365,6 +452,9 @@ impl HoverState {
     }
 
     pub fn effective_hovered_diag_type_target(&self, type_target: Option<usize>) -> Option<usize> {
+        if !self.diagnostic_type_hover_enabled {
+            return None;
+        }
         if self.stale_combined_popup
             || (type_target.is_none() && self.has_active_combined_type_popup())
         {

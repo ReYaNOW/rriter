@@ -529,12 +529,25 @@ pub fn diag_popup_byte_at(mx: f32, my: f32) -> usize {
 
 fn valid_diagnostic_popup_cache(
     cache: Vec<crate::app::mouse::HoveredDiagnostic>,
-    diagnostics_len: usize,
+    diagnostics: &[&Diagnostic],
 ) -> Vec<crate::app::mouse::HoveredDiagnostic> {
-    cache
-        .into_iter()
-        .filter(|(idx, _, _, _, _)| *idx < diagnostics_len)
-        .collect()
+    let mut valid: Vec<crate::app::mouse::HoveredDiagnostic> =
+        Vec::with_capacity(cache.len());
+    for diagnostic in cache {
+        let idx = diagnostic.0;
+        let Some(candidate) = diagnostics.get(idx).copied() else {
+            continue;
+        };
+        let duplicate = valid.iter().any(|existing| {
+            diagnostics
+                .get(existing.0)
+                .is_some_and(|existing_diag| *existing_diag == candidate)
+        });
+        if !duplicate {
+            valid.push(diagnostic);
+        }
+    }
+    valid
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
@@ -595,7 +608,7 @@ impl Renderer {
             s.diagnostic_popup_cache().to_vec()
         });
         let hovered_diags_cache =
-            valid_diagnostic_popup_cache(hovered_diags_cache, lsp_diagnostics.len());
+            valid_diagnostic_popup_cache(hovered_diags_cache, lsp_diagnostics);
         if hovered_diags_cache.is_empty() {
             crate::app::mouse::HOVER_STATE.with(|state| {
                 state.borrow_mut().reset_diagnostic_popup();

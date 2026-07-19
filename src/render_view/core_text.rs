@@ -256,6 +256,86 @@ mod tests {
     }
 
     #[test]
+    fn compact_tree_label_stable_geometry_preserves_shared_glyph_edge() {
+        let scale = 0.86;
+        let baseline = 100.0;
+        let glyph = |offset_y: f32, height: f32| crate::renderer::GlyphInfo {
+            u: 0.0,
+            v: 0.0,
+            uw: 1.0,
+            vh: 1.0,
+            width: 6.0,
+            height,
+            offset_x: 0.0,
+            offset_y,
+            advance: 8.0,
+            is_emoji: 0.0,
+        };
+        let stable_bottom = |x: f32, glyph| {
+            let (x, y, w, h) = crate::renderer::glyph_quad_rect(x, baseline, glyph, scale);
+            crate::renderer::quad_vertices(
+                x, y, w, h, 0.0, 0.0, 1.0, 1.0, [1.0; 4], 0.0,
+            )[2]
+                .pos[1]
+        };
+        let first = glyph(8.0, 5.98);
+        let second = glyph(8.42, 6.4);
+
+        assert_eq!(stable_bottom(10.0, first), stable_bottom(18.0, second));
+
+        let old_first = pixel_snapped_ui_glyph_rect(
+            10.0,
+            baseline,
+            first.offset_x,
+            first.offset_y,
+            first.width,
+            first.height,
+            scale,
+        )
+        .expect("visible first glyph");
+        let old_second = pixel_snapped_ui_glyph_rect(
+            18.0,
+            baseline,
+            second.offset_x,
+            second.offset_y,
+            second.width,
+            second.height,
+            scale,
+        )
+        .expect("visible second glyph");
+        assert_ne!(old_first.1 + old_first.3, old_second.1 + old_second.3);
+    }
+
+    #[test]
+    fn compact_tree_label_stable_geometry_is_repeatable_at_fractional_dpi() {
+        let glyph = crate::renderer::GlyphInfo {
+            u: 0.0,
+            v: 0.0,
+            uw: 1.0,
+            vh: 1.0,
+            width: 7.2,
+            height: 8.1,
+            offset_x: 0.25,
+            offset_y: 9.35,
+            advance: 8.0,
+            is_emoji: 0.0,
+        };
+        for dpi in [1.0, 1.25, 1.5, 1.75] {
+            let scale = 0.86 * dpi;
+            let rect = crate::renderer::glyph_quad_rect(12.0, 80.0, glyph, scale);
+            let first = crate::renderer::quad_vertices(
+                rect.0, rect.1, rect.2, rect.3, 0.0, 0.0, 1.0, 1.0, [1.0; 4], 0.0,
+            )
+            .map(|vertex| vertex.pos);
+            let second = crate::renderer::quad_vertices(
+                rect.0, rect.1, rect.2, rect.3, 0.0, 0.0, 1.0, 1.0, [0.5; 4], 0.0,
+            )
+            .map(|vertex| vertex.pos);
+            assert_eq!(first, second);
+        }
+    }
+
+    #[test]
     fn spanned_ui_chars_keep_utf8_offsets_and_exact_span_colors() {
         let expected = [0.1, 0.2, 0.3, 1.0];
         let spans = vec![crate::highlighter::ColorSpan {

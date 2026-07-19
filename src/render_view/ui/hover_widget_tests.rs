@@ -32,10 +32,58 @@ fn module_header_wrap_does_not_split_marker_from_path() {
 
 #[test]
 fn test_valid_diagnostic_popup_cache_drops_stale_indices() {
+    let diagnostic = crate::lsp::Diagnostic {
+        start_line: 0,
+        start_col: 0,
+        end_line: 0,
+        end_col: 1,
+        severity: crate::lsp::DiagSeverity::Warning,
+        code: Some(std::sync::Arc::<str>::from("SQL119")),
+        code_href: None,
+        message: std::sync::Arc::<str>::from("Не используйте SELECT *"),
+        source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
+        quickfixes: Box::new([]),
+        tags: Box::new([]),
+    };
+    let diagnostics = [&diagnostic];
     let cache = vec![(0, 1.0, 2.0, 3.0, 4.0), (3, 5.0, 6.0, 7.0, 8.0)];
     assert_eq!(
-        valid_diagnostic_popup_cache(cache, 3),
+        valid_diagnostic_popup_cache(cache, &diagnostics),
         vec![(0, 1.0, 2.0, 3.0, 4.0)]
+    );
+}
+
+#[test]
+fn diagnostic_popup_cache_keeps_unique_messages_and_deduplicates_exact_copies() {
+    let make_diagnostic = |code: &'static str, message: &'static str| crate::lsp::Diagnostic {
+        start_line: 0,
+        start_col: 7,
+        end_line: 0,
+        end_col: 8,
+        severity: crate::lsp::DiagSeverity::Warning,
+        code: Some(std::sync::Arc::<str>::from(code)),
+        code_href: None,
+        message: std::sync::Arc::<str>::from(message),
+        source: Some(std::sync::Arc::<str>::from("RRiter SQL")),
+        quickfixes: Box::new([]),
+        tags: Box::new([]),
+    };
+    let select_star = make_diagnostic("SQL119", "Не используйте SELECT *");
+    let duplicate_select_star = make_diagnostic("SQL119", "Не используйте SELECT *");
+    let second_message = make_diagnostic("SQL999", "Другая диагностика на том же диапазоне");
+    let diagnostics = [&select_star, &duplicate_select_star, &second_message];
+    let cache = vec![
+        (0, 10.0, 20.0, 40.0, 18.0),
+        (1, 10.0, 20.0, 40.0, 18.0),
+        (2, 10.0, 20.0, 40.0, 18.0),
+    ];
+
+    assert_eq!(
+        valid_diagnostic_popup_cache(cache, &diagnostics),
+        vec![
+            (0, 10.0, 20.0, 40.0, 18.0),
+            (2, 10.0, 20.0, 40.0, 18.0),
+        ]
     );
 }
 

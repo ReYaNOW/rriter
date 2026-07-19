@@ -854,14 +854,21 @@ impl App {
             && self.ide_panel.bottom_panel_blocks_editor_hover()
             && position.y as f32 >= bottom_panel_y
             && position.y as f32 <= bottom_panel_y + bottom_panel_h;
+        let in_database_query_results = self.active_tab_is_database_query()
+            && crate::app::mouse::HoverState::database_query_results_block_hover_at(
+                &self.ui_registry,
+                px,
+                py,
+            );
 
-        if in_blocking_bottom_panel {
+        if in_blocking_bottom_panel || in_database_query_results {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);
         }
 
         if !suppress_editor_hover
             && !in_blocking_bottom_panel
+            && !in_database_query_results
             && (!in_hover_popup || in_hover_source_line)
         {
             let tab_bar_h = crate::render_view::editor_content_top_inset(

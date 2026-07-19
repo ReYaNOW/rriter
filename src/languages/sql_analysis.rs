@@ -623,11 +623,13 @@ fn collect_statement_lints(
                 "CROSS JOIN создаёт декартово произведение и может резко увеличить результат",
             ));
         }
-        let has_limit = direct_named_child(from_node, "limit").is_some();
+        let limit = direct_named_child(from_node, "limit");
         let has_order = direct_named_child(from_node, "order_by").is_some();
-        if has_limit && !has_order {
+        if let Some(limit) = limit
+            && !has_order
+        {
             analysis.diagnostics.push(warning(
-                from_node.start_byte()..from_node.end_byte(),
+                stable_node_range(limit, sql),
                 "SQL117",
                 "LIMIT без ORDER BY возвращает недетерминированный набор строк",
             ));
@@ -640,9 +642,9 @@ fn collect_statement_lints(
             ));
         }
     }
-    if select_uses_star(statement) {
+    if let Some(range) = select_star_range(statement, sql) {
         analysis.diagnostics.push(warning(
-            scope.clone(),
+            range,
             "SQL119",
             "SELECT * делает результат зависимым от структуры таблицы; перечислите нужные столбцы",
         ));
@@ -1144,8 +1146,12 @@ fn predicate_is_constant_true(where_node: tree_sitter::Node<'_>, sql: &str) -> b
             && right.is_some_and(|value| value.eq_ignore_ascii_case("TRUE"))
 }
 
-fn select_uses_star(statement: tree_sitter::Node<'_>) -> bool {
-    find_in_scope(statement, statement, "all_fields").is_some()
+fn select_star_range(statement: tree_sitter::Node<'_>, sql: &str) -> Option<Range<usize>> {
+    let all_fields = find_in_scope(statement, statement, "all_fields")?;
+    let star_offset = node_text(all_fields, sql)?.find('*')?;
+    let start = all_fields.start_byte().saturating_add(star_offset).min(sql.len());
+    let end = start.saturating_add(1).min(sql.len());
+    (start < end).then_some(start..end)
 }
 
 fn stable_node_range(node: tree_sitter::Node<'_>, sql: &str) -> Range<usize> {
@@ -1347,6 +1353,65 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diagnostic| diagnostic.code == "SQL117"));
+    }
+
+    #[test]
+    fn sql117_and_sql119_have_precise_non_overlapping_ranges() {
+        let sql = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let analysis = analyze_sql(sql);
+        let sql117 = analysis
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "SQL117")
+            .collect::<Vec<_>>();
+        let sql119 = analysis
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "SQL119")
+            .collect::<Vec<_>>();
+
+        assert_eq!(sql117.len(), 1, "unexpected diagnostics: {:?}", analysis.diagnostics);
+        assert_eq!(sql119.len(), 1, "unexpected diagnostics: {:?}", analysis.diagnostics);
+        assert_eq!(sql.get(sql119[0].range.clone()), Some("*"));
+        assert_eq!(sql.get(sql117[0].range.clone()), Some("LIMIT 100"));
+        assert!(
+            sql119[0].range.end <= sql117[0].range.start
+                || sql117[0].range.end <= sql119[0].range.start
+        );
+    }
+
+    #[test]
+    fn select_star_range_stays_byte_exact_after_unicode() {
+        let sql = "SELECT 'Ж', *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let analysis = analyze_sql(sql);
+        let sql119 = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "SQL119")
+            .expect("SQL119");
+
+        assert_eq!(sql.get(sql119.range.clone()), Some("*"));
+        assert!(sql.is_char_boundary(sql119.range.start));
+        assert!(sql.is_char_boundary(sql119.range.end));
+    }
+
+    #[test]
+    fn sql_warning_order_and_deduplication_are_deterministic() {
+        let sql = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
+        let first = analyze_sql(sql);
+        let second = analyze_sql(sql);
+
+        assert_eq!(first.diagnostics, second.diagnostics);
+        for code in ["SQL117", "SQL119"] {
+            assert_eq!(
+                first
+                    .diagnostics
+                    .iter()
+                    .filter(|diagnostic| diagnostic.code == code)
+                    .count(),
+                1
+            );
+        }
     }
 
     #[test]
