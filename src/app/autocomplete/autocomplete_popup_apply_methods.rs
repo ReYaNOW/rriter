@@ -227,8 +227,9 @@ pub(crate) fn tree_sitter_completion_options(
     let mut matches = Vec::with_capacity(best_scopes.len());
     for (_, comp) in best_scopes {
         let comp_lower = comp.word.to_lowercase();
-        if let Some(indices) = fuzzy_match(&prefix_lower, &comp_lower) {
-            let is_prefix = comp_lower.starts_with(&prefix_lower);
+        if let Some((match_kind, indices)) = autocomplete_match_candidate(&prefix_lower, &comp_lower)
+        {
+            let is_prefix = match_kind.is_prefix();
             let mut score = 0i64;
             let scope_bonus = if comp.kind == SymbolKind::Keyword {
                 0
@@ -275,6 +276,46 @@ pub(crate) fn tree_sitter_completion_options(
         .take(60)
         .map(|m| (m.2.into(), m.3))
         .collect()
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AutocompleteMatchKind {
+    Exact,
+    Prefix,
+    Fuzzy,
+}
+
+impl AutocompleteMatchKind {
+    #[inline]
+    pub(crate) fn is_prefix(self) -> bool {
+        matches!(self, Self::Exact | Self::Prefix)
+    }
+}
+
+pub(crate) fn autocomplete_match_candidate(
+    prefix: &str,
+    candidate: &str,
+) -> Option<(AutocompleteMatchKind, Vec<usize>)> {
+    let prefix_lower = prefix.to_lowercase();
+    let candidate_lower = candidate.to_lowercase();
+    let indices = fuzzy_match(&prefix_lower, &candidate_lower)?;
+    let kind = if candidate_lower == prefix_lower {
+        AutocompleteMatchKind::Exact
+    } else if candidate_lower.starts_with(&prefix_lower) {
+        AutocompleteMatchKind::Prefix
+    } else {
+        AutocompleteMatchKind::Fuzzy
+    };
+    Some((kind, indices))
+}
+
+fn autocomplete_item_identity_matches(left: &AutocompleteItem, right: &AutocompleteItem) -> bool {
+    left.word == right.word
+        && left.kind == right.kind
+        && left.insert_text == right.insert_text
+        && left.module == right.module
+        && left.module_path == right.module_path
+        && left.detail == right.detail
 }
 
 pub(crate) fn enrich_python_tree_sitter_options(
@@ -412,6 +453,71 @@ pub(crate) fn autocomplete_next_index(
 }
 
 impl App {
+    pub(crate) fn update_autocomplete_session(
+        &mut self,
+        mode: AutocompleteMode,
+        context_key: Option<String>,
+        options: Vec<(AutocompleteItem, Vec<usize>)>,
+        anchor: Option<(f32, f32)>,
+        refresh_anchor_while_open: bool,
+    ) {
+        let was_active = self.autocomplete_active;
+        let same_session = was_active
+            && self.autocomplete_mode == mode
+            && self.autocomplete_pending_context_key.as_deref() == context_key.as_deref();
+        let previous_index = self.autocomplete_selected_idx;
+        let previous_option_count = self.autocomplete_options.len();
+        let previous_item = same_session
+            .then(|| {
+                self.autocomplete_options
+                    .get(previous_index)
+                    .map(|(item, _)| item.clone())
+            })
+            .flatten();
+
+        self.autocomplete_options = options;
+        if self.autocomplete_options.is_empty() {
+            self.close_autocomplete();
+            return;
+        }
+
+        if !was_active {
+            self.autocomplete_anim_progress = 0.0;
+        }
+        if !same_session {
+            self.autocomplete_scroll.reset();
+        }
+        if !was_active || !same_session || refresh_anchor_while_open {
+            self.autocomplete_anchor = anchor;
+        }
+
+        let preserved_selection = previous_item.as_ref().and_then(|previous_item| {
+            self.autocomplete_options
+                .iter()
+                .position(|(item, _)| autocomplete_item_identity_matches(item, previous_item))
+        });
+        self.autocomplete_selected_idx = preserved_selection
+            .unwrap_or_else(|| previous_index.min(self.autocomplete_options.len() - 1));
+        if !same_session {
+            self.autocomplete_selected_idx = 0;
+        } else if previous_item.is_some() && preserved_selection.is_none() {
+            self.autocomplete_scroll.reset();
+        }
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_mode = mode;
+        self.autocomplete_pending_context_key = context_key;
+        self.autocomplete_active = true;
+        self.autocomplete_detail_rect = None;
+        self.autocomplete_detail_placement = None;
+        self.autocomplete_detail_max_scroll = 0.0;
+        self.reset_autocomplete_detail_size();
+        self.refresh_autocomplete_detail_popup();
+
+        if same_session && self.autocomplete_options.len() < previous_option_count {
+            self.ensure_autocomplete_visible();
+        }
+    }
+
     pub(crate) fn handle_active_autocomplete_key(
         &mut self,
         physical_key: winit::keyboard::PhysicalKey,
@@ -561,15 +667,14 @@ impl App {
                 api_mock_contract_constraint_options(&ctx)
             };
             if !local_options.is_empty() {
-                self.autocomplete_options = local_options;
-                self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
-                self.autocomplete_scroll.reset();
-                self.autocomplete_mode = AutocompleteMode::TreeSitter;
-                self.autocomplete_active = true;
-                self.autocomplete_selected_idx = 0;
-                self.autocomplete_hovered_idx = None;
-                self.refresh_autocomplete_detail_popup();
+                let anchor = self.autocomplete_anchor_for_source(source);
+                self.update_autocomplete_session(
+                    AutocompleteMode::TreeSitter,
+                    None,
+                    local_options,
+                    anchor,
+                    source.is_api_mock(),
+                );
                 self.trace_autocomplete_state("update_ts:local_empty_prefix");
                 return;
             }
@@ -578,15 +683,14 @@ impl App {
             return;
         }
 
-        self.autocomplete_options = {
+        let options = {
             let editor = self.autocomplete_editor_for_source(source);
             let completions = self.autocomplete_tree_sitter_completions_for_source(source);
             let ctx = snapshot.editor_context(editor);
             build_tree_sitter_autocomplete_options(&ctx, completions, "update_ts")
         };
         if autocomplete_trace_enabled() {
-            let first = self
-                .autocomplete_options
+            let first = options
                 .iter()
                 .take(5)
                 .map(|(item, _)| item.word.as_str())
@@ -594,28 +698,25 @@ impl App {
                 .join(",");
             println!(
                 "Autocomplete update_ts_matches: opts={} first=[{}]",
-                self.autocomplete_options.len(),
+                options.len(),
                 first
             );
         }
-        if !self.autocomplete_options.is_empty() {
-            if !self.autocomplete_active {
-                self.autocomplete_anim_progress = 0.0;
-                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
-            } else if source.is_api_mock() {
-                self.autocomplete_anchor = self.autocomplete_anchor_for_source(source);
-            }
-            self.autocomplete_scroll.reset();
-            self.autocomplete_mode = AutocompleteMode::TreeSitter;
-            self.autocomplete_active = true;
-            self.autocomplete_selected_idx = 0;
-            if source.is_api_mock() {
-                self.autocomplete_hovered_idx = None;
-            }
-            self.request_active_autocomplete_detail_for_index(0);
+        let has_options = !options.is_empty();
+        let anchor = has_options
+            .then(|| self.autocomplete_anchor_for_source(source))
+            .flatten();
+        self.update_autocomplete_session(
+            AutocompleteMode::TreeSitter,
+            None,
+            options,
+            anchor,
+            source.is_api_mock(),
+        );
+        if has_options {
+            self.request_active_autocomplete_detail_for_index(self.autocomplete_selected_idx);
             self.trace_autocomplete_state("update_ts:active_end");
         } else {
-            self.autocomplete_active = false;
             self.trace_autocomplete_state("update_ts:no_options");
         }
     }
@@ -648,6 +749,7 @@ impl App {
         let max_scroll = ((total_items - visible_limit) * step).max(0.0);
 
         self.autocomplete_scroll.clamp_target(0.0, max_scroll);
+        self.autocomplete_scroll.clamp_current(0.0, max_scroll);
     }
 
     pub fn apply_autocomplete(&mut self) {
@@ -839,5 +941,33 @@ impl App {
             .is_some_and(|snapshot| {
                 self.source_member_dot_receiver_is_unavailable_self(source, &snapshot)
             })
+    }
+}
+
+#[cfg(test)]
+mod autocomplete_session_identity_tests {
+    use super::*;
+
+    fn item(word: &str, detail: &str) -> AutocompleteItem {
+        AutocompleteItem {
+            word: word.to_string(),
+            kind: SymbolKind::Property,
+            scope_start: 0,
+            scope_end: 0,
+            module: None,
+            module_path: None,
+            detail: Some(detail.to_string()),
+            insert_text: None,
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn autocomplete_identity_distinguishes_same_word_from_different_sql_sources() {
+        let left = item("id", "booking · bigint");
+        let right = item("id", "customer · bigint");
+        assert!(!autocomplete_item_identity_matches(&left, &right));
+        assert!(autocomplete_item_identity_matches(&left, &left));
     }
 }

@@ -239,11 +239,9 @@ fn search_update_finds_nearest_match_preserves_previous_and_honors_case() {
     app.editor = editor_with("alpha beta\nAlpha beta\nbeta tail");
     app.editor.cursor = 18;
     app.search_editor = editor_with("beta");
-
     app.update_search();
     assert_eq!(app.search_results.len(), 3);
     assert_eq!(app.search_current_idx, Some(1));
-
     let previous = app.search_current_idx;
     app.update_search();
     assert_eq!(app.search_current_idx, previous);
@@ -293,6 +291,217 @@ fn autocomplete_filters_scores_scrolls_and_applies_selected_completion() {
     assert_eq!(app.autocomplete_scroll.target, 0.0);
 }
 
+fn sql_completion_test_app(
+    text: &str,
+    metadata: crate::app::database::DatabaseQueryCompletionMetadata,
+) -> Option<App> {
+    let mut app = test_app()?;
+    app.editor = editor_with(text);
+    app.file_extension = "sql".to_string();
+    let mut tab = tab_with("SQL Console", None, text);
+    tab.file_extension = "sql".to_string();
+    tab.kind = EditorTabKind::DatabaseQuery(
+        crate::app::database::DatabaseQueryTabMeta {
+            console_id: crate::app::database::SqlConsoleId(7),
+            connection_id: crate::app::database::DatabaseConnectionId(3),
+            database_name: "postgres".to_string(),
+            title: "SQL Console".to_string(),
+        },
+        crate::app::database::DatabaseQueryTabState {
+            completion: metadata,
+            completion_loaded: true,
+            ..crate::app::database::DatabaseQueryTabState::default()
+        },
+    );
+    app.tabs = vec![tab];
+    app.active_tab = 0;
+    Some(app)
+}
+fn sql_completion_metadata() -> crate::app::database::DatabaseQueryCompletionMetadata {
+    crate::app::database::DatabaseQueryCompletionMetadata {
+        columns: vec![crate::app::database::DatabaseQueryCompletionColumn {
+            table_name: "items".to_string(),
+            column_name: "frame".to_string(),
+            data_type: "text".to_string(),
+        }],
+        functions: vec!["format".to_string()],
+        ..crate::app::database::DatabaseQueryCompletionMetadata::default()
+    }
+}
+#[test]
+fn editor_and_sql_completion_share_non_restarting_popup_session_updates() {
+    let Some(mut editor_app) = test_app() else {
+        return;
+    };
+    editor_app.editor = editor_with("pr");
+    editor_app.highlighter.completions = vec![
+        completion("print", SymbolKind::Function, 0, 100),
+        completion("private", SymbolKind::Variable, 0, 100),
+    ];
+    editor_app.update_autocomplete();
+    editor_app.autocomplete_anim_progress = 0.63;
+    editor_app.autocomplete_scroll.current = 18.0;
+    editor_app.autocomplete_scroll.target = 18.0;
+    editor_app.autocomplete_selected_idx = editor_app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "print")
+        .expect("print completion");
+    editor_app.editor = editor_with("pri");
+    editor_app.update_autocomplete();
+    assert_eq!(editor_app.autocomplete_anim_progress, 0.63);
+    assert_eq!(editor_app.autocomplete_scroll.target, 18.0);
+    assert_eq!(
+        editor_app.autocomplete_options[editor_app.autocomplete_selected_idx]
+            .0
+            .word,
+        "print"
+    );
+    let Some(mut sql_app) = sql_completion_test_app("SELECT *\nF", sql_completion_metadata())
+    else {
+        return;
+    };
+    sql_app.update_active_database_query_completion(false);
+    let from_index = sql_app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "FROM")
+        .expect("FROM completion");
+    sql_app.autocomplete_selected_idx = from_index;
+    sql_app.autocomplete_anim_progress = 0.63;
+    sql_app.autocomplete_scroll.current = 18.0;
+    sql_app.autocomplete_scroll.target = 18.0;
+    let session_key = sql_app.autocomplete_pending_context_key.clone();
+    sql_app.editor = editor_with("SELECT *\nFR");
+    sql_app.update_active_database_query_completion(false);
+    assert_eq!(sql_app.autocomplete_anim_progress, 0.63);
+    assert_eq!(sql_app.autocomplete_pending_context_key, session_key);
+    assert_eq!(
+        sql_app.autocomplete_options[sql_app.autocomplete_selected_idx]
+            .0
+            .word,
+        "FROM"
+    );
+    sql_app.editor = editor_with("SELECT *\nF");
+    sql_app.update_active_database_query_completion(false);
+    assert_eq!(sql_app.autocomplete_anim_progress, 0.63);
+    assert_eq!(sql_app.autocomplete_pending_context_key, session_key);
+}
+#[test]
+fn sql_completion_schema_refresh_preserves_scroll_for_surviving_selection() {
+    let mut metadata = sql_completion_metadata();
+    metadata.columns.extend((0..16).map(|index| {
+        crate::app::database::DatabaseQueryCompletionColumn {
+            table_name: "items".to_string(),
+            column_name: format!("fr_item_{index:02}"),
+            data_type: "text".to_string(),
+        }
+    }));
+    let Some(mut app) = sql_completion_test_app("SELECT *\nFR", metadata) else {
+        return;
+    };
+    app.update_active_database_query_completion(false);
+    app.autocomplete_selected_idx = app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "fr_item_10")
+        .expect("stable SQL completion item");
+    app.autocomplete_anim_progress = 0.74;
+    app.autocomplete_scroll.current = 180.0;
+    app.autocomplete_scroll.target = 180.0;
+    if let EditorTabKind::DatabaseQuery(_, state) = &mut app.tabs[0].kind {
+        state.completion.columns.push(
+            crate::app::database::DatabaseQueryCompletionColumn {
+                table_name: "items".to_string(),
+                column_name: "fr_item_99".to_string(),
+                data_type: "text".to_string(),
+            },
+        );
+    }
+    app.update_active_database_query_completion(false);
+    assert_eq!(app.autocomplete_anim_progress, 0.74);
+    assert_eq!(app.autocomplete_scroll.current, 180.0);
+    assert_eq!(app.autocomplete_scroll.target, 180.0);
+    assert_eq!(
+        app.autocomplete_options[app.autocomplete_selected_idx].0.word,
+        "fr_item_10"
+    );
+    if let EditorTabKind::DatabaseQuery(_, state) = &mut app.tabs[0].kind {
+        state.completion.columns.retain(|column| column.column_name == "fr_item_10");
+        state.completion.functions.clear();
+    }
+    app.update_active_database_query_completion(false);
+    let max_scroll = ((app.autocomplete_options.len() as f32 - 7.0).max(0.0)) * 36.0;
+    assert!(app.autocomplete_scroll.target <= max_scroll);
+    assert!(app.autocomplete_scroll.current <= max_scroll);
+}
+#[test]
+fn sql_completion_enter_tab_and_escape_use_shared_popup_actions() {
+    for key in [
+        winit::keyboard::KeyCode::Enter,
+        winit::keyboard::KeyCode::Tab,
+    ] {
+        let Some(mut app) = sql_completion_test_app("SELECT *\nFR", sql_completion_metadata())
+        else {
+            return;
+        };
+        app.update_active_database_query_completion(false);
+        app.autocomplete_selected_idx = app
+            .autocomplete_options
+            .iter()
+            .position(|(item, _)| item.word == "FROM")
+            .expect("FROM completion");
+        assert_eq!(
+            app.handle_active_autocomplete_key(
+                winit::keyboard::PhysicalKey::Code(key),
+                false,
+            ),
+            AutocompletePopupKeyResult::Consumed
+        );
+        assert_eq!(app.editor.get_full_text(), "SELECT *\nFROM");
+        assert_eq!(app.editor.cursor, "SELECT *\nFROM".len());
+        assert!(!app.autocomplete_active);
+    }
+    let Some(mut app) = sql_completion_test_app("SELECT *\nFR", sql_completion_metadata()) else {
+        return;
+    };
+    app.update_active_database_query_completion(false);
+    assert_eq!(
+        app.handle_active_autocomplete_key(
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape),
+            false,
+        ),
+        AutocompletePopupKeyResult::Consumed
+    );
+    assert_eq!(app.editor.get_full_text(), "SELECT *\nFR");
+    assert!(!app.autocomplete_active);
+}
+#[test]
+fn sql_completion_list_refresh_preserves_animation_selection_and_apply_range() {
+    let Some(mut app) = sql_completion_test_app("SELECT *\nFR", sql_completion_metadata()) else {
+        return;
+    };
+    app.update_active_database_query_completion(false);
+    app.autocomplete_selected_idx = app
+        .autocomplete_options
+        .iter()
+        .position(|(item, _)| item.word == "FROM")
+        .expect("FROM completion");
+    app.autocomplete_anim_progress = 0.81;
+    if let EditorTabKind::DatabaseQuery(_, state) = &mut app.tabs[0].kind {
+        state.completion.functions.push("frame_fn".to_string());
+    }
+    app.update_active_database_query_completion(false);
+    assert_eq!(app.autocomplete_anim_progress, 0.81);
+    assert_eq!(
+        app.autocomplete_options[app.autocomplete_selected_idx].0.word,
+        "FROM"
+    );
+    app.apply_autocomplete();
+    assert_eq!(app.editor.get_full_text(), "SELECT *\nFROM");
+    assert_eq!(app.editor.cursor, "SELECT *\nFROM".len());
+    assert!(!app.autocomplete_active);
+}
 #[test]
 fn applying_autocomplete_recovers_from_a_stale_selected_index() {
     let Some(mut app) = test_app() else {

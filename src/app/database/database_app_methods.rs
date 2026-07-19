@@ -324,6 +324,16 @@ impl App {
         }
     }
 
+    pub(crate) fn reconcile_expanded_database_connections(&mut self) {
+        let connection_ids = self
+            .ide_panel
+            .database
+            .begin_expanded_connection_catalog_loads();
+        for connection_id in connection_ids {
+            self.load_connection_databases(connection_id, SshHostKeyPolicy::Strict);
+        }
+    }
+
     fn ensure_database_runtime(&mut self) -> io::Result<&DatabaseRuntime> {
         if self.database_runtime.is_none() {
             self.database_runtime = Some(DatabaseRuntime::spawn()?);
@@ -820,12 +830,10 @@ impl App {
 
     pub fn toggle_database_connection(&mut self, connection_id: DatabaseConnectionId) {
         self.select_database_connection(connection_id);
-        let should_load = if let Some(node) = self.ide_panel.database.connection_mut(connection_id) {
-            node.expanded = !node.expanded;
-            node.expanded && !node.databases_loaded && !node.loading
-        } else {
-            false
-        };
+        let should_load = self
+            .ide_panel
+            .database
+            .toggle_connection_expansion(connection_id);
         if should_load {
             self.load_connection_databases(connection_id, SshHostKeyPolicy::Strict);
         }
@@ -894,6 +902,7 @@ impl App {
         };
         if let Some(node) = self.ide_panel.database.connection_mut(connection_id) {
             node.loading = true;
+            node.catalog_load_attempted = true;
             node.status = DatabaseConnectionStatus::Connecting;
             node.status_message = None;
         }

@@ -220,19 +220,11 @@ impl App {
             return;
         }
 
-        let context_key = format!(
-            "{}:{}:{}",
-            connection_id.0,
-            console_id.0,
-            context.context_key()
+        let context_key = database_query_completion_session_key(
+            connection_id,
+            console_id,
+            &context,
         );
-        let same_context = self.autocomplete_active
-            && self.autocomplete_mode == AutocompleteMode::Sql
-            && self.autocomplete_pending_context_key.as_deref() == Some(context_key.as_str());
-        let selected_word = self
-            .autocomplete_options
-            .get(self.autocomplete_selected_idx)
-            .map(|(item, _)| item.word.clone());
         let (start_line, start_col) = crate::lsp::offset_to_lsp_pos(
             &text,
             context.replace_range.start,
@@ -243,7 +235,8 @@ impl App {
             context.replace_range.end,
             &self.editor.line_offsets,
         );
-        self.autocomplete_options = words
+        let prefix = context.prefix.clone();
+        let options = words
             .into_iter()
             .map(|(word, detail)| {
                 let kind = match detail.as_str() {
@@ -260,6 +253,10 @@ impl App {
                     end_col,
                     new_text: word.clone(),
                 };
+                let visible_word = word.trim_matches('"').trim_matches('\'');
+                let match_indices = crate::app::autocomplete_match_candidate(&prefix, visible_word)
+                    .map(|(_, indices)| indices)
+                    .unwrap_or_default();
                 (
                     AutocompleteItem {
                         word,
@@ -273,33 +270,18 @@ impl App {
                         text_edit: Some(text_edit),
                         additional_text_edits: Vec::new(),
                     },
-                    Vec::new(),
+                    match_indices,
                 )
             })
             .collect();
-        self.autocomplete_selected_idx = selected_word
-            .as_deref()
-            .and_then(|word| {
-                self.autocomplete_options
-                    .iter()
-                    .position(|(item, _)| item.word == word)
-            })
-            .unwrap_or(0);
-        self.autocomplete_hovered_idx = None;
-        self.autocomplete_mode = AutocompleteMode::Sql;
-        self.autocomplete_pending_context_key = Some(context_key);
-        self.autocomplete_anchor = self.database_query_autocomplete_anchor();
-        if !same_context {
-            self.autocomplete_scroll.reset();
-            self.autocomplete_anim_progress = 0.0;
-        }
-        self.autocomplete_detail_popup = None;
-        self.autocomplete_detail_rect = None;
-        self.autocomplete_detail_placement = None;
-        self.autocomplete_detail_max_scroll = 0.0;
-        self.reset_autocomplete_detail_size();
-        self.autocomplete_active = true;
-        self.refresh_autocomplete_detail_popup();
+        let anchor = self.database_query_autocomplete_anchor();
+        self.update_autocomplete_session(
+            AutocompleteMode::Sql,
+            Some(context_key),
+            options,
+            anchor,
+            false,
+        );
     }
 
     fn database_query_autocomplete_anchor(&mut self) -> Option<(f32, f32)> {
@@ -1176,6 +1158,22 @@ impl App {
     }
 }
 
+fn database_query_completion_session_key(
+    connection_id: crate::app::database::DatabaseConnectionId,
+    console_id: SqlConsoleId,
+    context: &crate::languages::sql_analysis::SqlCompletionContext,
+) -> String {
+    format!(
+        "{}:{}:sql:{:?}:{}:{}:{}",
+        connection_id.0,
+        console_id.0,
+        context.kind,
+        context.scope.start,
+        context.replace_range.start,
+        context.qualifier.as_deref().unwrap_or("")
+    )
+}
+
 fn normalize_database_query_text_offset(text: &str, offset: usize) -> usize {
     let mut offset = offset.min(text.len());
     while offset > 0 && !text.is_char_boundary(offset) {
@@ -1300,6 +1298,22 @@ mod database_query_app_method_tests {
             assert_eq!(text.get(start..offset), Some(expected_token));
             assert!(!public_range.contains(&offset));
         }
+    }
+
+    #[test]
+    fn query_problem_navigation_places_cursor_after_sql004_comma() {
+        let text = "SELECT Ж, FROM car__body_type";
+        let diagnostics = editor_diagnostics(text);
+        let diagnostic = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code.as_deref() == Some("SQL004"))
+            .expect("SQL004");
+        let comma = text.find(',').expect("comma");
+
+        assert_eq!(
+            database_query_diagnostic_navigation_offset(text, diagnostic),
+            comma + 1
+        );
     }
 
     #[test]

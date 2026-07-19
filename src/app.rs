@@ -31,8 +31,8 @@ pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,
 };
 pub(crate) use autocomplete::{
-    AutocompletePopupKeyResult, CompletionApplyPlan, CompletionTextEditOp,
-    apply_completion_plan_to_editor,
+    AutocompleteMatchKind, AutocompletePopupKeyResult, CompletionApplyPlan,
+    CompletionTextEditOp, apply_completion_plan_to_editor, autocomplete_match_candidate,
 };
 use glutin::display::GetGlDisplay;
 use python_completion::*;

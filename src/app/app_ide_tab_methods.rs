@@ -107,6 +107,10 @@ impl App {
         }
         self.ide_panel.enforce_single_open_per_group();
 
+        if self.ide_panel.is_open(PanelId::Database) {
+            self.reconcile_expanded_database_connections();
+        }
+
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
             self.add_terminal();
             self.ide_panel.terminal_focused = true;

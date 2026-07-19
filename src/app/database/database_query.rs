@@ -783,6 +783,11 @@ pub fn completion_words_for_context(
             for function in &metadata.functions {
                 out.push((function.clone(), "function".to_string()));
             }
+            if !context.prefix.is_empty() {
+                for keyword in crate::languages::sql::SQL_KEYWORDS {
+                    out.push(((*keyword).to_string(), "SQL".to_string()));
+                }
+            }
         }
         SqlCompletionKind::Operator => {
             for operator in &metadata.operators {
@@ -819,14 +824,17 @@ pub fn completion_words_for_context(
 
     let prefix = context.prefix.to_ascii_lowercase();
     if !prefix.is_empty() {
-        out.retain(|(word, _)| {
+        out.retain(|(word, detail)| {
             let candidate = word.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
-            candidate.contains(&prefix)
+            if detail == "alias SELECT" && candidate == prefix {
+                return false;
+            }
+            crate::app::autocomplete_match_candidate(&prefix, &candidate).is_some()
         });
     }
     out.sort_unstable_by(|left, right| {
-        completion_rank(&left.0, &prefix)
-            .cmp(&completion_rank(&right.0, &prefix))
+        completion_rank(&left.0, &left.1, &prefix)
+            .cmp(&completion_rank(&right.0, &right.1, &prefix))
             .then_with(|| left.0.to_ascii_lowercase().cmp(&right.0.to_ascii_lowercase()))
             .then_with(|| left.1.cmp(&right.1))
     });
@@ -834,18 +842,23 @@ pub fn completion_words_for_context(
     out
 }
 
-fn completion_rank(candidate: &str, prefix: &str) -> u8 {
+fn completion_rank(candidate: &str, detail: &str, prefix: &str) -> (u8, usize) {
     if prefix.is_empty() {
-        return 0;
+        return (0, candidate.len());
     }
     let candidate = candidate.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
-    if candidate == prefix {
-        0
-    } else if candidate.starts_with(prefix) {
-        1
-    } else {
-        2
-    }
+    let match_kind = crate::app::autocomplete_match_candidate(prefix, &candidate)
+        .map(|(kind, _)| kind)
+        .unwrap_or(crate::app::AutocompleteMatchKind::Fuzzy);
+    let keyword = matches!(detail, "SQL" | "operator" | "ORDER BY");
+    let priority = match (match_kind, keyword) {
+        (crate::app::AutocompleteMatchKind::Exact, _) => 0,
+        (crate::app::AutocompleteMatchKind::Prefix, true) => 1,
+        (crate::app::AutocompleteMatchKind::Prefix, false) => 2,
+        (crate::app::AutocompleteMatchKind::Fuzzy, true) => 3,
+        (crate::app::AutocompleteMatchKind::Fuzzy, false) => 4,
+    };
+    (priority, candidate.len())
 }
 
 fn quote_completion_identifier(identifier: &str) -> String {
@@ -1545,6 +1558,68 @@ mod tests {
     }
 
     #[test]
+    fn completion_after_select_prefix_keeps_from_ahead_of_identifiers() {
+        let metadata = DatabaseQueryCompletionMetadata {
+            columns: vec![
+                DatabaseQueryCompletionColumn {
+                    table_name: "items".to_string(),
+                    column_name: "frame".to_string(),
+                    data_type: "text".to_string(),
+                },
+                DatabaseQueryCompletionColumn {
+                    table_name: "items".to_string(),
+                    column_name: "far_value".to_string(),
+                    data_type: "text".to_string(),
+                },
+            ],
+            functions: vec!["format".to_string()],
+            ..DatabaseQueryCompletionMetadata::default()
+        };
+
+        for prefix in ["F", "FR", "FRO", "fr"] {
+            let sql = format!("SELECT *\n{prefix}");
+            let words = completion_for(&metadata, &sql, sql.len());
+            let from_index = words
+                .iter()
+                .position(|(word, detail)| word == "FROM" && detail == "SQL")
+                .expect("FROM completion");
+            assert!(from_index <= 1, "prefix={prefix:?}, words={words:?}");
+            assert!(!words.iter().any(|(word, detail)| {
+                detail == "alias SELECT"
+                    && word
+                        .trim_matches('"')
+                        .eq_ignore_ascii_case(prefix)
+            }));
+            assert_eq!(
+                words
+                    .iter()
+                    .filter(|(word, _)| word.eq_ignore_ascii_case("FROM"))
+                    .count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn sql_completion_filter_uses_shared_exact_prefix_and_fuzzy_matching() {
+        assert_eq!(
+            crate::app::autocomplete_match_candidate("from", "FROM")
+                .map(|(kind, _)| kind),
+            Some(crate::app::AutocompleteMatchKind::Exact)
+        );
+        assert_eq!(
+            crate::app::autocomplete_match_candidate("fr", "FROM")
+                .map(|(kind, _)| kind),
+            Some(crate::app::AutocompleteMatchKind::Prefix)
+        );
+        assert_eq!(
+            crate::app::autocomplete_match_candidate("fm", "format")
+                .map(|(kind, _)| kind),
+            Some(crate::app::AutocompleteMatchKind::Fuzzy)
+        );
+    }
+
+    #[test]
     fn execution_effects_keep_returned_and_changed_rows_separate() {
         let mut effects = SqlExecutionEffects {
             returned_rows: 100,
@@ -1696,6 +1771,34 @@ mod tests {
         let end = crate::lsp::lsp_pos_to_offset(text, editor.end_line, editor.end_col);
         assert_eq!(start..end, source.range);
         assert_eq!(text.get(start..end), Some("*"));
+    }
+
+    #[test]
+    fn sql004_round_trips_to_hover_diagnostic_with_utf16_safe_comma_range() {
+        let text = "SELECT Ж, FROM car__body_type";
+        let analysis = analyze_sql(text);
+        let source = analysis
+            .diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code == "SQL004")
+            .expect("SQL004 source");
+        let diagnostics = database_query_editor_diagnostics(
+            &analysis,
+            None,
+            text,
+            &test_line_offsets(text),
+        );
+        let editor = diagnostics
+            .iter()
+            .find(|diagnostic| diagnostic.code.as_deref() == Some("SQL004"))
+            .expect("SQL004 editor");
+        let start = crate::lsp::lsp_pos_to_offset(text, editor.start_line, editor.start_col);
+        let end = crate::lsp::lsp_pos_to_offset(text, editor.end_line, editor.end_col);
+
+        assert_eq!(editor.severity, crate::lsp::DiagSeverity::Error);
+        assert!(editor.message.contains("запятая перед FROM"));
+        assert_eq!(start..end, source.range);
+        assert_eq!(text.get(start..end), Some(","));
     }
 
     #[test]

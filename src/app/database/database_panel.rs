@@ -49,10 +49,21 @@ pub struct DatabaseConnectionNode {
     pub status: DatabaseConnectionStatus,
     pub expanded: bool,
     pub loading: bool,
+    pub catalog_load_attempted: bool,
     pub databases_loaded: bool,
     pub databases: Vec<DatabaseDatabaseNode>,
     pub status_message: Option<String>,
     pub fallback_reason: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DatabaseConnectionChildrenState {
+    Collapsed,
+    ExpandedUnloaded,
+    ExpandedLoading,
+    ExpandedLoaded,
+    ExpandedEmpty,
+    ExpandedError,
 }
 
 impl DatabaseConnectionNode {
@@ -62,10 +73,33 @@ impl DatabaseConnectionNode {
             status: DatabaseConnectionStatus::Disconnected,
             expanded: false,
             loading: false,
+            catalog_load_attempted: false,
             databases_loaded: false,
             databases: Vec::new(),
             status_message: None,
             fallback_reason: None,
+        }
+    }
+
+    pub(crate) fn children_state(&self) -> DatabaseConnectionChildrenState {
+        if !self.expanded {
+            DatabaseConnectionChildrenState::Collapsed
+        } else if self.loading {
+            DatabaseConnectionChildrenState::ExpandedLoading
+        } else if self.databases_loaded {
+            if self.databases.is_empty() {
+                DatabaseConnectionChildrenState::ExpandedEmpty
+            } else {
+                DatabaseConnectionChildrenState::ExpandedLoaded
+            }
+        } else if self.status == DatabaseConnectionStatus::Error
+            || self.status_message.is_some()
+            || self.catalog_load_attempted
+                && self.status == DatabaseConnectionStatus::Disconnected
+        {
+            DatabaseConnectionChildrenState::ExpandedError
+        } else {
+            DatabaseConnectionChildrenState::ExpandedUnloaded
         }
     }
 }
@@ -1380,6 +1414,36 @@ impl DatabasePanelState {
         }
     }
 
+    pub(crate) fn begin_expanded_connection_catalog_loads(
+        &mut self,
+    ) -> Vec<DatabaseConnectionId> {
+        let mut connection_ids = Vec::new();
+        for node in &mut self.connections {
+            if node.children_state()
+                != DatabaseConnectionChildrenState::ExpandedUnloaded
+            {
+                continue;
+            }
+            node.loading = true;
+            node.catalog_load_attempted = true;
+            node.status = DatabaseConnectionStatus::Connecting;
+            node.status_message = None;
+            connection_ids.push(node.config.id);
+        }
+        connection_ids
+    }
+
+    pub(crate) fn toggle_connection_expansion(
+        &mut self,
+        connection_id: DatabaseConnectionId,
+    ) -> bool {
+        let Some(node) = self.connection_mut(connection_id) else {
+            return false;
+        };
+        node.expanded = !node.expanded;
+        node.expanded && !node.databases_loaded && !node.loading
+    }
+
     pub fn modal_open(&self) -> bool {
         self.dialog.is_some()
             || self.delete_prompt.is_some()
@@ -1397,10 +1461,19 @@ impl DatabasePanelState {
         let mut rows = 0usize;
         for connection in &self.connections {
             rows += 1;
-            if !connection.expanded {
+            let children_state = connection.children_state();
+            if children_state == DatabaseConnectionChildrenState::Collapsed {
                 continue;
             }
-            if connection.loading && connection.databases.is_empty() {
+            if connection.databases.is_empty()
+                && matches!(
+                    children_state,
+                    DatabaseConnectionChildrenState::ExpandedUnloaded
+                        | DatabaseConnectionChildrenState::ExpandedLoading
+                        | DatabaseConnectionChildrenState::ExpandedEmpty
+                        | DatabaseConnectionChildrenState::ExpandedError
+                )
+            {
                 rows += 1;
             }
             for database in &connection.databases {
@@ -1448,6 +1521,8 @@ mod tests {
             ..DatabaseConnectionConfig::default()
         }
     }
+
+    include!("database_panel_restored_expansion_tests.rs");
 
     #[test]
     fn dialog_input_edits_unicode_without_breaking_boundaries() {

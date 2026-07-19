@@ -792,6 +792,7 @@ Entrypoints/state:
 * `src/app/database/database_secrets.rs` -> stable Database secret identities and zeroizing load/store/delete coordination through the strict platform secret API.
 * `src/app/database/database_runtime.rs` -> dedicated Tokio database worker, one-active-job policy, busy/cancel/shutdown events, and cancellation propagation.
 * `src/app/database/database_panel.rs` -> Database panel/tree/dialog/context/host-key/DDL-hover state plus global table overlays; password fields must remain zeroizing and non-debuggable.
+* `src/app/database/database_panel_restored_expansion_tests.rs` -> restored connection expansion/catalog-loading state-machine regressions included by `database_panel.rs`.
 * `src/app/database/database_catalog.rs` -> bounded autocommit PostgreSQL metadata reads and reconstructed `public` table DDL.
 * `src/app/database/database_app_methods.rs` and `database_app_event_methods.rs` -> Database panel commands/events, tab/session restore, connection delete guards, and exact SQL console persistence.
 * `src/render_view/ide_panels/ide_panel_database_renderer.rs` -> Database sidebar, embedded dimmed dialogs, tree/context rendering, and common-hover-based selectable DDL overlay.

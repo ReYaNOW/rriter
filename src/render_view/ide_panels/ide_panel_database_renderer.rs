@@ -86,7 +86,9 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
-        use crate::app::database::DatabaseConnectionStatus;
+        use crate::app::database::{
+            DatabaseConnectionChildrenState, DatabaseConnectionStatus,
+        };
         use crate::ui_system::UiId;
         use crate::widgets::{IconButton, IconType};
 
@@ -324,10 +326,35 @@ impl Renderer {
             logical_row += 1;
 
             if connection.expanded {
-                if connection.loading && connection.databases.is_empty() {
+                let children_state = connection.children_state();
+                let connection_hint = if connection.databases.is_empty() {
+                    match children_state {
+                        DatabaseConnectionChildrenState::ExpandedUnloaded => {
+                            Some("Ожидание загрузки…")
+                        }
+                        DatabaseConnectionChildrenState::ExpandedLoading => {
+                            Some("Подключение…")
+                        }
+                        DatabaseConnectionChildrenState::ExpandedEmpty => {
+                            Some("Нет доступных баз")
+                        }
+                        DatabaseConnectionChildrenState::ExpandedError => Some(
+                            if connection.status == DatabaseConnectionStatus::Disconnected {
+                                "Соединение закрыто · нажмите Обновить"
+                            } else {
+                                "Ошибка загрузки · нажмите Обновить"
+                            },
+                        ),
+                        DatabaseConnectionChildrenState::Collapsed
+                        | DatabaseConnectionChildrenState::ExpandedLoaded => None,
+                    }
+                } else {
+                    None
+                };
+                if let Some(hint) = connection_hint {
                     draw_database_hint(
                         self,
-                        "Подключение…",
+                        hint,
                         panel_x + 34.0 * s,
                         content_y + logical_row as f32 * row_h - scroll,
                         s,

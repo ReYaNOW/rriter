@@ -984,7 +984,7 @@ impl Renderer {
         anchor_y: f32,
         s: f32,
     ) {
-        let text_scale = 0.82;
+        let text_scale = crate::render_view::DATABASE_DIALOG_TOOLTIP_TEXT_SCALE;
         let pad_x = (12.0 * s).round();
         let pad_y = (9.0 * s).round();
         let line_h = (20.0 * s).round().max(16.0);
@@ -1032,11 +1032,19 @@ impl Renderer {
                 1.0,
             ],
         );
+        let text_layout = crate::render_view::standard_tooltip_text_layout(
+            rect.x,
+            rect.y,
+            pad_x,
+            pad_y,
+            line_h,
+            line_h * 0.5 + 5.5 * s,
+        );
         for (line, (start, end)) in ranges.into_iter().enumerate() {
-            self.draw_string_scaled_pixel_snapped(
+            self.draw_standard_tooltip_text_line(
                 &text[start..end],
-                rect.x + pad_x,
-                Self::tree_row_text_y(rect.y + pad_y + line as f32 * line_h, line_h, s),
+                text_layout,
+                line,
                 self.theme.fg,
                 text_scale,
             );

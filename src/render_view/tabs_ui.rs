@@ -628,7 +628,7 @@ impl Renderer {
             }
         }
 
-        let tooltip_scale = 0.95;
+        let tooltip_scale = crate::render_view::TAB_TOOLTIP_TEXT_SCALE;
         let tooltip_w = self.measure_ui_width(&path_str, tooltip_scale) + 24.0 * s;
         let tooltip_h = 32.0 * s;
 
@@ -663,10 +663,18 @@ impl Renderer {
             5.0 * s,
             bg_col,
         );
-        self.draw_string_scaled(
+        let text_layout = crate::render_view::standard_tooltip_text_layout(
+            tooltip_x,
+            tooltip_y,
+            12.0 * s,
+            0.0,
+            tooltip_h,
+            tooltip_h * 0.5 + 5.0 * s,
+        );
+        self.draw_standard_tooltip_text_line(
             &path_str,
-            tooltip_x + 12.0 * s,
-            tooltip_y + tooltip_h / 2.0 + 5.0 * s,
+            text_layout,
+            0,
             self.theme.fg,
             tooltip_scale,
         );

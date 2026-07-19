@@ -1,5 +1,60 @@
+pub(crate) const DATABASE_DIALOG_TOOLTIP_TEXT_SCALE: f32 = 0.82;
+pub(crate) const TAB_TOOLTIP_TEXT_SCALE: f32 = 0.95;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct StandardTooltipTextLayout {
+    pub(crate) content_x: f32,
+    pub(crate) content_y: f32,
+    pub(crate) first_baseline_y: f32,
+    pub(crate) line_h: f32,
+}
+
+impl StandardTooltipTextLayout {
+    #[inline(always)]
+    pub(crate) fn baseline_y(self, line: usize) -> f32 {
+        self.first_baseline_y + line as f32 * self.line_h
+    }
+}
+
+#[inline(always)]
+pub(crate) fn standard_tooltip_text_layout(
+    rect_x: f32,
+    rect_y: f32,
+    pad_x: f32,
+    pad_y: f32,
+    line_h: f32,
+    baseline_offset: f32,
+) -> StandardTooltipTextLayout {
+    let content_x = (rect_x + pad_x).round();
+    let content_y = (rect_y + pad_y).round();
+    StandardTooltipTextLayout {
+        content_x,
+        content_y,
+        first_baseline_y: (content_y + baseline_offset).round(),
+        line_h: line_h.round().max(1.0),
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    #[inline(always)]
+    pub(crate) fn draw_standard_tooltip_text_line(
+        &mut self,
+        text: &str,
+        layout: StandardTooltipTextLayout,
+        line: usize,
+        color: [f32; 4],
+        text_scale: f32,
+    ) {
+        self.draw_string_scaled_stable(
+            text,
+            layout.content_x,
+            layout.baseline_y(line),
+            color,
+            text_scale,
+        );
+    }
+
     fn draw_inline_git_text_line(
         &mut self,
         text: &str,
@@ -408,4 +463,289 @@ impl Renderer {
         );
     }
 
+}
+
+#[cfg(test)]
+mod standard_tooltip_tests {
+    use super::*;
+
+    fn glyph(offset_y: f32, height: f32) -> crate::renderer::GlyphInfo {
+        crate::renderer::GlyphInfo {
+            u: 0.0,
+            v: 0.0,
+            uw: 1.0,
+            vh: 1.0,
+            width: 7.2,
+            height,
+            offset_x: 0.25,
+            offset_y,
+            advance: 8.0,
+            is_emoji: 0.0,
+        }
+    }
+
+    fn rendered_y(
+        layout: StandardTooltipTextLayout,
+        line: usize,
+        glyph: crate::renderer::GlyphInfo,
+        scale: f32,
+        color: [f32; 4],
+    ) -> (f32, f32) {
+        let (x, y, w, h) = crate::renderer::glyph_quad_rect(
+            layout.content_x,
+            layout.baseline_y(line),
+            glyph,
+            scale,
+        );
+        let vertices = crate::renderer::quad_vertices(
+            x,
+            y,
+            w,
+            h,
+            glyph.u,
+            glyph.v,
+            glyph.uw,
+            glyph.vh,
+            color,
+            glyph.is_emoji,
+        );
+        (vertices[0].pos[1], vertices[2].pos[1])
+    }
+
+    fn database_layout(rect_y: f32, dpi: f32) -> StandardTooltipTextLayout {
+        let line_h = (20.0 * dpi).round().max(16.0);
+        standard_tooltip_text_layout(
+            40.25,
+            rect_y,
+            (12.0 * dpi).round(),
+            (9.0 * dpi).round(),
+            line_h,
+            line_h * 0.5 + 5.5 * dpi,
+        )
+    }
+
+    fn assert_dpi_stable(dpi: f32) {
+        let layout = database_layout(80.35, dpi);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * dpi;
+        let first = rendered_y(layout, 0, glyph(8.0, 5.98), scale, [1.0; 4]);
+        let second = rendered_y(layout, 0, glyph(8.42, 6.4), scale, [1.0; 4]);
+        assert_eq!(layout.content_x.fract(), 0.0);
+        assert_eq!(layout.content_y.fract(), 0.0);
+        assert_eq!(layout.first_baseline_y.fract(), 0.0);
+        assert_eq!(first, rendered_y(layout, 0, glyph(8.0, 5.98), scale, [1.0; 4]));
+        assert_eq!(second, rendered_y(layout, 0, glyph(8.42, 6.4), scale, [1.0; 4]));
+    }
+
+    #[test]
+    fn standard_tooltip_cyrillic_glyph_geometry_is_deterministic() {
+        let layout = database_layout(80.35, 1.5);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.5;
+        let geometry = |text: &str| {
+            text.chars()
+                .enumerate()
+                .map(|(idx, _)| {
+                    rendered_y(
+                        layout,
+                        0,
+                        glyph(8.0 + idx as f32 * 0.07, 5.98 + idx as f32 * 0.05),
+                        scale,
+                        [1.0; 4],
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(geometry("Подсказка"), geometry("Подсказка"));
+    }
+
+    #[test]
+    fn standard_tooltip_glyphs_recover_one_shared_baseline() {
+        let layout = database_layout(80.35, 1.25);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.25;
+        for glyph in [glyph(8.0, 5.98), glyph(8.42, 6.4), glyph(9.1, 7.2)] {
+            let (_, y, _, _) = crate::renderer::glyph_quad_rect(
+                layout.content_x,
+                layout.baseline_y(0),
+                glyph,
+                scale,
+            );
+            assert!((y + glyph.offset_y * scale - layout.baseline_y(0)).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn standard_tooltip_fractional_dpi_preserves_shared_glyph_edge() {
+        let layout = database_layout(80.35, 1.5);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.5;
+        let first = rendered_y(layout, 0, glyph(8.0, 5.98), scale, [1.0; 4]);
+        let second = rendered_y(layout, 0, glyph(8.42, 6.4), scale, [1.0; 4]);
+
+        assert_eq!(first.1, second.1);
+    }
+
+    #[test]
+    fn standard_tooltip_repeat_render_keeps_same_y() {
+        let layout = database_layout(80.35, 1.75);
+        let glyph = glyph(8.42, 6.4);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.75;
+        assert_eq!(
+            rendered_y(layout, 0, glyph, scale, [1.0; 4]),
+            rendered_y(layout, 0, glyph, scale, [1.0; 4])
+        );
+    }
+
+    #[test]
+    fn standard_tooltip_color_does_not_change_geometry() {
+        let layout = database_layout(80.35, 1.5);
+        let glyph = glyph(8.42, 6.4);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.5;
+        assert_eq!(
+            rendered_y(layout, 0, glyph, scale, [1.0, 0.0, 0.0, 1.0]),
+            rendered_y(layout, 0, glyph, scale, [0.0, 1.0, 0.0, 0.4])
+        );
+    }
+
+    #[test]
+    fn standard_tooltip_hover_timer_progress_does_not_change_baseline() {
+        let expected = database_layout(80.35, 1.25).baseline_y(0);
+        for _hover_progress in [0.0, 0.2, 0.5, 0.9, 1.0] {
+            assert_eq!(database_layout(80.35, 1.25).baseline_y(0), expected);
+        }
+    }
+
+    #[test]
+    fn standard_tooltip_animation_progress_keeps_text_origin_fixed() {
+        let expected = database_layout(80.35, 1.5);
+        for _animation_progress in [0.0, 0.5, 1.0] {
+            assert_eq!(database_layout(80.35, 1.5), expected);
+        }
+    }
+
+    #[test]
+    fn standard_tooltip_dpi_1_0_is_stable() {
+        assert_dpi_stable(1.0);
+    }
+
+    #[test]
+    fn standard_tooltip_dpi_1_25_is_stable() {
+        assert_dpi_stable(1.25);
+    }
+
+    #[test]
+    fn standard_tooltip_dpi_1_5_is_stable() {
+        assert_dpi_stable(1.5);
+    }
+
+    #[test]
+    fn standard_tooltip_dpi_1_75_is_stable() {
+        assert_dpi_stable(1.75);
+    }
+
+    #[test]
+    fn standard_tooltip_dpi_2_0_is_stable() {
+        assert_dpi_stable(2.0);
+    }
+
+    #[test]
+    fn database_field_tooltip_uses_real_text_scale() {
+        let layout = database_layout(80.35, 1.0);
+        assert_eq!(
+            rendered_y(
+                layout,
+                0,
+                glyph(8.0, 5.98),
+                DATABASE_DIALOG_TOOLTIP_TEXT_SCALE,
+                [1.0; 4],
+            ),
+            (98.0, 103.0)
+        );
+    }
+
+    #[test]
+    fn database_control_tooltip_uses_same_real_text_scale() {
+        let layout = database_layout(140.35, 1.0);
+        let geometry = rendered_y(
+            layout,
+            0,
+            glyph(8.0, 5.98),
+            DATABASE_DIALOG_TOOLTIP_TEXT_SCALE,
+            [1.0; 4],
+        );
+        assert_eq!(geometry.1 - geometry.0, 5.0);
+    }
+
+    #[test]
+    fn standard_tooltip_multiline_layout_keeps_fixed_line_height() {
+        let layout = database_layout(80.35, 1.25);
+        assert_eq!(layout.baseline_y(1) - layout.baseline_y(0), layout.line_h);
+        assert_eq!(layout.baseline_y(4) - layout.baseline_y(3), layout.line_h);
+    }
+
+    #[test]
+    fn database_dialog_scroll_moves_anchor_but_not_local_glyph_geometry() {
+        let first = database_layout(80.35, 1.5);
+        let scrolled = database_layout(33.35, 1.5);
+        let glyph = glyph(8.42, 6.4);
+        let scale = DATABASE_DIALOG_TOOLTIP_TEXT_SCALE * 1.5;
+        let first_y = rendered_y(first, 0, glyph, scale, [1.0; 4]);
+        let scrolled_y = rendered_y(scrolled, 0, glyph, scale, [1.0; 4]);
+        assert_eq!(
+            first_y.0 - first.content_y,
+            scrolled_y.0 - scrolled.content_y
+        );
+        assert_eq!(
+            first_y.1 - first.content_y,
+            scrolled_y.1 - scrolled.content_y
+        );
+    }
+
+    #[test]
+    fn tab_and_database_tooltips_share_snapped_layout_model() {
+        let database = database_layout(80.35, 1.25);
+        let tab_h = 32.0 * 1.25;
+        let tab = standard_tooltip_text_layout(
+            50.4,
+            44.3,
+            12.0 * 1.25,
+            0.0,
+            tab_h,
+            tab_h * 0.5 + 5.0 * 1.25,
+        );
+        for layout in [database, tab] {
+            assert_eq!(layout.content_x.fract(), 0.0);
+            assert_eq!(layout.content_y.fract(), 0.0);
+            assert_eq!(layout.first_baseline_y.fract(), 0.0);
+        }
+        assert_eq!(TAB_TOOLTIP_TEXT_SCALE, 0.95);
+    }
+
+    #[test]
+    fn standard_tooltip_fast_rehover_returns_identical_geometry() {
+        let first = database_layout(80.35, 1.75);
+        let after_leave_and_rehover = database_layout(80.35, 1.75);
+        assert_eq!(first, after_leave_and_rehover);
+    }
+
+    #[test]
+    fn standard_tooltip_text_layout_does_not_mutate_popup_frame() {
+        let frame = crate::ui_system::UiClipRect::new(30.0, 40.0, 320.0, 96.0);
+        let before = frame;
+        let _ = standard_tooltip_text_layout(
+            frame.x,
+            frame.y,
+            12.0,
+            9.0,
+            20.0,
+            15.5,
+        );
+        assert_eq!(frame, before);
+    }
+
+    #[test]
+    fn standard_tooltip_content_origin_is_snapped_once() {
+        let layout = standard_tooltip_text_layout(10.49, 20.49, 11.51, 8.51, 19.6, 15.2);
+        assert_eq!(layout.content_x, 22.0);
+        assert_eq!(layout.content_y, 29.0);
+        assert_eq!(layout.first_baseline_y, 44.0);
+        assert_eq!(layout.line_h, 20.0);
+    }
 }

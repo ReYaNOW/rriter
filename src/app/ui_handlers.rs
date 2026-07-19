@@ -1213,6 +1213,9 @@ impl App {
                     self.ide_panel.project_search.focused =
                         Some(crate::app::project_search::ProjectSearchField::Query);
                 }
+                if panel_id == crate::app::PanelId::Database && self.ide_panel.is_open(panel_id) {
+                    self.reconcile_expanded_database_connections();
+                }
                 crate::save_panel_state(&self.ide_panel);
                 self.window.as_ref().unwrap().request_redraw();
             }

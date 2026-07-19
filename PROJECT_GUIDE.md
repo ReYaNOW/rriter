@@ -503,6 +503,7 @@ Panel/catalog/session files added by the Database UI stage:
 
 ```text
 src/app/database/database_panel.rs
+src/app/database/database_panel_restored_expansion_tests.rs
 src/app/database/database_catalog.rs
 src/app/database/database_app_methods.rs
 src/app/database/database_app_event_methods.rs
@@ -513,6 +514,7 @@ src/render_view/database_table_tab.rs
 Responsibilities and invariants:
 
 * `database_panel.rs` owns secret-safe connection-dialog inputs, connection/database/table tree state, context menus, host-key/delete prompts, DDL hover state, and database table/query tab metadata. Password fields remain `Zeroizing<String>` and render masked text.
+* `database_panel_restored_expansion_tests.rs` covers persisted disclosure restoration, idempotent catalog reconciliation, loading/empty/error rows, and stale/cancelled state behavior.
 * `database_catalog.rs` loads PostgreSQL column, primary-key, enum, constraint, and index metadata through bounded internal autocommit reads and reconstructs read-only `public` table DDL.
 * `database_app_methods.rs` and `database_app_event_methods.rs` connect the panel to the database worker, preserve exact SQL console IDs, lazily restore table/query tabs, guard connection deletion while related tabs are open, and persist expanded/selected tree state.
 * `ide_panel_database_renderer.rs` renders the left database panel, embedded dimmed connection/confirmation/host-key dialogs, connection colors, context menus, and the DDL document overlay. The DDL overlay reuses the common animated hover renderer, selection, copy, and smooth scrolling rather than creating a platform window.

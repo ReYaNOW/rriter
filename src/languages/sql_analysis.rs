@@ -286,6 +286,10 @@ fn collect_syntax_diagnostics(
     diagnostics: &mut Vec<SqlAnalysisDiagnostic>,
 ) {
     if node.is_error() {
+        if let Some(comma) = error_trailing_comma_before_from(node) {
+            push_trailing_comma_diagnostic(comma, sql, diagnostics);
+            return;
+        }
         diagnostics.push(SqlAnalysisDiagnostic {
             range: stable_node_range(node, sql),
             severity: SqlDiagnosticSeverity::Error,
@@ -300,10 +304,75 @@ fn collect_syntax_diagnostics(
             message: format!("Ожидался элемент SQL: {}", readable_kind(node.kind())),
         });
     }
+    if node.kind() == "select_expression" {
+        collect_select_list_syntax_diagnostics(node, sql, diagnostics);
+    }
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         collect_syntax_diagnostics(child, sql, diagnostics);
     }
+}
+
+fn collect_select_list_syntax_diagnostics(
+    select_expression: tree_sitter::Node<'_>,
+    sql: &str,
+    diagnostics: &mut Vec<SqlAnalysisDiagnostic>,
+) {
+    let mut pending_comma = None;
+    let mut cursor = select_expression.walk();
+    for child in select_expression.children(&mut cursor) {
+        if child.kind() == "," {
+            pending_comma = Some(child);
+            continue;
+        }
+        if child.kind().contains("comment") {
+            continue;
+        }
+        let Some(comma) = pending_comma.take() else {
+            continue;
+        };
+        if child.kind() != "term" || !term_starts_with_from_identifier(child, sql) {
+            continue;
+        }
+        push_trailing_comma_diagnostic(comma, sql, diagnostics);
+    }
+}
+
+fn error_trailing_comma_before_from(error: tree_sitter::Node<'_>) -> Option<tree_sitter::Node<'_>> {
+    let mut pending_comma = None;
+    let mut cursor = error.walk();
+    for child in error.children(&mut cursor) {
+        match child.kind() {
+            "," => pending_comma = Some(child),
+            kind if kind.contains("comment") => {}
+            "keyword_from" => return pending_comma,
+            _ => pending_comma = None,
+        }
+    }
+    None
+}
+
+fn push_trailing_comma_diagnostic(
+    comma: tree_sitter::Node<'_>,
+    sql: &str,
+    diagnostics: &mut Vec<SqlAnalysisDiagnostic>,
+) {
+    diagnostics.push(SqlAnalysisDiagnostic {
+        range: stable_node_range(comma, sql),
+        severity: SqlDiagnosticSeverity::Error,
+        code: "SQL004",
+        message: "Лишняя запятая перед FROM; после запятой ожидалось выражение SELECT".to_string(),
+    });
+}
+
+fn term_starts_with_from_identifier(term: tree_sitter::Node<'_>, sql: &str) -> bool {
+    term
+        .child_by_field_name("value")
+        .filter(|value| value.kind() == "field")
+        .and_then(|value| value.child_by_field_name("name"))
+        .filter(|name| name.kind() == "identifier")
+        .and_then(|name| node_text(name, sql))
+        .is_some_and(|name| name.eq_ignore_ascii_case("FROM"))
 }
 
 fn collect_statement_analysis(
@@ -1230,6 +1299,14 @@ fn sort_and_deduplicate_diagnostics(diagnostics: &mut Vec<SqlAnalysisDiagnostic>
 mod tests {
     use super::*;
 
+    fn diagnostics_with_code(sql: &str, code: &str) -> Vec<SqlAnalysisDiagnostic> {
+        analyze_sql(sql)
+            .diagnostics
+            .into_iter()
+            .filter(|item| item.code == code)
+            .collect()
+    }
+
     #[test]
     fn resolves_alias_from_tree_sitter_relation() {
         let sql = "SELECT b.car_wash_id FROM booking AS b WHERE b.id = 1";
@@ -1299,6 +1376,93 @@ mod tests {
             diagnostic.severity == SqlDiagnosticSeverity::Error
                 && diagnostic.range.start < diagnostic.range.end
         }));
+    }
+
+    #[test]
+    fn trailing_comma_before_from_is_one_precise_error() {
+        let sql = "SELECT id, FROM car__body_type";
+        let diagnostics = diagnostics_with_code(sql, "SQL004");
+        assert_eq!(diagnostics.len(), 1);
+        let diagnostic = &diagnostics[0];
+        assert_eq!(diagnostic.severity, SqlDiagnosticSeverity::Error);
+        assert_eq!(sql.get(diagnostic.range.clone()), Some(","));
+        for outside in [sql.find("id").unwrap(), sql.find("car__body_type").unwrap()] {
+            assert!(!diagnostic.range.contains(&outside));
+        }
+        assert!(diagnostic.message.contains("запятая перед FROM"));
+    }
+
+    #[test]
+    fn whitespace_comments_and_unicode_keep_comma_range_exact() {
+        for sql in [
+            "SELECT id,\nFROM car__body_type",
+            "SELECT id, -- comment\nFROM car__body_type",
+            "SELECT имя, FROM car__body_type",
+            "SELECT \"Имя поля\", FROM car__body_type",
+        ] {
+            let diagnostics = diagnostics_with_code(sql, "SQL004");
+            assert_eq!(diagnostics.len(), 1, "{sql}");
+            let range = diagnostics[0].range.clone();
+            assert_eq!(sql.get(range.clone()), Some(","));
+            assert!(sql.is_char_boundary(range.start) && sql.is_char_boundary(range.end));
+        }
+    }
+
+    #[test]
+    fn nested_cte_and_subquery_select_lists_are_checked() {
+        for sql in [
+            "WITH x AS (SELECT id, FROM car__body_type) SELECT * FROM x",
+            "SELECT * FROM (SELECT id, FROM car__body_type) nested",
+        ] {
+            let diagnostics = diagnostics_with_code(sql, "SQL004");
+            assert_eq!(diagnostics.len(), 1, "{sql}");
+            assert_eq!(sql.get(diagnostics[0].range.clone()), Some(","));
+        }
+    }
+
+    #[test]
+    fn invalid_select_lists_in_multiple_statements_are_independent() {
+        let sql = "SELECT id, FROM first_table; SELECT name, FROM second_table";
+        let diagnostics = diagnostics_with_code(sql, "SQL004");
+        assert_eq!(diagnostics.len(), 2);
+        assert_eq!(
+            diagnostics.iter().map(|item| item.range.clone()).collect::<Vec<_>>(),
+            sql.match_indices(',').map(|(start, _)| start..start + 1).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn malformed_select_list_has_no_overlapping_parser_error_duplicate() {
+        let sql = "SELECT id, FROM car__body_type";
+        let analysis = analyze_sql(sql);
+        let comma = sql.find(',').unwrap();
+        let errors_at_comma = analysis.diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == SqlDiagnosticSeverity::Error)
+            .filter(|diagnostic| diagnostic.range.contains(&comma))
+            .collect::<Vec<_>>();
+        assert_eq!(errors_at_comma.len(), 1, "{:?}", analysis.diagnostics);
+        assert_eq!(errors_at_comma[0].code, "SQL004");
+    }
+
+    #[test]
+    fn valid_and_incomplete_sql_only_reports_unambiguous_trailing_comma() {
+        for (sql, expected) in [
+            ("SELECT id FROM car__body_type", 0),
+            ("SELECT id, name FROM car__body_type", 0),
+            ("SELECT func(id, name) FROM car__body_type", 0),
+            ("SELECT id, from_value FROM car__body_type", 0),
+            ("SELECT id, \"FROM\" FROM car__body_type", 0),
+            ("SELECT id,", 0),
+            ("SELECT id, F", 0),
+            ("SELECT id, FR", 0),
+            ("SELECT id, FROM", 1),
+            ("INSERT INTO items (id, name) VALUES (1, 'one')", 0),
+            ("CREATE TABLE items (id integer, name text)", 0),
+            ("SELECT ARRAY[1, 2, 3] FROM items", 0),
+            ("SELECT COALESCE(name, 'unknown') FROM items", 0),
+        ] {
+            assert_eq!(diagnostics_with_code(sql, "SQL004").len(), expected, "{sql}");
+        }
     }
 
     #[test]
