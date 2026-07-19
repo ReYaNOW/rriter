@@ -7,6 +7,87 @@ use crate::renderer::{Renderer, Vertex};
 
 const MINIMAP_MAX_VISIBLE_LINES: usize = 900;
 const MINIMAP_MIN_LINE_HEIGHT: f32 = 1.5;
+const MINIMAP_MASK_CHARS: usize = 96;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct MinimapMaskChunk {
+    masks: [u32; 3],
+    char_count: usize,
+    byte_count: usize,
+}
+
+#[inline]
+fn minimap_byte_at(
+    first: &[u8],
+    second: &[u8],
+    first_len: usize,
+    offset: usize,
+) -> Option<u8> {
+    if offset < first_len {
+        first.get(offset).copied()
+    } else {
+        second.get(offset - first_len).copied()
+    }
+}
+
+#[inline]
+fn utf8_sequence_len(first_byte: u8) -> usize {
+    match first_byte {
+        0x00..=0x7f => 1,
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 1,
+    }
+}
+
+fn minimap_mask_chunk(
+    first: &[u8],
+    second: &[u8],
+    first_len: usize,
+    start: usize,
+    end: usize,
+) -> MinimapMaskChunk {
+    let total_len = first_len.saturating_add(second.len());
+    let end = end.min(total_len);
+    let mut chunk = MinimapMaskChunk::default();
+
+    while chunk.char_count < MINIMAP_MASK_CHARS && start + chunk.byte_count < end {
+        let offset = start + chunk.byte_count;
+        let Some(first_byte) = minimap_byte_at(first, second, first_len, offset) else {
+            break;
+        };
+        let sequence_len = utf8_sequence_len(first_byte).min(end - offset);
+        let mut encoded = [0u8; 4];
+        let mut copied = 0usize;
+        while copied < sequence_len {
+            let Some(byte) = minimap_byte_at(first, second, first_len, offset + copied) else {
+                break;
+            };
+            encoded[copied] = byte;
+            copied += 1;
+        }
+        if copied == 0 {
+            break;
+        }
+
+        let (ch, consumed) = std::str::from_utf8(&encoded[..copied])
+            .ok()
+            .and_then(|text| text.chars().next())
+            .map(|ch| (ch, ch.len_utf8()))
+            .unwrap_or(('\u{fffd}', 1));
+
+        if !ch.is_whitespace() {
+            let mask_idx = chunk.char_count / 32;
+            let bit_idx = chunk.char_count % 32;
+            chunk.masks[mask_idx] |= 1 << bit_idx;
+        }
+        chunk.char_count += 1;
+        chunk.byte_count += consumed.min(end - offset).max(1);
+    }
+
+    chunk
+}
 
 #[derive(Clone, Copy, Debug)]
 struct MinimapViewMetrics {
@@ -262,32 +343,18 @@ impl Renderer {
                     let mut byte_in_span = cur_byte_abs;
                     let span_end_abs = span_end;
 
-                    // Process this span in chunks of up to 96 chars
+                    // Process this span in chunks of up to 96 Unicode scalar values.
                     while byte_in_span < span_end_abs {
                         let quad_start_char_idx = cur_char_idx;
-                        let mut masks: [u32; 3] = [0; 3];
-                        let mut chars_in_mask = 0;
-                        let mut bytes_processed = 0;
-
-                        for _ in 0..96 {
-                            let current_byte_to_check = byte_in_span + bytes_processed;
-                            if current_byte_to_check >= span_end_abs {
-                                break;
-                            }
-
-                            let b = if current_byte_to_check < first_len {
-                                first_bytes[current_byte_to_check]
-                            } else {
-                                second_bytes[current_byte_to_check - first_len]
-                            };
-
-                            if !b.is_ascii_whitespace() {
-                                let mask_idx = chars_in_mask / 32;
-                                let bit_idx = chars_in_mask % 32;
-                                masks[mask_idx] |= 1 << bit_idx;
-                            }
-                            chars_in_mask += 1;
-                            bytes_processed += 1;
+                        let chunk = minimap_mask_chunk(
+                            first_bytes,
+                            second_bytes,
+                            first_len,
+                            byte_in_span,
+                            span_end_abs,
+                        );
+                        if chunk.byte_count == 0 {
+                            break;
                         }
 
                         let x1 = line_start_x + quad_start_char_idx as f32 * minimap_char_width;
@@ -296,21 +363,21 @@ impl Renderer {
                             break;
                         }
 
-                        let quad_width =
-                            (chars_in_mask as f32 * minimap_char_width).min(minimap_max_x - x1);
+                        let quad_width = (chunk.char_count as f32 * minimap_char_width)
+                            .min(minimap_max_x - x1);
 
-                        let is_empty = masks[0] == 0 && masks[1] == 0 && masks[2] == 0;
+                        let is_empty = chunk.masks.iter().all(|&mask| mask == 0);
 
                         if quad_width > 0.01 && !is_empty {
                             let x2 = x1 + quad_width;
                             let sdf_params = [
-                                f32::from_bits(masks[0]),
-                                f32::from_bits(masks[1]),
-                                f32::from_bits(masks[2]),
+                                f32::from_bits(chunk.masks[0]),
+                                f32::from_bits(chunk.masks[1]),
+                                f32::from_bits(chunk.masks[2]),
                             ];
 
                             let uv_x_end =
-                                (quad_width / minimap_char_width).min(chars_in_mask as f32);
+                                (quad_width / minimap_char_width).min(chunk.char_count as f32);
 
                             let v1 = Vertex {
                                 pos: [x1, y1],
@@ -345,8 +412,8 @@ impl Renderer {
                             self.vertices.extend_from_slice(&[v1, v2, v3, v1, v3, v4]);
                         }
 
-                        byte_in_span += bytes_processed;
-                        cur_char_idx += chars_in_mask;
+                        byte_in_span += chunk.byte_count;
+                        cur_char_idx += chunk.char_count;
                     }
                     if cur_byte_abs == end_byte {
                         break;
@@ -428,5 +495,21 @@ mod tests {
         assert!(middle.end - middle.start <= 1_024);
         assert_eq!(bottom.end, total_lines);
         assert!(bottom.end - bottom.start <= 1_024);
+    }
+
+    #[test]
+    fn minimap_mask_chunk_counts_unicode_scalars_and_unicode_whitespace() {
+        let text = "a Ж\t😀\u{2003}z";
+        let split = "a ".len();
+        let first = &text.as_bytes()[..split];
+        let second = &text.as_bytes()[split..];
+
+        let chunk = minimap_mask_chunk(first, second, first.len(), 0, text.len());
+
+        assert_eq!(chunk.byte_count, text.len());
+        assert_eq!(chunk.char_count, text.chars().count());
+        assert_eq!(chunk.masks[0], (1 << 0) | (1 << 2) | (1 << 4) | (1 << 6));
+        assert_eq!(chunk.masks[1], 0);
+        assert_eq!(chunk.masks[2], 0);
     }
 }

@@ -153,6 +153,19 @@ pub(crate) fn terminal_max_scroll(
     (total_lines as f32 * char_h - terminal_text_viewport_height(term_h, scale)).max(0.0)
 }
 
+#[inline(always)]
+pub(crate) fn terminal_render_scroll_offset(
+    current_scroll: f32,
+    max_scroll: f32,
+    is_alt: bool,
+) -> f32 {
+    if is_alt {
+        0.0
+    } else {
+        current_scroll.min(max_scroll).round()
+    }
+}
+
 pub(crate) fn terminal_scrollbar_layout(
     panel_x: f32,
     panel_w: f32,
@@ -480,11 +493,11 @@ impl Renderer {
                 terminal_max_scroll(total_lines, char_h, term_content_h, s)
             };
 
-            let scroll_offset = if grid.is_alt {
-                0.0
-            } else {
-                term.scroll_y.current.min(max_scroll).round()
-            };
+            let scroll_offset = terminal_render_scroll_offset(
+                term.scroll_y.current,
+                max_scroll,
+                grid.is_alt,
+            );
             let draw_x = panel_x + 10.0 * s;
             let (_, term_pad_bottom) = terminal_text_padding(s);
 
@@ -998,6 +1011,13 @@ mod tests {
         assert!(first_row_y >= top);
         assert!(first_row_y < top + char_h);
         assert_eq!(terminal_max_scroll(rows, char_h, term_h, 1.0), 0.0);
+    }
+
+    #[test]
+    fn terminal_drag_mapping_uses_the_rendered_rounded_scroll_offset() {
+        assert_eq!(terminal_render_scroll_offset(0.6, 20.0, false), 1.0);
+        assert_eq!(terminal_render_scroll_offset(20.6, 20.2, false), 20.0);
+        assert_eq!(terminal_render_scroll_offset(20.6, 20.2, true), 0.0);
     }
 
     #[test]

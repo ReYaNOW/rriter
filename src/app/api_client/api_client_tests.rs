@@ -2937,3 +2937,162 @@ fn multipart_limit_counts_text_fields_headers_and_final_boundary() {
         .expect_err("final boundary must count toward the limit");
     assert_eq!(error.kind, ApiLoadErrorKind::TooLarge);
 }
+
+#[test]
+fn auth_view_scroll_includes_every_related_route() {
+    let spec = serde_json::json!({
+        "openapi": "3.1.0",
+        "info": {"title": "Auth routes", "version": "1"},
+        "paths": {
+            "/template": {
+                "get": {"responses": {"200": {"description": "ok"}}}
+            }
+        }
+    });
+    let mut model = parse_openapi_model(ApiSpecId(90), &spec).expect("parse");
+    let template = model.routes.first().cloned().expect("sample route");
+    model.routes = (0..13)
+        .map(|idx| {
+            let mut route = template.clone();
+            route.path = format!("/login/{idx}");
+            route
+        })
+        .collect();
+    model.rebuild_route_layout_cache();
+    let state = ApiClientTabState {
+        auth_view: true,
+        ..Default::default()
+    };
+
+    assert_eq!(api_auth_related_route_count(&model), 13);
+    assert_eq!(api_tab_max_scroll(Some(&model), &state, None, 0.0, 1.0), 644.0);
+}
+
+#[test]
+fn manual_request_url_uses_entered_path_values() {
+    let route = crate::app::api_mock::types::ApiManualRoute {
+        stable_id: "manual-user".to_string(),
+        method: ApiMethod::Get,
+        path: "/users/{id}".to_string(),
+        enabled: true,
+        response: crate::app::api_mock::types::ApiMockResponse::Generated,
+        python: None,
+        input_fields: Vec::new(),
+        output_fields: Vec::new(),
+    };
+    let server = ApiServer {
+        url: "http://127.0.0.1:4010".to_string(),
+        description: String::new(),
+        variables: Vec::new(),
+    };
+    let path_values = vec![ApiInputValue {
+        name: "id".to_string(),
+        value: "42".to_string(),
+    }];
+
+    let url = build_manual_api_request_url(&server, &route, &path_values, &[])
+        .expect("manual URL");
+
+    assert_eq!(url, "http://127.0.0.1:4010/users/42");
+}
+
+#[test]
+fn request_url_without_query_values_has_no_trailing_question_mark() {
+    let server = ApiServer {
+        url: "https://api.example.test".to_string(),
+        description: String::new(),
+        variables: Vec::new(),
+    };
+
+    let url = build_request_url(&server, "/health", &[], &[]).expect("URL");
+
+    assert_eq!(url, "https://api.example.test/health");
+}
+
+#[test]
+fn operation_parameters_override_path_item_parameters() {
+    let spec = serde_json::json!({
+        "openapi": "3.1.0",
+        "info": {"title": "Override", "version": "1"},
+        "paths": {
+            "/users/{id}": {
+                "parameters": [{
+                    "name": "id", "in": "path", "required": true,
+                    "description": "path item", "schema": {"type": "string"}
+                }],
+                "get": {
+                    "parameters": [{
+                        "name": "id", "in": "path", "required": true,
+                        "description": "operation", "schema": {"type": "integer"}
+                    }],
+                    "responses": {"200": {"description": "ok"}}
+                }
+            }
+        }
+    });
+
+    let model = parse_openapi_model(ApiSpecId(91), &spec).expect("parse");
+    let params = &model.routes[0].path_params;
+
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].description, "operation");
+    assert_eq!(params[0].primitive_type, ApiPrimitiveType::Integer);
+}
+
+#[test]
+fn explicit_parameter_example_keeps_precedence_over_schema_examples() {
+    let spec = serde_json::json!({
+        "openapi": "3.1.0",
+        "info": {"title": "Examples", "version": "1"},
+        "paths": {
+            "/search": {
+                "get": {
+                    "parameters": [{
+                        "name": "q", "in": "query", "example": "z-explicit",
+                        "schema": {"type": "string", "example": "a-schema"}
+                    }],
+                    "responses": {"200": {"description": "ok"}}
+                }
+            }
+        }
+    });
+
+    let model = parse_openapi_model(ApiSpecId(92), &spec).expect("parse");
+    let param = &model.routes[0].query_params[0];
+
+    assert_eq!(param.example.as_deref(), Some("z-explicit"));
+    assert_eq!(param.examples, vec!["z-explicit", "a-schema"]);
+}
+
+#[test]
+fn python_version_scroll_uses_actual_compressed_viewport() {
+    let full = api_python_version_list_max_scroll(10, 158.0, 1.0);
+    let compressed = api_python_version_list_max_scroll(10, 46.0, 1.0);
+
+    assert_eq!(full, 130.0);
+    assert_eq!(compressed, 242.0);
+    assert!(compressed > full);
+}
+
+#[test]
+fn python_scrollbar_metrics_handle_tiny_viewports_without_invalid_bounds() {
+    assert_eq!(api_python_scrollbar_metrics(8.0, 100.0, 1.0), None);
+    let (track_h, thumb_h) =
+        api_python_scrollbar_metrics(100.0, 200.0, 1.0).expect("scrollbar");
+    assert_eq!(track_h, 88.0);
+    assert!(thumb_h >= 18.0 && thumb_h <= track_h);
+}
+
+#[test]
+fn ty_worker_disconnect_does_not_create_a_synthetic_route_failure() {
+    assert!(api_mock_ty_disconnect_status(None).is_none());
+    let status = api_mock_ty_disconnect_status(Some((7, 11))).expect("current check");
+    assert!(matches!(
+        status,
+        crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+            route_idx: 7,
+            version: 11,
+            ..
+        }
+    ));
+}

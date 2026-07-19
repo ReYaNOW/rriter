@@ -55,19 +55,7 @@ pub(crate) fn is_python_ident_byte(b: u8) -> bool {
 }
 
 pub(crate) fn is_plain_assignment_after_token(after_token: &str) -> bool {
-    let bytes = after_token.as_bytes();
-    for (idx, &b) in bytes.iter().enumerate() {
-        if b != b'=' {
-            continue;
-        }
-        let prev = idx.checked_sub(1).and_then(|i| bytes.get(i)).copied();
-        let next = bytes.get(idx + 1).copied();
-        if matches!(prev, Some(b'=' | b'!' | b'<' | b'>' | b':')) || next == Some(b'=') {
-            continue;
-        }
-        return true;
-    }
-    false
+    crate::languages::python::python_plain_assignment_after_token(after_token)
 }
 
 pub(crate) fn plain_assignment_index(line: &str) -> Option<usize> {
@@ -224,10 +212,29 @@ fn python_string_prefix_before(bytes: &[u8], quote_at: usize) -> &[u8] {
     }
 }
 
-fn python_cursor_context(text: &str, cursor: usize) -> PythonCursorContext {
+#[derive(Debug)]
+struct PythonCursorScan {
+    context: PythonCursorContext,
+    delimiters: Vec<(u8, usize)>,
+}
+
+fn close_python_delimiter(delimiters: &mut Vec<(u8, usize)>, closing: u8) {
+    let opening = match closing {
+        b')' => b'(',
+        b']' => b'[',
+        b'}' => b'{',
+        _ => return,
+    };
+    if delimiters.last().is_some_and(|(byte, _)| *byte == opening) {
+        delimiters.pop();
+    }
+}
+
+fn scan_python_cursor(text: &str, cursor: usize) -> PythonCursorScan {
     let bytes = text.as_bytes();
     let end = cursor.min(bytes.len());
     let mut frames = Vec::with_capacity(2);
+    let mut delimiters = Vec::new();
     let mut i = 0usize;
     let mut in_comment = false;
 
@@ -294,6 +301,14 @@ fn python_cursor_context(text: &str, cursor: usize) -> PythonCursorContext {
                     });
                     i += if triple { 3 } else { 1 };
                 }
+                b'(' | b'[' => {
+                    delimiters.push((bytes[i], i));
+                    i += 1;
+                }
+                b')' | b']' => {
+                    close_python_delimiter(&mut delimiters, bytes[i]);
+                    i += 1;
+                }
                 b'{' => {
                     if let Some(PythonLexFrame::FStringExpression { brace_depth }) =
                         frames.last_mut()
@@ -330,18 +345,139 @@ fn python_cursor_context(text: &str, cursor: usize) -> PythonCursorContext {
                     });
                     i += if triple { 3 } else { 1 };
                 }
+                b'(' | b'[' | b'{' => {
+                    delimiters.push((bytes[i], i));
+                    i += 1;
+                }
+                b')' | b']' | b'}' => {
+                    close_python_delimiter(&mut delimiters, bytes[i]);
+                    i += 1;
+                }
                 _ => i += 1,
             },
         }
     }
 
-    if in_comment {
+    let context = if in_comment {
         PythonCursorContext::Comment
     } else if matches!(frames.last(), Some(PythonLexFrame::String { .. })) {
         PythonCursorContext::String
     } else {
         PythonCursorContext::Code
+    };
+    PythonCursorScan {
+        context,
+        delimiters,
     }
+}
+
+fn python_cursor_context(text: &str, cursor: usize) -> PythonCursorContext {
+    scan_python_cursor(text, cursor).context
+}
+
+pub(crate) fn python_current_call_open(text: &str, cursor: usize) -> Option<usize> {
+    let scan = scan_python_cursor(text, cursor);
+    if scan.context != PythonCursorContext::Code {
+        return None;
+    }
+    scan.delimiters
+        .last()
+        .and_then(|(byte, offset)| (*byte == b'(').then_some(*offset))
+}
+
+pub(crate) fn python_current_call_named_args(text: &str, cursor: usize) -> FxHashSet<String> {
+    let cursor = cursor.min(text.len());
+    let Some(open) = python_current_call_open(text, cursor) else {
+        return FxHashSet::default();
+    };
+    let bytes = text.as_bytes();
+    let mut out = FxHashSet::default();
+    let mut depth = 0usize;
+    let mut quote = None;
+    let mut triple = false;
+    let mut escaped = false;
+    let mut comment = false;
+    let mut i = open.saturating_add(1);
+
+    while i < cursor {
+        let byte = bytes[i];
+        if comment {
+            if byte == b'\n' {
+                comment = false;
+            }
+            i += 1;
+            continue;
+        }
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+                i += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                i += 1;
+                continue;
+            }
+            let closes = byte == active_quote
+                && (!triple
+                    || bytes.get(i + 1) == Some(&active_quote)
+                        && bytes.get(i + 2) == Some(&active_quote));
+            if closes {
+                quote = None;
+                i += if triple { 3 } else { 1 };
+            } else if !triple && byte == b'\n' {
+                quote = None;
+                i += 1;
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        match byte {
+            b'#' => {
+                comment = true;
+                i += 1;
+            }
+            active_quote @ (b'\'' | b'"') => {
+                quote = Some(active_quote);
+                triple = bytes.get(i + 1) == Some(&active_quote)
+                    && bytes.get(i + 2) == Some(&active_quote);
+                i += if triple { 3 } else { 1 };
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            _ if depth == 0 && is_python_ident_byte(byte) => {
+                let start = i;
+                i += 1;
+                while i < cursor && is_python_ident_byte(bytes[i]) {
+                    i += 1;
+                }
+                let end = i;
+                let mut equals = i;
+                while equals < cursor && matches!(bytes[equals], b' ' | b'\t') {
+                    equals += 1;
+                }
+                if equals < cursor
+                    && bytes[equals] == b'='
+                    && bytes.get(equals + 1) != Some(&b'=')
+                    && (start == open + 1 || bytes.get(start - 1) != Some(&b'.'))
+                    && let Some(name) = text.get(start..end)
+                {
+                    out.insert(name.to_string());
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    out
 }
 
 pub(crate) fn python_completion_allowed_at_cursor(editor: &Editor) -> bool {
@@ -1123,6 +1259,7 @@ pub(crate) fn ty_autocomplete_context_key(
     line_offsets: &[usize],
     cursor: usize,
     prefix: &str,
+    version: i32,
     mode: AutocompleteMode,
 ) -> String {
     let anchor = cursor.saturating_sub(prefix.len()).min(text.len());
@@ -1131,7 +1268,7 @@ pub(crate) fn ty_autocomplete_context_key(
         .saturating_sub(1);
     let line_start = line_offsets.get(line).copied().unwrap_or(0).min(anchor);
     let context = text.get(line_start..anchor).unwrap_or("").trim_end();
-    format!("{mode:?}|{context}")
+    format!("{mode:?}|v{version}|{context}")
 }
 
 pub(crate) fn apply_import_modules_to_autocomplete_items(

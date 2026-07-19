@@ -118,10 +118,7 @@ fn line_hashes_from_slices(first: &str, second: &str) -> Vec<u64> {
 }
 
 fn is_delimiter(b: u8) -> bool {
-    matches!(
-        b,
-        b' ' | b'\n' | b'\r' | b'\t' | b'.' | b'(' | b')' | b'[' | b']' | b'{' | b'}'
-    )
+    b.is_ascii_whitespace() || (b.is_ascii_punctuation() && b != b'_')
 }
 
 fn char_class(b: u8) -> u8 {
@@ -1101,12 +1098,20 @@ impl Editor {
     }
 
     pub fn insert_str(&mut self, s: &str) -> (Option<(usize, usize)>, usize) {
-        let cursor_before = self.cursor;
-        let del_info = self.delete_selection();
-
         if s.is_empty() {
-            self.update_modifications();
-            return (del_info, 0);
+            return (None, 0);
+        }
+
+        let cursor_before = self.cursor;
+        if let Some(anchor) = self.selection_anchor {
+            if anchor != self.cursor {
+                let start = anchor.min(self.cursor);
+                let end = anchor.max(self.cursor);
+                let deleted_len = end - start;
+                let _ = self.replace_range(start, end, s);
+                return (Some((start, deleted_len)), s.len());
+            }
+            self.selection_anchor = None;
         }
 
         self.version = next_editor_version(self.version);
@@ -1124,7 +1129,7 @@ impl Editor {
         });
 
         self.update_modifications();
-        (del_info, len)
+        (None, len)
     }
 
     pub fn delete_selection(&mut self) -> Option<(usize, usize)> {
@@ -1284,14 +1289,16 @@ impl Editor {
             start -= 1;
         }
 
-        let mut space_count = 0;
+        let mut indent = String::with_capacity(self.cursor.saturating_sub(start) + 4);
         let mut curr = start;
-        while curr < self.cursor && self.byte_at(curr) == b' ' {
-            space_count += 1;
+        while curr < self.cursor {
+            match self.byte_at(curr) {
+                b' ' => indent.push(' '),
+                b'\t' => indent.push('\t'),
+                _ => break,
+            }
             curr += 1;
         }
-
-        let mut indent = " ".repeat(space_count);
 
         let mut p = self.cursor;
         while p > start {

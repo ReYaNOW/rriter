@@ -1225,11 +1225,16 @@ fn database_server_rows_on_page(state: &crate::app::database::DatabaseTableTabSt
 }
 
 fn database_table_page_status(state: &crate::app::database::DatabaseTableTabState) -> String {
-    let base = state.grid.view.current_page.saturating_mul(state.grid.view.limit);
     let loaded = state.grid.loaded_server_row_count_on_page();
     match state.grid.count {
         Some(0) => "0 из 0".to_string(),
-        Some(count) if loaded > 0 => format!("{}–{} из {}", base + 1, base + loaded, count),
+        Some(count) if loaded > 0 => state
+            .grid
+            .loaded_server_row_bounds_on_page()
+            .map_or_else(
+                || format!("Загружено {loaded} · всего {count}"),
+                |(first, last)| format!("{}–{} из {}", first + 1, last + 1, count),
+            ),
         Some(count) if state.grid.loading_chunk => format!("Загрузка… · всего {count}"),
         Some(count) => format!("0 загружено · всего {count}"),
         None if state.grid.loading_count && loaded > 0 => {
@@ -1941,5 +1946,37 @@ mod database_table_renderer_tests {
             },
         );
         assert_eq!(database_table_page_status(&state), "1–99 из 100");
+    }
+
+    #[test]
+    fn a4_b015_page_status_uses_loaded_chunk_absolute_bounds() {
+        let view = crate::app::database::DatabaseTableViewState {
+            key: crate::app::database::DatabaseTableViewKey {
+                connection_id: crate::app::database::DatabaseConnectionId(1),
+                database_name: "db".to_string(),
+                table_name: "items".to_string(),
+            },
+            limit: 1_000,
+            ..crate::app::database::DatabaseTableViewState::default()
+        };
+        let mut state = crate::app::database::DatabaseTableTabState::new(view);
+        state.grid.count = Some(2_000);
+        state.grid.chunks.insert(
+            5,
+            crate::app::database::DatabaseTableChunk {
+                generation: crate::app::database::DatabaseGeneration(1),
+                chunk_index: 5,
+                rows: (500..600)
+                    .map(|absolute_index| crate::app::database::DatabaseGridRow {
+                        absolute_index,
+                        cells: Vec::new(),
+                        xmin: None,
+                        state: crate::app::database::DatabaseRowState::Clean,
+                    })
+                    .collect(),
+                estimated_bytes: 0,
+            },
+        );
+        assert_eq!(database_table_page_status(&state), "501–600 из 2000");
     }
 }

@@ -817,3 +817,38 @@ fn file_tree_scrollbar_uses_panel_viewport_for_top_and_bottom_layouts() {
     assert!(top.thumb.start >= top.track_y);
     assert!(bottom.thumb.start >= bottom.track_y);
 }
+
+#[test]
+fn file_tree_row_hit_test_uses_the_same_pixel_snapped_scroll_as_rendering() {
+    let panel_y = 100.0;
+    let row_h = 22.0;
+    let scroll: f32 = 0.6;
+    let first_pixel_of_second_row = panel_y + row_h - scroll.round();
+
+    assert_eq!(
+        file_tree_row_index_at(panel_y, first_pixel_of_second_row, row_h, scroll, 2),
+        Some(1)
+    );
+    assert_eq!(
+        file_tree_row_index_at(panel_y, panel_y - 1.0, row_h, 0.0, 2),
+        None
+    );
+}
+
+#[test]
+fn file_tree_atomic_move_rolls_back_when_a_later_source_fails() {
+    let root = test_root("atomic_move_rollback");
+    let _ = std::fs::remove_dir_all(&root);
+    let target = root.join("target");
+    std::fs::create_dir_all(&target).unwrap();
+    let source = root.join("source.txt");
+    let missing = root.join("missing.txt");
+    std::fs::write(&source, "value").unwrap();
+
+    let error = move_paths_to_dir_atomic(&[source.clone(), missing], &target).unwrap_err();
+
+    assert!(error.contains("возвращены на прежние места"));
+    assert_eq!(std::fs::read_to_string(&source).unwrap(), "value");
+    assert!(!target.join("source.txt").exists());
+    let _ = std::fs::remove_dir_all(root);
+}

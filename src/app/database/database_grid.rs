@@ -792,6 +792,23 @@ impl DatabaseTableGridState {
             .count()
     }
 
+    pub fn loaded_server_row_bounds_on_page(&self) -> Option<(usize, usize)> {
+        let page_base = self.view.current_page.saturating_mul(self.view.limit);
+        let page_end = page_base.saturating_add(self.view.limit);
+        self.chunks
+            .values()
+            .flat_map(|chunk| chunk.rows.iter())
+            .filter_map(|row| {
+                (row.absolute_index >= page_base && row.absolute_index < page_end)
+                    .then_some(row.absolute_index)
+            })
+            .fold(None, |bounds, row| {
+                Some(bounds.map_or((row, row), |(first, last): (usize, usize)| {
+                    (first.min(row), last.max(row))
+                }))
+            })
+    }
+
     pub fn loaded_server_row_extent_on_page(&self) -> usize {
         let page_base = self.view.current_page.saturating_mul(self.view.limit);
         let page_end = page_base.saturating_add(self.view.limit);

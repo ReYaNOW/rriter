@@ -28,6 +28,26 @@ fn api_request_disconnect_response(
     }
 }
 
+fn build_manual_api_request_url(
+    server: &ApiServer,
+    route: &crate::app::api_mock::types::ApiManualRoute,
+    path_values: &[ApiInputValue],
+    query_values: &[ApiInputValue],
+) -> Result<String, ApiLoadError> {
+    build_request_url(server, &route.path, path_values, query_values)
+}
+
+fn api_mock_ty_disconnect_status(
+    pending: Option<(usize, u64)>,
+) -> Option<crate::app::api_mock::types::ApiMockCheckStatus> {
+    let (route_idx, version) = pending?;
+    Some(crate::app::api_mock::types::ApiMockCheckStatus::Failed {
+        route_idx,
+        version,
+        message: "Ty check worker stopped".to_string(),
+    })
+}
+
 fn apply_api_request_disconnect_to_state(
     state: &mut ApiClientTabState,
     spec_id: ApiSpecId,
@@ -1073,13 +1093,19 @@ impl crate::app::App {
         else {
             return;
         };
-        let Some((meta, state)) = self.active_api_tab() else {
-            return;
+        let (spec_id, path_values, query_values) = {
+            let Some((meta, state)) = self.active_api_tab() else {
+                return;
+            };
+            if state.pending_request_id.is_some() || state.pending {
+                return;
+            }
+            (
+                meta.spec_id,
+                state.path_values.clone(),
+                state.query_values.clone(),
+            )
         };
-        if state.pending_request_id.is_some() || state.pending {
-            return;
-        }
-        let spec_id = meta.spec_id;
         if !self.api_mock_server_running() {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                 state.route_idx = Some(manual_idx);
@@ -1111,7 +1137,7 @@ impl crate::app::App {
             description: String::new(),
             variables: Vec::new(),
         };
-        let url = match build_request_url(&server, &route.path, &[], &[]) {
+        let url = match build_manual_api_request_url(&server, &route, &path_values, &query_values) {
             Ok(url) => url,
             Err(err) => {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
@@ -1280,14 +1306,12 @@ impl crate::app::App {
                 }
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                     self.ide_panel.api.mock_ty_diagnostics.clear();
-                    self.ide_panel.api.mock.check_status =
-                        crate::app::api_mock::types::ApiMockCheckStatus::Failed {
-                            route_idx: 0,
-                            version: 0,
-                            message: "Ty check worker stopped".to_string(),
-                        };
-                    self.ide_panel.api.mock_ty_pending = None;
-                    changed = true;
+                    if let Some(status) =
+                        api_mock_ty_disconnect_status(self.ide_panel.api.mock_ty_pending.take())
+                    {
+                        self.ide_panel.api.mock.check_status = status;
+                        changed = true;
+                    }
                 }
             }
         }

@@ -428,6 +428,18 @@ fn resolve_alias_from_user_config(alias: &str) -> io::Result<ResolvedSshEndpoint
 }
 
 fn parse_user_ssh_config(content: &str, alias: &str) -> io::Result<ResolvedSshEndpoint> {
+    let default_username = std::env::var("USER")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var("USERNAME").ok().filter(|value| !value.is_empty()));
+    parse_user_ssh_config_with_default_user(content, alias, default_username.as_deref())
+}
+
+fn parse_user_ssh_config_with_default_user(
+    content: &str,
+    alias: &str,
+    default_username: Option<&str>,
+) -> io::Result<ResolvedSshEndpoint> {
     let mut active = false;
     let mut host = None;
     let mut user = None;
@@ -444,7 +456,7 @@ fn parse_user_ssh_config(content: &str, alias: &str) -> io::Result<ResolvedSshEn
             continue;
         };
         if key.eq_ignore_ascii_case("Host") {
-            active = fields.any(|pattern| pattern == alias || pattern == "*");
+            active = ssh_host_patterns_match(fields, alias);
             continue;
         }
         if !active {
@@ -460,7 +472,62 @@ fn parse_user_ssh_config(content: &str, alias: &str) -> io::Result<ResolvedSshEn
             _ => {}
         }
     }
-    endpoint_from_parts(host, port, user, identity, proxy_jump)
+    endpoint_from_parts(
+        host.or_else(|| Some(alias.to_string())),
+        port,
+        user.or_else(|| default_username.map(str::to_string)),
+        identity,
+        proxy_jump,
+    )
+}
+
+fn ssh_host_patterns_match<'a>(patterns: impl Iterator<Item = &'a str>, alias: &str) -> bool {
+    let mut positive_match = false;
+    for pattern in patterns {
+        let (negated, pattern) = pattern
+            .strip_prefix('!')
+            .map_or((false, pattern), |pattern| (true, pattern));
+        if pattern.is_empty() || !ssh_wildcard_match(pattern, alias) {
+            continue;
+        }
+        if negated {
+            return false;
+        }
+        positive_match = true;
+    }
+    positive_match
+}
+
+fn ssh_wildcard_match(pattern: &str, value: &str) -> bool {
+    let pattern = pattern.as_bytes();
+    let value = value.as_bytes();
+    let mut pattern_index = 0usize;
+    let mut value_index = 0usize;
+    let mut star_index = None;
+    let mut star_value_index = 0usize;
+    while value_index < value.len() {
+        if pattern_index < pattern.len()
+            && (pattern[pattern_index] == b'?'
+                || pattern[pattern_index].eq_ignore_ascii_case(&value[value_index]))
+        {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+            star_index = Some(pattern_index);
+            pattern_index += 1;
+            star_value_index = value_index;
+        } else if let Some(star) = star_index {
+            pattern_index = star + 1;
+            star_value_index += 1;
+            value_index = star_value_index;
+        } else {
+            return false;
+        }
+    }
+    while pattern_index < pattern.len() && pattern[pattern_index] == b'*' {
+        pattern_index += 1;
+    }
+    pattern_index == pattern.len()
 }
 
 fn endpoint_from_parts(
@@ -578,6 +645,35 @@ mod tests {
         assert_eq!(endpoint.host, "prod.example.com");
         assert_eq!(endpoint.username, "release");
         assert_eq!(endpoint.port, 2222);
+    }
+
+    #[test]
+    fn a4_b019_user_config_uses_openssh_alias_defaults() {
+        let endpoint = parse_user_ssh_config_with_default_user(
+            "Host prod\n  Port 2222\n",
+            "prod",
+            Some("local-user"),
+        )
+        .unwrap();
+        assert_eq!(endpoint.host, "prod");
+        assert_eq!(endpoint.username, "local-user");
+        assert_eq!(endpoint.port, 2222);
+    }
+
+    #[test]
+    fn a4_b020_user_config_respects_negated_and_wildcard_host_patterns() {
+        let endpoint = parse_user_ssh_config_with_default_user(
+            "Host * !prod-*\n  HostName wrong.example.com\n  User wrong\n\nHost prod-*\n  HostName right.example.com\n  User release\n",
+            "prod-eu",
+            Some("local-user"),
+        )
+        .unwrap();
+        assert_eq!(endpoint.host, "right.example.com");
+        assert_eq!(endpoint.username, "release");
+        assert!(ssh_host_patterns_match(
+            ["PROD-?U"].into_iter(),
+            "prod-eu"
+        ));
     }
 
     #[test]

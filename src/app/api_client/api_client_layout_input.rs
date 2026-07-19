@@ -109,7 +109,7 @@ pub fn api_tab_max_scroll(
                     .sum::<f32>()
             }
             + {
-                let route_count = api_auth_related_route_count(model).min(12);
+                let route_count = api_auth_related_route_count(model);
                 if route_count == 0 {
                     0.0
                 } else {
@@ -660,7 +660,13 @@ pub fn build_request_url(
         format!("{base}/{path}")
     };
     let mut url = validate_api_url(&full)?;
-    {
+    if query_values.iter().any(|item| {
+        if item.value.contains('\n') {
+            item.value.lines().any(|line| !line.trim().is_empty())
+        } else {
+            !item.value.is_empty()
+        }
+    }) {
         let mut pairs = url.query_pairs_mut();
         for item in query_values {
             if item.value.contains('\n') {

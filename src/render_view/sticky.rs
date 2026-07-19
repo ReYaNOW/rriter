@@ -3,6 +3,24 @@ use crate::highlighter::ColorSpan;
 use crate::renderer::Renderer;
 use glow::HasContext;
 
+fn expanded_sticky_range_end(editor: &Editor, start_line: usize, initial_end: usize) -> usize {
+    let last_line = editor.line_offsets.len().saturating_sub(1);
+    let mut end_line = initial_end.min(last_line);
+    let mut line = start_line.min(last_line);
+
+    while line <= end_line {
+        if let Some(&fold_end) = editor.foldable_lines.get(&line) {
+            end_line = end_line.max(fold_end.min(last_line));
+        }
+        let Some(next_line) = line.checked_add(1) else {
+            break;
+        };
+        line = next_line;
+    }
+
+    end_line
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     pub(crate) fn draw_sticky_lines(
@@ -29,16 +47,11 @@ impl Renderer {
                 .line_offsets
                 .partition_point(|&o| o <= start_b)
                 .saturating_sub(1);
-            let mut el = editor
+            let el = editor
                 .line_offsets
                 .partition_point(|&o| o <= end_b)
                 .saturating_sub(1);
-
-            for line in sl..=el {
-                if let Some(&fold_end) = editor.foldable_lines.get(&line) {
-                    el = el.max(fold_end);
-                }
-            }
+            let el = expanded_sticky_range_end(editor, sl, el);
 
             if el > sl {
                 active_ranges.push((sl, el));
@@ -271,5 +284,20 @@ impl Renderer {
         }
 
         target_sticky_lines
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sticky_range_expands_through_nested_fold_ends() {
+        let mut editor = Editor::new(64);
+        editor.set_clean_text("0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n");
+        editor.foldable_lines.insert(1, 5);
+        editor.foldable_lines.insert(4, 10);
+
+        assert_eq!(expanded_sticky_range_end(&editor, 1, 2), 10);
     }
 }

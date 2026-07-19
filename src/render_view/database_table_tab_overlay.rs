@@ -534,13 +534,44 @@ impl Renderer {
 
 #[allow(clippy::too_many_arguments)]
 fn draw_modal_buttons(renderer: &mut Renderer, ui: &mut UiRegistry, x: f32, y: f32, w: f32, h: f32, s: f32, buttons: &[(UiId, &str)], mx: f32, my: f32) {
-    let button_w = 118.0 * s;
-    let total = buttons.len() as f32 * button_w + buttons.len().saturating_sub(1) as f32 * 8.0 * s;
-    let mut bx = x + w - 20.0 * s - total;
+    let Some((mut bx, button_y, button_w, button_h, gap)) =
+        database_modal_button_layout(x, y, w, h, s, buttons.len())
+    else {
+        return;
+    };
     for (id, label) in buttons {
-        ui.register_button_view(*id, ButtonView { x: bx, y: y + h - 54.0 * s, w: button_w, h: 36.0 * s, text: label, icon: None, text_scale: 0.82, icon_size: 0.0 }, renderer, mx, my, s, false);
-        bx += button_w + 8.0 * s;
+        ui.register_button_view(*id, ButtonView { x: bx, y: button_y, w: button_w, h: button_h, text: label, icon: None, text_scale: 0.82, icon_size: 0.0 }, renderer, mx, my, s, false);
+        bx += button_w + gap;
     }
+}
+
+fn database_modal_button_layout(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    s: f32,
+    button_count: usize,
+) -> Option<(f32, f32, f32, f32, f32)> {
+    if button_count == 0 || w <= 0.0 || h <= 0.0 {
+        return None;
+    }
+    let s = s.max(0.01);
+    let side_padding = (20.0 * s).min(w * 0.25);
+    let available = (w - side_padding * 2.0).max(0.0);
+    let gap_count = button_count.saturating_sub(1) as f32;
+    let gap = if gap_count > 0.0 {
+        (8.0 * s).min(available / (button_count as f32 * 4.0).max(1.0))
+    } else {
+        0.0
+    };
+    let button_w = ((available - gap * gap_count).max(0.0) / button_count as f32)
+        .min(118.0 * s);
+    let total = button_w * button_count as f32 + gap * gap_count;
+    let button_h = (36.0 * s).min(h).max(0.0);
+    let button_y = (y + h - 18.0 * s - button_h)
+        .clamp(y, (y + h - button_h).max(y));
+    Some((x + side_padding + (available - total).max(0.0), button_y, button_w, button_h, gap))
 }
 
 fn now_unix_ms() -> u128 {
@@ -549,7 +580,10 @@ fn now_unix_ms() -> u128 {
 
 #[cfg(test)]
 mod tests {
-    use super::{database_table_review_body_height, database_table_review_max_scroll};
+    use super::{
+        database_modal_button_layout, database_table_review_body_height,
+        database_table_review_max_scroll,
+    };
 
     #[test]
     fn database_review_scroll_uses_fitted_modal_body_height() {
@@ -563,5 +597,20 @@ mod tests {
             database_table_review_max_scroll(500.0, 400.0, 1.0, 30),
             (30.0 * 22.0 - compact_body_h).max(0.0)
         );
+    }
+
+    #[test]
+    fn a4_b014_modal_buttons_stay_inside_fitted_modal() {
+        for (w, h) in [(120.0, 80.0), (200.0, 120.0), (300.0, 180.0)] {
+            for count in 1..=3 {
+                let (x, y, button_w, button_h, gap) =
+                    database_modal_button_layout(10.0, 20.0, w, h, 1.0, count).unwrap();
+                let right = x + button_w * count as f32 + gap * count.saturating_sub(1) as f32;
+                assert!(x >= 10.0);
+                assert!(right <= 10.0 + w + 0.01);
+                assert!(y >= 20.0);
+                assert!(y + button_h <= 20.0 + h + 0.01);
+            }
+        }
     }
 }

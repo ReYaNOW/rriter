@@ -781,15 +781,17 @@ impl App {
             PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
                 if let Some(text) = self.get_clipboard_text() {
                     let (del_info, ins_len) = self.editor.insert_str(&text);
-                    if let Some((offset, len)) = del_info {
-                        self.highlighter.shift_delete(offset, len);
+                    if del_info.is_some() || ins_len > 0 {
+                        if let Some((offset, len)) = del_info {
+                            self.highlighter.shift_delete(offset, len);
+                        }
+                        self.highlighter.shift_insert(
+                            self.editor.cursor - ins_len,
+                            ins_len,
+                            Some(&text),
+                        );
+                        is_edit = true;
                     }
-                    self.highlighter.shift_insert(
-                        self.editor.cursor - ins_len,
-                        ins_len,
-                        Some(&text),
-                    );
-                    is_edit = true;
                 }
                 cursor_moved = true;
             }

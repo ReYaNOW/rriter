@@ -97,6 +97,11 @@ mod tests {
         editor.move_end_of_file(false);
         editor.move_word_left(false);
         assert_eq!(editor.cursor, text.find("привет").unwrap());
+
+        let mut tab_indented = Editor::new(32);
+        tab_indented.set_clean_text("\tif ready:");
+        tab_indented.cursor = tab_indented.len();
+        assert_eq!(tab_indented.get_auto_indent(), "\t    ");
     }
 
     #[test]
@@ -215,6 +220,29 @@ mod tests {
         assert_eq!(deleted, Some((0, 3)));
         assert_eq!(inserted, 3);
         assert_eq!(words.get_full_text(), "BARbaz");
+
+        assert!(matches!(
+            words.undo(),
+            Some(UndoRedoDelta::Replace(0, 3, old_text, new_text))
+                if old_text == "foo" && new_text == "BAR"
+        ));
+        assert_eq!(words.get_full_text(), "foobaz");
+        assert!(matches!(
+            words.redo(),
+            Some(UndoRedoDelta::Replace(0, 3, old_text, new_text))
+                if old_text == "BAR" && new_text == "foo"
+        ));
+        assert_eq!(words.get_full_text(), "BARbaz");
+
+        let mut punctuation = Editor::new(16);
+        punctuation.set_clean_text("foo,bar");
+        punctuation.cursor = 5;
+        punctuation.select_word();
+        assert_eq!(punctuation.get_selection().as_deref(), Some("bar"));
+        punctuation.selection_anchor = None;
+        punctuation.cursor = punctuation.len();
+        assert_eq!(punctuation.delete_word_backward(), Some((4, 3)));
+        assert_eq!(punctuation.get_full_text(), "foo,");
     }
 
     #[test]
@@ -278,7 +306,20 @@ mod tests {
         assert_eq!(editor.insert_str(""), (None, 0));
         assert_eq!(editor.get_visible_lines_count(), 1);
 
-        editor.insert_str("alpha beta\nlast");
+        editor.set_clean_text("alpha");
+        editor.selection_anchor = Some(0);
+        editor.cursor = editor.len();
+        let version = editor.version;
+        assert_eq!(editor.insert_str(""), (None, 0));
+        assert_eq!(editor.get_full_text(), "alpha");
+        assert_eq!(editor.get_selection().as_deref(), Some("alpha"));
+        assert_eq!(editor.version, version);
+        assert!(editor.history.is_empty());
+        assert!(editor.sync_edits.is_empty());
+
+        editor.selection_anchor = None;
+        editor.cursor = editor.len();
+        editor.insert_str(" beta\nlast");
         editor.clear_history();
         assert!(editor.history.is_empty());
         assert!(editor.redo_stack.is_empty());

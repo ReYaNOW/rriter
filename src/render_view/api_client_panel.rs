@@ -14,5 +14,9 @@ include!("api_client_panel/api_client_panel_main_renderer.rs");
 include!("api_client_panel/api_client_panel_overlay_renderer.rs");
 
 fn api_panel_row_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
-    row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()
+    (row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()).round()
+}
+
+fn api_panel_label_width(right_edge: f32, text_x: f32) -> f32 {
+    (right_edge - text_x).max(0.0)
 }

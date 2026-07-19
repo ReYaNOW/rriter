@@ -368,6 +368,15 @@ impl App {
             {
                 self.ide_panel.project_search.focused = None;
             }
+            if self.ide_panel.api.mock_contract_constraint_menu.is_some() {
+                let clicked_id = self.ui_registry.find_at(mx, my);
+                if !self.api_mock_constraint_menu_contains_ui_id(clicked_id) {
+                    self.close_api_mock_constraint_menu();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+            }
         }
         if state == ElementState::Released {
             self.finish_database_table_drag();

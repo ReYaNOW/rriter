@@ -69,22 +69,7 @@ pub(crate) fn class_header_bases(line: &str, class_name: &str) -> Option<Vec<Str
 }
 
 pub(crate) fn class_direct_attr(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    if trimmed.starts_with("def ")
-        || trimmed.starts_with("async def ")
-        || trimmed.starts_with('@')
-        || trimmed.starts_with("class ")
-    {
-        return None;
-    }
-    let end = trimmed
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .unwrap_or(trimmed.len());
-    if end == 0 {
-        return None;
-    }
-    let rest = trimmed[end..].trim_start();
-    (rest.starts_with(':') || rest.starts_with('=')).then_some(&trimmed[..end])
+    crate::languages::python::python_class_direct_attr(line)
 }
 
 pub(crate) fn instance_attr_assignment_name(line: &str) -> Option<&str> {
@@ -103,12 +88,7 @@ pub(crate) fn instance_attr_assignment_name(line: &str) -> Option<&str> {
 }
 
 pub(crate) fn class_header_name(line: &str) -> Option<&str> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("class ")?;
-    let end = rest
-        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .unwrap_or(rest.len());
-    (end > 0).then_some(&rest[..end])
+    crate::languages::python::python_class_header_name(line)
 }
 
 fn python_header_depth_delta(line: &str) -> i32 {
@@ -122,6 +102,32 @@ fn python_header_depth_delta(line: &str) -> i32 {
 
 fn python_class_header_complete(line: &str, depth: i32) -> bool {
     depth <= 0 && line.trim_end().ends_with(':')
+}
+
+fn python_class_header_end(lines: &[&str], idx: usize) -> Option<usize> {
+    let first = *lines.get(idx)?;
+    let mut depth = python_header_depth_delta(first);
+    let mut line_idx = idx;
+    while !python_class_header_complete(lines[line_idx], depth) && line_idx + 1 < lines.len() {
+        line_idx += 1;
+        depth += python_header_depth_delta(lines[line_idx]);
+    }
+    Some(line_idx)
+}
+
+fn python_block_body_indent(lines: &[&str], start_idx: usize, parent_indent: usize) -> Option<usize> {
+    for line in lines.iter().skip(start_idx).copied() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len().saturating_sub(trimmed.len());
+        if indent <= parent_indent {
+            return None;
+        }
+        return Some(indent);
+    }
+    None
 }
 
 fn python_class_bases_at(lines: &[&str], idx: usize, class_name: &str) -> Option<Vec<String>> {
@@ -244,8 +250,11 @@ pub(crate) fn python_class_method_overload_detail(
         if python_class_bases_at(&lines, class_idx, class_label).is_none() {
             continue;
         }
-        let direct_indent = class_indent + 4;
-        let mut idx = class_idx + 1;
+        let body_start = python_class_header_end(&lines, class_idx)?.saturating_add(1);
+        let Some(direct_indent) = python_block_body_indent(&lines, body_start, class_indent) else {
+            break;
+        };
+        let mut idx = body_start;
         while idx < lines.len() {
             let line = lines[idx];
             if line.trim().is_empty() {
@@ -313,9 +322,15 @@ pub(crate) fn class_body_declares_attr(
     class_indent: usize,
     attr: &str,
 ) -> bool {
-    let direct_indent = class_indent + 4;
+    let Some(body_start) = python_class_header_end(lines, class_idx).map(|idx| idx.saturating_add(1))
+    else {
+        return false;
+    };
+    let Some(direct_indent) = python_block_body_indent(lines, body_start, class_indent) else {
+        return false;
+    };
     let mut type_checking_attr_indent = None;
-    for body in lines.iter().skip(class_idx + 1) {
+    for (body_idx, body) in lines.iter().enumerate().skip(body_start) {
         if body.trim().is_empty() {
             continue;
         }
@@ -333,9 +348,9 @@ pub(crate) fn class_body_declares_attr(
             if class_direct_attr(body) == Some(attr) {
                 return true;
             }
-            let trimmed = body.trim();
-            if trimmed == "if TYPE_CHECKING:" {
-                type_checking_attr_indent = Some(indent + 4);
+            if body.trim() == "if TYPE_CHECKING:" {
+                type_checking_attr_indent =
+                    python_block_body_indent(lines, body_idx.saturating_add(1), indent);
             }
             continue;
         }
@@ -354,9 +369,15 @@ pub(crate) fn class_body_declared_attrs(
     owner: &str,
     out: &mut FxHashMap<String, String>,
 ) {
-    let direct_indent = class_indent + 4;
+    let Some(body_start) = python_class_header_end(lines, class_idx).map(|idx| idx.saturating_add(1))
+    else {
+        return;
+    };
+    let Some(direct_indent) = python_block_body_indent(lines, body_start, class_indent) else {
+        return;
+    };
     let mut type_checking_attr_indent = None;
-    for body in lines.iter().skip(class_idx + 1) {
+    for (body_idx, body) in lines.iter().enumerate().skip(body_start) {
         if body.trim().is_empty() {
             continue;
         }
@@ -378,9 +399,9 @@ pub(crate) fn class_body_declared_attrs(
                 out.entry(attr.to_string())
                     .or_insert_with(|| owner.to_string());
             }
-            let trimmed = body.trim();
-            if trimmed == "if TYPE_CHECKING:" {
-                type_checking_attr_indent = Some(indent + 4);
+            if body.trim() == "if TYPE_CHECKING:" {
+                type_checking_attr_indent =
+                    python_block_body_indent(lines, body_idx.saturating_add(1), indent);
             }
             continue;
         }
@@ -402,8 +423,14 @@ fn class_body_declared_methods(
     owner: &str,
     out: &mut FxHashMap<String, String>,
 ) {
-    let direct_indent = class_indent + 4;
-    for body in lines.iter().skip(class_idx + 1) {
+    let Some(body_start) = python_class_header_end(lines, class_idx).map(|idx| idx.saturating_add(1))
+    else {
+        return;
+    };
+    let Some(direct_indent) = python_block_body_indent(lines, body_start, class_indent) else {
+        return;
+    };
+    for body in lines.iter().skip(body_start) {
         if body.trim().is_empty() {
             continue;
         }
@@ -796,25 +823,6 @@ pub(crate) fn python_member_receiver_before_cursor(editor: &Editor) -> Option<St
 }
 
 pub(crate) fn cursor_inside_python_call_parens(editor: &Editor) -> bool {
-    if !python_completion_allowed_at_cursor(editor) {
-        return false;
-    }
     let text = editor.get_full_text();
-    let cursor = editor.cursor.min(text.len());
-    let bytes = text.as_bytes();
-    let mut depth = 0usize;
-    for idx in (0..cursor).rev() {
-        match bytes[idx] {
-            b')' | b']' | b'}' => depth += 1,
-            b'(' | b'[' | b'{' => {
-                if depth > 0 {
-                    depth -= 1;
-                } else {
-                    return bytes[idx] == b'(';
-                }
-            }
-            _ => {}
-        }
-    }
-    false
+    python_current_call_open(&text, editor.cursor).is_some()
 }

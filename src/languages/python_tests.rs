@@ -272,6 +272,29 @@ fn python_import_blocks_keep_blank_lines_between_groups_only() {
 }
 
 #[test]
+fn python_import_blocks_ignore_comment_delimiters_and_continuations() {
+    let comment = "from pkg import value  # (\ndef f():\n    pass\n";
+    assert!(import_blocks(comment).is_empty());
+
+    let explicit = r#"from pkg import value  # keep \
+def f():
+    pass
+"#;
+    assert!(import_blocks(explicit).is_empty());
+}
+
+#[test]
+fn python_class_attribute_highlighting_uses_actual_body_indent() {
+    let code = "class TwoSpace:\n  value: int\n\nclass Tabbed:\n\tother = 1\n";
+    let ranges = python_class_attr_name_ranges(code);
+
+    for name in ["value", "other"] {
+        let start = code.find(name).expect("expected class attribute");
+        assert!(ranges.contains(&(start, start + name.len())));
+    }
+}
+
+#[test]
 fn python_docstring_spans_color_text_header_and_inline_code() {
     let text = "def f():\n    \"\"\"Args:\n    value: use ``int``.\n    \"\"\"\n";
     let start = text.find("\"\"\"").unwrap();

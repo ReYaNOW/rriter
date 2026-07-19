@@ -1934,6 +1934,29 @@ mod tests {
         std::fs::remove_dir_all(&root).unwrap();
     }
 
+
+    #[test]
+    fn stale_git_graph_disconnect_keeps_newer_request_pending() {
+        let repo_root = PathBuf::from("/repo/current");
+        let mut state = GitPanelState::default();
+        state.seed_graph_request_for_test(repo_root.clone(), 2, true);
+
+        state.handle_graph_disconnect(&repo_root, 1);
+
+        assert!(state.graph_request_pending_for_test(&repo_root, 2));
+        assert!(state.graph_pending);
+        assert!(state.graph_notice.is_none());
+
+        state.handle_graph_disconnect(&repo_root, 2);
+
+        assert!(!state.graph_request_pending_for_test(&repo_root, 2));
+        assert!(!state.graph_pending);
+        assert_eq!(
+            state.graph_notice.as_deref(),
+            Some("Загрузка Git Graph неожиданно завершилась")
+        );
+    }
+
 }
 
 #[test]

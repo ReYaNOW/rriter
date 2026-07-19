@@ -19,7 +19,7 @@ impl Renderer {
         self.draw_string_scaled_stable(
             label,
             x + (w - text_w) * 0.5,
-            y + h * 0.5 + 4.5 * s,
+            api_panel_row_text_y(y, h, s),
             [0.04, 0.05, 0.07, 1.0],
             text_scale,
         );
@@ -727,24 +727,36 @@ impl Renderer {
                 mx,
                 my,
             );
-            self.draw_string_scaled_stable(
+            let title_x = card_x + 10.0 * s;
+            let title_right = if matches!(spec.source, ApiSpecSource::Url(_)) {
+                card_x + card_w - 40.0 * s
+            } else {
+                card_x + card_w - 10.0 * s
+            };
+            self.draw_tree_label_clipped(
                 &spec.title,
-                card_x + 10.0 * s,
+                title_x,
                 (card_y + 22.0 * s).round(),
+                api_panel_label_width(title_right, title_x),
                 self.theme.fg,
                 0.90,
+                &mut error_scratch,
             );
             let version = if spec.version.is_empty() {
                 spec.openapi_version.as_str()
             } else {
                 spec.version.as_str()
             };
-            self.draw_string_scaled_stable(
+            let card_text_x = card_x + 10.0 * s;
+            let card_text_right = card_x + card_w - 10.0 * s;
+            self.draw_tree_label_clipped(
                 version,
-                card_x + 10.0 * s,
+                card_text_x,
                 (card_y + 42.0 * s).round(),
+                api_panel_label_width(card_text_right, card_text_x),
                 [0.68, 0.70, 0.78, 1.0],
                 0.80,
+                &mut error_scratch,
             );
             let source = match &spec.source {
                 ApiSpecSource::Local(path) => path
@@ -753,12 +765,14 @@ impl Renderer {
                     .unwrap_or("local"),
                 ApiSpecSource::Url(url) => url.as_str(),
             };
-            self.draw_string_scaled_stable(
+            self.draw_tree_label_clipped(
                 source,
-                card_x + 10.0 * s,
+                card_text_x,
                 (card_y + 62.0 * s).round(),
+                api_panel_label_width(card_text_right, card_text_x),
                 [0.58, 0.61, 0.70, 1.0],
                 0.74,
+                &mut error_scratch,
             );
             let loaded = format_last_loaded_at(spec.last_loaded, now);
             self.draw_string_scaled_pixel_snapped(
@@ -994,12 +1008,15 @@ impl Renderer {
                 }
                 let tag_x = x + pad + indent_w;
                 self.draw_tree_disclosure_icon(!collapsed, tag_x, cy, tag_h, self.theme.line_num);
-                self.draw_string_scaled_stable(
+                let tag_text_x = tag_x + 18.0 * s;
+                self.draw_tree_label_clipped(
                     tag,
-                    tag_x + 18.0 * s,
+                    tag_text_x,
                     tree_text_y(cy),
+                    api_panel_label_width(x + w - pad, tag_text_x),
                     self.theme.fg,
                     TREE_TEXT_SCALE,
+                    &mut error_scratch,
                 );
                 cy += tag_h;
                 if !collapsed || filtering {
@@ -1043,16 +1060,22 @@ impl Renderer {
                             s,
                             0.62,
                         );
-                        self.draw_string_scaled_stable(
-                            display_path,
-                            route_x + chip_w + 8.0 * s,
-                            tree_text_y(cy),
-                            self.theme.fg,
-                            TREE_TEXT_SCALE,
-                        );
                         let route_mock_enabled = api.mock.route_overrides.iter().any(|item| {
                             item.enabled && item.method == route.method && item.path == route.path
                         });
+                        let route_text_x = route_x + chip_w + 8.0 * s;
+                        let route_text_right = x + w
+                            - pad
+                            - if route_mock_enabled { 21.0 * s } else { 0.0 };
+                        self.draw_tree_label_clipped(
+                            display_path,
+                            route_text_x,
+                            tree_text_y(cy),
+                            api_panel_label_width(route_text_right, route_text_x),
+                            self.theme.fg,
+                            TREE_TEXT_SCALE,
+                            &mut error_scratch,
+                        );
                         if route_mock_enabled {
                             let icon_size = 17.0 * s;
                             self.draw_file_icon(
@@ -1081,6 +1104,8 @@ impl Renderer {
 
 #[cfg(test)]
 mod api_panel_scroll_regression_tests {
+    use super::*;
+
     #[test]
     fn all_manual_routes_are_rendered_without_a_hidden_fixed_cap() {
         let source = include_str!("api_client_panel_main_renderer.rs");
@@ -1101,5 +1126,16 @@ mod api_panel_scroll_regression_tests {
         let source = include_str!("api_client_panel_main_renderer.rs");
         assert!(source.contains("if hover_settled"));
         assert!(source.contains("UiId::ApiRoutesRoot"));
+    }
+
+    #[test]
+    fn api_panel_baseline_and_label_width_match_pixel_clipped_layout() {
+        assert_eq!(api_panel_row_text_y(10.2, 24.4, 1.25).fract(), 0.0);
+        assert_eq!(api_panel_label_width(180.0, 40.0), 140.0);
+        assert_eq!(api_panel_label_width(40.0, 180.0), 0.0);
+
+        let source = include_str!("api_client_panel_main_renderer.rs");
+        assert!(source.contains("draw_tree_label_clipped(\n                &spec.title"));
+        assert!(source.contains("draw_tree_label_clipped(\n                            display_path"));
     }
 }

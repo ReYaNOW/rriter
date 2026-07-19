@@ -6,6 +6,7 @@ use super::types::{
 use crate::app::api_client::{
     ApiMethod, ApiSpecEntry, ApiSpecModel, api_generated_response_for_route,
 };
+use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
 pub fn build_api_mock_routes<'a>(
@@ -34,7 +35,7 @@ pub fn build_api_mock_routes<'a>(
             source_key: "manual".to_string(),
             method: route.method,
             path: route.path.clone(),
-            enabled: true,
+            enabled: route.enabled,
             proxy_when_disabled: false,
             response: route.response.clone(),
             generated_status: 200,
@@ -117,11 +118,9 @@ pub fn resolve_api_mock_route<'a>(
     method: ApiMethod,
     path: &str,
 ) -> ApiMockRouteDecision<'a> {
-    if let Some(route) = routes.iter().find(|route| {
+    if let Some(route) = best_matching_route(routes, method, path, |route| {
         route.origin == ApiMockRouteOrigin::Manual
             && route.enabled
-            && route.method == method
-            && api_mock_path_matches(&route.path, path)
     }) {
         return ApiMockRouteDecision::Mock(route);
     }
@@ -138,20 +137,16 @@ pub fn resolve_api_mock_route<'a>(
         }
     }
 
-    if let Some(route) = routes.iter().find(|route| {
+    if let Some(route) = best_matching_route(routes, method, path, |route| {
         route.origin == ApiMockRouteOrigin::OpenApi
             && route.enabled
-            && route.method == method
-            && api_mock_path_matches(&route.path, path)
     }) {
         return ApiMockRouteDecision::Mock(route);
     }
 
     if mode == ApiMockMode::MockAll {
-        if let Some(route) = routes.iter().find(|route| {
+        if let Some(route) = best_matching_route(routes, method, path, |route| {
             route.origin == ApiMockRouteOrigin::OpenApi
-                && route.method == method
-                && api_mock_path_matches(&route.path, path)
         }) {
             return ApiMockRouteDecision::Mock(route);
         }
@@ -162,6 +157,47 @@ pub fn resolve_api_mock_route<'a>(
     } else {
         ApiMockRouteDecision::NotFound
     }
+}
+
+fn best_matching_route<'a>(
+    routes: &'a [ApiMockRuntimeRoute],
+    method: ApiMethod,
+    path: &str,
+    mut eligible: impl FnMut(&ApiMockRuntimeRoute) -> bool,
+) -> Option<&'a ApiMockRuntimeRoute> {
+    let mut best = None;
+    for route in routes {
+        if !eligible(route)
+            || route.method != method
+            || !api_mock_path_matches(&route.path, path)
+        {
+            continue;
+        }
+        let score = api_mock_route_specificity(&route.path, path);
+        if best
+            .as_ref()
+            .is_none_or(|(_, best_score)| score > *best_score)
+        {
+            best = Some((route, score));
+        }
+    }
+    best.map(|(route, _)| route)
+}
+
+fn api_mock_route_specificity(pattern: &str, path: &str) -> (bool, usize, Reverse<usize>) {
+    let mut static_bytes = 0usize;
+    let mut param_count = 0usize;
+    if let Some(tokens) = path_pattern_tokens(pattern) {
+        for token in tokens {
+            match token {
+                PathPatternToken::Static(text) => {
+                    static_bytes = static_bytes.saturating_add(text.len())
+                }
+                PathPatternToken::Param(_) => param_count = param_count.saturating_add(1),
+            }
+        }
+    }
+    (pattern == path, static_bytes, Reverse(param_count))
 }
 
 fn api_mock_path_matches(pattern: &str, path: &str) -> bool {
@@ -196,34 +232,67 @@ fn match_path_segment(
         return (pattern == path).then_some(());
     }
     let tokens = path_pattern_tokens(pattern)?;
-    let mut pos = 0usize;
-    for (idx, token) in tokens.iter().enumerate() {
-        match token {
-            PathPatternToken::Static(text) => {
-                if !path[pos..].starts_with(text) {
-                    return None;
-                }
-                pos = pos.saturating_add(text.len());
+    match_path_tokens(&tokens, 0, path, 0, params).then_some(())
+}
+
+fn match_path_tokens(
+    tokens: &[PathPatternToken],
+    token_idx: usize,
+    path: &str,
+    pos: usize,
+    params: &mut BTreeMap<String, String>,
+) -> bool {
+    let Some(token) = tokens.get(token_idx) else {
+        return pos == path.len();
+    };
+    match token {
+        PathPatternToken::Static(text) => {
+            path.get(pos..).is_some_and(|rest| rest.starts_with(text))
+                && match_path_tokens(
+                    tokens,
+                    token_idx + 1,
+                    path,
+                    pos.saturating_add(text.len()),
+                    params,
+                )
+        }
+        PathPatternToken::Param(name) => {
+            let next_static = tokens.get(token_idx + 1).and_then(|token| match token {
+                PathPatternToken::Static(text) if !text.is_empty() => Some(text.as_str()),
+                _ => None,
+            });
+            let mut ends = path
+                .char_indices()
+                .map(|(idx, _)| idx)
+                .filter(|end| *end > pos)
+                .collect::<Vec<_>>();
+            if path.len() > pos {
+                ends.push(path.len());
             }
-            PathPatternToken::Param(name) => {
-                let next_static = tokens[idx + 1..].iter().find_map(|token| match token {
-                    PathPatternToken::Static(text) if !text.is_empty() => Some(text.as_str()),
-                    _ => None,
-                });
-                let end = if let Some(next_static) = next_static {
-                    path[pos..].find(next_static).map(|offset| pos + offset)?
-                } else {
-                    path.len()
+            ends.sort_unstable();
+            ends.dedup();
+            for end in ends.into_iter().rev() {
+                if next_static.is_some_and(|text| {
+                    !path.get(end..).is_some_and(|rest| rest.starts_with(text))
+                }) {
+                    continue;
+                }
+                let Some(value) = path.get(pos..end) else {
+                    continue;
                 };
-                if end <= pos {
-                    return None;
+                let previous = params.insert(name.clone(), value.to_string());
+                if match_path_tokens(tokens, token_idx + 1, path, end, params) {
+                    return true;
                 }
-                params.insert(name.clone(), path[pos..end].to_string());
-                pos = end;
+                if let Some(previous) = previous {
+                    params.insert(name.clone(), previous);
+                } else {
+                    params.remove(name);
+                }
             }
+            false
         }
     }
-    (pos == path.len()).then_some(())
 }
 
 fn path_pattern_tokens(pattern: &str) -> Option<Vec<PathPatternToken>> {
@@ -421,6 +490,70 @@ mod tests {
 
         assert_eq!(params.get("id").map(String::as_str), Some("42"));
         assert_eq!(params.get("post_id").map(String::as_str), Some("7"));
+    }
+
+    #[test]
+    fn route_resolution_prefers_static_path_over_earlier_parameter_route() {
+        let mut state = ApiMockState::default();
+        for (stable_id, path) in [("generic", "/users/{id}"), ("static", "/users/me")] {
+            state.manual_routes.push(super::super::types::ApiManualRoute {
+                stable_id: stable_id.to_string(),
+                method: ApiMethod::Get,
+                path: path.to_string(),
+                enabled: true,
+                response: super::super::types::ApiMockResponse::Generated,
+                python: None,
+                input_fields: Vec::new(),
+                output_fields: Vec::new(),
+            });
+        }
+        let routes = build_api_mock_routes([], &state);
+
+        let ApiMockRouteDecision::Mock(route) = resolve_api_mock_route(
+            &routes,
+            ApiMockMode::MockSelectedProxyRest,
+            ApiMethod::Get,
+            "/users/me",
+        ) else {
+            panic!("route must be mocked");
+        };
+
+        assert_eq!(route.path, "/users/me");
+    }
+
+    #[test]
+    fn embedded_path_parameter_can_contain_the_suffix_text() {
+        let params = api_mock_path_params("/files/{name}.json", "/files/foo.json.json")
+            .expect("backtracking match");
+
+        assert_eq!(params.get("name").map(String::as_str), Some("foo.json"));
+    }
+
+    #[test]
+    fn disabled_manual_route_is_not_enabled_in_runtime_snapshot() {
+        let mut state = ApiMockState::default();
+        state.manual_routes.push(super::super::types::ApiManualRoute {
+            stable_id: "disabled".to_string(),
+            method: ApiMethod::Get,
+            path: "/disabled".to_string(),
+            enabled: false,
+            response: super::super::types::ApiMockResponse::Generated,
+            python: None,
+            input_fields: Vec::new(),
+            output_fields: Vec::new(),
+        });
+        let routes = build_api_mock_routes([], &state);
+
+        assert!(!routes[0].enabled);
+        assert_eq!(
+            resolve_api_mock_route(
+                &routes,
+                ApiMockMode::MockAll,
+                ApiMethod::Get,
+                "/disabled"
+            ),
+            ApiMockRouteDecision::NotFound
+        );
     }
 
     #[test]

@@ -82,11 +82,18 @@ fn api_rect_intersection(
 }
 
 fn api_centered_text_y(y: f32, h: f32, scale: f32) -> f32 {
-    y + h * 0.5 + 4.5 * scale
+    (y.round() + h.round() * 0.5 + (4.5 * scale).round()).round()
 }
 
 fn api_split_label_text_y(y: f32, h: f32, scale: f32, bottom: bool) -> f32 {
-    y + h * if bottom { 0.80 } else { 0.30 } + 4.5 * scale
+    (y.round()
+        + h.round() * if bottom { 0.80 } else { 0.30 }
+        + (4.5 * scale).round())
+    .round()
+}
+
+fn api_popup_width(desired: f32, minimum: f32, available: f32) -> f32 {
+    desired.max(minimum).min(available.max(0.0))
 }
 
 fn response_auth_token_flags(response: &crate::app::api_client::ApiJobResponse) -> (bool, bool) {

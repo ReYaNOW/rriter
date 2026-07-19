@@ -193,6 +193,9 @@ fn python_completion_context_detects_member_dot_and_call_parens() {
     let multiline_call = editor_with("asyncpg.create_pool(\n    ma");
     assert!(cursor_inside_python_call_parens(&multiline_call));
 
+    let string_delimiter = editor_with(r#"outer(")", value"#);
+    assert!(cursor_inside_python_call_parens(&string_delimiter));
+
     let closed_multiline_call = editor_with("asyncpg.create_pool()\nma");
     assert!(!cursor_inside_python_call_parens(&closed_multiline_call));
 

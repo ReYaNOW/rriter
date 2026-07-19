@@ -775,6 +775,7 @@ impl Renderer {
             );
             let max_scroll = crate::app::api_client::api_python_version_list_max_scroll(
                 api.mock_python_versions.len(),
+                list_h,
                 s,
             );
             let scroll_y = api.mock_python_versions_scroll.current.min(max_scroll).max(0.0);
@@ -932,14 +933,16 @@ impl Renderer {
         max_scroll: f32,
         s: f32,
     ) {
-        if max_scroll <= 0.0 {
+        let Some((track_h, thumb_h)) = crate::app::api_client::api_python_scrollbar_metrics(
+            h,
+            max_scroll,
+            s,
+        ) else {
             return;
-        }
+        };
         let track_w = 4.0 * s;
         let track_x = x + w - track_w - 4.0 * s;
         let track_y = y + 6.0 * s;
-        let track_h = h - 12.0 * s;
-        let thumb_h = (track_h * (track_h / (track_h + max_scroll))).clamp(18.0 * s, track_h);
         let thumb_y = track_y + (track_h - thumb_h) * (scroll_y / max_scroll).clamp(0.0, 1.0);
         self.push_rounded_rect(track_x, track_y, track_w, track_h, track_w * 0.5, [1.0, 1.0, 1.0, 0.08]);
         self.push_rounded_rect(track_x, thumb_y, track_w, thumb_h, track_w * 0.5, [1.0, 1.0, 1.0, 0.36]);

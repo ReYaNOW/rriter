@@ -54,6 +54,7 @@ impl crate::app::App {
             if crate::ui_system::point_in_rect(mx, my, rect) {
                 let max_scroll = api_python_version_list_max_scroll(
                     self.ide_panel.api.mock_python_versions.len(),
+                    rect.3,
                     s,
                 );
                 self.ide_panel.api.mock_python_versions_scroll.anim_speed = 7.0;

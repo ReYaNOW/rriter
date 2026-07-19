@@ -1,53 +1,3 @@
-fn python_current_call_named_args(text: &str, cursor: usize) -> FxHashSet<String> {
-    let bytes = text.as_bytes();
-    let cursor = cursor.min(bytes.len());
-    let mut depth = 0usize;
-    let mut open = None;
-    for idx in (0..cursor).rev() {
-        match bytes[idx] {
-            b')' | b']' | b'}' => depth += 1,
-            b'(' => {
-                if depth == 0 {
-                    open = Some(idx + 1);
-                    break;
-                }
-                depth = depth.saturating_sub(1);
-            }
-            _ => {}
-        }
-    }
-    let Some(open) = open else {
-        return FxHashSet::default();
-    };
-    let mut out = FxHashSet::default();
-    let mut p = open;
-    while p < cursor {
-        while p < cursor && !is_python_ident_byte(bytes[p]) {
-            p += 1;
-        }
-        let start = p;
-        while p < cursor && is_python_ident_byte(bytes[p]) {
-            p += 1;
-        }
-        if start == p {
-            continue;
-        }
-        let mut q = p;
-        while q < cursor && matches!(bytes[q], b' ' | b'\t') {
-            q += 1;
-        }
-        if q < cursor
-            && bytes[q] == b'='
-            && start > open
-            && bytes[start - 1] != b'.'
-            && let Some(name) = text.get(start..p)
-        {
-            out.insert(name.to_string());
-        }
-    }
-    out
-}
-
 pub(crate) fn ty_signature_parameter_items(
     names: Vec<String>,
     text: &str,
@@ -973,6 +923,7 @@ impl App {
             &snapshot.line_offsets,
             snapshot.analysis_cursor,
             &prefix,
+            snapshot.version,
             mode,
         );
         let cacheable_response = source.cacheable() && prefix.is_empty();

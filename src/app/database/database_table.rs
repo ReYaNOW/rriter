@@ -295,18 +295,98 @@ pub fn validate_table_fragment(fragment: &str, label: &str) -> Result<(), String
     if label == "WHERE" && contains_unquoted_double_equals(trimmed) {
         return Err("WHERE содержит недопустимый оператор ==; используйте =".to_string());
     }
-    let wrapped = if label == "WHERE" {
-        format!("SELECT 1 FROM public.__rriter_validation WHERE {trimmed}")
+    let (prefix, clause_kind, clause_text) = if label == "WHERE" {
+        (
+            "SELECT 1 FROM public.__rriter_validation WHERE ",
+            "where",
+            "WHERE ",
+        )
     } else {
-        format!("SELECT 1 FROM public.__rriter_validation ORDER BY {trimmed}")
+        (
+            "SELECT 1 FROM public.__rriter_validation ORDER BY ",
+            "order_by",
+            "ORDER BY ",
+        )
     };
+    let wrapped = format!("{prefix}{trimmed}");
     if crate::languages::sql::scan_statements(&wrapped).len() != 1 {
         return Err(format!("{label} должен быть одним SQL-фрагментом"));
     }
-    if crate::languages::sql::has_syntax_error(&wrapped) {
+    if !table_fragment_clause_consumes_tail(
+        &wrapped,
+        clause_kind,
+        prefix.len().saturating_sub(clause_text.len()),
+    ) {
         return Err(format!("{label} содержит синтаксическую ошибку"));
     }
     Ok(())
+}
+
+fn table_fragment_clause_consumes_tail(
+    wrapped: &str,
+    clause_kind: &str,
+    clause_start: usize,
+) -> bool {
+    let mut parser = tree_sitter::Parser::new();
+    let language: tree_sitter::Language = tree_sitter_sequel::LANGUAGE.into();
+    if parser.set_language(&language).is_err() {
+        return false;
+    }
+    let Some(tree) = parser.parse(wrapped, None) else {
+        return false;
+    };
+    let root = tree.root_node();
+    if root.has_error() {
+        return false;
+    }
+    let mut stack = vec![root];
+    while let Some(node) = stack.pop() {
+        if node.kind() == clause_kind && node.start_byte() == clause_start {
+            return table_fragment_tail_is_trivia(&wrapped[node.end_byte()..]);
+        }
+        let mut cursor = node.walk();
+        stack.extend(node.named_children(&mut cursor));
+    }
+    false
+}
+
+fn table_fragment_tail_is_trivia(tail: &str) -> bool {
+    let bytes = tail.as_bytes();
+    let mut index = 0usize;
+    while index < bytes.len() {
+        if bytes[index].is_ascii_whitespace() {
+            index += 1;
+            continue;
+        }
+        if bytes[index] == b'-' && bytes.get(index + 1) == Some(&b'-') {
+            index += 2;
+            while index < bytes.len() && bytes[index] != b'\n' {
+                index += 1;
+            }
+            continue;
+        }
+        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+            index += 2;
+            let mut depth = 1usize;
+            while index < bytes.len() && depth > 0 {
+                if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
+                    depth = depth.saturating_add(1);
+                    index += 2;
+                } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                    depth = depth.saturating_sub(1);
+                    index += 2;
+                } else {
+                    index += 1;
+                }
+            }
+            if depth != 0 {
+                return false;
+            }
+            continue;
+        }
+        return false;
+    }
+    true
 }
 
 fn contains_unquoted_double_equals(text: &str) -> bool {
@@ -1008,6 +1088,14 @@ mod tests {
         assert!(validate_table_fragment("name = 'a==b'", "WHERE").is_ok());
         assert!(validate_table_fragment("id = 1 /* == */", "WHERE").is_ok());
         assert!(validate_table_fragment("note = $$==$$ -- ==\n", "WHERE").is_ok());
+    }
+
+    #[test]
+    fn a4_b018_fragments_reject_additional_outer_clauses() {
+        assert!(validate_table_fragment("TRUE ORDER BY id", "WHERE").is_err());
+        assert!(validate_table_fragment("id LIMIT 1", "ORDER BY").is_err());
+        assert!(validate_table_fragment("EXISTS (SELECT 1 FROM items ORDER BY id)", "WHERE").is_ok());
+        assert!(validate_table_fragment("(SELECT id FROM items LIMIT 1)", "ORDER BY").is_ok());
     }
 
     #[test]

@@ -40,7 +40,7 @@ pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
     let mut pending_blank_lines = 0usize;
     let mut offset = 0usize;
     let mut continuing = false;
-    let mut paren_depth = 0i32;
+    let mut delimiter_state = super::PythonDelimiterState::default();
 
     for raw_line in text.split_inclusive('\n') {
         let line_start = offset;
@@ -70,9 +70,9 @@ pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
                 });
             }
             pending_blank_lines = 0;
-            update_python_import_continuation(trimmed, &mut paren_depth, &mut continuing);
+            update_python_import_continuation(trimmed, &mut delimiter_state, &mut continuing);
             if !continuing {
-                paren_depth = 0;
+                delimiter_state = super::PythonDelimiterState::default();
             }
             continue;
         }
@@ -83,13 +83,13 @@ pub fn import_blocks(text: &str) -> Vec<ImportBlock> {
                 block.line_count += pending_blank_lines + 1;
             }
             pending_blank_lines = 0;
-            update_python_import_continuation(trimmed, &mut paren_depth, &mut continuing);
+            update_python_import_continuation(trimmed, &mut delimiter_state, &mut continuing);
             continue;
         }
 
         pending_blank_lines = 0;
         continuing = false;
-        paren_depth = 0;
+        delimiter_state = super::PythonDelimiterState::default();
         finish_import_block(&mut current, &mut blocks);
     }
 
@@ -156,6 +156,51 @@ pub fn push_docstring_highlight_spans(
     }
 }
 
+pub(crate) fn python_plain_assignment_after_token(after_token: &str) -> bool {
+    let bytes = after_token.as_bytes();
+    for (idx, &byte) in bytes.iter().enumerate() {
+        if byte != b'=' {
+            continue;
+        }
+        let previous = idx.checked_sub(1).and_then(|at| bytes.get(at)).copied();
+        let next = bytes.get(idx + 1).copied();
+        if matches!(previous, Some(b'=' | b'!' | b'<' | b'>' | b':')) || next == Some(b'=') {
+            continue;
+        }
+        return true;
+    }
+    false
+}
+
+pub(crate) fn python_class_direct_attr(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    if trimmed.starts_with("def ")
+        || trimmed.starts_with("async def ")
+        || trimmed.starts_with('@')
+        || trimmed.starts_with("class ")
+    {
+        return None;
+    }
+    let end = trimmed
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(trimmed.len());
+    if end == 0 {
+        return None;
+    }
+    let rest = trimmed[end..].trim_start();
+    (rest.starts_with(':') || python_plain_assignment_after_token(rest))
+        .then_some(&trimmed[..end])
+}
+
+pub(crate) fn python_class_header_name(line: &str) -> Option<&str> {
+    let trimmed = line.trim_start();
+    let rest = trimmed.strip_prefix("class ")?;
+    let end = rest
+        .find(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .unwrap_or(rest.len());
+    (end > 0).then_some(&rest[..end])
+}
+
 fn python_import_keyword_len(trimmed: &str) -> Option<usize> {
     if trimmed.starts_with("from ") {
         Some("from".len())
@@ -166,15 +211,66 @@ fn python_import_keyword_len(trimmed: &str) -> Option<usize> {
     }
 }
 
-fn update_python_import_continuation(trimmed: &str, paren_depth: &mut i32, continuing: &mut bool) {
-    for b in trimmed.bytes() {
-        match b {
-            b'(' | b'[' | b'{' => *paren_depth += 1,
-            b')' | b']' | b'}' => *paren_depth -= 1,
-            _ => {}
+fn python_import_line_has_explicit_continuation(line: &str) -> bool {
+    let bytes = line.as_bytes();
+    let mut quote = None;
+    let mut triple = false;
+    let mut escaped = false;
+    let mut last_code = None;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+                index += 1;
+                continue;
+            }
+            if byte == b'\\' {
+                escaped = true;
+                index += 1;
+                continue;
+            }
+            let closes = byte == active_quote
+                && (!triple
+                    || bytes.get(index + 1) == Some(&active_quote)
+                        && bytes.get(index + 2) == Some(&active_quote));
+            if closes {
+                last_code = Some(active_quote);
+                quote = None;
+                index += if triple { 3 } else { 1 };
+            } else {
+                index += 1;
+            }
+            continue;
+        }
+        match byte {
+            b'#' => break,
+            active_quote @ (b'\'' | b'"') => {
+                quote = Some(active_quote);
+                triple = bytes.get(index + 1) == Some(&active_quote)
+                    && bytes.get(index + 2) == Some(&active_quote);
+                last_code = Some(active_quote);
+                index += if triple { 3 } else { 1 };
+            }
+            byte if byte.is_ascii_whitespace() => index += 1,
+            _ => {
+                last_code = Some(byte);
+                index += 1;
+            }
         }
     }
-    *continuing = *paren_depth > 0 || trimmed.ends_with('\\');
+    last_code == Some(b'\\')
+}
+
+fn update_python_import_continuation(
+    trimmed: &str,
+    delimiters: &mut super::PythonDelimiterState,
+    continuing: &mut bool,
+) {
+    delimiters.scan_line(trimmed);
+    *continuing = delimiters.has_open_delimiter()
+        || python_import_line_has_explicit_continuation(trimmed);
 }
 
 fn push_docstring_line_spans(
@@ -937,35 +1033,65 @@ pub fn push_python_ts_spans(
 }
 
 pub(crate) fn python_class_attr_name_ranges(code: &str) -> Vec<(usize, usize)> {
+    #[derive(Clone, Copy)]
+    struct ClassScope {
+        indent: usize,
+        body_indent: Option<usize>,
+        header_delimiters: super::PythonDelimiterState,
+        header_complete: bool,
+    }
+
     let mut ranges = Vec::new();
     let mut offset = 0usize;
-    let mut class_indent: Option<usize> = None;
+    let mut classes = Vec::<ClassScope>::new();
     for line in code.lines() {
-        let indent = line.len().saturating_sub(line.trim_start().len());
         let trimmed = line.trim_start();
-        if trimmed.starts_with("class ") {
-            class_indent = Some(indent);
-        } else if let Some(cls_indent) = class_indent {
-            if !trimmed.is_empty() && indent <= cls_indent {
-                class_indent = None;
-            } else if indent == cls_indent + 4
-                && !trimmed.starts_with("def ")
-                && !trimmed.starts_with("async def ")
-                && !trimmed.starts_with('@')
+        let indent = line.len().saturating_sub(trimmed.len());
+
+        while classes
+            .last()
+            .is_some_and(|scope| scope.header_complete && !trimmed.is_empty() && indent <= scope.indent)
+        {
+            classes.pop();
+        }
+
+        if let Some(scope) = classes.last_mut()
+            && !scope.header_complete
+        {
+            scope.header_delimiters.scan_line(line);
+            scope.header_complete = !scope.header_delimiters.has_open_delimiter()
+                && trimmed.trim_end().ends_with(':');
+            offset = offset.saturating_add(line.len()).saturating_add(1);
+            continue;
+        }
+
+        if let Some(scope) = classes.last_mut()
+            && !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && indent > scope.indent
+        {
+            let direct_indent = *scope.body_indent.get_or_insert(indent);
+            if indent == direct_indent
+                && let Some(name) = python_class_direct_attr(trimmed)
             {
-                let name_len = trimmed
-                    .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-                    .unwrap_or(trimmed.len());
-                if name_len > 0 {
-                    let rest = trimmed[name_len..].trim_start();
-                    if rest.starts_with(':') || rest.starts_with('=') {
-                        let start = offset + indent;
-                        ranges.push((start, start + name_len));
-                    }
-                }
+                let start = offset + indent;
+                ranges.push((start, start + name.len()));
             }
         }
-        offset += line.len() + 1;
+
+        if python_class_header_name(line).is_some() {
+            let mut header_delimiters = super::PythonDelimiterState::default();
+            header_delimiters.scan_line(line);
+            classes.push(ClassScope {
+                indent,
+                body_indent: None,
+                header_complete: !header_delimiters.has_open_delimiter()
+                    && trimmed.trim_end().ends_with(':'),
+                header_delimiters,
+            });
+        }
+
+        offset = offset.saturating_add(line.len()).saturating_add(1);
     }
     ranges
 }

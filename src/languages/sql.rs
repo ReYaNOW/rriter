@@ -179,7 +179,7 @@ struct ScannedStatement {
 #[derive(Debug)]
 enum ScanState {
     Normal,
-    SingleQuoted,
+    SingleQuoted { backslash_escapes: bool },
     DoubleQuoted,
     LineComment,
     BlockComment { depth: usize },
@@ -349,7 +349,21 @@ fn is_unsupported_in_managed_transaction(words: &[String]) -> bool {
         Some("VACUUM" | "CHECKPOINT" | "DISCARD") => true,
         Some("CREATE") => {
             matches!(second, Some("DATABASE" | "TABLESPACE" | "SUBSCRIPTION"))
-                || (second == Some("INDEX") && words.iter().any(|word| word == "CONCURRENTLY"))
+                || matches!(
+                    words,
+                    [create, index, concurrently, ..]
+                        if create == "CREATE"
+                            && index == "INDEX"
+                            && concurrently == "CONCURRENTLY"
+                )
+                || matches!(
+                    words,
+                    [create, unique, index, concurrently, ..]
+                        if create == "CREATE"
+                            && unique == "UNIQUE"
+                            && index == "INDEX"
+                            && concurrently == "CONCURRENTLY"
+                )
         }
         Some("DROP") => {
             matches!(second, Some("DATABASE" | "TABLESPACE" | "SUBSCRIPTION"))
@@ -382,7 +396,9 @@ fn scanned_statements(sql: &str) -> Vec<ScannedStatement> {
         match &mut state {
             ScanState::Normal => match bytes[index] {
                 b'\'' => {
-                    state = ScanState::SingleQuoted;
+                    state = ScanState::SingleQuoted {
+                        backslash_escapes: single_quote_uses_backslash_escapes(bytes, index),
+                    };
                     index += 1;
                 }
                 b'"' => {
@@ -425,7 +441,7 @@ fn scanned_statements(sql: &str) -> Vec<ScannedStatement> {
                 }
                 _ => index += 1,
             },
-            ScanState::SingleQuoted => {
+            ScanState::SingleQuoted { backslash_escapes } => {
                 if bytes[index] == b'\'' {
                     if bytes.get(index + 1) == Some(&b'\'') {
                         index += 2;
@@ -433,7 +449,10 @@ fn scanned_statements(sql: &str) -> Vec<ScannedStatement> {
                         state = ScanState::Normal;
                         index += 1;
                     }
-                } else if bytes[index] == b'\\' && bytes.get(index + 1).is_some() {
+                } else if *backslash_escapes
+                    && bytes[index] == b'\\'
+                    && bytes.get(index + 1).is_some()
+                {
                     index += 2;
                 } else {
                     index += 1;
@@ -543,6 +562,22 @@ fn dollar_quote_delimiter(bytes: &[u8], start: usize) -> Option<(Vec<u8>, usize)
     None
 }
 
+fn single_quote_uses_backslash_escapes(bytes: &[u8], quote_index: usize) -> bool {
+    let prefixed_by = |prefix_start: usize| {
+        prefix_start == 0 || !is_word_continue(bytes[prefix_start.saturating_sub(1)])
+    };
+    if quote_index >= 1
+        && matches!(bytes[quote_index - 1], b'e' | b'E')
+        && prefixed_by(quote_index - 1)
+    {
+        return true;
+    }
+    quote_index >= 2
+        && matches!(bytes[quote_index - 2], b'u' | b'U')
+        && bytes[quote_index - 1] == b'&'
+        && prefixed_by(quote_index - 2)
+}
+
 fn is_word_start(byte: u8) -> bool {
     byte.is_ascii_alphabetic() || byte == b'_'
 }
@@ -566,7 +601,9 @@ pub fn contains_sql_token_outside_literals_and_comments(sql: &str, token: &[u8])
                 }
                 match bytes[index] {
                     b'\'' => {
-                        state = ScanState::SingleQuoted;
+                        state = ScanState::SingleQuoted {
+                            backslash_escapes: single_quote_uses_backslash_escapes(bytes, index),
+                        };
                         index += 1;
                     }
                     b'"' => {
@@ -592,7 +629,7 @@ pub fn contains_sql_token_outside_literals_and_comments(sql: &str, token: &[u8])
                     _ => index += 1,
                 }
             }
-            ScanState::SingleQuoted => {
+            ScanState::SingleQuoted { backslash_escapes } => {
                 if bytes[index] == b'\'' {
                     if bytes.get(index + 1) == Some(&b'\'') {
                         index += 2;
@@ -600,7 +637,10 @@ pub fn contains_sql_token_outside_literals_and_comments(sql: &str, token: &[u8])
                         state = ScanState::Normal;
                         index += 1;
                     }
-                } else if bytes[index] == b'\\' && bytes.get(index + 1).is_some() {
+                } else if *backslash_escapes
+                    && bytes[index] == b'\\'
+                    && bytes.get(index + 1).is_some()
+                {
                     index += 2;
                 } else {
                     index += 1;
@@ -679,7 +719,9 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                 b'\'' => {
                     write_pending_space(&mut out, &mut pending_space, line_start);
                     out.push('\'');
-                    state = ScanState::SingleQuoted;
+                    state = ScanState::SingleQuoted {
+                        backslash_escapes: single_quote_uses_backslash_escapes(bytes, index),
+                    };
                     line_start = false;
                     index += 1;
                 }
@@ -771,7 +813,7 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                     line_start = false;
                 }
             },
-            ScanState::SingleQuoted => {
+            ScanState::SingleQuoted { backslash_escapes } => {
                 if bytes[index] == b'\'' {
                     out.push('\'');
                     if bytes.get(index + 1) == Some(&b'\'') {
@@ -781,7 +823,10 @@ pub fn format_sql_conservative(sql: &str) -> Result<String, String> {
                         state = ScanState::Normal;
                         index += 1;
                     }
-                } else if bytes[index] == b'\\' && bytes.get(index + 1).is_some() {
+                } else if *backslash_escapes
+                    && bytes[index] == b'\\'
+                    && bytes.get(index + 1).is_some()
+                {
                     out.push('\\');
                     index += 1;
                     push_next_utf8_char(sql, &mut index, &mut out);
@@ -988,6 +1033,7 @@ mod tests {
             "ALTER SYSTEM SET work_mem = '64MB';",
             "VACUUM items;",
             "CREATE INDEX CONCURRENTLY idx_items ON items(id);",
+            "CREATE UNIQUE INDEX CONCURRENTLY idx_items_unique ON items(id);",
             "REINDEX INDEX CONCURRENTLY idx_items;",
             "COPY items TO STDOUT;",
         ] {
@@ -998,6 +1044,18 @@ mod tests {
                 "{sql}"
             );
         }
+    }
+
+    #[test]
+    fn a4_b016_unique_concurrent_index_requires_autocommit() {
+        let error = validate_managed_user_sql(
+            "CREATE UNIQUE INDEX CONCURRENTLY idx_items_unique ON items(id);",
+        )
+        .unwrap_err();
+        assert_eq!(
+            error.kind,
+            SqlValidationErrorKind::UnsupportedInManagedTransaction
+        );
     }
 
     #[test]
@@ -1057,6 +1115,16 @@ mod tests {
             "id = 1 /* == */ AND note = $$==$$ -- ==\n",
             b"==",
         ));
+    }
+
+    #[test]
+    fn a4_b017_standard_strings_do_not_hide_following_transaction_commands() {
+        let error = validate_managed_user_sql("SELECT 'x\\'; COMMIT;").unwrap_err();
+        assert_eq!(error.kind, SqlValidationErrorKind::TransactionControl);
+        assert_eq!(error.statement_index, Some(1));
+
+        let escaped = scan_statements("SELECT E'x\\';still'; SELECT 2;");
+        assert_eq!(escaped.len(), 2);
     }
 
     #[test]

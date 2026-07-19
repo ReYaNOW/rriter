@@ -799,15 +799,15 @@ fn api_mock_locked_text_block_height(text: &str, s: f32) -> f32 {
 }
 
 fn api_mock_contract_row_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
-    row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()
+    (row_y.round() + row_h.round() * 0.5 + (4.5 * scale).round()).round()
 }
 
 fn api_mock_contract_status_text_y(row_y: f32, row_h: f32, scale: f32) -> f32 {
-    row_y.round() + row_h.round() * 0.5 + 5.0 * scale
+    (row_y.round() + row_h.round() * 0.5 + (5.0 * scale).round()).round()
 }
 
 fn api_mock_contract_button_text_y(row_y: f32, row_h: f32, text_scale: f32, scale: f32) -> f32 {
-    row_y.round() + row_h.round() * 0.5 + (4.5 * text_scale * scale).round()
+    (row_y.round() + row_h.round() * 0.5 + (4.5 * text_scale * scale).round()).round()
 }
 
 const API_MOCK_CONTRACT_PROP_LABEL_SCALE: f32 = 0.82;
@@ -892,5 +892,26 @@ mod tests {
             api_mock_contract_prop_label_text_y(10.2, 24.4, 1.0),
             api_centered_text_y(10.0, 24.0, 1.0)
         );
+    }
+
+    #[test]
+    fn api_text_baselines_are_pixel_snapped_at_fractional_scale() {
+        for y in [
+            api_centered_text_y(10.2, 24.4, 1.25),
+            api_split_label_text_y(10.2, 24.4, 1.25, false),
+            api_split_label_text_y(10.2, 24.4, 1.25, true),
+            api_mock_contract_row_text_y(10.2, 24.4, 1.25),
+            api_mock_contract_status_text_y(10.2, 24.4, 1.25),
+            api_mock_contract_button_text_y(10.2, 24.4, 0.82, 1.25),
+        ] {
+            assert_eq!(y.fract(), 0.0, "baseline {y} must be pixel snapped");
+        }
+    }
+
+    #[test]
+    fn popup_width_fits_a_viewport_narrower_than_its_preferred_minimum() {
+        assert_eq!(api_popup_width(80.0, 132.0, 1.0), 1.0);
+        assert_eq!(api_popup_width(80.0, 132.0, 200.0), 132.0);
+        assert_eq!(api_popup_width(240.0, 132.0, 200.0), 200.0);
     }
 }

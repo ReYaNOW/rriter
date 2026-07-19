@@ -481,6 +481,29 @@ where
     text.len()
 }
 
+pub(crate) fn file_tree_row_index_at(
+    panel_y: f32,
+    mouse_y: f32,
+    row_h: f32,
+    current_scroll: f32,
+    total_nodes: usize,
+) -> Option<usize> {
+    if !panel_y.is_finite()
+        || !mouse_y.is_finite()
+        || !row_h.is_finite()
+        || row_h <= 0.0
+        || !current_scroll.is_finite()
+    {
+        return None;
+    }
+    let content_y = mouse_y - panel_y + current_scroll.round();
+    if content_y < 0.0 {
+        return None;
+    }
+    let idx = (content_y / row_h).floor() as usize;
+    (idx < total_nodes).then_some(idx)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct FileTreeScrollbarLayout {
     pub track_x: f32,
@@ -1321,13 +1344,11 @@ impl App {
                         return Err("Можно вырезать только элементы внутри workspace".to_string());
                     }
                 }
-                let mut moved = Vec::new();
-                let mut pairs = Vec::new();
-                for src in &paths {
-                    let (old_path, dst) = move_path_to_dir(src, &target_dir)?;
-                    self.update_open_paths_after_file_tree_rename(&old_path, &dst);
+                let pairs = move_paths_to_dir_atomic(&paths, &target_dir)?;
+                let mut moved = Vec::with_capacity(pairs.len());
+                for (old_path, dst) in &pairs {
+                    self.update_open_paths_after_file_tree_rename(old_path, dst);
                     moved.push(dst.clone());
-                    pairs.push((old_path, dst));
                 }
                 self.ide_panel.file_tree_selection.clear();
                 self.ide_panel.file_tree_selection.extend(moved);
@@ -1412,8 +1433,6 @@ impl App {
             }
             return;
         }
-        let mut moved = Vec::new();
-        let mut pairs = Vec::new();
         for src in &sources {
             if !can_modify_path(src, &self.ide_workspaces) {
                 if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
@@ -1422,19 +1441,20 @@ impl App {
                 }
                 return;
             }
-            match move_path_to_dir(src, &target_dir) {
-                Ok((old_path, dst)) => {
-                    self.update_open_paths_after_file_tree_rename(&old_path, &dst);
-                    moved.push(dst.clone());
-                    pairs.push((old_path, dst));
+        }
+        let pairs = match move_paths_to_dir_atomic(&sources, &target_dir) {
+            Ok(pairs) => pairs,
+            Err(error) => {
+                if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
+                    dialog.error = Some(error);
                 }
-                Err(err) => {
-                    if let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_mut() {
-                        dialog.error = Some(err);
-                    }
-                    return;
-                }
+                return;
             }
+        };
+        let mut moved = Vec::with_capacity(pairs.len());
+        for (old_path, dst) in &pairs {
+            self.update_open_paths_after_file_tree_rename(old_path, dst);
+            moved.push(dst.clone());
         }
         self.ide_panel.file_tree_move_dialog = None;
         self.ide_panel.file_tree_selection.clear();
@@ -1519,16 +1539,13 @@ impl App {
             return None;
         }
         let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
-        let content_y = my - panel_y + self.ide_panel.explorer_scroll.current;
-        if content_y < 0.0 {
-            return None;
-        }
-        let idx = (content_y / row_h) as usize;
-        if idx < self.ide_panel.file_tree_nodes.len() {
-            Some(idx)
-        } else {
-            None
-        }
+        file_tree_row_index_at(
+            panel_y,
+            my,
+            row_h,
+            self.ide_panel.explorer_scroll.current,
+            self.ide_panel.file_tree_nodes.len(),
+        )
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

@@ -431,21 +431,64 @@ fn parse_proxy_jump(value: &str) -> Result<SshConnectionConfig, DatabaseSshError
             "ProxyJump must use alias or user@host[:port] for built-in SSH".to_string(),
         )
     })?;
-    let (host, port) = match host_port.rsplit_once(':') {
-        Some((host, port)) => (
-            host.to_string(),
-            port.parse::<u16>().map_err(|_| {
-                DatabaseSshError::Unsupported("ProxyJump port is invalid".to_string())
-            })?,
-        ),
-        None => (host_port.to_string(), 22),
-    };
+    let (host, port) = parse_proxy_jump_host_port(host_port)?;
     Ok(SshConnectionConfig {
         host,
         port,
         username: username.to_string(),
         ..SshConnectionConfig::default()
     })
+}
+
+fn parse_proxy_jump_host_port(host_port: &str) -> Result<(String, u16), DatabaseSshError> {
+    if let Some(bracketed) = host_port.strip_prefix('[') {
+        let Some(close) = bracketed.find(']') else {
+            return Err(DatabaseSshError::Unsupported(
+                "ProxyJump IPv6 host has no closing bracket".to_string(),
+            ));
+        };
+        let host = &bracketed[..close];
+        let suffix = &bracketed[close + 1..];
+        let port = if suffix.is_empty() {
+            22
+        } else {
+            suffix
+                .strip_prefix(':')
+                .ok_or_else(|| {
+                    DatabaseSshError::Unsupported(
+                        "ProxyJump bracketed host has an invalid suffix".to_string(),
+                    )
+                })?
+                .parse::<u16>()
+                .map_err(|_| {
+                    DatabaseSshError::Unsupported("ProxyJump port is invalid".to_string())
+                })?
+        };
+        if host.is_empty() {
+            return Err(DatabaseSshError::Unsupported(
+                "ProxyJump host is empty".to_string(),
+            ));
+        }
+        return Ok((host.to_string(), port));
+    }
+    if host_port.matches(':').count() > 1 {
+        return Ok((host_port.to_string(), 22));
+    }
+    match host_port.rsplit_once(':') {
+        Some((host, port)) if !host.is_empty() => Ok((
+            host.to_string(),
+            port.parse::<u16>().map_err(|_| {
+                DatabaseSshError::Unsupported("ProxyJump port is invalid".to_string())
+            })?,
+        )),
+        Some(_) => Err(DatabaseSshError::Unsupported(
+            "ProxyJump host is empty".to_string(),
+        )),
+        None if !host_port.is_empty() => Ok((host_port.to_string(), 22)),
+        None => Err(DatabaseSshError::Unsupported(
+            "ProxyJump host is empty".to_string(),
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -467,5 +510,20 @@ mod tests {
     fn proxy_jump_parser_rejects_ambiguous_chains() {
         assert!(parse_proxy_jump("one,two").is_err());
         assert!(parse_proxy_jump("%h").is_err());
+    }
+
+    #[test]
+    fn a4_b021_proxy_jump_parser_accepts_ipv6_targets() {
+        let target = parse_proxy_jump("deploy@[2001:db8::1]").unwrap();
+        assert_eq!(target.host, "2001:db8::1");
+        assert_eq!(target.port, 22);
+
+        let target = parse_proxy_jump("deploy@[2001:db8::1]:2202").unwrap();
+        assert_eq!(target.host, "2001:db8::1");
+        assert_eq!(target.port, 2202);
+
+        let target = parse_proxy_jump("deploy@2001:db8::2").unwrap();
+        assert_eq!(target.host, "2001:db8::2");
+        assert_eq!(target.port, 22);
     }
 }

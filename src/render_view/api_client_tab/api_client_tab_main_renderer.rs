@@ -628,7 +628,7 @@ impl Renderer {
                     );
                 }
             }
-            let auth_route_count = api_auth_related_route_count(model).min(12);
+            let auth_route_count = api_auth_related_route_count(model);
             if auth_route_count > 0 {
                 cy += 28.0 * s;
                 self.draw_api_section_title("Роуты авторизации", x + pad, cy + 18.0 * s, s);
@@ -2329,7 +2329,7 @@ impl Renderer {
             } else {
                 20.0 * s
             };
-            let menu_w = (menu_label_w + menu_extra_w).clamp(132.0 * s, content_w);
+            let menu_w = api_popup_width(menu_label_w + menu_extra_w, 132.0 * s, content_w);
             let tab_x = x + pad;
             self.draw_api_response_tab(
                 "Example",

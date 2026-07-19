@@ -91,21 +91,27 @@ fn query_toolbar_layout(x: f32, w: f32, scale: f32) -> QueryToolbarLayout {
     let available = (right - left).max(0.0);
     let use_compact = normal_total + (120.0 * scale).round() > available;
     let mut widths = if use_compact { compact } else { normal };
-    let gap = if use_compact { compact_gap } else { normal_gap };
+    let mut gap = if use_compact { compact_gap } else { normal_gap };
     let total = widths.iter().sum::<f32>() + gap * 5.0;
     if total > available && total > 0.0 {
-        let minimum = (24.0 * scale).round().max(18.0);
+        gap = gap.min((available / 11.0).floor().max(0.0));
         let distributable = (available - gap * 5.0).max(0.0);
-        let ratio = (distributable / widths.iter().sum::<f32>()).clamp(0.0, 1.0);
+        let source_width = widths.iter().sum::<f32>();
+        let ratio = if source_width > 0.0 {
+            (distributable / source_width).clamp(0.0, 1.0)
+        } else {
+            0.0
+        };
         for width in &mut widths {
-            *width = (*width * ratio).max(minimum).round();
+            *width = (*width * ratio).floor().max(0.0);
         }
-        let overflow = (widths.iter().sum::<f32>() + gap * 5.0 - available).max(0.0);
-        if overflow > 0.0 {
-            let each = overflow / widths.len() as f32;
-            for width in &mut widths {
-                *width = (*width - each).max(1.0).round();
+        let mut spare = (distributable - widths.iter().sum::<f32>()).floor() as usize;
+        for width in &mut widths {
+            if spare == 0 {
+                break;
             }
+            *width += 1.0;
+            spare -= 1;
         }
     }
     let buttons_end = left + widths.iter().sum::<f32>() + gap * 5.0;
@@ -1509,6 +1515,26 @@ mod tests {
             assert!(layout.status_w.is_finite());
             assert!(layout.status_w >= 0.0);
             assert!(layout.status_x + layout.status_w <= 10.0 + width.max(0.0) + 0.5);
+        }
+    }
+
+    #[test]
+    fn a4_b013_query_toolbar_buttons_never_cross_narrow_clip() {
+        for scale in [0.75, 1.0, 1.25, 2.0] {
+            for width in [0.0, 20.0, 40.0, 80.0, 120.0, 180.0, 280.0] {
+                let x = 10.0;
+                let layout = query_toolbar_layout(x, width, scale);
+                let viewport_right = x + width;
+                let left = (x + (8.0 * scale).round()).min(viewport_right);
+                let right = (viewport_right - 8.0 * scale)
+                    .max(left)
+                    .min(viewport_right);
+                let available = (right - left).max(0.0);
+                let total = layout.button_widths.iter().sum::<f32>() + layout.gap * 5.0;
+                assert!(layout.button_widths.iter().all(|value| value.is_finite() && *value >= 0.0));
+                assert!(layout.gap.is_finite() && layout.gap >= 0.0);
+                assert!(total <= available + 0.01, "scale={scale} width={width}: {total} > {available}");
+            }
         }
     }
 

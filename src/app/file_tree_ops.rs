@@ -489,6 +489,33 @@ pub(super) fn restore_trash_entries(
     }
 }
 
+pub(super) fn move_paths_to_dir_atomic(
+    sources: &[PathBuf],
+    target_dir: &Path,
+) -> Result<Vec<(PathBuf, PathBuf)>, String> {
+    let mut pairs = Vec::with_capacity(sources.len());
+    for src in sources {
+        match move_path_to_dir(src, target_dir) {
+            Ok(pair) => pairs.push(pair),
+            Err(error) => {
+                if pairs.is_empty() {
+                    return Err(error);
+                }
+                return match undo_moved_pairs(&pairs) {
+                    Ok(()) => Err(format!(
+                        "{error}; уже перемещённые элементы возвращены на прежние места"
+                    )),
+                    Err(rollback) => Err(format!(
+                        "{error}; не удалось вернуть уже перемещённые элементы: {}",
+                        rollback.message
+                    )),
+                };
+            }
+        }
+    }
+    Ok(pairs)
+}
+
 pub(super) fn move_path_to_dir(
     src: &Path,
     target_dir: &Path,

@@ -1548,11 +1548,12 @@ impl App {
                     )
                 };
 
-                let scroll_offset = if grid.is_alt {
-                    0.0
-                } else {
-                    term.scroll_y.current.min(max_scroll)
-                };
+                let scroll_offset =
+                    crate::render_view::terminal_ui::terminal_render_scroll_offset(
+                        term.scroll_y.current,
+                        max_scroll,
+                        grid.is_alt,
+                    );
                 let (_, bottom_pad) =
                     crate::render_view::terminal_ui::terminal_text_padding(s);
                 let offset_from_bottom =

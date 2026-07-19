@@ -1455,14 +1455,36 @@ pub(crate) fn api_python_version_list_rect(
     )
 }
 
-pub(crate) fn api_python_version_list_max_scroll(count: usize, scale: f32) -> f32 {
+pub(crate) fn api_python_version_list_max_scroll(
+    count: usize,
+    visible_h: f32,
+    scale: f32,
+) -> f32 {
     let row_h = api_python_version_row_height(scale);
-    let inner_h = (158.0 * scale - 8.0 * scale).max(row_h);
+    let inner_h = (visible_h - 8.0 * scale).max(0.0);
     (count as f32 * row_h - inner_h).max(0.0)
 }
 
 pub(crate) fn api_python_version_row_height(scale: f32) -> f32 {
     28.0 * scale
+}
+
+pub(crate) fn api_python_scrollbar_metrics(
+    visible_h: f32,
+    max_scroll: f32,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    if max_scroll <= 0.0 {
+        return None;
+    }
+    let track_h = (visible_h - 12.0 * scale).max(0.0);
+    if track_h <= 0.0 {
+        return None;
+    }
+    let desired_thumb_h = track_h * (track_h / (track_h + max_scroll));
+    let min_thumb_h = (18.0 * scale).min(track_h);
+    let thumb_h = desired_thumb_h.clamp(min_thumb_h, track_h);
+    Some((track_h, thumb_h))
 }
 
 pub(crate) fn api_python_install_log_visible(api: &ApiClientState) -> bool {

@@ -471,8 +471,8 @@ impl GitPanelState {
 
     pub(crate) fn handle_graph_disconnect(&mut self, repo_root: &std::path::Path, request_id: u64) {
         let key = crate::platform::PathKey::new(repo_root);
-        self.graph_pending_roots.remove(&key);
         if self.graph_latest_request_by_root.get(&key).copied() == Some(request_id) {
+            self.graph_pending_roots.remove(&key);
             self.graph_latest_request_by_root.remove(&key);
             self.graph_notice = Some("Загрузка Git Graph неожиданно завершилась".to_string());
             if self.graph_repo_root.as_ref().is_some_and(|root| crate::platform::paths_equal(root, repo_root)) {
@@ -495,6 +495,17 @@ impl GitPanelState {
             self.graph_repo_root = Some(repo_root);
             self.graph_pending = true;
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn graph_request_pending_for_test(
+        &self,
+        repo_root: &std::path::Path,
+        request_id: u64,
+    ) -> bool {
+        let key = crate::platform::PathKey::new(repo_root);
+        self.graph_latest_request_by_root.get(&key).copied() == Some(request_id)
+            && self.graph_pending_roots.contains(&key)
     }
 
     #[cfg(test)]

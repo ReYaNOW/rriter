@@ -343,6 +343,12 @@ impl App {
                 return;
             }
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
+                && self.close_api_mock_constraint_menu()
+            {
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+            if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
                 && self.close_active_api_output_example_menu()
             {
                 self.window.as_ref().unwrap().request_redraw();

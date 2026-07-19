@@ -2,6 +2,20 @@ pub(crate) fn file_watcher_disconnect_message() -> &'static str {
     "Наблюдение за файлами неожиданно завершилось; выполняется перезапуск"
 }
 
+fn lsp_action_selection_after_prepend(
+    old_len: usize,
+    old_selected: usize,
+    prepended_len: usize,
+) -> usize {
+    if old_len == 0 {
+        0
+    } else {
+        old_selected
+            .min(old_len - 1)
+            .saturating_add(prepended_len)
+    }
+}
+
 use super::*;
 
 include!("about/about_helpers.rs");
@@ -1007,9 +1021,15 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             })
                             .map(crate::app::LspActionItem::CodeAction)
                             .collect();
+                        let selected = lsp_action_selection_after_prepend(
+                            menu.items.len(),
+                            menu.selected,
+                            new_items.len(),
+                        );
                         let mut combined = new_items;
                         combined.extend(menu.items.drain(..));
                         menu.items = combined;
+                        menu.selected = selected.min(menu.items.len().saturating_sub(1));
                         menu.pending_request_id = None;
                     }
                     if let Some(w) = app.window.as_ref() {
@@ -1466,5 +1486,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         AboutWaitPlan::WaitUntil(wake_at) => {
             event_loop.set_control_flow(ControlFlow::WaitUntil(wake_at));
         }
+    }
+}
+
+#[cfg(test)]
+mod lsp_action_merge_tests {
+    use super::lsp_action_selection_after_prepend;
+
+    #[test]
+    fn async_lsp_actions_keep_the_same_existing_item_selected() {
+        assert_eq!(lsp_action_selection_after_prepend(4, 2, 3), 5);
+        assert_eq!(lsp_action_selection_after_prepend(4, 99, 2), 5);
+        assert_eq!(lsp_action_selection_after_prepend(0, 0, 3), 0);
     }
 }

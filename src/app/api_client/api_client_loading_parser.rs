@@ -398,8 +398,10 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                     let Some(method) = ApiMethod::from_key(method_key.as_str()) else {
                         continue;
                     };
-                    let mut params = path_params.clone();
-                    params.extend(parse_parameters(op.get("parameters"), root));
+                    let params = merge_openapi_parameters(
+                        &path_params,
+                        parse_parameters(op.get("parameters"), root),
+                    );
                     let mut path_params = Vec::new();
                     let mut query_params = Vec::new();
                     for param in params {
@@ -409,9 +411,7 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
                         }
                     }
                     path_params.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-                    path_params.dedup_by(|a, b| a.name == b.name);
                     query_params.sort_unstable_by(|a, b| a.name.cmp(&b.name));
-                    query_params.dedup_by(|a, b| a.name == b.name);
                     let tag = op
                         .get("tags")
                         .and_then(Value::as_array)
@@ -478,6 +478,24 @@ pub fn parse_openapi_model(id: ApiSpecId, root: &Value) -> Result<ApiSpecModel, 
         .dedup_by(|a, b| a.tag == b.tag && a.path == b.path && a.method == b.method);
     model.rebuild_route_layout_cache();
     Ok(model)
+}
+
+fn merge_openapi_parameters(
+    path_parameters: &[ApiParam],
+    operation_parameters: Vec<ApiParam>,
+) -> Vec<ApiParam> {
+    let mut merged = path_parameters.to_vec();
+    for operation_parameter in operation_parameters {
+        if let Some(existing) = merged.iter_mut().find(|parameter| {
+            parameter.location == operation_parameter.location
+                && parameter.name == operation_parameter.name
+        }) {
+            *existing = operation_parameter;
+        } else {
+            merged.push(operation_parameter);
+        }
+    }
+    merged
 }
 
 fn parse_tag_order(value: Option<&Value>) -> FxHashMap<String, usize> {
@@ -755,9 +773,7 @@ fn parameter_examples(
     if let Some(item_schema) = item_schema {
         out.extend(schema_examples(item_schema));
     }
-    out.sort_unstable();
-    out.dedup();
-    out
+    dedup_strings_preserving_order(out)
 }
 
 fn schema_enum_values(schema: Option<&Value>) -> Option<Vec<String>> {
@@ -1128,8 +1144,12 @@ fn schema_examples(schema: &Value) -> Vec<String> {
             }
         }
     }
-    let mut deduped = Vec::with_capacity(out.len());
-    for value in out {
+    dedup_strings_preserving_order(out)
+}
+
+fn dedup_strings_preserving_order(values: Vec<String>) -> Vec<String> {
+    let mut deduped = Vec::with_capacity(values.len());
+    for value in values {
         if !deduped.contains(&value) {
             deduped.push(value);
         }

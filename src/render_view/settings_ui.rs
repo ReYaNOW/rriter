@@ -528,10 +528,11 @@ impl Renderer {
             content_y += 20.0 * s;
 
             // ── Поле ввода + кнопка «Добавить» ───────────────────────────
+            let content_w = content_available_w;
             let add_gap = 10.0 * s;
-            let btn_add_w = (110.0 * s).min((content_available_w * 0.32).max(0.0));
-            let effective_gap = add_gap.min((content_available_w - btn_add_w).max(0.0));
-            let input_w = (content_available_w - effective_gap - btn_add_w).max(0.0);
+            let btn_add_w = (110.0 * s).min((content_w * 0.32).max(0.0));
+            let effective_gap = add_gap.min((content_w - btn_add_w).max(0.0));
+            let input_w = (content_w - effective_gap - btn_add_w).max(0.0);
             let input_h = 34.0 * s;
             let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
@@ -599,60 +600,19 @@ impl Renderer {
                 );
             }
 
+            let btn_ignore_add = crate::widgets::ButtonView {
+                x: btn_add_x,
+                y: btn_add_y,
+                w: btn_add_w,
+                h: input_h,
+                text: "Добавить",
+                icon: Some(crate::widgets::IconType::Plus),
+                text_scale: 0.88,
+                icon_size: 15.0 * s,
+            };
             if trimmed_input.is_empty() {
-                // Строго копируем математику округления из widgets.rs (Button::render)
-                let bx = btn_add_x.round();
-                let by = btn_add_y.round();
-                let bw = btn_add_w.round();
-                let bh = input_h.round();
-
-                self.push_rounded_rect_border(
-                    bx - 1.0,
-                    by - 1.0,
-                    bw + 2.0,
-                    bh + 2.0,
-                    6.0 * s,
-                    1.0,
-                    [0.20, 0.21, 0.26, 1.0],
-                    [0.15, 0.16, 0.20, 1.0],
-                );
-
-                let icon_sz = 15.0 * s;
-                let text_scale = 0.88;
-                let text_w = self.measure_ui_width("Добавить", text_scale);
-                let content_w = text_w + icon_sz + 8.0 * s;
-
-                let mut content_x = bx + (bw - content_w) / 2.0;
-                let icon_y = by + (bh - icon_sz) / 2.0;
-                let text_y = by + bh / 2.0 + 5.0 * s;
-
-                self.draw_atlas_icon(
-                    crate::widgets::IconType::Plus,
-                    content_x,
-                    icon_y,
-                    icon_sz,
-                    [0.35, 0.36, 0.42, 1.0],
-                );
-                content_x += icon_sz + 8.0 * s;
-
-                self.draw_string_scaled(
-                    "Добавить",
-                    content_x,
-                    text_y,
-                    [0.35, 0.36, 0.42, 1.0],
-                    text_scale,
-                );
+                btn_ignore_add.render_disabled(self, s);
             } else {
-                let btn_ignore_add = crate::widgets::Button {
-                    x: btn_add_x,
-                    y: btn_add_y,
-                    w: btn_add_w,
-                    h: input_h,
-                    text: "Добавить".to_string(),
-                    icon: Some(crate::widgets::IconType::Plus),
-                    text_scale: 0.88,
-                    icon_size: 15.0 * s,
-                };
                 btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             }
             content_y += input_h + 16.0 * s;

@@ -180,6 +180,75 @@ pub(super) fn source_line<'a>(
     text.get(start..end)
 }
 
+fn format_attribute_assignment_line(line: &str) -> String {
+    let mut lines_iter = line.lines();
+    let first = lines_iter.next().unwrap_or("");
+    let base_indent = first.len() - first.trim_start().len();
+    let mut out = vec![first.trim_start().to_string()];
+    for line in lines_iter {
+        let current_indent = line.len() - line.trim_start().len();
+        if current_indent >= base_indent {
+            out.push(line[base_indent..].to_string());
+        } else {
+            out.push(line.trim_start().to_string());
+        }
+    }
+    let joined = out.join("\n");
+    let trimmed = joined.trim_end();
+    if trimmed.contains('\n') {
+        return trimmed.to_string();
+    }
+    let Some(eq_idx) = trimmed.find('=') else {
+        return trimmed.to_string();
+    };
+    let lhs = trimmed[..eq_idx].trim_end();
+    let rhs = trimmed[eq_idx + 1..].trim_start();
+    if rhs.len() < 56 {
+        return format!("{lhs} = {rhs}");
+    }
+    let Some(open_idx) = rhs.find('(') else {
+        return format!("{lhs} = {rhs}");
+    };
+    if !rhs.ends_with(')') {
+        return format!("{lhs} = {rhs}");
+    }
+    let head = &rhs[..=open_idx];
+    let inner = rhs[open_idx + 1..rhs.len().saturating_sub(1)].trim();
+    if inner.is_empty() {
+        return format!("{lhs} = {rhs}");
+    }
+    format!("{lhs} = {head}\n    {inner}\n    )")
+}
+
+fn source_attribute_class_owner(lines: &[&str], line_idx: usize) -> Option<String> {
+    let line = *lines.get(line_idx)?;
+    let target_indent = line.len().saturating_sub(line.trim_start().len());
+    if target_indent == 0 {
+        return None;
+    }
+
+    for line in lines[..line_idx].iter().rev().copied() {
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let indent = line.len().saturating_sub(trimmed.len());
+        if indent >= target_indent {
+            continue;
+        }
+        if let Some(name) = crate::app::class_header_name(line) {
+            return Some(name.to_string());
+        }
+        if trimmed.starts_with("def ")
+            || trimmed.starts_with("async def ")
+            || trimmed.ends_with(':')
+        {
+            return None;
+        }
+    }
+    None
+}
+
 pub(super) fn source_signature_for_hover(
     editor: &crate::editor::Editor,
     byte_offset: usize,
@@ -187,46 +256,6 @@ pub(super) fn source_signature_for_hover(
     lsp_type: Option<&str>,
     module_path: Option<&str>,
 ) -> Option<String> {
-    fn format_attribute_assignment_line(line: &str) -> String {
-        let mut lines_iter = line.lines();
-        let first = lines_iter.next().unwrap_or("");
-        let base_indent = first.len() - first.trim_start().len();
-        let mut out = vec![first.trim_start().to_string()];
-        for l in lines_iter {
-            let current_indent = l.len() - l.trim_start().len();
-            if current_indent >= base_indent {
-                out.push(l[base_indent..].to_string());
-            } else {
-                out.push(l.trim_start().to_string());
-            }
-        }
-        let joined = out.join("\n");
-        let trimmed = joined.trim_end();
-        if trimmed.contains('\n') {
-            return trimmed.to_string();
-        }
-        let Some(eq_idx) = trimmed.find('=') else {
-            return trimmed.to_string();
-        };
-        let lhs = trimmed[..eq_idx].trim_end();
-        let rhs = trimmed[eq_idx + 1..].trim_start();
-        if rhs.len() < 56 {
-            return format!("{lhs} = {rhs}");
-        }
-        let Some(open_idx) = rhs.find('(') else {
-            return format!("{lhs} = {rhs}");
-        };
-        if !rhs.ends_with(')') {
-            return format!("{lhs} = {rhs}");
-        }
-        let head = &rhs[..=open_idx];
-        let inner = rhs[open_idx + 1..rhs.len().saturating_sub(1)].trim();
-        if inner.is_empty() {
-            return format!("{lhs} = {rhs}");
-        }
-        format!("{lhs} = {head}\n    {inner}\n    )")
-    }
-
     fn source_attribute_hover_for_symbol(
         text: &str,
         line_offsets: &[usize],
@@ -235,17 +264,14 @@ pub(super) fn source_signature_for_hover(
         original_line_idx: usize,
         module_path: Option<&str>,
     ) -> Option<String> {
+        let lines = text.lines().collect::<Vec<_>>();
         for idx in 0..line_offsets.len() {
             let line = source_line(text, line_offsets, idx)?;
             let trimmed = line.trim_start();
             if trimmed.starts_with('#') || trimmed.is_empty() {
                 continue;
             }
-            let mut matched = false;
-            if let Some(rest) = trimmed.strip_prefix(symbol) {
-                matched = rest.starts_with(':') || rest.starts_with(" =");
-            }
-            if !matched {
+            if crate::app::class_direct_attr(trimmed) != Some(symbol) {
                 continue;
             }
 
@@ -308,20 +334,7 @@ pub(super) fn source_signature_for_hover(
                 }
             }
 
-            let mut class_name = None;
-            for up in (0..idx).rev() {
-                let class_line = source_line(text, line_offsets, up)?.trim_start();
-                if let Some(rest) = class_line.strip_prefix("class ") {
-                    class_name = rest
-                        .split(|c: char| c == '(' || c == ':' || c.is_whitespace())
-                        .next()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty());
-                    break;
-                }
-            }
-
-            if let Some(class_name) = class_name {
+            if let Some(class_name) = source_attribute_class_owner(&lines, idx) {
                 let header = format!("## Class attribute {symbol} of {class_name}");
                 return Some(format!("{header}\n{assignment}"));
             } else {
@@ -560,45 +573,6 @@ pub(super) fn source_attribute_hover_from_definition_file(
     module_path: &str,
     lsp_type: Option<&str>,
 ) -> Option<String> {
-    fn format_attribute_assignment_line(line: &str) -> String {
-        let mut lines_iter = line.lines();
-        let first = lines_iter.next().unwrap_or("");
-        let base_indent = first.len() - first.trim_start().len();
-        let mut out = vec![first.trim_start().to_string()];
-        for l in lines_iter {
-            let current_indent = l.len() - l.trim_start().len();
-            if current_indent >= base_indent {
-                out.push(l[base_indent..].to_string());
-            } else {
-                out.push(l.trim_start().to_string());
-            }
-        }
-        let joined = out.join("\n");
-        let trimmed = joined.trim_end();
-        if trimmed.contains('\n') {
-            return trimmed.to_string();
-        }
-        let Some(eq_idx) = trimmed.find('=') else {
-            return trimmed.to_string();
-        };
-        let lhs = trimmed[..eq_idx].trim_end();
-        let rhs = trimmed[eq_idx + 1..].trim_start();
-        if rhs.len() < 56 {
-            return format!("{lhs} = {rhs}");
-        }
-        let Some(open_idx) = rhs.find('(') else {
-            return format!("{lhs} = {rhs}");
-        };
-        if !rhs.ends_with(')') {
-            return format!("{lhs} = {rhs}");
-        }
-        let head = &rhs[..=open_idx];
-        let inner = rhs[open_idx + 1..rhs.len().saturating_sub(1)].trim();
-        if inner.is_empty() {
-            return format!("{lhs} = {rhs}");
-        }
-        format!("{lhs} = {head}\n    {inner}\n    )")
-    }
     let text = std::fs::read_to_string(path).ok()?;
     let lines: Vec<&str> = text.lines().collect();
     for idx in 0..lines.len() {
@@ -606,11 +580,7 @@ pub(super) fn source_attribute_hover_from_definition_file(
         if trimmed.starts_with('#') || trimmed.is_empty() {
             continue;
         }
-        let mut matched = false;
-        if let Some(rest) = trimmed.strip_prefix(symbol) {
-            matched = rest.starts_with(':') || rest.starts_with(" =");
-        }
-        if !matched {
+        if crate::app::class_direct_attr(trimmed) != Some(symbol) {
             continue;
         }
 
@@ -660,28 +630,17 @@ pub(super) fn source_attribute_hover_from_definition_file(
             }
         }
 
-        let mut class_name = None;
-        for up in (0..idx).rev() {
-            let class_line = lines[up].trim_start();
-            if let Some(rest) = class_line.strip_prefix("class ") {
-                class_name = rest
-                    .split(|c: char| c == '(' || c == ':' || c.is_whitespace())
-                    .next()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty());
-                break;
-            }
-        }
-        let (header_prefix, fq_owner) = if let Some(class_name) = class_name {
-            let owner = if module_path.is_empty() {
-                class_name
+        let (header_prefix, fq_owner) =
+            if let Some(class_name) = source_attribute_class_owner(&lines, idx) {
+                let owner = if module_path.is_empty() {
+                    class_name
+                } else {
+                    format!("{module_path}.{class_name}")
+                };
+                ("Class attribute", owner)
             } else {
-                format!("{module_path}.{class_name}")
+                ("Variable", module_path.to_string())
             };
-            ("Class attribute", owner)
-        } else {
-            ("Variable", module_path.to_string())
-        };
 
         if fq_owner.is_empty() {
             return Some(format!("## {header_prefix} {symbol}\n{}", assignment));
@@ -1267,6 +1226,91 @@ mod tests {
             sig,
             "## Class attribute client of Service\nclient: pkg.Client | OmittedUnionElements = make_client()"
         );
+    }
+
+    #[test]
+    fn source_attribute_hover_accepts_whitespace_before_plain_assignment() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class Service:\n    client  = make_client()\n\ndef use():\n    return Service.client\n",
+        );
+        let hover_offset = editor.get_full_text().rfind("client").unwrap();
+        let hover = source_signature_for_hover(&editor, hover_offset, false, None, None)
+            .expect("expected class attribute hover");
+
+        assert_eq!(
+            hover,
+            "## Class attribute client of Service\nclient = make_client()"
+        );
+    }
+
+    #[test]
+    fn source_attribute_hover_does_not_inherit_class_after_dedent() {
+        let mut editor = crate::editor::Editor::new(512);
+        editor.insert_str(
+            "class Service:\n    client = make_client()\n\nmodule_value  = make_value()\nprint(module_value)\n",
+        );
+        let hover_offset = editor.get_full_text().rfind("module_value").unwrap();
+        let hover = source_signature_for_hover(
+            &editor,
+            hover_offset,
+            false,
+            None,
+            Some("pkg.module"),
+        )
+        .expect("expected module variable hover");
+
+        assert_eq!(
+            hover,
+            "## Variable module_value of pkg.module\nmodule_value = make_value()"
+        );
+    }
+
+    #[test]
+    fn definition_attribute_hover_accepts_spaced_annotation() {
+        let mut tmp = std::env::temp_dir();
+        tmp.push(format!("rriter_attr_hover_{}_spaced.py", std::process::id()));
+        std::fs::write(&tmp, "class Service:\n    client : Client = make_client()\n")
+            .expect("expected temp file write");
+
+        let hover = source_attribute_hover_from_definition_file(
+            &tmp,
+            "client",
+            "pkg.module",
+            None,
+        )
+        .expect("expected definition attribute hover");
+
+        assert_eq!(
+            hover,
+            "## Class attribute client of pkg.module.Service\nclient : Client = make_client()"
+        );
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn definition_attribute_hover_does_not_inherit_class_after_dedent() {
+        let mut tmp = std::env::temp_dir();
+        tmp.push(format!("rriter_attr_hover_{}_dedent.py", std::process::id()));
+        std::fs::write(
+            &tmp,
+            "class Service:\n    client = make_client()\n\nmodule_value = make_value()\n",
+        )
+        .expect("expected temp file write");
+
+        let hover = source_attribute_hover_from_definition_file(
+            &tmp,
+            "module_value",
+            "pkg.module",
+            None,
+        )
+        .expect("expected definition variable hover");
+
+        assert_eq!(
+            hover,
+            "## Variable module_value of pkg.module\nmodule_value = make_value()"
+        );
+        let _ = std::fs::remove_file(&tmp);
     }
 
     #[test]

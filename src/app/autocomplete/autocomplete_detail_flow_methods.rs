@@ -431,6 +431,7 @@ impl App {
             &self.editor.line_offsets,
             self.editor.cursor,
             prefix,
+            crate::editor::lsp_document_version(self.editor.version),
             AutocompleteMode::TreeSitter,
         )
     }
@@ -452,6 +453,7 @@ impl App {
                     &snapshot.line_offsets,
                     snapshot.analysis_cursor,
                     &prefix,
+                    snapshot.version,
                     AutocompleteMode::TreeSitter,
                 )
             );

@@ -14,6 +14,7 @@ fn ty_completion_cache_uses_request_context_not_current_cursor() {
         &request_editor.line_offsets,
         request_editor.cursor,
         "",
+        crate::editor::lsp_document_version(request_editor.version),
         AutocompleteMode::TyContext,
     );
     app.autocomplete_pending_request_id = Some(8);
@@ -41,12 +42,78 @@ fn ty_completion_cache_uses_request_context_not_current_cursor() {
             &app.editor.line_offsets,
             app.editor.cursor,
             "",
+            crate::editor::lsp_document_version(app.editor.version),
             AutocompleteMode::TyContext,
         )
     );
     assert_eq!(app.autocomplete_pending_request_mode, None);
     assert_eq!(app.autocomplete_pending_request_path, None);
     assert_eq!(app.autocomplete_pending_context_key, None);
+}
+
+#[test]
+fn ty_completion_cache_context_changes_with_document_version() {
+    let text = "box.";
+    let editor = editor_with(text);
+    let old_key = ty_autocomplete_context_key(
+        text,
+        &editor.line_offsets,
+        editor.cursor,
+        "",
+        3,
+        AutocompleteMode::TyContext,
+    );
+    let new_key = ty_autocomplete_context_key(
+        text,
+        &editor.line_offsets,
+        editor.cursor,
+        "",
+        4,
+        AutocompleteMode::TyContext,
+    );
+
+    assert_ne!(old_key, new_key);
+}
+
+#[test]
+fn signature_parameters_exclude_first_top_level_named_argument() {
+    let items = crate::app::autocomplete::ty_signature_parameter_items(
+        vec!["first".into(), "remaining".into()],
+        "outer(first=1, rem",
+        "outer(first=1, rem".len(),
+    );
+    let labels = items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>();
+
+    assert!(!labels.contains(&"first"));
+    assert!(labels.contains(&"remaining"));
+}
+
+#[test]
+fn signature_parameters_ignore_nested_call_named_arguments() {
+    let text = "outer(inner(nested=1), nes";
+    let items = crate::app::autocomplete::ty_signature_parameter_items(
+        vec!["nested".into(), "remaining".into()],
+        text,
+        text.len(),
+    );
+    let labels = items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>();
+
+    assert!(labels.contains(&"nested"));
+    assert!(labels.contains(&"remaining"));
+}
+
+#[test]
+fn signature_parameters_do_not_treat_comparisons_as_named_arguments() {
+    let text = "outer(value == 1, val";
+    let items = crate::app::autocomplete::ty_signature_parameter_items(
+        vec!["value".into(), "remaining".into()],
+        text,
+        text.len(),
+    );
+    let labels = items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>();
+
+    assert!(labels.contains(&"value"));
+    assert!(labels.contains(&"remaining"));
 }
 
 #[test]
@@ -648,6 +715,24 @@ fn inherited_python_attr_owner_uses_declaring_base_class() {
     assert!(overload_detail.contains("@overload"));
     assert!(overload_detail.contains("async def execute_sql("));
     assert!(!overload_detail.contains("Overload["));
+}
+
+#[test]
+fn python_class_member_discovery_respects_actual_body_indentation() {
+    let source = "class RepoBase:
+  field: int
+  @overload
+  def execute_sql(self, value: int) -> int: ...
+";
+
+    assert_eq!(
+        python_class_attr_owner_in_source(source, "RepoBase", "field").as_deref(),
+        Some("RepoBase")
+    );
+    let detail = python_class_method_overload_detail(source, "RepoBase", "execute_sql")
+        .expect("expected overload detail with two-space indentation");
+    assert!(detail.contains("@overload"));
+    assert!(detail.contains("def execute_sql"));
 }
 
 #[test]

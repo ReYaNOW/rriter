@@ -1,4 +1,43 @@
+fn api_mock_constraint_menu_contains_ui_id(
+    menu: Option<crate::app::api_client::ApiMockContractConstraintMenu>,
+    id: Option<crate::ui_system::UiId>,
+) -> bool {
+    let Some(menu) = menu else {
+        return false;
+    };
+    match id {
+        Some(crate::ui_system::UiId::ApiMockContractFieldAddConstraint(
+            route_idx,
+            group,
+            field_idx,
+        ))
+        | Some(crate::ui_system::UiId::ApiMockContractFieldAddConstraintOption(
+            route_idx,
+            group,
+            field_idx,
+            _,
+        )) => {
+            route_idx == menu.route_idx && group == menu.group && field_idx == menu.field_idx
+        }
+        _ => false,
+    }
+}
+
 impl crate::app::App {
+    pub(crate) fn api_mock_constraint_menu_contains_ui_id(
+        &self,
+        id: Option<crate::ui_system::UiId>,
+    ) -> bool {
+        api_mock_constraint_menu_contains_ui_id(
+            self.ide_panel.api.mock_contract_constraint_menu,
+            id,
+        )
+    }
+
+    pub(crate) fn close_api_mock_constraint_menu(&mut self) -> bool {
+        self.ide_panel.api.mock_contract_constraint_menu.take().is_some()
+    }
+
     pub(crate) fn close_active_api_output_example_menu(&mut self) -> bool {
         let Some((meta, state)) = self.active_api_tab() else {
             return false;
@@ -1297,5 +1336,37 @@ impl crate::app::App {
         }
         self.pulse_api_cursor_blink();
         true
+    }
+}
+
+#[cfg(test)]
+mod constraint_menu_tests {
+    use super::api_mock_constraint_menu_contains_ui_id;
+    use crate::app::api_client::ApiMockContractConstraintMenu;
+    use crate::ui_system::{ApiMockContractFieldGroup, ApiMockContractFieldProp, UiId};
+
+    #[test]
+    fn constraint_menu_only_keeps_its_own_button_and_options_inside() {
+        let menu = Some(ApiMockContractConstraintMenu {
+            route_idx: 2,
+            group: ApiMockContractFieldGroup::Body,
+            field_idx: 4,
+        });
+
+        assert!(api_mock_constraint_menu_contains_ui_id(menu, Some(
+            UiId::ApiMockContractFieldAddConstraint(2, ApiMockContractFieldGroup::Body, 4),
+        )));
+        assert!(api_mock_constraint_menu_contains_ui_id(menu, Some(
+            UiId::ApiMockContractFieldAddConstraintOption(
+                2,
+                ApiMockContractFieldGroup::Body,
+                4,
+                ApiMockContractFieldProp::Minimum,
+            ),
+        )));
+        assert!(!api_mock_constraint_menu_contains_ui_id(menu, Some(
+            UiId::ApiMockContractFieldAddConstraint(3, ApiMockContractFieldGroup::Body, 4),
+        )));
+        assert!(!api_mock_constraint_menu_contains_ui_id(menu, None));
     }
 }

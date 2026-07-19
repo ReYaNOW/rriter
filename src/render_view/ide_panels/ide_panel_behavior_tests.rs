@@ -471,4 +471,19 @@ mod tests {
             1
         );
     }
+
+    #[test]
+    fn settings_ignore_add_reuses_shared_disabled_button_renderer() {
+        let source = include_str!("../settings_ui.rs");
+        let body = source_between(
+            source,
+            "// Кнопка «Добавить» — неактивна если поле пустое или только пробелы",
+            "content_y += input_h + 16.0 * s;",
+        );
+
+        assert!(body.contains("btn_ignore_add.render_disabled(self, s);"));
+        assert!(!body.contains("push_rounded_rect_border"));
+        assert!(!body.contains("draw_atlas_icon"));
+    }
+
 }
