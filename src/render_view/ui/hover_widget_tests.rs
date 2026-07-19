@@ -596,7 +596,6 @@ fn test_hover_content_scissor_stays_inside_animated_frame() {
     assert!(old_scissor.2 > frame.2);
 }
 
-
 #[test]
 fn diagnostic_hit_test_uses_full_utf8_character_length() {
     super::DIAG_CHARS.with(|chars| {
@@ -619,7 +618,7 @@ fn diagnostic_hit_test_uses_full_utf8_character_length() {
 #[test]
 fn diagnostic_wrapping_keeps_original_offsets_and_ignores_visual_indent() {
     let message = "  alpha beta";
-    let lines = super::diagnostic_message_lines(message, &[], 0, 8.0, 2.0, |_| 1.0);
+    let lines = super::diagnostic_message_lines(message, &[], 0, 8.0, 2.0, false, |_| 1.0);
 
     assert_eq!(lines.len(), 2);
     assert_eq!(lines[1][0].ch, ' ');
@@ -635,4 +634,252 @@ fn diagnostic_wrapping_keeps_original_offsets_and_ignores_visual_indent() {
 fn hover_y_position_clamps_fallback_to_viewport_top_range() {
     let y = compute_hover_y_position(50.0, 20.0, 100.0, 100.0, 1.0);
     assert_eq!(y, 40.0);
+}
+
+fn diagnostic_visual_lines(
+    message: &str,
+    base_offset: usize,
+    balanced: bool,
+) -> Vec<Vec<DiagnosticVisualChar>> {
+    diagnostic_message_lines(
+        message,
+        &[],
+        base_offset,
+        1_000.0,
+        40.0,
+        balanced,
+        |_| 1.0,
+    )
+}
+
+fn visual_line_text(line: &[DiagnosticVisualChar]) -> String {
+    line.iter().map(|item| item.ch).collect()
+}
+
+fn test_diagnostic(source: &str, message: &str) -> crate::lsp::Diagnostic {
+    crate::lsp::Diagnostic {
+        start_line: 0,
+        start_col: 0,
+        end_line: 0,
+        end_col: 1,
+        severity: crate::lsp::DiagSeverity::Warning,
+        code: Some(std::sync::Arc::<str>::from("SQL119")),
+        code_href: None,
+        message: std::sync::Arc::<str>::from(message),
+        source: Some(std::sync::Arc::<str>::from(source)),
+        quickfixes: Box::new([]),
+        tags: Box::new([]),
+    }
+}
+
+#[test]
+fn five_word_sql_diagnostic_stays_on_one_visual_line() {
+    let lines = diagnostic_visual_lines("one two three four five", 0, true);
+    assert_eq!(lines.len(), 1);
+    assert_eq!(visual_line_text(&lines[0]), "one two three four five");
+}
+
+#[test]
+fn six_word_sql_diagnostic_balances_into_two_visual_lines() {
+    let lines = diagnostic_visual_lines("one two three four five six", 0, true);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(visual_line_text(&lines[0]), "one two three");
+    assert_eq!(visual_line_text(&lines[1]), "four five six");
+}
+
+#[test]
+fn long_sql_warning_never_creates_third_visual_line() {
+    let message = "SELECT star should include explicit ORDER BY for stable result ordering";
+    let lines = diagnostic_message_lines(message, &[], 0, 4.0, 1.0, true, |_| 1.0);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(
+        lines.iter().map(|line| visual_line_text(line)).collect::<Vec<_>>(),
+        vec![
+            "SELECT star should include explicit".to_string(),
+            "ORDER BY for stable result ordering".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn balanced_sql_diagnostic_keeps_unicode_words_intact() {
+    let message = "Ошибка запроса требует явного порядка строк результата";
+    let lines = diagnostic_visual_lines(message, 0, true);
+    assert_eq!(lines.len(), 2);
+    let rendered = lines
+        .iter()
+        .map(|line| visual_line_text(line))
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert_eq!(rendered, message);
+    for line in lines {
+        assert!(std::str::from_utf8(visual_line_text(&line).as_bytes()).is_ok());
+    }
+}
+
+#[test]
+fn balanced_sql_diagnostic_copy_keeps_original_text_without_visual_newline() {
+    let message = "one two three four five six";
+    let diagnostic = test_diagnostic("RRiter SQL", message);
+    let lines = diagnostic_visual_lines(message, 0, true);
+    assert_eq!(lines.len(), 2);
+    assert_eq!(diagnostic_copy_text(&diagnostic), format!("SQL119: {message}"));
+    assert!(!diagnostic_copy_text(&diagnostic).contains('\n'));
+}
+
+#[test]
+fn balanced_sql_diagnostic_lines_keep_original_byte_offsets() {
+    let message = "один два три четыре пять шесть";
+    let base_offset = 17;
+    let lines = diagnostic_visual_lines(message, base_offset, true);
+    assert_eq!(lines.len(), 2);
+
+    let first = lines[0].first().unwrap();
+    let second = lines[1].first().unwrap();
+    let second_text = visual_line_text(&lines[1]);
+    assert_eq!(first.byte_offset, base_offset);
+    assert_eq!(second.byte_offset, base_offset + message.find(&second_text).unwrap());
+    assert_eq!(second.byte_len, second.ch.len_utf8());
+}
+
+#[test]
+fn balanced_sql_diagnostics_keep_independent_base_offsets() {
+    let first_message = "one two three four five six";
+    let second_message = "alpha beta gamma delta epsilon zeta";
+    let first = diagnostic_visual_lines(first_message, 0, true);
+    let second_base = first_message.len() + 2;
+    let second = diagnostic_visual_lines(second_message, second_base, true);
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(second.len(), 2);
+    assert!(first.iter().flatten().all(|item| item.byte_offset < second_base));
+    assert!(second
+        .iter()
+        .flatten()
+        .all(|item| item.byte_offset >= second_base));
+}
+
+#[test]
+fn balanced_sql_diagnostic_adds_exactly_one_line_height() {
+    let line_h = 22.0;
+    let five = diagnostic_visual_lines("one two three four five", 0, true);
+    let six = diagnostic_visual_lines("one two three four five six", 0, true);
+    assert_eq!((six.len() as f32 - five.len() as f32) * line_h, line_h);
+}
+
+#[test]
+fn diagnostic_only_sql_hover_uses_balanced_message_policy() {
+    let diagnostic = test_diagnostic(
+        "RRiter SQL",
+        "query should include explicit order by for stable results",
+    );
+    assert!(should_balance_diagnostic_message(&diagnostic));
+    let lines = diagnostic_message_lines(
+        &diagnostic.message,
+        &[],
+        0,
+        8.0,
+        2.0,
+        should_balance_diagnostic_message(&diagnostic),
+        |_| 1.0,
+    );
+    assert_eq!(lines.len(), 2);
+}
+
+#[test]
+fn short_python_diagnostic_keeps_existing_layout_policy() {
+    let diagnostic = test_diagnostic("Pyright", "short python diagnostic");
+    assert!(!should_balance_diagnostic_message(&diagnostic));
+    let lines = diagnostic_message_lines(
+        &diagnostic.message,
+        &[],
+        0,
+        1_000.0,
+        40.0,
+        should_balance_diagnostic_message(&diagnostic),
+        |_| 1.0,
+    );
+    assert_eq!(lines.len(), 1);
+    assert_eq!(visual_line_text(&lines[0]), "short python diagnostic");
+}
+
+#[test]
+fn balanced_diagnostic_does_not_break_inside_quoted_identifier() {
+    let message = "Use quoted \"very long identifier\" in stable query ordering";
+    let lines = diagnostic_visual_lines(message, 0, true);
+    assert_eq!(lines.len(), 2);
+    assert!(lines
+        .iter()
+        .any(|line| visual_line_text(line).contains("\"very long identifier\"")));
+}
+
+#[test]
+fn hover_surface_fill_and_border_share_one_snapped_outer_rect() {
+    let surface = hover_surface_layout((100.25, 50.75, 300.4, 120.6), 7.5, 2.5);
+    assert_eq!(surface.outer_rect, (100.0, 51.0, 300.0, 121.0));
+    assert_eq!(surface.clip_rect, surface.inner_rect);
+}
+
+#[test]
+fn hover_surface_inner_radius_fits_after_border_inset() {
+    let surface = hover_surface_layout((10.0, 20.0, 80.0, 40.0), 12.0, 4.0);
+    assert!(surface.inner_radius <= surface.inner_rect.2 * 0.5);
+    assert!(surface.inner_radius <= surface.inner_rect.3 * 0.5);
+    assert_eq!(surface.inner_radius, surface.outer_radius - surface.border_width);
+}
+
+#[test]
+fn tiny_hover_surface_has_non_negative_geometry() {
+    let surface = hover_surface_layout((1.4, 2.6, 1.0, 1.0), 20.0, 8.0);
+    assert!(surface.outer_radius >= 0.0);
+    assert!(surface.inner_radius >= 0.0);
+    assert!(surface.inner_rect.2 >= 0.0);
+    assert!(surface.inner_rect.3 >= 0.0);
+    assert!(surface.border_width <= 0.5);
+}
+
+#[test]
+fn fractional_dpi_surface_reuses_identical_snapped_bounds() {
+    let python = hover_surface_layout((40.625, 80.375, 510.625, 220.375), 7.5, 2.5);
+    let sql = hover_surface_layout((40.625, 80.375, 510.625, 220.375), 7.5, 2.5);
+    assert_eq!(python, sql);
+    assert_eq!(python.outer_rect, (41.0, 80.0, 511.0, 220.0));
+}
+
+#[test]
+fn hover_surface_inner_rect_covers_all_four_inner_corners() {
+    let surface = hover_surface_layout((100.0, 100.0, 200.0, 80.0), 8.0, 2.0);
+    let (x, y, w, h) = surface.inner_rect;
+    let corners = [(x, y), (x + w, y), (x, y + h), (x + w, y + h)];
+    for (corner_x, corner_y) in corners {
+        assert!(corner_x >= surface.outer_rect.0);
+        assert!(corner_x <= surface.outer_rect.0 + surface.outer_rect.2);
+        assert!(corner_y >= surface.outer_rect.1);
+        assert!(corner_y <= surface.outer_rect.1 + surface.outer_rect.3);
+    }
+}
+
+#[test]
+fn hover_scrollbar_does_not_change_surface_geometry() {
+    let without_scrollbar = hover_surface_layout((20.0, 30.0, 400.0, 160.0), 6.0, 2.0);
+    let with_scrollbar = hover_surface_layout((20.0, 30.0, 400.0, 160.0), 6.0, 2.0);
+    assert_eq!(without_scrollbar, with_scrollbar);
+}
+
+#[test]
+fn hover_bridge_hitbox_does_not_modify_surface_background() {
+    let surface = hover_surface_layout((100.0, 100.0, 300.0, 120.0), 6.0, 2.0);
+    let before = surface;
+    let _ = crate::app::mouse::is_in_hover_popup_or_bridge(
+        250.0,
+        160.0,
+        surface.outer_rect,
+        220.0,
+        260.0,
+        220.0,
+        240.0,
+        800.0,
+        1.0,
+    );
+    assert_eq!(surface, before);
 }

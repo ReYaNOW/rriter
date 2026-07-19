@@ -9,6 +9,16 @@ mod tests {
         &tail[..end_idx]
     }
 
+    fn assert_rect_inside(
+        inner: crate::ui_system::UiClipRect,
+        outer: crate::ui_system::UiClipRect,
+    ) {
+        assert!(inner.x >= outer.x - 0.5);
+        assert!(inner.y >= outer.y - 0.5);
+        assert!(inner.x + inner.w <= outer.x + outer.w + 0.5);
+        assert!(inner.y + inner.h <= outer.y + outer.h + 0.5);
+    }
+
 
     #[test]
     fn draggable_panels_share_one_full_content_dispatcher_in_both_groups() {
@@ -484,6 +494,183 @@ mod tests {
         assert!(body.contains("btn_ignore_add.render_disabled(self, s);"));
         assert!(!body.contains("push_rounded_rect_border"));
         assert!(!body.contains("draw_atlas_icon"));
+    }
+
+
+    #[test]
+    fn connection_dialog_footer_rows_never_overlap() {
+        let layout = database_dialog_footer_layout(10.0, 600.0, 1.0);
+        assert!(layout.form_bottom < layout.message_baseline);
+        assert!(layout.message_baseline < layout.summary_baseline);
+        assert!(layout.summary_baseline < layout.toggle_y);
+        assert!(layout.toggle_y + 30.0 < layout.actions_y);
+        assert!(layout.actions_y + 30.0 <= 610.0);
+    }
+
+    #[test]
+    fn connection_dialog_without_ssh_fits_without_scrollbar() {
+        let layout = database_connection_dialog_layout(1200.0, 900.0, 1.0, 6);
+        assert_eq!(layout.max_scroll, 0.0);
+        assert!(layout.scrollbar_track.is_none());
+        assert!(layout.content_height <= layout.form_clip.h);
+    }
+
+    #[test]
+    fn bastion_form_on_short_window_has_shared_positive_max_scroll() {
+        let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
+        assert!(layout.max_scroll > 0.0);
+        assert!(layout.scrollbar_track.is_some());
+        assert_eq!(
+            layout.max_scroll,
+            (layout.content_height - layout.form_clip.h).max(0.0)
+        );
+    }
+
+    #[test]
+    fn last_bastion_field_can_be_fully_scrolled_above_fixed_footer() {
+        let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
+        let last = database_dialog_field_layout(&layout, 19, layout.max_scroll, false, false);
+        assert!(last.input.y >= layout.form_clip.y - 0.5);
+        assert!(last.input.y + last.input.h <= layout.footer.form_bottom + 0.5);
+        assert_eq!(layout.form_clip.y + layout.form_clip.h, layout.footer.form_bottom);
+    }
+
+    #[test]
+    fn dialog_scrollbar_thumb_reaches_both_track_ends() {
+        let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
+        let track = layout.scrollbar_track.unwrap();
+        let at_start = database_connection_dialog_scrollbar_thumb(&layout, 0.0).unwrap();
+        let at_end =
+            database_connection_dialog_scrollbar_thumb(&layout, layout.max_scroll).unwrap();
+        assert_eq!(at_start.start, track.y);
+        assert!((at_end.start + at_end.len - (track.y + track.h)).abs() <= 0.5);
+    }
+
+    #[test]
+    fn tiny_dialog_viewport_never_inverts_form_or_scrollbar_geometry() {
+        let layout = database_connection_dialog_layout(90.0, 70.0, 1.75, 20);
+        assert!(layout.form_clip.w >= 0.0);
+        assert!(layout.form_clip.h >= 0.0);
+        assert!(layout.max_scroll.is_finite());
+        if let Some(track) = layout.scrollbar_track {
+            assert!(track.w > 0.0);
+            assert!(track.h > 0.0);
+            assert_rect_inside(track, crate::ui_system::UiClipRect::new(
+                layout.modal.x,
+                layout.modal.y,
+                layout.modal.w,
+                layout.modal.h,
+            ));
+        }
+    }
+
+    #[test]
+    fn field_draw_hit_label_and_eye_share_one_scrolled_row_geometry() {
+        let layout = database_connection_dialog_layout(800.0, 500.0, 1.25, 20);
+        let before = database_dialog_field_layout(&layout, 10, 0.0, true, true);
+        let after = database_dialog_field_layout(&layout, 10, 47.0, true, true);
+        assert_eq!(before.input.y - after.input.y, 47.0);
+        assert_eq!(before.label.y - after.label.y, 47.0);
+        assert_eq!(
+            before.eye_hit.unwrap().y - after.eye_hit.unwrap().y,
+            47.0
+        );
+        assert_eq!(before.input.y, before.label.y);
+        assert_eq!(before.input.y, before.eye_hit.unwrap().y);
+    }
+
+    #[test]
+    fn footer_geometry_is_fixed_when_content_row_count_changes() {
+        let direct = database_connection_dialog_layout(800.0, 500.0, 1.0, 6);
+        let bastion = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
+        assert_eq!(direct.footer, bastion.footer);
+        assert_eq!(direct.form_clip, bastion.form_clip);
+    }
+
+    #[test]
+    fn every_connection_field_label_marks_and_describes_its_tooltip() {
+        for field in crate::app::database::DatabaseFormField::ALL {
+            let label = database_field_label(field);
+            let tooltip = DatabaseDialogTooltipTarget::Field(field).text();
+            assert!(label.ends_with('*'), "missing tooltip marker for {field:?}");
+            assert!(!tooltip.trim().is_empty(), "missing tooltip for {field:?}");
+            assert_ne!(tooltip.trim_end_matches('.'), label.trim_end_matches('*'));
+        }
+    }
+
+    #[test]
+    fn password_tooltips_never_include_runtime_secret_values() {
+        let secret = "actual-password-123";
+        for field in [
+            crate::app::database::DatabaseFormField::PostgresPassword,
+            crate::app::database::DatabaseFormField::SshPassword,
+            crate::app::database::DatabaseFormField::SshKeyPassphrase,
+            crate::app::database::DatabaseFormField::JumpPassword,
+            crate::app::database::DatabaseFormField::JumpKeyPassphrase,
+        ] {
+            assert!(!DatabaseDialogTooltipTarget::Field(field).text().contains(secret));
+        }
+    }
+
+    #[test]
+    fn all_four_footer_controls_have_distinct_standard_tooltip_targets() {
+        let targets = [
+            DatabaseDialogTooltipTarget::Tls,
+            DatabaseDialogTooltipTarget::Color,
+            DatabaseDialogTooltipTarget::Ssh,
+            DatabaseDialogTooltipTarget::Jump,
+        ];
+        let mut keys = std::collections::HashSet::new();
+        for target in targets {
+            assert!(keys.insert(target.key()));
+            assert!(!target.text().is_empty());
+            assert_eq!(target.key() & DATABASE_DIALOG_TOOLTIP_NAMESPACE, DATABASE_DIALOG_TOOLTIP_NAMESPACE);
+        }
+    }
+
+    #[test]
+    fn eye_hover_circle_is_smaller_but_keeps_original_hit_target_and_center() {
+        let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
+        let field = database_dialog_field_layout(&layout, 0, 0.0, false, true);
+        let hit = field.eye_hit.unwrap();
+        let visual = field.eye_visual.unwrap();
+        assert!(visual.w < hit.w);
+        assert!(visual.w >= hit.w * 0.85 - 0.5);
+        assert!(visual.w <= hit.w * 0.90 + 0.5);
+        assert_eq!(visual.w, visual.h);
+        assert!(((visual.x + visual.w * 0.5) - (hit.x + hit.w * 0.5)).abs() <= 0.5);
+        assert!(((visual.y + visual.h * 0.5) - (hit.y + hit.h * 0.5)).abs() <= 0.5);
+        assert_rect_inside(visual, field.input);
+    }
+
+    #[test]
+    fn secondary_database_dialog_text_uses_readable_stable_scale() {
+        assert!(DATABASE_DIALOG_FIELD_TEXT_SCALE >= 0.82);
+        assert!(DATABASE_DIALOG_SECONDARY_TEXT_SCALE >= 0.78);
+        for scale in [1.0, 1.25, 1.5, 1.75] {
+            let layout = database_connection_dialog_layout(800.0, 600.0, scale, 20);
+            let field = database_dialog_field_layout(&layout, 4, 17.0, false, false);
+            assert_eq!(field.input.y, field.input.y.round());
+            assert_eq!(field.label.y, field.label.y.round());
+            assert_eq!(field.input.h, field.input.h.round());
+        }
+    }
+
+    #[test]
+    fn tooltip_rect_stays_inside_window_after_scroll_or_fractional_dpi() {
+        for scale in [1.0, 1.25, 1.5, 1.75] {
+            let rect = database_dialog_tooltip_rect(
+                640.0,
+                360.0,
+                630.0,
+                350.0,
+                520.0,
+                180.0,
+                scale,
+            )
+            .unwrap();
+            assert_rect_inside(rect, crate::ui_system::UiClipRect::new(0.0, 0.0, 640.0, 360.0));
+        }
     }
 
 }

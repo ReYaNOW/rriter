@@ -52,6 +52,96 @@ fn normalize_diagnostic_message(message: &str) -> String {
     out
 }
 
+fn balanced_diagnostic_break<F>(
+    message: &str,
+    char_advance: &mut F,
+) -> Option<(usize, usize)>
+where
+    F: FnMut(char) -> f32,
+{
+    if message.contains('\n') || message.split_whitespace().count() <= 5 {
+        return None;
+    }
+
+    let total_width: f32 = message.chars().map(&mut *char_advance).sum();
+    let trimmed_end = message.trim_end().len();
+    let mut current_width = 0.0;
+    let mut quote = None;
+    let mut escaped = false;
+    let mut saw_text = false;
+    let mut best_break = None;
+    let mut chars = message.char_indices().peekable();
+
+    while let Some((offset, ch)) = chars.next() {
+        if ch.is_whitespace() && quote.is_none() {
+            let separator_start = offset;
+            let prefix_width = current_width;
+            let mut separator_end = offset + ch.len_utf8();
+            let mut separator_width = char_advance(ch);
+            current_width += separator_width;
+            while let Some(&(next_offset, next_ch)) = chars.peek() {
+                if !next_ch.is_whitespace() {
+                    break;
+                }
+                chars.next();
+                let advance = char_advance(next_ch);
+                current_width += advance;
+                separator_width += advance;
+                separator_end = next_offset + next_ch.len_utf8();
+            }
+            if saw_text && separator_end < trimmed_end {
+                let suffix_width = total_width - prefix_width - separator_width;
+                let imbalance = (prefix_width - suffix_width).abs();
+                if best_break
+                    .as_ref()
+                    .is_none_or(|(_, _, best_imbalance)| imbalance < *best_imbalance)
+                {
+                    best_break = Some((separator_start, separator_end, imbalance));
+                }
+            }
+            continue;
+        }
+
+        current_width += char_advance(ch);
+        if !ch.is_whitespace() {
+            saw_text = true;
+        }
+
+        if let Some(active_quote) = quote {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == active_quote {
+                quote = None;
+            }
+        } else if matches!(ch, '\'' | '"' | '`') {
+            quote = Some(ch);
+        }
+    }
+
+    best_break.map(|(start, end, _)| (start, end))
+}
+
+fn diagnostic_visual_char(
+    ch: char,
+    offset: usize,
+    spans: &[crate::highlighter::ColorSpan],
+    base_offset: usize,
+) -> DiagnosticVisualChar {
+    let color = spans
+        .iter()
+        .find(|span| offset >= span.start && offset < span.end)
+        .map(|span| span.color)
+        .unwrap_or([0.972, 0.972, 0.949, 1.0]);
+    DiagnosticVisualChar {
+        ch,
+        color,
+        byte_offset: base_offset.saturating_add(offset),
+        byte_len: ch.len_utf8(),
+        selectable: true,
+    }
+}
 
 fn diagnostic_message_lines<F>(
     message: &str,
@@ -59,11 +149,33 @@ fn diagnostic_message_lines<F>(
     base_offset: usize,
     max_text_w: f32,
     min_wrap_w: f32,
+    balance_into_two_lines: bool,
     mut char_advance: F,
 ) -> Vec<Vec<DiagnosticVisualChar>>
 where
     F: FnMut(char) -> f32,
 {
+    if balance_into_two_lines {
+        if let Some((break_start, break_end)) =
+            balanced_diagnostic_break(message, &mut char_advance)
+        {
+            let mut first = Vec::new();
+            let mut second = Vec::new();
+            for (offset, ch) in message.char_indices() {
+                if offset >= break_start && offset < break_end {
+                    continue;
+                }
+                let item = diagnostic_visual_char(ch, offset, spans, base_offset);
+                if offset < break_start {
+                    first.push(item);
+                } else {
+                    second.push(item);
+                }
+            }
+            return vec![first, second];
+        }
+    }
+
     let mut lines = Vec::new();
     let mut cur_line_w = 0.0;
     let mut cur_line: Vec<DiagnosticVisualChar> = Vec::new();
@@ -113,21 +225,7 @@ where
             last_space_idx = None;
         }
 
-        let mut color = [0.972, 0.972, 0.949, 1.0];
-        for span in spans {
-            if offset >= span.start && offset < span.end {
-                color = span.color;
-                break;
-            }
-        }
-
-        cur_line.push(DiagnosticVisualChar {
-            ch,
-            color,
-            byte_offset: base_offset.saturating_add(offset),
-            byte_len: ch.len_utf8(),
-            selectable: true,
-        });
+        cur_line.push(diagnostic_visual_char(ch, offset, spans, base_offset));
         cur_line_w += advance;
 
         if ch == ' ' {
@@ -139,6 +237,10 @@ where
         lines.push(cur_line);
     }
     lines
+}
+
+fn should_balance_diagnostic_message(diagnostic: &Diagnostic) -> bool {
+    diagnostic.source.as_deref() == Some("RRiter SQL")
 }
 
 fn diagnostic_copy_text(diagnostic: &Diagnostic) -> String {
@@ -220,6 +322,56 @@ fn fade_hover_color(mut color: [f32; 4], alpha: f32) -> [f32; 4] {
 fn compute_hover_scrollbar_alpha(anim_progress: f32) -> f32 {
     let p = ((anim_progress.clamp(0.0, 1.0) - 0.88) / 0.12).clamp(0.0, 1.0);
     p * p * (3.0 - 2.0 * p)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct HoverSurfaceLayout {
+    outer_rect: (f32, f32, f32, f32),
+    inner_rect: (f32, f32, f32, f32),
+    outer_radius: f32,
+    inner_radius: f32,
+    border_width: f32,
+    clip_rect: (f32, f32, f32, f32),
+}
+
+fn hover_surface_layout(
+    frame: (f32, f32, f32, f32),
+    radius: f32,
+    border_width: f32,
+) -> HoverSurfaceLayout {
+    let outer_rect = (
+        frame.0.round(),
+        frame.1.round(),
+        frame.2.round().max(0.0),
+        frame.3.round().max(0.0),
+    );
+    let max_inset = (outer_rect.2.min(outer_rect.3) * 0.5).max(0.0);
+    let requested_border_width = border_width.round().max(0.0);
+    let border_width = if requested_border_width > 0.0 && max_inset >= 1.0 {
+        requested_border_width.min(max_inset)
+    } else {
+        0.0
+    };
+    let outer_radius = radius.round().max(0.0).min(max_inset);
+    let inner_rect = (
+        outer_rect.0 + border_width,
+        outer_rect.1 + border_width,
+        (outer_rect.2 - border_width * 2.0).max(0.0),
+        (outer_rect.3 - border_width * 2.0).max(0.0),
+    );
+    let inner_max_radius = (inner_rect.2.min(inner_rect.3) * 0.5).max(0.0);
+    let inner_radius = (outer_radius - border_width)
+        .max(0.0)
+        .min(inner_max_radius);
+
+    HoverSurfaceLayout {
+        outer_rect,
+        inner_rect,
+        outer_radius,
+        inner_radius,
+        border_width,
+        clip_rect: inner_rect,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -386,6 +538,7 @@ fn compute_hover_scissor_rect(anim_rect: (f32, f32, f32, f32), x: f32, y: f32, w
     (cx1, cy1, (cx2 - cx1).max(0.0), (cy2 - cy1).max(0.0))
 }
 
+#[cfg(test)]
 fn compute_hover_frame_content_rect(
     bx: f32,
     by: f32,
@@ -552,6 +705,39 @@ fn valid_diagnostic_popup_cache(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn push_hover_surface_fill(
+        &mut self,
+        surface: HoverSurfaceLayout,
+        fill_color: [f32; 4],
+    ) {
+        self.push_rounded_rect(
+            surface.outer_rect.0,
+            surface.outer_rect.1,
+            surface.outer_rect.2,
+            surface.outer_rect.3,
+            surface.outer_radius,
+            fill_color,
+        );
+    }
+
+    fn push_hover_surface_border(
+        &mut self,
+        surface: HoverSurfaceLayout,
+        border_color: [f32; 4],
+    ) {
+        if surface.border_width > 0.0 {
+            self.push_rounded_rect_outline(
+                surface.outer_rect.0,
+                surface.outer_rect.1,
+                surface.outer_rect.2,
+                surface.outer_rect.3,
+                surface.outer_radius,
+                surface.border_width,
+                border_color,
+            );
+        }
+    }
+
     fn push_hover_popup_frame(
         &mut self,
         frame_x: f32,
@@ -559,36 +745,20 @@ impl Renderer {
         frame_w: f32,
         frame_h: f32,
         radius: f32,
-        alpha: f32,
+        fill_color: [f32; 4],
+        border_color: [f32; 4],
     ) {
-        if frame_w <= 0.0 || frame_h <= 0.0 {
+        let surface = hover_surface_layout(
+            (frame_x, frame_y, frame_w, frame_h),
+            radius,
+            (radius / 3.0).round().max(1.0),
+        );
+        if surface.outer_rect.2 <= 0.0 || surface.outer_rect.3 <= 0.0 {
             return;
         }
-        let alpha = alpha.clamp(0.0, 1.0);
-
-        let border_w = (radius / 3.0).round().max(1.0);
-        self.push_rounded_rect(
-            frame_x.round(),
-            frame_y.round(),
-            frame_w.round(),
-            frame_h.round(),
-            radius,
-            [
-                self.theme.minimap_bg[0],
-                self.theme.minimap_bg[1],
-                self.theme.minimap_bg[2],
-                alpha,
-            ],
-        );
-        self.push_rounded_rect_outline(
-            frame_x.round() - border_w,
-            frame_y.round() - border_w,
-            frame_w.round() + border_w * 2.0,
-            frame_h.round() + border_w * 2.0,
-            radius,
-            border_w,
-            [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], alpha],
-        );
+        debug_assert!(surface.inner_radius <= surface.outer_radius);
+        self.push_hover_surface_fill(surface, fill_color);
+        self.push_hover_surface_border(surface, border_color);
     }
 
     pub fn draw_diagnostic_popup(
@@ -679,6 +849,7 @@ impl Renderer {
                 message_base_offset,
                 max_text_w,
                 40.0 * s,
+                should_balance_diagnostic_message(diag),
                 |ch| self.char_advance(ch),
             );
 
@@ -841,37 +1012,56 @@ impl Renderer {
             (bx, by, box_w, combined_h),
             (source_anchor_x, source_anchor_y),
         );
-        self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, 1.0);
-
-        self.flush();
-        let bg_min_y = if combined_hover_h > 0.0 {
-            Some(frame_y)
-        } else {
-            None
-        };
-        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h, bg_min_y);
-        self.push_rounded_rect(
-            bx.round(),
-            by.round(),
-            box_w.round(),
-            combined_h.round(),
+        let frame_surface = hover_surface_layout(
+            (frame_x, frame_y, frame_w, frame_h),
             6.0 * s,
-            [
-                (self.theme.minimap_bg[0] + 0.035).min(1.0),
-                (self.theme.minimap_bg[1] + 0.035).min(1.0),
-                (self.theme.minimap_bg[2] + 0.035).min(1.0),
-                1.0,
-            ],
+            (2.0 * s).round().max(1.0),
         );
-        self.flush();
-        unsafe {
-            self.gl.disable(glow::SCISSOR_TEST);
+        let base_fill_color = [
+            self.theme.minimap_bg[0],
+            self.theme.minimap_bg[1],
+            self.theme.minimap_bg[2],
+            1.0,
+        ];
+        let diagnostic_fill_color = [
+            (self.theme.minimap_bg[0] + 0.035).min(1.0),
+            (self.theme.minimap_bg[1] + 0.035).min(1.0),
+            (self.theme.minimap_bg[2] + 0.035).min(1.0),
+            1.0,
+        ];
+        let border_color = [self.theme.sel[0], self.theme.sel[1], self.theme.sel[2], 1.0];
+        if frame_surface.outer_rect.2 > 0.0 && frame_surface.outer_rect.3 > 0.0 {
+            self.push_hover_surface_fill(frame_surface, base_fill_color);
+            self.flush();
+            let bg_min_y = if combined_hover_h > 0.0 {
+                Some(frame_surface.outer_rect.1)
+            } else {
+                None
+            };
+            apply_scissor(&self.gl, self.height, bx, by, box_w, total_h, bg_min_y);
+            self.push_hover_surface_fill(frame_surface, diagnostic_fill_color);
+            self.flush();
+            unsafe {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+            self.push_hover_surface_border(frame_surface, border_color);
         }
 
+        let target_surface = hover_surface_layout(
+            (bx, by, box_w, combined_h),
+            6.0 * s,
+            (2.0 * s).round().max(1.0),
+        );
         if combined_hover_h > 0.0 {
             let sep_y = (by + total_h).round();
             if let Some((sep_x, sep_w)) = compute_combined_separator_visible_rect(
-                bx, sep_y, box_w, frame_x, frame_y, frame_w, frame_h,
+                target_surface.inner_rect.0,
+                sep_y,
+                target_surface.inner_rect.2,
+                frame_x,
+                frame_y,
+                frame_w,
+                frame_h,
             ) {
                 self.push_rect(
                     sep_x.round(),
@@ -884,7 +1074,23 @@ impl Renderer {
         }
 
         self.flush();
-        apply_scissor(&self.gl, self.height, bx, by, box_w, total_h, None);
+        let diag_content_bottom =
+            (by + total_h).min(target_surface.clip_rect.1 + target_surface.clip_rect.3);
+        let diag_content_rect = (
+            target_surface.clip_rect.0,
+            target_surface.clip_rect.1,
+            target_surface.clip_rect.2,
+            (diag_content_bottom - target_surface.clip_rect.1).max(0.0),
+        );
+        apply_scissor(
+            &self.gl,
+            self.height,
+            diag_content_rect.0,
+            diag_content_rect.1,
+            diag_content_rect.2,
+            diag_content_rect.3,
+            None,
+        );
 
         let mut current_y = by + pad - scroll_y;
 
@@ -1398,12 +1604,26 @@ impl Renderer {
                 (bx, by, box_w, box_h),
                 (popup.anchor_x, popup.anchor_y),
             );
-            self.push_hover_popup_frame(frame_x, frame_y, frame_w, frame_h, 6.0 * s, opacity);
+            let fill_color = fade_hover_color(self.theme.minimap_bg, opacity);
+            let border_color = fade_hover_color(self.theme.sel, opacity);
+            self.push_hover_popup_frame(
+                frame_x,
+                frame_y,
+                frame_w,
+                frame_h,
+                6.0 * s,
+                fill_color,
+                border_color,
+            );
         }
 
         self.flush();
-        let content_rect =
-            compute_hover_frame_content_rect(bx, by, box_w, box_h, 1.0_f32.max(s.round()));
+        let content_rect = hover_surface_layout(
+            (bx, by, box_w, box_h),
+            6.0 * s,
+            (2.0 * s).round().max(1.0),
+        )
+        .clip_rect;
         apply_scissor(
             &self.gl,
             self.height,

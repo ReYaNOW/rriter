@@ -495,6 +495,9 @@ impl Renderer {
         blink_alpha: f32,
     ) -> bool {
         let database = &ide_panel.database;
+        if database.dialog.is_none() {
+            self.reset_delayed_tooltip_anchor_namespace(DATABASE_DIALOG_TOOLTIP_NAMESPACE);
+        }
         let mut drew = false;
         if let Some(menu) = database.context_menu.as_ref() {
             ui_registry.mark_overlay_start();
@@ -606,15 +609,13 @@ impl Renderer {
             mx,
             my,
         );
-        let geometry = database_modal_geometry(
+        let layout = database_connection_dialog_layout(
             self.width,
             self.height,
             s,
-            700.0,
-            780.0,
-            420.0,
-            420.0,
+            dialog.visible_fields().count(),
         );
+        let geometry = layout.modal;
         let s = geometry.scale;
         let width = geometry.w;
         let height = geometry.h;
@@ -644,146 +645,187 @@ impl Renderer {
             1.05,
         );
 
-        let form_top = y + 48.0 * s;
-        let footer = database_dialog_footer_layout(y, height, s);
-        let form_bottom = footer.form_bottom.max(form_top);
-        let form_clip = crate::ui_system::UiClipRect::new(
-            x,
-            form_top,
-            width,
-            (form_bottom - form_top).max(0.0),
-        );
+        let form_clip = layout.form_clip;
+        let scroll_y = dialog.scroll.current.clamp(0.0, layout.max_scroll);
+        let mut hovered_tooltip = None;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
             self.gl.scissor(
-                x as i32,
-                (self.height - form_bottom).max(0.0) as i32,
-                width as i32,
-                (form_bottom - form_top).max(0.0) as i32,
+                form_clip.x.max(0.0) as i32,
+                (self.height - form_clip.y - form_clip.h).max(0.0) as i32,
+                form_clip.w.max(0.0) as i32,
+                form_clip.h.max(0.0) as i32,
             );
         }
-        let form_pad = (22.0 * s).min(width * 0.08);
-        let inner_w = (width - form_pad * 2.0).max(1.0);
-        let label_area = (198.0 * s).min(inner_w * 0.34);
-        let label_x = x + form_pad;
-        let input_x = label_x + label_area;
-        let input_w = (inner_w - label_area).max(1.0);
-        let row_h = 38.0 * s;
-        let mut row = 0usize;
-        for field in dialog.visible_fields() {
-            let row_y = form_top + row as f32 * row_h - dialog.scroll.current;
-            if row_y + row_h >= form_top && row_y <= form_bottom {
-                let field_h = (28.0 * s).round();
-                let field_y = (row_y + 4.0 * s).round();
-                let mut label_scratch = String::new();
-                self.draw_tree_label_clipped(
-                    database_field_label(field),
-                    label_x.round(),
-                    Self::tree_row_text_y(field_y, field_h, s),
-                    (label_area - 6.0 * s).max(1.0),
-                    [0.72, 0.75, 0.82, 1.0],
-                    0.82,
-                    &mut label_scratch,
-                );
-                let remember = database_remember_control(field, dialog);
-                let desired_remember_w = if remember.is_some() { 132.0 * s } else { 0.0 };
-                let remember_w = desired_remember_w
-                    .min((input_w - 80.0 * s).max(0.0));
-                let field_w = (input_w - remember_w).max(1.0).round();
-                let focused = dialog.focused == Some(field);
-                let eye_size = if field.is_secret() { field_h.round() } else { 0.0 };
-                ui_registry.register_text_input_clipped(
-                    UiId::DatabaseDialogField(field),
-                    input_x.round(),
-                    field_y.round(),
-                    field_w,
-                    field_h.round(),
+        for (row, field) in dialog.visible_fields().enumerate() {
+            let remember = database_remember_control(field, dialog);
+            let field_layout = database_dialog_field_layout(
+                &layout,
+                row,
+                scroll_y,
+                remember.is_some(),
+                field.is_secret(),
+            );
+            if !field_layout.row_visible {
+                continue;
+            }
+
+            let label = database_field_label(field);
+            let mut label_scratch = String::new();
+            self.draw_tree_label_clipped(
+                label,
+                field_layout.label.x,
+                Self::tree_row_text_y(field_layout.input.y, field_layout.input.h, s),
+                field_layout.label.w,
+                [0.72, 0.75, 0.82, 1.0],
+                DATABASE_DIALOG_FIELD_TEXT_SCALE,
+                &mut label_scratch,
+            );
+            let label_hover_w = self
+                .measure_ui_width(label, DATABASE_DIALOG_FIELD_TEXT_SCALE)
+                .min(field_layout.label.w)
+                .max(1.0);
+            if ui_registry.register_rect_clipped(
+                UiId::DatabaseDialogField(field),
+                field_layout.label.x,
+                field_layout.input.y,
+                label_hover_w,
+                field_layout.input.h,
+                form_clip,
+                mx,
+                my,
+            ) {
+                hovered_tooltip = Some((
+                    DatabaseDialogTooltipTarget::Field(field),
+                    field_layout.label.x + label_hover_w,
+                    field_layout.input.y + field_layout.input.h,
+                ));
+            }
+
+            let focused = dialog.focused == Some(field);
+            ui_registry.register_text_input_clipped(
+                UiId::DatabaseDialogField(field),
+                field_layout.input.x,
+                field_layout.input.y,
+                field_layout.input.w,
+                field_layout.input.h,
+                form_clip,
+                mx,
+                my,
+            );
+            if let (Some((remember_id, enabled)), Some(remember_rect)) = (remember, field_layout.remember) {
+                let hovered = ui_registry.register_rect_clipped(
+                    remember_id,
+                    remember_rect.x,
+                    remember_rect.y,
+                    remember_rect.w,
+                    remember_rect.h,
                     form_clip,
                     mx,
                     my,
                 );
-                if let Some((remember_id, enabled)) = remember.filter(|_| remember_w >= 42.0 * s) {
-                    let checkbox_x = (input_x + field_w + 6.0 * s).round();
-                    let checkbox_w = (remember_w - 6.0 * s).max(1.0).round();
-                    let hovered = ui_registry.register_rect_clipped(
-                        remember_id,
-                        checkbox_x,
-                        field_y.round(),
-                        checkbox_w,
-                        field_h.round(),
-                        form_clip,
-                        mx,
-                        my,
-                    );
-                    crate::widgets::CheckboxView {
-                        x: checkbox_x,
-                        y: field_y,
-                        w: checkbox_w,
-                        h: field_h,
-                        label: "Запомнить",
-                        checked: enabled,
-                        enabled: true,
-                    }
-                    .render(self, hovered, s);
+                crate::widgets::CheckboxView {
+                    x: remember_rect.x,
+                    y: remember_rect.y,
+                    w: remember_rect.w,
+                    h: remember_rect.h,
+                    label: "Запомнить",
+                    checked: enabled,
+                    enabled: true,
                 }
-                let input = dialog.input(field);
-                let secret_masked = field.is_secret() && !dialog.secret_is_revealed(field);
-                let visible_width = (field_w - 16.0 * s - eye_size).max(1.0);
-                let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
-                    input.text(),
-                    input.cursor,
-                    visible_width,
-                    |ch| {
-                        let rendered = if secret_masked { '•' } else { ch };
-                        self.get_ui_glyph(rendered)
-                            .map(|glyph| Self::snapped_text_advance(glyph.advance, 0.82))
-                            .unwrap_or(8.0)
-                    },
-                );
-                self.draw_one_line_dialog_input(
-                    input.text(),
-                    input.cursor,
-                    input.selection_anchor,
-                    secret_masked,
-                    focused,
-                    input_x,
-                    field_y,
-                    field_w,
-                    field_h,
-                    scroll_x,
-                    if focused { blink_alpha } else { 0.0 },
-                    0.82,
-                    eye_size,
-                );
-                if field.is_secret() {
-                    let eye = crate::widgets::IconButton {
-                        x: (input_x + field_w - eye_size).round(),
-                        y: field_y.round(),
-                        size: eye_size,
-                        icon: Some(crate::widgets::IconType::Eye),
-                        is_active: dialog.secret_is_revealed(field),
-                        icon_size: Some((16.0 * s).round()),
-                        active_square_width: None,
-                        custom_color: None,
-                    };
-                    ui_registry.register_icon_button_clipped(
-                        UiId::DatabaseDialogSecretEye(field),
-                        &eye,
-                        form_clip,
-                        self,
-                        mx,
-                        my,
-                        s,
-                        false,
-                    );
-                }
+                .render(self, hovered, s);
             }
-            row += 1;
+
+            let input = dialog.input(field);
+            let secret_masked = field.is_secret() && !dialog.secret_is_revealed(field);
+            let eye_slot_w = field_layout.eye_hit.map_or(0.0, |rect| rect.w);
+            let visible_width = (field_layout.input.w - 16.0 * s - eye_slot_w).max(1.0);
+            let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                input.text(),
+                input.cursor,
+                visible_width,
+                |ch| {
+                    let rendered = if secret_masked { '•' } else { ch };
+                    self.get_ui_glyph(rendered)
+                        .map(|glyph| {
+                            Self::snapped_text_advance(
+                                glyph.advance,
+                                DATABASE_DIALOG_FIELD_TEXT_SCALE,
+                            )
+                        })
+                        .unwrap_or(8.0)
+                },
+            );
+            self.draw_one_line_dialog_input(
+                input.text(),
+                input.cursor,
+                input.selection_anchor,
+                secret_masked,
+                focused,
+                field_layout.input.x,
+                field_layout.input.y,
+                field_layout.input.w,
+                field_layout.input.h,
+                scroll_x,
+                if focused { blink_alpha } else { 0.0 },
+                DATABASE_DIALOG_FIELD_TEXT_SCALE,
+                eye_slot_w,
+            );
+            if let (Some(hit), Some(visual)) = (field_layout.eye_hit, field_layout.eye_visual) {
+                let hovered = ui_registry.register_rect_clipped(
+                    UiId::DatabaseDialogSecretEye(field),
+                    hit.x,
+                    hit.y,
+                    hit.w,
+                    hit.h,
+                    form_clip,
+                    mx,
+                    my,
+                );
+                let eye = crate::widgets::IconButton {
+                    x: visual.x,
+                    y: visual.y,
+                    size: visual.w,
+                    icon: Some(crate::widgets::IconType::Eye),
+                    is_active: dialog.secret_is_revealed(field),
+                    icon_size: Some((16.0 * s).round().min(visual.w)),
+                    active_square_width: None,
+                    custom_color: None,
+                };
+                let (render_mx, render_my) = if hovered {
+                    (visual.x + visual.w * 0.5, visual.y + visual.h * 0.5)
+                } else {
+                    (f32::NEG_INFINITY, f32::NEG_INFINITY)
+                };
+                eye.render(self, render_mx, render_my, s, false);
+            }
+        }
+
+        if let Some(track) = layout.scrollbar_track
+            && let Some(thumb) = database_connection_dialog_scrollbar_thumb(&layout, scroll_y)
+        {
+            self.push_rounded_rect(
+                track.x,
+                track.y,
+                track.w,
+                track.h,
+                track.w * 0.5,
+                [0.20, 0.21, 0.25, 0.55],
+            );
+            self.push_rounded_rect(
+                track.x,
+                thumb.start,
+                track.w,
+                thumb.len,
+                track.w * 0.5,
+                [0.48, 0.50, 0.58, 0.90],
+            );
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
 
+        let footer = layout.footer;
         let toggle_label = format!(
             "TLS: {:?}   Цвет: {:?}   SSH: {}   Бастион: {}",
             dialog.tls_mode,
@@ -798,15 +840,35 @@ impl Renderer {
             footer.summary_baseline,
             (width - 40.0 * s).max(4.0),
             [0.66, 0.70, 0.80, 1.0],
-            0.78,
+            DATABASE_DIALOG_SECONDARY_TEXT_SCALE,
             &mut toggle_scratch,
         );
         let mut control_x = x + 20.0 * s;
-        for (id, text, width) in [
-            (UiId::DatabaseDialogTls, "TLS", 66.0),
-            (UiId::DatabaseDialogColor, "Цвет", 66.0),
-            (UiId::DatabaseDialogSshToggle, "SSH", 66.0),
-            (UiId::DatabaseDialogJumpToggle, "Бастион", 92.0),
+        for (id, text, width, target) in [
+            (
+                UiId::DatabaseDialogTls,
+                "TLS",
+                66.0,
+                DatabaseDialogTooltipTarget::Tls,
+            ),
+            (
+                UiId::DatabaseDialogColor,
+                "Цвет",
+                66.0,
+                DatabaseDialogTooltipTarget::Color,
+            ),
+            (
+                UiId::DatabaseDialogSshToggle,
+                "SSH",
+                66.0,
+                DatabaseDialogTooltipTarget::Ssh,
+            ),
+            (
+                UiId::DatabaseDialogJumpToggle,
+                "Бастион",
+                92.0,
+                DatabaseDialogTooltipTarget::Jump,
+            ),
         ] {
             let button = crate::widgets::ButtonView {
                 x: control_x,
@@ -818,7 +880,9 @@ impl Renderer {
                 text_scale: 0.78,
                 icon_size: 0.0,
             };
-            ui_registry.register_button_view(id, button, self, mx, my, s, false);
+            if ui_registry.register_button_view(id, button, self, mx, my, s, false) {
+                hovered_tooltip = Some((target, control_x + width * s, footer.toggle_y + 30.0 * s));
+            }
             control_x += (width + 6.0) * s;
         }
         let right = x + width - 20.0 * s;
@@ -860,7 +924,7 @@ impl Renderer {
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
                 [0.95, 0.38, 0.42, 1.0],
-                0.75,
+                0.78,
                 &mut footer_scratch,
             );
         } else if let Some(status) = dialog.test_status.as_deref() {
@@ -870,7 +934,7 @@ impl Renderer {
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
                 [0.45, 0.85, 0.56, 1.0],
-                0.75,
+                0.78,
                 &mut footer_scratch,
             );
         } else if dialog.jump_enabled {
@@ -880,14 +944,30 @@ impl Renderer {
                 footer.message_baseline,
                 (width - 40.0 * s).max(20.0),
                 [0.72, 0.75, 0.82, 1.0],
-                0.72,
+                DATABASE_DIALOG_SECONDARY_TEXT_SCALE,
                 &mut footer_scratch,
             );
+        }
+
+        if let Some((target, anchor_x, anchor_y)) = hovered_tooltip {
+            let tooltip_anchor = self.delayed_tooltip_anchor(
+                Some(target.key()),
+                anchor_x,
+                anchor_y,
+                std::time::Instant::now(),
+            );
+            if let Some((tooltip_x, tooltip_y)) = tooltip_anchor
+                && !self.hide_popups_until_mouse_move
+            {
+                self.draw_database_dialog_tooltip(target.text(), tooltip_x, tooltip_y, s);
+            }
+        } else {
+            self.reset_delayed_tooltip_anchor_namespace(DATABASE_DIALOG_TOOLTIP_NAMESPACE);
         }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct DatabaseDialogFooterLayout {
     form_bottom: f32,
     message_baseline: f32,
@@ -985,26 +1065,26 @@ fn database_context_action_label(action: crate::app::database::DatabaseContextAc
 fn database_field_label(field: crate::app::database::DatabaseFormField) -> &'static str {
     use crate::app::database::DatabaseFormField::*;
     match field {
-        DisplayName => "Имя подключения",
-        Host => "PostgreSQL host",
-        Port => "PostgreSQL port",
-        Username => "PostgreSQL user",
-        PostgresPassword => "PostgreSQL password",
-        MaintenanceDatabase => "Служебная база",
-        SshHost => "SSH host",
-        SshPort => "SSH port",
-        SshUsername => "SSH user",
-        SshPassword => "SSH password",
-        SshPrivateKey => "SSH private key",
-        SshKeyPassphrase => "SSH key passphrase",
-        SshConfigAlias => "SSH config alias",
-        JumpHost => "Бастион host",
-        JumpPort => "Бастион port",
-        JumpUsername => "Бастион user",
-        JumpPassword => "Бастион password",
-        JumpPrivateKey => "Бастион private key",
-        JumpKeyPassphrase => "Бастион passphrase",
-        JumpConfigAlias => "Бастион config alias",
+        DisplayName => "Имя подключения*",
+        Host => "PostgreSQL host*",
+        Port => "PostgreSQL port*",
+        Username => "PostgreSQL user*",
+        PostgresPassword => "PostgreSQL password*",
+        MaintenanceDatabase => "Служебная база*",
+        SshHost => "SSH host*",
+        SshPort => "SSH port*",
+        SshUsername => "SSH user*",
+        SshPassword => "SSH password*",
+        SshPrivateKey => "SSH private key*",
+        SshKeyPassphrase => "SSH key passphrase*",
+        SshConfigAlias => "SSH config alias*",
+        JumpHost => "Бастион host*",
+        JumpPort => "Бастион port*",
+        JumpUsername => "Бастион user*",
+        JumpPassword => "Бастион password*",
+        JumpPrivateKey => "Бастион private key*",
+        JumpKeyPassphrase => "Бастион passphrase*",
+        JumpConfigAlias => "Бастион config alias*",
     }
 }
 
@@ -1286,16 +1366,6 @@ mod database_dialog_layout_tests {
             ),
             "Новая SQL-консоль"
         );
-    }
-
-    #[test]
-    fn connection_dialog_footer_rows_never_overlap() {
-        let layout = database_dialog_footer_layout(10.0, 600.0, 1.0);
-        assert!(layout.form_bottom < layout.message_baseline);
-        assert!(layout.message_baseline < layout.summary_baseline);
-        assert!(layout.summary_baseline < layout.toggle_y);
-        assert!(layout.toggle_y + 30.0 < layout.actions_y);
-        assert!(layout.actions_y + 30.0 <= 610.0);
     }
 
     #[test]

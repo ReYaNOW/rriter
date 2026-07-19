@@ -21,7 +21,119 @@ fn database_command_should_queue(
         || (transaction_review_open && !can_finish_transaction)
 }
 
+fn database_dialog_scrollbar_hit(
+    track: crate::ui_system::UiClipRect,
+    pointer_x: f32,
+    pointer_y: f32,
+) -> bool {
+    track.contains(pointer_x, pointer_y)
+}
+
 impl App {
+    pub(crate) fn database_connection_dialog_scroll_metrics(
+        &self,
+    ) -> Option<(
+        crate::ui_system::UiClipRect,
+        f32,
+        f32,
+        Option<(crate::ui_system::UiClipRect, crate::scroll::ScrollbarThumb)>,
+    )> {
+        let renderer = self.renderer.as_ref()?;
+        let dialog = self.ide_panel.database.dialog.as_ref()?;
+        Some(renderer.database_connection_dialog_scroll_metrics(
+            dialog.visible_fields().count(),
+            dialog.scroll.current,
+        ))
+    }
+
+    pub(crate) fn clamp_database_dialog_scroll_to_layout(&mut self) {
+        let Some((_, _, max_scroll, _)) = self.database_connection_dialog_scroll_metrics() else {
+            return;
+        };
+        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+            dialog.clamp_scroll(max_scroll);
+        }
+    }
+
+    pub(crate) fn ensure_database_dialog_focus_visible(&mut self) {
+        let Some((form_clip, row_h, max_scroll, _)) =
+            self.database_connection_dialog_scroll_metrics()
+        else {
+            return;
+        };
+        let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
+            return;
+        };
+        let Some(row) = dialog.focused.and_then(|field| dialog.visible_field_index(field)) else {
+            dialog.clamp_scroll(max_scroll);
+            return;
+        };
+        dialog.ensure_row_visible(row, row_h, form_clip.h, max_scroll);
+    }
+
+    pub(crate) fn start_database_dialog_scroll_drag(
+        &mut self,
+        pointer_x: f32,
+        pointer_y: f32,
+    ) -> bool {
+        let Some((_, _, max_scroll, scrollbar)) =
+            self.database_connection_dialog_scroll_metrics()
+        else {
+            return false;
+        };
+        let Some((track, thumb)) = scrollbar else { return false; };
+        if !database_dialog_scrollbar_hit(track, pointer_x, pointer_y) {
+            return false;
+        }
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer_y,
+            track.y,
+            track.h,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return false;
+        };
+        let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
+            return false;
+        };
+        dialog.scroll.jump_to(target);
+        dialog.scroll.drag_offset = drag_offset;
+        dialog.scroll.is_dragging = true;
+        true
+    }
+
+    pub(crate) fn update_database_dialog_scroll_drag(&mut self, pointer_y: f32) -> bool {
+        let drag_offset = match self.ide_panel.database.dialog.as_ref() {
+            Some(dialog) if dialog.scroll.is_dragging => dialog.scroll.drag_offset,
+            _ => return false,
+        };
+        let Some((_, _, max_scroll, scrollbar)) =
+            self.database_connection_dialog_scroll_metrics()
+        else {
+            return false;
+        };
+        let Some((track, thumb)) = scrollbar else { return false; };
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer_y,
+            track.y,
+            track.h,
+            thumb,
+            max_scroll,
+            Some(drag_offset),
+        ) else {
+            return false;
+        };
+        let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
+            return false;
+        };
+        dialog.scroll.jump_to(target);
+        dialog.scroll.drag_offset = drag_offset;
+        dialog.scroll.is_dragging = true;
+        true
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn database_dialog_input_index_at(
         &mut self,
@@ -115,11 +227,15 @@ impl App {
         let mut copy_text = None;
         let mut cancel = false;
         let mut save = false;
+        let mut focus_moved = false;
 
         if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
             match key_event.physical_key {
                 PhysicalKey::Code(KeyCode::Escape) => cancel = true,
-                PhysicalKey::Code(KeyCode::Tab) => dialog.focus_next(shift),
+                PhysicalKey::Code(KeyCode::Tab) => {
+                    dialog.focus_next(shift);
+                    focus_moved = true;
+                }
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => save = true,
                 physical_key => {
                     let Some(field) = dialog.focused else {
@@ -144,6 +260,9 @@ impl App {
 
         if let Some(text) = copy_text {
             self.set_clipboard_text(text);
+        }
+        if focus_moved {
+            self.ensure_database_dialog_focus_visible();
         }
         if cancel {
             self.cancel_database_dialog();
@@ -1428,6 +1547,14 @@ fn database_console_initial_text(
 #[cfg(test)]
 mod round3_database_console_tests {
     use super::*;
+
+    #[test]
+    fn database_dialog_scrollbar_drag_requires_pointer_inside_track_on_both_axes() {
+        let track = crate::ui_system::UiClipRect::new(760.0, 100.0, 8.0, 240.0);
+        assert!(database_dialog_scrollbar_hit(track, 764.0, 220.0));
+        assert!(!database_dialog_scrollbar_hit(track, 300.0, 220.0));
+        assert!(!database_dialog_scrollbar_hit(track, 764.0, 360.0));
+    }
 
     #[test]
     fn r3_107_unreadable_sql_console_does_not_become_empty_editable_text() {

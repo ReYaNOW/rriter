@@ -662,3 +662,384 @@ fn git_file_row_layout(indent_x: f32, row_y: f32, row_h: f32, scale: f32) -> Git
         text_x: icon_x + icon_size + 4.0 * scale,
     }
 }
+
+const DATABASE_DIALOG_FIELD_TEXT_SCALE: f32 = 0.82;
+const DATABASE_DIALOG_SECONDARY_TEXT_SCALE: f32 = 0.78;
+const DATABASE_DIALOG_ROW_H: f32 = 38.0;
+const DATABASE_DIALOG_FORM_TOP: f32 = 48.0;
+const DATABASE_DIALOG_SCROLLBAR_W: f32 = 8.0;
+const DATABASE_DIALOG_SCROLLBAR_MARGIN: f32 = 5.0;
+const DATABASE_DIALOG_MIN_THUMB_H: f32 = 24.0;
+const DATABASE_DIALOG_EYE_VISUAL_RATIO: f32 = 0.86;
+const DATABASE_DIALOG_TOOLTIP_NAMESPACE: u64 = 2u64 << 60;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabaseConnectionDialogLayout {
+    modal: DatabaseModalGeometry,
+    footer: DatabaseDialogFooterLayout,
+    form_clip: crate::ui_system::UiClipRect,
+    content_height: f32,
+    max_scroll: f32,
+    scrollbar_track: Option<crate::ui_system::UiClipRect>,
+    row_h: f32,
+    label_x: f32,
+    label_w: f32,
+    input_x: f32,
+    input_w: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabaseDialogFieldLayout {
+    row_visible: bool,
+    label: crate::ui_system::UiClipRect,
+    input: crate::ui_system::UiClipRect,
+    remember: Option<crate::ui_system::UiClipRect>,
+    eye_hit: Option<crate::ui_system::UiClipRect>,
+    eye_visual: Option<crate::ui_system::UiClipRect>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DatabaseDialogTooltipTarget {
+    Field(crate::app::database::DatabaseFormField),
+    Tls,
+    Color,
+    Ssh,
+    Jump,
+}
+
+impl DatabaseDialogTooltipTarget {
+    fn key(self) -> u64 {
+        let local = match self {
+            Self::Field(field) => crate::app::database::DatabaseFormField::ALL
+                .iter()
+                .position(|candidate| *candidate == field)
+                .unwrap_or(0) as u64,
+            Self::Tls => 32,
+            Self::Color => 33,
+            Self::Ssh => 34,
+            Self::Jump => 35,
+        };
+        DATABASE_DIALOG_TOOLTIP_NAMESPACE | local
+    }
+
+    fn text(self) -> &'static str {
+        use crate::app::database::DatabaseFormField as Field;
+        match self {
+            Self::Field(Field::DisplayName) => {
+                "Понятное имя подключения, которое будет показано в панели баз данных."
+            }
+            Self::Field(Field::Host) => {
+                "DNS-имя, IPv4/IPv6-адрес или доступный alias PostgreSQL-сервера. По умолчанию: localhost."
+            }
+            Self::Field(Field::Port) => "TCP-порт PostgreSQL. По умолчанию: 5432.",
+            Self::Field(Field::Username) => "Имя пользователя PostgreSQL для аутентификации.",
+            Self::Field(Field::PostgresPassword) => {
+                "Пароль пользователя PostgreSQL. При включённом «Запомнить» сохраняется только в системном хранилище секретов."
+            }
+            Self::Field(Field::MaintenanceDatabase) => {
+                "База, через которую RRiter загружает список доступных баз. По умолчанию: postgres."
+            }
+            Self::Field(Field::SshHost) => "DNS-имя или IP SSH-сервера, через который открывается туннель.",
+            Self::Field(Field::SshPort) => "TCP-порт SSH-сервера. По умолчанию: 22.",
+            Self::Field(Field::SshUsername) => "Имя пользователя для SSH-аутентификации.",
+            Self::Field(Field::SshPassword) => {
+                "Пароль SSH. Значение скрыто; сохранение выполняется только через системное хранилище секретов."
+            }
+            Self::Field(Field::SshPrivateKey) => "Путь к приватному ключу для SSH-аутентификации.",
+            Self::Field(Field::SshKeyPassphrase) => {
+                "Passphrase приватного SSH-ключа. Значение не выводится в tooltip или журнал."
+            }
+            Self::Field(Field::SshConfigAlias) => {
+                "Alias из пользовательского SSH config; может задавать host и другие параметры подключения."
+            }
+            Self::Field(Field::JumpHost) => "DNS-имя или IP промежуточного Bastion SSH-сервера.",
+            Self::Field(Field::JumpPort) => "TCP-порт Bastion SSH-сервера. По умолчанию: 22.",
+            Self::Field(Field::JumpUsername) => "Имя пользователя для входа на Bastion SSH-сервер.",
+            Self::Field(Field::JumpPassword) => {
+                "Пароль Bastion SSH. Значение скрыто и не включается в tooltip."
+            }
+            Self::Field(Field::JumpPrivateKey) => "Путь к приватному ключу для входа на Bastion SSH-сервер.",
+            Self::Field(Field::JumpKeyPassphrase) => {
+                "Passphrase приватного ключа Bastion SSH. Значение не включается в tooltip."
+            }
+            Self::Field(Field::JumpConfigAlias) => "Alias Bastion-сервера из пользовательского SSH config.",
+            Self::Tls => "Переключает режим TLS PostgreSQL: Disable, Prefer или Require.",
+            Self::Color => "Выбирает цвет подключения в дереве Database Tools.",
+            Self::Ssh => "Включает SSH-туннель между RRiter и PostgreSQL-сервером.",
+            Self::Jump => "Включает промежуточный Bastion SSH-сервер; SSH будет включён автоматически.",
+        }
+    }
+}
+
+fn database_connection_dialog_layout(
+    viewport_w: f32,
+    viewport_h: f32,
+    base_scale: f32,
+    visible_rows: usize,
+) -> DatabaseConnectionDialogLayout {
+    let modal = database_modal_geometry(
+        viewport_w,
+        viewport_h,
+        base_scale,
+        700.0,
+        780.0,
+        420.0,
+        420.0,
+    );
+    let s = modal.scale;
+    let footer = database_dialog_footer_layout(modal.y, modal.h, s);
+    let form_top = modal.y + DATABASE_DIALOG_FORM_TOP * s;
+    let form_bottom = footer.form_bottom.max(form_top);
+    let form_clip = crate::ui_system::UiClipRect::new(
+        modal.x,
+        form_top,
+        modal.w,
+        (form_bottom - form_top).max(0.0),
+    );
+    let row_h = DATABASE_DIALOG_ROW_H * s;
+    let content_height = visible_rows as f32 * row_h;
+    let max_scroll = (content_height - form_clip.h).max(0.0);
+    let scrollbar_track = (max_scroll > 0.0 && form_clip.h > 2.0 * DATABASE_DIALOG_SCROLLBAR_MARGIN * s)
+        .then(|| {
+            crate::ui_system::UiClipRect::new(
+                (modal.x + modal.w - (DATABASE_DIALOG_SCROLLBAR_W + DATABASE_DIALOG_SCROLLBAR_MARGIN) * s).round(),
+                (form_clip.y + DATABASE_DIALOG_SCROLLBAR_MARGIN * s).round(),
+                (DATABASE_DIALOG_SCROLLBAR_W * s).max(1.0).round(),
+                (form_clip.h - 2.0 * DATABASE_DIALOG_SCROLLBAR_MARGIN * s).max(1.0).round(),
+            )
+        });
+    let form_pad = (22.0 * s).min(modal.w * 0.08);
+    let content_right = scrollbar_track
+        .map(|track| track.x - 7.0 * s)
+        .unwrap_or(modal.x + modal.w - form_pad);
+    let inner_w = (content_right - (modal.x + form_pad)).max(1.0);
+    let label_w = (198.0 * s).min(inner_w * 0.34);
+    let label_x = modal.x + form_pad;
+    let input_x = label_x + label_w;
+    let input_w = (inner_w - label_w).max(1.0);
+    DatabaseConnectionDialogLayout {
+        modal,
+        footer,
+        form_clip,
+        content_height,
+        max_scroll,
+        scrollbar_track,
+        row_h,
+        label_x,
+        label_w: (label_w - 6.0 * s).max(1.0),
+        input_x,
+        input_w,
+    }
+}
+
+fn database_dialog_field_layout(
+    layout: &DatabaseConnectionDialogLayout,
+    row: usize,
+    scroll_y: f32,
+    has_remember: bool,
+    has_eye: bool,
+) -> DatabaseDialogFieldLayout {
+    let s = layout.modal.scale;
+    let row_y = layout.form_clip.y + row as f32 * layout.row_h - scroll_y;
+    let field_h = (28.0 * s).max(1.0).round();
+    let field_y = (row_y + 4.0 * s).round();
+    let desired_remember_w = if has_remember { 132.0 * s } else { 0.0 };
+    let remember_w = desired_remember_w.min((layout.input_w - 80.0 * s).max(0.0));
+    let field_w = (layout.input_w - remember_w).max(1.0).round();
+    let input = crate::ui_system::UiClipRect::new(
+        layout.input_x.round(),
+        field_y,
+        field_w,
+        field_h,
+    );
+    let remember = (has_remember && remember_w >= 42.0 * s).then(|| {
+        crate::ui_system::UiClipRect::new(
+            (layout.input_x + field_w + 6.0 * s).round(),
+            field_y,
+            (remember_w - 6.0 * s).max(1.0).round(),
+            field_h,
+        )
+    });
+    let eye_hit = has_eye.then(|| {
+        crate::ui_system::UiClipRect::new(
+            (input.x + input.w - field_h).round(),
+            field_y,
+            field_h,
+            field_h,
+        )
+    });
+    let eye_visual = eye_hit.map(|hit| {
+        let size = (hit.w * DATABASE_DIALOG_EYE_VISUAL_RATIO).round().clamp(1.0, hit.w);
+        crate::ui_system::UiClipRect::new(
+            (hit.x + (hit.w - size) * 0.5).round(),
+            (hit.y + (hit.h - size) * 0.5).round(),
+            size,
+            size,
+        )
+    });
+    DatabaseDialogFieldLayout {
+        row_visible: row_y + layout.row_h >= layout.form_clip.y
+            && row_y <= layout.form_clip.y + layout.form_clip.h,
+        label: crate::ui_system::UiClipRect::new(
+            layout.label_x.round(),
+            field_y,
+            layout.label_w,
+            field_h,
+        ),
+        input,
+        remember,
+        eye_hit,
+        eye_visual,
+    }
+}
+
+fn database_connection_dialog_scrollbar_thumb(
+    layout: &DatabaseConnectionDialogLayout,
+    current_scroll: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    let track = layout.scrollbar_track?;
+    crate::scroll::scrollbar_thumb(
+        track.y,
+        track.h,
+        layout.form_clip.h,
+        layout.content_height,
+        current_scroll.clamp(0.0, layout.max_scroll),
+        DATABASE_DIALOG_MIN_THUMB_H * layout.modal.scale,
+    )
+}
+
+fn database_dialog_tooltip_rect(
+    window_w: f32,
+    window_h: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+    desired_w: f32,
+    desired_h: f32,
+    scale: f32,
+) -> Option<crate::ui_system::UiClipRect> {
+    let margin = 8.0 * scale;
+    let max_w = (window_w - margin * 2.0).max(0.0);
+    let max_h = (window_h - margin * 2.0).max(0.0);
+    if max_w <= 1.0 || max_h <= 1.0 {
+        return None;
+    }
+    let w = desired_w.min(max_w).max(1.0).round();
+    let h = desired_h.min(max_h).max(1.0).round();
+    let preferred_x = anchor_x + 10.0 * scale;
+    let preferred_y = anchor_y + 8.0 * scale;
+    let x = if preferred_x + w <= window_w - margin {
+        preferred_x
+    } else {
+        anchor_x - 10.0 * scale - w
+    }
+    .clamp(margin, (window_w - margin - w).max(margin));
+    let y = if preferred_y + h <= window_h - margin {
+        preferred_y
+    } else {
+        anchor_y - 8.0 * scale - h
+    }
+    .clamp(margin, (window_h - margin - h).max(margin));
+    Some(crate::ui_system::UiClipRect::new(x.round(), y.round(), w, h))
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl Renderer {
+    pub(crate) fn database_connection_dialog_scroll_metrics(
+        &self,
+        visible_rows: usize,
+        current_scroll: f32,
+    ) -> (
+        crate::ui_system::UiClipRect,
+        f32,
+        f32,
+        Option<(crate::ui_system::UiClipRect, crate::scroll::ScrollbarThumb)>,
+    ) {
+        let layout = database_connection_dialog_layout(
+            self.width,
+            self.height,
+            self.scale_factor,
+            visible_rows,
+        );
+        let scrollbar = layout.scrollbar_track.and_then(|track| {
+            database_connection_dialog_scrollbar_thumb(&layout, current_scroll)
+                .map(|thumb| (track, thumb))
+        });
+        (
+            layout.form_clip,
+            layout.row_h,
+            layout.max_scroll,
+            scrollbar,
+        )
+    }
+
+    pub(crate) fn suppress_database_dialog_tooltip_after_click(&mut self) {
+        self.suppress_popups_until_next_mouse_move();
+        self.reset_delayed_tooltip_anchor_namespace(DATABASE_DIALOG_TOOLTIP_NAMESPACE);
+    }
+
+    fn draw_database_dialog_tooltip(
+        &mut self,
+        text: &str,
+        anchor_x: f32,
+        anchor_y: f32,
+        s: f32,
+    ) {
+        let text_scale = 0.82;
+        let pad_x = (12.0 * s).round();
+        let pad_y = (9.0 * s).round();
+        let line_h = (20.0 * s).round().max(16.0);
+        let max_text_w = (420.0 * s)
+            .min((self.width - 2.0 * (8.0 * s + pad_x)).max(1.0));
+        let ranges = crate::render_view::core_text::wrapped_text_ranges(
+            text,
+            max_text_w,
+            |ch| {
+                self.get_ui_glyph(ch)
+                    .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
+                    .unwrap_or(8.0 * text_scale)
+            },
+        );
+        let measured_w = ranges
+            .iter()
+            .map(|(start, end)| self.measure_ui_width(&text[*start..*end], text_scale))
+            .fold(1.0f32, f32::max);
+        let desired_w = measured_w + 2.0 * pad_x;
+        let desired_h = ranges.len() as f32 * line_h + 2.0 * pad_y;
+        let Some(rect) = database_dialog_tooltip_rect(
+            self.width,
+            self.height,
+            anchor_x,
+            anchor_y,
+            desired_w,
+            desired_h,
+            s,
+        ) else {
+            return;
+        };
+
+        self.push_rounded_rect_border(
+            rect.x,
+            rect.y,
+            rect.w,
+            rect.h,
+            6.0 * s,
+            1.0,
+            self.theme.sel,
+            [
+                self.theme.minimap_bg[0],
+                self.theme.minimap_bg[1],
+                self.theme.minimap_bg[2],
+                1.0,
+            ],
+        );
+        for (line, (start, end)) in ranges.into_iter().enumerate() {
+            self.draw_string_scaled_pixel_snapped(
+                &text[start..end],
+                rect.x + pad_x,
+                Self::tree_row_text_y(rect.y + pad_y + line as f32 * line_h, line_h, s),
+                self.theme.fg,
+                text_scale,
+            );
+        }
+    }
+}

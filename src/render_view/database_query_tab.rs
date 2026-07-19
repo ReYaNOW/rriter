@@ -5,6 +5,7 @@ use glow::HasContext;
 
 const QUERY_TOOLBAR_H: f32 = 40.0;
 const QUERY_BUTTON_TEXT_SCALE: f32 = 0.78;
+const QUERY_STATUS_TEXT_SCALE: f32 = 0.78;
 const DATABASE_SQL_SPANS_CACHE_MAX_ENTRIES: usize = 256;
 const DATABASE_SQL_SPANS_CACHE_MAX_BYTES: usize = 8 * 1024 * 1024;
 
@@ -336,7 +337,7 @@ impl Renderer {
             } else {
                 self.theme.line_num
             },
-            0.68,
+            QUERY_STATUS_TEXT_SCALE,
             &mut scratch,
         );
         if !state.editor_diagnostics.is_empty() && status_w > 0.0 {
@@ -1541,6 +1542,7 @@ mod tests {
     #[test]
     fn bug_7_query_toolbar_uses_standard_button_typography() {
         assert_eq!(QUERY_BUTTON_TEXT_SCALE, 0.78);
+        assert_eq!(QUERY_STATUS_TEXT_SCALE, 0.78);
     }
 
     #[test]

@@ -256,6 +256,7 @@ impl App {
         self.ide_panel.file_tree_dialog_input_drag = None;
         if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
             dialog.dragging_field = None;
+            dialog.scroll.end_drag();
         }
         self.ide_panel.database.table_modal_input_dragging = false;
 
@@ -360,6 +361,15 @@ impl App {
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             stop_click_scroll_anims(self);
+            if self.ide_panel.database.dialog.is_some() {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.suppress_database_dialog_tooltip_after_click();
+                }
+                if self.start_database_dialog_scroll_drag(mx, my) {
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
+            }
             if self
                 .ui_registry
                 .find_at(mx, my)

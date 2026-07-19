@@ -2310,15 +2310,27 @@ impl App {
             UiId::DatabaseDialogSshToggle => {
                 if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
                     dialog.ssh_enabled = !dialog.ssh_enabled;
-                    if !dialog.ssh_enabled { dialog.jump_enabled = false; }
+                    if !dialog.ssh_enabled {
+                        dialog.jump_enabled = false;
+                        if dialog.focused.is_some_and(|field| {
+                            dialog.visible_field_index(field).is_none()
+                        }) {
+                            dialog.focused = Some(
+                                crate::app::database::DatabaseFormField::MaintenanceDatabase,
+                            );
+                        }
+                    }
                     dialog.error = None;
                     dialog.test_status = None;
                 }
+                self.clamp_database_dialog_scroll_to_layout();
             }
             UiId::DatabaseDialogJumpToggle => {
                 if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
                     dialog.toggle_jump_host();
                 }
+                self.clamp_database_dialog_scroll_to_layout();
+                self.ensure_database_dialog_focus_visible();
             }
             UiId::DatabaseDialogRememberPostgres => {
                 if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {

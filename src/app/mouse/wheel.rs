@@ -26,6 +26,19 @@ fn scroll_autocomplete_list(
     scroll.clamp_target(0.0, autocomplete_max_scroll(total_items, scale));
 }
 
+fn scroll_database_dialog_form(
+    scroll: &mut crate::scroll::ScrollState,
+    dy: f32,
+    max_scroll: f32,
+    pointer_inside_viewport: bool,
+) {
+    if pointer_inside_viewport {
+        scroll.anim_speed = 7.0;
+        scroll.scroll_by(dy);
+    }
+    scroll.clamp_target(0.0, max_scroll.max(0.0));
+}
+
 fn git_changes_total_height(git: &crate::app::git_panel::GitPanelState, scale: f32) -> f32 {
     let mut total_h = 0.0;
     for workspace in &git.snapshot.workspaces {
@@ -95,18 +108,18 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
-        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
-            dialog.scroll.anim_speed = 7.0;
-            dialog.scroll.scroll_by(dy);
-            let visible_rows = dialog.visible_fields().count() as f32;
-            let renderer_height = self.renderer.as_ref().unwrap().height;
-            let dialog_height = (renderer_height - 48.0 * s)
-                .min(780.0 * s)
-                .max(420.0 * s);
-            let form_viewport_height = (dialog_height - 194.0 * s).max(38.0 * s);
-            let max_scroll =
-                (visible_rows * 38.0 * s - form_viewport_height).max(0.0);
-            dialog.scroll.clamp_target(0.0, max_scroll);
+        if self.ide_panel.database.dialog.is_some() {
+            let metrics = self.database_connection_dialog_scroll_metrics();
+            if let (Some((form_clip, _, max_scroll, _)), Some(dialog)) =
+                (metrics, self.ide_panel.database.dialog.as_mut())
+            {
+                scroll_database_dialog_form(
+                    &mut dialog.scroll,
+                    dy,
+                    max_scroll,
+                    form_clip.contains(mx, my),
+                );
+            }
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -1314,6 +1327,23 @@ mod tests {
 
         scroll_autocomplete_list(&mut scroll, -500.0, 10, 1.0);
         assert_eq!(scroll.target, 0.0);
+    }
+
+    #[test]
+    fn database_dialog_wheel_only_moves_inside_scrollable_form_viewport() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll_database_dialog_form(&mut scroll, 120.0, 400.0, false);
+        assert_eq!(scroll.target, 0.0);
+
+        scroll_database_dialog_form(&mut scroll, 120.0, 400.0, true);
+        assert_eq!(scroll.target, 120.0);
+        assert_eq!(scroll.current, 0.0);
+        assert_eq!(scroll.anim_speed, 7.0);
+        assert!(scroll.update(0.016));
+        assert!(scroll.current > 0.0 && scroll.current < scroll.target);
+
+        scroll_database_dialog_form(&mut scroll, 500.0, 400.0, true);
+        assert_eq!(scroll.target, 400.0);
     }
 
     fn git_workspace_for_wheel_test(

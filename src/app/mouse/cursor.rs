@@ -230,6 +230,13 @@ impl App {
             return;
         }
 
+        if self.update_database_dialog_scroll_drag(py) {
+            clear_hover_popup(self.renderer.as_mut());
+            self.update_ctrl_definition_hover(None);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
             && let Some(state) = ddl.as_mut()
             && state.selecting

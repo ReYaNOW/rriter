@@ -711,6 +711,49 @@ impl DatabaseConnectionDialog {
         })
     }
 
+    pub(crate) fn visible_field_index(&self, field: DatabaseFormField) -> Option<usize> {
+        self.visible_fields().position(|candidate| candidate == field)
+    }
+
+    pub(crate) fn clamp_scroll(&mut self, max_scroll: f32) {
+        let max_scroll = if max_scroll.is_finite() {
+            max_scroll.max(0.0)
+        } else {
+            0.0
+        };
+        self.scroll.clamp_current(0.0, max_scroll);
+        self.scroll.clamp_target(0.0, max_scroll);
+        if max_scroll <= 0.0 {
+            self.scroll.end_drag();
+        }
+    }
+
+    pub(crate) fn ensure_row_visible(
+        &mut self,
+        row: usize,
+        row_h: f32,
+        viewport_h: f32,
+        max_scroll: f32,
+    ) {
+        if !row_h.is_finite() || row_h <= 0.0 || !viewport_h.is_finite() || viewport_h <= 0.0 {
+            self.clamp_scroll(max_scroll);
+            return;
+        }
+        let max_scroll = max_scroll.max(0.0);
+        let row_top = row as f32 * row_h;
+        let row_bottom = row_top + row_h;
+        let current_target = self.scroll.target.clamp(0.0, max_scroll);
+        let target = if row_top < current_target {
+            row_top
+        } else if row_bottom > current_target + viewport_h {
+            row_bottom - viewport_h
+        } else {
+            current_target
+        }
+        .clamp(0.0, max_scroll);
+        self.scroll.jump_to(target);
+    }
+
 
     pub fn toggle_secret_visibility(&mut self, field: DatabaseFormField) {
         if !field.is_secret() {
@@ -1486,6 +1529,44 @@ mod tests {
         dialog.toggle_jump_host();
         assert!(dialog.ssh_enabled);
         assert!(!dialog.jump_enabled);
+    }
+
+    #[test]
+    fn dialog_scroll_clamps_when_visible_rows_shrink() {
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Orange);
+        dialog.scroll.current = 900.0;
+        dialog.scroll.target = 950.0;
+        dialog.scroll.is_dragging = true;
+        dialog.clamp_scroll(120.0);
+        assert_eq!(dialog.scroll.current, 120.0);
+        assert_eq!(dialog.scroll.target, 120.0);
+        assert!(dialog.scroll.is_dragging);
+
+        dialog.clamp_scroll(0.0);
+        assert_eq!(dialog.scroll.current, 0.0);
+        assert_eq!(dialog.scroll.target, 0.0);
+        assert!(!dialog.scroll.is_dragging);
+    }
+
+    #[test]
+    fn focused_row_is_scrolled_wholly_into_view() {
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Orange);
+        dialog.ensure_row_visible(8, 38.0, 152.0, 300.0);
+        assert_eq!(dialog.scroll.target, 190.0);
+        dialog.scroll.current = 190.0;
+        dialog.scroll.target = 190.0;
+        dialog.ensure_row_visible(2, 38.0, 152.0, 300.0);
+        assert_eq!(dialog.scroll.target, 76.0);
+    }
+
+    #[test]
+    fn non_finite_dialog_scroll_bounds_are_sanitized() {
+        let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Orange);
+        dialog.scroll.current = f32::NAN;
+        dialog.scroll.target = f32::INFINITY;
+        dialog.clamp_scroll(f32::NAN);
+        assert_eq!(dialog.scroll.current, 0.0);
+        assert_eq!(dialog.scroll.target, 0.0);
     }
 
     #[test]

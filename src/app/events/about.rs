@@ -436,6 +436,14 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.explorer_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.ide_panel.database.dialog.is_some() {
+        app.clamp_database_dialog_scroll_to_layout();
+        if let Some(dialog) = app.ide_panel.database.dialog.as_mut()
+            && dialog.scroll.update(dt)
+        {
+            needs_redraw = true;
+        }
+    }
     if let Some(layout) = app.project_search_panel_layout()
         && let Some(scale) = app.renderer.as_ref().map(|renderer| renderer.scale_factor)
     {
