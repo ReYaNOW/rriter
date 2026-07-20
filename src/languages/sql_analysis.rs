@@ -124,7 +124,9 @@ pub fn completion_context(sql: &str, cursor: usize) -> SqlCompletionContext {
     let probe = previous_non_whitespace_byte(sql, cursor);
     let node = probe
         .and_then(|start| {
-            let end = next_char_boundary(sql, start).unwrap_or(sql.len()).max(start + 1);
+            let end = next_char_boundary(sql, start)
+                .unwrap_or(sql.len())
+                .max(start + 1);
             root.descendant_for_byte_range(start, end.min(sql.len()))
         })
         .unwrap_or(root);
@@ -366,8 +368,7 @@ fn push_trailing_comma_diagnostic(
 }
 
 fn term_starts_with_from_identifier(term: tree_sitter::Node<'_>, sql: &str) -> bool {
-    term
-        .child_by_field_name("value")
+    term.child_by_field_name("value")
         .filter(|value| value.kind() == "field")
         .and_then(|value| value.child_by_field_name("name"))
         .filter(|name| name.kind() == "identifier")
@@ -375,11 +376,7 @@ fn term_starts_with_from_identifier(term: tree_sitter::Node<'_>, sql: &str) -> b
         .is_some_and(|name| name.eq_ignore_ascii_case("FROM"))
 }
 
-fn collect_statement_analysis(
-    root: tree_sitter::Node<'_>,
-    sql: &str,
-    analysis: &mut SqlAnalysis,
-) {
+fn collect_statement_analysis(root: tree_sitter::Node<'_>, sql: &str, analysis: &mut SqlAnalysis) {
     let mut stack = vec![root];
     while let Some(node) = stack.pop() {
         if node.kind() == "statement" {
@@ -392,11 +389,7 @@ fn collect_statement_analysis(
     }
 }
 
-fn analyze_statement(
-    statement: tree_sitter::Node<'_>,
-    sql: &str,
-    analysis: &mut SqlAnalysis,
-) {
+fn analyze_statement(statement: tree_sitter::Node<'_>, sql: &str, analysis: &mut SqlAnalysis) {
     let scope = statement.start_byte()..statement.end_byte();
     collect_structure_diagnostics(statement, sql, analysis);
     collect_ctes(statement, sql, scope.clone(), analysis);
@@ -419,7 +412,9 @@ fn collect_structure_diagnostics(
         let select_index = leaves
             .iter()
             .position(|leaf| leaf.kind() == "keyword_select");
-        let Some(select_index) = select_index else { return; };
+        let Some(select_index) = select_index else {
+            return;
+        };
         let Some(first_expression_token) = leaves.get(select_index + 1).copied() else {
             analysis.diagnostics.push(SqlAnalysisDiagnostic {
                 range: stable_node_range(node, sql),
@@ -458,7 +453,9 @@ fn collect_ctes(
             .find(|child| child.kind() == "identifier")
             .and_then(|child| node_text(child, sql))
         {
-            analysis.ctes.push((scope.clone(), normalize_identifier(name)));
+            analysis
+                .ctes
+                .push((scope.clone(), normalize_identifier(name)));
         }
     });
 }
@@ -484,7 +481,9 @@ fn collect_relations(
         let object = node
             .named_children(&mut cursor)
             .find(|child| child.kind() == "object_reference");
-        let Some(object) = object else { return; };
+        let Some(object) = object else {
+            return;
+        };
         let Some(table_name) = object
             .child_by_field_name("name")
             .and_then(|name| node_text(name, sql))
@@ -579,11 +578,13 @@ fn collect_qualified_references(
                 name,
             });
         } else {
-            analysis.unqualified_references.push(SqlUnqualifiedReference {
-                scope: scope.clone(),
-                range: name_node.start_byte()..name_node.end_byte(),
-                name,
-            });
+            analysis
+                .unqualified_references
+                .push(SqlUnqualifiedReference {
+                    scope: scope.clone(),
+                    range: name_node.start_byte()..name_node.end_byte(),
+                    name,
+                });
         }
     });
 }
@@ -631,13 +632,33 @@ fn collect_statement_lints(
     }
 
     for (kind, code, message) in [
-        ("drop_table", "SQL104", "DROP TABLE удаляет таблицу и её данные"),
-        ("drop_database", "SQL105", "DROP DATABASE удаляет базу данных"),
-        ("drop_schema", "SQL106", "DROP SCHEMA удаляет схему и может удалить связанные объекты"),
-        ("drop_type", "SQL107", "DROP TYPE может нарушить зависящие таблицы и функции"),
+        (
+            "drop_table",
+            "SQL104",
+            "DROP TABLE удаляет таблицу и её данные",
+        ),
+        (
+            "drop_database",
+            "SQL105",
+            "DROP DATABASE удаляет базу данных",
+        ),
+        (
+            "drop_schema",
+            "SQL106",
+            "DROP SCHEMA удаляет схему и может удалить связанные объекты",
+        ),
+        (
+            "drop_type",
+            "SQL107",
+            "DROP TYPE может нарушить зависящие таблицы и функции",
+        ),
         ("drop_view", "SQL108", "DROP VIEW удаляет представление"),
         ("drop_function", "SQL109", "DROP FUNCTION удаляет функцию"),
-        ("drop_sequence", "SQL110", "DROP SEQUENCE может нарушить генерацию идентификаторов"),
+        (
+            "drop_sequence",
+            "SQL110",
+            "DROP SEQUENCE может нарушить генерацию идентификаторов",
+        ),
     ] {
         if let Some(node) = find_in_scope(statement, statement, kind) {
             analysis
@@ -733,9 +754,7 @@ fn collect_statement_lints(
                 "ORDER BY по номеру столбца хрупок; используйте имя столбца или alias",
             ));
         }
-        if node.kind() == "join"
-            && has_leaf_kind_in_scope(node, node, "keyword_natural")
-        {
+        if node.kind() == "join" && has_leaf_kind_in_scope(node, node, "keyword_natural") {
             analysis.diagnostics.push(warning(
                 node.start_byte()..node.end_byte(),
                 "SQL121",
@@ -745,14 +764,16 @@ fn collect_statement_lints(
     });
 }
 
-fn lint_binary_expression(
-    node: tree_sitter::Node<'_>,
-    sql: &str,
-    analysis: &mut SqlAnalysis,
-) {
-    let Some(left) = node.child_by_field_name("left") else { return; };
-    let Some(operator) = node.child_by_field_name("operator") else { return; };
-    let Some(right) = node.child_by_field_name("right") else { return; };
+fn lint_binary_expression(node: tree_sitter::Node<'_>, sql: &str, analysis: &mut SqlAnalysis) {
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+    let Some(operator) = node.child_by_field_name("operator") else {
+        return;
+    };
+    let Some(right) = node.child_by_field_name("right") else {
+        return;
+    };
     let operator_text = node_text(operator, sql).unwrap_or_default().trim();
     let left_text = node_text(left, sql).unwrap_or_default().trim();
     let right_text = node_text(right, sql).unwrap_or_default().trim();
@@ -772,9 +793,7 @@ fn lint_binary_expression(
             "NOT IN может вернуть пустой результат при наличии NULL; рассмотрите NOT EXISTS",
         ));
     }
-    if matches!(operator.kind(), "keyword_like" | "not_like")
-        && right_text.starts_with("'%")
-    {
+    if matches!(operator.kind(), "keyword_like" | "not_like") && right_text.starts_with("'%") {
         analysis.diagnostics.push(warning(
             node.start_byte()..node.end_byte(),
             "SQL124",
@@ -787,10 +806,8 @@ fn semantic_parent_kind(node: tree_sitter::Node<'_>) -> Option<&'static str> {
     let mut current = Some(node);
     while let Some(value) = current {
         match value.kind() {
-            "from" | "join" | "where" | "order_by" | "group_by" | "returning"
-            | "select" | "select_expression" | "update" | "insert" => {
-                return Some(value.kind())
-            }
+            "from" | "join" | "where" | "order_by" | "group_by" | "returning" | "select"
+            | "select_expression" | "update" | "insert" => return Some(value.kind()),
             _ => current = value.parent(),
         }
     }
@@ -920,9 +937,7 @@ fn where_completion_kind(
     if last.is_some_and(|token| token.kind == "keyword_is") {
         return SqlCompletionKind::Value;
     }
-    if is_after_boolean_connector(last)
-        || last.is_some_and(|token| token.kind == "keyword_where")
-    {
+    if is_after_boolean_connector(last) || last.is_some_and(|token| token.kind == "keyword_where") {
         return SqlCompletionKind::Column;
     }
     if last.is_some_and(token_is_identifier_like)
@@ -1002,8 +1017,10 @@ fn collect_leaf_tokens(
 }
 
 fn token_is_identifier_like(token: &LeafToken) -> bool {
-    matches!(token.kind.as_str(), "identifier" | "field" | "object_reference")
-        || token.kind == "literal"
+    matches!(
+        token.kind.as_str(),
+        "identifier" | "field" | "object_reference"
+    ) || token.kind == "literal"
 }
 
 fn is_after_expression_operator(token: Option<&LeafToken>) -> bool {
@@ -1013,11 +1030,7 @@ fn is_after_expression_operator(token: Option<&LeafToken>) -> bool {
             "=" | "<>" | "!=" | "<" | ">" | "<=" | ">=" | "+" | "-" | "*" | "/"
         ) || matches!(
             token.kind.as_str(),
-            "keyword_like"
-                | "keyword_ilike"
-                | "keyword_in"
-                | "keyword_between"
-                | "keyword_is"
+            "keyword_like" | "keyword_ilike" | "keyword_in" | "keyword_between" | "keyword_is"
         )
     })
 }
@@ -1100,7 +1113,9 @@ fn is_inside_string_or_comment(mut node: tree_sitter::Node<'_>, sql: &str) -> bo
         {
             return true;
         }
-        let Some(parent) = node.parent() else { return false; };
+        let Some(parent) = node.parent() else {
+            return false;
+        };
         node = parent;
     }
 }
@@ -1218,7 +1233,10 @@ fn predicate_is_constant_true(where_node: tree_sitter::Node<'_>, sql: &str) -> b
 fn select_star_range(statement: tree_sitter::Node<'_>, sql: &str) -> Option<Range<usize>> {
     let all_fields = find_in_scope(statement, statement, "all_fields")?;
     let star_offset = node_text(all_fields, sql)?.find('*')?;
-    let start = all_fields.start_byte().saturating_add(star_offset).min(sql.len());
+    let start = all_fields
+        .start_byte()
+        .saturating_add(star_offset)
+        .min(sql.len());
     let end = start.saturating_add(1).min(sql.len());
     (start < end).then_some(start..end)
 }
@@ -1314,10 +1332,12 @@ mod tests {
         let relation = relation_for_qualifier(&analysis, 12, "b").unwrap();
         assert_eq!(relation.table_name, "booking");
         assert_eq!(relation.alias, "b");
-        assert!(analysis
-            .qualified_references
-            .iter()
-            .any(|reference| reference.qualifier == "b" && reference.name == "car_wash_id"));
+        assert!(
+            analysis
+                .qualified_references
+                .iter()
+                .any(|reference| reference.qualifier == "b" && reference.name == "car_wash_id")
+        );
     }
 
     #[test]
@@ -1354,18 +1374,39 @@ mod tests {
     #[test]
     fn dangerous_mutations_are_reported_from_ast() {
         let delete = analyze_sql("DELETE FROM booking");
-        assert!(delete.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL101"));
+        assert!(
+            delete
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL101")
+        );
         let update = analyze_sql("UPDATE booking SET status = 'done'");
-        assert!(update.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL102"));
+        assert!(
+            update
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL102")
+        );
         let safe = analyze_sql("DELETE FROM booking WHERE id = 1");
-        assert!(!safe.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL101"));
+        assert!(
+            !safe
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL101")
+        );
     }
 
     #[test]
     fn nested_where_does_not_make_outer_delete_safe() {
-        let sql = "DELETE FROM booking USING (SELECT id FROM old_booking WHERE archived = TRUE) old";
+        let sql =
+            "DELETE FROM booking USING (SELECT id FROM old_booking WHERE archived = TRUE) old";
         let analysis = analyze_sql(sql);
-        assert!(analysis.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL101"));
+        assert!(
+            analysis
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL101")
+        );
     }
 
     #[test]
@@ -1426,8 +1467,13 @@ mod tests {
         let diagnostics = diagnostics_with_code(sql, "SQL004");
         assert_eq!(diagnostics.len(), 2);
         assert_eq!(
-            diagnostics.iter().map(|item| item.range.clone()).collect::<Vec<_>>(),
-            sql.match_indices(',').map(|(start, _)| start..start + 1).collect::<Vec<_>>()
+            diagnostics
+                .iter()
+                .map(|item| item.range.clone())
+                .collect::<Vec<_>>(),
+            sql.match_indices(',')
+                .map(|(start, _)| start..start + 1)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -1436,7 +1482,9 @@ mod tests {
         let sql = "SELECT id, FROM car__body_type";
         let analysis = analyze_sql(sql);
         let comma = sql.find(',').unwrap();
-        let errors_at_comma = analysis.diagnostics.iter()
+        let errors_at_comma = analysis
+            .diagnostics
+            .iter()
             .filter(|diagnostic| diagnostic.severity == SqlDiagnosticSeverity::Error)
             .filter(|diagnostic| diagnostic.range.contains(&comma))
             .collect::<Vec<_>>();
@@ -1461,7 +1509,11 @@ mod tests {
             ("SELECT ARRAY[1, 2, 3] FROM items", 0),
             ("SELECT COALESCE(name, 'unknown') FROM items", 0),
         ] {
-            assert_eq!(diagnostics_with_code(sql, "SQL004").len(), expected, "{sql}");
+            assert_eq!(
+                diagnostics_with_code(sql, "SQL004").len(),
+                expected,
+                "{sql}"
+            );
         }
     }
 
@@ -1469,11 +1521,17 @@ mod tests {
     fn completion_ignores_strings_and_comments() {
         let string_sql = "SELECT 'b.ca' FROM booking b";
         let string_cursor = string_sql.find("ca").unwrap() + 2;
-        assert_eq!(completion_context(string_sql, string_cursor).kind, SqlCompletionKind::None);
+        assert_eq!(
+            completion_context(string_sql, string_cursor).kind,
+            SqlCompletionKind::None
+        );
 
         let comment_sql = "SELECT 1 -- b.ca\nFROM booking b";
         let comment_cursor = comment_sql.find("ca").unwrap() + 2;
-        assert_eq!(completion_context(comment_sql, comment_cursor).kind, SqlCompletionKind::None);
+        assert_eq!(
+            completion_context(comment_sql, comment_cursor).kind,
+            SqlCompletionKind::None
+        );
     }
 
     #[test]
@@ -1484,9 +1542,12 @@ mod tests {
         assert!(analysis.relations.iter().any(|relation| {
             relation.alias == "r" && relation.table_name == "recent" && relation.is_cte
         }));
-        assert!(analysis.relations.iter().any(|relation| {
-            relation.alias == "cw" && relation.table_name == "car_wash"
-        }));
+        assert!(
+            analysis
+                .relations
+                .iter()
+                .any(|relation| { relation.alias == "cw" && relation.table_name == "car_wash" })
+        );
     }
 
     #[test]
@@ -1496,9 +1557,12 @@ mod tests {
         let relation = relation_for_qualifier(&analysis, sql.find("b.").unwrap(), "b").unwrap();
         assert_eq!(relation.schema.as_deref(), Some("public"));
         assert_eq!(relation.table_name, "Booking Entry");
-        assert!(analysis.qualified_references.iter().any(|reference| {
-            reference.qualifier == "b" && reference.name == "Car Wash ID"
-        }));
+        assert!(
+            analysis
+                .qualified_references
+                .iter()
+                .any(|reference| { reference.qualifier == "b" && reference.name == "Car Wash ID" })
+        );
     }
 
     #[test]
@@ -1507,16 +1571,21 @@ mod tests {
         let analysis = analyze_sql(sql);
         for code in ["SQL103", "SQL104", "SQL113", "SQL119", "SQL120", "SQL122"] {
             assert!(
-                analysis.diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                analysis
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
                 "missing {code}: {:?}",
                 analysis.diagnostics
             );
         }
         let unstable_limit = analyze_sql("SELECT id FROM booking LIMIT 10");
-        assert!(unstable_limit
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "SQL117"));
+        assert!(
+            unstable_limit
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL117")
+        );
     }
 
     #[test]
@@ -1534,8 +1603,18 @@ mod tests {
             .filter(|diagnostic| diagnostic.code == "SQL119")
             .collect::<Vec<_>>();
 
-        assert_eq!(sql117.len(), 1, "unexpected diagnostics: {:?}", analysis.diagnostics);
-        assert_eq!(sql119.len(), 1, "unexpected diagnostics: {:?}", analysis.diagnostics);
+        assert_eq!(
+            sql117.len(),
+            1,
+            "unexpected diagnostics: {:?}",
+            analysis.diagnostics
+        );
+        assert_eq!(
+            sql119.len(),
+            1,
+            "unexpected diagnostics: {:?}",
+            analysis.diagnostics
+        );
         assert_eq!(sql.get(sql119[0].range.clone()), Some("*"));
         assert_eq!(sql.get(sql117[0].range.clone()), Some("LIMIT 100"));
         assert!(

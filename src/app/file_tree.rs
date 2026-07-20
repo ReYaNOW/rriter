@@ -149,9 +149,7 @@ impl FileTreeMenuAction {
             Self::Rename => "Переименовать",
             Self::OpenContainedFolder => "Открыть папку с файлом",
             Self::ShowInExplorer => "Показать в проводнике",
-            Self::CopyAbsolutePath | Self::CopyTargetAbsolutePath => {
-                "Скопировать абсолютный путь"
-            }
+            Self::CopyAbsolutePath | Self::CopyTargetAbsolutePath => "Скопировать абсолютный путь",
             Self::CopyRelativePath | Self::CopyTargetRelativePath => {
                 "Скопировать относительный путь"
             }
@@ -175,7 +173,6 @@ pub(crate) fn file_tree_context_menu_cursor(
 ) -> winit::window::CursorIcon {
     crate::app::context_menu::context_menu_cursor(hovered_overlay)
 }
-
 
 pub struct FileTreeCreateDialog {
     pub kind: FileTreeCreateKind,
@@ -293,9 +290,7 @@ pub fn file_tree_delete_dialog_message(paths: &[PathBuf]) -> String {
     }
 }
 
-pub fn file_tree_modal_overlay_active_for_panel(
-    ide_panel: &crate::app::IdePanelState,
-) -> bool {
+pub fn file_tree_modal_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState) -> bool {
     ide_panel.file_tree_create_dialog.is_some()
         || ide_panel.file_tree_rename_dialog.is_some()
         || ide_panel.file_tree_move_dialog.is_some()
@@ -705,12 +700,12 @@ impl App {
                         let terminal = message.is_terminal();
                         match message {
                             crate::app::file_tree::FileTreeScanMessage::Nodes(nodes) => {
-                                let selected_path =
-                                    if self.ide_panel.file_tree_selection.len() == 1 {
-                                        self.ide_panel.file_tree_selection.iter().next().cloned()
-                                    } else {
-                                        None
-                                    };
+                                let selected_path = if self.ide_panel.file_tree_selection.len() == 1
+                                {
+                                    self.ide_panel.file_tree_selection.iter().next().cloned()
+                                } else {
+                                    None
+                                };
                                 let selected_was_visible =
                                     selected_path.as_ref().is_some_and(|path| {
                                         self.ide_panel.file_tree_nodes.iter().any(|node| {
@@ -1096,7 +1091,7 @@ impl App {
                 }
             }
             action @ (FileTreeMenuAction::CopyAbsolutePath
-                | FileTreeMenuAction::CopyTargetAbsolutePath) => {
+            | FileTreeMenuAction::CopyTargetAbsolutePath) => {
                 if let Some(target_path) = menu.target_path {
                     let paths = if action == FileTreeMenuAction::CopyTargetAbsolutePath {
                         vec![target_path]
@@ -1112,7 +1107,7 @@ impl App {
                 }
             }
             action @ (FileTreeMenuAction::CopyRelativePath
-                | FileTreeMenuAction::CopyTargetRelativePath) => {
+            | FileTreeMenuAction::CopyTargetRelativePath) => {
                 if let Some(target_path) = menu.target_path {
                     let paths = if action == FileTreeMenuAction::CopyTargetRelativePath {
                         vec![target_path]
@@ -1286,7 +1281,8 @@ impl App {
         }
 
         if remap_paths_after_rename(&mut self.recent_files, old_path, new_path) {
-            self.recent_files = crate::platform::dedup_paths(std::mem::take(&mut self.recent_files));
+            self.recent_files =
+                crate::platform::dedup_paths(std::mem::take(&mut self.recent_files));
             crate::save_recent_files(&self.recent_files);
         }
         remap_path_set_after_rename(&mut self.ide_panel.file_tree_selection, old_path, new_path);
@@ -1297,8 +1293,10 @@ impl App {
         }
         remap_paths_after_rename(&mut self.file_tree_watched_dirs, old_path, new_path);
         for path in [
-            &mut self.autocomplete_pending_request_path, &mut self.autocomplete_detail_request_path,
-            &mut self.python_inlay_hint_path, &mut self.python_inlay_hint_pending_path,
+            &mut self.autocomplete_pending_request_path,
+            &mut self.autocomplete_detail_request_path,
+            &mut self.python_inlay_hint_path,
+            &mut self.python_inlay_hint_pending_path,
         ] {
             remap_optional_path_after_rename(path, old_path, new_path);
         }
@@ -1530,11 +1528,7 @@ impl App {
         let r = self.renderer.as_ref()?;
         let s = r.scale_factor;
         let (panel_x, panel_y, panel_w, panel_h, _) =
-            crate::app::mouse::app_panel_scroll_rect(
-                self,
-                crate::app::PanelId::Explorer,
-                s,
-            );
+            crate::app::mouse::app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s);
         if !crate::ui_system::point_in_rect(mx, my, (panel_x, panel_y, panel_w, panel_h)) {
             return None;
         }
@@ -1561,11 +1555,7 @@ impl App {
         };
         let s = r.scale_factor;
         let (panel_x, panel_y, panel_w, panel_h, _) =
-            crate::app::mouse::app_panel_scroll_rect(
-                self,
-                crate::app::PanelId::Explorer,
-                s,
-            );
+            crate::app::mouse::app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s);
         crate::ui_system::point_in_rect(mx, my, (panel_x, panel_y, panel_w, panel_h))
     }
 

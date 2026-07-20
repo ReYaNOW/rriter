@@ -137,13 +137,23 @@ fn r3_020_project_search_disconnect_clears_running_state() {
     state.running_generation = Some(7);
     assert!(state.handle_worker_disconnect());
     assert_eq!(state.running_generation, None);
-    assert!(state.error.as_deref().is_some_and(|e| e.contains("завершился")));
+    assert!(
+        state
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("завершился"))
+    );
 }
 
 #[test]
 fn r3_021_project_search_preview_disconnect_clears_pending_keys() {
     let mut state = ProjectSearchState::default();
-    state.preview_pending.insert(crate::app::project_search::ProjectSearchPreviewKey { file_idx: 0, match_idx: 0 });
+    state
+        .preview_pending
+        .insert(crate::app::project_search::ProjectSearchPreviewKey {
+            file_idx: 0,
+            match_idx: 0,
+        });
     state.handle_preview_disconnect();
     assert!(state.preview_pending.is_empty());
     assert!(state.error.is_some());
@@ -182,21 +192,30 @@ fn r3_024_empty_project_search_uses_the_same_cancellation_path() {
 fn r3_025_preview_worker_failure_is_visible_in_state() {
     let mut state = ProjectSearchState::default();
     state.handle_preview_disconnect();
-    assert!(state.error.as_deref().is_some_and(|e| e.contains("Предпросмотр")));
+    assert!(
+        state
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("Предпросмотр"))
+    );
 }
 
 #[test]
 fn r3_026_preview_disconnect_allows_worker_reinitialization() {
     let mut state = ProjectSearchState::default();
-    let (tx, _request_rx) = std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewRequest>();
-    let (_message_tx, rx) = std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewWorkerMessage>();
+    let (tx, _request_rx) =
+        std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewRequest>();
+    let (_message_tx, rx) =
+        std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewWorkerMessage>();
     state.preview_tx = Some(tx);
     state.preview_rx = Some(rx);
     state.handle_preview_disconnect();
     assert!(state.preview_tx.is_none());
     assert!(state.preview_rx.is_none());
-    let (tx2, _request_rx2) = std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewRequest>();
-    let (_message_tx2, rx2) = std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewWorkerMessage>();
+    let (tx2, _request_rx2) =
+        std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewRequest>();
+    let (_message_tx2, rx2) =
+        std::sync::mpsc::channel::<crate::app::project_search::ProjectSearchPreviewWorkerMessage>();
     state.preview_tx = Some(tx2);
     state.preview_rx = Some(rx2);
     assert!(state.preview_tx.is_some() && state.preview_rx.is_some());
@@ -218,7 +237,10 @@ fn r3_028_disconnected_import_receiver_is_removed() {
     let (tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
     let mut slot = Some(rx);
     drop(tx);
-    assert_eq!(crate::platform::poll_optional_receiver(&mut slot), crate::platform::ReceiverPoll::Disconnected);
+    assert_eq!(
+        crate::platform::poll_optional_receiver(&mut slot),
+        crate::platform::ReceiverPoll::Disconnected
+    );
     assert!(slot.is_none());
 }
 
@@ -227,7 +249,10 @@ fn r3_029_disconnected_body_file_receiver_is_removed() {
     let (tx, rx) = std::sync::mpsc::channel::<Vec<std::path::PathBuf>>();
     let mut slot = Some(rx);
     drop(tx);
-    assert_eq!(crate::platform::poll_optional_receiver(&mut slot), crate::platform::ReceiverPoll::Disconnected);
+    assert_eq!(
+        crate::platform::poll_optional_receiver(&mut slot),
+        crate::platform::ReceiverPoll::Disconnected
+    );
     assert!(slot.is_none());
 }
 
@@ -242,11 +267,12 @@ fn r3_030_python_path_disconnect_is_visible() {
 fn r3_031_python_version_disconnect_clears_stale_rows() {
     let mut api = crate::app::api_client::ApiClientState::default();
     api.mock_python_versions_loading = true;
-    api.mock_python_versions.push(crate::app::api_client::ApiPythonVersionRow {
-        version: "3.13".into(),
-        installed: true,
-        detail: "stale".into(),
-    });
+    api.mock_python_versions
+        .push(crate::app::api_client::ApiPythonVersionRow {
+            version: "3.13".into(),
+            installed: true,
+            detail: "stale".into(),
+        });
     api.handle_python_versions_disconnect();
     assert!(!api.mock_python_versions_loading);
     assert!(api.mock_python_versions.is_empty());
@@ -261,7 +287,11 @@ fn r3_032_python_install_disconnect_marks_runtime_invalid() {
     api.handle_python_install_disconnect();
     assert!(!api.mock_python_install_running);
     assert_eq!(api.mock.uv.status, ApiPythonRuntimeStatus::Invalid);
-    assert!(api.mock_python_install_log.last().is_some_and(|line| line.text.contains("завершилась")));
+    assert!(
+        api.mock_python_install_log
+            .last()
+            .is_some_and(|line| line.text.contains("завершилась"))
+    );
 }
 
 #[test]
@@ -307,7 +337,11 @@ fn r3_037_second_python_path_picker_is_rejected_while_first_is_active() {
 fn r3_038_openapi_receiver_keeps_id_and_generation_for_disconnect_cleanup() {
     use crate::app::api_client::{ApiLoadReceiver, ApiLoadResult, ApiSpecId};
     let (_tx, rx) = std::sync::mpsc::channel::<ApiLoadResult>();
-    let receiver = ApiLoadReceiver { id: ApiSpecId(8), generation: 77, rx };
+    let receiver = ApiLoadReceiver {
+        id: ApiSpecId(8),
+        generation: 77,
+        rx,
+    };
     assert_eq!(receiver.id, ApiSpecId(8));
     assert_eq!(receiver.generation, 77);
 }
@@ -315,7 +349,8 @@ fn r3_038_openapi_receiver_keeps_id_and_generation_for_disconnect_cleanup() {
 #[test]
 fn r3_039_python_runtime_dialog_never_has_negative_dimensions() {
     for size in 0..200 {
-        let l = crate::app::api_client::api_python_runtime_dialog_layout(size as f32, size as f32, 1.0);
+        let l =
+            crate::app::api_client::api_python_runtime_dialog_layout(size as f32, size as f32, 1.0);
         rect_is_finite_non_negative(l.box_x, l.box_y, l.box_w, l.box_h);
         assert!(l.content_w >= 0.0);
     }
@@ -332,20 +367,26 @@ fn r3_040_python_version_list_is_clamped_to_dialog_body() {
 
 #[test]
 fn r3_041_mock_guide_modal_never_exceeds_small_window() {
-    let l = crate::render_view::api_client_panel::api_overlay_layout(100.0, 90.0, 1.0, 860.0, 700.0, 24.0);
+    let l = crate::render_view::api_client_panel::api_overlay_layout(
+        100.0, 90.0, 1.0, 860.0, 700.0, 24.0,
+    );
     assert!(l.box_w <= 100.0 && l.box_h <= 90.0);
     assert!(l.box_x >= 0.0 && l.box_y >= 0.0);
 }
 
 #[test]
 fn r3_042_mock_details_modal_never_exceeds_small_window() {
-    let l = crate::render_view::api_client_panel::api_overlay_layout(70.0, 60.0, 1.0, 720.0, 560.0, 22.0);
+    let l = crate::render_view::api_client_panel::api_overlay_layout(
+        70.0, 60.0, 1.0, 720.0, 560.0, 22.0,
+    );
     assert!(l.box_w <= 70.0 && l.box_h <= 60.0);
 }
 
 #[test]
 fn r3_043_mock_guide_content_padding_collapses_when_no_space_exists() {
-    let l = crate::render_view::api_client_panel::api_overlay_layout(20.0, 20.0, 1.0, 860.0, 700.0, 24.0);
+    let l = crate::render_view::api_client_panel::api_overlay_layout(
+        20.0, 20.0, 1.0, 860.0, 700.0, 24.0,
+    );
     assert!(l.pad <= l.box_w * 0.25 + f32::EPSILON);
     assert!(l.pad <= l.box_h * 0.25 + f32::EPSILON);
 }
@@ -353,7 +394,14 @@ fn r3_043_mock_guide_content_padding_collapses_when_no_space_exists() {
 #[test]
 fn r3_044_api_overlay_close_button_remains_reachable() {
     for size in 0..160 {
-        let l = crate::render_view::api_client_panel::api_overlay_layout(size as f32, size as f32, 1.0, 720.0, 560.0, 22.0);
+        let l = crate::render_view::api_client_panel::api_overlay_layout(
+            size as f32,
+            size as f32,
+            1.0,
+            720.0,
+            560.0,
+            22.0,
+        );
         assert!(l.close_x >= l.box_x - f32::EPSILON);
         assert!(l.close_y >= l.box_y - f32::EPSILON);
         assert!(l.close_x + l.close_size <= l.box_x + l.box_w + f32::EPSILON);
@@ -385,14 +433,34 @@ fn r3_045_database_queue_never_drops_a_new_payload_as_already_active() {
     let mut panel = DatabasePanelState::default();
     panel.activate_command(
         DatabaseCommand::Shutdown,
-        database_pending(1, DatabasePendingJobKind::LoadTables, DatabaseJobOwner::Connection(DatabaseConnectionId(1)), 1, Some("a"), None),
+        database_pending(
+            1,
+            DatabasePendingJobKind::LoadTables,
+            DatabaseJobOwner::Connection(DatabaseConnectionId(1)),
+            1,
+            Some("a"),
+            None,
+        ),
     );
-    assert_eq!(panel.queue_command(
-        DatabaseCommand::Shutdown,
-        database_pending(2, DatabasePendingJobKind::LoadTables, DatabaseJobOwner::Connection(DatabaseConnectionId(1)), 1, Some("b"), None),
-    ), DatabaseQueueResult::Queued);
+    assert_eq!(
+        panel.queue_command(
+            DatabaseCommand::Shutdown,
+            database_pending(
+                2,
+                DatabasePendingJobKind::LoadTables,
+                DatabaseJobOwner::Connection(DatabaseConnectionId(1)),
+                1,
+                Some("b"),
+                None
+            ),
+        ),
+        DatabaseQueueResult::Queued
+    );
     assert_eq!(panel.queued_commands.len(), 1);
-    assert_eq!(panel.queued_commands[0].1.database_name.as_deref(), Some("b"));
+    assert_eq!(
+        panel.queued_commands[0].1.database_name.as_deref(),
+        Some("b")
+    );
 }
 
 #[test]
@@ -400,9 +468,36 @@ fn r3_046_repeated_test_connection_keeps_the_new_command() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Dialog(7);
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::TestConnection, owner, 1, None, None));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(2, DatabasePendingJobKind::TestConnection, owner, 1, None, None));
-    assert_eq!(panel.queued_commands.iter().map(|(_, p)| p.id.0).collect::<Vec<_>>(), vec![1, 2]);
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::TestConnection,
+            owner,
+            1,
+            None,
+            None,
+        ),
+    );
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            2,
+            DatabasePendingJobKind::TestConnection,
+            owner,
+            1,
+            None,
+            None,
+        ),
+    );
+    assert_eq!(
+        panel
+            .queued_commands
+            .iter()
+            .map(|(_, p)| p.id.0)
+            .collect::<Vec<_>>(),
+        vec![1, 2]
+    );
 }
 
 #[test]
@@ -410,10 +505,36 @@ fn r3_047_repeated_save_keeps_each_payload_and_secret_owner_distinct() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Dialog(8);
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::SaveConnection, owner, 11, None, None));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(2, DatabasePendingJobKind::SaveConnection, owner, 12, None, None));
-    assert_eq!(panel.queued_commands[0].1.connection_id, DatabaseConnectionId(11));
-    assert_eq!(panel.queued_commands[1].1.connection_id, DatabaseConnectionId(12));
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::SaveConnection,
+            owner,
+            11,
+            None,
+            None,
+        ),
+    );
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            2,
+            DatabasePendingJobKind::SaveConnection,
+            owner,
+            12,
+            None,
+            None,
+        ),
+    );
+    assert_eq!(
+        panel.queued_commands[0].1.connection_id,
+        DatabaseConnectionId(11)
+    );
+    assert_eq!(
+        panel.queued_commands[1].1.connection_id,
+        DatabaseConnectionId(12)
+    );
 }
 
 #[test]
@@ -422,9 +543,26 @@ fn r3_048_load_tables_for_different_databases_are_both_queued() {
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Connection(DatabaseConnectionId(1));
     for (id, db) in [(1, "one"), (2, "two")] {
-        panel.queue_command(DatabaseCommand::Shutdown, database_pending(id, DatabasePendingJobKind::LoadTables, owner, 1, Some(db), None));
+        panel.queue_command(
+            DatabaseCommand::Shutdown,
+            database_pending(
+                id,
+                DatabasePendingJobKind::LoadTables,
+                owner,
+                1,
+                Some(db),
+                None,
+            ),
+        );
     }
-    assert_eq!(panel.queued_commands.iter().map(|(_, p)| p.database_name.as_deref()).collect::<Vec<_>>(), vec![Some("one"), Some("two")]);
+    assert_eq!(
+        panel
+            .queued_commands
+            .iter()
+            .map(|(_, p)| p.database_name.as_deref())
+            .collect::<Vec<_>>(),
+        vec![Some("one"), Some("two")]
+    );
 }
 
 #[test]
@@ -433,10 +571,26 @@ fn r3_049_load_ddl_for_different_tables_is_not_coalesced() {
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Connection(DatabaseConnectionId(1));
     for (id, table) in [(1, "users"), (2, "orders")] {
-        panel.queue_command(DatabaseCommand::Shutdown, database_pending(id, DatabasePendingJobKind::LoadDdl, owner, 1, Some("db"), Some(table)));
+        panel.queue_command(
+            DatabaseCommand::Shutdown,
+            database_pending(
+                id,
+                DatabasePendingJobKind::LoadDdl,
+                owner,
+                1,
+                Some("db"),
+                Some(table),
+            ),
+        );
     }
-    assert_eq!(panel.queued_commands[0].1.table_name.as_deref(), Some("users"));
-    assert_eq!(panel.queued_commands[1].1.table_name.as_deref(), Some("orders"));
+    assert_eq!(
+        panel.queued_commands[0].1.table_name.as_deref(),
+        Some("users")
+    );
+    assert_eq!(
+        panel.queued_commands[1].1.table_name.as_deref(),
+        Some("orders")
+    );
 }
 
 #[test]
@@ -444,8 +598,28 @@ fn r3_050_count_rows_for_new_filter_is_not_lost() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Table(DatabaseTabId(1));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::CountRows, owner, 1, Some("db"), Some("t")));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(2, DatabasePendingJobKind::CountRows, owner, 1, Some("db"), Some("t")));
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::CountRows,
+            owner,
+            1,
+            Some("db"),
+            Some("t"),
+        ),
+    );
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            2,
+            DatabasePendingJobKind::CountRows,
+            owner,
+            1,
+            Some("db"),
+            Some("t"),
+        ),
+    );
     assert_eq!(panel.queued_commands.len(), 2);
 }
 
@@ -455,7 +629,17 @@ fn r3_051_load_metadata_for_new_table_context_is_not_lost() {
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Table(DatabaseTabId(3));
     for (id, table) in [(1, "a"), (2, "b")] {
-        panel.queue_command(DatabaseCommand::Shutdown, database_pending(id, DatabasePendingJobKind::LoadMetadata, owner, 1, Some("db"), Some(table)));
+        panel.queue_command(
+            DatabaseCommand::Shutdown,
+            database_pending(
+                id,
+                DatabasePendingJobKind::LoadMetadata,
+                owner,
+                1,
+                Some("db"),
+                Some(table),
+            ),
+        );
     }
     assert_eq!(panel.queued_commands.len(), 2);
 }
@@ -465,8 +649,28 @@ fn r3_052_queue_never_replaces_an_existing_job_without_recovery() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     let owner = DatabaseJobOwner::Table(DatabaseTabId(3));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::LoadMetadata, owner, 1, Some("db"), Some("a")));
-    panel.queue_command(DatabaseCommand::Shutdown, database_pending(2, DatabasePendingJobKind::LoadMetadata, owner, 1, Some("db"), Some("b")));
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::LoadMetadata,
+            owner,
+            1,
+            Some("db"),
+            Some("a"),
+        ),
+    );
+    panel.queue_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            2,
+            DatabasePendingJobKind::LoadMetadata,
+            owner,
+            1,
+            Some("db"),
+            Some("b"),
+        ),
+    );
     assert_eq!(panel.pop_queued_command().unwrap().1.id, DatabaseJobId(1));
     assert_eq!(panel.pop_queued_command().unwrap().1.id, DatabaseJobId(2));
 }
@@ -475,14 +679,37 @@ fn r3_052_queue_never_replaces_an_existing_job_without_recovery() {
 fn r3_053_queue_result_only_reports_started_or_queued_work() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
-    assert_eq!(panel.queue_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::RunUserSql, DatabaseJobOwner::Query(SqlConsoleId(1)), 1, Some("db"), None)), DatabaseQueueResult::Queued);
+    assert_eq!(
+        panel.queue_command(
+            DatabaseCommand::Shutdown,
+            database_pending(
+                1,
+                DatabasePendingJobKind::RunUserSql,
+                DatabaseJobOwner::Query(SqlConsoleId(1)),
+                1,
+                Some("db"),
+                None
+            )
+        ),
+        DatabaseQueueResult::Queued
+    );
 }
 
 #[test]
 fn r3_054_cancel_send_failure_can_clear_active_command_immediately() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
-    panel.activate_command(DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::RunUserSql, DatabaseJobOwner::Query(SqlConsoleId(1)), 1, Some("db"), None));
+    panel.activate_command(
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::RunUserSql,
+            DatabaseJobOwner::Query(SqlConsoleId(1)),
+            1,
+            Some("db"),
+            None,
+        ),
+    );
     panel.clear_active_command();
     assert!(panel.pending_job.is_none() && panel.active_command.is_none());
 }
@@ -500,8 +727,12 @@ fn r3_056_database_cancel_tombstones_expire_without_an_event() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     let now = std::time::Instant::now();
-    panel.cancelled_job_ids.insert(DatabaseJobId(1), now - std::time::Duration::from_secs(1));
-    panel.cancelled_job_ids.insert(DatabaseJobId(2), now + std::time::Duration::from_secs(1));
+    panel
+        .cancelled_job_ids
+        .insert(DatabaseJobId(1), now - std::time::Duration::from_secs(1));
+    panel
+        .cancelled_job_ids
+        .insert(DatabaseJobId(2), now + std::time::Duration::from_secs(1));
     panel.prune_cancelled_jobs(now);
     assert!(!panel.cancelled_job_ids.contains_key(&DatabaseJobId(1)));
     assert!(panel.cancelled_job_ids.contains_key(&DatabaseJobId(2)));
@@ -520,8 +751,21 @@ fn r3_058_connection_allocator_skips_host_key_retry_connection_id() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     panel.next_connection_id = u64::MAX;
-    panel.host_key_retry = Some((DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::TestConnection, DatabaseJobOwner::Dialog(1), u64::MAX, None, None)));
-    assert_ne!(panel.allocate_connection_id(), DatabaseConnectionId(u64::MAX));
+    panel.host_key_retry = Some((
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::TestConnection,
+            DatabaseJobOwner::Dialog(1),
+            u64::MAX,
+            None,
+            None,
+        ),
+    ));
+    assert_ne!(
+        panel.allocate_connection_id(),
+        DatabaseConnectionId(u64::MAX)
+    );
 }
 
 #[test]
@@ -529,7 +773,9 @@ fn r3_059_connection_allocator_skips_pending_secret_connection_id() {
     use crate::app::database::*;
     let mut panel = DatabasePanelState::default();
     panel.next_connection_id = 5;
-    panel.pending_session_secrets.insert(DatabaseConnectionId(5), DatabaseSecretBundle::empty());
+    panel
+        .pending_session_secrets
+        .insert(DatabaseConnectionId(5), DatabaseSecretBundle::empty());
     assert_ne!(panel.allocate_connection_id(), DatabaseConnectionId(5));
 }
 
@@ -538,12 +784,32 @@ fn r3_060_tab_and_console_allocators_skip_host_key_retry_owners() {
     use crate::app::database::*;
     let mut table_panel = DatabasePanelState::default();
     table_panel.next_tab_id = 5;
-    table_panel.host_key_retry = Some((DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::LoadMetadata, DatabaseJobOwner::Table(DatabaseTabId(5)), 1, Some("db"), Some("t"))));
+    table_panel.host_key_retry = Some((
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::LoadMetadata,
+            DatabaseJobOwner::Table(DatabaseTabId(5)),
+            1,
+            Some("db"),
+            Some("t"),
+        ),
+    ));
     assert_ne!(table_panel.allocate_tab_id(), DatabaseTabId(5));
 
     let mut query_panel = DatabasePanelState::default();
     query_panel.next_console_id = 9;
-    query_panel.host_key_retry = Some((DatabaseCommand::Shutdown, database_pending(1, DatabasePendingJobKind::RunUserSql, DatabaseJobOwner::Query(SqlConsoleId(9)), 1, Some("db"), None)));
+    query_panel.host_key_retry = Some((
+        DatabaseCommand::Shutdown,
+        database_pending(
+            1,
+            DatabasePendingJobKind::RunUserSql,
+            DatabaseJobOwner::Query(SqlConsoleId(9)),
+            1,
+            Some("db"),
+            None,
+        ),
+    ));
     assert_ne!(query_panel.allocate_console_id(), SqlConsoleId(9));
 }
 
@@ -554,7 +820,12 @@ fn r3_061_git_diff_disconnect_produces_non_loading_error_state() {
         7,
     );
     assert!(!state.loading);
-    assert!(state.error.as_deref().is_some_and(|e| e.contains("завершилась")));
+    assert!(
+        state
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("завершилась"))
+    );
     assert_eq!(state.version, 7);
 }
 
@@ -565,7 +836,12 @@ fn r3_062_git_graph_disconnect_clears_exact_pending_root() {
     state.seed_graph_request_for_test(root.clone(), 11, true);
     state.handle_graph_disconnect(&root, 11);
     assert!(!state.graph_pending);
-    assert!(state.graph_notice.as_deref().is_some_and(|e| e.contains("завершилась")));
+    assert!(
+        state
+            .graph_notice
+            .as_deref()
+            .is_some_and(|e| e.contains("завершилась"))
+    );
 }
 
 #[test]
@@ -573,7 +849,12 @@ fn r3_063_blocking_git_disconnect_sets_visible_notice() {
     let mut state = crate::app::git_panel::GitPanelState::default();
     state.latest_request_id = 8;
     state.handle_status_disconnect(8);
-    assert!(state.notice.as_deref().is_some_and(|e| e.contains("Git-операция")));
+    assert!(
+        state
+            .notice
+            .as_deref()
+            .is_some_and(|e| e.contains("Git-операция"))
+    );
 }
 
 #[test]
@@ -681,7 +962,10 @@ fn r3_076_disconnected_native_dialog_receiver_is_cleared() {
     let (tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
     let mut slot = Some(rx);
     drop(tx);
-    assert_eq!(crate::platform::poll_optional_receiver(&mut slot), crate::platform::ReceiverPoll::Disconnected);
+    assert_eq!(
+        crate::platform::poll_optional_receiver(&mut slot),
+        crate::platform::ReceiverPoll::Disconnected
+    );
     assert!(slot.is_none());
 }
 
@@ -818,7 +1102,11 @@ fn r3_112_terminal_tab_metrics_bound_the_actual_total_width() {
             } else {
                 metrics.per_tab * count as f32 + metrics.gap * count.saturating_sub(1) as f32
             };
-            assert!(used <= metrics.available + 0.001, "w={panel_w} count={count} used={used} available={}", metrics.available);
+            assert!(
+                used <= metrics.available + 0.001,
+                "w={panel_w} count={count} used={used} available={}",
+                metrics.available
+            );
             assert!(metrics.add_x + metrics.add_size <= 13.0 + panel_w as f32 + 0.001);
         }
     }
@@ -828,14 +1116,24 @@ fn r3_112_terminal_tab_metrics_bound_the_actual_total_width() {
 fn r3_113_explicit_clip_cannot_escape_nested_parent_clip() {
     use crate::ui_system::{UiClipRect, UiId, UiRegistry};
     let mut registry = UiRegistry::new();
-    registry.push_clip(UiClipRect { x: 20.0, y: 20.0, w: 10.0, h: 10.0 });
+    registry.push_clip(UiClipRect {
+        x: 20.0,
+        y: 20.0,
+        w: 10.0,
+        h: 10.0,
+    });
     registry.register_rect_clipped(
         UiId::SearchInput,
         0.0,
         0.0,
         100.0,
         100.0,
-        UiClipRect { x: 0.0, y: 0.0, w: 100.0, h: 100.0 },
+        UiClipRect {
+            x: 0.0,
+            y: 0.0,
+            w: 100.0,
+            h: 100.0,
+        },
         -1.0,
         -1.0,
     );
@@ -849,7 +1147,10 @@ fn r3_114_disconnected_worker_slots_are_cleared_across_subsystems() {
     let (tx, rx) = std::sync::mpsc::channel::<u8>();
     let mut slot = Some(rx);
     drop(tx);
-    assert_eq!(crate::platform::poll_optional_receiver(&mut slot), crate::platform::ReceiverPoll::Disconnected);
+    assert_eq!(
+        crate::platform::poll_optional_receiver(&mut slot),
+        crate::platform::ReceiverPoll::Disconnected
+    );
     assert!(slot.is_none());
 
     let mut project = ProjectSearchState::default();
@@ -860,7 +1161,11 @@ fn r3_114_disconnected_worker_slots_are_cleared_across_subsystems() {
     let mut git = crate::app::git_panel::GitPanelState::default();
     let request_id = git.allocate_status_request_id();
     git.handle_status_disconnect(request_id);
-    assert!(git.notice.as_deref().is_some_and(|notice| notice.contains("завершилась")));
+    assert!(
+        git.notice
+            .as_deref()
+            .is_some_and(|notice| notice.contains("завершилась"))
+    );
 }
 
 #[test]
@@ -874,12 +1179,26 @@ fn r3_115_all_shared_layouts_survive_systematic_tiny_windows() {
             assert!(fitted.x + fitted.w <= width + 0.001);
             assert!(fitted.y + fitted.h <= height + 0.001);
 
-            let settings = crate::render_view::settings_ui::settings_modal_layout(width, height, 1.0);
-            rect_is_finite_non_negative(settings.outer.x, settings.outer.y, settings.outer.w, settings.outer.h);
-            let api = crate::render_view::api_client_panel::api_overlay_layout(width, height, 1.0, 720.0, 520.0, 16.0);
+            let settings =
+                crate::render_view::settings_ui::settings_modal_layout(width, height, 1.0);
+            rect_is_finite_non_negative(
+                settings.outer.x,
+                settings.outer.y,
+                settings.outer.w,
+                settings.outer.h,
+            );
+            let api = crate::render_view::api_client_panel::api_overlay_layout(
+                width, height, 1.0, 720.0, 520.0, 16.0,
+            );
             rect_is_finite_non_negative(api.box_x, api.box_y, api.box_w, api.box_h);
             let project = project_search_layout(0.0, 0.0, width, height, 1.0);
-            for rect in [project.query, project.include, project.exclude, project.filter, project.help_button] {
+            for rect in [
+                project.query,
+                project.include,
+                project.exclude,
+                project.filter,
+                project.help_button,
+            ] {
                 rect_is_finite_non_negative(rect.x, rect.y, rect.w, rect.h);
                 assert!(rect.x + rect.w <= width + 0.001);
             }
@@ -891,8 +1210,27 @@ fn r3_115_all_shared_layouts_survive_systematic_tiny_windows() {
 fn r3_116_behavioral_invariants_cover_clipping_disconnect_and_payload_queueing() {
     use crate::ui_system::{UiClipRect, UiId, UiRegistry};
     let mut registry = UiRegistry::new();
-    registry.push_clip(UiClipRect { x: 10.0, y: 10.0, w: 10.0, h: 10.0 });
-    registry.register_rect_clipped(UiId::SearchInput, 0.0, 0.0, 30.0, 30.0, UiClipRect { x: 0.0, y: 0.0, w: 30.0, h: 30.0 }, -1.0, -1.0);
+    registry.push_clip(UiClipRect {
+        x: 10.0,
+        y: 10.0,
+        w: 10.0,
+        h: 10.0,
+    });
+    registry.register_rect_clipped(
+        UiId::SearchInput,
+        0.0,
+        0.0,
+        30.0,
+        30.0,
+        UiClipRect {
+            x: 0.0,
+            y: 0.0,
+            w: 30.0,
+            h: 30.0,
+        },
+        -1.0,
+        -1.0,
+    );
     registry.pop_clip();
     assert!(registry.find_at(15.0, 15.0).is_some());
     assert!(registry.find_at(5.0, 5.0).is_none());
@@ -900,22 +1238,45 @@ fn r3_116_behavioral_invariants_cover_clipping_disconnect_and_payload_queueing()
     let (tx, rx) = std::sync::mpsc::channel::<u8>();
     let mut slot = Some(rx);
     drop(tx);
-    assert_eq!(crate::platform::poll_optional_receiver(&mut slot), crate::platform::ReceiverPoll::Disconnected);
+    assert_eq!(
+        crate::platform::poll_optional_receiver(&mut slot),
+        crate::platform::ReceiverPoll::Disconnected
+    );
 
     let mut panel = crate::app::database::DatabasePanelState::default();
-    let first = database_pending(900, crate::app::database::DatabasePendingJobKind::LoadTables, crate::app::database::DatabaseJobOwner::Connection(crate::app::database::DatabaseConnectionId(1)), 1, Some("alpha"), None);
-    let second = database_pending(901, crate::app::database::DatabasePendingJobKind::LoadTables, crate::app::database::DatabaseJobOwner::Connection(crate::app::database::DatabaseConnectionId(1)), 1, Some("beta"), None);
+    let first = database_pending(
+        900,
+        crate::app::database::DatabasePendingJobKind::LoadTables,
+        crate::app::database::DatabaseJobOwner::Connection(
+            crate::app::database::DatabaseConnectionId(1),
+        ),
+        1,
+        Some("alpha"),
+        None,
+    );
+    let second = database_pending(
+        901,
+        crate::app::database::DatabasePendingJobKind::LoadTables,
+        crate::app::database::DatabaseJobOwner::Connection(
+            crate::app::database::DatabaseConnectionId(1),
+        ),
+        1,
+        Some("beta"),
+        None,
+    );
     panel.activate_command(crate::app::database::DatabaseCommand::Shutdown, first);
-    assert!(matches!(panel.queue_command(crate::app::database::DatabaseCommand::Shutdown, second), crate::app::database::DatabaseQueueResult::Queued));
+    assert!(matches!(
+        panel.queue_command(crate::app::database::DatabaseCommand::Shutdown, second),
+        crate::app::database::DatabaseQueueResult::Queued
+    ));
     assert_eq!(panel.queued_commands.len(), 1);
 }
 
 #[test]
 fn r3_117_animated_settings_layout_moves_outer_and_inner_together() {
     let base = crate::render_view::settings_ui::settings_modal_layout(800.0, 600.0, 1.0);
-    let animated = crate::render_view::settings_ui::animated_settings_modal_layout(
-        800.0, 600.0, 1.0, 0.35,
-    );
+    let animated =
+        crate::render_view::settings_ui::animated_settings_modal_layout(800.0, 600.0, 1.0, 0.35);
     let outer_delta = animated.outer.y - base.outer.y;
     let inner_delta = animated.inner.y - base.inner.y;
     assert!((outer_delta - inner_delta).abs() < 0.001);
@@ -950,14 +1311,9 @@ fn r3_119_scrollbar_thumb_never_exceeds_tiny_track() {
 
 #[test]
 fn r3_120_nested_gl_scissor_is_intersected_not_replaced() {
-    let intersection = crate::render_view::intersect_scissor_boxes(
-        [20, 20, 10, 10],
-        [0, 0, 100, 100],
-    );
+    let intersection =
+        crate::render_view::intersect_scissor_boxes([20, 20, 10, 10], [0, 0, 100, 100]);
     assert_eq!(intersection, [20, 20, 10, 10]);
-    let partial = crate::render_view::intersect_scissor_boxes(
-        [20, 20, 10, 10],
-        [25, 5, 20, 20],
-    );
+    let partial = crate::render_view::intersect_scissor_boxes([20, 20, 10, 10], [25, 5, 20, 20]);
     assert_eq!(partial, [25, 20, 5, 5]);
 }

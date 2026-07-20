@@ -176,11 +176,8 @@ impl App {
             return None;
         }
         let s = self.renderer.as_ref()?.scale_factor;
-        let (x, y, w, h, _) = crate::app::mouse::app_panel_scroll_rect(
-            self,
-            crate::app::PanelId::LspServers,
-            s,
-                );
+        let (x, y, w, h, _) =
+            crate::app::mouse::app_panel_scroll_rect(self, crate::app::PanelId::LspServers, s);
         Some((x, y, w, h))
     }
 
@@ -435,7 +432,12 @@ impl App {
                     let text = self.editor.get_full_text();
                     let ext = self.file_extension.clone();
                     let path = path.clone();
-                    lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
+                    lsp.notify_change(
+                        &path,
+                        &ext,
+                        &text,
+                        crate::editor::lsp_document_version(self.editor.version),
+                    );
                 }
             }
             self.highlighter
@@ -533,7 +535,12 @@ impl App {
                             let text = self.editor.get_full_text();
                             let ext = self.file_extension.clone();
                             let path = path.clone();
-                            lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
+                            lsp.notify_change(
+                                &path,
+                                &ext,
+                                &text,
+                                crate::editor::lsp_document_version(self.editor.version),
+                            );
                         }
                     }
                     self.highlighter
@@ -633,5 +640,4 @@ mod tests {
     fn lsp_action_menu_anchor_includes_editor_top_inset_once() {
         assert_eq!(lsp_actions_menu_screen_y(120.0, 30.0, 20.0, 44.0), 154.0);
     }
-
 }

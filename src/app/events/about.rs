@@ -10,9 +10,7 @@ fn lsp_action_selection_after_prepend(
     if old_len == 0 {
         0
     } else {
-        old_selected
-            .min(old_len - 1)
-            .saturating_add(prepended_len)
+        old_selected.min(old_len - 1).saturating_add(prepended_len)
     }
 }
 
@@ -415,8 +413,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             app.file_tree_notify_rx = None;
             app.file_tree_watcher_stop_tx = None;
             app.file_tree_watched_dirs.clear();
-            app.ide_panel.file_tree_error =
-                Some(file_watcher_disconnect_message().to_string());
+            app.ide_panel.file_tree_error = Some(file_watcher_disconnect_message().to_string());
             app.start_file_watcher();
             needs_redraw = true;
         }
@@ -592,20 +589,32 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
     if let Some(modal) = app.ide_panel.database.table_modal.as_mut() {
         match modal {
-            crate::app::database::DatabaseTableModal::SqlPreview { scroll_x, scroll_y, .. } => {
-                if scroll_x.update(dt) { needs_redraw = true; }
-                if scroll_y.update(dt) { needs_redraw = true; }
+            crate::app::database::DatabaseTableModal::SqlPreview {
+                scroll_x, scroll_y, ..
+            } => {
+                if scroll_x.update(dt) {
+                    needs_redraw = true;
+                }
+                if scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
             }
             crate::app::database::DatabaseTableModal::MultilineEditor {
                 scroll_x,
                 scroll_y,
                 ..
             } => {
-                if scroll_x.update(dt) { needs_redraw = true; }
-                if scroll_y.update(dt) { needs_redraw = true; }
+                if scroll_x.update(dt) {
+                    needs_redraw = true;
+                }
+                if scroll_y.update(dt) {
+                    needs_redraw = true;
+                }
             }
             crate::app::database::DatabaseTableModal::Review { scroll, .. } => {
-                if scroll.update(dt) { needs_redraw = true; }
+                if scroll.update(dt) {
+                    needs_redraw = true;
+                }
             }
             _ => {}
         }
@@ -746,10 +755,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                 let mx = r.last_mouse_x;
                 let my = r.last_mouse_y;
                 let panel_x = content_x + 10.0 * s;
-                let char_w = r.char_advance('A')
-                    * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-                let char_h = r.line_height
-                    * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                let char_w =
+                    r.char_advance('A') * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                let char_h = r.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                 let (term_y, term_h) =
                     crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
                 let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
@@ -761,13 +769,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                         let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
                         if !grid.is_alt {
                             let total_lines = grid.scrollback.len() + grid.lines.len();
-                            let max_scroll =
-                                crate::render_view::terminal_ui::terminal_max_scroll(
-                                    total_lines,
-                                    char_h,
-                                    term_h,
-                                    s,
-                                );
+                            let max_scroll = crate::render_view::terminal_ui::terminal_max_scroll(
+                                total_lines,
+                                char_h,
+                                term_h,
+                                s,
+                            );
                             if max_scroll > 0.0 && total_lines > 0 {
                                 let speed = drag_autoscroll_speed(drag_delta, drag_delta < 0.0);
                                 term.scroll_y.target = (term.scroll_y.target
@@ -862,19 +869,22 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         } else {
             0.0
         };
-        let query_results_h = app.tabs.get(app.active_tab).map_or(0.0, |tab| match &tab.kind {
-            crate::app::EditorTabKind::DatabaseQuery(_, state)
-                if crate::app::database::database_query_results_visible(state) =>
-            {
-                crate::app::database::database_query_results_height(
-                    state.result_view.preferred_height,
-                    window_h,
-                    full_bottom_panel_h,
-                    s,
-                )
-            }
-            _ => 0.0,
-        });
+        let query_results_h = app
+            .tabs
+            .get(app.active_tab)
+            .map_or(0.0, |tab| match &tab.kind {
+                crate::app::EditorTabKind::DatabaseQuery(_, state)
+                    if crate::app::database::database_query_results_visible(state) =>
+                {
+                    crate::app::database::database_query_results_height(
+                        state.result_view.preferred_height,
+                        window_h,
+                        full_bottom_panel_h,
+                        s,
+                    )
+                }
+                _ => 0.0,
+            });
         let editor_bottom_h = if app.is_ide_mode {
             app.ide_panel.editor_reserved_bottom_height(s) + query_results_h
         } else {
@@ -1112,10 +1122,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 }
             }
-            crate::lsp::LspEvent::SignatureHelpResponse {
-                request_id,
-                help,
-            } => {
+            crate::lsp::LspEvent::SignatureHelpResponse { request_id, help } => {
                 if app.autocomplete_signature_request_id == Some(request_id) {
                     app.autocomplete_signature_request_id = None;
                     if app.autocomplete_mode == crate::app::AutocompleteMode::LspContext {
@@ -1159,11 +1166,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                             &app.editor.line_offsets,
                             &hints,
                         );
-                        app.python_inlay_hint_cache
-                            .insert(
-                                (path.clone(), app.file_extension.clone()),
-                                (version, range, parsed.clone()),
-                            );
+                        app.python_inlay_hint_cache.insert(
+                            (path.clone(), app.file_extension.clone()),
+                            (version, range, parsed.clone()),
+                        );
                         app.python_inlay_hints = parsed;
                         app.python_inlay_hint_path = Some(path);
                         app.python_inlay_hint_range = Some(range);

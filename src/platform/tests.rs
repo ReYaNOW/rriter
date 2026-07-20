@@ -1,9 +1,9 @@
 use super::*;
 use std::collections::HashMap;
 #[cfg(unix)]
-use std::sync::atomic::AtomicBool;
-#[cfg(unix)]
 use std::process::Stdio;
+#[cfg(unix)]
+use std::sync::atomic::AtomicBool;
 
 fn paths_for(platform: PlatformKind, values: &[(&str, &str)]) -> AppPaths {
     let values = values
@@ -96,7 +96,6 @@ fn user_cache_root_follows_tool_cache_conventions() {
     );
 }
 
-
 #[test]
 fn tool_kind_indices_keys_and_sources_are_stable() {
     for (index, kind) in ToolKind::ALL.into_iter().enumerate() {
@@ -107,7 +106,10 @@ fn tool_kind_indices_keys_and_sources_are_stable() {
         assert!(kind.override_env().starts_with("RRITER_"));
     }
     assert_eq!(ToolKind::from_index(ToolKind::ALL.len()), None);
-    assert_eq!(integration::ToolPathSource::Environment.label(), "RRITER_*_PATH");
+    assert_eq!(
+        integration::ToolPathSource::Environment.label(),
+        "RRITER_*_PATH"
+    );
     assert_eq!(integration::ToolPathSource::Settings.label(), "настройки");
     assert_eq!(integration::ToolPathSource::Path.label(), "PATH");
 }
@@ -164,7 +166,10 @@ fn macos_canonical_temp_paths_keep_visible_system_aliases() {
 #[test]
 fn windows_path_keys_handle_drive_unc_case_and_extended_prefixes() {
     let key = |path: &str| PathKey::for_platform(Path::new(path), PlatformKind::Windows);
-    assert_eq!(key(r"C:\Work\RRiter\src\main.rs"), key(r"c:/work/rriter/src/MAIN.rs"));
+    assert_eq!(
+        key(r"C:\Work\RRiter\src\main.rs"),
+        key(r"c:/work/rriter/src/MAIN.rs")
+    );
     assert_eq!(
         key(r"\\?\C:\Work\RRiter\src\.\main.rs"),
         key(r"c:\work\rriter\src\main.rs")
@@ -174,10 +179,7 @@ fn windows_path_keys_handle_drive_unc_case_and_extended_prefixes() {
         key(r"\\server\share\project\FILE.py")
     );
     assert_ne!(key(r"C:\Work\one"), key(r"C:\Work\one-more"));
-    assert_eq!(
-        key(r"C:\ПРОЕКТ\ФАЙЛ.rs"),
-        key(r"c:\проект\файл.RS")
-    );
+    assert_eq!(key(r"C:\ПРОЕКТ\ФАЙЛ.rs"), key(r"c:\проект\файл.RS"));
 }
 
 #[test]
@@ -231,7 +233,9 @@ fn unix_persisted_paths_and_relative_paths_preserve_non_utf8_bytes() {
     assert_eq!(decode_persisted_path(&encoded), Some(path.clone()));
     assert_eq!(
         relative_to(&path, &root),
-        Some(PathBuf::from(OsString::from_vec(b"child\n\xfe.rs".to_vec())))
+        Some(PathBuf::from(OsString::from_vec(
+            b"child\n\xfe.rs".to_vec()
+        )))
     );
 }
 
@@ -338,7 +342,12 @@ fn atomic_write_through_symlink_preserves_the_link() {
 
     atomic_write(&link, b"new").unwrap();
 
-    assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(fs::read(&target).unwrap(), b"new");
     let _ = fs::remove_dir_all(root);
 }
@@ -363,7 +372,10 @@ fn broken_symlink_is_an_existing_removable_path_entry() {
 #[test]
 fn url_opener_rejects_non_http_schemes_before_spawning() {
     for url in ["file:///tmp/secret", "javascript:alert(1)", "not a url"] {
-        assert_eq!(open_url(url).unwrap_err().kind(), io::ErrorKind::InvalidInput);
+        assert_eq!(
+            open_url(url).unwrap_err().kind(),
+            io::ErrorKind::InvalidInput
+        );
     }
 }
 
@@ -385,7 +397,13 @@ fn windows_name_validation_covers_reserved_and_trailing_names() {
             "{invalid} must be rejected"
         );
     }
-    for valid in ["console.txt", "COM10", "LPT0", "normal name.rs", "Привет.py"] {
+    for valid in [
+        "console.txt",
+        "COM10",
+        "LPT0",
+        "normal name.rs",
+        "Привет.py",
+    ] {
         assert!(
             validate_child_name_for_platform(valid, PlatformKind::Windows).is_ok(),
             "{valid} must be accepted"
@@ -420,14 +438,42 @@ fn altgr_is_not_forwarded_as_terminal_ctrl_alt() {
 
 #[test]
 fn shortcut_modifiers_follow_platform_conventions() {
-    assert!(primary_modifier_for_platform(PlatformKind::Windows, true, false));
-    assert!(!primary_modifier_for_platform(PlatformKind::Windows, false, true));
-    assert!(primary_modifier_for_platform(PlatformKind::Macos, false, true));
-    assert!(!primary_modifier_for_platform(PlatformKind::Macos, true, false));
+    assert!(primary_modifier_for_platform(
+        PlatformKind::Windows,
+        true,
+        false
+    ));
+    assert!(!primary_modifier_for_platform(
+        PlatformKind::Windows,
+        false,
+        true
+    ));
+    assert!(primary_modifier_for_platform(
+        PlatformKind::Macos,
+        false,
+        true
+    ));
+    assert!(!primary_modifier_for_platform(
+        PlatformKind::Macos,
+        true,
+        false
+    ));
 
-    assert!(word_modifier_for_platform(PlatformKind::Windows, true, false));
-    assert!(!word_modifier_for_platform(PlatformKind::Windows, false, true));
-    assert!(!word_modifier_for_platform(PlatformKind::Windows, true, true));
+    assert!(word_modifier_for_platform(
+        PlatformKind::Windows,
+        true,
+        false
+    ));
+    assert!(!word_modifier_for_platform(
+        PlatformKind::Windows,
+        false,
+        true
+    ));
+    assert!(!word_modifier_for_platform(
+        PlatformKind::Windows,
+        true,
+        true
+    ));
     assert!(word_modifier_for_platform(PlatformKind::Macos, false, true));
 
     assert!(text_input_modifiers_allowed_for_platform(
@@ -501,7 +547,12 @@ fn managed_child_exit_reaps_background_descendants() {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = ManagedChild::spawn(&mut command).unwrap();
-    assert!(child.wait_timeout(Duration::from_secs(1)).unwrap().is_some());
+    assert!(
+        child
+            .wait_timeout(Duration::from_secs(1))
+            .unwrap()
+            .is_some()
+    );
 
     std::thread::sleep(Duration::from_millis(350));
     assert!(!marker.exists());
@@ -644,7 +695,10 @@ fn atomic_secret_write_uses_owner_only_permissions() {
     fs::create_dir_all(&root).unwrap();
     let path = root.join("auth.json");
     atomic_write_secret(&path, b"secret").unwrap();
-    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
     assert_eq!(fs::read(&path).unwrap(), b"secret");
     let _ = fs::remove_dir_all(root);
 }
@@ -664,8 +718,8 @@ fn cancelable_managed_command_terminates_the_process_tree() {
     let mut command = command_for("sh").unwrap();
     command.args(["-c", "sleep 30 & wait"]);
     let started = std::time::Instant::now();
-    let error = run_command_output_cancelable(&mut command, Duration::from_secs(5), &cancel)
-        .unwrap_err();
+    let error =
+        run_command_output_cancelable(&mut command, Duration::from_secs(5), &cancel).unwrap_err();
     trigger.join().unwrap();
     assert_eq!(error.kind(), io::ErrorKind::Interrupted);
     assert!(started.elapsed() < Duration::from_secs(3));
@@ -687,10 +741,7 @@ fn macos_proxy_parser_supports_native_endpoints_and_bypass_values() {
 }"#;
     let parsed = parse_macos_proxy_config(output).expect("native proxy");
     assert_eq!(parsed.http.as_deref(), Some("http://proxy.local:8080"));
-    assert_eq!(
-        parsed.https.as_deref(),
-        Some("http://secure.local:8443")
-    );
+    assert_eq!(parsed.https.as_deref(), Some("http://secure.local:8443"));
     assert_eq!(parsed.bypass.as_deref(), Some("localhost,*.internal"));
     assert!(parse_macos_proxy_config("HTTPEnable : 0").is_none());
 }
@@ -734,7 +785,10 @@ fn preproduction_atomic_write_preserves_existing_permissions() {
     atomic_write(&path, b"new").unwrap();
 
     assert_eq!(fs::read(&path).unwrap(), b"new");
-    assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+    assert_eq!(
+        fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+        0o640
+    );
     let _ = fs::remove_dir_all(root);
 }
 
@@ -847,7 +901,10 @@ fn dart_resolution_follows_documented_priority_order() {
         Some(path_dart.clone()),
     );
     assert_eq!(resolution.path.as_deref(), Some(custom.as_path()));
-    assert_eq!(resolution.source, Some(integration::ToolPathSource::Settings));
+    assert_eq!(
+        resolution.source,
+        Some(integration::ToolPathSource::Settings)
+    );
 
     let resolution = resolve(
         None,
@@ -857,7 +914,10 @@ fn dart_resolution_follows_documented_priority_order() {
         Some(path_dart.clone()),
     );
     assert_eq!(resolution.path.as_deref(), Some(project_flutter.as_path()));
-    assert_eq!(resolution.source, Some(integration::ToolPathSource::Flutter));
+    assert_eq!(
+        resolution.source,
+        Some(integration::ToolPathSource::Flutter)
+    );
 
     let resolution = resolve(
         None,
@@ -867,32 +927,29 @@ fn dart_resolution_follows_documented_priority_order() {
         Some(path_dart.clone()),
     );
     assert_eq!(resolution.path.as_deref(), Some(env_dart.as_path()));
-    assert_eq!(resolution.source, Some(integration::ToolPathSource::Environment));
-
-    let resolution = resolve(
-        None,
-        None,
-        None,
-        &managed_root,
-        Some(path_dart.clone()),
+    assert_eq!(
+        resolution.source,
+        Some(integration::ToolPathSource::Environment)
     );
+
+    let resolution = resolve(None, None, None, &managed_root, Some(path_dart.clone()));
     assert_eq!(resolution.path.as_deref(), Some(managed.as_path()));
-    assert_eq!(resolution.source, Some(integration::ToolPathSource::Managed));
+    assert_eq!(
+        resolution.source,
+        Some(integration::ToolPathSource::Managed)
+    );
 
     let empty_managed = root.join("empty managed");
-    let resolution = resolve(
-        None,
-        None,
-        None,
-        &empty_managed,
-        Some(path_dart.clone()),
-    );
+    let resolution = resolve(None, None, None, &empty_managed, Some(path_dart.clone()));
     assert_eq!(resolution.path.as_deref(), Some(path_dart.as_path()));
     assert_eq!(resolution.source, Some(integration::ToolPathSource::Path));
 
     let resolution = resolve(None, None, None, &empty_managed, None);
     assert_eq!(resolution.path.as_deref(), Some(other_flutter.as_path()));
-    assert_eq!(resolution.source, Some(integration::ToolPathSource::Flutter));
+    assert_eq!(
+        resolution.source,
+        Some(integration::ToolPathSource::Flutter)
+    );
 
     let _ = fs::remove_dir_all(root);
 }
@@ -991,7 +1048,11 @@ fn malformed_package_config_is_ignored_without_panic() {
     let path = root.join("package_config.json");
     fs::write(&path, "{bad json").unwrap();
     assert!(integration::flutter_root_from_package_config(&path).is_none());
-    fs::write(&path, r#"{"packages":[{"name":"flutter","rootUri":"http://invalid"}]}"#).unwrap();
+    fs::write(
+        &path,
+        r#"{"packages":[{"name":"flutter","rootUri":"http://invalid"}]}"#,
+    )
+    .unwrap();
     assert!(integration::flutter_root_from_package_config(&path).is_none());
     let _ = fs::remove_dir_all(root);
 }

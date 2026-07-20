@@ -202,7 +202,12 @@ impl PythonWorker {
         script: &ApiMockPythonScript,
         request: PythonMockRequest,
     ) -> Result<PythonMockResponse, String> {
-        if self.child.try_wait().map_err(|err| err.to_string())?.is_some() {
+        if self
+            .child
+            .try_wait()
+            .map_err(|err| err.to_string())?
+            .is_some()
+        {
             return Err("Python worker exited before handling the request".to_string());
         }
 
@@ -232,15 +237,12 @@ impl PythonWorker {
         self.stdin.write_all(b"\n").map_err(|err| err.to_string())?;
         self.stdin.flush().map_err(|err| err.to_string())?;
         let timeout = Duration::from_millis(script.timeout_ms.clamp(50, 30_000));
-        let line = self
-            .rx
-            .recv_timeout(timeout)
-            .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => "Python mock timeout".to_string(),
-                mpsc::RecvTimeoutError::Disconnected => {
-                    "Python worker output stream closed".to_string()
-                }
-            })?;
+        let line = self.rx.recv_timeout(timeout).map_err(|error| match error {
+            mpsc::RecvTimeoutError::Timeout => "Python mock timeout".to_string(),
+            mpsc::RecvTimeoutError::Disconnected => {
+                "Python worker output stream closed".to_string()
+            }
+        })?;
         let output: WorkerOutput = serde_json::from_str(&line).map_err(|err| err.to_string())?;
         if output.id != Some(id) {
             return Err("Python mock response id mismatch".to_string());
@@ -343,11 +345,8 @@ mod tests {
             python_version: "3.13".to_string(),
         };
 
-        let command = python_worker_command(
-            &runtime,
-            PathBuf::from(r"C:\Users\Re YaN\worker.py"),
-        )
-        .unwrap();
+        let command =
+            python_worker_command(&runtime, PathBuf::from(r"C:\Users\Re YaN\worker.py")).unwrap();
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())

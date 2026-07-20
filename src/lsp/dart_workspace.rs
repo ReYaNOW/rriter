@@ -110,12 +110,7 @@ fn pubspec_declares_flutter(path: &Path) -> bool {
 }
 
 impl LspManager {
-    pub(super) fn open_dart_document(
-        &mut self,
-        path: PathBuf,
-        text: Arc<str>,
-        version: i32,
-    ) {
+    pub(super) fn open_dart_document(&mut self, path: PathBuf, text: Arc<str>, version: i32) {
         let path_key = crate::platform::PathKey::new(&path);
         if let Some(existing_version) = self
             .open_dart_files
@@ -151,12 +146,7 @@ impl LspManager {
         self.dirty_diagnostics = true;
     }
 
-    pub(super) fn change_dart_document(
-        &mut self,
-        path: PathBuf,
-        text: Arc<str>,
-        version: i32,
-    ) {
+    pub(super) fn change_dart_document(&mut self, path: PathBuf, text: Arc<str>, version: i32) {
         let path_key = crate::platform::PathKey::new(&path);
         let Some(existing) = self.open_dart_files.get(&path_key) else {
             return;
@@ -562,8 +552,8 @@ fn run_dart_workspace_check(
     cancel: &AtomicBool,
 ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, String> {
     let executable = dart_executable_for_root(root);
-    let mut command = crate::platform::command_for_executable(&executable)
-        .map_err(|error| error.to_string())?;
+    let mut command =
+        crate::platform::command_for_executable(&executable).map_err(|error| error.to_string())?;
     command
         .current_dir(root)
         .arg("analyze")
@@ -687,9 +677,7 @@ fn resolve_dart_path(value: &str, root: &Path) -> Option<PathBuf> {
     }
     let path = PathBuf::from(value);
     let bytes = value.as_bytes();
-    let windows_absolute = bytes.len() >= 3
-        && bytes[1] == b':'
-        && matches!(bytes[2], b'\\' | b'/')
+    let windows_absolute = bytes.len() >= 3 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/')
         || value.starts_with("\\\\");
     Some(if path.is_absolute() || windows_absolute {
         path
@@ -716,8 +704,8 @@ fn dart_severity(value: &str) -> DiagSeverity {
 mod tests {
     use super::*;
     use crate::lsp::{
-        Cmd, LspEvent, LspRestartBudget, LspServerKind, PendingRequestCleanup,
-        PendingRequestKind, RUFF_SERVER, TY_SERVER, command_for_server,
+        Cmd, LspEvent, LspRestartBudget, LspServerKind, PendingRequestCleanup, PendingRequestKind,
+        RUFF_SERVER, TY_SERVER, command_for_server,
     };
     use std::collections::HashSet;
     use std::sync::Mutex;
@@ -727,10 +715,8 @@ mod tests {
 
     fn temp_dir(name: &str) -> PathBuf {
         let id = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "rriter-dart-{name}-{}-{id}",
-            std::process::id()
-        ));
+        let path =
+            std::env::temp_dir().join(format!("rriter-dart-{name}-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         path
     }
@@ -740,8 +726,8 @@ mod tests {
         (process, commands)
     }
 
-    fn test_dart_process_with_events(
-    ) -> (LspProcess, mpsc::Receiver<Cmd>, mpsc::Sender<LspEvent>) {
+    fn test_dart_process_with_events() -> (LspProcess, mpsc::Receiver<Cmd>, mpsc::Sender<LspEvent>)
+    {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel::<LspEvent>();
         (
@@ -833,7 +819,10 @@ mod tests {
         let parsed = parse_dart_machine_output(raw, &root);
         let items = parsed.get(&root.join("lib/main.dart")).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].message.as_ref(), "message with | pipe and \\ slash");
+        assert_eq!(
+            items[0].message.as_ref(),
+            "message with | pipe and \\ slash"
+        );
         assert_eq!(items[0].start_line, 2);
         assert_eq!(items[0].start_col, 4);
         assert_eq!(items[0].end_col, 8);
@@ -888,10 +877,7 @@ mod tests {
         for expected in [&first, &second] {
             match commands.try_recv().unwrap() {
                 Cmd::Open {
-                    uri,
-                    lang,
-                    version,
-                    ..
+                    uri, lang, version, ..
                 } => {
                     assert_eq!(uri, crate::lsp::path_to_uri(expected));
                     assert_eq!(lang, "dart");
@@ -938,11 +924,13 @@ mod tests {
 
         manager.notify_close(&first, "dart");
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
-        assert!(manager
-            .dart_workspaces
-            .get(&root_key)
-            .and_then(|state| state.process.as_ref())
-            .is_some());
+        assert!(
+            manager
+                .dart_workspaces
+                .get(&root_key)
+                .and_then(|state| state.process.as_ref())
+                .is_some()
+        );
         manager.notify_close(&second, "dart");
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Shutdown));
@@ -967,7 +955,10 @@ mod tests {
         assert!(manager.dart_workspace_diagnostics.is_empty());
         let disabled_generation = manager.dart_workspaces[&root_key].generation;
         manager.notify_saved(&package.join("pubspec.yaml"), "yaml");
-        assert_eq!(manager.dart_workspaces[&root_key].generation, disabled_generation);
+        assert_eq!(
+            manager.dart_workspaces[&root_key].generation,
+            disabled_generation
+        );
         let _ = std::fs::remove_dir_all(package);
     }
 
@@ -985,7 +976,10 @@ mod tests {
         manager.dart_workspaces.get_mut(&root_key).unwrap().due_at = None;
 
         manager.notify_change(&path, "dart", "void main() { print(1); }\n", 2);
-        assert_eq!(manager.dart_workspaces[&root_key].generation, initial_generation);
+        assert_eq!(
+            manager.dart_workspaces[&root_key].generation,
+            initial_generation
+        );
         assert!(manager.dart_workspaces[&root_key].due_at.is_none());
 
         manager.notify_saved(&path, "dart");
@@ -1010,13 +1004,19 @@ mod tests {
         );
         manager.dart_live_diagnostics.insert(
             path.clone(),
-            (4, Arc::from(vec![test_diagnostic("live")].into_boxed_slice())),
+            (
+                4,
+                Arc::from(vec![test_diagnostic("live")].into_boxed_slice()),
+            ),
         );
         manager.rebuild_merged_diagnostic_indices();
         manager.dirty_diagnostics = false;
 
         assert_eq!(manager.diagnostic_count(&path), 1);
-        assert_eq!(manager.diagnostic_at(&path, 0).unwrap().message.as_ref(), "live");
+        assert_eq!(
+            manager.diagnostic_at(&path, 0).unwrap().message.as_ref(),
+            "live"
+        );
 
         manager.notify_close(&path, "dart");
         manager.rebuild_merged_diagnostic_indices();
@@ -1071,13 +1071,34 @@ mod tests {
         manager.poll();
         assert_eq!(manager.diagnostic_count(&first), 1);
 
+        manager.notify_change(&first, "dart", "void first() { missing; }\n", 4);
+        assert!(matches!(commands.try_recv().unwrap(), Cmd::Change { .. }));
+        events
+            .send(LspEvent::Diagnostics {
+                server: crate::lsp::LspServerKind::Dart,
+                path: first.clone(),
+                version: None,
+                items: vec![test_diagnostic("versionless current")],
+                result_id: None,
+            })
+            .unwrap();
+        manager.poll();
+        assert_eq!(manager.diagnostic_count(&first), 1);
+        assert_eq!(
+            manager.diagnostic_at(&first, 0).unwrap().message.as_ref(),
+            "versionless current"
+        );
+        assert_eq!(manager.dart_live_diagnostics[&first].0, 4);
+
         manager.notify_close(&first, "dart");
         assert!(matches!(commands.try_recv().unwrap(), Cmd::Close { .. }));
         manager.notify_change(&first, "dart", "late edit\n", 4);
         assert!(commands.try_recv().is_err());
-        assert!(!manager
-            .open_dart_files
-            .contains_key(&crate::platform::PathKey::new(&first)));
+        assert!(
+            !manager
+                .open_dart_files
+                .contains_key(&crate::platform::PathKey::new(&first))
+        );
         events
             .send(LspEvent::Diagnostics {
                 server: crate::lsp::LspServerKind::Dart,
@@ -1161,10 +1182,7 @@ mod tests {
             .unwrap();
         let _ = manager.poll();
 
-        assert_eq!(
-            manager.dart_status,
-            crate::lsp::LspServerStatus::Disabled
-        );
+        assert_eq!(manager.dart_status, crate::lsp::LspServerStatus::Disabled);
         assert!(!manager.dart_unavailable);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -1189,7 +1207,6 @@ mod tests {
         assert!(!manager.dart_unavailable);
         assert!(manager.python_disabled);
     }
-
 
     #[test]
     fn dart_and_python_server_definitions_are_stable() {

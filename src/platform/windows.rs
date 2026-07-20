@@ -50,15 +50,20 @@ fn nul_terminated(mut units: Vec<u16>) -> Vec<u16> {
     units
 }
 
-
 pub(super) fn without_extended_prefix(path: &Path) -> PathBuf {
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
 
     const BACKSLASH: u16 = b'\\' as u16;
     let units = path.as_os_str().encode_wide().collect::<Vec<_>>();
     let extended_unc = [
-        BACKSLASH, BACKSLASH, b'?' as u16, BACKSLASH,
-        b'U' as u16, b'N' as u16, b'C' as u16, BACKSLASH,
+        BACKSLASH,
+        BACKSLASH,
+        b'?' as u16,
+        BACKSLASH,
+        b'U' as u16,
+        b'N' as u16,
+        b'C' as u16,
+        BACKSLASH,
     ];
     let extended = [BACKSLASH, BACKSLASH, b'?' as u16, BACKSLASH];
     let native = [BACKSLASH, b'?' as u16, b'?' as u16, BACKSLASH];
@@ -180,9 +185,10 @@ fn normalize_windows_units(mut units: Vec<u16>) -> Vec<u16> {
 
 fn starts_with_ascii_case_insensitive(value: &[u16], prefix: &[u16]) -> bool {
     value.len() >= prefix.len()
-        && value.iter().zip(prefix).all(|(left, right)| {
-            ascii_lower_u16(*left) == ascii_lower_u16(*right)
-        })
+        && value
+            .iter()
+            .zip(prefix)
+            .all(|(left, right)| ascii_lower_u16(*left) == ascii_lower_u16(*right))
 }
 
 fn ascii_lower_u16(value: u16) -> u16 {
@@ -245,8 +251,7 @@ pub(super) fn path_is_within(path: &Path, root: &Path) -> bool {
     let root = normalized_units(root);
     path == root
         || (path.starts_with(&root)
-            && (root.last() == Some(&BACKSLASH)
-                || path.get(root.len()) == Some(&BACKSLASH)))
+            && (root.last() == Some(&BACKSLASH) || path.get(root.len()) == Some(&BACKSLASH)))
 }
 
 fn windows_component_key(component: std::path::Component<'_>) -> Vec<u16> {
@@ -274,8 +279,6 @@ pub(super) fn relative_to(path: &Path, root: &Path) -> Option<PathBuf> {
     }
     Some(relative)
 }
-
-
 
 pub(super) fn run_elevated_helper(executable: &Path, request: &Path) -> std::io::Result<i32> {
     use std::os::windows::ffi::OsStrExt;
@@ -393,7 +396,10 @@ mod tests {
             b'\\' as u16,
             0xd801,
         ]));
-        assert_ne!(normalized_path_bytes(&first), normalized_path_bytes(&second));
+        assert_ne!(
+            normalized_path_bytes(&first),
+            normalized_path_bytes(&second)
+        );
     }
 
     #[test]
@@ -468,7 +474,10 @@ pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Resul
     let entropy_bytes = purpose.as_bytes();
     let entropy = CRYPT_INTEGER_BLOB {
         cbData: u32::try_from(entropy_bytes.len()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret purpose is too large")
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "secret purpose is too large",
+            )
         })?,
         pbData: entropy_bytes.as_ptr().cast_mut(),
     };
@@ -487,9 +496,8 @@ pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Resul
     if ok == 0 {
         return Err(std::io::Error::last_os_error());
     }
-    let protected = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let protected =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe {
         LocalFree(output.pbData.cast());
     }
@@ -497,7 +505,7 @@ pub(super) fn protect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Resul
 }
 
 pub(super) fn unprotect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Result<Vec<u8>> {
-    use windows_sys::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows_sys::Win32::Foundation::{HLOCAL, LocalFree};
     use windows_sys::Win32::Security::Cryptography::{
         CRYPT_INTEGER_BLOB, CRYPTPROTECT_UI_FORBIDDEN, CryptUnprotectData,
     };
@@ -511,7 +519,10 @@ pub(super) fn unprotect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Res
     let entropy_bytes = purpose.as_bytes();
     let entropy = CRYPT_INTEGER_BLOB {
         cbData: u32::try_from(entropy_bytes.len()).map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::InvalidInput, "secret purpose is too large")
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "secret purpose is too large",
+            )
         })?,
         pbData: entropy_bytes.as_ptr().cast_mut(),
     };
@@ -531,9 +542,8 @@ pub(super) fn unprotect_user_secret(bytes: &[u8], purpose: &str) -> std::io::Res
     if ok == 0 {
         return Err(std::io::Error::last_os_error());
     }
-    let plain = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let plain =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe {
         LocalFree(output.pbData.cast());
         if !description.is_null() {
@@ -568,11 +578,8 @@ pub(super) fn native_root_certificates_der() -> std::io::Result<Vec<Vec<u8>>> {
         let context = unsafe { &*current };
         if !context.pbCertEncoded.is_null() && context.cbCertEncoded > 0 {
             certificates.push(unsafe {
-                std::slice::from_raw_parts(
-                    context.pbCertEncoded,
-                    context.cbCertEncoded as usize,
-                )
-                .to_vec()
+                std::slice::from_raw_parts(context.pbCertEncoded, context.cbCertEncoded as usize)
+                    .to_vec()
             });
         }
         previous = current;
@@ -618,7 +625,9 @@ fn wide_ptr_to_string(value: windows_sys::core::PCWSTR) -> Option<String> {
         while *value.add(len) != 0 {
             len = len.saturating_add(1);
         }
-        Some(String::from_utf16_lossy(std::slice::from_raw_parts(value, len)))
+        Some(String::from_utf16_lossy(std::slice::from_raw_parts(
+            value, len,
+        )))
     }
 }
 
@@ -630,12 +639,6 @@ pub(super) fn current_process_memory_kb() -> Option<usize> {
 
     let mut counters = PROCESS_MEMORY_COUNTERS::default();
     counters.cb = std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32;
-    let ok = unsafe {
-        GetProcessMemoryInfo(
-            GetCurrentProcess(),
-            &raw mut counters,
-            counters.cb,
-        )
-    };
+    let ok = unsafe { GetProcessMemoryInfo(GetCurrentProcess(), &raw mut counters, counters.cb) };
     (ok != 0).then_some(counters.WorkingSetSize / 1024)
 }

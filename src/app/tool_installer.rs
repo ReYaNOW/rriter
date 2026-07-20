@@ -1,5 +1,5 @@
 use crate::platform::{
-    PlatformKind, ProcessOutputStream, ToolKind, CURRENT_PLATFORM, resolve_executable,
+    CURRENT_PLATFORM, PlatformKind, ProcessOutputStream, ToolKind, resolve_executable,
     resolve_tool_kind, run_command_output_cancelable, run_command_streaming_cancelable,
 };
 use crate::scroll::ScrollState;
@@ -29,8 +29,7 @@ const TOOL_INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const TOOL_VALIDATE_TIMEOUT: Duration = Duration::from_secs(30);
 const DART_VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_LINE_HEIGHT: f32 = 17.0;
-const TRUNCATED_LOG_MARKER: &str =
-    "… начало журнала удалено из-за ограничения памяти …";
+const TRUNCATED_LOG_MARKER: &str = "… начало журнала удалено из-за ограничения памяти …";
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -116,11 +115,7 @@ impl DartToolState {
         self.error.as_deref()
     }
 
-    pub(crate) fn refresh(
-        &mut self,
-        workspace: Option<&Path>,
-        window: Option<Arc<Window>>,
-    ) {
+    pub(crate) fn refresh(&mut self, workspace: Option<&Path>, window: Option<Arc<Window>>) {
         self.cancel_probe();
         crate::platform::configure_dart_workspace_root(workspace.map(Path::to_path_buf));
         let resolution = resolve_tool_kind(ToolKind::Dart);
@@ -237,7 +232,10 @@ fn probe_dart_version(path: &Path, cancel: &AtomicBool) -> Result<String, String
     let output = run_command_output_cancelable(&mut command, DART_VERSION_TIMEOUT, cancel)
         .map_err(|error| format!("Не удалось выполнить Dart --version: {error}"))?;
     if !output.status.success() {
-        return Err(format!("Dart --version завершился с кодом {}", output.status));
+        return Err(format!(
+            "Dart --version завершился с кодом {}",
+            output.status
+        ));
     }
     parse_dart_version_output(&output.stdout, &output.stderr)
 }
@@ -877,8 +875,7 @@ pub(crate) fn log_viewport_height(window_height: f32, scale: f32) -> f32 {
 }
 
 pub(crate) fn log_max_scroll(line_count: usize, window_height: f32, scale: f32) -> f32 {
-    let content_height =
-        line_count.max(1) as f32 * log_line_height(scale) + (12.0 * scale).round();
+    let content_height = line_count.max(1) as f32 * log_line_height(scale) + (12.0 * scale).round();
     (content_height - log_viewport_height(window_height, scale))
         .max(0.0)
         .round()
@@ -941,7 +938,8 @@ impl ToolInstallLayout {
     }
 
     fn executable(&self) -> PathBuf {
-        self.bin.join(tool_executable_name(self.kind, self.platform))
+        self.bin
+            .join(tool_executable_name(self.kind, self.platform))
     }
 
     fn create(&self) -> io::Result<()> {
@@ -1224,7 +1222,10 @@ async fn download_installer_async(
         .map_err(|error| format!("Не удалось сохранить установщик uv: {error}"))?;
     reporter.line(
         ToolInstallLogKind::Info,
-        format!("Установщик uv сохранён: {} КиБ", (bytes.len() + 1023) / 1024),
+        format!(
+            "Установщик uv сохранён: {} КиБ",
+            (bytes.len() + 1023) / 1024
+        ),
     );
     Ok(())
 }
@@ -1331,7 +1332,9 @@ fn validate_executable(
         ));
     }
     let mut command = Command::new(path);
-    command.arg("--version").current_dir(&layout.generation_root);
+    command
+        .arg("--version")
+        .current_dir(&layout.generation_root);
     apply_uv_tool_environment(&mut command, layout);
     let result = run_logged_command(
         &mut command,
@@ -1542,7 +1545,10 @@ impl crate::app::App {
     }
 
     pub(crate) fn tool_install_log_max_scroll(&self) -> f32 {
-        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
         let height = self
             .window
             .as_ref()
@@ -1580,9 +1586,7 @@ impl crate::app::App {
             }
             crate::platform::configure_tool_paths(self.tool_paths.clone());
             self.save_current_config();
-            if restart_lsp
-                && let Some(lsp) = &mut self.lsp
-            {
+            if restart_lsp && let Some(lsp) = &mut self.lsp {
                 lsp.restart_python();
                 self.ide_panel.lsp_servers = lsp.servers_info();
             }

@@ -38,8 +38,9 @@ impl GlContextPlan {
             Self::Desktop { .. } => ContextAttributesBuilder::new()
                 .with_profile(GlProfile::Core)
                 .with_context_api(ContextApi::OpenGl(Some(version))),
-            Self::Gles { .. } => ContextAttributesBuilder::new()
-                .with_context_api(ContextApi::Gles(Some(version))),
+            Self::Gles { .. } => {
+                ContextAttributesBuilder::new().with_context_api(ContextApi::Gles(Some(version)))
+            }
         };
         builder.build(Some(raw_window_handle))
     }
@@ -188,8 +189,7 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
         .as_raw();
     let (not_current_context, requested_context) =
         create_not_current_context(&gl_config, raw_window_handle)?;
-    let (surface, context) =
-        create_surface_and_context(&gl_config, &window, not_current_context)?;
+    let (surface, context) = create_surface_and_context(&gl_config, &window, not_current_context)?;
     let renderer = Renderer::new(
         create_glow_context(&gl_config),
         window.scale_factor() as f32,
@@ -259,9 +259,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         let (width, height) = if maximized {
             (app.window_width, app.window_height)
         } else {
-            let size = window
-                .inner_size()
-                .to_logical::<f64>(window.scale_factor());
+            let size = window.inner_size().to_logical::<f64>(window.scale_factor());
             (size.width, size.height)
         };
         (width, height, maximized)
@@ -294,7 +292,7 @@ pub(super) fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
 
 #[cfg(test)]
 mod tests {
-    use super::{gl_context_plans, GlContextPlan};
+    use super::{GlContextPlan, gl_context_plans};
 
     #[test]
     fn graphics_context_plan_is_platform_specific() {
@@ -309,9 +307,11 @@ mod tests {
                 GlContextPlan::Desktop { major: 3, minor: 3 },
             ]
         );
-        assert!(gl_context_plans(crate::platform::PlatformKind::Linux)
-            .iter()
-            .any(|plan| matches!(plan, GlContextPlan::Gles { major: 3, minor: 0 })));
+        assert!(
+            gl_context_plans(crate::platform::PlatformKind::Linux)
+                .iter()
+                .any(|plan| matches!(plan, GlContextPlan::Gles { major: 3, minor: 0 }))
+        );
     }
 
     #[test]

@@ -14,7 +14,6 @@ pub use database_catalog::{
     DatabaseColumnInfo, DatabaseDdlResult, DatabaseTableMetadata, DatabaseTypeKind,
     load_public_table_metadata, quote_pg_identifier, reconstruct_public_table_ddl,
 };
-pub use database_panel::*;
 #[allow(unused_imports)]
 pub use database_grid::{
     DATABASE_GRID_DEFAULT_COLUMN_WIDTH, DATABASE_GRID_HEADER_HEIGHT,
@@ -29,14 +28,15 @@ pub use database_grid::{
     database_grid_max_scroll, database_grid_viewport, database_grid_visible_row_range,
     parse_bytea_preview, parse_editor_value, set_database_column_width,
 };
-#[allow(unused_imports)]
-pub use database_query::*;
+pub use database_panel::*;
 #[allow(unused_imports)]
 pub use database_postgres::{
     DatabaseBackendError, DatabaseBackendNotice, DatabaseConnectionTestResult, DatabaseInfo,
     DatabaseListResult, DatabaseTableInfo, DatabaseTableListResult, PostgresSession,
     connect_postgres, list_databases, list_public_tables, test_database_connection,
 };
+#[allow(unused_imports)]
+pub use database_query::*;
 #[allow(unused_imports)]
 pub use database_runtime::{DatabaseCommand, DatabaseEvent, DatabaseRuntime, host_key_options};
 #[allow(unused_imports)]
@@ -55,15 +55,14 @@ pub use database_ssh::{
 pub use database_ssh_builtin::{BuiltinSshStream, DatabaseSshError};
 #[allow(unused_imports)]
 pub use database_table::{
-    DatabaseChangeKind, DatabaseChangeParameter, DatabaseChangePlan,
-    DatabaseChangePlanOperation, DatabaseChangeStatement, DatabasePreparedTableTransaction,
-    DatabaseTableChunkResult, DatabaseTableCountResult, DatabaseTableModal,
-    DatabaseTableTabMeta, DatabaseTableTabState, begin_table_transaction,
-    DATABASE_SQL_PREVIEW_LINE_HEIGHT, DATABASE_TABLE_DISCONNECTED_MESSAGE,
-    database_calendar_weekday_monday, database_calendar_year_month,
-    database_days_in_month, database_shift_calendar_month,
-    build_table_change_plan, count_public_table_rows,
-    database_table_effective_order_by, load_public_table_chunk, validate_table_fragment,
+    DATABASE_SQL_PREVIEW_LINE_HEIGHT, DATABASE_TABLE_DISCONNECTED_MESSAGE, DatabaseChangeKind,
+    DatabaseChangeParameter, DatabaseChangePlan, DatabaseChangePlanOperation,
+    DatabaseChangeStatement, DatabasePreparedTableTransaction, DatabaseTableChunkResult,
+    DatabaseTableCountResult, DatabaseTableModal, DatabaseTableTabMeta, DatabaseTableTabState,
+    begin_table_transaction, build_table_change_plan, count_public_table_rows,
+    database_calendar_weekday_monday, database_calendar_year_month, database_days_in_month,
+    database_shift_calendar_month, database_table_effective_order_by, load_public_table_chunk,
+    validate_table_fragment,
 };
 pub(crate) use database_table::{database_multiline_line_count, database_multiline_lines};
 
@@ -536,7 +535,7 @@ pub struct DatabasePersistedState {
     pub selected_connection: Option<DatabaseConnectionId>,
     pub selected_database: Option<(DatabaseConnectionId, String)>,
     pub expanded_connections: Vec<DatabaseConnectionId>,
-    pub expanded_databases: Vec<(DatabaseConnectionId, String)> ,
+    pub expanded_databases: Vec<(DatabaseConnectionId, String)>,
 }
 
 impl Default for DatabasePersistedState {
@@ -595,9 +594,8 @@ impl DatabasePersistedState {
         self.consoles.retain(|console| {
             ids.contains(&console.connection_id) && !console.database_name.is_empty()
         });
-        self.query_history.retain(|entry| {
-            ids.contains(&entry.connection_id) && !entry.database_name.is_empty()
-        });
+        self.query_history
+            .retain(|entry| ids.contains(&entry.connection_id) && !entry.database_name.is_empty());
         for entry in &mut self.query_history {
             entry.normalize();
         }
@@ -607,14 +605,17 @@ impl DatabasePersistedState {
             MAX_SQL_HISTORY_BYTES,
         );
         self.selected_connection = self.selected_connection.filter(|id| ids.contains(id));
-        self.selected_database = self.selected_database.take().filter(|(id, name)| {
-            ids.contains(id) && !name.is_empty()
-        });
+        self.selected_database = self
+            .selected_database
+            .take()
+            .filter(|(id, name)| ids.contains(id) && !name.is_empty());
         self.expanded_connections.retain(|id| ids.contains(id));
         self.expanded_connections.sort_by_key(|id| id.0);
         self.expanded_connections.dedup();
-        self.expanded_databases.retain(|(id, name)| ids.contains(id) && !name.is_empty());
-        self.expanded_databases.sort_by(|a, b| (a.0.0, &a.1).cmp(&(b.0.0, &b.1)));
+        self.expanded_databases
+            .retain(|(id, name)| ids.contains(id) && !name.is_empty());
+        self.expanded_databases
+            .sort_by(|a, b| (a.0.0, &a.1).cmp(&(b.0.0, &b.1)));
         self.expanded_databases.dedup();
         Ok(())
     }
@@ -655,11 +656,26 @@ impl DatabaseSecretBundle {
 
     pub fn clone_for_job(&self) -> Self {
         Self {
-            postgres_password: self.postgres_password.as_ref().map(|value| Zeroizing::new(value.to_string())),
-            ssh_password: self.ssh_password.as_ref().map(|value| Zeroizing::new(value.to_string())),
-            ssh_key_passphrase: self.ssh_key_passphrase.as_ref().map(|value| Zeroizing::new(value.to_string())),
-            jump_password: self.jump_password.as_ref().map(|value| Zeroizing::new(value.to_string())),
-            jump_key_passphrase: self.jump_key_passphrase.as_ref().map(|value| Zeroizing::new(value.to_string())),
+            postgres_password: self
+                .postgres_password
+                .as_ref()
+                .map(|value| Zeroizing::new(value.to_string())),
+            ssh_password: self
+                .ssh_password
+                .as_ref()
+                .map(|value| Zeroizing::new(value.to_string())),
+            ssh_key_passphrase: self
+                .ssh_key_passphrase
+                .as_ref()
+                .map(|value| Zeroizing::new(value.to_string())),
+            jump_password: self
+                .jump_password
+                .as_ref()
+                .map(|value| Zeroizing::new(value.to_string())),
+            jump_key_passphrase: self
+                .jump_key_passphrase
+                .as_ref()
+                .map(|value| Zeroizing::new(value.to_string())),
         }
     }
 }
@@ -929,10 +945,12 @@ mod tests {
         }
         state.normalize_and_validate().unwrap();
         assert_eq!(state.query_history.len(), 3);
-        assert!(state
-            .query_history
-            .iter()
-            .all(|entry| entry.connection_id == DatabaseConnectionId(7)));
+        assert!(
+            state
+                .query_history
+                .iter()
+                .all(|entry| entry.connection_id == DatabaseConnectionId(7))
+        );
         assert_eq!(state.query_history.last().unwrap().sql, "SELECT 7");
     }
 
@@ -1025,5 +1043,4 @@ mod tests {
         assert!(state.column_widths[0].column_name.len() <= 256);
         assert!(state.selected_primary_keys[0][0].len() <= 4_096);
     }
-
 }

@@ -136,12 +136,16 @@ pub async fn load_public_table_metadata(
     ssh_options: &SshConnectOptions,
 ) -> Result<DatabaseTableMetadata, DatabaseBackendError> {
     validate_table_name(table_name)?;
-    let session = connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
+    let session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     let timeout = Duration::from_secs(settings.statement_timeout_seconds);
     // Internal read: intentionally autocommit, without BEGIN/review.
-    let rows = tokio::time::timeout(timeout, session.client.query(TABLE_METADATA_SQL, &[&table_name]))
-        .await
-        .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL table metadata"))??;
+    let rows = tokio::time::timeout(
+        timeout,
+        session.client.query(TABLE_METADATA_SQL, &[&table_name]),
+    )
+    .await
+    .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL table metadata"))??;
     if rows.is_empty() {
         return Err(DatabaseBackendError::InvalidConfiguration(format!(
             "public table {} does not exist or is not a regular table",
@@ -218,7 +222,8 @@ pub async fn reconstruct_public_table_ddl(
         ssh_options,
     )
     .await?;
-    let mut session = connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
+    let mut session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     let timeout = Duration::from_secs(settings.statement_timeout_seconds);
     // Internal catalog reads: intentionally autocommit.
     let constraints = tokio::time::timeout(
@@ -458,7 +463,12 @@ mod tests {
 
     #[test]
     fn internal_catalog_queries_do_not_open_transactions() {
-        for sql in [TABLE_METADATA_SQL, ENUM_VALUES_SQL, CONSTRAINTS_SQL, INDEXES_SQL] {
+        for sql in [
+            TABLE_METADATA_SQL,
+            ENUM_VALUES_SQL,
+            CONSTRAINTS_SQL,
+            INDEXES_SQL,
+        ] {
             let lower = sql.to_ascii_lowercase();
             assert!(!lower.contains("begin"));
             assert!(!lower.contains("commit"));

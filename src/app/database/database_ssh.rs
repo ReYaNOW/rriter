@@ -98,9 +98,7 @@ pub fn select_ssh_backend(
     {
         return SshBackendSelection {
             kind: SshBackendKind::Builtin,
-            reason: Some(
-                "отдельный закрытый ключ jump host требует встроенного SSH".to_string(),
-            ),
+            reason: Some("отдельный закрытый ключ jump host требует встроенного SSH".to_string()),
             executable: None,
         };
     }
@@ -144,7 +142,10 @@ pub fn resolve_system_ssh() -> Option<PathBuf> {
 pub(crate) fn windows_ssh_candidates_with(system_root: &Path) -> [PathBuf; 2] {
     [
         system_root.join("System32").join("OpenSSH").join("ssh.exe"),
-        system_root.join("Sysnative").join("OpenSSH").join("ssh.exe"),
+        system_root
+            .join("Sysnative")
+            .join("OpenSSH")
+            .join("ssh.exe"),
     ]
 }
 
@@ -170,7 +171,11 @@ impl SystemSshTunnel {
     }
 
     pub fn stderr_snapshot(&self) -> String {
-        let bytes = self.stderr.lock().map(|bytes| bytes.clone()).unwrap_or_default();
+        let bytes = self
+            .stderr
+            .lock()
+            .map(|bytes| bytes.clone())
+            .unwrap_or_default();
         String::from_utf8_lossy(&bytes).trim().to_string()
     }
 
@@ -209,7 +214,10 @@ pub(crate) fn start_system_ssh_tunnel_cancelable(
         .take_stderr()
         .ok_or_else(|| io::Error::other("system SSH stderr was not piped"))?;
     let stderr = Arc::new(Mutex::new(Vec::new()));
-    let stderr_reader = Some(spawn_bounded_stderr_reader(stderr_pipe, Arc::clone(&stderr))?);
+    let stderr_reader = Some(spawn_bounded_stderr_reader(
+        stderr_pipe,
+        Arc::clone(&stderr),
+    )?);
     let mut tunnel = SystemSshTunnel {
         child,
         stderr,
@@ -312,7 +320,11 @@ pub fn system_ssh_args(
 }
 
 fn system_jump_target(config: &SshJumpHostConfig) -> io::Result<String> {
-    if let Some(alias) = config.config_alias.as_deref().filter(|alias| !alias.is_empty()) {
+    if let Some(alias) = config
+        .config_alias
+        .as_deref()
+        .filter(|alias| !alias.is_empty())
+    {
         return Ok(alias.to_string());
     }
     if config.host.is_empty() || config.username.is_empty() {
@@ -349,7 +361,11 @@ fn spawn_bounded_stderr_reader(
 }
 
 pub fn resolve_builtin_endpoint(config: &SshConnectionConfig) -> io::Result<ResolvedSshEndpoint> {
-    let Some(alias) = config.config_alias.as_deref().filter(|alias| !alias.is_empty()) else {
+    let Some(alias) = config
+        .config_alias
+        .as_deref()
+        .filter(|alias| !alias.is_empty())
+    else {
         return Ok(ResolvedSshEndpoint {
             host: config.host.clone(),
             port: config.port,
@@ -377,7 +393,9 @@ fn resolve_alias_with_ssh_g(executable: &Path, alias: &str) -> io::Result<Resolv
     command.arg("-G").arg("--").arg(alias);
     let output = crate::platform::run_command_output(&mut command, Duration::from_secs(5))?;
     if !output.status.success() {
-        return Err(io::Error::other("ssh -G failed to resolve the config alias"));
+        return Err(io::Error::other(
+            "ssh -G failed to resolve the config alias",
+        ));
     }
     parse_ssh_g(&String::from_utf8_lossy(&output.stdout))
 }
@@ -431,7 +449,11 @@ fn parse_user_ssh_config(content: &str, alias: &str) -> io::Result<ResolvedSshEn
     let default_username = std::env::var("USER")
         .ok()
         .filter(|value| !value.is_empty())
-        .or_else(|| std::env::var("USERNAME").ok().filter(|value| !value.is_empty()));
+        .or_else(|| {
+            std::env::var("USERNAME")
+                .ok()
+                .filter(|value| !value.is_empty())
+        });
     parse_user_ssh_config_with_default_user(content, alias, default_username.as_deref())
 }
 
@@ -538,9 +560,12 @@ fn endpoint_from_parts(
     proxy_jump: Option<String>,
 ) -> io::Result<ResolvedSshEndpoint> {
     Ok(ResolvedSshEndpoint {
-        host: host.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "SSH alias has no HostName"))?,
+        host: host.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "SSH alias has no HostName")
+        })?,
         port: port.unwrap_or(22),
-        username: username.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "SSH alias has no User"))?,
+        username: username
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "SSH alias has no User"))?,
         private_key_path,
         proxy_jump,
     })
@@ -670,10 +695,7 @@ mod tests {
         .unwrap();
         assert_eq!(endpoint.host, "right.example.com");
         assert_eq!(endpoint.username, "release");
-        assert!(ssh_host_patterns_match(
-            ["PROD-?U"].into_iter(),
-            "prod-eu"
-        ));
+        assert!(ssh_host_patterns_match(["PROD-?U"].into_iter(), "prod-eu"));
     }
 
     #[test]

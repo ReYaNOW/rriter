@@ -231,8 +231,8 @@ impl crate::app::App {
                         .unwrap_or(text.len()),
                 );
                 if let Some(line_text) = text.get(line_start..line_end) {
-                    max_width = max_width
-                        .max(renderer.project_search_stable_text_width(line_text, 0.82));
+                    max_width =
+                        max_width.max(renderer.project_search_stable_text_width(line_text, 0.82));
                 }
             }
             state.query_content_width = max_width + (2.0 * scale).max(1.0);
@@ -264,17 +264,9 @@ impl crate::app::App {
         let renderer = self.renderer.as_ref()?;
         let scale = renderer.scale_factor;
         let (panel_x, panel_y, panel_w, panel_h, _) =
-            crate::app::mouse::app_panel_scroll_rect(
-                self,
-                crate::app::PanelId::Search,
-                scale,
-            );
+            crate::app::mouse::app_panel_scroll_rect(self, crate::app::PanelId::Search, scale);
         Some(project_search_layout(
-            panel_x,
-            panel_y,
-            panel_w,
-            panel_h,
-            scale,
+            panel_x, panel_y, panel_w, panel_h, scale,
         ))
     }
 
@@ -332,9 +324,8 @@ impl crate::app::App {
             ProjectSearchField::Filter => layout.filter,
         };
         let text_scale = 0.82;
-        let line_h = crate::app::project_search::project_search_query_line_height(
-            renderer.scale_factor,
-        );
+        let line_h =
+            crate::app::project_search::project_search_query_line_height(renderer.scale_factor);
         let query_viewport = project_search_query_viewport(rect, renderer.scale_factor);
         let query_scroll_x = self.ide_panel.project_search.query_scroll_x.current.round();
         let query_scroll_y = self.ide_panel.project_search.query_scroll_y.current.round();
@@ -346,8 +337,8 @@ impl crate::app::App {
         };
         let text = editor.get_full_text();
         let line = if field == ProjectSearchField::Query {
-            (((mouse_y - query_viewport.text.y + query_scroll_y).max(0.0) / line_h)
-                .floor() as usize)
+            (((mouse_y - query_viewport.text.y + query_scroll_y).max(0.0) / line_h).floor()
+                as usize)
                 .min(editor.line_offsets.len().saturating_sub(1))
         } else {
             0
@@ -420,14 +411,7 @@ impl crate::app::App {
             .current_abs_path()
             .as_ref()
             .is_some_and(|current| crate::platform::paths_equal(current, &absolute));
-        self.jump_to_project_search_position(
-            path,
-            true,
-            start_line,
-            start_col,
-            end_line,
-            end_col,
-        );
+        self.jump_to_project_search_position(path, true, start_line, start_col, end_line, end_col);
         if !was_active {
             self.scroll_y.jump_to(self.scroll_y.target);
             self.scroll_x.jump_to(self.scroll_x.target);
@@ -447,13 +431,8 @@ impl crate::app::App {
         let was_open = self.path_is_open_in_tabs(&path);
         self.open_file_in_tab_internal_options(path, add_to_history, was_open, was_open);
         let text = self.editor.get_full_text();
-        let (start, end) = project_search_offsets_for_position(
-            &text,
-            start_line,
-            start_col,
-            end_line,
-            end_col,
-        );
+        let (start, end) =
+            project_search_offsets_for_position(&text, start_line, start_col, end_line, end_col);
         self.editor.selection_anchor = Some(start);
         self.editor.cursor = end;
         if !was_open {

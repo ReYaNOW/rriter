@@ -1,6 +1,73 @@
 pub use super::ImportBlock;
 use super::finish_import_block;
 use std::sync::Arc;
+use tree_sitter::StreamingIterator;
+
+thread_local! {
+    static TS_HOVER_PARSER: std::cell::RefCell<tree_sitter::Parser> = {
+        let mut parser = tree_sitter::Parser::new();
+        if let Some((lang, _)) = crate::queries::get_ts_config("dart") {
+            let _ = parser.set_language(&lang);
+        }
+        std::cell::RefCell::new(parser)
+    };
+    static TS_HOVER_QUERIES: std::cell::RefCell<Vec<tree_sitter::Query>> =
+        std::cell::RefCell::new(
+            crate::queries::get_ts_config("dart")
+                .map(|(lang, queries)| {
+                    queries
+                        .into_iter()
+                        .filter_map(|query| tree_sitter::Query::new(&lang, query).ok())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        );
+    static TS_HOVER_CURSOR: std::cell::RefCell<tree_sitter::QueryCursor> =
+        std::cell::RefCell::new(tree_sitter::QueryCursor::new());
+}
+
+pub(crate) fn push_hover_highlight_spans(
+    source: &str,
+    offset: usize,
+    spans: &mut Vec<crate::highlighter::ColorSpan>,
+) {
+    if source.is_empty() {
+        return;
+    }
+    TS_HOVER_PARSER.with(|parser_cell| {
+        TS_HOVER_QUERIES.with(|queries_cell| {
+            TS_HOVER_CURSOR.with(|cursor_cell| {
+                let mut parser = parser_cell.borrow_mut();
+                let queries = queries_cell.borrow();
+                let mut cursor = cursor_cell.borrow_mut();
+                let Some(tree) = parser.parse(source, None) else {
+                    return;
+                };
+                for query in queries.iter() {
+                    let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
+                    while let Some(query_match) = matches.next() {
+                        for capture in query_match.captures {
+                            let name = query.capture_names()[capture.index as usize];
+                            let start = capture.node.start_byte();
+                            let end = capture.node.end_byte();
+                            let Some(node_text) = source.get(start..end) else {
+                                continue;
+                            };
+                            let color = crate::highlighter::hover_capture_color(name, node_text);
+                            if color != crate::highlighter::DRACULA_FG {
+                                spans.push(crate::highlighter::ColorSpan {
+                                    start: offset + start,
+                                    end: offset + end,
+                                    color,
+                                });
+                            }
+                        }
+                    }
+                }
+            })
+        })
+    });
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ClosingHintMode {
@@ -365,7 +432,10 @@ fn declaration_label(node: tree_sitter::Node<'_>, text: &str, keyword: &str) -> 
     let actual_kind = node.kind();
     if actual_kind != expected_kind
         && !(keyword == "class"
-            && matches!(actual_kind, "mixin_declaration" | "extension_type_declaration"))
+            && matches!(
+                actual_kind,
+                "mixin_declaration" | "extension_type_declaration"
+            ))
     {
         return None;
     }
@@ -620,7 +690,10 @@ mod tests {
         let text = "void main() {\n  if (ready) {\n    run();\n  }\n  else {\n    stop();\n  }\n  for (final item in items) {\n    use(item);\n  }\n  while (active) {\n    tick();\n  }\n  switch (value) {\n    case 1:\n      break;\n  }\n}\n";
         let found = labels(text);
         for expected in ["if", "else", "for", "while", "switch"] {
-            assert!(found.iter().any(|label| label == expected), "missing {expected}: {found:?}");
+            assert!(
+                found.iter().any(|label| label == expected),
+                "missing {expected}: {found:?}"
+            );
         }
     }
 
@@ -629,7 +702,10 @@ mod tests {
         let text = "void main() {\n  try {\n    run();\n  }\n  catch (error) {\n    report(error);\n  }\n  finally {\n    cleanup();\n  }\n}\n";
         let found = labels(text);
         for expected in ["try", "catch", "finally"] {
-            assert!(found.iter().any(|label| label == expected), "missing {expected}: {found:?}");
+            assert!(
+                found.iter().any(|label| label == expected),
+                "missing {expected}: {found:?}"
+            );
         }
     }
 
@@ -648,7 +724,9 @@ mod tests {
     #[test]
     fn short_blocks_and_syntax_errors_are_filtered() {
         let short = "void main() {\n}\n";
-        assert!(local_closing_hints(short, &parse(short), 1, ClosingHintSettings::default()).is_empty());
+        assert!(
+            local_closing_hints(short, &parse(short), 1, ClosingHintSettings::default()).is_empty()
+        );
         let broken = "void main() {\n  if (ready) {\n    run(\n  }\n}\n";
         assert!(!parse(broken).root_node().has_error() || labels(broken).is_empty());
         assert!(labels(broken).is_empty());
@@ -770,10 +848,14 @@ mod tests {
             end_line: 2,
             end_col: 1,
         };
-        let found = server_closing_hints(text, 1, &[crate::lsp::LspClosingLabel {
-            label: "метод 😀".into(),
-            ..valid
-        }]);
+        let found = server_closing_hints(
+            text,
+            1,
+            &[crate::lsp::LspClosingLabel {
+                label: "метод 😀".into(),
+                ..valid
+            }],
+        );
         assert_eq!(found.len(), 1);
         assert_eq!(&*found[0].label, "метод 😀");
     }
@@ -829,7 +911,6 @@ mod tests {
         assert_eq!(state.revision(), 2);
         assert!(state.hints().is_empty());
     }
-
 
     #[test]
     fn local_labels_cover_mixin_extension_enum_and_do() {
@@ -1002,5 +1083,68 @@ mod tests {
         state.replace_server(1, vec![server], settings);
         assert_eq!(state.hints().len(), 1);
         assert_eq!(&*state.hints()[0].label, "server");
+    }
+
+    #[test]
+    fn dart_lsp_hover_removes_fences_and_highlights_code_blocks() {
+        let raw = "```dart\nabstract final class String implements Comparable<String>, Pattern\n```\nDeclared in _dart:core_.\n\n---\nA string example:\n```dart\nconst string = 'Dart is fun';\nprint(string.substring(0, 4));\n```\n## Other resources";
+        let (text, spans, kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert!(!text.contains("```"));
+        assert!(
+            text.starts_with("abstract final class String implements Comparable<String>, Pattern")
+        );
+        assert_eq!(kinds.first(), Some(&crate::lsp::HoverLineKindPublic::Code));
+        let const_line = text
+            .lines()
+            .position(|line| line.starts_with("const "))
+            .unwrap();
+        assert_eq!(
+            kinds.get(const_line),
+            Some(&crate::lsp::HoverLineKindPublic::Code)
+        );
+        let declared_line = text
+            .lines()
+            .position(|line| line.starts_with("Declared in"))
+            .unwrap();
+        assert_eq!(
+            kinds.get(declared_line),
+            Some(&crate::lsp::HoverLineKindPublic::Text)
+        );
+        assert_eq!(text.lines().last(), Some("Other resources"));
+        assert_eq!(
+            kinds.last(),
+            Some(&crate::lsp::HoverLineKindPublic::Header2)
+        );
+
+        for color in [
+            crate::highlighter::DRACULA_PINK,
+            crate::highlighter::DRACULA_CYAN,
+            crate::highlighter::DRACULA_YELLOW,
+        ] {
+            assert!(
+                spans.iter().any(|span| span.color == color),
+                "missing Dart hover syntax color {color:?}: {spans:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dart_lsp_hover_closing_fence_does_not_color_following_prose_as_code() {
+        let raw = "```dart\nfinal value = StringBuffer();\n```\nFollowing prose with `inlineCode`.";
+        let (text, _spans, kinds, inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert_eq!(
+            kinds,
+            vec![
+                crate::lsp::HoverLineKindPublic::Code,
+                crate::lsp::HoverLineKindPublic::Text,
+            ]
+        );
+        assert_eq!(
+            text,
+            "final value = StringBuffer();\nFollowing prose with inlineCode."
+        );
+        assert_eq!(&text[inline[0].0..inline[0].1], "inlineCode");
     }
 }

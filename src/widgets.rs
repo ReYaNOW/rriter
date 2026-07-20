@@ -91,7 +91,6 @@ impl Button {
     }
 }
 
-
 #[derive(Clone, Copy)]
 pub struct ButtonStyle {
     pub border: [f32; 4],
@@ -147,7 +146,15 @@ impl<'a> ButtonView<'a> {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn render_disabled(&self, renderer: &mut Renderer, scale: f32) {
-        let _ = self.render_with_style(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false, false, None);
+        let _ = self.render_with_style(
+            renderer,
+            f32::NEG_INFINITY,
+            f32::NEG_INFINITY,
+            scale,
+            false,
+            false,
+            None,
+        );
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -172,7 +179,11 @@ impl<'a> ButtonView<'a> {
             content: renderer.theme.fg,
         };
         let style = style.unwrap_or(standard);
-        let border_color = if enabled { style.border } else { [1.0, 1.0, 1.0, 0.07] };
+        let border_color = if enabled {
+            style.border
+        } else {
+            [1.0, 1.0, 1.0, 0.07]
+        };
         let bg_color = if !enabled {
             [0.10, 0.105, 0.13, 1.0]
         } else if hovered && pressed {
@@ -189,7 +200,11 @@ impl<'a> ButtonView<'a> {
 
         let icon_size = self.icon_size.round();
         let text_scale = self.text_scale;
-        let content_color = if enabled { style.content } else { [0.40, 0.42, 0.48, 1.0] };
+        let content_color = if enabled {
+            style.content
+        } else {
+            [0.40, 0.42, 0.48, 1.0]
+        };
         let icon_y = (y + (h - icon_size) * 0.5).round();
         let text_y = Renderer::tree_row_text_y(y, h, scale);
 
@@ -206,7 +221,8 @@ impl<'a> ButtonView<'a> {
 
         if let Some(icon_type) = self.icon {
             renderer.draw_atlas_icon(icon_type, content_x, icon_y, icon_size, content_color);
-            content_x = (content_x + icon_size + if self.text.is_empty() { 0.0 } else { gap }).round();
+            content_x =
+                (content_x + icon_size + if self.text.is_empty() { 0.0 } else { gap }).round();
         }
         if !self.text.is_empty() {
             renderer.draw_string_scaled_pixel_snapped(
@@ -243,12 +259,20 @@ impl CheckboxView<'_> {
         let box_x = (x + 7.0 * scale).round();
         let box_y = (y + (h - box_size) * 0.5).round();
         let border = if self.enabled {
-            if hovered { renderer.theme.sel } else { [1.0, 1.0, 1.0, 0.22] }
+            if hovered {
+                renderer.theme.sel
+            } else {
+                [1.0, 1.0, 1.0, 0.22]
+            }
         } else {
             [1.0, 1.0, 1.0, 0.08]
         };
         let bg = if self.checked {
-            if self.enabled { renderer.theme.sel } else { [0.28, 0.24, 0.34, 1.0] }
+            if self.enabled {
+                renderer.theme.sel
+            } else {
+                [0.28, 0.24, 0.34, 1.0]
+            }
         } else if hovered && self.enabled {
             [0.16, 0.17, 0.21, 1.0]
         } else {
@@ -271,14 +295,22 @@ impl CheckboxView<'_> {
                 (box_x + (box_size - icon_size) * 0.5).round(),
                 (box_y + (box_size - icon_size) * 0.5).round(),
                 icon_size,
-                if self.enabled { [1.0, 1.0, 1.0, 1.0] } else { [0.62, 0.62, 0.68, 1.0] },
+                if self.enabled {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    [0.62, 0.62, 0.68, 1.0]
+                },
             );
         }
         renderer.draw_string_scaled_pixel_snapped(
             self.label,
             (box_x + box_size + 7.0 * scale).round(),
             Renderer::tree_row_text_y(y, h, scale),
-            if self.enabled { renderer.theme.fg } else { [0.46, 0.47, 0.52, 1.0] },
+            if self.enabled {
+                renderer.theme.fg
+            } else {
+                [0.46, 0.47, 0.52, 1.0]
+            },
             0.86,
         );
     }

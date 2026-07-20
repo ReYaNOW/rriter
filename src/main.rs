@@ -12,13 +12,13 @@ mod platform;
 mod queries;
 mod render_view;
 mod renderer;
-mod scroll;
-mod ui_system;
-mod widgets;
 #[cfg(test)]
 mod round2_regression_tests;
 #[cfg(test)]
 mod round3_regression_tests;
+mod scroll;
+mod ui_system;
+mod widgets;
 
 use crate::app::{App, PendingAction};
 use crate::editor::Editor;
@@ -180,9 +180,7 @@ fn parse_open_tabs_content(content: &str) -> (Vec<OpenTabSnapshot>, usize) {
     parse_open_tabs_content_checked(content).unwrap_or_default()
 }
 
-fn parse_open_tabs_content_checked(
-    content: &str,
-) -> Result<(Vec<OpenTabSnapshot>, usize), String> {
+fn parse_open_tabs_content_checked(content: &str) -> Result<(Vec<OpenTabSnapshot>, usize), String> {
     let mut tabs = Vec::new();
     let mut active = 0;
     let mut lines = content.lines();
@@ -280,12 +278,7 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
         crate::app::EditorTabKind::Normal => Some(
             tab.file_path
                 .as_ref()
-                .map(|path| {
-                    format!(
-                        "FILE\t{}",
-                        crate::platform::encode_persisted_path(path)
-                    )
-                })
+                .map(|path| format!("FILE\t{}", crate::platform::encode_persisted_path(path)))
                 .unwrap_or_else(|| "EMPTY".to_string()),
         ),
         crate::app::EditorTabKind::ApiClient(meta, state) => {
@@ -308,20 +301,16 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
                 }
             ))
         }
-        crate::app::EditorTabKind::DatabaseTable(meta, _) => serde_json::to_string(&(
-            meta.connection_id.0,
-            &meta.database_name,
-            &meta.table_name,
-        ))
-        .ok()
-        .map(|payload| format!("DBTABLE\t{payload}")),
-        crate::app::EditorTabKind::DatabaseQuery(meta, _) => serde_json::to_string(&(
-            meta.connection_id.0,
-            &meta.database_name,
-            meta.console_id.0,
-        ))
-        .ok()
-        .map(|payload| format!("DBQUERY\t{payload}")),
+        crate::app::EditorTabKind::DatabaseTable(meta, _) => {
+            serde_json::to_string(&(meta.connection_id.0, &meta.database_name, &meta.table_name))
+                .ok()
+                .map(|payload| format!("DBTABLE\t{payload}"))
+        }
+        crate::app::EditorTabKind::DatabaseQuery(meta, _) => {
+            serde_json::to_string(&(meta.connection_id.0, &meta.database_name, meta.console_id.0))
+                .ok()
+                .map(|payload| format!("DBQUERY\t{payload}"))
+        }
         crate::app::EditorTabKind::GitDiff(_, _) => None,
     }
 }
@@ -338,7 +327,10 @@ pub fn load_open_tabs(is_ide: bool) -> (Vec<OpenTabSnapshot>, usize) {
         Ok(content) => match parse_open_tabs_content_checked(&content.text) {
             Ok(tabs) => tabs,
             Err(error) => {
-                eprintln!("RRiter: {error}{}", crate::platform::corrupt_file_backup_note(&path));
+                eprintln!(
+                    "RRiter: {error}{}",
+                    crate::platform::corrupt_file_backup_note(&path)
+                );
                 (Vec::new(), 0)
             }
         },
@@ -470,9 +462,7 @@ fn parse_panel_state_content(content: &str) -> crate::app::IdePanelState {
     parse_panel_state_content_checked(content).unwrap_or_default()
 }
 
-fn parse_panel_state_content_checked(
-    content: &str,
-) -> Result<crate::app::IdePanelState, String> {
+fn parse_panel_state_content_checked(content: &str) -> Result<crate::app::IdePanelState, String> {
     let mut state = crate::app::IdePanelState::default();
     let mut loaded: Vec<crate::app::PanelSlot> = Vec::new();
     for line in content.lines() {
@@ -536,11 +526,7 @@ fn parse_panel_state_content_checked(
                 "1" => true,
                 _ => return Err("panel state contains invalid open flag".to_string()),
             };
-            loaded.push(crate::app::PanelSlot {
-                id,
-                group,
-                open,
-            });
+            loaded.push(crate::app::PanelSlot { id, group, open });
         } else if !line.trim().is_empty() {
             return Err("panel state contains malformed record".to_string());
         }
@@ -568,7 +554,10 @@ pub fn load_panel_state() -> crate::app::IdePanelState {
         Ok(content) => match parse_panel_state_content_checked(&content.text) {
             Ok(state) => state,
             Err(error) => {
-                eprintln!("RRiter: {error}{}", crate::platform::corrupt_file_backup_note(&path));
+                eprintln!(
+                    "RRiter: {error}{}",
+                    crate::platform::corrupt_file_backup_note(&path)
+                );
                 crate::app::IdePanelState::default()
             }
         },
@@ -649,10 +638,16 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(content) else {
         return config;
     };
-    if let Some(value) = value.get("window_width").and_then(serde_json::Value::as_f64) {
+    if let Some(value) = value
+        .get("window_width")
+        .and_then(serde_json::Value::as_f64)
+    {
         config.window_width = value;
     }
-    if let Some(value) = value.get("window_height").and_then(serde_json::Value::as_f64) {
+    if let Some(value) = value
+        .get("window_height")
+        .and_then(serde_json::Value::as_f64)
+    {
         config.window_height = value;
     }
     if let Some(value) = value.get("maximized").and_then(serde_json::Value::as_bool) {
@@ -662,10 +657,10 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         if let Some(values) = value.as_array() {
             config.ide_workspaces = crate::platform::dedup_paths(
                 values
-                .iter()
-                .filter_map(serde_json::Value::as_str)
-                .filter_map(crate::platform::decode_persisted_path)
-                .collect::<Vec<_>>(),
+                    .iter()
+                    .filter_map(serde_json::Value::as_str)
+                    .filter_map(crate::platform::decode_persisted_path)
+                    .collect::<Vec<_>>(),
             );
         } else if let Some(legacy) = value.as_str().filter(|value| !value.is_empty()) {
             config.ide_workspaces =
@@ -689,7 +684,10 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
     {
         config.enable_telemetry = value;
     }
-    if let Some(values) = value.get("tool_paths").and_then(serde_json::Value::as_object) {
+    if let Some(values) = value
+        .get("tool_paths")
+        .and_then(serde_json::Value::as_object)
+    {
         for kind in crate::platform::ToolKind::ALL {
             let path = values
                 .get(kind.config_key())
@@ -871,9 +869,7 @@ fn get_kde_color(target_group: &str, target_key: &str) -> Option<[f32; 4]> {
     let path = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|path| !path.as_os_str().is_empty())
-        .unwrap_or_else(|| {
-            PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config")
-        })
+        .unwrap_or_else(|| PathBuf::from(env::var_os("HOME").unwrap_or_default()).join(".config"))
         .join("kdeglobals");
     let content = std::fs::read_to_string(path).ok()?;
     parse_kde_color(&content, target_group, target_key)
@@ -897,10 +893,7 @@ fn init_rayon_global_pool() {
         .build_global();
 }
 
-fn selection_color(
-    desktop_color: Option<[f32; 4]>,
-    system_color: Option<[f32; 4]>,
-) -> [f32; 4] {
+fn selection_color(desktop_color: Option<[f32; 4]>, system_color: Option<[f32; 4]>) -> [f32; 4] {
     desktop_color
         .or(system_color)
         .unwrap_or(crate::platform::DEFAULT_ACCENT_COLOR)
@@ -1126,7 +1119,10 @@ mod tests {
         crate::app::EditorTab {
             editor: Editor::new(16),
             file_path: path.map(PathBuf::from),
-            file_key: path.map(PathBuf::from).as_deref().map(crate::platform::PathKey::new),
+            file_key: path
+                .map(PathBuf::from)
+                .as_deref()
+                .map(crate::platform::PathKey::new),
             text_file_format: crate::platform::TextFileFormat::default(),
             base_title: path.unwrap_or("Безымянный").to_string(),
             file_extension: String::new(),
@@ -1192,7 +1188,10 @@ mod tests {
         assert_eq!(parse_recent_files(&recent), paths);
 
         let formatted_tabs = format_open_tabs_content(
-            &[tab(Some(r"C:\Work|spaces\tab\tname.py")), tab(Some("relative\nname.rs"))],
+            &[
+                tab(Some(r"C:\Work|spaces\tab\tname.py")),
+                tab(Some("relative\nname.rs")),
+            ],
             1,
         );
         let (tabs, active) = parse_open_tabs_content(&formatted_tabs);
@@ -1282,10 +1281,9 @@ mod tests {
         let (tabs, active) = parse_open_tabs_content("1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n");
         assert_eq!(active, 0);
         assert!(tabs.is_empty());
-        assert!(parse_open_tabs_content_checked(
-            "1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n"
-        )
-        .is_err());
+        assert!(
+            parse_open_tabs_content_checked("1\nAPI\t42\t7\nAPI\tbad\t1\napi:/tmp/file\n").is_err()
+        );
 
         let mut auth_tab = tab(None);
         auth_tab.kind = crate::app::EditorTabKind::ApiClient(
@@ -1445,10 +1443,12 @@ mod tests {
             parsed.bottom_height,
             crate::app::IdePanelState::default().bottom_height
         );
-        assert!(parse_panel_state_content_checked(
-            "Unknown:Top:1\nExplorer:Top:0\nleft_width:nope\nbottom_height:333.3\n"
-        )
-        .is_err());
+        assert!(
+            parse_panel_state_content_checked(
+                "Unknown:Top:1\nExplorer:Top:0\nleft_width:nope\nbottom_height:333.3\n"
+            )
+            .is_err()
+        );
         assert!(
             parsed
                 .slots
@@ -2034,9 +2034,8 @@ fn main() {
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(22.0);
     let pgo_train = args.iter().any(|argument| argument == "--pgo-train");
-    let run_ide_on_startup = scroll_bench_idx.is_some()
-        || pgo_train
-        || args.iter().any(|a| a == "--ide" || a == "ide");
+    let run_ide_on_startup =
+        scroll_bench_idx.is_some() || pgo_train || args.iter().any(|a| a == "--ide" || a == "ide");
     let initial_file_arg = initial_file_argument(&startup_args, scroll_bench_idx);
     let automation_options = match automation_options(&args, initial_file_arg) {
         Ok(options) => options,
@@ -2150,7 +2149,10 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     let event_loop = match event_loop_builder.build() {
         Ok(event_loop) => event_loop,
         Err(error) => {
-            eprintln!("{}", event_loop_error_message("не удалось создать event loop", &error));
+            eprintln!(
+                "{}",
+                event_loop_error_message("не удалось создать event loop", &error)
+            );
             return;
         }
     };
@@ -2166,9 +2168,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
 
     let show_welcome = !has_file_arg && !run_ide_on_startup;
 
-    let file_key = file_path
-        .as_deref()
-        .map(crate::platform::PathKey::new);
+    let file_key = file_path.as_deref().map(crate::platform::PathKey::new);
     let mut app = App {
         automation: automation_options.map(crate::app::automation::AutomationController::new),
         scroll_render_bench: scroll_bench_idx
@@ -2355,6 +2355,9 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
     }
 
     if let Err(error) = event_loop.run_app(&mut app) {
-        eprintln!("{}", event_loop_error_message("event loop завершился с ошибкой", &error));
+        eprintln!(
+            "{}",
+            event_loop_error_message("event loop завершился с ошибкой", &error)
+        );
     }
 }

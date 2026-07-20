@@ -123,9 +123,9 @@ impl super::LspManager {
         let workspaces = self.active_workspaces.clone();
         let (tx, rx) = std::sync::mpsc::channel();
         let spawn_result = crate::platform::spawn_named("rriter-ruff-workspace", move || {
-                let result = collect_workspace_diagnostics(workspaces);
-                let _ = tx.send(result);
-            });
+            let result = collect_workspace_diagnostics(workspaces);
+            let _ = tx.send(result);
+        });
 
         if spawn_result.is_ok() {
             self.ruff_workspace_diag_rx = Some(rx);
@@ -521,5 +521,4 @@ mod tests {
         let error = parse_ruff_check_json(b"not json", &[ws()]).unwrap_err();
         assert!(error.to_string().contains("expected"));
     }
-
 }

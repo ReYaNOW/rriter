@@ -1,8 +1,8 @@
+use super::DartSettings;
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
 use crate::ui_system::UiId;
-use super::DartSettings;
 use glutin::context::PossiblyCurrentContext;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -539,10 +539,7 @@ impl IdePanelState {
         }
     }
 
-    pub fn visible_problem_row_count(
-        &self,
-        lsp: Option<&crate::lsp::LspManager>,
-    ) -> usize {
+    pub fn visible_problem_row_count(&self, lsp: Option<&crate::lsp::LspManager>) -> usize {
         self.flat_diags
             .iter()
             .filter(|(path, index)| self.problem_row_visible(lsp, path, *index))
@@ -564,13 +561,14 @@ impl IdePanelState {
         path: &std::path::Path,
     ) -> (usize, usize) {
         if self.query_problem_path.as_deref() == Some(path) {
-            self.query_problem_diagnostics.iter().fold((0, 0), |counts, diagnostic| {
-                match diagnostic.severity {
+            self.query_problem_diagnostics.iter().fold(
+                (0, 0),
+                |counts, diagnostic| match diagnostic.severity {
                     crate::lsp::DiagSeverity::Error => (counts.0 + 1, counts.1),
                     crate::lsp::DiagSeverity::Warning => (counts.0, counts.1 + 1),
                     crate::lsp::DiagSeverity::Info | crate::lsp::DiagSeverity::Hint => counts,
-                }
-            })
+                },
+            )
         } else {
             lsp.map_or((0, 0), |manager| manager.diagnostic_counts_for_path(path))
         }
@@ -929,9 +927,7 @@ pub(crate) fn lsp_inlay_hints_from_lsp_with_offsets(
         })
         .collect::<Vec<_>>();
     out.sort_unstable_by_key(|hint| hint.byte_offset);
-    out.dedup_by(|left, right| {
-        left.byte_offset == right.byte_offset && left.label == right.label
-    });
+    out.dedup_by(|left, right| left.byte_offset == right.byte_offset && left.label == right.label);
     out
 }
 
@@ -1078,8 +1074,7 @@ pub struct App {
     pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_body_file_rx:
         Option<std::sync::mpsc::Receiver<crate::app::api_client::ApiBodyFilePickResult>>,
-    pub api_openapi_export_rx:
-        Option<std::sync::mpsc::Receiver<Result<Option<PathBuf>, String>>>,
+    pub api_openapi_export_rx: Option<std::sync::mpsc::Receiver<Result<Option<PathBuf>, String>>>,
     pub api_load_rx: Vec<crate::app::api_client::ApiLoadReceiver>,
     pub api_request_rx: Vec<(
         u64,
@@ -1104,9 +1099,8 @@ pub struct App {
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: DartSettings,
-    pub settings_tool_picker_rx: Option<
-        std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>,
-    >,
+    pub settings_tool_picker_rx:
+        Option<std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>>,
     pub(crate) tool_installer: crate::app::tool_installer::ToolInstaller,
     pub(crate) dart_tool_state: crate::app::tool_installer::DartToolState,
 

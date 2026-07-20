@@ -167,9 +167,7 @@ impl HoverState {
         }
         ui.rect_for(crate::ui_system::UiId::DatabaseQueryResultResize)
             .is_some_and(|(x, y, w, h)| {
-                pointer_x >= x
-                    && pointer_x <= x + w
-                    && pointer_y >= y + h * 0.5
+                pointer_x >= x && pointer_x <= x + w && pointer_y >= y + h * 0.5
             })
     }
 

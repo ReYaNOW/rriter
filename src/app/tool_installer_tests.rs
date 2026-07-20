@@ -46,10 +46,13 @@ fn managed_layout_uses_generation_and_platform_specific_names() {
             PathBuf::from("/Users/test/Library/Caches/RRiter"),
         );
         assert_eq!(layout.executable(), layout.bin.join("ruff"));
-        assert!(layout.generation_root.ends_with("managed/ruff/generation-b"));
+        assert!(
+            layout
+                .generation_root
+                .ends_with("managed/ruff/generation-b")
+        );
     }
 }
-
 
 #[test]
 fn managed_executable_names_cover_all_supported_platforms() {
@@ -58,11 +61,17 @@ fn managed_executable_names_cover_all_supported_platforms() {
         (ToolKind::Ruff, "ruff.exe", "ruff"),
         (ToolKind::Ty, "ty.exe", "ty"),
     ] {
-        assert_eq!(tool_executable_name(kind, PlatformKind::Windows), windows_name);
+        assert_eq!(
+            tool_executable_name(kind, PlatformKind::Windows),
+            windows_name
+        );
         assert_eq!(tool_executable_name(kind, PlatformKind::Linux), unix_name);
         assert_eq!(tool_executable_name(kind, PlatformKind::Macos), unix_name);
     }
-    assert_eq!(tool_executable_name(ToolKind::Git, PlatformKind::Windows), "");
+    assert_eq!(
+        tool_executable_name(ToolKind::Git, PlatformKind::Windows),
+        ""
+    );
     assert_eq!(installer_url(PlatformKind::Other), None);
 }
 
@@ -83,13 +92,8 @@ fn transactional_pruning_keeps_current_and_previous_generation() {
         data.clone(),
         cache.clone(),
     );
-    let current = ToolInstallLayout::with_roots(
-        PlatformKind::Linux,
-        ToolKind::Ty,
-        "current",
-        data,
-        cache,
-    );
+    let current =
+        ToolInstallLayout::with_roots(PlatformKind::Linux, ToolKind::Ty, "current", data, cache);
     for layout in [&old, &stale, &current] {
         layout.create().unwrap();
         fs::write(layout.executable(), b"test").unwrap();
@@ -117,13 +121,8 @@ fn failed_generation_cleanup_does_not_touch_previous_install() {
         data.clone(),
         cache.clone(),
     );
-    let failed = ToolInstallLayout::with_roots(
-        PlatformKind::Windows,
-        ToolKind::Ruff,
-        "failed",
-        data,
-        cache,
-    );
+    let failed =
+        ToolInstallLayout::with_roots(PlatformKind::Windows, ToolKind::Ruff, "failed", data, cache);
     old.create().unwrap();
     failed.create().unwrap();
     fs::write(old.executable(), b"working").unwrap();
@@ -137,7 +136,10 @@ fn failed_generation_cleanup_does_not_touch_previous_install() {
 #[test]
 fn uv_installer_plan_is_native_for_all_supported_platforms() {
     let windows_script = Path::new(r"C:\Temp\install uv.ps1");
-    assert_eq!(installer_url(PlatformKind::Windows), Some(UV_INSTALL_URL_WINDOWS));
+    assert_eq!(
+        installer_url(PlatformKind::Windows),
+        Some(UV_INSTALL_URL_WINDOWS)
+    );
     assert_eq!(installer_script_extension(PlatformKind::Windows), "ps1");
     assert_eq!(
         uv_installer_arguments(PlatformKind::Windows, windows_script),
@@ -193,9 +195,18 @@ fn uv_environment_is_isolated_and_never_updates_shell_profile() {
     let mut tool = Command::new("uv");
     apply_uv_tool_environment(&mut tool, &layout);
     let tool_env = command_env(&tool);
-    assert_eq!(tool_env.get("UV_TOOL_BIN_DIR"), Some(&layout.bin.to_string_lossy().into_owned()));
-    assert_eq!(tool_env.get("UV_TOOL_DIR"), Some(&layout.environments.to_string_lossy().into_owned()));
-    assert_eq!(tool_env.get("UV_CACHE_DIR"), Some(&layout.cache.to_string_lossy().into_owned()));
+    assert_eq!(
+        tool_env.get("UV_TOOL_BIN_DIR"),
+        Some(&layout.bin.to_string_lossy().into_owned())
+    );
+    assert_eq!(
+        tool_env.get("UV_TOOL_DIR"),
+        Some(&layout.environments.to_string_lossy().into_owned())
+    );
+    assert_eq!(
+        tool_env.get("UV_CACHE_DIR"),
+        Some(&layout.cache.to_string_lossy().into_owned())
+    );
     assert_eq!(
         tool_env.get("UV_PYTHON_INSTALL_DIR"),
         Some(&layout.python_installations.to_string_lossy().into_owned())
@@ -218,9 +229,18 @@ fn uv_environment_is_isolated_and_never_updates_shell_profile() {
             .map(String::as_str),
         Some("false")
     );
-    assert_eq!(tool_env.get("UV_NO_MODIFY_PATH").map(String::as_str), Some("1"));
-    assert_eq!(tool_env.get("UV_SYSTEM_CERTS").map(String::as_str), Some("true"));
-    assert_eq!(tool_env.get("UV_NO_PROGRESS").map(String::as_str), Some("1"));
+    assert_eq!(
+        tool_env.get("UV_NO_MODIFY_PATH").map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        tool_env.get("UV_SYSTEM_CERTS").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(
+        tool_env.get("UV_NO_PROGRESS").map(String::as_str),
+        Some("1")
+    );
 
     let mut installer = Command::new("sh");
     apply_uv_installer_environment(&mut installer, &layout);
@@ -229,10 +249,15 @@ fn uv_environment_is_isolated_and_never_updates_shell_profile() {
         installer_env.get("UV_UNMANAGED_INSTALL"),
         Some(&layout.bin.to_string_lossy().into_owned())
     );
-    assert_eq!(installer_env.get("UV_NO_MODIFY_PATH").map(String::as_str), Some("1"));
-    assert!(installer.get_envs().any(|(name, value)| {
-        name == OsStr::new("UV_INSTALL_DIR") && value.is_none()
-    }));
+    assert_eq!(
+        installer_env.get("UV_NO_MODIFY_PATH").map(String::as_str),
+        Some("1")
+    );
+    assert!(
+        installer
+            .get_envs()
+            .any(|(name, value)| { name == OsStr::new("UV_INSTALL_DIR") && value.is_none() })
+    );
 }
 
 #[test]
@@ -250,8 +275,18 @@ fn installer_log_is_byte_bounded_truncated_and_copyable() {
     assert!(full.contains("Ruff: Установка инструмента"));
     assert!(full.contains(&format!("line-{}", INSTALL_LOG_LIMIT + 9)));
 
-    installer.push_log(ToolInstallLogKind::Output, "я".repeat(INSTALL_LINE_BYTES_LIMIT));
-    assert!(installer.logs.last().unwrap().text.ends_with("[сообщение обрезано]"));
+    installer.push_log(
+        ToolInstallLogKind::Output,
+        "я".repeat(INSTALL_LINE_BYTES_LIMIT),
+    );
+    assert!(
+        installer
+            .logs
+            .last()
+            .unwrap()
+            .text
+            .ends_with("[сообщение обрезано]")
+    );
     assert!(installer.log_bytes <= INSTALL_LOG_BYTES_LIMIT + TRUNCATED_LOG_MARKER.len());
     assert_eq!(installer.logs[0].text, TRUNCATED_LOG_MARKER);
 }
@@ -380,13 +415,8 @@ fn cancelled_download_stops_before_network_or_file_creation() {
         dropped_lines: Arc::new(AtomicUsize::new(0)),
     };
     let cancel = AtomicBool::new(true);
-    let error = download_installer(
-        PlatformKind::Linux,
-        &destination,
-        &cancel,
-        &reporter,
-    )
-    .unwrap_err();
+    let error =
+        download_installer(PlatformKind::Linux, &destination, &cancel, &reporter).unwrap_err();
     assert!(error.contains("отменена"));
     assert!(!destination.exists());
     let _ = fs::remove_dir_all(data.parent().unwrap());
@@ -401,13 +431,11 @@ fn unsupported_tool_is_rejected_before_worker_or_network_is_started() {
     assert!(installer.worker.is_none());
 }
 
-
 #[test]
 fn cancellation_only_overrides_the_exact_cancelled_error() {
-    let ToolInstallEvent::Done(Err(error)) = terminal_install_event(
-        Err("проверка версии завершилась ошибкой".to_string()),
-        true,
-    ) else {
+    let ToolInstallEvent::Done(Err(error)) =
+        terminal_install_event(Err("проверка версии завершилась ошибкой".to_string()), true)
+    else {
         panic!("a late cancel must not hide an unrelated failure");
     };
     assert_eq!(error, "проверка версии завершилась ошибкой");
@@ -421,13 +449,8 @@ fn cancellation_only_overrides_the_exact_cancelled_error() {
 #[test]
 fn successful_generation_is_not_removed_by_late_cancellation() {
     let (data, cache) = test_roots("late-success");
-    let layout = ToolInstallLayout::with_roots(
-        PlatformKind::Linux,
-        ToolKind::Uv,
-        "committed",
-        data,
-        cache,
-    );
+    let layout =
+        ToolInstallLayout::with_roots(PlatformKind::Linux, ToolKind::Uv, "committed", data, cache);
     layout.create().unwrap();
     fs::write(layout.executable(), b"validated").unwrap();
 
@@ -453,7 +476,11 @@ fn installer_log_geometry_is_pixel_stable_at_fractional_scales() {
             log_max_scroll(137, 803.0, scale),
         ];
         for value in values {
-            assert_eq!(value.fract(), 0.0, "geometry must be snapped at scale {scale}");
+            assert_eq!(
+                value.fract(),
+                0.0,
+                "geometry must be snapped at scale {scale}"
+            );
         }
         assert!(values[0] > values[1]);
         assert!(values[2] >= 1.0);

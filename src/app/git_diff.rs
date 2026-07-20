@@ -366,8 +366,7 @@ pub fn rollback_hunk_text(current_new_text: &str, hunk: &DiffHunk) -> String {
 }
 
 fn decode_git_text(bytes: &[u8], source: &str) -> Result<crate::platform::DecodedTextFile, String> {
-    crate::platform::decode_text_bytes(bytes)
-        .map_err(|error| format!("{source}: {error}"))
+    crate::platform::decode_text_bytes(bytes).map_err(|error| format!("{source}: {error}"))
 }
 
 fn read_head_blob(repo: &git2::Repository, rel_path: &Path) -> Result<String, String> {
@@ -420,12 +419,13 @@ fn read_worktree_or_index(
     let path = repo_root.join(rel_path);
     match crate::platform::read_text_file(&path) {
         Ok(decoded) => Ok(decoded),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Ok(read_index_blob(repo, rel_path)?.unwrap_or(crate::platform::DecodedTextFile {
-                text: String::new(),
-                format: crate::platform::TextFileFormat::default(),
-            }))
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(read_index_blob(
+            repo, rel_path,
+        )?
+        .unwrap_or(crate::platform::DecodedTextFile {
+            text: String::new(),
+            format: crate::platform::TextFileFormat::default(),
+        })),
         Err(error) => Err(format!("worktree file {}: {error}", path.display())),
     }
 }
@@ -448,10 +448,7 @@ fn load_git_diff_with_side(
 ) -> Result<GitDiffPayload, String> {
     let repo = git2::Repository::open(&repo_root).map_err(|err| err.message().to_string())?;
     let rel_path = Path::new(&rel_path);
-    let old_path = old_rel_path
-        .as_deref()
-        .map(Path::new)
-        .unwrap_or(rel_path);
+    let old_path = old_rel_path.as_deref().map(Path::new).unwrap_or(rel_path);
     let base_text = if matches!(status, GitFileStatus::Added | GitFileStatus::Untracked) {
         String::new()
     } else {
@@ -578,14 +575,20 @@ impl App {
     pub fn active_git_diff_state(&self) -> Option<&GitDiffState> {
         match &self.tabs.get(self.active_tab)?.kind {
             EditorTabKind::GitDiff(_, state) => Some(state),
-            EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) | EditorTabKind::DatabaseTable(_, _) | EditorTabKind::DatabaseQuery(_, _) => None,
+            EditorTabKind::Normal
+            | EditorTabKind::ApiClient(_, _)
+            | EditorTabKind::DatabaseTable(_, _)
+            | EditorTabKind::DatabaseQuery(_, _) => None,
         }
     }
 
     fn active_git_diff_state_mut(&mut self) -> Option<&mut GitDiffState> {
         match &mut self.tabs.get_mut(self.active_tab)?.kind {
             EditorTabKind::GitDiff(_, state) => Some(state),
-            EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) | EditorTabKind::DatabaseTable(_, _) | EditorTabKind::DatabaseQuery(_, _) => None,
+            EditorTabKind::Normal
+            | EditorTabKind::ApiClient(_, _)
+            | EditorTabKind::DatabaseTable(_, _)
+            | EditorTabKind::DatabaseQuery(_, _) => None,
         }
     }
 
@@ -628,7 +631,10 @@ impl App {
                     && existing.rel_path == meta.rel_path
                     && existing.old_rel_path == meta.old_rel_path
             }
-            EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) | EditorTabKind::DatabaseTable(_, _) | EditorTabKind::DatabaseQuery(_, _) => false,
+            EditorTabKind::Normal
+            | EditorTabKind::ApiClient(_, _)
+            | EditorTabKind::DatabaseTable(_, _)
+            | EditorTabKind::DatabaseQuery(_, _) => false,
         }) {
             if idx != self.active_tab {
                 self.switch_to_tab(idx);
@@ -829,7 +835,10 @@ impl App {
                     && meta.old_rel_path == event.meta.old_rel_path
                     && state.version == event.version
             }
-            EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) | EditorTabKind::DatabaseTable(_, _) | EditorTabKind::DatabaseQuery(_, _) => false,
+            EditorTabKind::Normal
+            | EditorTabKind::ApiClient(_, _)
+            | EditorTabKind::DatabaseTable(_, _)
+            | EditorTabKind::DatabaseQuery(_, _) => false,
         }) else {
             return;
         };
@@ -1310,7 +1319,12 @@ impl App {
         {
             let text = self.editor.get_full_text();
             let ext = self.file_extension.clone();
-            lsp.notify_change(path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
+            lsp.notify_change(
+                path,
+                &ext,
+                &text,
+                crate::editor::lsp_document_version(self.editor.version),
+            );
             self.last_sent_version = self.editor.version;
         }
         if self.show_search && !self.search_editor.get_full_text().is_empty() {
@@ -1535,7 +1549,10 @@ impl App {
                         meta.rel_path.clone(),
                         state.line_kinds.clone(),
                     ),
-                    EditorTabKind::Normal | EditorTabKind::ApiClient(_, _) | EditorTabKind::DatabaseTable(_, _) | EditorTabKind::DatabaseQuery(_, _) => unreachable!(),
+                    EditorTabKind::Normal
+                    | EditorTabKind::ApiClient(_, _)
+                    | EditorTabKind::DatabaseTable(_, _)
+                    | EditorTabKind::DatabaseQuery(_, _) => unreachable!(),
                 })
         else {
             return false;

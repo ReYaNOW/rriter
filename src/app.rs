@@ -1,11 +1,11 @@
 pub mod api_client;
 pub mod api_mock;
-pub mod automation;
-pub(crate) mod context_menu;
-pub mod database;
-mod dart_settings;
 mod app_state;
 mod autocomplete;
+pub mod automation;
+pub(crate) mod context_menu;
+mod dart_settings;
+pub mod database;
 pub mod events;
 pub mod file_icons;
 pub mod file_tree;
@@ -15,9 +15,9 @@ pub mod keyboard;
 pub mod lsp_actions;
 pub mod mouse;
 pub mod project_search;
-pub(crate) mod single_line_input;
 mod project_search_app;
 mod python_completion;
+pub(crate) mod single_line_input;
 pub mod terminal;
 mod terminal_process;
 pub(crate) mod tool_installer;
@@ -27,15 +27,15 @@ use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_B
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
-pub use dart_settings::*;
 #[cfg(test)]
 pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,
 };
 pub(crate) use autocomplete::{
-    AutocompleteMatchKind, AutocompletePopupKeyResult, CompletionApplyPlan,
-    CompletionTextEditOp, apply_completion_plan_to_editor, autocomplete_match_candidate,
+    AutocompleteMatchKind, AutocompletePopupKeyResult, CompletionApplyPlan, CompletionTextEditOp,
+    apply_completion_plan_to_editor, autocomplete_match_candidate,
 };
+pub use dart_settings::*;
 use glutin::display::GetGlDisplay;
 use python_completion::*;
 use rustc_hash::{FxHashMap, FxHashSet};

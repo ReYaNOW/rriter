@@ -25,8 +25,6 @@ pub(crate) fn finish_import_block(
     }
 }
 
-
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct PythonDelimiterState {
     paren_depth: i32,
@@ -77,12 +75,30 @@ impl PythonDelimiterState {
                     self.triple_quoted = bytes[index..].starts_with(&[quote, quote, quote]);
                     index += if self.triple_quoted { 3 } else { 1 };
                 }
-                b'(' => { self.paren_depth += 1; index += 1; }
-                b')' => { self.paren_depth -= 1; index += 1; }
-                b'[' => { self.bracket_depth += 1; index += 1; }
-                b']' => { self.bracket_depth -= 1; index += 1; }
-                b'{' => { self.brace_depth += 1; index += 1; }
-                b'}' => { self.brace_depth -= 1; index += 1; }
+                b'(' => {
+                    self.paren_depth += 1;
+                    index += 1;
+                }
+                b')' => {
+                    self.paren_depth -= 1;
+                    index += 1;
+                }
+                b'[' => {
+                    self.bracket_depth += 1;
+                    index += 1;
+                }
+                b']' => {
+                    self.bracket_depth -= 1;
+                    index += 1;
+                }
+                b'{' => {
+                    self.brace_depth += 1;
+                    index += 1;
+                }
+                b'}' => {
+                    self.brace_depth -= 1;
+                    index += 1;
+                }
                 _ => index += 1,
             }
         }
@@ -155,9 +171,7 @@ pub(crate) fn decode_python_string_literal(text: &str) -> Option<String> {
         && text.as_bytes().get(quote_at + 2) == Some(&quote);
     let quote_len = if triple { 3 } else { 1 };
     let end = text.len().checked_sub(quote_len)?;
-    if end < quote_at + quote_len
-        || !text.as_bytes()[end..].iter().all(|byte| *byte == quote)
-    {
+    if end < quote_at + quote_len || !text.as_bytes()[end..].iter().all(|byte| *byte == quote) {
         return None;
     }
     let content = &text[quote_at + quote_len..end];
@@ -178,7 +192,12 @@ pub(crate) fn decode_python_string_literal(text: &str) -> Option<String> {
             out.push('\\');
             break;
         };
-        let (digits, width) = match escaped { 'x' => (16, 2), 'u' => (16, 4), 'U' => (16, 8), _ => (0, 0) };
+        let (digits, width) = match escaped {
+            'x' => (16, 2),
+            'u' => (16, 4),
+            'U' => (16, 8),
+            _ => (0, 0),
+        };
         if width > 0 && i + width < chars.len() {
             let value = chars[i + 1..=i + width].iter().collect::<String>();
             if let Ok(value) = u32::from_str_radix(&value, digits)
@@ -190,9 +209,17 @@ pub(crate) fn decode_python_string_literal(text: &str) -> Option<String> {
             }
         }
         match escaped {
-            'n' => out.push('\n'), 'r' => out.push('\r'), 't' => out.push('\t'),
-            '\\' => out.push('\\'), '\'' => out.push('\''), '"' => out.push('"'),
-            '0' => out.push('\0'), other => { out.push('\\'); out.push(other); }
+            'n' => out.push('\n'),
+            'r' => out.push('\r'),
+            't' => out.push('\t'),
+            '\\' => out.push('\\'),
+            '\'' => out.push('\''),
+            '"' => out.push('"'),
+            '0' => out.push('\0'),
+            other => {
+                out.push('\\');
+                out.push(other);
+            }
         }
         i += 1;
     }
@@ -225,16 +252,28 @@ mod shared_language_regression_tests {
 
     #[test]
     fn python_literal_decoder_preserves_raw_regex_and_decodes_escapes() {
-        assert_eq!(decode_python_string_literal(r#"r"\d+\s""#).as_deref(), Some(r"\d+\s"));
-        assert_eq!(decode_python_string_literal(r#""a\n\x42\u263a""#).as_deref(), Some("a\nB☺"));
+        assert_eq!(
+            decode_python_string_literal(r#"r"\d+\s""#).as_deref(),
+            Some(r"\d+\s")
+        );
+        assert_eq!(
+            decode_python_string_literal(r#""a\n\x42\u263a""#).as_deref(),
+            Some("a\nB☺")
+        );
         assert!(decode_python_string_literal("not_a_string").is_none());
     }
 
     #[test]
     fn python_call_argument_ignores_closing_tokens_and_commas_inside_strings() {
-        assert_eq!(python_call_argument(r#"Pattern("a)b,c")"#, "Pattern"), Some(r#""a)b,c""#));
         assert_eq!(
-            python_call_argument("Field(default_factory=lambda: fn(1, 2), title='x')", "Field"),
+            python_call_argument(r#"Pattern("a)b,c")"#, "Pattern"),
+            Some(r#""a)b,c""#)
+        );
+        assert_eq!(
+            python_call_argument(
+                "Field(default_factory=lambda: fn(1, 2), title='x')",
+                "Field"
+            ),
             Some("default_factory=lambda: fn(1, 2)")
         );
     }

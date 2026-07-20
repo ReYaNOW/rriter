@@ -1,8 +1,7 @@
 use super::{
-    DatabaseConnectionColor, DatabaseConnectionConfig, DatabaseConnectionId,
-    DatabaseGeneration, DatabaseJobId, DatabasePersistedState, DatabaseSecretBundle,
-    DatabaseSettings, DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode, SshConnectionConfig,
-    SshJumpHostConfig,
+    DatabaseConnectionColor, DatabaseConnectionConfig, DatabaseConnectionId, DatabaseGeneration,
+    DatabaseJobId, DatabasePersistedState, DatabaseSecretBundle, DatabaseSettings,
+    DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode, SshConnectionConfig, SshJumpHostConfig,
 };
 use crate::app::mouse::HoverPopup;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -94,8 +93,7 @@ impl DatabaseConnectionNode {
             }
         } else if self.status == DatabaseConnectionStatus::Error
             || self.status_message.is_some()
-            || self.catalog_load_attempted
-                && self.status == DatabaseConnectionStatus::Disconnected
+            || self.catalog_load_attempted && self.status == DatabaseConnectionStatus::Disconnected
         {
             DatabaseConnectionChildrenState::ExpandedError
         } else {
@@ -618,7 +616,9 @@ impl DatabaseConnectionDialog {
         let mut dialog = Self::new(connection.color);
         dialog.editing_connection_id = Some(connection.id);
         dialog.reserved_connection_id = Some(connection.id);
-        dialog.display_name.set_text(connection.display_name.clone());
+        dialog
+            .display_name
+            .set_text(connection.display_name.clone());
         dialog.host.set_text(connection.host.clone());
         dialog.port.set_text(connection.port.to_string());
         dialog.username.set_text(connection.username.clone());
@@ -649,8 +649,7 @@ impl DatabaseConnectionDialog {
                 dialog.jump_port.set_text(jump.port.to_string());
                 dialog.jump_username.set_text(jump.username.clone());
                 dialog.jump_private_key.set_text(
-                    jump
-                        .private_key_path
+                    jump.private_key_path
                         .as_deref()
                         .map(|path| path.to_string_lossy().into_owned())
                         .unwrap_or_default(),
@@ -746,7 +745,8 @@ impl DatabaseConnectionDialog {
     }
 
     pub(crate) fn visible_field_index(&self, field: DatabaseFormField) -> Option<usize> {
-        self.visible_fields().position(|candidate| candidate == field)
+        self.visible_fields()
+            .position(|candidate| candidate == field)
     }
 
     pub(crate) fn clamp_scroll(&mut self, max_scroll: f32) {
@@ -788,7 +788,6 @@ impl DatabaseConnectionDialog {
         self.scroll.jump_to(target);
     }
 
-
     pub fn toggle_secret_visibility(&mut self, field: DatabaseFormField) {
         if !field.is_secret() {
             return;
@@ -827,17 +826,18 @@ impl DatabaseConnectionDialog {
         if self.jump_enabled {
             self.ssh_enabled = true;
             self.focused = Some(DatabaseFormField::JumpHost);
-        } else if self
-            .focused
-            .is_some_and(|field| matches!(field,
+        } else if self.focused.is_some_and(|field| {
+            matches!(
+                field,
                 DatabaseFormField::JumpHost
                     | DatabaseFormField::JumpPort
                     | DatabaseFormField::JumpUsername
                     | DatabaseFormField::JumpPassword
                     | DatabaseFormField::JumpPrivateKey
                     | DatabaseFormField::JumpKeyPassphrase
-                    | DatabaseFormField::JumpConfigAlias))
-        {
+                    | DatabaseFormField::JumpConfigAlias
+            )
+        }) {
             self.focused = Some(DatabaseFormField::SshHost);
         }
         self.error = None;
@@ -1063,7 +1063,6 @@ pub struct DatabasePendingJob {
     pub table_name: Option<String>,
 }
 
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseQueryTabMeta {
     pub console_id: super::SqlConsoleId,
@@ -1071,7 +1070,6 @@ pub struct DatabaseQueryTabMeta {
     pub database_name: String,
     pub title: String,
 }
-
 
 pub const MAX_QUEUED_DATABASE_COMMANDS: usize = 64;
 
@@ -1183,7 +1181,8 @@ impl DatabasePanelState {
             next_tab_id: 1,
             next_console_id,
             next_dialog_id: 1,
-            global_error: normalization_error.map(|error| format!("Повреждено состояние Database Tools: {error}")),
+            global_error: normalization_error
+                .map(|error| format!("Повреждено состояние Database Tools: {error}")),
             notice: None,
             session_secrets: FxHashMap::default(),
             pending_session_secrets: FxHashMap::default(),
@@ -1204,7 +1203,10 @@ impl DatabasePanelState {
             let id = DatabaseJobId(candidate);
             let used = self.pending_job.as_ref().is_some_and(|job| job.id == id)
                 || self.queued_commands.iter().any(|(_, job)| job.id == id)
-                || self.host_key_retry.as_ref().is_some_and(|(_, job)| job.id == id)
+                || self
+                    .host_key_retry
+                    .as_ref()
+                    .is_some_and(|(_, job)| job.id == id)
                 || self.cancelled_job_ids.contains_key(&id);
             candidate = candidate.wrapping_add(1).max(1);
             if !used {
@@ -1238,7 +1240,10 @@ impl DatabasePanelState {
         DatabaseQueueResult::Queued
     }
 
-    pub(crate) fn remove_queued_owner(&mut self, owner: DatabaseJobOwner) -> Vec<DatabasePendingJob> {
+    pub(crate) fn remove_queued_owner(
+        &mut self,
+        owner: DatabaseJobOwner,
+    ) -> Vec<DatabasePendingJob> {
         let mut removed = Vec::new();
         self.queued_commands.retain(|(_, pending)| {
             if pending.owner == owner {
@@ -1248,7 +1253,11 @@ impl DatabasePanelState {
                 true
             }
         });
-        if self.host_key_retry.as_ref().is_some_and(|(_, pending)| pending.owner == owner) {
+        if self
+            .host_key_retry
+            .as_ref()
+            .is_some_and(|(_, pending)| pending.owner == owner)
+        {
             if let Some((_, pending)) = self.host_key_retry.take() {
                 removed.push(pending);
             }
@@ -1268,11 +1277,7 @@ impl DatabasePanelState {
         self.active_command = None;
     }
 
-    pub(crate) fn mark_job_cancelled(
-        &mut self,
-        job_id: DatabaseJobId,
-        now: std::time::Instant,
-    ) {
+    pub(crate) fn mark_job_cancelled(&mut self, job_id: DatabaseJobId, now: std::time::Instant) {
         self.cancelled_job_ids
             .insert(job_id, now + std::time::Duration::from_secs(30));
     }
@@ -1296,10 +1301,22 @@ impl DatabasePanelState {
         loop {
             let id = DatabaseConnectionId(candidate);
             let used = self.connections.iter().any(|node| node.config.id == id)
-                || self.dialog.as_ref().is_some_and(|dialog| dialog.reserved_connection_id == Some(id))
-                || self.pending_job.as_ref().is_some_and(|job| job.connection_id == id)
-                || self.queued_commands.iter().any(|(_, job)| job.connection_id == id)
-                || self.host_key_retry.as_ref().is_some_and(|(_, job)| job.connection_id == id)
+                || self
+                    .dialog
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.reserved_connection_id == Some(id))
+                || self
+                    .pending_job
+                    .as_ref()
+                    .is_some_and(|job| job.connection_id == id)
+                || self
+                    .queued_commands
+                    .iter()
+                    .any(|(_, job)| job.connection_id == id)
+                || self
+                    .host_key_retry
+                    .as_ref()
+                    .is_some_and(|(_, job)| job.connection_id == id)
                 || self.pending_session_secrets.contains_key(&id);
             candidate = candidate.wrapping_add(1).max(1);
             if !used {
@@ -1317,15 +1334,15 @@ impl DatabasePanelState {
                 .dialog
                 .as_ref()
                 .is_some_and(|dialog| dialog.session_id == candidate);
-            let used_by_pending = self.pending_job.as_ref().is_some_and(|job| {
-                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
-            });
-            let used_by_queue = self.queued_commands.iter().any(|(_, job)| {
-                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
-            });
-            let used_by_retry = self.host_key_retry.as_ref().is_some_and(|(_, job)| {
-                matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate)
-            });
+            let used_by_pending = self.pending_job.as_ref().is_some_and(
+                |job| matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate),
+            );
+            let used_by_queue = self.queued_commands.iter().any(
+                |(_, job)| matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate),
+            );
+            let used_by_retry = self.host_key_retry.as_ref().is_some_and(
+                |(_, job)| matches!(job.owner, DatabaseJobOwner::Dialog(id) if id == candidate),
+            );
             let id = candidate;
             candidate = candidate.wrapping_add(1).max(1);
             if !(used_by_dialog || used_by_pending || used_by_queue || used_by_retry) {
@@ -1340,11 +1357,26 @@ impl DatabasePanelState {
             .open_table_ids
             .iter()
             .map(|id| id.0)
-            .chain(self.queued_commands
-            .iter()
-            .filter_map(|(_, job)| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
-            .chain(self.pending_job.iter().filter_map(|job| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
-            .chain(self.host_key_retry.iter().filter_map(|(_, job)| match job.owner { DatabaseJobOwner::Table(id) => Some(id.0), _ => None }))
+            .chain(
+                self.queued_commands
+                    .iter()
+                    .filter_map(|(_, job)| match job.owner {
+                        DatabaseJobOwner::Table(id) => Some(id.0),
+                        _ => None,
+                    }),
+            )
+            .chain(self.pending_job.iter().filter_map(|job| match job.owner {
+                DatabaseJobOwner::Table(id) => Some(id.0),
+                _ => None,
+            }))
+            .chain(
+                self.host_key_retry
+                    .iter()
+                    .filter_map(|(_, job)| match job.owner {
+                        DatabaseJobOwner::Table(id) => Some(id.0),
+                        _ => None,
+                    }),
+            )
             .collect();
         let start = self.next_tab_id.max(1);
         let mut candidate = start;
@@ -1359,13 +1391,24 @@ impl DatabasePanelState {
     }
 
     pub fn allocate_console_id(&mut self) -> super::SqlConsoleId {
-        let used_persisted = |candidate| self.persisted.consoles.iter().any(|console| console.id.0 == candidate);
+        let used_persisted = |candidate| {
+            self.persisted
+                .consoles
+                .iter()
+                .any(|console| console.id.0 == candidate)
+        };
         let start = self.next_console_id.max(1);
         let mut candidate = start;
         loop {
-            let queued = self.queued_commands.iter().any(|(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
-            let active = self.pending_job.as_ref().is_some_and(|job| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
-            let retry = self.host_key_retry.as_ref().is_some_and(|(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate));
+            let queued = self.queued_commands.iter().any(
+                |(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate),
+            );
+            let active = self.pending_job.as_ref().is_some_and(
+                |job| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate),
+            );
+            let retry = self.host_key_retry.as_ref().is_some_and(
+                |(_, job)| matches!(job.owner, DatabaseJobOwner::Query(id) if id.0 == candidate),
+            );
             if !used_persisted(candidate) && !queued && !active && !retry {
                 self.next_console_id = candidate.wrapping_add(1).max(1);
                 return super::SqlConsoleId(candidate);
@@ -1402,26 +1445,27 @@ impl DatabasePanelState {
         self.persisted.selected_database = self.selected_database.clone();
         self.persisted.expanded_connections.clear();
         self.persisted.expanded_connections.extend(
-            self.connections.iter().filter(|node| node.expanded).map(|node| node.config.id),
+            self.connections
+                .iter()
+                .filter(|node| node.expanded)
+                .map(|node| node.config.id),
         );
         self.persisted.expanded_databases.clear();
         for connection in &self.connections {
             for database in &connection.databases {
                 if database.expanded {
-                    self.persisted.expanded_databases.push((connection.config.id, database.name.clone()));
+                    self.persisted
+                        .expanded_databases
+                        .push((connection.config.id, database.name.clone()));
                 }
             }
         }
     }
 
-    pub(crate) fn begin_expanded_connection_catalog_loads(
-        &mut self,
-    ) -> Vec<DatabaseConnectionId> {
+    pub(crate) fn begin_expanded_connection_catalog_loads(&mut self) -> Vec<DatabaseConnectionId> {
         let mut connection_ids = Vec::new();
         for node in &mut self.connections {
-            if node.children_state()
-                != DatabaseConnectionChildrenState::ExpandedUnloaded
-            {
+            if node.children_state() != DatabaseConnectionChildrenState::ExpandedUnloaded {
                 continue;
             }
             node.loading = true;
@@ -1600,7 +1644,11 @@ mod tests {
         assert!(dialog.ssh_enabled);
         assert!(dialog.jump_enabled);
         assert_eq!(dialog.focused, Some(DatabaseFormField::JumpHost));
-        assert!(dialog.visible_fields().any(|field| field == DatabaseFormField::JumpHost));
+        assert!(
+            dialog
+                .visible_fields()
+                .any(|field| field == DatabaseFormField::JumpHost)
+        );
         dialog.toggle_jump_host();
         assert!(dialog.ssh_enabled);
         assert!(!dialog.jump_enabled);
@@ -1673,8 +1721,14 @@ mod tests {
 
         panel.connections[0].databases[0].loading = false;
         panel.connections[0].databases[0].tables = vec![
-            DatabaseTableInfo { name: "a".to_string(), partitioned: false },
-            DatabaseTableInfo { name: "b".to_string(), partitioned: false },
+            DatabaseTableInfo {
+                name: "a".to_string(),
+                partitioned: false,
+            },
+            DatabaseTableInfo {
+                name: "b".to_string(),
+                partitioned: false,
+            },
         ];
         assert_eq!(panel.visible_tree_row_count(), 4);
         assert_eq!(panel.max_tree_scroll(100.0, 1.0), 46.0);
@@ -1685,7 +1739,9 @@ mod tests {
         let mut panel = DatabasePanelState::default();
         assert!(!panel.modal_open());
         assert!(!panel.selected_connection_refresh_enabled());
-        panel.connections.push(DatabaseConnectionNode::new(config(1)));
+        panel
+            .connections
+            .push(DatabaseConnectionNode::new(config(1)));
         panel.selected_connection = Some(DatabaseConnectionId(1));
         assert!(panel.selected_connection_refresh_enabled());
         panel.dialog = Some(DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue));
@@ -1712,8 +1768,14 @@ mod tests {
         second.owner = DatabaseJobOwner::Table(crate::app::database::DatabaseTabId(2));
         panel.activate_command(super::super::DatabaseCommand::Shutdown, first);
         panel.queue_command(super::super::DatabaseCommand::Shutdown, second);
-        assert_eq!(panel.pending_job.as_ref().map(|job| job.id), Some(DatabaseJobId(1)));
-        assert_eq!(panel.queued_commands.front().map(|(_, job)| job.id), Some(DatabaseJobId(2)));
+        assert_eq!(
+            panel.pending_job.as_ref().map(|job| job.id),
+            Some(DatabaseJobId(1))
+        );
+        assert_eq!(
+            panel.queued_commands.front().map(|(_, job)| job.id),
+            Some(DatabaseJobId(2))
+        );
     }
 
     #[test]
@@ -1727,7 +1789,10 @@ mod tests {
             super::super::DatabaseCommand::Shutdown,
             pending(8, DatabasePendingJobKind::LoadDatabases),
         );
-        assert_eq!(panel.pending_job.as_ref().map(|job| job.id), Some(DatabaseJobId(7)));
+        assert_eq!(
+            panel.pending_job.as_ref().map(|job| job.id),
+            Some(DatabaseJobId(7))
+        );
         assert_eq!(panel.queued_commands.len(), 1);
     }
 
@@ -1745,37 +1810,64 @@ mod tests {
         panel.clear_active_command();
         assert!(panel.pending_job.is_none());
         assert!(panel.active_command.is_none());
-        assert_eq!(panel.pop_queued_command().map(|(_, job)| job.id), Some(DatabaseJobId(2)));
+        assert_eq!(
+            panel.pop_queued_command().map(|(_, job)| job.id),
+            Some(DatabaseJobId(2))
+        );
     }
 
     #[test]
     fn bug_46_busy_metadata_job_clears_table_loading_target() {
-        assert!(DatabasePendingJobKind::LoadMetadata.recovery_targets().metadata_loading);
+        assert!(
+            DatabasePendingJobKind::LoadMetadata
+                .recovery_targets()
+                .metadata_loading
+        );
     }
 
     #[test]
     fn bug_47_busy_database_list_job_clears_connection_loading_target() {
-        assert!(DatabasePendingJobKind::LoadDatabases.recovery_targets().connection_loading);
+        assert!(
+            DatabasePendingJobKind::LoadDatabases
+                .recovery_targets()
+                .connection_loading
+        );
     }
 
     #[test]
     fn bug_48_busy_table_list_job_clears_database_loading_target() {
-        assert!(DatabasePendingJobKind::LoadTables.recovery_targets().database_loading);
+        assert!(
+            DatabasePendingJobKind::LoadTables
+                .recovery_targets()
+                .database_loading
+        );
     }
 
     #[test]
     fn bug_49_busy_connection_test_clears_dialog_status_target() {
-        assert!(DatabasePendingJobKind::TestConnection.recovery_targets().dialog_status);
+        assert!(
+            DatabasePendingJobKind::TestConnection
+                .recovery_targets()
+                .dialog_status
+        );
     }
 
     #[test]
     fn bug_50_busy_connection_save_clears_dialog_status_target() {
-        assert!(DatabasePendingJobKind::SaveConnection.recovery_targets().dialog_status);
+        assert!(
+            DatabasePendingJobKind::SaveConnection
+                .recovery_targets()
+                .dialog_status
+        );
     }
 
     #[test]
     fn bug_51_busy_user_sql_clears_query_running_target() {
-        assert!(DatabasePendingJobKind::RunUserSql.recovery_targets().query_running);
+        assert!(
+            DatabasePendingJobKind::RunUserSql
+                .recovery_targets()
+                .query_running
+        );
     }
 
     #[test]
@@ -1789,21 +1881,40 @@ mod tests {
     fn bug_53_send_failure_recovers_running_sql_state() {
         let source = include_str!("database_app_methods.rs");
         assert!(source.contains("self.recover_database_pending_job(&pending, &message, false);"));
-        assert!(DatabasePendingJobKind::RunUserSql.recovery_targets().query_running);
+        assert!(
+            DatabasePendingJobKind::RunUserSql
+                .recovery_targets()
+                .query_running
+        );
     }
 
     #[test]
     fn bug_54_send_failure_recovers_test_and_save_dialog_state() {
-        for kind in [DatabasePendingJobKind::TestConnection, DatabasePendingJobKind::SaveConnection] {
+        for kind in [
+            DatabasePendingJobKind::TestConnection,
+            DatabasePendingJobKind::SaveConnection,
+        ] {
             assert!(kind.recovery_targets().dialog_status);
         }
     }
 
     #[test]
     fn bug_55_send_failure_recovers_database_and_table_loaders() {
-        assert!(DatabasePendingJobKind::LoadDatabases.recovery_targets().connection_loading);
-        assert!(DatabasePendingJobKind::LoadTables.recovery_targets().database_loading);
-        assert!(DatabasePendingJobKind::LoadMetadata.recovery_targets().metadata_loading);
+        assert!(
+            DatabasePendingJobKind::LoadDatabases
+                .recovery_targets()
+                .connection_loading
+        );
+        assert!(
+            DatabasePendingJobKind::LoadTables
+                .recovery_targets()
+                .database_loading
+        );
+        assert!(
+            DatabasePendingJobKind::LoadMetadata
+                .recovery_targets()
+                .metadata_loading
+        );
     }
 
     #[test]
@@ -1815,12 +1926,26 @@ mod tests {
     #[test]
     fn bug_57_cancelled_jobs_use_the_same_complete_recovery_map() {
         let source = include_str!("database_app_event_methods.rs");
-        assert!(source.contains("self.recover_database_pending_job(pending, \"Запрос отменён\", true);"));
-        assert!(DatabasePendingJobKind::CountRows.recovery_targets().count_loading);
-        assert!(DatabasePendingJobKind::LoadChunk.recovery_targets().chunk_loading);
-        assert!(DatabasePendingJobKind::RollbackTransaction.recovery_targets().query_transaction);
+        assert!(
+            source
+                .contains("self.recover_database_pending_job(pending, \"Запрос отменён\", true);")
+        );
+        assert!(
+            DatabasePendingJobKind::CountRows
+                .recovery_targets()
+                .count_loading
+        );
+        assert!(
+            DatabasePendingJobKind::LoadChunk
+                .recovery_targets()
+                .chunk_loading
+        );
+        assert!(
+            DatabasePendingJobKind::RollbackTransaction
+                .recovery_targets()
+                .query_transaction
+        );
     }
-
 
     fn pending_for(
         id: u64,
@@ -1850,7 +1975,10 @@ mod tests {
         );
         let removed = panel.remove_queued_owner(owner);
         assert_eq!(removed.len(), 1);
-        assert!(matches!(removed[0].kind, DatabasePendingJobKind::SaveConnection));
+        assert!(matches!(
+            removed[0].kind,
+            DatabasePendingJobKind::SaveConnection
+        ));
         assert!(panel.queued_commands.is_empty());
     }
 
@@ -1889,10 +2017,15 @@ mod tests {
         let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue);
         dialog.reserved_connection_id = Some(reserved);
         panel.dialog = Some(dialog);
-        assert_eq!(panel.dialog.as_ref().unwrap().reserved_connection_id, Some(reserved));
+        assert_eq!(
+            panel.dialog.as_ref().unwrap().reserved_connection_id,
+            Some(reserved)
+        );
         assert_ne!(panel.allocate_connection_id(), reserved);
         let methods = include_str!("database_app_methods.rs");
-        assert!(methods.contains("dialog.reserved_connection_id = dialog.editing_connection_id.or(allocated_id)"));
+        assert!(methods.contains(
+            "dialog.reserved_connection_id = dialog.editing_connection_id.or(allocated_id)"
+        ));
     }
 
     #[test]
@@ -1983,13 +2116,21 @@ mod tests {
     fn r2_010_database_ids_skip_live_values_after_wraparound() {
         let mut panel = DatabasePanelState::default();
         panel.next_job_id = u64::MAX;
-        panel.cancelled_job_ids.insert(DatabaseJobId(u64::MAX), std::time::Instant::now());
-        panel.cancelled_job_ids.insert(DatabaseJobId(1), std::time::Instant::now());
+        panel
+            .cancelled_job_ids
+            .insert(DatabaseJobId(u64::MAX), std::time::Instant::now());
+        panel
+            .cancelled_job_ids
+            .insert(DatabaseJobId(1), std::time::Instant::now());
         assert_eq!(panel.allocate_job_id(), DatabaseJobId(2));
 
         panel.next_connection_id = u64::MAX;
-        panel.connections.push(DatabaseConnectionNode::new(config(u64::MAX)));
-        panel.connections.push(DatabaseConnectionNode::new(config(1)));
+        panel
+            .connections
+            .push(DatabaseConnectionNode::new(config(u64::MAX)));
+        panel
+            .connections
+            .push(DatabaseConnectionNode::new(config(1)));
         assert_eq!(panel.allocate_connection_id(), DatabaseConnectionId(2));
 
         panel.next_dialog_id = u64::MAX;
@@ -2007,7 +2148,6 @@ mod tests {
         assert_eq!(panel.allocate_dialog_id(), 2);
     }
 
-
     #[test]
     fn r3_106_invalid_persisted_database_state_surfaces_global_error() {
         let mut persisted = DatabasePersistedState::default();
@@ -2018,7 +2158,6 @@ mod tests {
                 && error.contains("newer RRiter version")
         }));
     }
-
 }
 
 impl crate::app::single_line_input::SingleLineInputModel for DatabaseDialogInput {

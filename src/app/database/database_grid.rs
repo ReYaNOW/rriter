@@ -118,7 +118,12 @@ pub fn database_grid_layout(
         h: scrollbar_width,
     });
     DatabaseGridLayout {
-        outer_rect: DatabaseGridRect { x, y, w: width, h: height },
+        outer_rect: DatabaseGridRect {
+            x,
+            y,
+            w: width,
+            h: height,
+        },
         header_rect,
         body_rect,
         vertical_scrollbar_rect,
@@ -149,17 +154,21 @@ pub fn database_column_width(widths: &[DatabaseColumnWidth], name: &str) -> f32 
     widths
         .iter()
         .find(|entry| entry.column_name == name)
-        .map_or(DATABASE_GRID_DEFAULT_COLUMN_WIDTH, |entry| entry.width_px as f32)
-        .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
+        .map_or(DATABASE_GRID_DEFAULT_COLUMN_WIDTH, |entry| {
+            entry.width_px as f32
+        })
+        .clamp(
+            DATABASE_GRID_MIN_COLUMN_WIDTH,
+            DATABASE_GRID_MAX_COLUMN_WIDTH,
+        )
 }
 
-pub fn set_database_column_width(
-    widths: &mut Vec<DatabaseColumnWidth>,
-    name: &str,
-    width: f32,
-) {
+pub fn set_database_column_width(widths: &mut Vec<DatabaseColumnWidth>, name: &str, width: f32) {
     let width = width
-        .clamp(DATABASE_GRID_MIN_COLUMN_WIDTH, DATABASE_GRID_MAX_COLUMN_WIDTH)
+        .clamp(
+            DATABASE_GRID_MIN_COLUMN_WIDTH,
+            DATABASE_GRID_MAX_COLUMN_WIDTH,
+        )
         .round() as u16;
     if let Some(entry) = widths.iter_mut().find(|entry| entry.column_name == name) {
         entry.width_px = width;
@@ -210,9 +219,15 @@ impl DatabaseCellValue {
             Self::Boolean(value) => value.to_string(),
             Self::ByteaPreview(preview) => {
                 if preview.truncated {
-                    format!("<bytea {} bytes: {}…>", preview.total_bytes, preview.hex_preview)
+                    format!(
+                        "<bytea {} bytes: {}…>",
+                        preview.total_bytes, preview.hex_preview
+                    )
                 } else {
-                    format!("<bytea {} bytes: {}>", preview.total_bytes, preview.hex_preview)
+                    format!(
+                        "<bytea {} bytes: {}>",
+                        preview.total_bytes, preview.hex_preview
+                    )
                 }
             }
         }
@@ -344,7 +359,11 @@ impl DatabaseGridSelection {
         self.anchor = None;
         self.cursor = None;
         if toggle {
-            if let Some(index) = self.selected_rows.iter().position(|selected| *selected == row) {
+            if let Some(index) = self
+                .selected_rows
+                .iter()
+                .position(|selected| *selected == row)
+            {
                 self.selected_rows.remove(index);
             } else {
                 self.selected_rows.push(row);
@@ -374,7 +393,9 @@ impl DatabaseGridSelection {
             return;
         }
         let anchor = self.selected_rows.first().copied().unwrap_or(row);
-        let Some(anchor_index) = ordered_rows.iter().position(|candidate| *candidate == anchor)
+        let Some(anchor_index) = ordered_rows
+            .iter()
+            .position(|candidate| *candidate == anchor)
         else {
             self.select_row(row, false, false);
             return;
@@ -721,7 +742,10 @@ impl DatabaseTableGridState {
 
     pub fn row_mut(&mut self, absolute_index: usize) -> Option<&mut DatabaseGridRow> {
         for chunk in self.chunks.values_mut() {
-            if let Some(row) = chunk.rows.iter_mut().find(|row| row.absolute_index == absolute_index)
+            if let Some(row) = chunk
+                .rows
+                .iter_mut()
+                .find(|row| row.absolute_index == absolute_index)
             {
                 return Some(row);
             }
@@ -816,8 +840,11 @@ impl DatabaseTableGridState {
             .values()
             .flat_map(|chunk| chunk.rows.iter())
             .filter_map(|row| {
-                (row.absolute_index >= page_base && row.absolute_index < page_end)
-                    .then_some(row.absolute_index.saturating_sub(page_base).saturating_add(1))
+                (row.absolute_index >= page_base && row.absolute_index < page_end).then_some(
+                    row.absolute_index
+                        .saturating_sub(page_base)
+                        .saturating_add(1),
+                )
             })
             .max()
             .unwrap_or(0)
@@ -827,7 +854,11 @@ impl DatabaseTableGridState {
         let page_base = self.view.current_page.saturating_mul(self.view.limit);
         let server_rows = self.count.map_or_else(
             || self.loaded_server_row_extent_on_page(),
-            |count| (count as usize).saturating_sub(page_base).min(self.view.limit),
+            |count| {
+                (count as usize)
+                    .saturating_sub(page_base)
+                    .min(self.view.limit)
+            },
         );
         server_rows.saturating_add(self.added_rows.len())
     }
@@ -891,18 +922,19 @@ impl DatabaseTableGridState {
 
     pub fn can_page_next(&self) -> bool {
         match self.count {
-            Some(count) => self.view.current_page.saturating_add(1)
-                .saturating_mul(self.view.limit)
-                < count as usize,
+            Some(count) => {
+                self.view
+                    .current_page
+                    .saturating_add(1)
+                    .saturating_mul(self.view.limit)
+                    < count as usize
+            }
             None => self.loaded_server_row_extent_on_page() >= self.view.limit,
         }
     }
 
     pub fn cycle_sort(&mut self, column: &DatabaseColumnInfo) {
-        match (
-            self.view.sorted_column.as_deref(),
-            self.view.sort_direction,
-        ) {
+        match (self.view.sorted_column.as_deref(), self.view.sort_direction) {
             (Some(name), Some(DatabaseSortDirection::Asc)) if name == column.name => {
                 self.view.sort_direction = Some(DatabaseSortDirection::Desc);
                 self.view.order_by = format!("{} DESC", super::quote_pg_identifier(&column.name));
@@ -948,7 +980,11 @@ impl DatabaseTableGridState {
         for chunk in self.chunks.values() {
             for row in &chunk.rows {
                 let key = primary_key_values(metadata, row);
-                if self.restore_selection_keys.iter().any(|pending| pending == &key) {
+                if self
+                    .restore_selection_keys
+                    .iter()
+                    .any(|pending| pending == &key)
+                {
                     matched.push((row.absolute_index, key));
                 }
             }
@@ -958,18 +994,22 @@ impl DatabaseTableGridState {
         }
         if let Some(column) = self.restore_selection_column {
             for (index, (row, _)) in matched.iter().enumerate() {
-                self.selection.select_cell(
-                    DatabaseCellPosition { row: *row, column },
-                    index > 0,
-                );
+                self.selection
+                    .select_cell(DatabaseCellPosition { row: *row, column }, index > 0);
             }
         } else {
-            self.selection.selected_rows.extend(matched.iter().map(|(row, _)| *row));
+            self.selection
+                .selected_rows
+                .extend(matched.iter().map(|(row, _)| *row));
             self.selection.selected_rows.sort_unstable();
             self.selection.selected_rows.dedup();
         }
         for (_, key) in matched {
-            if let Some(index) = self.restore_selection_keys.iter().position(|pending| pending == &key) {
+            if let Some(index) = self
+                .restore_selection_keys
+                .iter()
+                .position(|pending| pending == &key)
+            {
                 self.restore_selection_keys.remove(index);
             }
         }
@@ -997,7 +1037,6 @@ impl DatabaseTableGridState {
     }
 }
 
-
 fn chunk_is_protected(
     chunk: &DatabaseTableChunk,
     selection: &DatabaseGridSelection,
@@ -1013,15 +1052,15 @@ fn chunk_is_protected(
         })
 }
 
-fn primary_key_values(
-    metadata: &DatabaseTableMetadata,
-    row: &DatabaseGridRow,
-) -> Vec<String> {
+fn primary_key_values(metadata: &DatabaseTableMetadata, row: &DatabaseGridRow) -> Vec<String> {
     metadata
         .primary_key_columns
         .iter()
         .filter_map(|name| {
-            let index = metadata.columns.iter().position(|column| &column.name == name)?;
+            let index = metadata
+                .columns
+                .iter()
+                .position(|column| &column.name == name)?;
             row.cells.get(index).map(|cell| cell.original.copy_text())
         })
         .collect()
@@ -1187,7 +1226,9 @@ mod tests {
         for index in 0..10 {
             let mut row = DatabaseGridRow {
                 absolute_index: index,
-                cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text("x".to_string()))],
+                cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text(
+                    "x".to_string(),
+                ))],
                 xmin: Some("1".to_string()),
                 state: DatabaseRowState::Clean,
             };
@@ -1308,7 +1349,9 @@ mod tests {
                 chunk_index: 0,
                 rows: vec![DatabaseGridRow {
                     absolute_index: 7,
-                    cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text("row".to_string()))],
+                    cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text(
+                        "row".to_string(),
+                    ))],
                     xmin: None,
                     state: DatabaseRowState::Clean,
                 }],
@@ -1328,7 +1371,9 @@ mod tests {
             let absolute_index = index * 100;
             let row = DatabaseGridRow {
                 absolute_index,
-                cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text(index.to_string()))],
+                cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text(
+                    index.to_string(),
+                ))],
                 xmin: Some("1".to_string()),
                 state: DatabaseRowState::Clean,
             };
@@ -1339,8 +1384,14 @@ mod tests {
                 rows: vec![row],
             });
         }
-        assert!(grid.chunks.contains_key(&0), "visible chunk must stay cached");
-        assert!(grid.chunks.contains_key(&1), "selected chunk must stay cached");
+        assert!(
+            grid.chunks.contains_key(&0),
+            "visible chunk must stay cached"
+        );
+        assert!(
+            grid.chunks.contains_key(&1),
+            "selected chunk must stay cached"
+        );
         assert!(grid.chunks.len() <= MAX_CACHED_CHUNKS_PER_TAB + 2);
     }
 
@@ -1385,7 +1436,8 @@ mod tests {
                 state: DatabaseRowState::Clean,
             }],
         });
-        grid.selection.select_cell(DatabaseCellPosition { row: 2, column: 1 }, false);
+        grid.selection
+            .select_cell(DatabaseCellPosition { row: 2, column: 1 }, false);
         grid.prepare_selection_restore(&metadata);
         grid.clear_loaded_rows();
         grid.insert_chunk(DatabaseTableChunk {
@@ -1423,13 +1475,22 @@ mod tests {
     #[test]
     fn shared_column_width_helpers_match_table_resize_rules() {
         let mut widths = Vec::new();
-        assert_eq!(database_column_width(&widths, "name"), DATABASE_GRID_DEFAULT_COLUMN_WIDTH);
+        assert_eq!(
+            database_column_width(&widths, "name"),
+            DATABASE_GRID_DEFAULT_COLUMN_WIDTH
+        );
         set_database_column_width(&mut widths, "name", 12.0);
-        assert_eq!(database_column_width(&widths, "name"), DATABASE_GRID_MIN_COLUMN_WIDTH);
+        assert_eq!(
+            database_column_width(&widths, "name"),
+            DATABASE_GRID_MIN_COLUMN_WIDTH
+        );
         set_database_column_width(&mut widths, "name", 320.0);
         assert_eq!(database_column_width(&widths, "name"), 320.0);
         set_database_column_width(&mut widths, "other", DATABASE_GRID_MAX_COLUMN_WIDTH + 100.0);
-        assert_eq!(database_column_width(&widths, "other"), DATABASE_GRID_MAX_COLUMN_WIDTH);
+        assert_eq!(
+            database_column_width(&widths, "other"),
+            DATABASE_GRID_MAX_COLUMN_WIDTH
+        );
         assert_eq!(
             database_columns_content_width(&widths, ["name", "other"]),
             320.0 + DATABASE_GRID_MAX_COLUMN_WIDTH
@@ -1459,23 +1520,46 @@ mod tests {
 
     #[test]
     fn shared_grid_layout_reserves_header_body_and_both_scrollbars_once() {
-        let layout = database_grid_layout(
-            10.0, 20.0, 500.0, 300.0, 0.0, 10.0, 40.0, 700.0, 500.0,
-        );
+        let layout = database_grid_layout(10.0, 20.0, 500.0, 300.0, 0.0, 10.0, 40.0, 700.0, 500.0);
         assert!(layout.viewport.show_x);
         assert!(layout.viewport.show_y);
-        assert_eq!(layout.header_rect, DatabaseGridRect { x: 10.0, y: 20.0, w: 490.0, h: 40.0 });
-        assert_eq!(layout.body_rect, DatabaseGridRect { x: 10.0, y: 60.0, w: 490.0, h: 250.0 });
+        assert_eq!(
+            layout.header_rect,
+            DatabaseGridRect {
+                x: 10.0,
+                y: 20.0,
+                w: 490.0,
+                h: 40.0
+            }
+        );
+        assert_eq!(
+            layout.body_rect,
+            DatabaseGridRect {
+                x: 10.0,
+                y: 60.0,
+                w: 490.0,
+                h: 250.0
+            }
+        );
         assert_eq!(
             layout.vertical_scrollbar_rect,
-            Some(DatabaseGridRect { x: 500.0, y: 60.0, w: 10.0, h: 250.0 }),
+            Some(DatabaseGridRect {
+                x: 500.0,
+                y: 60.0,
+                w: 10.0,
+                h: 250.0
+            }),
         );
         assert_eq!(
             layout.horizontal_scrollbar_rect,
-            Some(DatabaseGridRect { x: 10.0, y: 310.0, w: 490.0, h: 10.0 }),
+            Some(DatabaseGridRect {
+                x: 10.0,
+                y: 310.0,
+                w: 490.0,
+                h: 10.0
+            }),
         );
     }
-
 
     #[test]
     fn unknown_count_pages_only_after_a_full_loaded_page() {
@@ -1607,5 +1691,4 @@ mod tests {
         });
         assert_eq!(grid.logical_row_count(), 10);
     }
-
 }

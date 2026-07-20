@@ -17,7 +17,9 @@ fn scrollbar_x_click_target(
     if track_w <= 0.0 || max_scroll <= 0.0 {
         return None;
     }
-    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w).max(40.0 * scale).min(track_w.max(0.0));
+    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w)
+        .max(40.0 * scale)
+        .min(track_w.max(0.0));
     let scroll_ratio = (current_scroll / max_scroll).clamp(0.0, 1.0);
     let thumb_x = track_x + scroll_ratio * (track_w - thumb_w);
     if mouse_x >= thumb_x && mouse_x <= thumb_x + thumb_w {
@@ -94,11 +96,7 @@ mod tests {
         let viewport = editor_interaction_view_height(1000.0, 40.0, 300.0, 160.0, true, 1.0);
         assert_eq!(
             viewport,
-            1000.0
-                - 40.0
-                - 300.0
-                - 160.0
-                - crate::render_view::ide_status_bar_height(1.0)
+            1000.0 - 40.0 - 300.0 - 160.0 - crate::render_view::ide_status_bar_height(1.0)
         );
 
         assert_eq!(
@@ -106,7 +104,6 @@ mod tests {
             960.0
         );
     }
-
 
     #[test]
     fn repeated_click_requires_the_same_ui_target() {
@@ -183,21 +180,22 @@ impl App {
         } else {
             0.0
         };
-        let query_results_height = self.tabs.get(self.active_tab).map_or(0.0, |tab| {
-            match &tab.kind {
-                crate::app::EditorTabKind::DatabaseQuery(_, state)
-                    if crate::app::database::database_query_results_visible(state) =>
-                {
-                    crate::app::database::database_query_results_height(
-                        state.result_view.preferred_height,
-                        window_height,
-                        open_panel_height,
-                        scale,
-                    )
-                }
-                _ => 0.0,
-            }
-        });
+        let query_results_height =
+            self.tabs
+                .get(self.active_tab)
+                .map_or(0.0, |tab| match &tab.kind {
+                    crate::app::EditorTabKind::DatabaseQuery(_, state)
+                        if crate::app::database::database_query_results_visible(state) =>
+                    {
+                        crate::app::database::database_query_results_height(
+                            state.result_view.preferred_height,
+                            window_height,
+                            open_panel_height,
+                            scale,
+                        )
+                    }
+                    _ => 0.0,
+                });
         (panel_bottom_height, query_results_height)
     }
 
@@ -684,36 +682,79 @@ impl App {
             }
             UiId::SettingsIdeScrollY => {
                 if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsIdeScrollY) {
-                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
-                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    let s = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.scale_factor)
+                        .unwrap_or(1.0);
+                    let pointer = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.last_mouse_y)
+                        .unwrap_or(rect.1);
                     let window_size = self.window.as_ref().map(|window| window.inner_size());
                     if let Some(window_size) = window_size {
-                        let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
-                            window_size.width as f32, window_size.height as f32, s, self.settings_anim_progress,
-                        );
+                        let layout =
+                            crate::render_view::settings_ui::animated_settings_modal_layout(
+                                window_size.width as f32,
+                                window_size.height as f32,
+                                s,
+                                self.settings_anim_progress,
+                            );
                         let pad_x = 12.0 * s;
-                        let widths = self.ide_ignore_patterns.iter().map(|pattern| {
-                            self.renderer.as_mut().unwrap().measure_ui_width(pattern, 0.88)
-                                + pad_x * 2.0 + 22.0 * s
-                        }).collect::<Vec<_>>();
+                        let widths = self
+                            .ide_ignore_patterns
+                            .iter()
+                            .map(|pattern| {
+                                self.renderer
+                                    .as_mut()
+                                    .unwrap()
+                                    .measure_ui_width(pattern, 0.88)
+                                    + pad_x * 2.0
+                                    + 22.0 * s
+                            })
+                            .collect::<Vec<_>>();
                         let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
-                            layout, self.ide_workspaces.len(), widths, s,
+                            layout,
+                            self.ide_workspaces.len(),
+                            widths,
+                            s,
                         );
                         crate::app::mouse::begin_scrollbar_drag(
-                            &mut self.settings_ide_scroll, pointer, rect.1, rect.3, max_scroll, 40.0 * s,
+                            &mut self.settings_ide_scroll,
+                            pointer,
+                            rect.1,
+                            rect.3,
+                            max_scroll,
+                            40.0 * s,
                         );
                     }
                 }
             }
             UiId::SettingsFaqScrollY => {
                 if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsFaqScrollY) {
-                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
-                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
-                    let max_scroll = self.renderer.as_mut().map(|renderer| {
-                        renderer.get_faq_max_scroll(&self.faq_editor, rect.3)
-                    }).unwrap_or(0.0);
+                    let s = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.scale_factor)
+                        .unwrap_or(1.0);
+                    let pointer = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.last_mouse_y)
+                        .unwrap_or(rect.1);
+                    let max_scroll = self
+                        .renderer
+                        .as_mut()
+                        .map(|renderer| renderer.get_faq_max_scroll(&self.faq_editor, rect.3))
+                        .unwrap_or(0.0);
                     crate::app::mouse::begin_scrollbar_drag(
-                        &mut self.settings_scroll, pointer, rect.1, rect.3, max_scroll, 40.0 * s,
+                        &mut self.settings_scroll,
+                        pointer,
+                        rect.1,
+                        rect.3,
+                        max_scroll,
+                        40.0 * s,
                     );
                 }
             }
@@ -771,7 +812,10 @@ impl App {
             }
             UiId::SettingsToolInstallLogBody => {}
             UiId::SettingsToolInstallLogScrollY => {
-                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsToolInstallLogScrollY) {
+                if let Some(rect) = self
+                    .ui_registry
+                    .rect_for(UiId::SettingsToolInstallLogScrollY)
+                {
                     let s = self
                         .renderer
                         .as_ref()
@@ -805,10 +849,13 @@ impl App {
                     3 => paths.state,
                     _ => return,
                 };
-                if let Err(error) = std::fs::create_dir_all(&path)
-                    .and_then(|_| crate::platform::reveal_path(&path))
+                if let Err(error) =
+                    std::fs::create_dir_all(&path).and_then(|_| crate::platform::reveal_path(&path))
                 {
-                    eprintln!("Failed to open RRiter directory {}: {error}", path.display());
+                    eprintln!(
+                        "Failed to open RRiter directory {}: {error}",
+                        path.display()
+                    );
                 }
             }
             UiId::SettingsCopyGraphicsDiagnostics => {
@@ -843,9 +890,7 @@ impl App {
             UiId::SettingsDartToggleWorkspaceAnalysis => {
                 self.dart_settings.workspace_analysis = !self.dart_settings.workspace_analysis;
                 if let Some(lsp) = &mut self.lsp {
-                    lsp.set_dart_workspace_analysis_enabled(
-                        self.dart_settings.workspace_analysis,
-                    );
+                    lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
                 }
                 self.save_current_config();
             }
@@ -1881,10 +1926,8 @@ impl App {
                         .and_then(|rect| {
                             let renderer = self.renderer.as_ref()?;
                             let s = renderer.scale_factor;
-                            let (content_len, _) = self.lsp_server_inner_size(
-                                &self.ide_panel.lsp_servers[server_idx],
-                                s,
-                            );
+                            let (content_len, _) = self
+                                .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
                             Some((
                                 renderer.last_mouse_y,
                                 rect.1 + 7.0 * s,
@@ -1932,10 +1975,8 @@ impl App {
                         .and_then(|rect| {
                             let renderer = self.renderer.as_ref()?;
                             let s = renderer.scale_factor;
-                            let (_, max_line_w) = self.lsp_server_inner_size(
-                                &self.ide_panel.lsp_servers[server_idx],
-                                s,
-                            );
+                            let (_, max_line_w) = self
+                                .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
                             Some((
                                 renderer.last_mouse_x,
                                 rect.0 + 7.0 * s,
@@ -1992,8 +2033,7 @@ impl App {
                             rect.2 - 16.0 * s,
                             0.0,
                         );
-                        let x_offset =
-                            (mx - (rect.0 + 8.0 * s) + scroll_x).max(0.0);
+                        let x_offset = (mx - (rect.0 + 8.0 * s) + scroll_x).max(0.0);
                         let target_idx = r.one_line_cursor_from_x(&text, x_offset, 0.78);
                         self.ide_panel.lsp_log_filter_editor.cursor = target_idx;
                         self.ide_panel.lsp_log_filter_editor.selection_anchor = Some(target_idx);
@@ -2071,11 +2111,9 @@ impl App {
             }
             UiId::ProblemUrl(idx) => {
                 if let Some((path, diag_idx)) = self.ide_panel.flat_diags.get(idx)
-                    && let Some(diag) = self.ide_panel.problem_diagnostic(
-                        self.lsp.as_ref(),
-                        path,
-                        *diag_idx,
-                    )
+                    && let Some(diag) =
+                        self.ide_panel
+                            .problem_diagnostic(self.lsp.as_ref(), path, *diag_idx)
                     && let Some(href) = &diag.code_href
                 {
                     let _ = crate::platform::open_url(href.as_ref());
@@ -2197,13 +2235,10 @@ impl App {
     }
 }
 
-
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     fn handle_database_ui_click(&mut self, id: UiId, same_click_target: bool) {
-        use crate::app::database::{
-            DatabaseConnectionColor, PostgresTlsMode, SshHostKeyPolicy,
-        };
+        use crate::app::database::{DatabaseConnectionColor, PostgresTlsMode, SshHostKeyPolicy};
 
         if database_table_click_closes_cell_popup(id)
             && let Some(tab_id) = self.active_database_table_tab_id()
@@ -2225,8 +2260,11 @@ impl App {
         }
 
         match id {
-            UiId::DatabasePanelBody | UiId::DatabaseDialogBody | UiId::DatabaseDdlBody
-            | UiId::DatabaseDdlScroll | UiId::DatabaseTableGridBody
+            UiId::DatabasePanelBody
+            | UiId::DatabaseDialogBody
+            | UiId::DatabaseDdlBody
+            | UiId::DatabaseDdlScroll
+            | UiId::DatabaseTableGridBody
             | UiId::DatabaseTableModalBody => {}
             UiId::DatabaseGlobalErrorCopy => {
                 if let Some(error) = self.ide_panel.database.global_error.clone() {
@@ -2264,37 +2302,67 @@ impl App {
             }
             UiId::DatabaseRefresh => self.refresh_selected_database(),
             UiId::DatabaseConnectionRow(index) => {
-                if let Some(id) = self.ide_panel.database.connections.get(index).map(|node| node.config.id) {
+                if let Some(id) = self
+                    .ide_panel
+                    .database
+                    .connections
+                    .get(index)
+                    .map(|node| node.config.id)
+                {
                     self.select_database_connection(id);
                 }
             }
             UiId::DatabaseConnectionArrow(index) => {
-                if let Some(id) = self.ide_panel.database.connections.get(index).map(|node| node.config.id) {
+                if let Some(id) = self
+                    .ide_panel
+                    .database
+                    .connections
+                    .get(index)
+                    .map(|node| node.config.id)
+                {
                     self.toggle_database_connection(id);
                 }
             }
             UiId::DatabaseRow(connection_index, database_index) => {
-                let selected = self.ide_panel.database.connections.get(connection_index).and_then(|node| {
-                    node.databases.get(database_index).map(|database| (node.config.id, database.name.clone()))
-                });
+                let selected = self
+                    .ide_panel
+                    .database
+                    .connections
+                    .get(connection_index)
+                    .and_then(|node| {
+                        node.databases
+                            .get(database_index)
+                            .map(|database| (node.config.id, database.name.clone()))
+                    });
                 if let Some((id, database_name)) = selected {
                     self.ide_panel.database.selected_connection = Some(id);
                     self.ide_panel.database.selected_database = Some((id, database_name));
                 }
             }
             UiId::DatabaseArrow(connection_index, database_index) => {
-                if let Some(id) = self.ide_panel.database.connections.get(connection_index).map(|node| node.config.id) {
+                if let Some(id) = self
+                    .ide_panel
+                    .database
+                    .connections
+                    .get(connection_index)
+                    .map(|node| node.config.id)
+                {
                     self.toggle_database_node(id, database_index);
                 }
             }
             UiId::DatabaseTableRow(connection_index, database_index, table_index) => {
-                let target = self.ide_panel.database.connections.get(connection_index).and_then(|node| {
-                    node.databases.get(database_index).and_then(|database| {
-                        database.tables.get(table_index).map(|table| {
-                            (node.config.id, database.name.clone(), table.name.clone())
+                let target = self
+                    .ide_panel
+                    .database
+                    .connections
+                    .get(connection_index)
+                    .and_then(|node| {
+                        node.databases.get(database_index).and_then(|database| {
+                            database.tables.get(table_index).map(|table| {
+                                (node.config.id, database.name.clone(), table.name.clone())
+                            })
                         })
-                    })
-                });
+                    });
                 if let Some((id, database, table)) = target {
                     let now = std::time::Instant::now();
                     let table_key = (id, database.clone(), table.clone());
@@ -2312,7 +2380,8 @@ impl App {
                     self.ide_panel.database.selected_database = Some((id, database.clone()));
                     self.ide_panel.database.selected_table = Some(table_key.clone());
                     self.ide_panel.database.last_table_click = Some((table_key, now));
-                    self.ide_panel.database.notice = Some(format!("Выбрана таблица public.{table}"));
+                    self.ide_panel.database.notice =
+                        Some(format!("Выбрана таблица public.{table}"));
                     if double_click {
                         self.open_database_table_tab(id, &database, &table);
                     }
@@ -2379,12 +2448,12 @@ impl App {
                     dialog.ssh_enabled = !dialog.ssh_enabled;
                     if !dialog.ssh_enabled {
                         dialog.jump_enabled = false;
-                        if dialog.focused.is_some_and(|field| {
-                            dialog.visible_field_index(field).is_none()
-                        }) {
-                            dialog.focused = Some(
-                                crate::app::database::DatabaseFormField::MaintenanceDatabase,
-                            );
+                        if dialog
+                            .focused
+                            .is_some_and(|field| dialog.visible_field_index(field).is_none())
+                        {
+                            dialog.focused =
+                                Some(crate::app::database::DatabaseFormField::MaintenanceDatabase);
                         }
                     }
                     dialog.error = None;
@@ -2438,20 +2507,68 @@ impl App {
             }
             UiId::DatabaseDeleteConfirm => self.confirm_delete_database_connection(),
             UiId::DatabaseDeleteCancel => self.cancel_delete_database_connection(),
-            UiId::DatabaseHostKeyTrustOnce => self.resolve_database_host_key(SshHostKeyPolicy::TrustOnce),
-            UiId::DatabaseHostKeyTrustStore => self.resolve_database_host_key(SshHostKeyPolicy::TrustAndStore),
+            UiId::DatabaseHostKeyTrustOnce => {
+                self.resolve_database_host_key(SshHostKeyPolicy::TrustOnce)
+            }
+            UiId::DatabaseHostKeyTrustStore => {
+                self.resolve_database_host_key(SshHostKeyPolicy::TrustAndStore)
+            }
             UiId::DatabaseHostKeyCancel => self.cancel_database_host_key_prompt(),
-            UiId::DatabaseTableAddRow => { if let Some(tab) = self.active_database_table_tab_id() { self.add_database_table_row(tab); } }
-            UiId::DatabaseTableDeleteRows => { if let Some(tab) = self.active_database_table_tab_id() { self.delete_database_table_selection(tab); } }
-            UiId::DatabaseTableUndo => { if let Some(tab) = self.active_database_table_tab_id() { self.undo_database_table_selection(tab); } }
-            UiId::DatabaseTableSave => { if let Some(tab) = self.active_database_table_tab_id() { self.save_database_table_changes(tab, false); } }
-            UiId::DatabaseTablePreview => { if let Some(tab) = self.active_database_table_tab_id() { self.preview_database_table_changes(tab); } }
-            UiId::DatabaseTableRefresh => { if let Some(tab) = self.active_database_table_tab_id() { self.request_database_table_refresh(tab); } }
-            UiId::DatabaseTablePageFirst => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_first(tab); } }
-            UiId::DatabaseTablePagePrevious => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_previous(tab); } }
-            UiId::DatabaseTablePageNext => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_next(tab); } }
-            UiId::DatabaseTablePageLast => { if let Some(tab) = self.active_database_table_tab_id() { self.database_table_page_last(tab); } }
-            UiId::DatabaseTableLimit => { if let Some(tab) = self.active_database_table_tab_id() { self.open_database_table_limit_dialog(tab); } }
+            UiId::DatabaseTableAddRow => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.add_database_table_row(tab);
+                }
+            }
+            UiId::DatabaseTableDeleteRows => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.delete_database_table_selection(tab);
+                }
+            }
+            UiId::DatabaseTableUndo => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.undo_database_table_selection(tab);
+                }
+            }
+            UiId::DatabaseTableSave => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.save_database_table_changes(tab, false);
+                }
+            }
+            UiId::DatabaseTablePreview => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.preview_database_table_changes(tab);
+                }
+            }
+            UiId::DatabaseTableRefresh => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.request_database_table_refresh(tab);
+                }
+            }
+            UiId::DatabaseTablePageFirst => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.database_table_page_first(tab);
+                }
+            }
+            UiId::DatabaseTablePagePrevious => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.database_table_page_previous(tab);
+                }
+            }
+            UiId::DatabaseTablePageNext => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.database_table_page_next(tab);
+                }
+            }
+            UiId::DatabaseTablePageLast => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.database_table_page_last(tab);
+                }
+            }
+            UiId::DatabaseTableLimit => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.open_database_table_limit_dialog(tab);
+                }
+            }
             UiId::DatabaseTableModalInput => {
                 let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
                     (renderer.last_mouse_x, renderer.last_mouse_y)
@@ -2466,10 +2583,14 @@ impl App {
             }
             UiId::DatabaseTableWhereInput => {
                 let target = crate::app::database::DatabaseTableInputTarget::Where;
-                let mouse_x = self.renderer.as_ref().map_or(0.0, |renderer| renderer.last_mouse_x);
+                let mouse_x = self
+                    .renderer
+                    .as_ref()
+                    .map_or(0.0, |renderer| renderer.last_mouse_x);
                 let input_index = self.database_table_input_index_at(target, mouse_x);
                 if let Some(tab) = self.active_database_table_tab_id()
-                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab)
+                {
                     state.grid.focused_input = Some(target);
                     state.grid.text_drag = Some(target);
                     state.grid.cell_editor = None;
@@ -2483,10 +2604,14 @@ impl App {
             }
             UiId::DatabaseTableOrderInput => {
                 let target = crate::app::database::DatabaseTableInputTarget::OrderBy;
-                let mouse_x = self.renderer.as_ref().map_or(0.0, |renderer| renderer.last_mouse_x);
+                let mouse_x = self
+                    .renderer
+                    .as_ref()
+                    .map_or(0.0, |renderer| renderer.last_mouse_x);
                 let input_index = self.database_table_input_index_at(target, mouse_x);
                 if let Some(tab) = self.active_database_table_tab_id()
-                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab)
+                {
                     state.grid.focused_input = Some(target);
                     state.grid.text_drag = Some(target);
                     state.grid.cell_editor = None;
@@ -2500,10 +2625,14 @@ impl App {
             }
             UiId::DatabaseTableCellEditor => {
                 let target = crate::app::database::DatabaseTableInputTarget::Cell;
-                let mouse_x = self.renderer.as_ref().map_or(0.0, |renderer| renderer.last_mouse_x);
+                let mouse_x = self
+                    .renderer
+                    .as_ref()
+                    .map_or(0.0, |renderer| renderer.last_mouse_x);
                 let input_index = self.database_table_input_index_at(target, mouse_x);
                 if let Some(tab) = self.active_database_table_tab_id()
-                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab)
+                {
                     state.grid.focused_input = Some(target);
                     state.grid.text_drag = Some(target);
                 }
@@ -2513,7 +2642,11 @@ impl App {
                     self.set_database_table_input_cursor(target, input_index, false);
                 }
             }
-            UiId::DatabaseTableHeader(column) => { if let Some(tab) = self.active_database_table_tab_id() { self.cycle_database_table_sort(tab, column); } }
+            UiId::DatabaseTableHeader(column) => {
+                if let Some(tab) = self.active_database_table_tab_id() {
+                    self.cycle_database_table_sort(tab, column);
+                }
+            }
             UiId::DatabaseTableColumnResize(column) => {
                 if let Some(tab) = self.active_database_table_tab_id() {
                     let now = std::time::Instant::now();
@@ -2539,7 +2672,8 @@ impl App {
                 let extend = self.modifiers.shift_key();
                 let toggle = self.modifiers.control_key() || self.modifiers.super_key();
                 if let Some(tab) = self.active_database_table_tab_id()
-                    && let Some((_, state)) = self.database_table_meta_state_mut(tab) {
+                    && let Some((_, state)) = self.database_table_meta_state_mut(tab)
+                {
                     state.grid.select_row(row, extend, toggle);
                     state.grid.focused_input = None;
                 }
@@ -2572,12 +2706,19 @@ impl App {
             UiId::DatabaseTableModalScroll => self.start_database_sql_preview_scroll_drag(false),
             UiId::DatabaseTableModalScrollX => self.start_database_sql_preview_scroll_drag(true),
             UiId::DatabaseTableModalPrimary => self.activate_database_table_modal_action(0),
-            UiId::DatabaseTableModalSecondary | UiId::DatabaseTableModalBackdrop => self.activate_database_table_modal_action(1),
+            UiId::DatabaseTableModalSecondary | UiId::DatabaseTableModalBackdrop => {
+                self.activate_database_table_modal_action(1)
+            }
             UiId::DatabaseTableModalTertiary => self.activate_database_table_modal_action(2),
-            UiId::DatabaseQueryRun => self.run_active_database_query(crate::app::database::DatabaseQueryMode::Run),
+            UiId::DatabaseQueryRun => {
+                self.run_active_database_query(crate::app::database::DatabaseQueryMode::Run)
+            }
             UiId::DatabaseQueryCancel => self.cancel_active_database_query(),
-            UiId::DatabaseQueryExplain => self.run_active_database_query(crate::app::database::DatabaseQueryMode::Explain),
-            UiId::DatabaseQueryExplainAnalyze => self.run_active_database_query(crate::app::database::DatabaseQueryMode::ExplainAnalyze),
+            UiId::DatabaseQueryExplain => {
+                self.run_active_database_query(crate::app::database::DatabaseQueryMode::Explain)
+            }
+            UiId::DatabaseQueryExplainAnalyze => self
+                .run_active_database_query(crate::app::database::DatabaseQueryMode::ExplainAnalyze),
             UiId::DatabaseQueryFormat => self.format_active_database_query(),
             UiId::DatabaseQueryHistory => self.toggle_active_database_query_history(),
             UiId::DatabaseQueryNextDiagnostic => {
@@ -2651,7 +2792,9 @@ impl App {
                 .database
                 .connections
                 .get(connection_index)
-                .map(|node| DatabaseContextTarget::Table(node.config.id, database_index, table_index)),
+                .map(|node| {
+                    DatabaseContextTarget::Table(node.config.id, database_index, table_index)
+                }),
             _ => None,
         };
         if let Some(target) = target {

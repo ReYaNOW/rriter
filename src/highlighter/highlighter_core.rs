@@ -344,6 +344,10 @@ fn resolve_color(
     color
 }
 
+pub(crate) fn hover_capture_color(name: &str, node_text: &str) -> [f32; 4] {
+    resolve_color(name, node_text, 0, &[])
+}
+
 fn is_python_attribute_property(node: tree_sitter::Node<'_>) -> bool {
     let Some(parent) = node.parent() else {
         return false;

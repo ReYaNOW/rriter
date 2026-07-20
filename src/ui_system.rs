@@ -559,11 +559,7 @@ impl UiClipRect {
     }
 }
 
-pub(crate) fn point_in_rect(
-    mx: f32,
-    my: f32,
-    rect: (f32, f32, f32, f32),
-) -> bool {
+pub(crate) fn point_in_rect(mx: f32, my: f32, rect: (f32, f32, f32, f32)) -> bool {
     rect.0.is_finite()
         && rect.1.is_finite()
         && rect.2.is_finite()
@@ -588,8 +584,7 @@ fn icon_hit_rect(
     } else {
         (x, y, size, size)
     };
-    UiClipRect::new(hit_x, hit_y, hit_w, hit_h)
-        .intersect(hit_x, hit_y, hit_w, hit_h)
+    UiClipRect::new(hit_x, hit_y, hit_w, hit_h).intersect(hit_x, hit_y, hit_w, hit_h)
 }
 
 impl UiElement {
@@ -612,10 +607,14 @@ impl UiElement {
                     && my >= *y
                     && my <= *y + *h
             }
-            UiElement::IconButton { x, y, size, active_square_width, .. } => {
-                icon_hit_rect(*x, *y, *size, *active_square_width)
-                    .is_some_and(|rect| rect.contains(mx, my))
-            }
+            UiElement::IconButton {
+                x,
+                y,
+                size,
+                active_square_width,
+                ..
+            } => icon_hit_rect(*x, *y, *size, *active_square_width)
+                .is_some_and(|rect| rect.contains(mx, my)),
         }
     }
 
@@ -710,12 +709,7 @@ impl UiRegistry {
     }
 
     pub fn push_interactions_enabled(&mut self, enabled: bool) {
-        let enabled = self
-            .interaction_stack
-            .last()
-            .copied()
-            .unwrap_or(true)
-            && enabled;
+        let enabled = self.interaction_stack.last().copied().unwrap_or(true) && enabled;
         self.interaction_stack.push(enabled);
     }
 
@@ -756,13 +750,7 @@ impl UiRegistry {
         pressed: bool,
     ) -> bool {
         if !self.interactions_enabled() {
-            button.render(
-                renderer,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                scale,
-                false,
-            );
+            button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         }
         self.register_button_view(id, button.as_view(), renderer, mx, my, scale, pressed)
@@ -780,19 +768,12 @@ impl UiRegistry {
         pressed: bool,
     ) -> bool {
         if !self.interactions_enabled() {
-            button.render(
-                renderer,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                scale,
-                false,
-            );
+            button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         }
         if let Some(clip) = self.active_clip() {
-            return self.register_button_view_clipped(
-                id, button, clip, renderer, mx, my, scale, pressed,
-            );
+            return self
+                .register_button_view_clipped(id, button, clip, renderer, mx, my, scale, pressed);
         }
         let Some(rect) = Self::button_rect(button) else {
             button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
@@ -830,13 +811,7 @@ impl UiRegistry {
         pressed: bool,
     ) -> bool {
         if !self.interactions_enabled() {
-            button.render(
-                renderer,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                scale,
-                false,
-            );
+            button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         }
         let Some(button_rect) = Self::button_rect(button) else {
@@ -882,13 +857,7 @@ impl UiRegistry {
         pressed: bool,
     ) -> bool {
         if !self.interactions_enabled() {
-            icon_button.render(
-                renderer,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                scale,
-                false,
-            );
+            icon_button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         }
         if let Some(clip) = self.active_clip() {
@@ -944,13 +913,7 @@ impl UiRegistry {
         pressed: bool,
     ) -> bool {
         if !self.interactions_enabled() {
-            icon_button.render(
-                renderer,
-                f32::NEG_INFINITY,
-                f32::NEG_INFINITY,
-                scale,
-                false,
-            );
+            icon_button.render(renderer, f32::NEG_INFINITY, f32::NEG_INFINITY, scale, false);
             return false;
         }
         let Some(hit_rect) = icon_hit_rect(
@@ -961,13 +924,8 @@ impl UiRegistry {
         ) else {
             return false;
         };
-        let Some(rect) = self.clipped_rect(
-            clip,
-            hit_rect.x,
-            hit_rect.y,
-            hit_rect.w,
-            hit_rect.h,
-        ) else {
+        let Some(rect) = self.clipped_rect(clip, hit_rect.x, hit_rect.y, hit_rect.w, hit_rect.h)
+        else {
             return false;
         };
         let hovered = rect.contains(mx, my);
@@ -1006,7 +964,9 @@ impl UiRegistry {
         if let Some(clip) = self.active_clip() {
             return self.register_text_input_clipped(id, x, y, w, h, clip, mx, my);
         }
-        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let Some(rect) = Self::valid_rect(x, y, w, h) else {
+            return false;
+        };
         let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::TextInput { id, x, y, w, h });
@@ -1085,7 +1045,9 @@ impl UiRegistry {
             }
             return hovered;
         }
-        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let Some(rect) = Self::valid_rect(x, y, w, h) else {
+            return false;
+        };
         let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });
@@ -1146,7 +1108,9 @@ impl UiRegistry {
             }
             return hovered;
         }
-        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let Some(rect) = Self::valid_rect(x, y, w, h) else {
+            return false;
+        };
         let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });
@@ -1208,7 +1172,9 @@ impl UiRegistry {
         if let Some(clip) = self.active_clip() {
             return self.register_rect_clipped(id, x, y, w, h, clip, mx, my);
         }
-        let Some(rect) = Self::valid_rect(x, y, w, h) else { return false; };
+        let Some(rect) = Self::valid_rect(x, y, w, h) else {
+            return false;
+        };
         let hovered = rect.contains(mx, my);
 
         self.elements.push(UiElement::Rect { id, x, y, w, h });
@@ -1518,16 +1484,7 @@ mod tests {
     fn assert_partial_hitbox_clips(id: UiId) {
         let mut registry = UiRegistry::new();
         let clip = UiClipRect::new(20.0, 20.0, 40.0, 30.0);
-        assert!(registry.register_rect_clipped(
-            id,
-            0.0,
-            10.0,
-            80.0,
-            60.0,
-            clip,
-            30.0,
-            30.0,
-        ));
+        assert!(registry.register_rect_clipped(id, 0.0, 10.0, 80.0, 60.0, clip, 30.0, 30.0,));
         assert_eq!(registry.rect_for(id), Some((20.0, 20.0, 40.0, 30.0)));
         assert_eq!(registry.find_at(10.0, 30.0), None);
     }
@@ -1624,8 +1581,16 @@ mod tests {
             custom_color: None,
         };
         let clip = UiClipRect::new(290.0, 30.0, 40.0, 40.0);
-        let rect = clip.intersect(icon.x, icon.y, icon.size, icon.size).unwrap();
-        registry.elements.push(UiElement::Rect { id: UiId::SearchClose, x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+        let rect = clip
+            .intersect(icon.x, icon.y, icon.size, icon.size)
+            .unwrap();
+        registry.elements.push(UiElement::Rect {
+            id: UiId::SearchClose,
+            x: rect.x,
+            y: rect.y,
+            w: rect.w,
+            h: rect.h,
+        });
         assert_eq!(registry.find_at(1.0, 50.0), None);
         assert_eq!(registry.find_at(305.0, 50.0), Some(UiId::SearchClose));
     }
@@ -1660,7 +1625,6 @@ mod tests {
         assert!(visible.contains(25.0, 25.0));
     }
 
-
     #[test]
     fn r3_001_explicit_clip_is_intersected_with_parent_clip() {
         let mut registry = UiRegistry::new();
@@ -1675,20 +1639,19 @@ mod tests {
             15.0,
             15.0,
         ));
-        assert_eq!(registry.rect_for(UiId::SearchClose), Some((10.0, 10.0, 20.0, 20.0)));
+        assert_eq!(
+            registry.rect_for(UiId::SearchClose),
+            Some((10.0, 10.0, 20.0, 20.0))
+        );
         assert_eq!(registry.find_at(5.0, 5.0), None);
     }
 
     #[test]
     fn r3_002_topmost_element_controls_cursor_shape() {
         let mut registry = UiRegistry::new();
-        assert!(registry.register_text_input(
-            UiId::SearchInput, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,
-        ));
+        assert!(registry.register_text_input(UiId::SearchInput, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,));
         assert_eq!(registry.cursor_code(), 2);
-        assert!(registry.register_rect(
-            UiId::SearchClose, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,
-        ));
+        assert!(registry.register_rect(UiId::SearchClose, 0.0, 0.0, 20.0, 20.0, 10.0, 10.0,));
         assert_eq!(registry.find_at(10.0, 10.0), Some(UiId::SearchClose));
         assert_eq!(registry.cursor_code(), 1);
     }
@@ -1696,22 +1659,21 @@ mod tests {
     #[test]
     fn r3_003_zero_sized_elements_are_not_registered() {
         let mut registry = UiRegistry::new();
-        assert!(!registry.register_rect(
-            UiId::SearchClose, 1.0, 1.0, 0.0, 20.0, 1.0, 10.0,
-        ));
-        assert!(!registry.register_text_input(
-            UiId::SearchInput, 1.0, 1.0, 20.0, 0.0, 10.0, 1.0,
-        ));
+        assert!(!registry.register_rect(UiId::SearchClose, 1.0, 1.0, 0.0, 20.0, 1.0, 10.0,));
+        assert!(!registry.register_text_input(UiId::SearchInput, 1.0, 1.0, 20.0, 0.0, 10.0, 1.0,));
         assert_eq!(registry.find_at(1.0, 1.0), None);
     }
 
     #[test]
     fn r3_004_negative_and_non_finite_rectangles_are_rejected_consistently() {
         let mut registry = UiRegistry::new();
-        for (w, h) in [(-1.0, 10.0), (10.0, -1.0), (f32::NAN, 10.0), (10.0, f32::INFINITY)] {
-            assert!(!registry.register_rect(
-                UiId::SearchClose, 0.0, 0.0, w, h, 0.0, 0.0,
-            ));
+        for (w, h) in [
+            (-1.0, 10.0),
+            (10.0, -1.0),
+            (f32::NAN, 10.0),
+            (10.0, f32::INFINITY),
+        ] {
+            assert!(!registry.register_rect(UiId::SearchClose, 0.0, 0.0, w, h, 0.0, 0.0,));
             assert!(!registry.register_rect_clipped(
                 UiId::SearchClose,
                 0.0,
@@ -1766,5 +1728,4 @@ mod tests {
             Some((10.0, 50.0, 80.0, 24.0))
         );
     }
-
 }

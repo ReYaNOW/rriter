@@ -219,6 +219,7 @@ impl LspServerKind {
         }
     }
 
+    #[cfg(test)]
     fn from_name(name: &str) -> Option<Self> {
         match name {
             "ruff" => Some(Self::Ruff),

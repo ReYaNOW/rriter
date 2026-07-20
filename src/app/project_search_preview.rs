@@ -155,9 +155,9 @@ impl ProjectSearchState {
             if tx.send(request).is_err() {
                 self.reset_preview_worker();
                 self.start_preview_worker();
-                self.error.get_or_insert_with(||
+                self.error.get_or_insert_with(|| {
                     "Предпросмотр поиска был перезапущен после сбоя".to_string()
-                );
+                });
                 return sent > 0;
             }
             self.preview_pending.insert(key);
@@ -544,19 +544,58 @@ mod tests {
         state.has_run = true;
         state.flat_rows = (0..40).map(ProjectSearchFlatRow::File).collect();
         let layout = ProjectSearchLayout {
-            query: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            include: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            exclude: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            filter: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            case_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            run_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
-            help_button: ProjectSearchRect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 },
+            query: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            include: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            exclude: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            filter: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            case_button: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            run_button: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
+            help_button: ProjectSearchRect {
+                x: 0.0,
+                y: 0.0,
+                w: 0.0,
+                h: 0.0,
+            },
             stats_y: 0.0,
-            list: ProjectSearchRect { x: 10.0, y: 20.0, w: 200.0, h: 120.0 },
+            list: ProjectSearchRect {
+                x: 10.0,
+                y: 20.0,
+                w: 200.0,
+                h: 120.0,
+            },
         };
         assert!(state.start_scrollbar_drag(&layout, 130.0, 1.0));
         assert_eq!(state.scroll.current, state.scroll.target);
         assert!(state.scroll.is_dragging);
     }
-
 }

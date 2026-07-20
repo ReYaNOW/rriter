@@ -26,9 +26,7 @@ impl DartClosingLabelsMode {
         match value.trim().to_ascii_lowercase().as_str() {
             "off" => Self::Off,
             "dart_server" | "server" => Self::DartServer,
-            "dart_server_and_blocks" | "server_and_blocks" | "all" => {
-                Self::DartServerAndBlocks
-            }
+            "dart_server_and_blocks" | "server_and_blocks" | "all" => Self::DartServerAndBlocks,
             _ => Self::default(),
         }
     }
@@ -228,10 +226,16 @@ mod tests {
     fn nesting_adjustment_saturates_at_both_bounds() {
         let mut settings = DartSettings::default();
         settings.adjust_minimum_nesting_depth(i8::MIN);
-        assert_eq!(settings.minimum_nesting_depth, DartSettings::MIN_NESTING_DEPTH);
+        assert_eq!(
+            settings.minimum_nesting_depth,
+            DartSettings::MIN_NESTING_DEPTH
+        );
 
         settings.adjust_minimum_nesting_depth(i8::MAX);
-        assert_eq!(settings.minimum_nesting_depth, DartSettings::MAX_NESTING_DEPTH);
+        assert_eq!(
+            settings.minimum_nesting_depth,
+            DartSettings::MAX_NESTING_DEPTH
+        );
     }
 
     #[test]

@@ -163,7 +163,12 @@ impl App {
                     let text = self.editor.get_full_text();
                     let ext = self.file_extension.clone();
                     let path = path.clone();
-                    lsp.notify_change(&path, &ext, &text, crate::editor::lsp_document_version(self.editor.version));
+                    lsp.notify_change(
+                        &path,
+                        &ext,
+                        &text,
+                        crate::editor::lsp_document_version(self.editor.version),
+                    );
                 }
             }
             let (line_start_byte, line_end_byte) =
@@ -254,22 +259,12 @@ impl App {
         if let Some((offset, len)) = deleted {
             self.highlighter.shift_delete(offset, len);
         }
-        self.highlighter.shift_insert(
-            self.editor.cursor - inserted_len,
-            inserted_len,
-            Some(text),
-        );
+        self.highlighter
+            .shift_insert(self.editor.cursor - inserted_len, inserted_len, Some(text));
         let trigger = (text == ".").then_some(".");
-        let wants_completion = text == "."
-            || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
-        self.finish_editor_edit_after_input(
-            false,
-            false,
-            false,
-            wants_completion,
-            trigger,
-            true,
-        );
+        let wants_completion =
+            text == "." || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
+        self.finish_editor_edit_after_input(false, false, false, wants_completion, trigger, true);
 
         let database_query_tab = self.active_tab_is_database_query();
         if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
@@ -883,8 +878,7 @@ impl App {
         }
 
         if is_edit {
-            let git_diff_undo =
-                matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
+            let git_diff_undo = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
             if self.finish_editor_edit_after_input(
                 is_git_diff_tab,
                 git_diff_undo,

@@ -40,7 +40,10 @@ pub(crate) fn app_panel_scroll_rect(
     panel_id: crate::app::PanelId,
     scale: f32,
 ) -> (f32, f32, f32, f32, f32) {
-    let renderer = app.renderer.as_ref().expect("panel input requires renderer");
+    let renderer = app
+        .renderer
+        .as_ref()
+        .expect("panel input requires renderer");
     let window_w = renderer.width;
     let window_h = renderer.height;
     let sidebar_w = 48.0 * scale;
@@ -175,11 +178,8 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
     if !app.ide_panel.is_open(crate::app::PanelId::Problems) {
         return None;
     }
-    let (content_x, content_y, content_w, content_h, _) = app_panel_scroll_rect(
-        app,
-        crate::app::PanelId::Problems,
-        scale,
-    );
+    let (content_x, content_y, content_w, content_h, _) =
+        app_panel_scroll_rect(app, crate::app::PanelId::Problems, scale);
     let list_y = content_y + 40.0 * scale;
     let track_h = (content_h - 40.0 * scale).max(0.0);
     let total_h = crate::app::problems_scroll_content_height(
@@ -221,10 +221,7 @@ fn active_terminal_scrollbar_layout(
         return None;
     }
     let renderer = app.renderer.as_ref()?;
-    let terminal = app
-        .ide_panel
-        .terminals
-        .get(app.ide_panel.active_terminal)?;
+    let terminal = app.ide_panel.terminals.get(app.ide_panel.active_terminal)?;
     let grid = crate::platform::lock_recover(&terminal.grid);
     if grid.is_alt {
         return None;
@@ -274,18 +271,15 @@ pub(super) use hover_mouse_logic::{
 };
 pub(crate) use hover_mouse_logic::{
     diagnostic_hover_byte_range_on_line, diagnostic_hover_type_target_at_x,
-    diagnostic_visual_byte_range_on_line,
-    embedded_editor_hover_byte_at_point, hover_bytes_share_token, hover_content_y_in_line_hitbox,
-    hover_screen_y_to_content_y, hover_token_bounds, move_type_hover_to_empty_space,
-    normalize_hover_byte, update_editor_hover_state_for_cursor,
-    with_embedded_editor_hover_renderer_context,
+    diagnostic_visual_byte_range_on_line, embedded_editor_hover_byte_at_point,
+    hover_bytes_share_token, hover_content_y_in_line_hitbox, hover_screen_y_to_content_y,
+    hover_token_bounds, move_type_hover_to_empty_space, normalize_hover_byte,
+    update_editor_hover_state_for_cursor, with_embedded_editor_hover_renderer_context,
 };
 pub use hover_state_core::{
     HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,
 };
-pub(crate) use hover_state_core::{
-    hover_popup_scrollbar_drag_target, hover_popup_scrollbar_thumb,
-};
+pub(crate) use hover_state_core::{hover_popup_scrollbar_drag_target, hover_popup_scrollbar_thumb};
 #[cfg(test)]
 pub use hover_state_core::{hover_source_line_y_band, is_in_hover_popup_or_bridge};
 
@@ -297,25 +291,31 @@ mod panel_geometry_tests {
     fn shared_scrollbar_drag_preserves_pointer_offset_across_moves() {
         let mut scroll = crate::scroll::ScrollState::new(15.0);
         scroll.jump_to(100.0);
-        assert!(begin_scrollbar_drag(&mut scroll, 75.0, 0.0, 200.0, 300.0, 20.0));
+        assert!(begin_scrollbar_drag(
+            &mut scroll,
+            75.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
         let offset = scroll.drag_offset;
         assert!(offset > 0.0);
-        assert!(update_scrollbar_drag(&mut scroll, 95.0, 0.0, 200.0, 300.0, 20.0));
+        assert!(update_scrollbar_drag(
+            &mut scroll,
+            95.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
         assert_eq!(scroll.drag_offset, offset);
         assert!(scroll.is_dragging);
     }
 
     #[test]
     fn top_panel_input_stops_above_every_visible_bottom_panel() {
-        let (_, y, _, h) = panel_scroll_rect(
-            true,
-            1.0,
-            48.0,
-            240.0,
-            180.0,
-            1200.0,
-            900.0,
-        );
+        let (_, y, _, h) = panel_scroll_rect(true, 1.0, 48.0, 240.0, 180.0, 1200.0, 900.0);
         assert_eq!(y, 32.0);
         assert_eq!(h, 658.0);
     }

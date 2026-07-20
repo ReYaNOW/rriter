@@ -43,11 +43,7 @@ fn module_path_from_definition_path_for_platform(
         text
     }
 
-    fn component_eq(
-        left: &str,
-        right: &str,
-        platform: crate::platform::PlatformKind,
-    ) -> bool {
+    fn component_eq(left: &str, right: &str, platform: crate::platform::PlatformKind) -> bool {
         if platform == crate::platform::PlatformKind::Windows {
             left.to_lowercase() == right.to_lowercase()
         } else {
@@ -1251,14 +1247,9 @@ mod tests {
             "class Service:\n    client = make_client()\n\nmodule_value  = make_value()\nprint(module_value)\n",
         );
         let hover_offset = editor.get_full_text().rfind("module_value").unwrap();
-        let hover = source_signature_for_hover(
-            &editor,
-            hover_offset,
-            false,
-            None,
-            Some("pkg.module"),
-        )
-        .expect("expected module variable hover");
+        let hover =
+            source_signature_for_hover(&editor, hover_offset, false, None, Some("pkg.module"))
+                .expect("expected module variable hover");
 
         assert_eq!(
             hover,
@@ -1269,17 +1260,18 @@ mod tests {
     #[test]
     fn definition_attribute_hover_accepts_spaced_annotation() {
         let mut tmp = std::env::temp_dir();
-        tmp.push(format!("rriter_attr_hover_{}_spaced.py", std::process::id()));
-        std::fs::write(&tmp, "class Service:\n    client : Client = make_client()\n")
-            .expect("expected temp file write");
-
-        let hover = source_attribute_hover_from_definition_file(
+        tmp.push(format!(
+            "rriter_attr_hover_{}_spaced.py",
+            std::process::id()
+        ));
+        std::fs::write(
             &tmp,
-            "client",
-            "pkg.module",
-            None,
+            "class Service:\n    client : Client = make_client()\n",
         )
-        .expect("expected definition attribute hover");
+        .expect("expected temp file write");
+
+        let hover = source_attribute_hover_from_definition_file(&tmp, "client", "pkg.module", None)
+            .expect("expected definition attribute hover");
 
         assert_eq!(
             hover,
@@ -1291,20 +1283,19 @@ mod tests {
     #[test]
     fn definition_attribute_hover_does_not_inherit_class_after_dedent() {
         let mut tmp = std::env::temp_dir();
-        tmp.push(format!("rriter_attr_hover_{}_dedent.py", std::process::id()));
+        tmp.push(format!(
+            "rriter_attr_hover_{}_dedent.py",
+            std::process::id()
+        ));
         std::fs::write(
             &tmp,
             "class Service:\n    client = make_client()\n\nmodule_value = make_value()\n",
         )
         .expect("expected temp file write");
 
-        let hover = source_attribute_hover_from_definition_file(
-            &tmp,
-            "module_value",
-            "pkg.module",
-            None,
-        )
-        .expect("expected definition variable hover");
+        let hover =
+            source_attribute_hover_from_definition_file(&tmp, "module_value", "pkg.module", None)
+                .expect("expected definition variable hover");
 
         assert_eq!(
             hover,
@@ -1503,7 +1494,6 @@ where
     state.selecting = false;
     true
 }
-
 
 #[cfg(test)]
 mod agent3_regression_tests {

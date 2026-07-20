@@ -183,7 +183,10 @@ pub fn load_keychain_secret(purpose: &str) -> io::Result<Vec<u8>> {
         )
     };
     if status == ERR_SEC_ITEM_NOT_FOUND {
-        return Err(io::Error::new(io::ErrorKind::NotFound, "Keychain item not found"));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "Keychain item not found",
+        ));
     }
     os_status(status, "Keychain lookup")?;
     if password_data.is_null() {
@@ -237,7 +240,8 @@ pub fn delete_keychain_secret(purpose: &str) -> io::Result<()> {
 pub fn current_process_memory_kb() -> Option<usize> {
     const MACH_TASK_BASIC_INFO: u32 = 20;
     let mut info = MachTaskBasicInfo::default();
-    let mut count = (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<c_int>()) as u32;
+    let mut count =
+        (std::mem::size_of::<MachTaskBasicInfo>() / std::mem::size_of::<c_int>()) as u32;
     let status = unsafe {
         task_info(
             mach_task_self_,
@@ -259,7 +263,6 @@ pub fn open_url(url: &str) -> io::Result<()> {
         )))
     }
 }
-
 
 pub(super) fn run_elevated_helper(executable: &Path, request: &Path) -> io::Result<i32> {
     const SCRIPT: &str = r#"on run argv

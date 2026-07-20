@@ -145,7 +145,11 @@ impl App {
     }
 
     pub fn handle_file_tree_modal_ime_commit(&mut self, text: &str) -> bool {
-        if self.ide_panel.api.mock_contract_field_delete_dialog.is_some()
+        if self
+            .ide_panel
+            .api
+            .mock_contract_field_delete_dialog
+            .is_some()
             || self.ide_panel.api.mock_route_reset_dialog.is_some()
             || self.ide_panel.git.confirm_dialog.is_some()
             || self.ide_panel.file_tree_context_menu.is_some()
@@ -311,8 +315,7 @@ impl App {
 
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
-            let text_input_allowed =
-                crate::platform::text_input_modifiers_allowed(self.modifiers);
+            let text_input_allowed = crate::platform::text_input_modifiers_allowed(self.modifiers);
             let shift = self.modifiers.shift_key();
             let mut submit = false;
             let mut cancel = false;

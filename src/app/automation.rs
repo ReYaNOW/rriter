@@ -39,10 +39,7 @@ fn timed_scroll_plan(elapsed: f32, duration_secs: u16) -> TimedScrollPlan {
     } else if elapsed < second_scroll_start {
         (first_scroll_end, 0.0)
     } else {
-        (
-            first_scroll_end + (elapsed - second_scroll_start),
-            -1.0,
-        )
+        (first_scroll_end + (elapsed - second_scroll_start), -1.0)
     };
     TimedScrollPlan {
         expected_impulses: (active_elapsed * TIMED_SCROLL_HZ).floor() as u32,
@@ -111,7 +108,10 @@ pub struct AutomationOptions {
 #[derive(Debug, Clone)]
 enum AutomationStep {
     WaitReady,
-    ResizeWindow { width: u32, height: u32 },
+    ResizeWindow {
+        width: u32,
+        height: u32,
+    },
     ApplyWorkspace,
     WaitFileTree,
     WaitFrames(u16),
@@ -133,7 +133,9 @@ enum AutomationStep {
     NextSearchResult,
     PreviousSearchResult,
     CloseSearch,
-    ScrollEditorTimed { duration_secs: u16 },
+    ScrollEditorTimed {
+        duration_secs: u16,
+    },
     JumpMinimap(f32),
     ToggleFirstFold,
     SetEditorCursorAfter(&'static str),
@@ -144,7 +146,9 @@ enum AutomationStep {
         needle: &'static str,
         text: &'static str,
     },
-    ScrollHoverTimed { duration_secs: u16 },
+    ScrollHoverTimed {
+        duration_secs: u16,
+    },
     ClearHover,
     SetProjectSearchQuery(&'static str),
     RunProjectSearch,
@@ -153,8 +157,12 @@ enum AutomationStep {
     WaitGit,
     ToggleGitGraph,
     WaitGitGraph,
-    LoadGitGraph { min_commits: usize },
-    ScrollGitGraphTimed { duration_secs: u16 },
+    LoadGitGraph {
+        min_commits: usize,
+    },
+    ScrollGitGraphTimed {
+        duration_secs: u16,
+    },
     WaitTerminal,
     RunTerminalHtop,
     WaitTerminalHtopVisible,
@@ -165,13 +173,17 @@ enum AutomationStep {
     ImportApiSpec,
     WaitApiSpec,
     WaitApiRoutesPanel,
-    ScrollApiRoutesTimed { duration_secs: u16 },
+    ScrollApiRoutesTimed {
+        duration_secs: u16,
+    },
     ResetApiPanelScroll,
     SetApiRouteFilter(&'static str),
     WaitApiRouteFilter(&'static str),
     OpenApiRouteMatching(&'static str),
     WaitApiRouteOpen(&'static str),
-    ScrollApiTabTimed { duration_secs: u16 },
+    ScrollApiTabTimed {
+        duration_secs: u16,
+    },
     OpenApiAuth,
     FocusApiAuth(&'static str),
     SetApiAuthValue {
@@ -276,7 +288,9 @@ impl AutomationStep {
             Self::SetApiAuthValue { scheme, .. } => format!("set-api-auth-value:{scheme}"),
             Self::SaveApiAuth { scheme, .. } => format!("save-api-auth:{scheme}"),
             Self::StartApiRequest => "start-api-request".to_string(),
-            Self::WaitApiResponse { expected_status, .. } => {
+            Self::WaitApiResponse {
+                expected_status, ..
+            } => {
                 format!("wait-api-response:{expected_status}")
             }
             Self::ResetApiTabScroll => "reset-api-tab-scroll".to_string(),
@@ -294,9 +308,7 @@ impl AutomationStep {
         match self {
             Self::WaitReady | Self::WaitFileTree => Duration::from_secs(45),
             Self::WaitHighlight => Duration::from_secs(90),
-            Self::WaitProjectSearch | Self::WaitGit | Self::WaitGitGraph => {
-                Duration::from_secs(60)
-            }
+            Self::WaitProjectSearch | Self::WaitGit | Self::WaitGitGraph => Duration::from_secs(60),
             Self::LoadGitGraph { .. } => Duration::from_secs(120),
             Self::WaitTerminal
             | Self::WaitTerminalHtopVisible
@@ -428,7 +440,8 @@ impl AutomationController {
     ) -> StepResult {
         match step {
             AutomationStep::WaitReady => {
-                if app.is_ready && app.is_ide_mode && app.window.is_some() && app.renderer.is_some() {
+                if app.is_ready && app.is_ide_mode && app.window.is_some() && app.renderer.is_some()
+                {
                     StepResult::Done
                 } else {
                     StepResult::Pending
@@ -493,7 +506,12 @@ impl AutomationController {
                     .file_tree_nodes
                     .iter()
                     .position(|node| node.is_dir && node.path == self.options.workspace)
-                    .or_else(|| app.ide_panel.file_tree_nodes.iter().position(|node| node.is_dir));
+                    .or_else(|| {
+                        app.ide_panel
+                            .file_tree_nodes
+                            .iter()
+                            .position(|node| node.is_dir)
+                    });
                 let Some(node_idx) = node_idx else {
                     return StepResult::Pending;
                 };
@@ -505,7 +523,10 @@ impl AutomationController {
             AutomationStep::OpenFile(relative) => {
                 let path = self.options.workspace.join(relative);
                 if !path.is_file() {
-                    return StepResult::Failed(format!("fixture file is missing: {}", path.display()));
+                    return StepResult::Failed(format!(
+                        "fixture file is missing: {}",
+                        path.display()
+                    ));
                 }
                 app.open_file_in_tab(path, false);
                 StepResult::Done
@@ -587,7 +608,9 @@ impl AutomationController {
                 if app.search_results.is_empty() {
                     return StepResult::Failed("editor search results disappeared".to_string());
                 }
-                let next = app.search_current_idx.map_or(0, |idx| (idx + 1) % app.search_results.len());
+                let next = app
+                    .search_current_idx
+                    .map_or(0, |idx| (idx + 1) % app.search_results.len());
                 app.search_current_idx = Some(next);
                 app.jump_to_search_result();
                 request_redraw(app);
@@ -598,7 +621,11 @@ impl AutomationController {
                     return StepResult::Failed("editor search results disappeared".to_string());
                 }
                 let previous = app.search_current_idx.map_or(0, |idx| {
-                    if idx == 0 { app.search_results.len() - 1 } else { idx - 1 }
+                    if idx == 0 {
+                        app.search_results.len() - 1
+                    } else {
+                        idx - 1
+                    }
                 });
                 app.search_current_idx = Some(previous);
                 app.jump_to_search_result();
@@ -613,24 +640,25 @@ impl AutomationController {
                 request_redraw(app);
                 StepResult::Done
             }
-            AutomationStep::ScrollEditorTimed { duration_secs } => self.timed_scroll(
-                app,
-                now,
-                *duration_secs,
-                |app, direction| {
+            AutomationStep::ScrollEditorTimed { duration_secs } => {
+                self.timed_scroll(app, now, *duration_secs, |app, direction| {
                     let max_scroll = app.renderer.as_ref().map_or(0.0, |renderer| {
-                        (app.editor.line_offsets.len() as f32 * renderer.line_height - renderer.height)
+                        (app.editor.line_offsets.len() as f32 * renderer.line_height
+                            - renderer.height)
                             .max(0.0)
                     });
                     app.scroll_y.scroll_by(36.0 * direction);
                     app.scroll_y.clamp_target(0.0, max_scroll);
-                },
-            ),
+                })
+            }
             AutomationStep::JumpMinimap(fraction) => {
                 let Some(renderer) = app.renderer.as_mut() else {
                     return StepResult::Pending;
                 };
-                let height = app.window.as_ref().map_or(renderer.height, |window| window.inner_size().height as f32);
+                let height = app
+                    .window
+                    .as_ref()
+                    .map_or(renderer.height, |window| window.inner_size().height as f32);
                 let max_scroll = renderer.get_max_scroll(&app.editor, height);
                 let target = (max_scroll * fraction.clamp(0.0, 1.0)).round();
                 app.scroll_y.jump_to(target);
@@ -666,7 +694,10 @@ impl AutomationController {
             AutomationStep::TriggerAutocomplete(expected) => {
                 app.update_autocomplete();
                 if app.autocomplete_active
-                    && app.autocomplete_options.iter().any(|(item, _)| item.word == *expected)
+                    && app
+                        .autocomplete_options
+                        .iter()
+                        .any(|(item, _)| item.word == *expected)
                 {
                     request_redraw(app);
                     StepResult::Done
@@ -698,9 +729,7 @@ impl AutomationController {
                     StepResult::Failed(format!("completion was not applied: {expected}"))
                 }
             }
-            AutomationStep::ShowHover { needle, text } => {
-                show_hover_semantic(app, needle, text)
-            }
+            AutomationStep::ShowHover { needle, text } => show_hover_semantic(app, needle, text),
             AutomationStep::ScrollHoverTimed { duration_secs } => {
                 let hover_ready = crate::app::mouse::HOVER_STATE.with(|state| {
                     let state = state.borrow();
@@ -732,11 +761,13 @@ impl AutomationController {
             }
             AutomationStep::SetProjectSearchQuery(query) => {
                 open_panel_semantic(app, PanelId::Search);
-                app.ide_panel.project_search.query_editor.set_text_clean(query);
+                app.ide_panel
+                    .project_search
+                    .query_editor
+                    .set_text_clean(query);
                 app.ide_panel.project_search.query_editor.cursor = query.len();
-                app.ide_panel.project_search.focused = Some(
-                    crate::app::project_search::ProjectSearchField::Query,
-                );
+                app.ide_panel.project_search.focused =
+                    Some(crate::app::project_search::ProjectSearchField::Query);
                 app.ide_panel.project_search.dirty = true;
                 request_redraw(app);
                 StepResult::Done
@@ -751,7 +782,9 @@ impl AutomationController {
                     if let Some(error) = &search.error {
                         StepResult::Failed(format!("project search failed: {error}"))
                     } else if search.total_matches == 0 {
-                        StepResult::Failed("project search completed without the fixture marker".to_string())
+                        StepResult::Failed(
+                            "project search completed without the fixture marker".to_string(),
+                        )
                     } else {
                         StepResult::Done
                     }
@@ -760,7 +793,13 @@ impl AutomationController {
                 }
             }
             AutomationStep::JumpFirstProjectSearchMatch => {
-                if app.ide_panel.project_search.results.first().is_some_and(|file| !file.matches.is_empty()) {
+                if app
+                    .ide_panel
+                    .project_search
+                    .results
+                    .first()
+                    .is_some_and(|file| !file.matches.is_empty())
+                {
                     app.handle_project_search_match_click(0, 0);
                     StepResult::Done
                 } else {
@@ -779,7 +818,9 @@ impl AutomationController {
                 let git = &app.ide_panel.git;
                 if !git.pending && !git.status_loading() {
                     if git.snapshot.workspaces.is_empty() {
-                        StepResult::Failed("Git panel did not discover the fixture repository".to_string())
+                        StepResult::Failed(
+                            "Git panel did not discover the fixture repository".to_string(),
+                        )
                     } else {
                         StepResult::Done
                     }
@@ -822,12 +863,12 @@ impl AutomationController {
                 app.load_more_git_graph_commits();
                 StepResult::Pending
             }
-            AutomationStep::ScrollGitGraphTimed { duration_secs } => self.timed_scroll(
-                app,
-                now,
-                *duration_secs,
-                |app, direction| {
-                    let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+            AutomationStep::ScrollGitGraphTimed { duration_secs } => {
+                self.timed_scroll(app, now, *duration_secs, |app, direction| {
+                    let scale = app
+                        .renderer
+                        .as_ref()
+                        .map_or(1.0, |renderer| renderer.scale_factor);
                     let view_h = app.renderer.as_ref().map_or(600.0 * scale, |renderer| {
                         (renderer.height * 0.55).max(240.0 * scale)
                     });
@@ -839,8 +880,8 @@ impl AutomationController {
                     app.ide_panel.git.graph_scroll.anim_speed = 7.0;
                     app.ide_panel.git.graph_scroll.scroll_by(120.0 * direction);
                     app.ide_panel.git.graph_scroll.clamp_target(0.0, max_scroll);
-                },
-            ),
+                })
+            }
             AutomationStep::WaitTerminal => {
                 if app.ide_panel.is_open(PanelId::Terminal) && !app.ide_panel.terminals.is_empty() {
                     StepResult::Done
@@ -849,21 +890,17 @@ impl AutomationController {
                 }
             }
             AutomationStep::RunTerminalHtop => write_terminal_semantic(app, b"htop\r"),
-            AutomationStep::WaitTerminalHtopVisible => {
-                match active_terminal_tui_state(app) {
-                    Some(state) if state.alternate_screen && state.non_blank_cells >= 20 => {
-                        StepResult::Done
-                    }
-                    _ => StepResult::Pending,
+            AutomationStep::WaitTerminalHtopVisible => match active_terminal_tui_state(app) {
+                Some(state) if state.alternate_screen && state.non_blank_cells >= 20 => {
+                    StepResult::Done
                 }
-            }
+                _ => StepResult::Pending,
+            },
             AutomationStep::InterruptTerminal => write_terminal_semantic(app, b"\x03"),
-            AutomationStep::WaitTerminalHtopExit => {
-                match active_terminal_tui_state(app) {
-                    Some(state) if !state.alternate_screen => StepResult::Done,
-                    _ => StepResult::Pending,
-                }
-            }
+            AutomationStep::WaitTerminalHtopExit => match active_terminal_tui_state(app) {
+                Some(state) if !state.alternate_screen => StepResult::Done,
+                _ => StepResult::Pending,
+            },
             AutomationStep::RunTerminalBasicCommand => {
                 write_terminal_semantic(app, terminal_basic_command())
             }
@@ -876,7 +913,10 @@ impl AutomationController {
             AutomationStep::ImportApiSpec => {
                 let path = self.options.workspace.join("openapi.json");
                 if !path.is_file() {
-                    return StepResult::Failed(format!("OpenAPI fixture is missing: {}", path.display()));
+                    return StepResult::Failed(format!(
+                        "OpenAPI fixture is missing: {}",
+                        path.display()
+                    ));
                 }
                 app.start_api_local_import(path);
                 StepResult::Done
@@ -906,13 +946,16 @@ impl AutomationController {
                     StepResult::Pending
                 }
             }
-            AutomationStep::ScrollApiRoutesTimed { duration_secs } => self.timed_scroll(
-                app,
-                now,
-                *duration_secs,
-                |app, direction| {
-                    let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-                    let visible_h = app.renderer.as_ref().map_or(720.0, |renderer| renderer.height);
+            AutomationStep::ScrollApiRoutesTimed { duration_secs } => {
+                self.timed_scroll(app, now, *duration_secs, |app, direction| {
+                    let scale = app
+                        .renderer
+                        .as_ref()
+                        .map_or(1.0, |renderer| renderer.scale_factor);
+                    let visible_h = app
+                        .renderer
+                        .as_ref()
+                        .map_or(720.0, |renderer| renderer.height);
                     let max_scroll = crate::app::api_client::api_panel_max_scroll(
                         &app.ide_panel.api,
                         visible_h,
@@ -920,8 +963,8 @@ impl AutomationController {
                     );
                     app.ide_panel.api.panel_scroll.scroll_by(72.0 * direction);
                     app.ide_panel.api.panel_scroll.clamp_target(0.0, max_scroll);
-                },
-            ),
+                })
+            }
             AutomationStep::ResetApiPanelScroll => {
                 reset_scroll(&mut app.ide_panel.api.panel_scroll);
                 StepResult::Done
@@ -962,7 +1005,9 @@ impl AutomationController {
                         || route.path.contains(needle)
                 });
                 let Some(route_idx) = route_idx else {
-                    return StepResult::Failed(format!("OpenAPI fixture route not found: {needle}"));
+                    return StepResult::Failed(format!(
+                        "OpenAPI fixture route not found: {needle}"
+                    ));
                 };
                 app.commit_api_focus();
                 app.ide_panel.api.focused = None;
@@ -979,20 +1024,30 @@ impl AutomationController {
                 let opened = app.active_api_tab().is_some_and(|(meta, state)| {
                     state.route_idx.is_some()
                         && (meta.route_path.contains(needle)
-                            || app.ide_panel.api.models.get(&meta.spec_id)
-                                .and_then(|model| state.route_idx.and_then(|idx| model.routes.get(idx)))
+                            || app
+                                .ide_panel
+                                .api
+                                .models
+                                .get(&meta.spec_id)
+                                .and_then(|model| {
+                                    state.route_idx.and_then(|idx| model.routes.get(idx))
+                                })
                                 .is_some_and(|route| {
-                                    route.operation_id.contains(needle) || route.summary.contains(needle)
+                                    route.operation_id.contains(needle)
+                                        || route.summary.contains(needle)
                                 }))
                 });
-                if opened { StepResult::Done } else { StepResult::Pending }
+                if opened {
+                    StepResult::Done
+                } else {
+                    StepResult::Pending
+                }
             }
-            AutomationStep::ScrollApiTabTimed { duration_secs } => self.timed_scroll(
-                app,
-                now,
-                *duration_secs,
-                |app, direction| scroll_active_api_tab(app, 72.0 * direction),
-            ),
+            AutomationStep::ScrollApiTabTimed { duration_secs } => {
+                self.timed_scroll(app, now, *duration_secs, |app, direction| {
+                    scroll_active_api_tab(app, 72.0 * direction)
+                })
+            }
             AutomationStep::OpenApiAuth => {
                 let Some((meta, _)) = app.active_api_tab() else {
                     return StepResult::Pending;
@@ -1013,7 +1068,10 @@ impl AutomationController {
                 };
                 let spec_id = meta.spec_id;
                 let Some(_scheme_idx) = app.ide_panel.api.models.get(&spec_id).and_then(|model| {
-                    model.security_schemes.iter().position(|candidate| candidate.name == *scheme)
+                    model
+                        .security_schemes
+                        .iter()
+                        .position(|candidate| candidate.name == *scheme)
                 }) else {
                     return StepResult::Failed(format!("OpenAPI auth scheme not found: {scheme}"));
                 };
@@ -1069,7 +1127,10 @@ impl AutomationController {
                 };
                 let spec_id = meta.spec_id;
                 let Some(_scheme_idx) = app.ide_panel.api.models.get(&spec_id).and_then(|model| {
-                    model.security_schemes.iter().position(|candidate| candidate.name == *scheme)
+                    model
+                        .security_schemes
+                        .iter()
+                        .position(|candidate| candidate.name == *scheme)
                 }) else {
                     return StepResult::Failed(format!("OpenAPI auth scheme not found: {scheme}"));
                 };
@@ -1094,11 +1155,13 @@ impl AutomationController {
                         .api
                         .auth
                         .entry(spec_id, scheme)
-                        .map(|entry| format!(
-                            "value_len={} token_type={:?}",
-                            entry.value.len(),
-                            entry.token_type
-                        ))
+                        .map(|entry| {
+                            format!(
+                                "value_len={} token_type={:?}",
+                                entry.value.len(),
+                                entry.token_type
+                            )
+                        })
                         .unwrap_or_else(|| "missing entry".to_string());
                     StepResult::Failed(format!(
                         "OpenAPI auth value was not saved for scheme {scheme}; expected_len={} editor_len={} saved={saved}",
@@ -1142,8 +1205,7 @@ impl AutomationController {
                 if response.status != Some(*expected_status) {
                     return StepResult::Failed(format!(
                         "local API request returned {:?}, expected {expected_status}; body={:?}",
-                        response.status,
-                        response.body
+                        response.status, response.body
                     ));
                 }
                 if !response.body.contains(body_marker) {
@@ -1186,30 +1248,50 @@ impl AutomationController {
                 StepResult::Done
             }
             AutomationStep::AddSettingsIgnore(pattern) => {
-                if !app.ide_ignore_patterns.iter().any(|candidate| candidate == pattern) {
+                if !app
+                    .ide_ignore_patterns
+                    .iter()
+                    .any(|candidate| candidate == pattern)
+                {
                     app.ide_ignore_patterns.push((*pattern).to_string());
                     app.save_current_config();
                     app.refresh_file_tree();
                     request_redraw(app);
                 }
-                if app.ide_ignore_patterns.iter().any(|candidate| candidate == pattern) {
+                if app
+                    .ide_ignore_patterns
+                    .iter()
+                    .any(|candidate| candidate == pattern)
+                {
                     StepResult::Done
                 } else {
                     StepResult::Failed(format!("settings ignore pattern was not added: {pattern}"))
                 }
             }
             AutomationStep::RemoveSettingsIgnore(pattern) => {
-                let Some(index) = app.ide_ignore_patterns.iter().position(|candidate| candidate == pattern) else {
-                    return StepResult::Failed(format!("settings ignore pattern not found: {pattern}"));
+                let Some(index) = app
+                    .ide_ignore_patterns
+                    .iter()
+                    .position(|candidate| candidate == pattern)
+                else {
+                    return StepResult::Failed(format!(
+                        "settings ignore pattern not found: {pattern}"
+                    ));
                 };
                 app.ide_ignore_patterns.remove(index);
                 app.save_current_config();
                 app.refresh_file_tree();
                 request_redraw(app);
-                if app.ide_ignore_patterns.iter().all(|candidate| candidate != pattern) {
+                if app
+                    .ide_ignore_patterns
+                    .iter()
+                    .all(|candidate| candidate != pattern)
+                {
                     StepResult::Done
                 } else {
-                    StepResult::Failed(format!("settings ignore pattern was not removed: {pattern}"))
+                    StepResult::Failed(format!(
+                        "settings ignore pattern was not removed: {pattern}"
+                    ))
                 }
             }
             AutomationStep::RefreshSettingsTools => {
@@ -1415,9 +1497,8 @@ fn open_panel_semantic(app: &mut App, panel: PanelId) {
         }
         PanelId::Git => app.refresh_git_panel(),
         PanelId::Search => {
-            app.ide_panel.project_search.focused = Some(
-                crate::app::project_search::ProjectSearchField::Query,
-            );
+            app.ide_panel.project_search.focused =
+                Some(crate::app::project_search::ProjectSearchField::Query);
         }
         _ => {}
     }
@@ -1437,35 +1518,30 @@ fn open_file_tree_context_semantic(app: &mut App) -> StepResult {
     } else {
         node.path.parent().map(Path::to_path_buf)
     };
-    app.ide_panel.file_tree_context_menu = Some(
-        crate::app::file_tree::FileTreeContextMenu {
-            x: 96.0,
-            y: 96.0,
-            target_dir,
-            target_path: Some(node.path),
-            target_is_dir: node.is_dir,
-            entries: vec![
-                crate::app::file_tree::FileTreeMenuAction::CreateFile,
-                crate::app::file_tree::FileTreeMenuAction::CreateDirectory,
-                crate::app::file_tree::FileTreeMenuAction::Delete,
-                crate::app::file_tree::FileTreeMenuAction::Copy,
-                crate::app::file_tree::FileTreeMenuAction::Cut,
-                crate::app::file_tree::FileTreeMenuAction::Rename,
-                crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
-                crate::app::file_tree::FileTreeMenuAction::CopyAbsolutePath,
-                crate::app::file_tree::FileTreeMenuAction::CopyRelativePath,
-            ],
-            opened_at: Instant::now(),
-        },
-    );
+    app.ide_panel.file_tree_context_menu = Some(crate::app::file_tree::FileTreeContextMenu {
+        x: 96.0,
+        y: 96.0,
+        target_dir,
+        target_path: Some(node.path),
+        target_is_dir: node.is_dir,
+        entries: vec![
+            crate::app::file_tree::FileTreeMenuAction::CreateFile,
+            crate::app::file_tree::FileTreeMenuAction::CreateDirectory,
+            crate::app::file_tree::FileTreeMenuAction::Delete,
+            crate::app::file_tree::FileTreeMenuAction::Copy,
+            crate::app::file_tree::FileTreeMenuAction::Cut,
+            crate::app::file_tree::FileTreeMenuAction::Rename,
+            crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
+            crate::app::file_tree::FileTreeMenuAction::CopyAbsolutePath,
+            crate::app::file_tree::FileTreeMenuAction::CopyRelativePath,
+        ],
+        opened_at: Instant::now(),
+    });
     request_redraw(app);
     StepResult::Done
 }
 
-fn hover_popup_status(
-    state: &crate::app::mouse::HoverState,
-    byte_offset: usize,
-) -> (bool, bool) {
+fn hover_popup_status(state: &crate::app::mouse::HoverState, byte_offset: usize) -> (bool, bool) {
     let matching = state
         .popup
         .as_ref()
@@ -1507,7 +1583,10 @@ fn show_hover_semantic(app: &mut App, needle: &str, text: &str) -> StepResult {
         return StepResult::Pending;
     }
 
-    let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+    let scale = app
+        .renderer
+        .as_ref()
+        .map_or(1.0, |renderer| renderer.scale_factor);
     let anchor = (340.0 * scale, 180.0 * scale);
     let mut popup = crate::app::events::source_hover_popup_for_editor(
         &app.editor,
@@ -1533,8 +1612,14 @@ fn show_hover_semantic(app: &mut App, needle: &str, text: &str) -> StepResult {
 }
 
 fn scroll_active_api_tab(app: &mut App, delta: f32) {
-    let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-    let visible_h = app.renderer.as_ref().map_or(720.0, |renderer| renderer.height);
+    let scale = app
+        .renderer
+        .as_ref()
+        .map_or(1.0, |renderer| renderer.scale_factor);
+    let visible_h = app
+        .renderer
+        .as_ref()
+        .map_or(720.0, |renderer| renderer.height);
     let Some((meta, state)) = app.active_api_tab() else {
         return;
     };
@@ -1587,15 +1672,12 @@ fn terminal_basic_command() -> &'static [u8] {
 }
 
 fn terminal_grid_contains(grid: &crate::app::terminal::TermGrid, needle: &str) -> bool {
-    grid.scrollback
-        .iter()
-        .chain(grid.lines.iter())
-        .any(|line| {
-            line.iter()
-                .map(|cell| cell.c)
-                .collect::<String>()
-                .contains(needle)
-        })
+    grid.scrollback.iter().chain(grid.lines.iter()).any(|line| {
+        line.iter()
+            .map(|cell| cell.c)
+            .collect::<String>()
+            .contains(needle)
+    })
 }
 
 fn active_terminal_contains(app: &App, needle: &str) -> Option<bool> {
@@ -1606,11 +1688,7 @@ fn active_terminal_contains(app: &App, needle: &str) -> Option<bool> {
 
 fn write_terminal_semantic(app: &mut App, bytes: &[u8]) -> StepResult {
     app.ide_panel.terminal_focused = true;
-    let Some(terminal) = app
-        .ide_panel
-        .terminals
-        .get(app.ide_panel.active_terminal)
-    else {
+    let Some(terminal) = app.ide_panel.terminals.get(app.ide_panel.active_terminal) else {
         return StepResult::Pending;
     };
     match terminal.write_input(bytes) {
@@ -1657,19 +1735,27 @@ fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
         if fixture_head_commit_count(&repository) >= GIT_FIXTURE_COMMIT_COUNT {
             return Ok(());
         }
-        return Err("fixture Git repository exists but does not contain the 1000-commit graph".to_string());
+        return Err(
+            "fixture Git repository exists but does not contain the 1000-commit graph".to_string(),
+        );
     }
 
     let repository = git2::Repository::init(workspace)
         .map_err(|error| format!("failed to initialize fixture Git repository: {error}"))?;
-    let mut index = repository.index()
+    let mut index = repository
+        .index()
         .map_err(|error| format!("failed to open fixture Git index: {error}"))?;
-    index.add_all(["*"], git2::IndexAddOption::DEFAULT, None)
+    index
+        .add_all(["*"], git2::IndexAddOption::DEFAULT, None)
         .map_err(|error| format!("failed to stage fixture files: {error}"))?;
-    index.write().map_err(|error| format!("failed to write fixture Git index: {error}"))?;
-    let tree_id = index.write_tree()
+    index
+        .write()
+        .map_err(|error| format!("failed to write fixture Git index: {error}"))?;
+    let tree_id = index
+        .write_tree()
         .map_err(|error| format!("failed to write fixture Git tree: {error}"))?;
-    let tree = repository.find_tree(tree_id)
+    let tree = repository
+        .find_tree(tree_id)
         .map_err(|error| format!("failed to load fixture Git tree: {error}"))?;
 
     let mut timestamp = 1_700_000_000i64;
@@ -1704,12 +1790,14 @@ fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
                 timestamp,
             )?;
         }
-        repository.reference(
-            &format!("refs/heads/feature-{branch_index:02}"),
-            feature_tip,
-            true,
-            "RRiter PGO feature branch",
-        ).map_err(|error| format!("failed to create fixture Git branch: {error}"))?;
+        repository
+            .reference(
+                &format!("refs/heads/feature-{branch_index:02}"),
+                feature_tip,
+                true,
+                "RRiter PGO feature branch",
+            )
+            .map_err(|error| format!("failed to create fixture Git branch: {error}"))?;
         timestamp += 1;
         main_tip = fixture_commit(
             &repository,
@@ -1729,14 +1817,18 @@ fn ensure_fixture_repository(workspace: &Path) -> Result<(), String> {
             timestamp,
         )?;
     }
-    repository.reference("refs/heads/main", main_tip, true, "RRiter PGO main branch")
+    repository
+        .reference("refs/heads/main", main_tip, true, "RRiter PGO main branch")
         .map_err(|error| format!("failed to update fixture Git main branch: {error}"))?;
-    repository.set_head("refs/heads/main")
+    repository
+        .set_head("refs/heads/main")
         .map_err(|error| format!("failed to set fixture Git HEAD: {error}"))?;
 
     let count = fixture_head_commit_count(&repository);
     if count != GIT_FIXTURE_COMMIT_COUNT {
-        return Err(format!("fixture Git graph has {count} commits, expected {GIT_FIXTURE_COMMIT_COUNT}"));
+        return Err(format!(
+            "fixture Git graph has {count} commits, expected {GIT_FIXTURE_COMMIT_COUNT}"
+        ));
     }
     Ok(())
 }
@@ -1751,7 +1843,8 @@ fn fixture_python_tests(workspace: &Path) -> Vec<PathBuf> {
         .map(|entry| entry.path())
         .filter(|path| {
             path.extension().and_then(|extension| extension.to_str()) == Some("py")
-                && path.file_name().and_then(|name| name.to_str()) != Some("pgo_completion_hover.py")
+                && path.file_name().and_then(|name| name.to_str())
+                    != Some("pgo_completion_hover.py")
         })
         .filter_map(|path| {
             let size = path.metadata().ok()?.len();
@@ -1766,7 +1859,10 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
     use AutomationStep as S;
     let mut steps = vec![
         S::WaitReady,
-        S::ResizeWindow { width: 1280, height: 800 },
+        S::ResizeWindow {
+            width: 1280,
+            height: 800,
+        },
         S::ApplyWorkspace,
         S::WaitFileTree,
         S::OpenPanel(PanelId::Explorer),
@@ -1941,7 +2037,10 @@ fn terminal_workload_steps_for(os: &str) -> Vec<AutomationStep> {
             S::WaitTerminalHtopExit,
         ]
     } else {
-        vec![S::RunTerminalBasicCommand, S::WaitTerminalBasicCommandVisible]
+        vec![
+            S::RunTerminalBasicCommand,
+            S::WaitTerminalBasicCommandVisible,
+        ]
     }
 }
 
@@ -1963,21 +2062,28 @@ mod tests {
         assert!(matches!(steps.last(), Some(AutomationStep::Finish)));
         assert!(steps.iter().any(|step| matches!(
             step,
-            AutomationStep::LoadGitGraph { min_commits: GIT_FIXTURE_COMMIT_COUNT }
+            AutomationStep::LoadGitGraph {
+                min_commits: GIT_FIXTURE_COMMIT_COUNT
+            }
         )));
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::ScrollGitGraphTimed { duration_secs: 24 }
         )));
-        assert!(steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::TriggerAutocomplete("print")
-        )));
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::TriggerAutocomplete("print")))
+        );
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::SetEditorCursorAfter("pgo_completion_result = pri")
         )));
-        assert!(steps.iter().any(|step| matches!(step, AutomationStep::ShowHover { .. })));
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::ShowHover { .. }))
+        );
         assert!(!steps.iter().any(|step| step.name() == "wait-hover"));
         assert!(steps.iter().any(|step| matches!(
             step,
@@ -1994,32 +2100,53 @@ mod tests {
             }
         )));
         if cfg!(target_os = "linux") {
-            assert!(steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::RunTerminalHtop)));
-            assert!(steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::WaitTerminalHtopVisible)));
-            assert!(steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::WaitTerminalHtopExit)));
-            assert!(steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::WaitMillis(10_000))));
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::RunTerminalHtop))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::WaitTerminalHtopVisible))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::WaitTerminalHtopExit))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::WaitMillis(10_000)))
+            );
         } else {
-            assert!(steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::RunTerminalBasicCommand)));
-            assert!(steps.iter().any(|step| matches!(
-                step,
-                AutomationStep::WaitTerminalBasicCommandVisible
-            )));
-            assert!(!steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::RunTerminalHtop)));
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::RunTerminalBasicCommand))
+            );
+            assert!(
+                steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::WaitTerminalBasicCommandVisible))
+            );
+            assert!(
+                !steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::RunTerminalHtop))
+            );
         }
-        assert!(!steps.iter().any(|step| step.name().contains("terminal-listings")));
-        assert!(!steps.iter().any(|step| step.name().contains("terminal-ready")));
+        assert!(
+            !steps
+                .iter()
+                .any(|step| step.name().contains("terminal-listings"))
+        );
+        assert!(
+            !steps
+                .iter()
+                .any(|step| step.name().contains("terminal-ready"))
+        );
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::AddSettingsIgnore(".rriter-pgo-ignore/**")
@@ -2058,7 +2185,6 @@ mod tests {
 
         std::fs::remove_dir_all(root).unwrap();
     }
-
 
     #[test]
     fn terminal_tui_state_requires_alt_screen_and_visible_content() {
@@ -2101,15 +2227,21 @@ mod tests {
     #[test]
     fn terminal_workload_is_htop_only_on_linux() {
         let linux = terminal_workload_steps_for("linux");
-        assert!(linux
-            .iter()
-            .any(|step| matches!(step, AutomationStep::RunTerminalHtop)));
-        assert!(linux
-            .iter()
-            .any(|step| matches!(step, AutomationStep::WaitMillis(10_000))));
-        assert!(!linux
-            .iter()
-            .any(|step| matches!(step, AutomationStep::RunTerminalBasicCommand)));
+        assert!(
+            linux
+                .iter()
+                .any(|step| matches!(step, AutomationStep::RunTerminalHtop))
+        );
+        assert!(
+            linux
+                .iter()
+                .any(|step| matches!(step, AutomationStep::WaitMillis(10_000)))
+        );
+        assert!(
+            !linux
+                .iter()
+                .any(|step| matches!(step, AutomationStep::RunTerminalBasicCommand))
+        );
 
         for os in ["macos", "windows"] {
             let steps = terminal_workload_steps_for(os);
@@ -2119,9 +2251,11 @@ mod tests {
                 steps[1],
                 AutomationStep::WaitTerminalBasicCommandVisible
             ));
-            assert!(!steps
-                .iter()
-                .any(|step| matches!(step, AutomationStep::RunTerminalHtop)));
+            assert!(
+                !steps
+                    .iter()
+                    .any(|step| matches!(step, AutomationStep::RunTerminalHtop))
+            );
         }
     }
 
@@ -2163,14 +2297,24 @@ mod tests {
 
         ensure_fixture_repository(&root).unwrap();
         let repository = git2::Repository::open(&root).unwrap();
-        assert_eq!(fixture_head_commit_count(&repository), GIT_FIXTURE_COMMIT_COUNT);
-        let branch_count = repository.branches(Some(git2::BranchType::Local)).unwrap().count();
+        assert_eq!(
+            fixture_head_commit_count(&repository),
+            GIT_FIXTURE_COMMIT_COUNT
+        );
+        let branch_count = repository
+            .branches(Some(git2::BranchType::Local))
+            .unwrap()
+            .count();
         assert_eq!(branch_count, GIT_FIXTURE_BRANCH_COUNT + 1);
         let mut walk = repository.revwalk().unwrap();
         walk.push_head().unwrap();
         let merge_count = walk
             .filter_map(Result::ok)
-            .filter(|oid| repository.find_commit(*oid).is_ok_and(|commit| commit.parent_count() > 1))
+            .filter(|oid| {
+                repository
+                    .find_commit(*oid)
+                    .is_ok_and(|commit| commit.parent_count() > 1)
+            })
             .count();
         assert_eq!(merge_count, GIT_FIXTURE_BRANCH_COUNT);
         let first = repository.head().unwrap().target().unwrap();
@@ -2191,7 +2335,13 @@ mod tests {
         std::fs::write(tests.join("large.py"), "x".repeat(100)).unwrap();
         std::fs::write(tests.join("pgo_completion_hover.py"), "fixture\n").unwrap();
         let files = fixture_python_tests(&root);
-        assert_eq!(files, vec![PathBuf::from("tests/large.py"), PathBuf::from("tests/small.py")]);
+        assert_eq!(
+            files,
+            vec![
+                PathBuf::from("tests/large.py"),
+                PathBuf::from("tests/small.py")
+            ]
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -2234,9 +2384,11 @@ mod tests {
         let report: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
         assert_eq!(report["status"], "failed");
-        assert!(report["failed_step"]
-            .as_str()
-            .is_some_and(|message| message.contains("current_step=wait-ready")));
+        assert!(
+            report["failed_step"]
+                .as_str()
+                .is_some_and(|message| message.contains("current_step=wait-ready"))
+        );
         std::fs::remove_dir_all(root).unwrap();
     }
 

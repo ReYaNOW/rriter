@@ -484,9 +484,8 @@ fn parse_literal_values(type_text: &str) -> Vec<String> {
                 escaped = true;
             } else if byte == quote {
                 if let Some(start) = quote_start.take()
-                    && let Some(value) = crate::languages::decode_python_string_literal(
-                        &rest[start..=idx],
-                    )
+                    && let Some(value) =
+                        crate::languages::decode_python_string_literal(&rest[start..=idx])
                 {
                     values.push(value);
                 }
@@ -648,8 +647,7 @@ fn python_default_to_contract_default(default: &str) -> Option<String> {
     if default == "False" {
         return Some("false".to_string());
     }
-    crate::languages::decode_python_string_literal(default)
-        .or_else(|| Some(default.to_string()))
+    crate::languages::decode_python_string_literal(default).or_else(|| Some(default.to_string()))
 }
 
 fn enum_default_to_contract_default(default: &str, enum_values: &[String]) -> Option<String> {

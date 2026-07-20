@@ -441,7 +441,8 @@ impl App {
                 .ok()
                 .and_then(|ddl| ddl.as_ref().and_then(|state| state.rect));
             if let Some(rect) = ddl_rect {
-                let inside = mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3;
+                let inside =
+                    mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3;
                 if state == ElementState::Pressed {
                     if inside {
                         if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
@@ -461,7 +462,9 @@ impl App {
                     } else {
                         *self.ide_panel.database.ddl_hover.borrow_mut() = None;
                     }
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                     return;
                 }
                 if state == ElementState::Released {
@@ -470,7 +473,9 @@ impl App {
                     {
                         ddl.selecting = false;
                     }
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                     return;
                 }
             }
@@ -533,22 +538,27 @@ impl App {
             return;
         }
 
-        if state == ElementState::Pressed
-            && self.ide_panel.database.context_menu.is_some()
-        {
+        if state == ElementState::Pressed && self.ide_panel.database.context_menu.is_some() {
             let clicked_id = self.ui_registry.find_overlay_at(mx, my);
-            let keep = matches!(clicked_id, Some(crate::ui_system::UiId::DatabaseContextItem(_)));
+            let keep = matches!(
+                clicked_id,
+                Some(crate::ui_system::UiId::DatabaseContextItem(_))
+            );
             if button == winit::event::MouseButton::Left && keep {
                 if let Some(clicked_id) = clicked_id {
                     self.handle_ui_click(clicked_id);
                 }
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return;
             }
             if !keep {
                 self.ide_panel.database.context_menu = None;
                 if button != winit::event::MouseButton::Left {
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                     return;
                 }
             }
@@ -632,7 +642,9 @@ impl App {
             && let Some(id) = self.ui_registry.find_at(mx, my)
             && self.open_database_context_menu_for_hit(id, mx, my)
         {
-            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
 
@@ -794,11 +806,7 @@ impl App {
                     let is_pressed = state == ElementState::Pressed;
                     let s = self.renderer.as_ref().unwrap().scale_factor;
                     let (terminal_panel_x, content_y, _, content_h, _) =
-                        super::app_panel_scroll_rect(
-                            self,
-                            crate::app::PanelId::Terminal,
-                            s,
-                        );
+                        super::app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
                     let panel_x = terminal_panel_x + 10.0 * s;
                     let char_w = self.renderer.as_mut().unwrap().char_advance('A')
                         * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
@@ -952,7 +960,10 @@ impl App {
             // Глобальная обработка декларативного UI
             if !self.show_settings && self.dialog_window.is_none() {
                 if self.is_ide_mode
-                    && let Some(layout) = super::problems_scrollbar_layout(self, self.renderer.as_ref().unwrap().scale_factor)
+                    && let Some(layout) = super::problems_scrollbar_layout(
+                        self,
+                        self.renderer.as_ref().unwrap().scale_factor,
+                    )
                     && crate::ui_system::point_in_rect(
                         mx,
                         my,
@@ -1294,8 +1305,7 @@ impl App {
                         self.handle_ui_click(clicked_id);
                     } else if clicked_id == crate::ui_system::UiId::GitGraphScroll {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        if let Some((rows_y, rows_h)) =
-                            super::git_graph_rows_bounds(self, s)
+                        if let Some((rows_y, rows_h)) = super::git_graph_rows_bounds(self, s)
                             && let Some((drag_offset, target)) =
                                 crate::app::git_panel::git_graph_scroll_drag_target(
                                     my,
@@ -1344,9 +1354,7 @@ impl App {
                         }
                         self.handle_ui_click(clicked_id);
                     } else {
-                        if clicked_id
-                            == crate::ui_system::UiId::ProjectSearchQueryScrollbarY
-                        {
+                        if clicked_id == crate::ui_system::UiId::ProjectSearchQueryScrollbarY {
                             if self.start_project_search_query_scrollbar_drag(
                                 crate::app::project_search::ProjectSearchQueryScrollAxis::Vertical,
                                 my,
@@ -1355,9 +1363,7 @@ impl App {
                             }
                             return;
                         }
-                        if clicked_id
-                            == crate::ui_system::UiId::ProjectSearchQueryScrollbarX
-                        {
+                        if clicked_id == crate::ui_system::UiId::ProjectSearchQueryScrollbarX {
                             if self.start_project_search_query_scrollbar_drag(
                                 crate::app::project_search::ProjectSearchQueryScrollAxis::Horizontal,
                                 mx,
@@ -1455,16 +1461,17 @@ impl App {
                                 // Специальная обработка: позиционирование курсора по клику
                                 self.settings_ignore_focused = true;
                                 self.is_dragging_settings_ignore = true;
-                                let input = crate::render_view::settings_ui::settings_ignore_input_rect(
-                                    layout,
-                                    s,
-                                    self.ide_workspaces.len(),
-                                    self.settings_ide_scroll.current,
-                                );
+                                let input =
+                                    crate::render_view::settings_ui::settings_ignore_input_rect(
+                                        layout,
+                                        s,
+                                        self.ide_workspaces.len(),
+                                        self.settings_ide_scroll.current,
+                                    );
                                 let text = self.settings_ignore_editor.get_full_text();
-                                let x_offset =
-                                    (mx - (input.x + 8.0 * s) + self.settings_ignore_scroll_x)
-                                        .max(0.0);
+                                let x_offset = (mx - (input.x + 8.0 * s)
+                                    + self.settings_ignore_scroll_x)
+                                    .max(0.0);
                                 let target_idx = self
                                     .renderer
                                     .as_mut()

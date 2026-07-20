@@ -85,7 +85,9 @@ fn load_api_mocks_from_checked(path: &Path) -> Result<ApiMockState, String> {
         Ok(saved) => Ok(ApiMockState::from(saved)),
         Err(error) => {
             let backup_note = crate::platform::corrupt_file_backup_note(path);
-            Err(format!("API mock configuration повреждена: {error}{backup_note}"))
+            Err(format!(
+                "API mock configuration повреждена: {error}{backup_note}"
+            ))
         }
     }
 }
@@ -348,11 +350,8 @@ mod tests {
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        std::fs::write(
-            &path,
-            serde_json::to_string_pretty(&legacy).unwrap(),
-        )
-        .expect("write legacy");
+        std::fs::write(&path, serde_json::to_string_pretty(&legacy).unwrap())
+            .expect("write legacy");
 
         let loaded = load_api_mocks_from(&path);
         let script = loaded.route_overrides[0].python.as_ref().expect("script");
@@ -409,9 +408,11 @@ mod tests {
         let parent = path.parent().unwrap();
         let stem = path.file_stem().unwrap().to_string_lossy();
         assert!(std::fs::read_dir(parent).unwrap().flatten().any(|entry| {
-            entry.file_name().to_string_lossy().starts_with(&format!("{stem}.corrupt-"))
+            entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&format!("{stem}.corrupt-"))
         }));
         cleanup_test_path(&path);
     }
-
 }

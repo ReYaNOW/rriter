@@ -4,12 +4,12 @@ use super::super::{
     HOVER_STATE, HoverState, advance_hover_anim_progress, clear_hover_popup,
     compute_hover_visibility, compute_hover_visibility_from_matches,
     diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
-    diagnostic_visual_byte_range_on_line,
     diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
-    hover_byte_on_line_at_x, hover_bytes_share_token, hover_screen_y_to_content_y,
-    hover_source_line_y_band, hover_token_bounds, hover_token_text, is_hover_target_byte,
-    is_in_hover_popup_or_bridge, is_python_hover_keyword, normalize_hover_byte,
-    suppress_hover_popup_until_mouse_move, type_hover_screen_y_matches_byte_line,
+    diagnostic_visual_byte_range_on_line, hover_byte_on_line_at_x, hover_bytes_share_token,
+    hover_screen_y_to_content_y, hover_source_line_y_band, hover_token_bounds, hover_token_text,
+    is_hover_target_byte, is_in_hover_popup_or_bridge, is_python_hover_keyword,
+    normalize_hover_byte, suppress_hover_popup_until_mouse_move,
+    type_hover_screen_y_matches_byte_line,
 };
 
 #[test]

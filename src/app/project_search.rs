@@ -252,9 +252,9 @@ impl ProjectSearchState {
         self.preview_tx = None;
         self.preview_rx = None;
         self.preview_pending.clear();
-        self.error.get_or_insert_with(||
+        self.error.get_or_insert_with(|| {
             "Предпросмотр результатов поиска неожиданно завершился".to_string()
-        );
+        });
     }
 
     pub fn filter_enabled(&self) -> bool {
@@ -338,8 +338,8 @@ impl ProjectSearchState {
 
     pub(crate) fn query_max_scroll_y(&self, rect: ProjectSearchRect, scale: f32) -> f32 {
         let viewport = project_search_query_viewport(rect, scale);
-        let content_h = self.query_editor.line_offsets.len() as f32
-            * project_search_query_line_height(scale);
+        let content_h =
+            self.query_editor.line_offsets.len() as f32 * project_search_query_line_height(scale);
         (content_h - viewport.text.h).max(0.0)
     }
 
@@ -393,12 +393,7 @@ impl ProjectSearchState {
         set_scroll_immediate(&mut self.query_scroll_x, target_x, max_x);
     }
 
-    pub(crate) fn scroll_query_y_by(
-        &mut self,
-        rect: ProjectSearchRect,
-        scale: f32,
-        delta: f32,
-    ) {
+    pub(crate) fn scroll_query_y_by(&mut self, rect: ProjectSearchRect, scale: f32, delta: f32) {
         let max_scroll = self.query_max_scroll_y(rect, scale);
         self.query_scroll_y.anim_speed = 7.0;
         self.query_scroll_y.scroll_by(delta);
@@ -510,11 +505,7 @@ pub(crate) fn project_search_query_viewport(
     }
 }
 
-pub(crate) fn project_search_line_end(
-    text: &str,
-    line_start: usize,
-    mut line_end: usize,
-) -> usize {
+pub(crate) fn project_search_line_end(text: &str, line_start: usize, mut line_end: usize) -> usize {
     line_end = line_end.min(text.len());
     if line_end > line_start && text.as_bytes().get(line_end - 1) == Some(&b'\n') {
         line_end -= 1;
@@ -547,8 +538,7 @@ pub(crate) fn project_search_query_scrollbar_thumb(
                 min_thumb,
             )?;
             Some(ProjectSearchRect {
-                x: viewport.vertical_track.x
-                    + (viewport.vertical_track.w - thickness) * 0.5,
+                x: viewport.vertical_track.x + (viewport.vertical_track.w - thickness) * 0.5,
                 y: thumb.start,
                 w: thickness,
                 h: thumb.len,
@@ -565,8 +555,7 @@ pub(crate) fn project_search_query_scrollbar_thumb(
             )?;
             Some(ProjectSearchRect {
                 x: thumb.start,
-                y: viewport.horizontal_track.y
-                    + (viewport.horizontal_track.h - thickness) * 0.5,
+                y: viewport.horizontal_track.y + (viewport.horizontal_track.h - thickness) * 0.5,
                 w: thumb.len,
                 h: thickness,
             })
@@ -626,7 +615,11 @@ pub fn project_search_layout(
     let inner_w = (content_w - pad * 2.0).max(0.0);
     let show_buttons = inner_w >= desired_button * 2.0 + gap * 2.0 + 24.0 * scale;
     let button = if show_buttons { desired_button } else { 0.0 };
-    let controls_w = if show_buttons { button * 2.0 + gap * 2.0 } else { 0.0 };
+    let controls_w = if show_buttons {
+        button * 2.0 + gap * 2.0
+    } else {
+        0.0
+    };
     let mut y = content_y + 9.0 * scale;
     let query_w = (inner_w - controls_w).max(0.0);
     let query = ProjectSearchRect {
@@ -664,9 +657,19 @@ pub fn project_search_layout(
         h: PROJECT_SEARCH_SINGLE_H * scale,
     };
     y = include.y + include.h + 7.0 * scale;
-    let exclude = ProjectSearchRect { x: include.x, y: y + label_h, w: field_w, h: include.h };
+    let exclude = ProjectSearchRect {
+        x: include.x,
+        y: y + label_h,
+        w: field_w,
+        h: include.h,
+    };
     y = exclude.y + exclude.h + 22.0 * scale;
-    let filter = ProjectSearchRect { x: include.x, y: y + label_h, w: field_w, h: include.h };
+    let filter = ProjectSearchRect {
+        x: include.x,
+        y: y + label_h,
+        w: field_w,
+        h: include.h,
+    };
     let stats_y = filter.y + filter.h + 26.0 * scale;
     let list_y = stats_y + 8.0 * scale;
     ProjectSearchLayout {
@@ -1598,8 +1601,7 @@ impl SearchPatternPlan {
 
     fn workspace_relative<'a>(&'a self, path: &Path) -> Option<(&'a Path, PathBuf)> {
         self.workspaces.iter().find_map(|workspace| {
-            platform::relative_to(path, workspace)
-                .map(|relative| (workspace.as_path(), relative))
+            platform::relative_to(path, workspace).map(|relative| (workspace.as_path(), relative))
         })
     }
 
@@ -2031,20 +2033,24 @@ mod tests {
 
         assert!(state.query_scroll_y.current > 0.0);
         assert!(state.query_scroll_x.current > 0.0);
-        assert!(project_search_query_scrollbar_thumb(
-            rect,
-            &state,
-            ProjectSearchQueryScrollAxis::Vertical,
-            1.0,
-        )
-        .is_some());
-        assert!(project_search_query_scrollbar_thumb(
-            rect,
-            &state,
-            ProjectSearchQueryScrollAxis::Horizontal,
-            1.0,
-        )
-        .is_some());
+        assert!(
+            project_search_query_scrollbar_thumb(
+                rect,
+                &state,
+                ProjectSearchQueryScrollAxis::Vertical,
+                1.0,
+            )
+            .is_some()
+        );
+        assert!(
+            project_search_query_scrollbar_thumb(
+                rect,
+                &state,
+                ProjectSearchQueryScrollAxis::Horizontal,
+                1.0,
+            )
+            .is_some()
+        );
     }
 
     #[test]

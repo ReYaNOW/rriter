@@ -132,6 +132,7 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
 
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
 
+#[cfg(test)]
 pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
     make_initialize_for_server(LspServerKind::Ruff, id, workspaces)
 }
@@ -585,6 +586,7 @@ fn rpc_reply_id_json(value: Option<&serde_json::Value>) -> Option<String> {
     }
 }
 
+#[cfg(test)]
 pub(super) fn dispatch_frame(
     body: &[u8],
     event_tx: &Sender<LspEvent>,

@@ -1,8 +1,7 @@
-use super::{PlatformKind, CURRENT_PLATFORM, APP_DIR_NAME, resolve_executable};
+use super::{APP_DIR_NAME, CURRENT_PLATFORM, PlatformKind, resolve_executable};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, RwLock};
-
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagedToolInstallPlan {
@@ -134,9 +133,7 @@ impl ToolPaths {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (ToolKind, Option<&Path>)> {
-        ToolKind::ALL
-            .into_iter()
-            .map(|kind| (kind, self.get(kind)))
+        ToolKind::ALL.into_iter().map(|kind| (kind, self.get(kind)))
     }
 }
 
@@ -199,8 +196,7 @@ static TOOL_PATHS: LazyLock<RwLock<ToolPaths>> =
     LazyLock::new(|| RwLock::new(ToolPaths::default()));
 static TOOL_RESOLUTION_CACHE: LazyLock<RwLock<[Option<ToolResolution>; 7]>> =
     LazyLock::new(|| RwLock::new(std::array::from_fn(|_| None)));
-static DART_WORKSPACE_ROOT: LazyLock<RwLock<Option<PathBuf>>> =
-    LazyLock::new(|| RwLock::new(None));
+static DART_WORKSPACE_ROOT: LazyLock<RwLock<Option<PathBuf>>> = LazyLock::new(|| RwLock::new(None));
 
 pub fn refresh_tool_resolutions() {
     if let Ok(mut cache) = TOOL_RESOLUTION_CACHE.write() {
@@ -362,8 +358,7 @@ pub(super) fn resolve_dart_with(
     }
 
     if let Some(path) = path_dart {
-        let resolution =
-            dart_resolution_from_candidate(path, None, ToolPathSource::Path, platform);
+        let resolution = dart_resolution_from_candidate(path, None, ToolPathSource::Path, platform);
         if resolution.is_ready() {
             return resolution;
         }
@@ -493,8 +488,7 @@ pub(super) fn flutter_root_from_package_config(path: &Path) -> Option<PathBuf> {
     let package_root = base.join(root_uri).ok()?.to_file_path().ok()?;
     let packages_dir = package_root.parent()?;
     let flutter_root = packages_dir.parent()?;
-    (packages_dir.file_name() == Some(OsStr::new("packages")))
-        .then(|| flutter_root.to_path_buf())
+    (packages_dir.file_name() == Some(OsStr::new("packages"))).then(|| flutter_root.to_path_buf())
 }
 
 fn discovered_flutter_roots() -> Vec<PathBuf> {
@@ -502,11 +496,12 @@ fn discovered_flutter_roots() -> Vec<PathBuf> {
     if let Some(root) = std::env::var_os("FLUTTER_ROOT").filter(|value| !value.is_empty()) {
         roots.push(PathBuf::from(root));
     }
-    if let Some(flutter) = resolve_executable(OsStr::new(if CURRENT_PLATFORM == PlatformKind::Windows {
-        "flutter.bat"
-    } else {
-        "flutter"
-    }))
+    if let Some(flutter) =
+        resolve_executable(OsStr::new(if CURRENT_PLATFORM == PlatformKind::Windows {
+            "flutter.bat"
+        } else {
+            "flutter"
+        }))
         && let Some(root) = flutter.parent().and_then(Path::parent)
     {
         roots.push(root.to_path_buf());
@@ -533,7 +528,6 @@ fn managed_dart_executable_in(root: &Path, platform: PlatformKind) -> Option<Pat
     }
     None
 }
-
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AppPaths {
@@ -830,7 +824,9 @@ pub(crate) fn parse_pem_certificates(input: &[u8]) -> Vec<Vec<u8>> {
 
 #[cfg(any(target_os = "macos", test))]
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    haystack.windows(needle.len()).position(|window| window == needle)
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -838,7 +834,11 @@ fn decode_base64(input: &[u8]) -> Option<Vec<u8>> {
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
     let mut chunk = [0_u8; 4];
     let mut len = 0;
-    for byte in input.iter().copied().filter(|byte| !byte.is_ascii_whitespace()) {
+    for byte in input
+        .iter()
+        .copied()
+        .filter(|byte| !byte.is_ascii_whitespace())
+    {
         chunk[len] = byte;
         len += 1;
         if len != 4 {

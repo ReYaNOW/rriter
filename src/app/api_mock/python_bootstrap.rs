@@ -13,7 +13,11 @@ pub fn detect_uv_path() -> Option<PathBuf> {
 #[allow(dead_code)]
 pub fn detect_python_path() -> Option<PathBuf> {
     if let Some(path) = crate::platform::resolve_tool_executable(
-        OsStr::new(if cfg!(windows) { "python.exe" } else { "python3" }),
+        OsStr::new(if cfg!(windows) {
+            "python.exe"
+        } else {
+            "python3"
+        }),
         "RRITER_PYTHON_PATH",
     ) {
         return Some(path);
@@ -38,9 +42,9 @@ pub(crate) fn python_command(path: &Path) -> Command {
 
 fn is_windows_py_launcher(path: &Path) -> bool {
     let raw = path.as_os_str().to_string_lossy();
-    raw.rsplit(['\\', '/']).next().is_some_and(|name| {
-        name.eq_ignore_ascii_case("py.exe") || name.eq_ignore_ascii_case("py")
-    })
+    raw.rsplit(['\\', '/'])
+        .next()
+        .is_some_and(|name| name.eq_ignore_ascii_case("py.exe") || name.eq_ignore_ascii_case("py"))
 }
 
 pub fn validate_uv_path(path: &Path) -> Result<String, String> {

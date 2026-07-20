@@ -14,9 +14,9 @@ use axum::routing::any;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::{Arc, LazyLock, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, LazyLock, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::sync::oneshot;
@@ -194,7 +194,7 @@ fn run_server_thread(
             Ok(addr) => addr,
             Err(err) => {
                 push_event(ApiMockServerEvent::Failed(err));
-                    return;
+                return;
             }
         };
         push_log_event(&format!("tcp bind: {addr}"));
@@ -204,7 +204,7 @@ fn run_server_thread(
                 push_event(ApiMockServerEvent::Failed(format_api_mock_bind_error(
                     addr, &err,
                 )));
-                    return;
+                return;
             }
         };
         let local = listener.local_addr().ok();
@@ -224,7 +224,7 @@ fn run_server_thread(
                 push_event(ApiMockServerEvent::Failed(format!(
                     "Proxy HTTP client initialization failed: {error}"
                 )));
-                    return;
+                return;
             }
         };
         let state = ApiMockAxumState {
@@ -808,10 +808,7 @@ async fn read_proxy_body_limited(
 ) -> Result<Vec<u8>, String> {
     let mut body = Vec::new();
     loop {
-        let chunk = upstream
-            .chunk()
-            .await
-            .map_err(|error| error.to_string())?;
+        let chunk = upstream.chunk().await.map_err(|error| error.to_string())?;
         let Some(chunk) = chunk else {
             break;
         };
@@ -1102,8 +1099,8 @@ mod tests {
         let body = Bytes::from_static(
             b"--rr\r\nContent-Disposition: form-data; Name = \"title\"\r\n\r\npic\r\n--rr--\r\n",
         );
-        let parts = multipart_values(&body, "multipart/form-data; Boundary = \"rr\"")
-            .expect("parts");
+        let parts =
+            multipart_values(&body, "multipart/form-data; Boundary = \"rr\"").expect("parts");
         assert_eq!(
             parts.get("title"),
             Some(&vec![MultipartValue::Text("pic".to_string())])
@@ -1152,5 +1149,4 @@ mod tests {
         let response = proxy_body_read_error_response("stream failed");
         assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
     }
-
 }

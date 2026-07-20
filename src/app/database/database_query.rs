@@ -1,9 +1,9 @@
+use super::DatabaseQueryTabMeta;
 use super::database_postgres::{
     DatabaseBackendError, DatabaseServerNotice, PostgresSession, connect_postgres,
     rollback_postgres_transaction_after_error,
 };
 use super::database_ssh::SshConnectOptions;
-use super::DatabaseQueryTabMeta;
 use super::{
     DatabaseConnectionConfig, DatabaseConnectionId, DatabaseSecretBundle, DatabaseSettings,
     DatabaseTransactionId, MAX_COLUMNS_PER_RESULT, MAX_RESULT_BYTES, MAX_RESULT_ROWS,
@@ -200,10 +200,9 @@ pub fn database_query_results_height(
     scale: f32,
 ) -> f32 {
     let min_height = (DATABASE_QUERY_RESULTS_MIN_HEIGHT * scale).round();
-    let available_height = (window_height
-        - bottom_panel_height
-        - (DATABASE_QUERY_EDITOR_MIN_HEIGHT * scale).round())
-    .max(0.0);
+    let available_height =
+        (window_height - bottom_panel_height - (DATABASE_QUERY_EDITOR_MIN_HEIGHT * scale).round())
+            .max(0.0);
     let desired = (preferred_height.max(DATABASE_QUERY_RESULTS_MIN_HEIGHT) * scale).round();
     if available_height < min_height {
         available_height
@@ -288,7 +287,12 @@ pub fn database_query_history_is_truncated(sql: &str) -> bool {
 
 pub fn database_query_history_entry_height(sql: &str) -> f32 {
     let lines = database_query_history_preview_lines(sql) as f32;
-    30.0 + lines * 20.0 + if database_query_history_is_truncated(sql) { 18.0 } else { 0.0 }
+    30.0 + lines * 20.0
+        + if database_query_history_is_truncated(sql) {
+            18.0
+        } else {
+            0.0
+        }
 }
 
 pub fn database_query_history_entry_height_px(sql: &str, scale: f32) -> f32 {
@@ -513,7 +517,9 @@ pub fn query_execution_target(
     if let Some((start, end)) = selection {
         let start = start.min(text.len());
         let end = end.min(text.len());
-        if start < end && let Some(raw) = text.get(start..end) {
+        if start < end
+            && let Some(raw) = text.get(start..end)
+        {
             let sql = raw.trim();
             if !sql.is_empty() {
                 let leading = raw.len() - raw.trim_start().len();
@@ -617,7 +623,10 @@ pub fn database_query_editor_diagnostics(
         left.start_line
             .cmp(&right.start_line)
             .then(left.start_col.cmp(&right.start_col))
-            .then_with(|| diagnostic_severity_rank(left.severity).cmp(&diagnostic_severity_rank(right.severity)))
+            .then_with(|| {
+                diagnostic_severity_rank(left.severity)
+                    .cmp(&diagnostic_severity_rank(right.severity))
+            })
             .then_with(|| left.source.cmp(&right.source))
             .then_with(|| left.code.cmp(&right.code))
     });
@@ -778,7 +787,10 @@ pub fn completion_words_for_context(
                 }
             }
             for alias in output_aliases_at(analysis, cursor) {
-                out.push((quote_completion_identifier(alias), "alias SELECT".to_string()));
+                out.push((
+                    quote_completion_identifier(alias),
+                    "alias SELECT".to_string(),
+                ));
             }
             for function in &metadata.functions {
                 out.push((function.clone(), "function".to_string()));
@@ -793,13 +805,30 @@ pub fn completion_words_for_context(
             for operator in &metadata.operators {
                 out.push((operator.clone(), "operator".to_string()));
             }
-            for operator in ["=", "<>", "!=", "<", ">", "<=", ">=", "LIKE", "ILIKE", "IN", "BETWEEN", "IS NULL", "IS NOT NULL"] {
+            for operator in [
+                "=",
+                "<>",
+                "!=",
+                "<",
+                ">",
+                "<=",
+                ">=",
+                "LIKE",
+                "ILIKE",
+                "IN",
+                "BETWEEN",
+                "IS NULL",
+                "IS NOT NULL",
+            ] {
                 out.push((operator.to_string(), "operator".to_string()));
             }
         }
         SqlCompletionKind::Value => {
             for value in &metadata.enum_values {
-                out.push((format!("'{}'", value.replace('\'', "''")), "enum".to_string()));
+                out.push((
+                    format!("'{}'", value.replace('\'', "''")),
+                    "enum".to_string(),
+                ));
             }
             for value in ["TRUE", "FALSE", "NULL", "CURRENT_DATE", "CURRENT_TIMESTAMP"] {
                 out.push((value.to_string(), "value".to_string()));
@@ -825,7 +854,10 @@ pub fn completion_words_for_context(
     let prefix = context.prefix.to_ascii_lowercase();
     if !prefix.is_empty() {
         out.retain(|(word, detail)| {
-            let candidate = word.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+            let candidate = word
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_ascii_lowercase();
             if detail == "alias SELECT" && candidate == prefix {
                 return false;
             }
@@ -835,7 +867,11 @@ pub fn completion_words_for_context(
     out.sort_unstable_by(|left, right| {
         completion_rank(&left.0, &left.1, &prefix)
             .cmp(&completion_rank(&right.0, &right.1, &prefix))
-            .then_with(|| left.0.to_ascii_lowercase().cmp(&right.0.to_ascii_lowercase()))
+            .then_with(|| {
+                left.0
+                    .to_ascii_lowercase()
+                    .cmp(&right.0.to_ascii_lowercase())
+            })
             .then_with(|| left.1.cmp(&right.1))
     });
     out.dedup_by(|left, right| left.0 == right.0 && left.1 == right.1);
@@ -846,7 +882,10 @@ fn completion_rank(candidate: &str, detail: &str, prefix: &str) -> (u8, usize) {
     if prefix.is_empty() {
         return (0, candidate.len());
     }
-    let candidate = candidate.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+    let candidate = candidate
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_ascii_lowercase();
     let match_kind = crate::app::autocomplete_match_candidate(prefix, &candidate)
         .map(|(kind, _)| kind)
         .unwrap_or(crate::app::AutocompleteMatchKind::Fuzzy);
@@ -867,9 +906,10 @@ fn quote_completion_identifier(identifier: &str) -> String {
         .next()
         .is_some_and(|first| first == '_' || first.is_ascii_lowercase())
         && chars.all(|ch| ch == '_' || ch.is_ascii_lowercase() || ch.is_ascii_digit());
-    if simple && !crate::languages::sql::SQL_KEYWORDS
-        .iter()
-        .any(|keyword| keyword.eq_ignore_ascii_case(identifier))
+    if simple
+        && !crate::languages::sql::SQL_KEYWORDS
+            .iter()
+            .any(|keyword| keyword.eq_ignore_ascii_case(identifier))
     {
         identifier.to_string()
     } else {
@@ -888,7 +928,12 @@ fn database_query_semantic_diagnostics(
         .collect::<std::collections::BTreeSet<_>>();
     let mut diagnostics = Vec::new();
     for relation in &analysis.relations {
-        if relation.is_cte || relation.schema.as_deref().is_some_and(|schema| !schema.eq_ignore_ascii_case("public")) {
+        if relation.is_cte
+            || relation
+                .schema
+                .as_deref()
+                .is_some_and(|schema| !schema.eq_ignore_ascii_case("public"))
+        {
             continue;
         }
         if !known_tables.contains(&relation.table_name.to_ascii_lowercase()) {
@@ -896,12 +941,17 @@ fn database_query_semantic_diagnostics(
                 range: relation.source_range.clone(),
                 severity: SqlDiagnosticSeverity::Error,
                 code: "SQL202",
-                message: format!("Таблица «{}» не найдена в public schema", relation.table_name),
+                message: format!(
+                    "Таблица «{}» не найдена в public schema",
+                    relation.table_name
+                ),
             });
         }
     }
     for reference in &analysis.qualified_references {
-        let Some(relation) = relation_for_qualifier(analysis, reference.range.start, &reference.qualifier) else {
+        let Some(relation) =
+            relation_for_qualifier(analysis, reference.range.start, &reference.qualifier)
+        else {
             diagnostics.push(SqlAnalysisDiagnostic {
                 range: reference.range.clone(),
                 severity: SqlDiagnosticSeverity::Error,
@@ -940,7 +990,10 @@ fn database_query_semantic_diagnostics(
             .filter(|relation| {
                 relation.scope == reference.scope
                     && !relation.is_cte
-                    && relation.schema.as_deref().is_none_or(|schema| schema.eq_ignore_ascii_case("public"))
+                    && relation
+                        .schema
+                        .as_deref()
+                        .is_none_or(|schema| schema.eq_ignore_ascii_case("public"))
             })
             .collect::<Vec<_>>();
         if visible_relations.is_empty() {
@@ -961,7 +1014,10 @@ fn database_query_semantic_diagnostics(
                 range: reference.range.clone(),
                 severity: SqlDiagnosticSeverity::Error,
                 code: "SQL205",
-                message: format!("Столбец «{}» не найден в таблицах текущего SQL-блока", reference.name),
+                message: format!(
+                    "Столбец «{}» не найден в таблицах текущего SQL-блока",
+                    reference.name
+                ),
             });
         } else if matching_tables.len() > 1 {
             diagnostics.push(SqlAnalysisDiagnostic {
@@ -987,7 +1043,6 @@ pub fn analysis_error_ranges(analysis: &SqlAnalysis) -> Vec<(usize, usize)> {
         .collect()
 }
 
-
 pub async fn load_query_completion_metadata(
     connection: &DatabaseConnectionConfig,
     secrets: &DatabaseSecretBundle,
@@ -996,16 +1051,19 @@ pub async fn load_query_completion_metadata(
     settings: &DatabaseSettings,
     ssh_options: &SshConnectOptions,
 ) -> Result<DatabaseQueryCompletionResult, DatabaseBackendError> {
-    let session = connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
+    let session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     let timeout = Duration::from_secs(settings.statement_timeout_seconds);
     let rows = tokio::time::timeout(
         timeout,
         session.client.query(QUERY_COMPLETION_COLUMNS_SQL, &[]),
     )
-        .await
-        .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL completion metadata"))??;
+    .await
+    .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL completion metadata"))??;
     if rows.len() > super::MAX_PUBLIC_TABLES_PER_DATABASE.saturating_mul(MAX_COLUMNS_PER_RESULT) {
-        return Err(DatabaseBackendError::LimitExceeded("completion metadata exceeds supported size"));
+        return Err(DatabaseBackendError::LimitExceeded(
+            "completion metadata exceeds supported size",
+        ));
     }
     let mut metadata = DatabaseQueryCompletionMetadata::default();
     for row in rows {
@@ -1023,8 +1081,8 @@ pub async fn load_query_completion_metadata(
         timeout,
         session.client.query(QUERY_COMPLETION_ENUMS_SQL, &[]),
     )
-        .await
-        .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL enum metadata"))??
+    .await
+    .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL enum metadata"))??
     {
         metadata.enum_values.push(row.get(0));
     }
@@ -1032,8 +1090,8 @@ pub async fn load_query_completion_metadata(
         timeout,
         session.client.query(QUERY_COMPLETION_FUNCTIONS_SQL, &[]),
     )
-        .await
-        .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL function metadata"))??
+    .await
+    .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL function metadata"))??
     {
         metadata.functions.push(row.get(0));
     }
@@ -1041,8 +1099,8 @@ pub async fn load_query_completion_metadata(
         timeout,
         session.client.query(QUERY_COMPLETION_OPERATORS_SQL, &[]),
     )
-        .await
-        .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL operator metadata"))??
+    .await
+    .map_err(|_| DatabaseBackendError::Timeout("PostgreSQL operator metadata"))??
     {
         metadata.operators.push(row.get(0));
     }
@@ -1077,13 +1135,17 @@ pub async fn begin_user_query_transaction(
             diagnostic,
         }
     })?;
-    let execution = explain_sql(sql, &statements, mode).map_err(|message| DatabaseQueryExecutionError {
-        error: DatabaseBackendError::InvalidConfiguration(message),
-        diagnostic: None,
-    })?;
+    let execution =
+        explain_sql(sql, &statements, mode).map_err(|message| DatabaseQueryExecutionError {
+            error: DatabaseBackendError::InvalidConfiguration(message),
+            diagnostic: None,
+        })?;
     let session = connect_postgres(connection, secrets, database_name, settings, ssh_options)
         .await
-        .map_err(|error| DatabaseQueryExecutionError { error, diagnostic: None })?;
+        .map_err(|error| DatabaseQueryExecutionError {
+            error,
+            diagnostic: None,
+        })?;
     let statement_timeout_ms = settings.statement_timeout_seconds.saturating_mul(1_000);
     let lock_timeout_ms = settings.lock_timeout_seconds.saturating_mul(1_000);
     let idle_timeout_ms = settings
@@ -1093,10 +1155,14 @@ pub async fn begin_user_query_transaction(
     let begin = format!(
         "BEGIN; SET LOCAL statement_timeout = {statement_timeout_ms}; SET LOCAL lock_timeout = {lock_timeout_ms}; SET LOCAL idle_in_transaction_session_timeout = {idle_timeout_ms};"
     );
-    session.client.batch_execute(&begin).await.map_err(|error| DatabaseQueryExecutionError {
-        diagnostic: diagnostic_from_error(&error, sql, source_offset),
-        error: DatabaseBackendError::Postgres(error),
-    })?;
+    session
+        .client
+        .batch_execute(&begin)
+        .await
+        .map_err(|error| DatabaseQueryExecutionError {
+            diagnostic: diagnostic_from_error(&error, sql, source_offset),
+            error: DatabaseBackendError::Postgres(error),
+        })?;
     let result = execute_simple_query(&session, &execution.text, &statements, settings).await;
     match result {
         Ok((result_sets, mut effects)) => {
@@ -1106,23 +1172,24 @@ pub async fn begin_user_query_transaction(
                 .into_iter()
                 .map(DatabaseQueryMessage::from)
                 .collect();
-            Ok((session, DatabasePreparedQueryTransaction {
-                result_sets,
-                messages,
-                effects,
-                mode,
-            }))
+            Ok((
+                session,
+                DatabasePreparedQueryTransaction {
+                    result_sets,
+                    messages,
+                    effects,
+                    mode,
+                },
+            ))
         }
         Err(error) => {
             let diagnostic = match &error {
-                DatabaseBackendError::Postgres(postgres) => {
-                    diagnostic_from_execution_error(
-                        postgres,
-                        sql,
-                        source_offset,
-                        execution.prefix_characters,
-                    )
-                }
+                DatabaseBackendError::Postgres(postgres) => diagnostic_from_execution_error(
+                    postgres,
+                    sql,
+                    source_offset,
+                    execution.prefix_characters,
+                ),
                 _ => None,
             };
             let error = rollback_postgres_transaction_after_error(&session, error).await;
@@ -1170,22 +1237,33 @@ async fn execute_simple_query(
                     push_result(&mut result_sets, result)?;
                 }
                 if columns.len() > MAX_COLUMNS_PER_RESULT {
-                    return Err(DatabaseBackendError::LimitExceeded("result has more than 512 columns"));
+                    return Err(DatabaseBackendError::LimitExceeded(
+                        "result has more than 512 columns",
+                    ));
                 }
                 current = Some(DatabaseQueryResultSet {
                     title: format!("Результат {}", result_sets.len() + 1),
-                    columns: columns.iter().map(|column| column.name().to_string()).collect(),
+                    columns: columns
+                        .iter()
+                        .map(|column| column.name().to_string())
+                        .collect(),
                     ..DatabaseQueryResultSet::default()
                 });
             }
             SimpleQueryMessage::Row(row) => {
                 total_rows = total_rows.saturating_add(1);
                 if total_rows > settings.result_row_limit.min(MAX_RESULT_ROWS) {
-                    return Err(DatabaseBackendError::LimitExceeded("query result exceeds configured row limit"));
+                    return Err(DatabaseBackendError::LimitExceeded(
+                        "query result exceeds configured row limit",
+                    ));
                 }
                 let result = current.get_or_insert_with(|| DatabaseQueryResultSet {
                     title: format!("Результат {}", result_sets.len() + 1),
-                    columns: row.columns().iter().map(|column| column.name().to_string()).collect(),
+                    columns: row
+                        .columns()
+                        .iter()
+                        .map(|column| column.name().to_string())
+                        .collect(),
                     ..DatabaseQueryResultSet::default()
                 });
                 let mut values = Vec::with_capacity(row.len());
@@ -1193,7 +1271,9 @@ async fn execute_simple_query(
                     let value = row.try_get(index)?.map(str::to_string);
                     total_bytes = total_bytes.saturating_add(value.as_ref().map_or(8, String::len));
                     if total_bytes > settings.result_memory_limit_bytes.min(MAX_RESULT_BYTES) {
-                        return Err(DatabaseBackendError::LimitExceeded("query result exceeds configured memory limit"));
+                        return Err(DatabaseBackendError::LimitExceeded(
+                            "query result exceeds configured memory limit",
+                        ));
                     }
                     values.push(DatabaseQueryCell { value });
                 }
@@ -1210,32 +1290,33 @@ async fn execute_simple_query(
                 effects.record_command(kind, affected);
                 if let Some(mut result) = current.take() {
                     result.returned_rows = result.rows.len() as u64;
-                    effects.returned_rows = effects
-                        .returned_rows
-                        .saturating_add(result.returned_rows);
-                    result.affected_rows = if kind
-                        == crate::languages::sql::SqlStatementKind::Mutation
-                    {
-                        affected
-                    } else {
-                        0
-                    };
+                    effects.returned_rows =
+                        effects.returned_rows.saturating_add(result.returned_rows);
+                    result.affected_rows =
+                        if kind == crate::languages::sql::SqlStatementKind::Mutation {
+                            affected
+                        } else {
+                            0
+                        };
                     result.command_kind = command_kind.clone();
                     push_result(&mut result_sets, result)?;
                 } else {
                     let title = format!("Результат {}", result_sets.len() + 1);
-                    push_result(&mut result_sets, DatabaseQueryResultSet {
-                        title,
-                        command_kind,
-                        affected_rows: if kind
-                            == crate::languages::sql::SqlStatementKind::Mutation
-                        {
-                            affected
-                        } else {
-                            0
+                    push_result(
+                        &mut result_sets,
+                        DatabaseQueryResultSet {
+                            title,
+                            command_kind,
+                            affected_rows: if kind
+                                == crate::languages::sql::SqlStatementKind::Mutation
+                            {
+                                affected
+                            } else {
+                                0
+                            },
+                            ..DatabaseQueryResultSet::default()
                         },
-                        ..DatabaseQueryResultSet::default()
-                    })?;
+                    )?;
                 }
             }
             _ => {}
@@ -1265,13 +1346,21 @@ fn command_kind(sql: &str, statement: Option<&SqlStatement>) -> String {
         .to_ascii_uppercase();
     match statement.kind {
         crate::languages::sql::SqlStatementKind::Query => {
-            if keyword == "WITH" { "SELECT".to_string() } else { keyword }
+            if keyword == "WITH" {
+                "SELECT".to_string()
+            } else {
+                keyword
+            }
         }
         crate::languages::sql::SqlStatementKind::Mutation
         | crate::languages::sql::SqlStatementKind::Definition
         | crate::languages::sql::SqlStatementKind::Explain => keyword,
         crate::languages::sql::SqlStatementKind::Other => {
-            if keyword.is_empty() { "COMMAND".to_string() } else { keyword }
+            if keyword.is_empty() {
+                "COMMAND".to_string()
+            } else {
+                keyword
+            }
         }
     }
 }
@@ -1281,12 +1370,13 @@ fn push_result(
     result: DatabaseQueryResultSet,
 ) -> Result<(), DatabaseBackendError> {
     if results.len() >= MAX_RESULT_SETS {
-        return Err(DatabaseBackendError::LimitExceeded("query script produced more than 32 result sets"));
+        return Err(DatabaseBackendError::LimitExceeded(
+            "query script produced more than 32 result sets",
+        ));
     }
     results.push(result);
     Ok(())
 }
-
 
 fn explain_sql(
     sql: &str,
@@ -1361,7 +1451,11 @@ pub fn diagnostic_from_error(
     let start = source_offset.saturating_add(relative);
     Some(DatabaseQueryDiagnostic {
         start_byte: start,
-        end_byte: start.saturating_add(sql.get(relative..).and_then(|tail| tail.chars().next()).map_or(1, char::len_utf8)),
+        end_byte: start.saturating_add(
+            sql.get(relative..)
+                .and_then(|tail| tail.chars().next())
+                .map_or(1, char::len_utf8),
+        ),
         message: db.message().to_string(),
         detail: db.detail().map(str::to_string),
         hint: db.hint().map(str::to_string),
@@ -1374,7 +1468,6 @@ pub fn postgres_character_to_byte(text: &str, character_offset: usize) -> usize 
         .nth(character_offset)
         .map_or(text.len(), |(byte, _)| byte)
 }
-
 
 pub fn sanitize_history_sql(sql: &str) -> String {
     let mut output = sql.to_string();
@@ -1401,13 +1494,15 @@ pub fn sanitize_history_sql(sql: &str) -> String {
     let mut cursor = 0usize;
     loop {
         let lower = output[cursor..].to_ascii_lowercase();
-        let Some(relative) = lower.find("password") else { break; };
+        let Some(relative) = lower.find("password") else {
+            break;
+        };
         let token_start = cursor + relative;
         let after = token_start + "password".len();
-        let boundary_before = token_start == 0
-            || !output.as_bytes()[token_start - 1].is_ascii_alphanumeric();
-        let boundary_after = after >= output.len()
-            || !output.as_bytes()[after].is_ascii_alphanumeric();
+        let boundary_before =
+            token_start == 0 || !output.as_bytes()[token_start - 1].is_ascii_alphanumeric();
+        let boundary_after =
+            after >= output.len() || !output.as_bytes()[after].is_ascii_alphanumeric();
         if !boundary_before || !boundary_after {
             cursor = after;
             continue;
@@ -1437,7 +1532,9 @@ pub fn sanitize_history_sql(sql: &str) -> String {
     let mut query_cursor = 0usize;
     loop {
         let lower = output[query_cursor..].to_ascii_lowercase();
-        let Some(relative) = lower.find("password=") else { break; };
+        let Some(relative) = lower.find("password=") else {
+            break;
+        };
         let value_start = query_cursor + relative + "password=".len();
         let value_end = output[value_start..]
             .find(|ch: char| matches!(ch, '&' | '#' | '\'' | '"') || ch.is_whitespace())
@@ -1473,8 +1570,14 @@ mod tests {
     #[test]
     fn execution_target_prefers_selection_then_statement() {
         let text = "select 1;\nselect 2;";
-        assert_eq!(query_execution_target(text, Some((10, 18)), 0), Some(("select 2".to_string(), 10)));
-        assert_eq!(query_execution_target(text, None, 3), Some(("select 1;".to_string(), 0)));
+        assert_eq!(
+            query_execution_target(text, Some((10, 18)), 0),
+            Some(("select 2".to_string(), 10))
+        );
+        assert_eq!(
+            query_execution_target(text, None, 3),
+            Some(("select 1;".to_string(), 0))
+        );
     }
 
     #[test]
@@ -1500,14 +1603,8 @@ mod tests {
     ) -> Vec<(String, String)> {
         let context = database_query_completion_context(sql, cursor);
         let base = analyze_database_query_sql(metadata, sql);
-        let analysis = completion_recovery_analysis(
-            metadata,
-            sql,
-            cursor,
-            &context,
-            &base,
-        )
-        .unwrap_or(base);
+        let analysis =
+            completion_recovery_analysis(metadata, sql, cursor, &context, &base).unwrap_or(base);
         completion_words_for_context(metadata, &analysis, &context, cursor)
     }
 
@@ -1552,9 +1649,11 @@ mod tests {
         let sql = "SELECT b.ca FROM booking AS b";
         let words = completion_for(&metadata, sql, "SELECT b.ca".len());
         assert!(words.iter().any(|(word, _)| word == "car_wash_id"));
-        assert!(!words.iter().any(|(word, detail)| {
-            word == "capacity" || detail.starts_with("car_wash ·")
-        }));
+        assert!(
+            !words
+                .iter()
+                .any(|(word, detail)| { word == "capacity" || detail.starts_with("car_wash ·") })
+        );
     }
 
     #[test]
@@ -1585,10 +1684,7 @@ mod tests {
                 .expect("FROM completion");
             assert!(from_index <= 1, "prefix={prefix:?}, words={words:?}");
             assert!(!words.iter().any(|(word, detail)| {
-                detail == "alias SELECT"
-                    && word
-                        .trim_matches('"')
-                        .eq_ignore_ascii_case(prefix)
+                detail == "alias SELECT" && word.trim_matches('"').eq_ignore_ascii_case(prefix)
             }));
             assert_eq!(
                 words
@@ -1603,18 +1699,15 @@ mod tests {
     #[test]
     fn sql_completion_filter_uses_shared_exact_prefix_and_fuzzy_matching() {
         assert_eq!(
-            crate::app::autocomplete_match_candidate("from", "FROM")
-                .map(|(kind, _)| kind),
+            crate::app::autocomplete_match_candidate("from", "FROM").map(|(kind, _)| kind),
             Some(crate::app::AutocompleteMatchKind::Exact)
         );
         assert_eq!(
-            crate::app::autocomplete_match_candidate("fr", "FROM")
-                .map(|(kind, _)| kind),
+            crate::app::autocomplete_match_candidate("fr", "FROM").map(|(kind, _)| kind),
             Some(crate::app::AutocompleteMatchKind::Prefix)
         );
         assert_eq!(
-            crate::app::autocomplete_match_candidate("fm", "format")
-                .map(|(kind, _)| kind),
+            crate::app::autocomplete_match_candidate("fm", "format").map(|(kind, _)| kind),
             Some(crate::app::AutocompleteMatchKind::Fuzzy)
         );
     }
@@ -1647,10 +1740,8 @@ mod tests {
 
     #[test]
     fn a4_b007_explain_analyze_mutation_marks_effects_for_review() {
-        let statements = crate::languages::sql::validate_managed_user_sql(
-            "UPDATE items SET value = 2",
-        )
-        .unwrap();
+        let statements =
+            crate::languages::sql::validate_managed_user_sql("UPDATE items SET value = 2").unwrap();
         let mut effects = SqlExecutionEffects::default();
         mark_explain_analyze_side_effects(
             DatabaseQueryMode::ExplainAnalyze,
@@ -1673,12 +1764,7 @@ mod tests {
             }],
             ..SqlAnalysis::default()
         };
-        let diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            text,
-            &[0],
-        );
+        let diagnostics = database_query_editor_diagnostics(&analysis, None, text, &[0]);
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -1700,12 +1786,8 @@ mod tests {
             hint: Some("hint".to_string()),
             sqlstate: Some("42601".to_string()),
         };
-        let diagnostics = database_query_editor_diagnostics(
-            &SqlAnalysis::default(),
-            Some(&backend),
-            text,
-            &[0],
-        );
+        let diagnostics =
+            database_query_editor_diagnostics(&SqlAnalysis::default(), Some(&backend), text, &[0]);
 
         assert_eq!(diagnostics.len(), 1);
         let diagnostic = &diagnostics[0];
@@ -1719,12 +1801,8 @@ mod tests {
     fn sql_warning_ranges_round_trip_through_lsp_positions() {
         let text = "SELECT *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
         let analysis = analyze_sql(text);
-        let diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            text,
-            &test_line_offsets(text),
-        );
+        let diagnostics =
+            database_query_editor_diagnostics(&analysis, None, text, &test_line_offsets(text));
 
         for code in ["SQL117", "SQL119"] {
             let source = analysis
@@ -1736,11 +1814,7 @@ mod tests {
                 .iter()
                 .find(|diagnostic| diagnostic.code.as_deref() == Some(code))
                 .expect("editor diagnostic");
-            let start = crate::lsp::lsp_pos_to_offset(
-                text,
-                editor.start_line,
-                editor.start_col,
-            );
+            let start = crate::lsp::lsp_pos_to_offset(text, editor.start_line, editor.start_col);
             let end = crate::lsp::lsp_pos_to_offset(text, editor.end_line, editor.end_col);
 
             assert_eq!(start..end, source.range);
@@ -1751,12 +1825,8 @@ mod tests {
     fn sql_warning_lsp_round_trip_is_utf16_safe_before_star() {
         let text = "SELECT 'Ж', *\nFROM \"public\".\"car__model\"\nLIMIT 100;";
         let analysis = analyze_sql(text);
-        let diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            text,
-            &test_line_offsets(text),
-        );
+        let diagnostics =
+            database_query_editor_diagnostics(&analysis, None, text, &test_line_offsets(text));
         let source = analysis
             .diagnostics
             .iter()
@@ -1782,12 +1852,8 @@ mod tests {
             .iter()
             .find(|diagnostic| diagnostic.code == "SQL004")
             .expect("SQL004 source");
-        let diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            text,
-            &test_line_offsets(text),
-        );
+        let diagnostics =
+            database_query_editor_diagnostics(&analysis, None, text, &test_line_offsets(text));
         let editor = diagnostics
             .iter()
             .find(|diagnostic| diagnostic.code.as_deref() == Some("SQL004"))
@@ -1821,16 +1887,20 @@ mod tests {
             ],
             ..SqlAnalysis::default()
         };
-        let diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            text,
-            &[0, 12],
-        );
+        let diagnostics = database_query_editor_diagnostics(&analysis, None, text, &[0, 12]);
 
-        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 0), Some(7));
-        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 7), Some(19));
-        assert_eq!(next_database_query_diagnostic_offset(&diagnostics, text, 22), Some(7));
+        assert_eq!(
+            next_database_query_diagnostic_offset(&diagnostics, text, 0),
+            Some(7)
+        );
+        assert_eq!(
+            next_database_query_diagnostic_offset(&diagnostics, text, 7),
+            Some(19)
+        );
+        assert_eq!(
+            next_database_query_diagnostic_offset(&diagnostics, text, 22),
+            Some(7)
+        );
     }
 
     #[test]
@@ -1857,7 +1927,10 @@ mod tests {
         );
         for code in ["SQL204", "SQL203", "SQL206"] {
             assert!(
-                analysis.diagnostics.iter().any(|diagnostic| diagnostic.code == code),
+                analysis
+                    .diagnostics
+                    .iter()
+                    .any(|diagnostic| diagnostic.code == code),
                 "missing {code}: {:?}",
                 analysis.diagnostics
             );
@@ -1876,20 +1949,32 @@ mod tests {
             ..DatabaseQueryCompletionMetadata::default()
         };
         let unknown = analyze_database_query_sql(&metadata, "SELECT x.id FROM missing x");
-        assert!(unknown.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL202"));
+        assert!(
+            unknown
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL202")
+        );
 
         let cte = analyze_database_query_sql(
             &metadata,
             "WITH recent AS (SELECT id FROM booking) SELECT r.id FROM recent r",
         );
-        assert!(!cte.diagnostics.iter().any(|diagnostic| diagnostic.code == "SQL202"));
+        assert!(
+            !cte.diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.code == "SQL202")
+        );
     }
 
     #[test]
     fn query_result_height_clamps_to_editor_and_panel_space() {
         assert_eq!(database_query_results_height(260.0, 900.0, 0.0, 1.0), 260.0);
         assert_eq!(database_query_results_height(80.0, 900.0, 0.0, 1.0), 140.0);
-        assert_eq!(database_query_results_height(900.0, 900.0, 180.0, 1.0), 500.0);
+        assert_eq!(
+            database_query_results_height(900.0, 900.0, 180.0, 1.0),
+            500.0
+        );
         assert_eq!(database_query_results_height(260.0, 600.0, 0.0, 1.5), 270.0);
     }
 
@@ -1919,10 +2004,7 @@ mod tests {
     #[test]
     fn cancelled_running_query_becomes_a_sanitizable_history_entry() {
         let mut state = DatabaseQueryTabState::default();
-        state.mark_running(
-            "ALTER ROLE demo PASSWORD 'secret'".to_string(),
-            123,
-        );
+        state.mark_running("ALTER ROLE demo PASSWORD 'secret'".to_string(), 123);
         let mut entry = state
             .take_cancelled_history(
                 DatabaseConnectionId(7),
@@ -1933,7 +2015,10 @@ mod tests {
         entry.sql = sanitize_history_sql(&entry.sql);
         assert!(!entry.sql.contains("secret"));
         assert_eq!(entry.started_unix_ms, 123);
-        assert_eq!(entry.error_summary.as_deref(), Some("Запрос отменён пользователем"));
+        assert_eq!(
+            entry.error_summary.as_deref(),
+            Some("Запрос отменён пользователем")
+        );
         assert!(!state.running);
         assert!(state.running_sql.is_none());
         assert_eq!(state.running_started_unix_ms, 0);
@@ -1942,7 +2027,14 @@ mod tests {
     #[test]
     fn explain_rejects_multiple_statements() {
         let statements = validate_managed_user_sql("select 1; select 2").unwrap();
-        assert!(explain_sql("select 1; select 2", &statements, DatabaseQueryMode::Explain).is_err());
+        assert!(
+            explain_sql(
+                "select 1; select 2",
+                &statements,
+                DatabaseQueryMode::Explain
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -2053,7 +2145,11 @@ SELECT 2;  ";
             QUERY_COMPLETION_FUNCTIONS_SQL,
             QUERY_COMPLETION_OPERATORS_SQL,
         ] {
-            assert_eq!(crate::languages::sql::scan_statements(sql).len(), 1, "{sql}");
+            assert_eq!(
+                crate::languages::sql::scan_statements(sql).len(),
+                1,
+                "{sql}"
+            );
         }
         assert_eq!(
             QUERY_COMPLETION_FUNCTIONS_SQL
@@ -2069,7 +2165,9 @@ SELECT 2;  ";
         let result = DatabaseQueryResultSet {
             title: "Result 1".to_string(),
             columns: vec!["value".to_string()],
-            rows: vec![vec![DatabaseQueryCell { value: Some("hello".to_string()) }]],
+            rows: vec![vec![DatabaseQueryCell {
+                value: Some("hello".to_string()),
+            }]],
             command_kind: "SELECT".to_string(),
             ..DatabaseQueryResultSet::default()
         };
@@ -2130,7 +2228,10 @@ SELECT 2;  ";
         let mut state = DatabaseQueryTabState::default();
         state.results.push(DatabaseQueryResultSet {
             columns: vec!["id".to_string(), "description".to_string()],
-            rows: vec![vec![DatabaseQueryCell::default(), DatabaseQueryCell::default()]],
+            rows: vec![vec![
+                DatabaseQueryCell::default(),
+                DatabaseQueryCell::default(),
+            ]],
             ..DatabaseQueryResultSet::default()
         });
         crate::app::database::set_database_column_width(
@@ -2189,7 +2290,6 @@ SELECT 2;  ";
         assert_eq!(history[1].started_unix_ms, 9);
     }
 
-
     #[test]
     fn history_normalization_truncates_unicode_on_character_boundaries() {
         let mut entry = DatabaseQueryHistoryEntry {
@@ -2202,7 +2302,11 @@ SELECT 2;  ";
         assert!(entry.database_name.len() <= 128);
         assert!(entry.sql.len() <= super::super::MAX_SQL_CONSOLE_BYTES);
         assert!(entry.error_summary.as_ref().unwrap().len() <= 4_096);
-        assert!(entry.database_name.is_char_boundary(entry.database_name.len()));
+        assert!(
+            entry
+                .database_name
+                .is_char_boundary(entry.database_name.len())
+        );
         assert!(entry.sql.is_char_boundary(entry.sql.len()));
     }
 
@@ -2259,5 +2363,4 @@ SELECT 2;  ";
         let entry: DatabaseQueryHistoryEntry = serde_json::from_str(json).unwrap();
         assert_eq!(entry.returned_rows, 0);
     }
-
 }

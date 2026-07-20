@@ -4,17 +4,16 @@ use super::database_postgres::{
 };
 use super::database_ssh::SshConnectOptions;
 use super::{
-    DATABASE_CHUNK_SIZE, DatabaseCellValue,
-    DatabaseColumnInfo, DatabaseConnectionConfig, DatabaseConnectionId, DatabaseDialogInput, DatabaseGeneration, DatabaseGridCell,
-    DatabaseGridRow, DatabaseRowState, DatabaseSecretBundle, DatabaseSettings,
-    DatabaseTableChunk, DatabaseTableMetadata, DatabaseTableReviewSummary,
-    MAX_REVIEW_DETAIL_ROWS, MAX_REVIEW_CELL_DIFFS, parse_bytea_preview, quote_pg_identifier,
+    DATABASE_CHUNK_SIZE, DatabaseCellValue, DatabaseColumnInfo, DatabaseConnectionConfig,
+    DatabaseConnectionId, DatabaseDialogInput, DatabaseGeneration, DatabaseGridCell,
+    DatabaseGridRow, DatabaseRowState, DatabaseSecretBundle, DatabaseSettings, DatabaseTableChunk,
+    DatabaseTableMetadata, DatabaseTableReviewSummary, MAX_REVIEW_CELL_DIFFS,
+    MAX_REVIEW_DETAIL_ROWS, parse_bytea_preview, quote_pg_identifier,
 };
 use std::time::Duration;
 use tokio_postgres::types::ToSql;
 
-pub const DATABASE_TABLE_DISCONNECTED_MESSAGE: &str =
-    "Подключение к базе данных не установлено. Откройте панель «Базы данных» и обновите подключение.";
+pub const DATABASE_TABLE_DISCONNECTED_MESSAGE: &str = "Подключение к базе данных не установлено. Откройте панель «Базы данных» и обновите подключение.";
 pub const DATABASE_SQL_PREVIEW_LINE_HEIGHT: f32 = 26.0;
 
 #[derive(Clone, Debug)]
@@ -52,7 +51,6 @@ pub enum DatabaseTableModal {
     },
 }
 
-
 pub(crate) fn database_multiline_line_count(text: &str) -> usize {
     text.as_bytes()
         .iter()
@@ -61,9 +59,7 @@ pub(crate) fn database_multiline_line_count(text: &str) -> usize {
         .saturating_add(1)
 }
 
-pub(crate) fn database_multiline_lines(
-    text: &str,
-) -> impl Iterator<Item = (usize, &str)> {
+pub(crate) fn database_multiline_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
     let mut start = 0usize;
     let mut finished = false;
     std::iter::from_fn(move || {
@@ -80,9 +76,7 @@ pub(crate) fn database_multiline_lines(
             finished = true;
             text.len()
         };
-        let line_end = if raw_end > line_start
-            && text.as_bytes().get(raw_end - 1) == Some(&b'\r')
-        {
+        let line_end = if raw_end > line_start && text.as_bytes().get(raw_end - 1) == Some(&b'\r') {
             raw_end - 1
         } else {
             raw_end
@@ -90,7 +84,6 @@ pub(crate) fn database_multiline_lines(
         Some((line_start, &text[line_start..line_end]))
     })
 }
-
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseTableTabMeta {
@@ -154,9 +147,8 @@ impl DatabaseTableTabState {
 
     pub fn show_timed_notice(&mut self, message: impl Into<String>) {
         self.notice = Some(message.into());
-        self.notice_until = Some(
-            std::time::Instant::now() + std::time::Duration::from_millis(2800),
-        );
+        self.notice_until =
+            Some(std::time::Instant::now() + std::time::Duration::from_millis(2800));
     }
 
     pub fn active_notice(&self) -> Option<&str> {
@@ -201,7 +193,10 @@ pub fn database_days_in_month(year: i32, month: u32) -> u32 {
 }
 
 pub fn database_shift_calendar_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
-    let index = year.saturating_mul(12).saturating_add(month as i32 - 1).saturating_add(delta);
+    let index = year
+        .saturating_mul(12)
+        .saturating_add(month as i32 - 1)
+        .saturating_add(delta);
     (index.div_euclid(12), index.rem_euclid(12) as u32 + 1)
 }
 
@@ -214,8 +209,7 @@ pub fn database_calendar_weekday_monday(year: i32, month: u32, day: u32) -> u32 
     }
     let k = y.rem_euclid(100);
     let j = y.div_euclid(100);
-    let h = (day as i32 + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j)
-        .rem_euclid(7);
+    let h = (day as i32 + (13 * (m + 1)) / 5 + k + k / 4 + j / 4 + 5 * j).rem_euclid(7);
     ((h + 5).rem_euclid(7)) as u32
 }
 
@@ -290,7 +284,9 @@ pub fn validate_table_fragment(fragment: &str, label: &str) -> Result<(), String
         return Err(format!("{label} превышает 64 KiB"));
     }
     if crate::languages::sql::contains_top_level_semicolon(trimmed) {
-        return Err(format!("{label} не должен содержать верхнеуровневую точку с запятой"));
+        return Err(format!(
+            "{label} не должен содержать верхнеуровневую точку с запятой"
+        ));
     }
     if label == "WHERE" && contains_unquoted_double_equals(trimmed) {
         return Err("WHERE содержит недопустимый оператор ==; используйте =".to_string());
@@ -500,7 +496,11 @@ fn build_insert(
         kind: DatabaseChangeKind::Insert,
         sql,
         parameters,
-        changed_cells: row.cells.iter().filter(|cell| !matches!(cell.value, DatabaseCellValue::Default)).count(),
+        changed_cells: row
+            .cells
+            .iter()
+            .filter(|cell| !matches!(cell.value, DatabaseCellValue::Default))
+            .count(),
         row_label: "new row".to_string(),
     })
 }
@@ -536,7 +536,10 @@ fn build_update(
         return Err("Строка не содержит изменённых редактируемых ячеек".to_string());
     }
     let where_sql = primary_key_predicate(metadata, &row, &mut parameters, &mut parameter_index)?;
-    let xmin = row.xmin.clone().ok_or_else(|| "У строки отсутствует xmin".to_string())?;
+    let xmin = row
+        .xmin
+        .clone()
+        .ok_or_else(|| "У строки отсутствует xmin".to_string())?;
     let xmin_index = parameter_index;
     parameters.push(DatabaseChangeParameter {
         value: Some(xmin.clone()),
@@ -568,7 +571,10 @@ fn build_delete(
     let mut parameters = Vec::new();
     let mut parameter_index = 1usize;
     let where_sql = primary_key_predicate(metadata, &row, &mut parameters, &mut parameter_index)?;
-    let xmin = row.xmin.clone().ok_or_else(|| "У строки отсутствует xmin".to_string())?;
+    let xmin = row
+        .xmin
+        .clone()
+        .ok_or_else(|| "У строки отсутствует xmin".to_string())?;
     let xmin_index = parameter_index;
     parameters.push(DatabaseChangeParameter {
         value: Some(xmin.clone()),
@@ -635,7 +641,9 @@ fn returning_clause(metadata: &DatabaseTableMetadata) -> String {
         .map(|column| {
             let id = quote_pg_identifier(&column.name);
             if column.type_kind == super::DatabaseTypeKind::Bytea {
-                format!("CASE WHEN {id} IS NULL THEN NULL ELSE octet_length({id})::text END AS {id}")
+                format!(
+                    "CASE WHEN {id} IS NULL THEN NULL ELSE octet_length({id})::text END AS {id}"
+                )
             } else {
                 format!("{id}::text AS {id}")
             }
@@ -690,7 +698,11 @@ fn bounded_preview(value: &str) -> String {
     while end > 0 && !value.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}… <{} bytes>", value[..end].replace('\n', "\\n"), value.len())
+    format!(
+        "{}… <{} bytes>",
+        value[..end].replace('\n', "\\n"),
+        value.len()
+    )
 }
 
 pub async fn count_public_table_rows(
@@ -705,7 +717,8 @@ pub async fn count_public_table_rows(
 ) -> Result<DatabaseTableCountResult, DatabaseBackendError> {
     validate_table_fragment(where_clause, "WHERE")
         .map_err(DatabaseBackendError::InvalidConfiguration)?;
-    let session = connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
+    let session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     let mut sql = format!(
         "SELECT COUNT(*)::int8 FROM public.{}",
         quote_pg_identifier(&metadata.table_name)
@@ -747,7 +760,8 @@ pub async fn load_public_table_chunk(
         .map_err(DatabaseBackendError::InvalidConfiguration)?;
     validate_table_fragment(order_by, "ORDER BY")
         .map_err(DatabaseBackendError::InvalidConfiguration)?;
-    let session = connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
+    let session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     let page_offset = page.saturating_mul(limit);
     let chunk_offset = chunk_index.saturating_mul(DATABASE_CHUNK_SIZE);
     if chunk_offset >= limit {
@@ -841,13 +855,17 @@ fn decode_cell_value(column: &DatabaseColumnInfo, value: Option<String>) -> Data
         return DatabaseCellValue::Null;
     };
     match column.type_kind {
-        super::DatabaseTypeKind::Boolean => DatabaseCellValue::Boolean(value == "true" || value == "t"),
+        super::DatabaseTypeKind::Boolean => {
+            DatabaseCellValue::Boolean(value == "true" || value == "t")
+        }
         super::DatabaseTypeKind::Enum => DatabaseCellValue::Enum(value),
         super::DatabaseTypeKind::Date
         | super::DatabaseTypeKind::Time
         | super::DatabaseTypeKind::Timestamp
         | super::DatabaseTypeKind::TimestampTz => DatabaseCellValue::DateTime(value),
-        super::DatabaseTypeKind::Bytea => DatabaseCellValue::ByteaPreview(parse_bytea_preview(&value)),
+        super::DatabaseTypeKind::Bytea => {
+            DatabaseCellValue::ByteaPreview(parse_bytea_preview(&value))
+        }
         _ => DatabaseCellValue::Text(value),
     }
 }
@@ -859,18 +877,25 @@ pub async fn begin_table_transaction(
     settings: &DatabaseSettings,
     ssh_options: &SshConnectOptions,
 ) -> Result<(PostgresSession, DatabasePreparedTableTransaction), DatabaseBackendError> {
-    let session = connect_postgres(connection, secrets, &plan.database_name, settings, ssh_options).await?;
+    let session = connect_postgres(
+        connection,
+        secrets,
+        &plan.database_name,
+        settings,
+        ssh_options,
+    )
+    .await?;
     session.client.batch_execute("BEGIN").await?;
     let set_local = format!(
         "SET LOCAL statement_timeout = '{}s'; SET LOCAL lock_timeout = '{}s'; SET LOCAL idle_in_transaction_session_timeout = '{}s'",
         settings.statement_timeout_seconds,
         settings.lock_timeout_seconds,
-        settings.transaction_review_timeout_seconds.saturating_add(15)
+        settings
+            .transaction_review_timeout_seconds
+            .saturating_add(15)
     );
     if let Err(error) = session.client.batch_execute(&set_local).await {
-        return Err(
-            rollback_postgres_transaction_after_error(&session, error.into()).await,
-        );
+        return Err(rollback_postgres_transaction_after_error(&session, error.into()).await);
     }
 
     let mut summary = DatabaseTableReviewSummary {
@@ -901,18 +926,18 @@ pub async fn begin_table_transaction(
                 );
             }
         };
-        if matches!(statement.kind, DatabaseChangeKind::Update | DatabaseChangeKind::Delete)
-            && rows.len() != 1
+        if matches!(
+            statement.kind,
+            DatabaseChangeKind::Update | DatabaseChangeKind::Delete
+        ) && rows.len() != 1
         {
-            return Err(
-                rollback_postgres_transaction_after_error(
-                    &session,
-                    DatabaseBackendError::InvalidConfiguration(
-                        "Строка была изменена или удалена другим клиентом".to_string(),
-                    ),
-                )
-                .await,
-            );
+            return Err(rollback_postgres_transaction_after_error(
+                &session,
+                DatabaseBackendError::InvalidConfiguration(
+                    "Строка была изменена или удалена другим клиентом".to_string(),
+                ),
+            )
+            .await);
         }
         match statement.kind {
             DatabaseChangeKind::Insert => summary.inserted_rows += rows.len(),
@@ -934,22 +959,26 @@ pub async fn begin_table_transaction(
                     break;
                 }
                 let value: Option<String> = row.get(index);
-                values.push(value.map_or_else(
-                    || "<NULL>".to_string(),
-                    |value| bounded_preview(&value),
-                ));
+                values.push(
+                    value.map_or_else(|| "<NULL>".to_string(), |value| bounded_preview(&value)),
+                );
                 detail_cells += 1;
             }
             if !values.is_empty() {
-                summary
-                    .detail_rows
-                    .push(format!("{}: {}", statement.row_label, values.join(" | ")));
+                summary.detail_rows.push(format!(
+                    "{}: {}",
+                    statement.row_label,
+                    values.join(" | ")
+                ));
             }
         }
     }
     let notices = session.notices.clone();
     summary.notices = notices.iter().map(database_backend_notice_text).collect();
-    Ok((session, DatabasePreparedTableTransaction { summary, notices }))
+    Ok((
+        session,
+        DatabasePreparedTableTransaction { summary, notices },
+    ))
 }
 
 fn database_backend_notice_text(notice: &DatabaseBackendNotice) -> String {
@@ -962,7 +991,6 @@ fn database_backend_notice_text(notice: &DatabaseBackendNotice) -> String {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1070,7 +1098,10 @@ mod tests {
 
     #[test]
     fn calendar_parser_accepts_valid_date_prefix_only() {
-        assert_eq!(database_calendar_year_month("2026-07-16 12:30:00"), Some((2026, 7)));
+        assert_eq!(
+            database_calendar_year_month("2026-07-16 12:30:00"),
+            Some((2026, 7))
+        );
         assert_eq!(database_calendar_year_month("2025-02-29"), None);
         assert_eq!(database_calendar_year_month("not-a-date"), None);
     }
@@ -1094,7 +1125,9 @@ mod tests {
     fn a4_b018_fragments_reject_additional_outer_clauses() {
         assert!(validate_table_fragment("TRUE ORDER BY id", "WHERE").is_err());
         assert!(validate_table_fragment("id LIMIT 1", "ORDER BY").is_err());
-        assert!(validate_table_fragment("EXISTS (SELECT 1 FROM items ORDER BY id)", "WHERE").is_ok());
+        assert!(
+            validate_table_fragment("EXISTS (SELECT 1 FROM items ORDER BY id)", "WHERE").is_ok()
+        );
         assert!(validate_table_fragment("(SELECT id FROM items LIMIT 1)", "ORDER BY").is_ok());
     }
 
@@ -1175,9 +1208,11 @@ mod tests {
             vec![DatabaseChangePlanOperation::Insert(row)],
         )
         .unwrap();
-        assert!(plan.statements[0]
-            .sql
-            .starts_with("INSERT INTO public.\"items\" (\"name\") VALUES"));
+        assert!(
+            plan.statements[0]
+                .sql
+                .starts_with("INSERT INTO public.\"items\" (\"name\") VALUES")
+        );
         assert!(plan.statements[0].sql.contains("RETURNING \"id\"::text"));
         assert_eq!(plan.statements[0].row_label, "new row");
     }
@@ -1188,10 +1223,16 @@ mod tests {
             &metadata(),
             "db",
             "items",
-            vec![DatabaseChangePlanOperation::Delete(row(DatabaseRowState::Deleted))],
+            vec![DatabaseChangePlanOperation::Delete(row(
+                DatabaseRowState::Deleted,
+            ))],
         )
         .unwrap();
-        assert!(plan.statements[0].sql.starts_with("DELETE FROM public.\"items\""));
+        assert!(
+            plan.statements[0]
+                .sql
+                .starts_with("DELETE FROM public.\"items\"")
+        );
         assert!(plan.statements[0].sql.contains("xmin"));
     }
 }

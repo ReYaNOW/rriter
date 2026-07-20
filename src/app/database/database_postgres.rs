@@ -4,8 +4,8 @@ use super::database_ssh::{
 };
 use super::database_ssh_builtin::{BuiltinSshStream, DatabaseIoStream, connect_builtin_ssh};
 use super::{
-    DatabaseConnectionConfig, DatabaseSecretBundle, DatabaseSettings, PostgresTlsMode,
-    MAX_DATABASES_PER_CONNECTION, MAX_PUBLIC_TABLES_PER_DATABASE,
+    DatabaseConnectionConfig, DatabaseSecretBundle, DatabaseSettings, MAX_DATABASES_PER_CONNECTION,
+    MAX_PUBLIC_TABLES_PER_DATABASE, PostgresTlsMode,
 };
 use std::fmt;
 use std::io;
@@ -14,8 +14,8 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 use tokio::task::JoinHandle;
-use tokio_postgres::tls::MakeTlsConnect;
 use tokio_postgres::config::SslMode;
+use tokio_postgres::tls::MakeTlsConnect;
 use tokio_postgres::{AsyncMessage, Client, Config, Connection, NoTls};
 use tokio_postgres_rustls::MakeRustlsConnect;
 
@@ -38,7 +38,6 @@ pub enum DatabaseBackendNotice {
     BuiltinSshFallback { reason: String },
     NativeCertificateWarnings { count: usize },
 }
-
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DatabaseServerNotice {
@@ -222,9 +221,8 @@ pub async fn connect_postgres(
                         if system_error.kind() == io::ErrorKind::Interrupted {
                             return Err(DatabaseBackendError::Io(system_error));
                         }
-                        let reason = format!(
-                            "системный OpenSSH не смог открыть туннель: {system_error}"
-                        );
+                        let reason =
+                            format!("системный OpenSSH не смог открыть туннель: {system_error}");
                         let builtin = tokio::time::timeout(
                             timeout,
                             connect_builtin_ssh(
@@ -237,9 +235,11 @@ pub async fn connect_postgres(
                         )
                         .await
                         .map_err(|_| DatabaseBackendError::Timeout("built-in SSH fallback"))?
-                        .map_err(|builtin_error| DatabaseBackendError::SshFallback {
-                            system_error: system_error.to_string(),
-                            builtin_error,
+                        .map_err(|builtin_error| {
+                            DatabaseBackendError::SshFallback {
+                                system_error: system_error.to_string(),
+                                builtin_error,
+                            }
                         })?;
                         ssh_backend = Some(SshBackendKind::Builtin);
                         notices.push(DatabaseBackendNotice::BuiltinSshFallback { reason });
@@ -332,17 +332,19 @@ async fn connect_postgres_stream(
                 PostgresTlsMode::Require => SslMode::Require,
                 PostgresTlsMode::Disable => unreachable!(),
             });
-            let (mut make_tls, warnings) = MakeRustlsConnect::with_native_certs().map_err(|errors| {
-                DatabaseBackendError::InvalidConfiguration(format!(
-                    "no native TLS root certificates could be loaded ({} errors)",
-                    errors.len()
-                ))
-            })?;
-            let tls = <MakeRustlsConnect as MakeTlsConnect<Box<dyn DatabaseIoStream>>>::make_tls_connect(
-                &mut make_tls,
-                hostname,
-            )
-            .map_err(|error| tls_connector_error(hostname, &error))?;
+            let (mut make_tls, warnings) =
+                MakeRustlsConnect::with_native_certs().map_err(|errors| {
+                    DatabaseBackendError::InvalidConfiguration(format!(
+                        "no native TLS root certificates could be loaded ({} errors)",
+                        errors.len()
+                    ))
+                })?;
+            let tls =
+                <MakeRustlsConnect as MakeTlsConnect<Box<dyn DatabaseIoStream>>>::make_tls_connect(
+                    &mut make_tls,
+                    hostname,
+                )
+                .map_err(|error| tls_connector_error(hostname, &error))?;
             let (client, connection) = config.connect_raw(stream, tls).await?;
             let (driver, notice_rx) = spawn_connection_driver(connection);
             Ok((client, driver, notice_rx, warnings.len()))
@@ -398,8 +400,6 @@ fn install_rustls_provider() -> Result<(), DatabaseBackendError> {
         .clone()
         .map_err(DatabaseBackendError::InvalidConfiguration)
 }
-
-
 
 pub async fn finish_postgres_transaction(
     session: &PostgresSession,
@@ -495,14 +495,8 @@ pub async fn list_public_tables(
     settings: &DatabaseSettings,
     ssh_options: &SshConnectOptions,
 ) -> Result<DatabaseTableListResult, DatabaseBackendError> {
-    let session = connect_postgres(
-        connection,
-        secrets,
-        database_name,
-        settings,
-        ssh_options,
-    )
-    .await?;
+    let session =
+        connect_postgres(connection, secrets, database_name, settings, ssh_options).await?;
     // Internal read: intentionally no explicit BEGIN/review transaction.
     let rows = tokio::time::timeout(
         Duration::from_secs(settings.statement_timeout_seconds),
@@ -534,12 +528,20 @@ mod tests {
 
     #[test]
     fn backend_limit_errors_are_actionable() {
-        assert!(DatabaseBackendError::LimitExceeded("too many").to_string().contains("too many"));
+        assert!(
+            DatabaseBackendError::LimitExceeded("too many")
+                .to_string()
+                .contains("too many")
+        );
     }
 
     #[test]
     fn internal_read_queries_never_open_explicit_transactions() {
-        for query in [TEST_CONNECTION_SQL, LIST_DATABASES_SQL, LIST_PUBLIC_TABLES_SQL] {
+        for query in [
+            TEST_CONNECTION_SQL,
+            LIST_DATABASES_SQL,
+            LIST_PUBLIC_TABLES_SQL,
+        ] {
             let lower = query.to_ascii_lowercase();
             assert!(!lower.contains("begin"));
             assert!(!lower.contains("commit"));

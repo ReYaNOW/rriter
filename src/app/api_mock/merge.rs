@@ -119,8 +119,7 @@ pub fn resolve_api_mock_route<'a>(
     path: &str,
 ) -> ApiMockRouteDecision<'a> {
     if let Some(route) = best_matching_route(routes, method, path, |route| {
-        route.origin == ApiMockRouteOrigin::Manual
-            && route.enabled
+        route.origin == ApiMockRouteOrigin::Manual && route.enabled
     }) {
         return ApiMockRouteDecision::Mock(route);
     }
@@ -138,8 +137,7 @@ pub fn resolve_api_mock_route<'a>(
     }
 
     if let Some(route) = best_matching_route(routes, method, path, |route| {
-        route.origin == ApiMockRouteOrigin::OpenApi
-            && route.enabled
+        route.origin == ApiMockRouteOrigin::OpenApi && route.enabled
     }) {
         return ApiMockRouteDecision::Mock(route);
     }
@@ -167,10 +165,7 @@ fn best_matching_route<'a>(
 ) -> Option<&'a ApiMockRuntimeRoute> {
     let mut best = None;
     for route in routes {
-        if !eligible(route)
-            || route.method != method
-            || !api_mock_path_matches(&route.path, path)
-        {
+        if !eligible(route) || route.method != method || !api_mock_path_matches(&route.path, path) {
             continue;
         }
         let score = api_mock_route_specificity(&route.path, path);
@@ -272,9 +267,9 @@ fn match_path_tokens(
             ends.sort_unstable();
             ends.dedup();
             for end in ends.into_iter().rev() {
-                if next_static.is_some_and(|text| {
-                    !path.get(end..).is_some_and(|rest| rest.starts_with(text))
-                }) {
+                if next_static
+                    .is_some_and(|text| !path.get(end..).is_some_and(|rest| rest.starts_with(text)))
+                {
                     continue;
                 }
                 let Some(value) = path.get(pos..end) else {
@@ -496,16 +491,18 @@ mod tests {
     fn route_resolution_prefers_static_path_over_earlier_parameter_route() {
         let mut state = ApiMockState::default();
         for (stable_id, path) in [("generic", "/users/{id}"), ("static", "/users/me")] {
-            state.manual_routes.push(super::super::types::ApiManualRoute {
-                stable_id: stable_id.to_string(),
-                method: ApiMethod::Get,
-                path: path.to_string(),
-                enabled: true,
-                response: super::super::types::ApiMockResponse::Generated,
-                python: None,
-                input_fields: Vec::new(),
-                output_fields: Vec::new(),
-            });
+            state
+                .manual_routes
+                .push(super::super::types::ApiManualRoute {
+                    stable_id: stable_id.to_string(),
+                    method: ApiMethod::Get,
+                    path: path.to_string(),
+                    enabled: true,
+                    response: super::super::types::ApiMockResponse::Generated,
+                    python: None,
+                    input_fields: Vec::new(),
+                    output_fields: Vec::new(),
+                });
         }
         let routes = build_api_mock_routes([], &state);
 
@@ -532,26 +529,23 @@ mod tests {
     #[test]
     fn disabled_manual_route_is_not_enabled_in_runtime_snapshot() {
         let mut state = ApiMockState::default();
-        state.manual_routes.push(super::super::types::ApiManualRoute {
-            stable_id: "disabled".to_string(),
-            method: ApiMethod::Get,
-            path: "/disabled".to_string(),
-            enabled: false,
-            response: super::super::types::ApiMockResponse::Generated,
-            python: None,
-            input_fields: Vec::new(),
-            output_fields: Vec::new(),
-        });
+        state
+            .manual_routes
+            .push(super::super::types::ApiManualRoute {
+                stable_id: "disabled".to_string(),
+                method: ApiMethod::Get,
+                path: "/disabled".to_string(),
+                enabled: false,
+                response: super::super::types::ApiMockResponse::Generated,
+                python: None,
+                input_fields: Vec::new(),
+                output_fields: Vec::new(),
+            });
         let routes = build_api_mock_routes([], &state);
 
         assert!(!routes[0].enabled);
         assert_eq!(
-            resolve_api_mock_route(
-                &routes,
-                ApiMockMode::MockAll,
-                ApiMethod::Get,
-                "/disabled"
-            ),
+            resolve_api_mock_route(&routes, ApiMockMode::MockAll, ApiMethod::Get, "/disabled"),
             ApiMockRouteDecision::NotFound
         );
     }

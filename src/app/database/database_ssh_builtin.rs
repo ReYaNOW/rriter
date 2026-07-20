@@ -90,7 +90,7 @@ impl From<russh::AgentAuthError> for DatabaseSshError {
         match value {
             russh::AgentAuthError::Send(error) => {
                 Self::Unsupported(format!("SSH agent send failed: {error:?}"))
-            },
+            }
             russh::AgentAuthError::Key(error) => Self::Keys(error),
         }
     }
@@ -129,13 +129,11 @@ impl client::Handler for BuiltinSshClient {
                     Ok(true)
                 }
             },
-            Err(russh::keys::Error::KeyChanged { line }) => {
-                Err(DatabaseSshError::ChangedHostKey {
-                    host: self.host.clone(),
-                    port: self.port,
-                    detail: format!("known_hosts line {line}"),
-                })
-            }
+            Err(russh::keys::Error::KeyChanged { line }) => Err(DatabaseSshError::ChangedHostKey {
+                host: self.host.clone(),
+                port: self.port,
+                detail: format!("known_hosts line {line}"),
+            }),
             Err(error) => Err(error.into()),
         }
     }
@@ -165,10 +163,7 @@ impl AsyncWrite for BuiltinSshStream {
         Pin::new(&mut *self.stream).poll_write(cx, buffer)
     }
 
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut *self.stream).poll_flush(cx)
     }
 
@@ -195,7 +190,10 @@ pub async fn connect_builtin_ssh(
         let jump_session = connect_session(
             &jump_endpoint,
             secrets.jump_password.as_ref().map(|value| value.as_str()),
-            secrets.jump_key_passphrase.as_ref().map(|value| value.as_str()),
+            secrets
+                .jump_key_passphrase
+                .as_ref()
+                .map(|value| value.as_str()),
             options.host_key_policy,
         )
         .await?;
@@ -212,17 +210,17 @@ pub async fn connect_builtin_ssh(
             port: final_endpoint.port,
             policy: options.host_key_policy,
         };
-        let mut session = client::connect_stream(
-            Arc::new(client_config()),
-            channel.into_stream(),
-            handler,
-        )
-        .await?;
+        let mut session =
+            client::connect_stream(Arc::new(client_config()), channel.into_stream(), handler)
+                .await?;
         authenticate_session(
             &mut session,
             &final_endpoint,
             secrets.ssh_password.as_ref().map(|value| value.as_str()),
-            secrets.ssh_key_passphrase.as_ref().map(|value| value.as_str()),
+            secrets
+                .ssh_key_passphrase
+                .as_ref()
+                .map(|value| value.as_str()),
         )
         .await?;
         sessions.push(jump_session);
@@ -231,7 +229,10 @@ pub async fn connect_builtin_ssh(
         connect_session(
             &final_endpoint,
             secrets.ssh_password.as_ref().map(|value| value.as_str()),
-            secrets.ssh_key_passphrase.as_ref().map(|value| value.as_str()),
+            secrets
+                .ssh_key_passphrase
+                .as_ref()
+                .map(|value| value.as_str()),
             options.host_key_policy,
         )
         .await?

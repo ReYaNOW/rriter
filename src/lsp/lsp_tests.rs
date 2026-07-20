@@ -130,13 +130,13 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
 #[test]
 fn lsp_restart_budget_is_bounded_and_resets_after_stable_run() {
     let mut budget = LspRestartBudget::default();
-    for attempt in 1..=LSP_MAX_CONSECUTIVE_ATTEMPTS {
-        assert_eq!(budget.begin_attempt(), Some(attempt));
+    for attempt in 1..=LspServerKind::Ruff.restart_attempt_limit() {
+        assert_eq!(budget.begin_attempt_for(LspServerKind::Ruff), Some(attempt));
     }
-    assert_eq!(budget.begin_attempt(), None);
+    assert_eq!(budget.begin_attempt_for(LspServerKind::Ruff), None);
 
     budget.mark_stable();
-    assert_eq!(budget.begin_attempt(), Some(1));
+    assert_eq!(budget.begin_attempt_for(LspServerKind::Ruff), Some(1));
 }
 
 #[test]
@@ -328,9 +328,7 @@ fn lsp_process_commands_update_local_state_and_send_expected_requests() {
     }
 
     let ws_diag_id = proc
-        .request_workspace_diagnostics(
-            r#"[{"uri":"file:///tmp/app.py","value":"r1"}]"#.to_string(),
-        )
+        .request_workspace_diagnostics(r#"[{"uri":"file:///tmp/app.py","value":"r1"}]"#.to_string())
         .unwrap();
     match rx.try_recv().unwrap() {
         Cmd::WorkspaceDiagnostic {
@@ -476,11 +474,7 @@ fn lsp_manager_closing_last_workspace_file_prunes_workspace_diagnostics() {
         stale.clone(),
         (
             1,
-            diag_arc(vec![test_diag(
-                "stale instant",
-                DiagSeverity::Error,
-                None,
-            )]),
+            diag_arc(vec![test_diag("stale instant", DiagSeverity::Error, None)]),
         ),
     );
     manager.ty_instant_diagnostics.insert(
@@ -756,7 +750,9 @@ fn instant_merged_diagnostics_lazily_combines_servers_and_handles_empty() {
     assert_eq!(manager.diagnostic_count(&path), 2);
     assert_eq!(manager.diagnostic_counts_for_path(&path), (1, 0));
     assert_eq!(
-        manager.diagnostic_at(&path, 1).map(|diag| diag.message.as_ref()),
+        manager
+            .diagnostic_at(&path, 1)
+            .map(|diag| diag.message.as_ref()),
         Some("ty")
     );
     assert!(manager.diagnostic_paths().iter().any(|p| *p == &path));
@@ -815,10 +811,12 @@ fn workspace_ruff_diagnostics_cover_closed_files_without_overriding_open_buffers
         Some(DiagSeverity::Error)
     );
     assert_eq!(manager.total_diagnostic_counts(), (1, 1));
-    assert!(manager
-        .diagnostic_paths()
-        .iter()
-        .any(|path| *path == &closed_path));
+    assert!(
+        manager
+            .diagnostic_paths()
+            .iter()
+            .any(|path| *path == &closed_path)
+    );
 
     manager.instant_diagnostics.insert(
         open_path.clone(),
@@ -872,14 +870,20 @@ fn diagnostic_accessors_use_live_instant_store_while_index_is_dirty() {
         offscreen.clone(),
         (
             3,
-            diag_arc(vec![test_diag("workspace", DiagSeverity::Error, Some("T1"))]),
+            diag_arc(vec![test_diag(
+                "workspace",
+                DiagSeverity::Error,
+                Some("T1"),
+            )]),
         ),
     );
     manager.dirty_diagnostics = true;
 
     assert_eq!(manager.diagnostic_count(&path), 2);
     assert_eq!(
-        manager.diagnostic_at(&path, 1).map(|diag| diag.message.as_ref()),
+        manager
+            .diagnostic_at(&path, 1)
+            .map(|diag| diag.message.as_ref()),
         Some("new error")
     );
     assert_eq!(manager.diagnostic_counts_for_path(&path), (1, 1));
@@ -891,10 +895,12 @@ fn diagnostic_accessors_use_live_instant_store_while_index_is_dirty() {
         manager.diagnostic_severity_under_path(Path::new("/tmp/ws/pkg/current.py")),
         Some(DiagSeverity::Error)
     );
-    assert!(manager
-        .diagnostic_paths()
-        .iter()
-        .any(|path| *path == &offscreen));
+    assert!(
+        manager
+            .diagnostic_paths()
+            .iter()
+            .any(|path| *path == &offscreen)
+    );
 }
 
 #[test]
@@ -906,7 +912,11 @@ fn diagnostic_ancestor_severity_cache_rebuilds_and_clears() {
         warning_path.clone(),
         (
             1,
-            diag_arc(vec![test_diag("warning", DiagSeverity::Warning, Some("W1"))]),
+            diag_arc(vec![test_diag(
+                "warning",
+                DiagSeverity::Warning,
+                Some("W1"),
+            )]),
         ),
     );
     manager.ty_instant_diagnostics.insert(
@@ -1049,7 +1059,10 @@ fn send_and_log_removes_only_sent_text_fields_and_keeps_json_shape() {
 #[test]
 fn lsp_process_poll_drains_events_and_shutdown_sends_command() {
     let (proc, rx, tx) = test_process_with_events(&RUFF_SERVER);
-    tx.send(LspEvent::ServerReady { server: LspServerKind::Ruff }).unwrap();
+    tx.send(LspEvent::ServerReady {
+        server: LspServerKind::Ruff,
+    })
+    .unwrap();
     tx.send(LspEvent::Log {
         name: "ruff",
         message: "ready".to_string(),
@@ -1088,12 +1101,7 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
     let events = manager.poll();
     assert_eq!(events.len(), 1);
     assert!(manager.get_diagnostics(&path).is_empty());
-    assert!(
-        manager
-            .instant_merged_diagnostics(&path)
-            .1
-            .is_empty()
-    );
+    assert!(manager.instant_merged_diagnostics(&path).1.is_empty());
     assert!(!manager.dirty_diagnostics);
 
     manager.suppress_diagnostics = false;
@@ -1112,7 +1120,9 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
     assert_eq!(events.len(), 1);
     assert_eq!(manager.diagnostic_count(&path), 1);
     assert_eq!(
-        manager.diagnostic_at(&path, 0).map(|diag| diag.message.as_ref()),
+        manager
+            .diagnostic_at(&path, 0)
+            .map(|diag| diag.message.as_ref()),
         Some("flushed")
     );
     assert_eq!(manager.instant_merged_diagnostics(&path).0, 2);
@@ -1165,7 +1175,9 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
     let events = manager.poll();
     assert_eq!(events.len(), 2);
     assert_eq!(
-        manager.diagnostic_at(&path, 0).map(|diag| diag.message.as_ref()),
+        manager
+            .diagnostic_at(&path, 0)
+            .map(|diag| diag.message.as_ref()),
         Some("offscreen")
     );
     assert!(manager.ty_workspace_diag_pending.is_none());
@@ -1438,7 +1450,10 @@ fn r3_093_event_channel_disconnect_emits_disabled_once() {
     process.poll(&mut events);
     assert!(events.iter().any(|event| matches!(
         event,
-        LspEvent::StatusChanged { status: LspServerStatus::Disabled, .. }
+        LspEvent::StatusChanged {
+            status: LspServerStatus::Disabled,
+            ..
+        }
     )));
     let first_len = events.len();
     process.poll(&mut events);
@@ -1493,7 +1508,6 @@ fn r3_096_lsp_drop_reaps_unfinished_supervisor_without_blocking() {
     assert!(started.elapsed() < Duration::from_millis(80));
 }
 
-
 #[test]
 fn lsp_position_clamps_oversized_column_to_requested_line_end() {
     let text = "a😀\nline";
@@ -1513,7 +1527,10 @@ fn lsp_frame_reader_accepts_reordered_extra_headers() {
     let mut reader = std::io::Cursor::new(frame);
     let mut header = String::new();
 
-    assert_eq!(read_lsp_frame(&mut reader, &mut header).unwrap(), Some(body.to_vec()));
+    assert_eq!(
+        read_lsp_frame(&mut reader, &mut header).unwrap(),
+        Some(body.to_vec())
+    );
     assert_eq!(read_lsp_frame(&mut reader, &mut header).unwrap(), None);
 }
 

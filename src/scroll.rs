@@ -332,13 +332,13 @@ mod tests {
 
     #[test]
     fn scrollbar_geometry_reuses_same_ratio_for_both_axes() {
-        let thumb = scrollbar_thumb(10.0, 200.0, 100.0, 400.0, 150.0, 20.0)
-            .expect("scrollbar visible");
+        let thumb =
+            scrollbar_thumb(10.0, 200.0, 100.0, 400.0, 150.0, 20.0).expect("scrollbar visible");
         assert_eq!(thumb.len, 50.0);
         assert_eq!(thumb.start, 85.0);
 
-        let (_, target) = scrollbar_drag_target(160.0, 10.0, 200.0, thumb, 300.0, None)
-            .expect("drag target");
+        let (_, target) =
+            scrollbar_drag_target(160.0, 10.0, 200.0, thumb, 300.0, None).expect("drag target");
         assert!(target > 150.0);
         assert!(target <= 300.0);
 
@@ -398,14 +398,19 @@ mod tests {
     fn bug_37_scrollbar_helpers_reject_zero_over_zero_and_non_finite_inputs() {
         assert!(scrollbar_thumb(0.0, 0.0, 0.0, 0.0, 0.0, 20.0).is_none());
         assert!(scrollbar_thumb(0.0, 100.0, 50.0, f32::NAN, 0.0, 20.0).is_none());
-        assert!(scrollbar_drag_target(
-            f32::NAN,
-            0.0,
-            100.0,
-            ScrollbarThumb { start: 0.0, len: 20.0 },
-            100.0,
-            None,
-        )
-        .is_none());
+        assert!(
+            scrollbar_drag_target(
+                f32::NAN,
+                0.0,
+                100.0,
+                ScrollbarThumb {
+                    start: 0.0,
+                    len: 20.0
+                },
+                100.0,
+                None,
+            )
+            .is_none()
+        );
     }
 }

@@ -1,6 +1,6 @@
-use crate::lsp::HoverLineKindPublic;
 pub use super::ImportBlock;
 use super::finish_import_block;
+use crate::lsp::HoverLineKindPublic;
 use std::collections::HashMap;
 use tree_sitter::StreamingIterator;
 
@@ -188,8 +188,7 @@ pub(crate) fn python_class_direct_attr(line: &str) -> Option<&str> {
         return None;
     }
     let rest = trimmed[end..].trim_start();
-    (rest.starts_with(':') || python_plain_assignment_after_token(rest))
-        .then_some(&trimmed[..end])
+    (rest.starts_with(':') || python_plain_assignment_after_token(rest)).then_some(&trimmed[..end])
 }
 
 pub(crate) fn python_class_header_name(line: &str) -> Option<&str> {
@@ -269,8 +268,8 @@ fn update_python_import_continuation(
     continuing: &mut bool,
 ) {
     delimiters.scan_line(trimmed);
-    *continuing = delimiters.has_open_delimiter()
-        || python_import_line_has_explicit_continuation(trimmed);
+    *continuing =
+        delimiters.has_open_delimiter() || python_import_line_has_explicit_continuation(trimmed);
 }
 
 fn push_docstring_line_spans(
@@ -1048,10 +1047,9 @@ pub(crate) fn python_class_attr_name_ranges(code: &str) -> Vec<(usize, usize)> {
         let trimmed = line.trim_start();
         let indent = line.len().saturating_sub(trimmed.len());
 
-        while classes
-            .last()
-            .is_some_and(|scope| scope.header_complete && !trimmed.is_empty() && indent <= scope.indent)
-        {
+        while classes.last().is_some_and(|scope| {
+            scope.header_complete && !trimmed.is_empty() && indent <= scope.indent
+        }) {
             classes.pop();
         }
 
@@ -1059,8 +1057,8 @@ pub(crate) fn python_class_attr_name_ranges(code: &str) -> Vec<(usize, usize)> {
             && !scope.header_complete
         {
             scope.header_delimiters.scan_line(line);
-            scope.header_complete = !scope.header_delimiters.has_open_delimiter()
-                && trimmed.trim_end().ends_with(':');
+            scope.header_complete =
+                !scope.header_delimiters.has_open_delimiter() && trimmed.trim_end().ends_with(':');
             offset = offset.saturating_add(line.len()).saturating_add(1);
             continue;
         }

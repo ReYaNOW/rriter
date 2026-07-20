@@ -7,7 +7,6 @@ fn wheel_delta(delta: MouseScrollDelta, line_height: f32) -> (f32, f32) {
     }
 }
 
-
 fn autocomplete_max_scroll(total_items: usize, scale: f32) -> f32 {
     let step = 36.0 * scale;
     let total_items = total_items as f32;
@@ -125,7 +124,9 @@ impl App {
         }
         if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
             && let Some(state) = ddl.as_mut()
-            && state.rect.is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
+            && state
+                .rect
+                .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
         {
             state.popup.scroll.anim_speed = 7.0;
             state.popup.scroll.scroll_by(dy);
@@ -135,20 +136,26 @@ impl App {
         }
 
         if let Some(tab_id) = self.active_database_table_tab_id()
-            && matches!(self.ui_registry.find_at(mx, my), Some(
-                crate::ui_system::UiId::DatabaseTableGridBody
-                | crate::ui_system::UiId::DatabaseTableCell(_, _)
-                | crate::ui_system::UiId::DatabaseGridRow(_)
-                | crate::ui_system::UiId::DatabaseTableHeader(_)
-                | crate::ui_system::UiId::DatabaseTableScrollY
-                | crate::ui_system::UiId::DatabaseTableScrollX
-            ))
+            && matches!(
+                self.ui_registry.find_at(mx, my),
+                Some(
+                    crate::ui_system::UiId::DatabaseTableGridBody
+                        | crate::ui_system::UiId::DatabaseTableCell(_, _)
+                        | crate::ui_system::UiId::DatabaseGridRow(_)
+                        | crate::ui_system::UiId::DatabaseTableHeader(_)
+                        | crate::ui_system::UiId::DatabaseTableScrollY
+                        | crate::ui_system::UiId::DatabaseTableScrollX
+                )
+            )
         {
-            let grid_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableGridBody);
+            let grid_rect = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::DatabaseTableGridBody);
             if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
                 if let Some((_, _, width, height)) = grid_rect {
                     state.grid.viewport_width = (width / s - 54.0).max(0.0);
-                    state.grid.viewport_height = (height / s - crate::app::database::DATABASE_GRID_HEADER_HEIGHT).max(0.0);
+                    state.grid.viewport_height =
+                        (height / s - crate::app::database::DATABASE_GRID_HEADER_HEIGHT).max(0.0);
                 }
                 if shift || dx.abs() > dy.abs() {
                     let amount = if shift { dy } else { dx } / s.max(0.001);
@@ -159,7 +166,10 @@ impl App {
                     state.grid.scroll_x.scroll_by(amount);
                     state.grid.scroll_x.clamp_target(0.0, max);
                 } else {
-                    let max = (state.grid.logical_row_count() as f32 * crate::app::database::DATABASE_GRID_ROW_HEIGHT - state.grid.viewport_height).max(0.0);
+                    let max = (state.grid.logical_row_count() as f32
+                        * crate::app::database::DATABASE_GRID_ROW_HEIGHT
+                        - state.grid.viewport_height)
+                        .max(0.0);
                     state.grid.scroll_y.anim_speed = 7.0;
                     state.grid.scroll_y.scroll_by(dy / s.max(0.001));
                     state.grid.scroll_y.clamp_target(0.0, max);
@@ -272,8 +282,7 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s);
+            let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Explorer, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.explorer_scroll.anim_speed = 7.0;
@@ -291,14 +300,18 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Search, s);
+            let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Search, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if let Some(layout) = self.project_search_panel_layout() {
                     if crate::ui_system::point_in_rect(
                         mx,
                         my,
-                        (layout.query.x, layout.query.y, layout.query.w, layout.query.h),
+                        (
+                            layout.query.x,
+                            layout.query.y,
+                            layout.query.w,
+                            layout.query.h,
+                        ),
                     ) {
                         self.ide_panel
                             .project_search
@@ -306,8 +319,7 @@ impl App {
                     } else {
                         self.ide_panel.project_search.scroll.anim_speed = 7.0;
                         self.ide_panel.project_search.scroll.scroll_by(dy);
-                        let max_scroll =
-                            self.ide_panel.project_search.max_scroll(layout.list.h, s);
+                        let max_scroll = self.ide_panel.project_search.max_scroll(layout.list.h, s);
                         self.ide_panel
                             .project_search
                             .scroll
@@ -323,8 +335,7 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Git, s);
+            let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Git, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
@@ -412,8 +423,7 @@ impl App {
         }
 
         if self.is_ide_mode && self.ide_panel.is_open(crate::app::PanelId::Database) {
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Database, s);
+            let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Database, s);
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 self.ide_panel.database.scroll.anim_speed = 7.0;
                 self.ide_panel.database.scroll.scroll_by(dy);
@@ -455,7 +465,12 @@ impl App {
             if crate::ui_system::point_in_rect(
                 mx,
                 my,
-                (layout.content_x, layout.content_y, layout.content_w, layout.content_h),
+                (
+                    layout.content_x,
+                    layout.content_y,
+                    layout.content_w,
+                    layout.content_h,
+                ),
             ) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
                 self.ide_panel.problems_scroll.scroll_by(dy);
@@ -470,8 +485,7 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
-            let (cx, cy, cw, ch, _) =
-                app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
+            let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
                 if self.ide_panel.terminal_focused {
@@ -567,7 +581,11 @@ impl App {
                             let log_bg_w = cw - 48.0 * s;
                             let log_bg_h = logs_h - 52.0 * s;
 
-                            if crate::ui_system::point_in_rect(mx, my, (log_bg_x, log_bg_y, log_bg_w, log_bg_h)) {
+                            if crate::ui_system::point_in_rect(
+                                mx,
+                                my,
+                                (log_bg_x, log_bg_y, log_bg_w, log_bg_h),
+                            ) {
                                 let name = info.name.to_string();
 
                                 let inner_y = self
@@ -726,19 +744,22 @@ impl App {
         } else {
             0.0
         };
-        let query_results_h = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
-            crate::app::EditorTabKind::DatabaseQuery(_, state)
-                if crate::app::database::database_query_results_visible(state) =>
-            {
-                Some(crate::app::database::database_query_results_height(
-                    state.result_view.preferred_height,
-                    window_h,
-                    panel_bottom_h,
-                    s,
-                ))
-            }
-            _ => None,
-        });
+        let query_results_h = self
+            .tabs
+            .get(self.active_tab)
+            .and_then(|tab| match &tab.kind {
+                crate::app::EditorTabKind::DatabaseQuery(_, state)
+                    if crate::app::database::database_query_results_visible(state) =>
+                {
+                    Some(crate::app::database::database_query_results_height(
+                        state.result_view.preferred_height,
+                        window_h,
+                        panel_bottom_h,
+                        s,
+                    ))
+                }
+                _ => None,
+            });
         if let Some(results_h) = query_results_h {
             let viewport = self
                 .ui_registry
@@ -756,15 +777,9 @@ impl App {
                 if let Some(crate::app::EditorTabKind::DatabaseQuery(meta, state)) =
                     self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
                 {
-                    let (max_x, max_y) =
-                        crate::app::database::database_query_scroll_limits(
-                            meta,
-                            state,
-                            &history,
-                            viewport_w,
-                            viewport_h,
-                            s,
-                        );
+                    let (max_x, max_y) = crate::app::database::database_query_scroll_limits(
+                        meta, state, &history, viewport_w, viewport_h, s,
+                    );
                     if shift {
                         state.result_view.scroll_x.anim_speed = 7.0;
                         state.result_view.scroll_x.scroll_by(dy);
@@ -787,7 +802,8 @@ impl App {
         if self.database_blocking_modal_open() {
             return;
         }
-        let tab_bar_h = crate::render_view::ide_tab_bar_height(self.show_welcome, self.is_ide_mode, s);
+        let tab_bar_h =
+            crate::render_view::ide_tab_bar_height(self.show_welcome, self.is_ide_mode, s);
 
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if my >= 0.0 && my <= tab_bar_h && !self.tabs.is_empty() {
@@ -1055,7 +1071,9 @@ impl App {
                     _ => None,
                 }
             });
-            if let Some((spec_id, route_idx, scroll_target, mock_part, max_scroll)) = api_inner_scroll {
+            if let Some((spec_id, route_idx, scroll_target, mock_part, max_scroll)) =
+                api_inner_scroll
+            {
                 if max_scroll < 0.0 {
                     let menu_max_scroll = (-max_scroll - 1.0).max(0.0);
                     if let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
@@ -1391,10 +1409,16 @@ mod tests {
 
         let layout = crate::render_view::settings_ui::settings_modal_layout(1000.0, 500.0, 1.0);
         let no_wrap = crate::render_view::settings_ui::settings_ide_max_scroll(
-            layout, 2, [100.0, 120.0], 1.0,
+            layout,
+            2,
+            [100.0, 120.0],
+            1.0,
         );
         let wrapped = crate::render_view::settings_ui::settings_ide_max_scroll(
-            layout, 2, [430.0, 120.0, 450.0], 1.0,
+            layout,
+            2,
+            [430.0, 120.0, 450.0],
+            1.0,
         );
 
         assert!(no_wrap > 0.0);

@@ -124,8 +124,7 @@ impl App {
                     PhysicalKey::Code(KeyCode::Escape) => {
                         self.rollback_active_database_query();
                     }
-                    PhysicalKey::Code(KeyCode::Enter)
-                    | PhysicalKey::Code(KeyCode::NumpadEnter) => {
+                    PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter) => {
                         self.commit_active_database_query();
                     }
                     _ => {}
@@ -183,31 +182,43 @@ impl App {
                     match key_event.physical_key {
                         PhysicalKey::Code(KeyCode::ArrowDown) => {
                             self.move_active_database_query_history_selection(1);
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         PhysicalKey::Code(KeyCode::ArrowUp) => {
                             self.move_active_database_query_history_selection(-1);
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         PhysicalKey::Code(KeyCode::Home) => {
                             self.set_active_database_query_history_selection(false);
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         PhysicalKey::Code(KeyCode::End) => {
                             self.set_active_database_query_history_selection(true);
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         PhysicalKey::Code(KeyCode::Enter)
-                        | PhysicalKey::Code(KeyCode::NumpadEnter) if !ctrl => {
+                        | PhysicalKey::Code(KeyCode::NumpadEnter)
+                            if !ctrl =>
+                        {
                             let selected = self
                                 .active_database_query_meta_state()
                                 .map_or(0, |(_, state)| state.history_selected);
                             self.load_database_query_history_entry(selected);
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         _ => {}
@@ -222,41 +233,57 @@ impl App {
                             });
                         if reviewing {
                             self.rollback_active_database_query();
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         if running {
                             self.cancel_active_database_query();
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                         if history_open {
                             self.toggle_active_database_query_history();
-                            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                            if let Some(window) = self.window.as_ref() {
+                                window.request_redraw();
+                            }
                             return;
                         }
                     }
                     PhysicalKey::Code(KeyCode::Enter) | PhysicalKey::Code(KeyCode::NumpadEnter)
                         if ctrl =>
                     {
-                        self.run_active_database_query(crate::app::database::DatabaseQueryMode::Run);
-                        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                        self.run_active_database_query(
+                            crate::app::database::DatabaseQueryMode::Run,
+                        );
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
                         return;
                     }
                     PhysicalKey::Code(KeyCode::Space) if ctrl => {
                         self.show_active_database_query_completion();
-                        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
                         return;
                     }
                     _ => {}
                 }
             }
             if self.handle_database_table_key(&key_event) {
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return;
             }
             if self.handle_database_dialog_keyboard(&key_event) {
-                if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return;
             }
             if self.ide_panel.database.delete_prompt.is_some()
@@ -267,15 +294,25 @@ impl App {
                     if self.ide_panel.database.host_key_prompt.is_some() {
                         self.cancel_database_host_key_prompt();
                     }
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
                 return;
             }
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                 if self.ide_panel.database.context_menu.take().is_some()
-                    || self.ide_panel.database.ddl_hover.borrow_mut().take().is_some()
+                    || self
+                        .ide_panel
+                        .database
+                        .ddl_hover
+                        .borrow_mut()
+                        .take()
+                        .is_some()
                 {
-                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                     return;
                 }
             }
@@ -295,18 +332,26 @@ impl App {
                     }
                 }
                 PhysicalKey::Code(KeyCode::KeyC) if ctrl => {
-                    let selected = self.ide_panel.database.ddl_hover.borrow().as_ref().and_then(|state| {
-                        let (a, b) = (state.selection_anchor?, state.selection_cursor?);
-                        let (start, end) = (a.min(b), a.max(b));
-                        state.popup.text.get(start..end).map(str::to_string)
-                    });
+                    let selected = self
+                        .ide_panel
+                        .database
+                        .ddl_hover
+                        .borrow()
+                        .as_ref()
+                        .and_then(|state| {
+                            let (a, b) = (state.selection_anchor?, state.selection_cursor?);
+                            let (start, end) = (a.min(b), a.max(b));
+                            state.popup.text.get(start..end).map(str::to_string)
+                        });
                     if let Some(selected) = selected.filter(|text| !text.is_empty()) {
                         self.set_clipboard_text(selected);
                     }
                 }
                 _ => {}
             }
-            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
 

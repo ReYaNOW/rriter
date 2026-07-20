@@ -46,10 +46,8 @@ pub fn load_database_secret(
     connection_id: DatabaseConnectionId,
     kind: DatabaseSecretKind,
 ) -> io::Result<Option<Zeroizing<String>>> {
-    let Some(bytes) = crate::platform::load_system_user_secret(&database_secret_purpose(
-        connection_id,
-        kind,
-    ))?
+    let Some(bytes) =
+        crate::platform::load_system_user_secret(&database_secret_purpose(connection_id, kind))?
     else {
         return Ok(None);
     };
@@ -73,10 +71,8 @@ pub fn load_database_secret_bundle(
 ) -> io::Result<DatabaseSecretBundle> {
     let mut bundle = DatabaseSecretBundle::empty();
     if connection.remember_postgres_password {
-        bundle.postgres_password = load_database_secret(
-            connection.id,
-            DatabaseSecretKind::PostgresPassword,
-        )?;
+        bundle.postgres_password =
+            load_database_secret(connection.id, DatabaseSecretKind::PostgresPassword)?;
     }
     if let Some(ssh) = &connection.ssh {
         if ssh.remember_password {
@@ -84,10 +80,8 @@ pub fn load_database_secret_bundle(
                 load_database_secret(connection.id, DatabaseSecretKind::SshPassword)?;
         }
         if ssh.remember_key_passphrase {
-            bundle.ssh_key_passphrase = load_database_secret(
-                connection.id,
-                DatabaseSecretKind::SshKeyPassphrase,
-            )?;
+            bundle.ssh_key_passphrase =
+                load_database_secret(connection.id, DatabaseSecretKind::SshKeyPassphrase)?;
         }
         if let Some(jump) = &ssh.jump_host {
             if jump.remember_password {
@@ -95,10 +89,8 @@ pub fn load_database_secret_bundle(
                     load_database_secret(connection.id, DatabaseSecretKind::JumpPassword)?;
             }
             if jump.remember_key_passphrase {
-                bundle.jump_key_passphrase = load_database_secret(
-                    connection.id,
-                    DatabaseSecretKind::JumpKeyPassphrase,
-                )?;
+                bundle.jump_key_passphrase =
+                    load_database_secret(connection.id, DatabaseSecretKind::JumpKeyPassphrase)?;
             }
         }
     }
@@ -113,7 +105,10 @@ pub fn save_remembered_database_secrets(
         connection.id,
         DatabaseSecretKind::PostgresPassword,
         connection.remember_postgres_password,
-        bundle.postgres_password.as_ref().map(|value| value.as_str()),
+        bundle
+            .postgres_password
+            .as_ref()
+            .map(|value| value.as_str()),
     )?;
 
     let ssh = connection.ssh.as_ref();
@@ -127,7 +122,10 @@ pub fn save_remembered_database_secrets(
         connection.id,
         DatabaseSecretKind::SshKeyPassphrase,
         ssh.is_some_and(|ssh| ssh.remember_key_passphrase),
-        bundle.ssh_key_passphrase.as_ref().map(|value| value.as_str()),
+        bundle
+            .ssh_key_passphrase
+            .as_ref()
+            .map(|value| value.as_str()),
     )?;
     sync_secret(
         connection.id,
@@ -141,7 +139,10 @@ pub fn save_remembered_database_secrets(
         DatabaseSecretKind::JumpKeyPassphrase,
         ssh.and_then(|ssh| ssh.jump_host.as_ref())
             .is_some_and(|jump| jump.remember_key_passphrase),
-        bundle.jump_key_passphrase.as_ref().map(|value| value.as_str()),
+        bundle
+            .jump_key_passphrase
+            .as_ref()
+            .map(|value| value.as_str()),
     )
 }
 
@@ -157,7 +158,10 @@ fn sync_secret(
     let value = value.ok_or_else(|| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} is marked for storage but no value was supplied", kind.suffix()),
+            format!(
+                "{} is marked for storage but no value was supplied",
+                kind.suffix()
+            ),
         )
     })?;
     store_database_secret(connection_id, kind, value)
@@ -207,11 +211,8 @@ mod tests {
             remember_postgres_password: true,
             ..DatabaseConnectionConfig::default()
         };
-        let error = save_remembered_database_secrets(
-            &connection,
-            &DatabaseSecretBundle::empty(),
-        )
-        .unwrap_err();
+        let error = save_remembered_database_secrets(&connection, &DatabaseSecretBundle::empty())
+            .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
         assert!(error.to_string().contains("postgres_password"));
     }

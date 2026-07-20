@@ -1,7 +1,6 @@
 use super::*;
 use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
 
-
 #[allow(clippy::too_many_arguments)]
 fn diagnostic_hover_byte_at<'a>(
     editor: &crate::editor::Editor,
@@ -50,7 +49,11 @@ fn diagnostic_hover_byte_at<'a>(
             else {
                 continue;
             };
-            let line_start = editor.line_offsets.get(line).copied().map_or(0, |value| value);
+            let line_start = editor
+                .line_offsets
+                .get(line)
+                .copied()
+                .map_or(0, |value| value);
             let x_start_px =
                 renderer.visual_x_for_byte_offset(editor, line_start, start_byte, true);
             let mut x_end_px =
@@ -68,10 +71,8 @@ fn diagnostic_hover_byte_at<'a>(
                 avg_adv / 2.0,
             );
             let logical_line_x = renderer.text_x_for_visual_line_x(editor, line, line_x);
-            let type_target = diagnostic_hover_byte_range_on_line(
-                editor, line, start_col, end_col,
-            )
-            .map_or(start_byte, |range| range.2);
+            let type_target = diagnostic_hover_byte_range_on_line(editor, line, start_col, end_col)
+                .map_or(start_byte, |range| range.2);
             let x_start = left_padding + x_start_px - render_scroll_x;
             let x_end = left_padding + x_end_px - render_scroll_x;
             let squiggle_w = (x_end - x_start).max(avg_adv / 2.0);
@@ -250,7 +251,9 @@ impl App {
                 py,
             );
             state.selection_cursor = Some(byte);
-            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
 
@@ -528,12 +531,12 @@ impl App {
         }
 
         if self.ide_panel.api.mock_guide_scroll.is_dragging {
-            if let Some(rect) = self.ui_registry.rect_for(
-                crate::ui_system::UiId::ApiMockGuideScrollY,
-            ) {
+            if let Some(rect) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::ApiMockGuideScrollY)
+            {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let max_scroll =
-                    crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
+                let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
                 let track_start = rect.1 + 7.0 * s;
                 let track_len = (rect.3 - 14.0 * s).max(0.0);
                 if let Some(thumb) = crate::scroll::scrollbar_thumb(
@@ -562,22 +565,44 @@ impl App {
         }
 
         if self.settings_ide_scroll.is_dragging {
-            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsIdeScrollY) {
+            if let Some(rect) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::SettingsIdeScrollY)
+            {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let window_size = self.window.as_ref().unwrap().inner_size();
                 let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
-                    window_size.width as f32, window_size.height as f32, s, self.settings_anim_progress,
+                    window_size.width as f32,
+                    window_size.height as f32,
+                    s,
+                    self.settings_anim_progress,
                 );
                 let pad_x = 12.0 * s;
-                let widths = self.ide_ignore_patterns.iter().map(|pattern| {
-                    self.renderer.as_mut().unwrap().measure_ui_width(pattern, 0.88)
-                        + pad_x * 2.0 + 22.0 * s
-                }).collect::<Vec<_>>();
+                let widths = self
+                    .ide_ignore_patterns
+                    .iter()
+                    .map(|pattern| {
+                        self.renderer
+                            .as_mut()
+                            .unwrap()
+                            .measure_ui_width(pattern, 0.88)
+                            + pad_x * 2.0
+                            + 22.0 * s
+                    })
+                    .collect::<Vec<_>>();
                 let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
-                    layout, self.ide_workspaces.len(), widths, s,
+                    layout,
+                    self.ide_workspaces.len(),
+                    widths,
+                    s,
                 );
                 crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_ide_scroll, position.y as f32, rect.1, rect.3, max_scroll, 40.0 * s,
+                    &mut self.settings_ide_scroll,
+                    position.y as f32,
+                    rect.1,
+                    rect.3,
+                    max_scroll,
+                    40.0 * s,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -585,12 +610,23 @@ impl App {
         }
 
         if self.settings_scroll.is_dragging {
-            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsFaqScrollY) {
+            if let Some(rect) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::SettingsFaqScrollY)
+            {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let max_scroll = self.renderer.as_mut().unwrap()
+                let max_scroll = self
+                    .renderer
+                    .as_mut()
+                    .unwrap()
                     .get_faq_max_scroll(&self.faq_editor, rect.3);
                 crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_scroll, position.y as f32, rect.1, rect.3, max_scroll, 40.0 * s,
+                    &mut self.settings_scroll,
+                    position.y as f32,
+                    rect.1,
+                    rect.3,
+                    max_scroll,
+                    40.0 * s,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -598,9 +634,10 @@ impl App {
         }
 
         if self.tool_installer.log_scroll_is_dragging() {
-            if let Some(rect) = self.ui_registry.rect_for(
-                crate::ui_system::UiId::SettingsToolInstallLogScrollY,
-            ) {
+            if let Some(rect) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::SettingsToolInstallLogScrollY)
+            {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let line_h = crate::app::tool_installer::log_line_height(s);
                 let content_h = (self.tool_installer.logs().len().max(1) as f32 * line_h
@@ -740,11 +777,8 @@ impl App {
             }
 
             if self.ide_panel.git.graph_resizing {
-                let (_, content_y, _, content_h, _) = super::app_panel_scroll_rect(
-                    self,
-                    crate::app::PanelId::Git,
-                    s,
-                );
+                let (_, content_y, _, content_h, _) =
+                    super::app_panel_scroll_rect(self, crate::app::PanelId::Git, s);
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = content_y + controls_h;
                 let full_list_h = (content_h - controls_h).max(40.0 * s);
@@ -895,17 +929,25 @@ impl App {
                     .unwrap_or(0.0);
 
             let render_scroll_x = self.scroll_x.current.round();
-            let left_padding = self.renderer.as_ref().map_or(0.0, |renderer| renderer.left_padding);
+            let left_padding = self
+                .renderer
+                .as_ref()
+                .map_or(0.0, |renderer| renderer.left_padding);
             let cursor_phys_line = self
                 .editor
                 .line_offsets
                 .partition_point(|&offset| offset <= self.editor.cursor)
                 .saturating_sub(1);
             if self.active_tab_is_database_query() {
-                let diagnostics = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
-                    crate::app::EditorTabKind::DatabaseQuery(_, state) => Some(state.editor_diagnostics.as_slice()),
-                    _ => None,
-                });
+                let diagnostics = self
+                    .tabs
+                    .get(self.active_tab)
+                    .and_then(|tab| match &tab.kind {
+                        crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                            Some(state.editor_diagnostics.as_slice())
+                        }
+                        _ => None,
+                    });
                 if let Some(diagnostics) = diagnostics
                     && let Some(renderer) = self.renderer.as_mut()
                 {
@@ -1060,10 +1102,8 @@ impl App {
                 self.settings_ide_scroll.current,
             );
             let text = self.settings_ignore_editor.get_full_text();
-            let x_offset = (position.x as f32
-                - (input.x + 8.0 * s)
-                + self.settings_ignore_scroll_x)
-                .max(0.0);
+            let x_offset =
+                (position.x as f32 - (input.x + 8.0 * s) + self.settings_ignore_scroll_x).max(0.0);
             let target_idx = self
                 .renderer
                 .as_mut()
@@ -1224,8 +1264,7 @@ impl App {
         {
             let layout = active_terminal_scrollbar_layout(self);
             let active = self.ide_panel.active_terminal;
-            if let (Some(layout), Some(term)) =
-                (layout, self.ide_panel.terminals.get_mut(active))
+            if let (Some(layout), Some(term)) = (layout, self.ide_panel.terminals.get_mut(active))
                 && let Some((_, target)) =
                     crate::render_view::terminal_ui::terminal_scrollbar_drag_target(
                         position.y as f32,
@@ -1456,7 +1495,9 @@ impl App {
             let r = self.renderer.as_ref().unwrap();
             let track_w = scrollbar_x - padding;
             let max_x = r.max_scroll_x;
-            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w).max(40.0 * s).min(track_w.max(0.0));
+            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w)
+                .max(40.0 * s)
+                .min(track_w.max(0.0));
             let ratio = (position.x as f32 - padding - self.scroll_x.drag_offset)
                 / (track_w - thumb_w).max(0.0001);
             self.scroll_x.target = (ratio * max_x).clamp(0.0, max_x);
@@ -1527,11 +1568,7 @@ impl App {
             let active = self.ide_panel.active_terminal;
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let (terminal_panel_x, content_y, _, content_h, _) =
-                super::app_panel_scroll_rect(
-                    self,
-                    crate::app::PanelId::Terminal,
-                    s,
-                );
+                super::app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
             let (term_content_y, term_content_h) =
                 crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
             let lh = self.renderer.as_ref().unwrap().line_height;
@@ -1540,7 +1577,6 @@ impl App {
                 * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
             let panel_x = terminal_panel_x + 10.0 * s;
             if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-
                 let py = position.y as f32;
                 let px = position.x as f32;
 
@@ -1562,14 +1598,12 @@ impl App {
                     )
                 };
 
-                let scroll_offset =
-                    crate::render_view::terminal_ui::terminal_render_scroll_offset(
-                        term.scroll_y.current,
-                        max_scroll,
-                        grid.is_alt,
-                    );
-                let (_, bottom_pad) =
-                    crate::render_view::terminal_ui::terminal_text_padding(s);
+                let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
+                    term.scroll_y.current,
+                    max_scroll,
+                    grid.is_alt,
+                );
+                let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(s);
                 let offset_from_bottom =
                     (term_content_y + term_content_h - bottom_pad - py + scroll_offset) / char_h;
                 let mut cell_y = total_lines

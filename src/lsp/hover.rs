@@ -9,6 +9,9 @@ pub fn highlight_hover_text(
     Vec<(usize, usize)>,
 ) {
     let preprocessed = preprocess_hover_text(msg);
+    if looks_like_dart_hover(&preprocessed) {
+        return highlight_dart_hover_doc(&preprocessed);
+    }
     if preprocessed.contains(":param ") || looks_like_python_hover(&preprocessed) {
         let (clean_msg, mut spans, line_kinds, inline_code_ranges) =
             crate::languages::python::highlight_python_hover_doc(&preprocessed);
@@ -118,6 +121,147 @@ pub fn highlight_hover_text(
         })
         .collect();
     (clean_msg, spans, line_kinds, inline_code_ranges)
+}
+
+fn looks_like_dart_hover(msg: &str) -> bool {
+    msg.lines().any(|line| line.trim() == "```dart")
+}
+
+fn normalize_markdown_inline_code(line: &str) -> (String, Vec<(usize, usize)>) {
+    let mut out = String::with_capacity(line.len());
+    let mut ranges = Vec::new();
+    let mut from = 0usize;
+    while let Some(open_rel) = line[from..].find('`') {
+        let open = from + open_rel;
+        out.push_str(&line[from..open]);
+        let body_start = open + 1;
+        let Some(close_rel) = line[body_start..].find('`') else {
+            out.push_str(&line[open..]);
+            return (out, ranges);
+        };
+        let close = body_start + close_rel;
+        let start = out.len();
+        out.push_str(&line[body_start..close]);
+        if out.len() > start {
+            ranges.push((start, out.len()));
+        }
+        from = close + 1;
+    }
+    out.push_str(&line[from..]);
+    (out, ranges)
+}
+
+fn highlight_dart_hover_doc(
+    msg: &str,
+) -> (
+    String,
+    Vec<crate::highlighter::ColorSpan>,
+    Vec<HoverLineKindPublic>,
+    Vec<(usize, usize)>,
+) {
+    let mut text = String::with_capacity(msg.len());
+    let mut line_kinds = Vec::new();
+    let mut inline_code_ranges = Vec::new();
+    let mut in_fence = false;
+    let mut dart_fence = false;
+
+    for raw in msg.lines() {
+        let trimmed = raw.trim();
+        if let Some(language) = trimmed.strip_prefix("```") {
+            if in_fence {
+                in_fence = false;
+                dart_fence = false;
+            } else {
+                in_fence = true;
+                let language = language.trim();
+                dart_fence = language.is_empty() || language == "dart";
+            }
+            continue;
+        }
+
+        if in_fence {
+            text.push_str(raw);
+            text.push('\n');
+            line_kinds.push(if dart_fence {
+                HoverLineKindPublic::Code
+            } else {
+                HoverLineKindPublic::Text
+            });
+            continue;
+        }
+
+        if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            text.push_str("---\n");
+            line_kinds.push(HoverLineKindPublic::Separator);
+            continue;
+        }
+
+        let (line, ranges) = normalize_markdown_inline_code(raw);
+        let (line, kind, removed_prefix) = if let Some(header) = line.trim().strip_prefix("## ") {
+            (
+                header,
+                HoverLineKindPublic::Header2,
+                line.find("## ").unwrap_or(0) + 3,
+            )
+        } else if let Some(header) = line.trim().strip_prefix("# ") {
+            (
+                header,
+                HoverLineKindPublic::Header1,
+                line.find("# ").unwrap_or(0) + 2,
+            )
+        } else {
+            (line.as_str(), HoverLineKindPublic::Text, 0)
+        };
+        let line_start = text.len();
+        text.push_str(line);
+        text.push('\n');
+        line_kinds.push(kind);
+        for (start, end) in ranges {
+            if start >= removed_prefix && end >= removed_prefix {
+                inline_code_ranges.push((
+                    line_start + start - removed_prefix,
+                    line_start + end - removed_prefix,
+                ));
+            }
+        }
+    }
+
+    text.truncate(text.trim_end().len());
+    let lines: Vec<&str> = text.split('\n').collect();
+    let mut line_starts = Vec::with_capacity(lines.len());
+    let mut offset = 0usize;
+    for line in &lines {
+        line_starts.push(offset);
+        offset = offset.saturating_add(line.len()).saturating_add(1);
+    }
+
+    let mut spans = Vec::new();
+    let mut line = 0usize;
+    while line < lines.len() {
+        if line_kinds.get(line) != Some(&HoverLineKindPublic::Code) {
+            line += 1;
+            continue;
+        }
+        let first = line;
+        while line < lines.len() && line_kinds.get(line) == Some(&HoverLineKindPublic::Code) {
+            line += 1;
+        }
+        let start = line_starts[first];
+        let end = line_starts
+            .get(line)
+            .map_or(text.len(), |next| next.saturating_sub(1));
+        if let Some(code) = text.get(start..end) {
+            crate::languages::dart::push_hover_highlight_spans(code, start, &mut spans);
+        }
+    }
+    for &(start, end) in &inline_code_ranges {
+        if let Some(code) = text.get(start..end) {
+            crate::languages::dart::push_hover_highlight_spans(code, start, &mut spans);
+        }
+    }
+    spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));
+    let spans = crate::highlighter::flatten_color_spans_prefer_specific(spans, text.len());
+    (text, spans, line_kinds, inline_code_ranges)
 }
 
 fn preprocess_hover_text(msg: &str) -> String {

@@ -103,10 +103,7 @@ fn trim_gitignore_cache(
     keep_root: &crate::platform::PathKey,
 ) {
     while cache.len() >= GITIGNORE_CACHE_LIMIT {
-        let victim = cache
-            .keys()
-            .find(|path| *path != keep_root)
-            .cloned();
+        let victim = cache.keys().find(|path| *path != keep_root).cloned();
         let Some(victim) = victim else {
             break;
         };
@@ -268,10 +265,7 @@ pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(Stri
     (dirs, files)
 }
 
-fn os_name_is_git_dir(
-    name: &std::ffi::OsStr,
-    platform: crate::platform::PlatformKind,
-) -> bool {
+fn os_name_is_git_dir(name: &std::ffi::OsStr, platform: crate::platform::PlatformKind) -> bool {
     if platform == crate::platform::PlatformKind::Windows {
         name.as_encoded_bytes().eq_ignore_ascii_case(b".git")
     } else {
@@ -592,9 +586,9 @@ fn build_file_tree_watch_paths_for_platform(
     let mut expanded = expanded_dirs
         .iter()
         .filter(|dir| {
-            roots.iter().any(|root| {
-                crate::platform::path_is_within_for_platform(dir, root, platform)
-            })
+            roots
+                .iter()
+                .any(|root| crate::platform::path_is_within_for_platform(dir, root, platform))
         })
         .collect::<Vec<_>>();
     expanded.sort();
@@ -737,10 +731,7 @@ mod tests {
         let mut expanded = FxHashSet::default();
         expanded.insert(PathBuf::from(r"c:/work"));
         expanded.insert(PathBuf::from(r"C:\WORK\src"));
-        let open_dirs = vec![
-            PathBuf::from(r"c:\work\SRC"),
-            PathBuf::from(r"D:\shared"),
-        ];
+        let open_dirs = vec![PathBuf::from(r"c:\work\SRC"), PathBuf::from(r"D:\shared")];
         let paths = build_file_tree_watch_paths_for_platform(
             &roots,
             &expanded,
@@ -753,10 +744,7 @@ mod tests {
         let keys = paths
             .iter()
             .map(|path| {
-                crate::platform::PathKey::for_platform(
-                    path,
-                    crate::platform::PlatformKind::Windows,
-                )
+                crate::platform::PathKey::for_platform(path, crate::platform::PlatformKind::Windows)
             })
             .collect::<FxHashSet<_>>();
         assert_eq!(keys.len(), paths.len());

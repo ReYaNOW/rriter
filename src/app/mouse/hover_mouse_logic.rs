@@ -374,8 +374,7 @@ pub(crate) fn diagnostic_visual_byte_range_on_line(
             }
         } else if start_byte > line_start {
             start_byte -= 1;
-            while start_byte > line_start
-                && editor.byte_at(start_byte) & 0b1100_0000 == 0b1000_0000
+            while start_byte > line_start && editor.byte_at(start_byte) & 0b1100_0000 == 0b1000_0000
             {
                 start_byte -= 1;
             }

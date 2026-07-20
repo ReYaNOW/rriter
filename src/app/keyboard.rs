@@ -236,9 +236,14 @@ impl App {
             match modal {
                 crate::app::database::DatabaseTableModal::CustomLimit { input, error, .. } => {
                     let clean = single_line_ime_text(text);
-                    if !clean.is_empty() { input.insert(&clean, 16); *error = None; }
+                    if !clean.is_empty() {
+                        input.insert(&clean, 16);
+                        *error = None;
+                    }
                 }
-                crate::app::database::DatabaseTableModal::MultilineEditor { input, error, .. } => {
+                crate::app::database::DatabaseTableModal::MultilineEditor {
+                    input, error, ..
+                } => {
                     input.insert(text, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
                     *error = None;
                 }
@@ -249,29 +254,33 @@ impl App {
         if let Some(tab_id) = self.active_database_table_tab_id() {
             let mut completion_target = None;
             if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-                if !state.loading
-                    && state.metadata.is_none()
-                    && state.unavailable_text_focused
-                {
+                if !state.loading && state.metadata.is_none() && state.unavailable_text_focused {
                     return true;
                 }
                 let clean = single_line_ime_text(text);
                 match state.grid.focused_input {
                     Some(crate::app::database::DatabaseTableInputTarget::Where) => {
-                        if !clean.is_empty() { state.grid.where_input.insert(&clean, 64 * 1024); }
-                        completion_target = Some(
-                            crate::app::database::DatabaseTableInputTarget::Where,
-                        );
+                        if !clean.is_empty() {
+                            state.grid.where_input.insert(&clean, 64 * 1024);
+                        }
+                        completion_target =
+                            Some(crate::app::database::DatabaseTableInputTarget::Where);
                     }
                     Some(crate::app::database::DatabaseTableInputTarget::OrderBy) => {
-                        if !clean.is_empty() { state.grid.order_by_input.insert(&clean, 64 * 1024); }
-                        completion_target = Some(
-                            crate::app::database::DatabaseTableInputTarget::OrderBy,
-                        );
+                        if !clean.is_empty() {
+                            state.grid.order_by_input.insert(&clean, 64 * 1024);
+                        }
+                        completion_target =
+                            Some(crate::app::database::DatabaseTableInputTarget::OrderBy);
                     }
                     Some(crate::app::database::DatabaseTableInputTarget::Cell) => {
                         if let Some(editor) = state.grid.cell_editor.as_mut() {
-                            if !clean.is_empty() { editor.input.insert(&clean, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES); }
+                            if !clean.is_empty() {
+                                editor.input.insert(
+                                    &clean,
+                                    crate::app::database::MAX_EDITABLE_MULTILINE_BYTES,
+                                );
+                            }
                             editor.error = None;
                         }
                         return true;
@@ -363,9 +372,7 @@ impl App {
             return true;
         }
 
-        if self.ide_panel.git.message_focused
-            && self.ide_panel.is_open(crate::app::PanelId::Git)
-        {
+        if self.ide_panel.git.message_focused && self.ide_panel.is_open(crate::app::PanelId::Git) {
             let clean = single_line_ime_text(text);
             if !clean.is_empty() {
                 self.ide_panel.git.message_editor.insert_str(&clean);
@@ -410,11 +417,7 @@ impl App {
             && self.ide_panel.terminal_focused
             && self.ide_panel.is_open(crate::app::PanelId::Terminal)
         {
-            if let Some(terminal) = self
-                .ide_panel
-                .terminals
-                .get(self.ide_panel.active_terminal)
-            {
+            if let Some(terminal) = self.ide_panel.terminals.get(self.ide_panel.active_terminal) {
                 let _ = terminal.write_input(text.as_bytes());
             }
             return true;
@@ -446,9 +449,7 @@ impl App {
         }
 
         if key_event.state == winit::event::ElementState::Pressed {
-            let paste = if primary
-                && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV)
-            {
+            let paste = if primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV) {
                 self.get_clipboard_text()
             } else {
                 None
@@ -460,8 +461,7 @@ impl App {
                 let input = match key_event.physical_key {
                     PhysicalKey::Code(KeyCode::KeyC) if primary || terminal_ctrl => {
                         if primary && grid.selection.is_some() {
-                            clipboard_text =
-                                crate::app::terminal::terminal_selection_text(&grid);
+                            clipboard_text = crate::app::terminal::terminal_selection_text(&grid);
                             grid.selection = None;
                             None
                         } else if terminal_ctrl {

@@ -56,7 +56,10 @@ fn file_uri_roundtrips_windows_drive_unc_unicode_and_reserved_characters() {
 #[test]
 fn non_file_and_malformed_uris_are_not_misinterpreted_as_paths() {
     assert_eq!(
-        uri_to_path_for_platform("https://example.invalid/a.py", crate::platform::PlatformKind::Windows),
+        uri_to_path_for_platform(
+            "https://example.invalid/a.py",
+            crate::platform::PlatformKind::Windows
+        ),
         PathBuf::from("https://example.invalid/a.py")
     );
     assert_eq!(
@@ -354,7 +357,9 @@ fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
     .unwrap();
     assert_eq!(
         class_with_docs.detail.as_deref(),
-        Some("class map\n---\nMake an iterator that computes the function using arguments from\neach of the iterables.")
+        Some(
+            "class map\n---\nMake an iterator that computes the function using arguments from\neach of the iterables."
+        )
     );
     assert_eq!(class_with_docs.module.as_deref(), Some("builtins"));
 
@@ -373,7 +378,9 @@ fn completion_owner_comes_from_member_detail_and_detail_stays_full() {
     .unwrap();
     assert_eq!(
         generic_class_doc.detail.as_deref(),
-        Some("car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo core")
+        Some(
+            "car_wash.core.db.repo_base\nclass RepoBase[TModel: Base, TReadStruct: BasedStruct]\n---\nRepo core"
+        )
     );
     assert_eq!(
         generic_class_doc.module.as_deref(),
@@ -483,7 +490,10 @@ fn lsp_protocol_encodes_initialize_change_close_action_definition_shutdown() {
         serde_json::from_slice(&make_initialize(42, &workspaces)).unwrap();
     assert_eq!(init["id"], 42);
     assert_eq!(init["method"], "initialize");
-    assert_eq!(init["params"]["rootUri"], path_to_uri(Path::new("/tmp/ws one")));
+    assert_eq!(
+        init["params"]["rootUri"],
+        path_to_uri(Path::new("/tmp/ws one"))
+    );
     assert_eq!(
         init["params"]["workspaceFolders"]
             .as_array()
@@ -773,7 +783,10 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
             assert_eq!(actions[0].title, "Apply");
             assert_eq!(actions[0].code.as_deref(), Some("F401"));
             let edit = actions[0].edit.as_ref().unwrap();
-            assert_eq!(edit.changes[&uri_to_path("file:///tmp/doc.py")][0].new_text, "x");
+            assert_eq!(
+                edit.changes[&uri_to_path("file:///tmp/doc.py")][0].new_text,
+                "x"
+            );
         }
         other => panic!("unexpected event: {other:?}"),
     }
@@ -956,10 +969,7 @@ fn preproduction_json_rpc_rejects_out_of_range_client_response_ids() {
 
     let (event_tx, event_rx) = mpsc::channel();
     let (out_tx, _out_rx) = mpsc::channel();
-    let pending = Arc::new(Mutex::new(HashMap::from([(
-        0,
-        PendingRequestKind::Hover,
-    )])));
+    let pending = Arc::new(Mutex::new(HashMap::from([(0, PendingRequestKind::Hover)])));
     dispatch_frame(
         br#"{"jsonrpc":"2.0","id":4294967296,"result":null}"#,
         &event_tx,
@@ -1000,7 +1010,6 @@ fn preproduction_position_request_builders_share_valid_trigger_encoding() {
     assert_eq!(signature["method"], "textDocument/signatureHelp");
     assert_eq!(signature["params"]["context"]["triggerKind"], 1);
 }
-
 
 #[test]
 fn protocol_rejects_positions_that_do_not_fit_internal_integer_types() {
@@ -1060,18 +1069,15 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
         true
     );
     assert_eq!(
-        dart["params"]["capabilities"]["textDocument"]["completion"]
-            ["completionItem"]["snippetSupport"],
+        dart["params"]["capabilities"]["textDocument"]["completion"]["completionItem"]["snippetSupport"],
         false
     );
     assert_eq!(
-        dart["params"]["capabilities"]["textDocument"]["completion"]
-            ["completionItem"]["insertReplaceSupport"],
+        dart["params"]["capabilities"]["textDocument"]["completion"]["completionItem"]["insertReplaceSupport"],
         false
     );
     assert!(
-        dart["params"]["capabilities"]["textDocument"]["completion"]
-            ["completionItem"]
+        dart["params"]["capabilities"]["textDocument"]["completion"]["completionItem"]
             .get("resolveSupport")
             .is_none()
     );
@@ -1082,26 +1088,21 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
     );
 
     for server in [LspServerKind::Ruff, LspServerKind::Ty] {
-        let python: serde_json::Value = serde_json::from_slice(&make_initialize_for_server(
-            server,
-            202,
-            &workspace,
-        ))
-        .unwrap();
+        let python: serde_json::Value =
+            serde_json::from_slice(&make_initialize_for_server(server, 202, &workspace)).unwrap();
         assert!(python["params"].get("initializationOptions").is_none());
         assert_eq!(
-            python["params"]["capabilities"]["workspace"]["didChangeConfiguration"]
-                ["dynamicRegistration"],
+            python["params"]["capabilities"]["workspace"]["didChangeConfiguration"]["dynamicRegistration"],
             true
         );
         assert_eq!(
-            python["params"]["capabilities"]["textDocument"]["completion"]
-                ["completionItem"]["resolveSupport"]["properties"][0],
+            python["params"]["capabilities"]["textDocument"]["completion"]["completionItem"]["resolveSupport"]
+                ["properties"][0],
             "additionalTextEdits"
         );
         assert_eq!(
-            python["params"]["capabilities"]["textDocument"]["codeAction"]
-                ["resolveSupport"]["properties"][0],
+            python["params"]["capabilities"]["textDocument"]["codeAction"]["resolveSupport"]["properties"]
+                [0],
             "edit"
         );
     }
@@ -1110,10 +1111,7 @@ fn dart_initialize_is_server_specific_and_python_capabilities_stay_compatible() 
 #[test]
 fn workspace_configuration_is_isolated_for_ruff_ty_and_dart() {
     assert_eq!(
-        configuration_response_for(
-            LspServerKind::Ruff,
-            &serde_json::json!({"section": "dart"}),
-        ),
+        configuration_response_for(LspServerKind::Ruff, &serde_json::json!({"section": "dart"}),),
         serde_json::json!({})
     );
     assert_eq!(
@@ -1124,17 +1122,12 @@ fn workspace_configuration_is_isolated_for_ruff_ty_and_dart() {
         serde_json::json!("workspace")
     );
     assert_eq!(
-        configuration_response_for(
-            LspServerKind::Ty,
-            &serde_json::json!({"section": "dart"}),
-        ),
+        configuration_response_for(LspServerKind::Ty, &serde_json::json!({"section": "dart"}),),
         serde_json::json!({})
     );
 
-    let dart = configuration_response_for(
-        LspServerKind::Dart,
-        &serde_json::json!({"section": "dart"}),
-    );
+    let dart =
+        configuration_response_for(LspServerKind::Dart, &serde_json::json!({"section": "dart"}));
     assert_eq!(dart["enableSdkFormatter"], true);
     assert_eq!(dart["completeFunctionCalls"], true);
     assert_eq!(dart["enableSnippets"], false);
@@ -1212,9 +1205,11 @@ fn malformed_and_unknown_dart_notifications_are_safe() {
         event,
         LspEvent::Log { message, .. } if message.contains("invalid publishClosingLabels")
     )));
-    assert!(!malformed_events
-        .iter()
-        .any(|event| matches!(event, LspEvent::ClosingLabels { .. })));
+    assert!(
+        !malformed_events
+            .iter()
+            .any(|event| matches!(event, LspEvent::ClosingLabels { .. }))
+    );
 
     dispatch_frame_for_server(
         br#"{"jsonrpc":"2.0","method":"dart/unknownNotification","params":{}}"#,
@@ -1237,8 +1232,14 @@ fn typed_diagnostic_parser_uses_server_as_missing_source() {
     )
     .unwrap();
     match event {
-        LspEvent::Diagnostics { server, items, .. } => {
+        LspEvent::Diagnostics {
+            server,
+            version,
+            items,
+            ..
+        } => {
             assert_eq!(server, LspServerKind::Dart);
+            assert_eq!(version, None);
             assert_eq!(items[0].source.as_deref(), Some("dart"));
         }
         other => panic!("unexpected event: {other:?}"),
@@ -1278,10 +1279,21 @@ fn dart_ide_protocol_preserves_completion_signature_and_edit_metadata() {
     });
     let (items, is_incomplete) = parse_completion_items(&completion);
     assert!(is_incomplete);
-    assert_eq!(items.iter().map(|item| item.label.as_str()).collect::<Vec<_>>(), vec!["alpha", "zeta"]);
+    assert_eq!(
+        items
+            .iter()
+            .map(|item| item.label.as_str())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "zeta"]
+    );
     assert!(items[0].text_edit.is_some());
     assert_eq!(items[0].additional_text_edits.len(), 1);
-    assert!(items[1].detail.as_deref().is_some_and(|detail| detail.contains("Deprecated")));
+    assert!(
+        items[1]
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("Deprecated"))
+    );
 
     let signature = parse_signature_help(&serde_json::json!({
         "activeSignature": 1,
@@ -1302,7 +1314,12 @@ fn dart_ide_protocol_preserves_completion_signature_and_edit_metadata() {
     assert_eq!(signature.active_parameter, Some(1));
     assert_eq!(signature.signatures.len(), 2);
     assert_eq!(signature.signatures[1].parameters[1].label, "count");
-    assert_eq!(signature.signatures[1].parameters[1].documentation.as_deref(), Some("Item count"));
+    assert_eq!(
+        signature.signatures[1].parameters[1]
+            .documentation
+            .as_deref(),
+        Some("Item count")
+    );
 }
 
 #[test]
@@ -1344,7 +1361,10 @@ fn dart_ide_request_builders_and_response_routes_are_valid_json_rpc() {
         &pending,
     );
     match recv_non_log(&event_rx) {
-        LspEvent::ReferencesResponse { request_id, targets } => {
+        LspEvent::ReferencesResponse {
+            request_id,
+            targets,
+        } => {
             assert_eq!(request_id, 31);
             assert_eq!(targets.len(), 2);
             assert_eq!(targets[1].line, 3);
@@ -1363,7 +1383,10 @@ fn dart_ide_request_builders_and_response_routes_are_valid_json_rpc() {
         LspEvent::PrepareRenameResponse { request_id, range } => {
             assert_eq!(request_id, 32);
             let range = range.unwrap();
-            assert_eq!((range.start_line, range.start_col, range.end_col), (5, 1, 7));
+            assert_eq!(
+                (range.start_line, range.start_col, range.end_col),
+                (5, 1, 7)
+            );
         }
         other => panic!("unexpected event: {other:?}"),
     }

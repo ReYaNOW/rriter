@@ -24,9 +24,9 @@ use std::io::Read;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::{Host, Url};
 
@@ -408,7 +408,11 @@ impl<'a> Iterator for ApiDescriptionInlineSpans<'a> {
                         break;
                     }
                 }
-                scan += self.text[scan..].chars().next().map(char::len_utf8).unwrap_or(1);
+                scan += self.text[scan..]
+                    .chars()
+                    .next()
+                    .map(char::len_utf8)
+                    .unwrap_or(1);
             }
             if source_end == source_start {
                 continue;
@@ -858,7 +862,6 @@ pub struct ApiLoadResult {
     pub generation: u64,
     pub result: Result<ApiLoadPayload, ApiLoadError>,
 }
-
 
 #[derive(Debug)]
 pub struct ApiLoadReceiver {
@@ -1660,8 +1663,7 @@ impl ApiClientState {
 
     pub(crate) fn handle_python_path_disconnect(&mut self) {
         self.python_path_pick_rx = None;
-        self.mock.uv.last_error =
-            "Окно выбора Python/uv неожиданно завершилось".to_string();
+        self.mock.uv.last_error = "Окно выбора Python/uv неожиданно завершилось".to_string();
     }
 
     pub(crate) fn handle_python_versions_disconnect(&mut self) {
@@ -1669,16 +1671,14 @@ impl ApiClientState {
         self.mock_python_versions_loading = false;
         self.python_version_list_cancel = None;
         self.mock_python_versions.clear();
-        self.mock.uv.last_error =
-            "Загрузка списка Python неожиданно завершилась".to_string();
+        self.mock.uv.last_error = "Загрузка списка Python неожиданно завершилась".to_string();
     }
 
     pub(crate) fn handle_python_install_disconnect(&mut self) {
         self.python_install_rx = None;
         self.mock_python_install_running = false;
         self.python_install_cancel = None;
-        self.mock.uv.status =
-            crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
+        self.mock.uv.status = crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
         let message = "Установка Python неожиданно завершилась".to_string();
         self.mock.uv.last_error = message.clone();
         push_api_python_install_log(
@@ -1762,8 +1762,7 @@ impl ApiClientState {
 
         let deadline = Instant::now() + API_PYTHON_SHUTDOWN_TIMEOUT;
         while Instant::now() < deadline
-            && (self.python_version_list_cancel.is_some()
-                || self.python_install_cancel.is_some())
+            && (self.python_version_list_cancel.is_some() || self.python_install_cancel.is_some())
         {
             if let Some(rx) = &self.python_version_list_rx {
                 match rx.try_recv() {
@@ -1791,9 +1790,7 @@ impl ApiClientState {
             } else {
                 self.python_install_cancel = None;
             }
-            if self.python_version_list_cancel.is_some()
-                || self.python_install_cancel.is_some()
-            {
+            if self.python_version_list_cancel.is_some() || self.python_install_cancel.is_some() {
                 std::thread::sleep(Duration::from_millis(10));
             }
         }

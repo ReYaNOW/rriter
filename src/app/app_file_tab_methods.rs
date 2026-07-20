@@ -619,7 +619,7 @@ impl App {
 
     pub(crate) fn update_ctrl_definition_hover(&mut self, byte_offset: Option<usize>) {
         if !self.modifiers.control_key()
-            || !matches!(self.file_extension.as_str(), "py" | "pyi")
+            || !matches!(self.file_extension.as_str(), "py" | "pyi" | "dart")
             || !self.is_ide_mode
         {
             self.clear_ctrl_definition();
@@ -645,11 +645,14 @@ impl App {
             return;
         }
 
+        let local_target = matches!(self.file_extension.as_str(), "py" | "pyi")
+            .then(|| self.nearest_assignment_usage_target(source_range))
+            .flatten();
         self.ctrl_definition = CtrlDefinitionState {
             request_id: None,
             source_path: Some(source_path.clone()),
             source_range: Some(source_range),
-            target: self.nearest_assignment_usage_target(source_range),
+            target: local_target,
         };
 
         if self.ctrl_definition.target.is_some() {
@@ -677,10 +680,12 @@ impl App {
         let target = target?;
         let source_path = self.ctrl_definition.source_path.as_ref()?;
         let source_range = self.ctrl_definition.source_range?;
-        if crate::platform::paths_equal(
-            &self.abs_path_for_workspace(&target.path),
-            source_path,
-        ) {
+        if matches!(self.file_extension.as_str(), "py" | "pyi")
+            && crate::platform::paths_equal(
+                &self.abs_path_for_workspace(&target.path),
+                source_path,
+            )
+        {
             let text = self.editor.get_full_text();
             let target_offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
             if target_offset >= source_range.0 && target_offset <= source_range.1 {

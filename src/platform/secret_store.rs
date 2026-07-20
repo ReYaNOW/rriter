@@ -1,7 +1,7 @@
 use super::resolve_executable;
-use std::io;
 #[cfg(target_os = "linux")]
 use std::ffi::OsStr;
+use std::io;
 #[cfg(any(windows, target_os = "linux"))]
 use std::path::PathBuf;
 
@@ -194,15 +194,17 @@ fn linux_secret_tool_store(purpose: &str, bytes: &[u8]) -> io::Result<()> {
     let stderr = child
         .take_stderr()
         .ok_or_else(|| io::Error::other("secret-tool stderr was not piped"))?;
-    let stdout_reader = super::spawn_named("rriter-secret-store-stdout", move || read_bounded(stdout))?;
-    let stderr_reader = match super::spawn_named("rriter-secret-store-stderr", move || read_bounded(stderr)) {
-        Ok(reader) => reader,
-        Err(error) => {
-            let _ = child.terminate(Duration::from_millis(200));
-            let _ = join_bounded_reader(stdout_reader);
-            return Err(error);
-        }
-    };
+    let stdout_reader =
+        super::spawn_named("rriter-secret-store-stdout", move || read_bounded(stdout))?;
+    let stderr_reader =
+        match super::spawn_named("rriter-secret-store-stderr", move || read_bounded(stderr)) {
+            Ok(reader) => reader,
+            Err(error) => {
+                let _ = child.terminate(Duration::from_millis(200));
+                let _ = join_bounded_reader(stdout_reader);
+                return Err(error);
+            }
+        };
     let status = child
         .wait_timeout(Duration::from_secs(30))?
         .ok_or_else(|| {
@@ -240,9 +242,7 @@ fn linux_secret_tool_clear(purpose: &str) -> io::Result<()> {
     let mut command = Command::new(secret_tool_path()?);
     command.arg("clear").args(secret_tool_base_args(purpose));
     let output = super::run_command_output(&mut command, Duration::from_secs(30))?;
-    if output.status.success()
-        || (output.status.code() == Some(1) && output.stderr.is_empty())
-    {
+    if output.status.success() || (output.status.code() == Some(1) && output.stderr.is_empty()) {
         return Ok(());
     }
     command_status(false, "secret-tool clear", &output.stderr)
@@ -319,7 +319,13 @@ mod tests {
     #[test]
     fn lookup_trims_only_the_protocol_newline() {
         assert_eq!(trim_single_trailing_newline(b"value\n".to_vec()), b"value");
-        assert_eq!(trim_single_trailing_newline(b"value\r\n".to_vec()), b"value");
-        assert_eq!(trim_single_trailing_newline(b"value\n\n".to_vec()), b"value\n");
+        assert_eq!(
+            trim_single_trailing_newline(b"value\r\n".to_vec()),
+            b"value"
+        );
+        assert_eq!(
+            trim_single_trailing_newline(b"value\n\n".to_vec()),
+            b"value\n"
+        );
     }
 }

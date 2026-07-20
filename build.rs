@@ -210,7 +210,6 @@ fn pattern_to_rust(pat: &str, key: &str) -> Option<String> {
     None
 }
 
-
 fn configure_windows_executable_resources(out_dir: &Path) {
     println!("cargo:rerun-if-env-changed=RRITER_WINDOWS_RESOURCE");
     println!("cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS");
@@ -268,8 +267,8 @@ fn configure_windows_executable_resources(out_dir: &Path) {
         "cargo:rustc-link-arg-bin=rriter=/MANIFESTINPUT:{}",
         manifest_path.display()
     );
-    if let Some(resource) = std::env::var_os("RRITER_WINDOWS_RESOURCE")
-        .filter(|value| !value.is_empty())
+    if let Some(resource) =
+        std::env::var_os("RRITER_WINDOWS_RESOURCE").filter(|value| !value.is_empty())
     {
         println!(
             "cargo:rustc-link-arg-bin=rriter={}",

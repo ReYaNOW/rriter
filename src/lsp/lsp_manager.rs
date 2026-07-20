@@ -41,8 +41,7 @@ pub struct LspManager {
     active_workspaces: Vec<PathBuf>,
     open_python_files: HashMap<crate::platform::PathKey, OpenPythonFile>,
     open_dart_files: HashMap<crate::platform::PathKey, dart_workspace::OpenDartFile>,
-    dart_workspaces:
-        HashMap<crate::platform::PathKey, dart_workspace::DartWorkspaceState>,
+    dart_workspaces: HashMap<crate::platform::PathKey, dart_workspace::DartWorkspaceState>,
     closed_dart_documents: Vec<PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
     pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
@@ -215,11 +214,13 @@ impl LspManager {
         self.instant_diagnostics.retain(|path, _| keep_path(path));
         self.ruff_workspace_diagnostics
             .retain(|path, _| keep_path(path));
-        self.ty_instant_diagnostics.retain(|path, _| keep_path(path));
+        self.ty_instant_diagnostics
+            .retain(|path, _| keep_path(path));
         self.dart_live_diagnostics.retain(|path, _| keep_path(path));
         self.dart_workspace_diagnostics
             .retain(|path, _| keep_path(path));
-        self.merged_diagnostic_indices.retain(|path, _| keep_path(path));
+        self.merged_diagnostic_indices
+            .retain(|path, _| keep_path(path));
         self.ty_diag_result_ids.retain(|path, _| keep_path(path));
         self.rebuild_diag_text_pool();
         let after = self.diagnostics.len()
@@ -732,13 +733,7 @@ impl LspManager {
         }
     }
 
-    pub fn request_hover(
-        &mut self,
-        path: &PathBuf,
-        ext: &str,
-        line: u32,
-        col: u32,
-    ) -> Option<i32> {
+    pub fn request_hover(&mut self, path: &PathBuf, ext: &str, line: u32, col: u32) -> Option<i32> {
         let abs_path = self.lookup_abs_path(path);
         self.ide_process_for_document(&abs_path, ext)
             .and_then(|process| process.request_hover(&abs_path, line, col))
@@ -765,9 +760,10 @@ impl LspManager {
         include_declaration: bool,
     ) -> Option<i32> {
         let abs_path = self.lookup_abs_path(path);
-        self.ide_process_for_document(&abs_path, ext).and_then(|process| {
-            process.request_references(&abs_path, line, col, include_declaration)
-        })
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| {
+                process.request_references(&abs_path, line, col, include_declaration)
+            })
     }
 
     pub fn request_prepare_rename(
@@ -831,9 +827,10 @@ impl LspManager {
         end_col: u32,
     ) -> Option<i32> {
         let abs_path = self.lookup_abs_path(path);
-        self.ide_process_for_document(&abs_path, ext).and_then(|process| {
-            process.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
-        })
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| {
+                process.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
+            })
     }
 
     pub fn request_formatting(
@@ -1048,13 +1045,17 @@ impl LspManager {
                         let is_ty = *server == LspServerKind::Ty;
                         let is_dart = *server == LspServerKind::Dart;
                         let existing_version = if is_ty {
-                            self.ty_instant_diagnostics.get(path).map(|(version, _)| *version)
+                            self.ty_instant_diagnostics
+                                .get(path)
+                                .map(|(version, _)| *version)
                         } else if is_dart {
                             self.dart_live_diagnostics
                                 .get(path)
                                 .map(|(version, _)| *version)
                         } else {
-                            self.instant_diagnostics.get(path).map(|(version, _)| *version)
+                            self.instant_diagnostics
+                                .get(path)
+                                .map(|(version, _)| *version)
                         };
                         let path_key = crate::platform::PathKey::new(path);
                         let is_open_file = if is_dart {
@@ -1062,27 +1063,30 @@ impl LspManager {
                         } else {
                             self.open_python_files.contains_key(&path_key)
                         };
-                        let current_dart_version = is_dart
-                            .then(|| self.dart_document_version(path))
-                            .flatten();
+                        let current_dart_version =
+                            is_dart.then(|| self.dart_document_version(path)).flatten();
                         let version_is_current = if is_dart {
                             is_open_file
                                 && current_dart_version.is_some_and(|current| {
-                                    version.is_some_and(|incoming| incoming >= current)
+                                    version.is_none_or(|incoming| incoming >= current)
                                 })
                         } else {
                             true
                         };
                         if version_is_current
-                            && Self::should_accept_diagnostics_version(
-                                existing_version,
-                                *version,
-                                is_open_file,
-                            )
+                            && (is_dart && version.is_none()
+                                || Self::should_accept_diagnostics_version(
+                                    existing_version,
+                                    *version,
+                                    is_open_file,
+                                ))
                         {
-                            let stored_version = version.unwrap_or(0);
-                            received_diagnostics =
-                                received_diagnostics.saturating_add(items.len());
+                            let stored_version = if is_dart {
+                                version.or(current_dart_version).unwrap_or(0)
+                            } else {
+                                version.unwrap_or(0)
+                            };
+                            received_diagnostics = received_diagnostics.saturating_add(items.len());
                             if is_dart {
                                 for diagnostic in items.iter_mut() {
                                     diagnostic.source =
@@ -1525,9 +1529,7 @@ impl LspManager {
             DiagnosticSourceKind::Legacy => self.diagnostics.get(path)?.get(index.index),
             DiagnosticSourceKind::Ruff => self.ruff_diagnostic_at_for_abs_path(path, index.index),
             DiagnosticSourceKind::Ty => self.ty_instant_diagnostics.get(path)?.1.get(index.index),
-            DiagnosticSourceKind::Dart => {
-                self.dart_diagnostic_at_for_abs_path(path, index.index)
-            }
+            DiagnosticSourceKind::Dart => self.dart_diagnostic_at_for_abs_path(path, index.index),
         }
     }
 
@@ -1711,7 +1713,10 @@ impl LspManager {
             .chain(self.dart_live_diagnostics.keys())
             .chain(self.dart_workspace_diagnostics.keys())
         {
-            if !paths.iter().any(|existing| existing.as_path() == path.as_path()) {
+            if !paths
+                .iter()
+                .any(|existing| existing.as_path() == path.as_path())
+            {
                 paths.push(path);
             }
         }
@@ -1776,7 +1781,8 @@ impl LspManager {
             .chain(self.dart_workspace_diagnostics.keys())
         {
             if crate::platform::path_is_within(diagnostic_path, &abs_path)
-                && let Some(severity) = self.diagnostic_severity_for_abs_path_direct(diagnostic_path)
+                && let Some(severity) =
+                    self.diagnostic_severity_for_abs_path_direct(diagnostic_path)
             {
                 if severity == DiagSeverity::Error {
                     return Some(DiagSeverity::Error);
@@ -1907,15 +1913,16 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        self.action_process_for_document(&abs_path, ext)?.request_code_actions(
-            &abs_path,
-            0,
-            0,
-            u32::MAX,
-            0,
-            &[],
-            Some(vec![action_kind.to_string()]),
-        )
+        self.action_process_for_document(&abs_path, ext)?
+            .request_code_actions(
+                &abs_path,
+                0,
+                0,
+                u32::MAX,
+                0,
+                &[],
+                Some(vec![action_kind.to_string()]),
+            )
     }
 
     /// Запрос на глобальный fix-all (source.fixAll) для текущего файла
@@ -2139,7 +2146,6 @@ mod lsp_manager_allocation_tests {
         assert!(std::ptr::eq(summaries[1].status, &manager.ty_status));
     }
 
-
     #[test]
     fn r2_070_restart_ty_does_not_mutate_ruff_disable_state() {
         let mut manager = LspManager::new(Vec::new());
@@ -2147,7 +2153,10 @@ mod lsp_manager_allocation_tests {
         manager.ty_disabled = true;
         manager.restart_server(TY_SERVER.program);
         assert!(manager.ruff_disabled);
-        assert!(manager.ty_disabled, "without open files restart must remain a no-op");
+        assert!(
+            manager.ty_disabled,
+            "without open files restart must remain a no-op"
+        );
         let source = include_str!("lsp_manager.rs");
         assert!(source.contains("name if name == TY_SERVER.program"));
     }

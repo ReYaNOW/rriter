@@ -92,15 +92,8 @@ fn git_diff_loader_normalizes_head_and_preserves_worktree_text_format() {
         let tree_id = index.write_tree().unwrap();
         let tree = repo.find_tree(tree_id).unwrap();
         let signature = git2::Signature::now("RRiter Test", "rriter@example.invalid").unwrap();
-        repo.commit(
-            Some("HEAD"),
-            &signature,
-            &signature,
-            "initial",
-            &tree,
-            &[],
-        )
-        .unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
     }
 
     let worktree_format = crate::platform::TextFileFormat {
@@ -205,7 +198,10 @@ fn git_diff_staged_loader_reads_index_instead_of_worktree() {
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();
     let repo = git2::Repository::init(&root).unwrap();
-    repo.config().unwrap().set_bool("core.autocrlf", false).unwrap();
+    repo.config()
+        .unwrap()
+        .set_bool("core.autocrlf", false)
+        .unwrap();
     let format = crate::platform::TextFileFormat {
         encoding: crate::platform::TextEncoding::Utf8Bom,
         line_ending: crate::platform::LineEnding::CrLf,
@@ -244,7 +240,9 @@ fn pending_inline_git_popup_does_not_force_a_busy_redraw_loop() {
         .expect("empty branch body");
     assert!(branch.contains("self.inline_git_diff_rx = Some(rx);"));
     assert!(branch.contains("false"));
-    assert!(!branch.contains("
+    assert!(!branch.contains(
+        "
                 true
-"));
+"
+    ));
 }

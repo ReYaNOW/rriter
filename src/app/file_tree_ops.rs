@@ -86,7 +86,10 @@ fn copy_cleanup_error(dst: &Path, error: std::io::Error) -> std::io::Error {
         Err(cleanup) if cleanup.kind() == std::io::ErrorKind::NotFound => error,
         Err(cleanup) => std::io::Error::new(
             error.kind(),
-            format!("{error}; не удалось удалить неполную копию {}: {cleanup}", dst.display()),
+            format!(
+                "{error}; не удалось удалить неполную копию {}: {cleanup}",
+                dst.display()
+            ),
         ),
     }
 }
@@ -122,9 +125,8 @@ pub(super) fn delete_path(path: &Path) -> std::io::Result<()> {
 }
 
 fn is_real_directory(path: &Path) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|metadata| {
-        metadata.is_dir() && !crate::platform::metadata_is_link(&metadata)
-    })
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.is_dir() && !crate::platform::metadata_is_link(&metadata))
 }
 
 pub(super) fn cross_volume_move(src: &Path, dst: &Path) -> Result<(), String> {
@@ -164,7 +166,12 @@ pub(super) fn cross_volume_move(src: &Path, dst: &Path) -> Result<(), String> {
                     .unwrap_or_default();
                 let restore = restore
                     .err()
-                    .map(|error| format!("; имя исходника {} восстановить не удалось: {error}", src.display()))
+                    .map(|error| {
+                        format!(
+                            "; имя исходника {} восстановить не удалось: {error}",
+                            src.display()
+                        )
+                    })
                     .unwrap_or_default();
                 Err(format!(
                     "Копирование завершено, но временный исходный путь {} не удалось удалить: {delete_error}{cleanup}{restore}",
@@ -209,9 +216,7 @@ pub(super) struct UndoMovedPairsError {
     pub(super) retryable: bool,
 }
 
-pub(super) fn undo_moved_pairs(
-    pairs: &[(PathBuf, PathBuf)],
-) -> Result<(), UndoMovedPairsError> {
+pub(super) fn undo_moved_pairs(pairs: &[(PathBuf, PathBuf)]) -> Result<(), UndoMovedPairsError> {
     for (old_path, new_path) in pairs.iter().rev() {
         validate_move_path_exact(new_path, old_path).map_err(|message| UndoMovedPairsError {
             message,
@@ -454,7 +459,8 @@ pub(super) fn restore_trash_entries(
             Err(error) => {
                 let mut rollback_errors = Vec::new();
                 for (restored_entry, restored_path) in restored.iter().rev() {
-                    if let Err(rollback) = move_path_exact(restored_path, &restored_entry.trash_path)
+                    if let Err(rollback) =
+                        move_path_exact(restored_path, &restored_entry.trash_path)
                     {
                         rollback_errors.push(rollback);
                     }
@@ -672,10 +678,7 @@ pub(super) fn path_lists_equal(left: &[PathBuf], right: &[PathBuf]) -> bool {
             .all(|(left, right)| crate::platform::paths_equal(left, right))
 }
 
-pub(super) fn selection_contains_path(
-    selection: &FxHashSet<PathBuf>,
-    candidate: &Path,
-) -> bool {
+pub(super) fn selection_contains_path(selection: &FxHashSet<PathBuf>, candidate: &Path) -> bool {
     selection
         .iter()
         .any(|selected| crate::platform::paths_equal(selected, candidate))

@@ -1,6 +1,6 @@
-use std::ffi::OsString;
 #[cfg(any(windows, test))]
 use std::ffi::OsStr;
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
@@ -10,24 +10,26 @@ use std::process::Child;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
-use std::time::Duration;
 use std::thread::JoinHandle;
+use std::time::Duration;
 use winit::window::WindowAttributes;
 
+mod elevated_save;
+mod integration;
 #[cfg(target_os = "macos")]
 mod macos;
-#[cfg(windows)]
-mod windows;
-mod integration;
 mod process;
 mod secret_store;
-mod elevated_save;
+#[cfg(windows)]
+mod windows;
+#[cfg(test)]
+pub use integration::ManagedToolInstallPlan;
 pub use integration::{
-    ManagedToolInstallPlan, SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, async_http_client_builder,
+    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, async_http_client_builder,
     blocking_http_client_builder, configure_dart_workspace_root, configure_tool_paths,
-    configured_tool_path,
-    current_process_memory_kb, proxy_routing_is_configured, refresh_tool_resolutions,
-    resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config, user_cache_root,
+    configured_tool_path, current_process_memory_kb, proxy_routing_is_configured,
+    refresh_tool_resolutions, resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config,
+    user_cache_root,
 };
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
@@ -51,6 +53,7 @@ pub fn cache_dir() -> PathBuf {
 pub fn state_dir() -> PathBuf {
     integration::state_dir()
 }
+pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
 pub(crate) use integration::configured_tool_path_for_env;
 #[cfg(any(windows, test))]
 pub(crate) use integration::parse_windows_proxy_config;
@@ -58,16 +61,16 @@ pub(crate) use integration::parse_windows_proxy_config;
 pub(crate) use integration::{
     app_paths_with, parse_macos_proxy_config, parse_pem_certificates, user_cache_root_with,
 };
-pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
-pub use secret_store::{delete_system_user_secret, load_system_user_secret, store_system_user_secret};
-pub use process::{
-    ManagedChild, ProcessOutputStream, ProcessTree, command_for_executable, command_for_tool,
-    resolve_executable,
-    resolve_tool_executable, run_command_output, run_command_output_cancelable,
-    run_command_streaming_cancelable,
-};
 #[cfg(all(test, unix))]
 use process::command_for;
+pub use process::{
+    ManagedChild, ProcessOutputStream, ProcessTree, command_for_executable, command_for_tool,
+    resolve_executable, resolve_tool_executable, run_command_output, run_command_output_cancelable,
+    run_command_streaming_cancelable,
+};
+pub use secret_store::{
+    delete_system_user_secret, load_system_user_secret, store_system_user_secret,
+};
 
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";
@@ -84,14 +87,13 @@ pub(crate) fn next_operation_id() -> String {
 
 #[inline]
 pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 pub(crate) fn corrupt_file_backup_note(path: &Path) -> String {
-    let backup = path.with_extension(format!(
-        "corrupt-{}.json",
-        next_operation_id()
-    ));
+    let backup = path.with_extension(format!("corrupt-{}.json", next_operation_id()));
     match fs::copy(path, &backup) {
         Ok(_) => format!("; резервная копия: {}", backup.display()),
         Err(error) => format!("; резервная копия не создана: {error}"),
@@ -152,12 +154,7 @@ pub const CURRENT_PLATFORM: PlatformKind = if cfg!(target_os = "linux") {
     PlatformKind::Other
 };
 
-pub const DEFAULT_ACCENT_COLOR: [f32; 4] = [
-    114.0 / 255.0,
-    89.0 / 255.0,
-    175.0 / 255.0,
-    1.0,
-];
+pub const DEFAULT_ACCENT_COLOR: [f32; 4] = [114.0 / 255.0, 89.0 / 255.0, 175.0 / 255.0, 1.0];
 
 pub fn system_accent_color() -> Option<[f32; 4]> {
     #[cfg(windows)]
@@ -246,11 +243,7 @@ pub(crate) fn primary_shortcut_for_platform(
     primary_modifier_for_platform(platform, control, super_key)
 }
 
-pub(crate) fn word_modifier_for_platform(
-    platform: PlatformKind,
-    control: bool,
-    alt: bool,
-) -> bool {
+pub(crate) fn word_modifier_for_platform(platform: PlatformKind, control: bool, alt: bool) -> bool {
     match platform {
         PlatformKind::Macos => alt,
         PlatformKind::Windows => control && !alt,
@@ -288,7 +281,6 @@ pub(crate) fn text_input_modifiers_allowed_for_platform(
     }
 }
 
-
 pub fn initialize_gui_application() {
     #[cfg(windows)]
     windows::initialize_gui_application();
@@ -299,9 +291,7 @@ pub const fn native_dialog_requires_main_thread() -> bool {
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) const fn linux_window_identity(
-    pgo_automation: bool,
-) -> (&'static str, &'static str) {
+pub(crate) const fn linux_window_identity(pgo_automation: bool) -> (&'static str, &'static str) {
     if pgo_automation {
         ("rriter-pgo", "rriter-pgo")
     } else {
@@ -432,9 +422,7 @@ pub fn canonicalize_or_absolutize(path: &Path) -> PathBuf {
         #[cfg(not(windows))]
         return path.to_path_buf();
     }
-    std::env::current_dir()
-        .unwrap_or_default()
-        .join(path)
+    std::env::current_dir().unwrap_or_default().join(path)
 }
 
 pub fn dedup_paths(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
@@ -618,7 +606,6 @@ pub(crate) fn windows_path_is_absolute(raw: &str) -> bool {
             && raw[1] == b':'
             && matches!(raw[2], b'\\' | b'/'))
 }
-
 
 pub fn encode_persisted_path(path: &Path) -> String {
     encode_persisted_path_for_platform(path, CURRENT_PLATFORM)
@@ -981,7 +968,9 @@ pub fn encode_text(text: &str, format: TextFileFormat) -> Vec<u8> {
 }
 
 pub fn write_text_file(path: &Path, text: &str, format: TextFileFormat) -> io::Result<()> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty())
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
         && !parent.is_dir()
     {
         return Err(io::Error::new(
@@ -1018,7 +1007,9 @@ fn atomic_write_impl(path: &Path, bytes: &[u8], secret: bool) -> io::Result<()> 
     let preserved_permissions = if secret {
         None
     } else {
-        fs::metadata(path).ok().map(|metadata| metadata.permissions())
+        fs::metadata(path)
+            .ok()
+            .map(|metadata| metadata.permissions())
     };
     let (temp_path, mut file) = create_atomic_temp_file(path, secret)?;
     let result = (|| {
@@ -1200,9 +1191,10 @@ pub(crate) fn validate_child_name_for_platform(
     if platform != PlatformKind::Windows {
         return Ok(());
     }
-    if name.chars().any(|ch| {
-        ch <= '\u{1f}' || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-    }) {
+    if name
+        .chars()
+        .any(|ch| ch <= '\u{1f}' || matches!(ch, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+    {
         return Err("name contains a character forbidden by Windows");
     }
     if name.ends_with(['.', ' ']) {
@@ -1218,9 +1210,7 @@ pub(crate) fn validate_child_name_for_platform(
         || base
             .strip_prefix("COM")
             .or_else(|| base.strip_prefix("LPT"))
-            .is_some_and(|suffix| {
-                suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9')
-            });
+            .is_some_and(|suffix| suffix.len() == 1 && matches!(suffix.as_bytes()[0], b'1'..=b'9'));
     if reserved {
         return Err("name is reserved by Windows");
     }
@@ -1484,8 +1474,8 @@ pub fn reveal_path(path: &Path) -> io::Result<Child> {
 }
 
 pub fn open_url(url: &str) -> io::Result<()> {
-    let parsed = url::Url::parse(url)
-        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+    let parsed =
+        url::Url::parse(url).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -1543,7 +1533,6 @@ pub fn open_url(url: &str) -> io::Result<()> {
     ))
 }
 
-
 pub fn copy_symlink(source: &Path, destination: &Path) -> io::Result<()> {
     let target = fs::read_link(source)?;
     #[cfg(unix)]
@@ -1587,9 +1576,7 @@ pub(crate) fn recover_poisoned<T>(result: Result<T, T>) -> T {
     }
 }
 
-pub(crate) fn receiver_slot_available<T>(
-    slot: &Option<std::sync::mpsc::Receiver<T>>,
-) -> bool {
+pub(crate) fn receiver_slot_available<T>(slot: &Option<std::sync::mpsc::Receiver<T>>) -> bool {
     slot.is_none()
 }
 
@@ -1608,7 +1595,6 @@ pub(crate) fn poll_optional_receiver<T>(
         Err(std::sync::mpsc::TryRecvError::Disconnected) => ReceiverPoll::Disconnected,
     }
 }
-
 
 #[cfg(test)]
 mod tests;

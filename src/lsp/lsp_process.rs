@@ -48,7 +48,6 @@ const LSP_LOG_MAX_ENTRIES: usize = 64;
 const LSP_LOG_MAX_BYTES: usize = 512 * 1024;
 const LSP_LOG_ENTRY_MAX_BYTES: usize = 64 * 1024;
 const LSP_LOG_HIGHLIGHT_MAX_BYTES: usize = 8 * 1024;
-const LSP_MAX_CONSECUTIVE_ATTEMPTS: u8 = 4;
 const LSP_STABLE_RUNTIME: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
@@ -57,10 +56,6 @@ struct LspRestartBudget {
 }
 
 impl LspRestartBudget {
-    fn begin_attempt(&mut self) -> Option<u8> {
-        self.begin_attempt_for(LspServerKind::Ruff)
-    }
-
     fn begin_attempt_for(&mut self, server: LspServerKind) -> Option<u8> {
         if self.consecutive_attempts >= server.restart_attempt_limit() {
             return None;

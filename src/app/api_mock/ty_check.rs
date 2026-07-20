@@ -3,8 +3,8 @@ use super::contract::{
     api_mock_handler_signature_text, api_mock_python_type, api_mock_type_source_prefix,
     api_mock_type_source_suffix, enabled_fields,
 };
-use super::python_env::api_mock_python_dir;
 use super::python_bootstrap::python_command;
+use super::python_env::api_mock_python_dir;
 use super::types::{
     ApiMockClassSpec, ApiMockPythonContract, ApiMockPythonScript, ApiPythonRuntimeConfig,
     ApiPythonRuntimeMode, api_mock_effective_contract,
@@ -392,7 +392,9 @@ fn source_line_col_to_offset(source: &str, line_one: usize, col_one: usize) -> O
     for (idx, line) in source.split('\n').enumerate() {
         if idx + 1 == line_one {
             let col = col_one.saturating_sub(1);
-            return Some(offset + crate::editor::byte_offset_for_char_col(line, col).min(line.len()));
+            return Some(
+                offset + crate::editor::byte_offset_for_char_col(line, col).min(line.len()),
+            );
         }
         offset = offset.saturating_add(line.len()).saturating_add(1);
     }
@@ -409,7 +411,6 @@ fn edit_offset_to_line_col(text: &str, offset: usize) -> (usize, usize) {
     }
     (0, 0)
 }
-
 
 fn next_token_end_col(line: &str, start_col: usize) -> usize {
     let mut col = 0usize;
@@ -986,11 +987,9 @@ mod tests {
             custom_python_path: Some(PathBuf::from(r"C:\Windows\py.exe")),
             python_version: "3.13".to_string(),
         };
-        let command = api_mock_ty_command(
-            &runtime,
-            &PathBuf::from(r"C:\work\project\mock_route_0.py"),
-        )
-        .unwrap();
+        let command =
+            api_mock_ty_command(&runtime, &PathBuf::from(r"C:\work\project\mock_route_0.py"))
+                .unwrap();
         let args = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())

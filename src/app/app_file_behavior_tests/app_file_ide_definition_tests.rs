@@ -371,6 +371,47 @@ fn ctrl_definition_same_declaration_target_redirects_to_usage() {
 }
 
 #[test]
+fn dart_ctrl_definition_hover_reaches_lsp_request_path() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.file_extension = "dart".to_string();
+    app.file_path = Some(std::env::temp_dir().join("rriter-ctrl-def.dart"));
+    app.editor = editor_with("Target makeTarget() => const Target();\n");
+    app.modifiers = winit::keyboard::ModifiersState::CONTROL;
+
+    app.update_ctrl_definition_hover(Some(1));
+
+    assert!(app.ctrl_definition.source_path.is_some());
+    assert_eq!(app.ctrl_definition.source_range, Some((0, 6)));
+    assert!(app.ctrl_definition.target.is_none());
+}
+
+#[test]
+fn dart_ctrl_definition_preserves_same_token_analyzer_target() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.file_extension = "dart".to_string();
+    let path = std::env::temp_dir().join("rriter-ctrl-def.dart");
+    app.file_path = Some(path.clone());
+    app.editor = editor_with("Target makeTarget() => const Target();\n");
+    app.ctrl_definition.source_path = app.current_abs_path();
+    app.ctrl_definition.source_range = Some((0, 6));
+    let analyzer_target = DefinitionJumpTarget {
+        path,
+        line: 0,
+        col: 0,
+    };
+
+    assert_eq!(
+        app.ctrl_definition_target_from_lsp(Some(analyzer_target.clone())),
+        Some(analyzer_target)
+    );
+}
+
+#[test]
 fn definition_jump_to_open_file_does_not_restart_highlighter() {
     let Some(mut app) = test_app() else {
         return;

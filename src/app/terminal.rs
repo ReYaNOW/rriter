@@ -82,7 +82,11 @@ pub(crate) fn normalized_selection_bounds(
 
 pub(crate) fn terminal_selection_text(grid: &TermGrid) -> Option<String> {
     let (sx, sy, ex, ey) = grid.selection?;
-    let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
+    let scrollback_len = if grid.is_alt {
+        0
+    } else {
+        grid.scrollback.len()
+    };
     let total_lines = scrollback_len + grid.lines.len();
     let (start_x, start_y, end_x, end_y) = normalized_selection_bounds(sx, sy, ex, ey);
     let mut result = String::new();
@@ -927,7 +931,6 @@ mod tests {
         assert_eq!(grid.lines[1][2].bg, 0);
     }
 
-
     #[test]
     fn bug_70_poisoned_terminal_mutex_recovers_without_ui_thread_panic() {
         let grid = Mutex::new(TermGrid::new(4, 2));
@@ -1351,11 +1354,8 @@ impl Terminal {
         cwd: Option<&std::path::Path>,
     ) -> Self {
         let grid = Arc::new(Mutex::new(TermGrid::new(200, 60)));
-        let result = crate::app::terminal_process::TerminalProcess::spawn(
-            grid.clone(),
-            window,
-            cwd,
-        );
+        let result =
+            crate::app::terminal_process::TerminalProcess::spawn(grid.clone(), window, cwd);
         let (process, title) = match result {
             Ok((process, shell)) => (Some(process), shell.title),
             Err(error) => {

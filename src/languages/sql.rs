@@ -202,7 +202,9 @@ pub fn has_syntax_error(sql: &str) -> bool {
     if parser.set_language(&language).is_err() {
         return true;
     }
-    parser.parse(sql, None).is_none_or(|tree| tree.root_node().has_error())
+    parser
+        .parse(sql, None)
+        .is_none_or(|tree| tree.root_node().has_error())
 }
 
 pub fn contains_top_level_semicolon(sql: &str) -> bool {
@@ -285,7 +287,12 @@ pub fn validate_managed_user_sql(sql: &str) -> Result<Vec<SqlStatement>, SqlVali
 fn classify_words(words: &[String]) -> SqlStatementKind {
     match words.first().map(String::as_str) {
         Some("SELECT" | "SHOW" | "TABLE" | "VALUES") => SqlStatementKind::Query,
-        Some("WITH") if words.iter().skip(1).any(|word| is_side_effect_keyword(word)) => {
+        Some("WITH")
+            if words
+                .iter()
+                .skip(1)
+                .any(|word| is_side_effect_keyword(word)) =>
+        {
             SqlStatementKind::Other
         }
         Some("WITH") => SqlStatementKind::Query,
@@ -295,7 +302,10 @@ fn classify_words(words: &[String]) -> SqlStatementKind {
         }
         Some("EXPLAIN")
             if words.iter().any(|word| word == "ANALYZE")
-                && words.iter().skip(1).any(|word| is_side_effect_keyword(word)) =>
+                && words
+                    .iter()
+                    .skip(1)
+                    .any(|word| is_side_effect_keyword(word)) =>
         {
             SqlStatementKind::Other
         }
@@ -334,9 +344,9 @@ fn is_transaction_control(words: &[String]) -> bool {
         Some("PREPARE") => second == Some("TRANSACTION"),
         Some("SET") => {
             second == Some("TRANSACTION")
-                || words
-                    .windows(4)
-                    .any(|window| words_eq(window, &["SESSION", "CHARACTERISTICS", "AS", "TRANSACTION"]))
+                || words.windows(4).any(|window| {
+                    words_eq(window, &["SESSION", "CHARACTERISTICS", "AS", "TRANSACTION"])
+                })
         }
         _ => false,
     }
@@ -501,12 +511,7 @@ fn scanned_statements(sql: &str) -> Vec<ScannedStatement> {
         }
     }
 
-    push_scanned_statement(
-        sql,
-        segment_start..bytes.len(),
-        &mut words,
-        &mut statements,
-    );
+    push_scanned_statement(sql, segment_start..bytes.len(), &mut words, &mut statements);
     statements
 }
 
@@ -619,7 +624,8 @@ pub fn contains_sql_token_outside_literals_and_comments(sql: &str, token: &[u8])
                         index += 2;
                     }
                     b'$' => {
-                        if let Some((delimiter, next_index)) = dollar_quote_delimiter(bytes, index) {
+                        if let Some((delimiter, next_index)) = dollar_quote_delimiter(bytes, index)
+                        {
                             state = ScanState::DollarQuoted { delimiter };
                             index = next_index;
                         } else {
@@ -902,11 +908,7 @@ fn has_obviously_incomplete_statement(sql: &str) -> bool {
     })
 }
 
-fn statement_text_starts_with_keywords(
-    sql: &str,
-    range: &Range<usize>,
-    keywords: &[&str],
-) -> bool {
+fn statement_text_starts_with_keywords(sql: &str, range: &Range<usize>, keywords: &[&str]) -> bool {
     let mut remaining = sql.get(range.clone()).unwrap_or_default();
     for keyword in keywords {
         let Some(rest) = strip_ascii_keyword(remaining, keyword) else {
@@ -1021,7 +1023,11 @@ mod tests {
             "SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY;",
         ] {
             let error = validate_managed_user_sql(sql).unwrap_err();
-            assert_eq!(error.kind, SqlValidationErrorKind::TransactionControl, "{sql}");
+            assert_eq!(
+                error.kind,
+                SqlValidationErrorKind::TransactionControl,
+                "{sql}"
+            );
         }
     }
 
@@ -1110,7 +1116,9 @@ mod tests {
 
     #[test]
     fn a4_b005_token_search_ignores_comments_and_quoted_bodies() {
-        assert!(contains_sql_token_outside_literals_and_comments("id == 1", b"=="));
+        assert!(contains_sql_token_outside_literals_and_comments(
+            "id == 1", b"=="
+        ));
         assert!(!contains_sql_token_outside_literals_and_comments(
             "id = 1 /* == */ AND note = $$==$$ -- ==\n",
             b"==",
@@ -1138,8 +1146,8 @@ mod tests {
 
     #[test]
     fn a4_b007_explain_analyze_mutation_requires_review_classification() {
-        let statements = validate_managed_user_sql("EXPLAIN ANALYZE UPDATE items SET value = 2;")
-            .unwrap();
+        let statements =
+            validate_managed_user_sql("EXPLAIN ANALYZE UPDATE items SET value = 2;").unwrap();
         assert_eq!(statements[0].kind, SqlStatementKind::Other);
         let readonly = validate_managed_user_sql("EXPLAIN ANALYZE SELECT * FROM items;").unwrap();
         assert_eq!(readonly[0].kind, SqlStatementKind::Explain);
@@ -1149,8 +1157,12 @@ mod tests {
     fn a4_b011_formatter_preserves_unicode_in_every_scanner_state() {
         let sql = "SELECT \"Имя\", 'Жук', $$Привет$$ FROM \"таблица\" /* комментарий */; -- хвост";
         let formatted = format_sql_conservative(sql).unwrap();
-        for expected in ["Имя", "Жук", "Привет", "таблица", "комментарий", "хвост"] {
-            assert!(formatted.contains(expected), "missing {expected}: {formatted}");
+        for expected in ["Имя", "Жук", "Привет", "таблица", "комментарий", "хвост"]
+        {
+            assert!(
+                formatted.contains(expected),
+                "missing {expected}: {formatted}"
+            );
         }
         assert!(!formatted.contains('Ð'));
     }

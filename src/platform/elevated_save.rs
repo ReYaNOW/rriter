@@ -1,9 +1,9 @@
 use super::{TextFileFormat, encode_text};
 #[cfg(any(windows, target_os = "macos", test))]
 use super::{atomic_write, decode_persisted_path, encode_persisted_path};
-use std::ffi::OsString;
 #[cfg(any(windows, target_os = "macos", test))]
 use std::ffi::OsStr;
+use std::ffi::OsString;
 #[cfg(any(windows, target_os = "macos", test))]
 use std::fs;
 use std::io;
@@ -236,11 +236,7 @@ fn write_with_native_elevation(path: &Path, bytes: &[u8]) -> io::Result<()> {
     outcome
 }
 
-pub fn write_text_file_elevated(
-    path: &Path,
-    text: &str,
-    format: TextFileFormat,
-) -> io::Result<()> {
+pub fn write_text_file_elevated(path: &Path, text: &str, format: TextFileFormat) -> io::Result<()> {
     let bytes = encode_text(text, format);
     #[cfg(target_os = "linux")]
     {

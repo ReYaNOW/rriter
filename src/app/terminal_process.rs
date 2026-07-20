@@ -60,10 +60,9 @@ impl TerminalProcess {
             command.env("TERM", "xterm-256color");
         }
 
-        let mut child = pair
-            .slave
-            .spawn_command(command)
-            .map_err(|error| io::Error::other(format!("failed to spawn terminal shell: {error}")))?;
+        let mut child = pair.slave.spawn_command(command).map_err(|error| {
+            io::Error::other(format!("failed to spawn terminal shell: {error}"))
+        })?;
         drop(pair.slave);
 
         let process_id = child.process_id().ok_or_else(|| {
@@ -221,7 +220,12 @@ fn install_terminal_io_threads(
             }
         }
     })
-    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal parser: {error}")))?;
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to spawn terminal parser: {error}"),
+        )
+    })?;
 
     crate::platform::spawn_named("rriter-terminal-reader", move || {
         let mut reader = reader;
@@ -238,7 +242,12 @@ fn install_terminal_io_threads(
             }
         }
     })
-    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal reader: {error}")))?;
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to spawn terminal reader: {error}"),
+        )
+    })?;
 
     crate::platform::spawn_named("rriter-terminal-writer", move || {
         while let Ok(message) = reply_rx.recv() {
@@ -250,16 +259,20 @@ fn install_terminal_io_threads(
             }
         }
     })
-    .map_err(|error| io::Error::new(error.kind(), format!("failed to spawn terminal writer: {error}")))?;
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to spawn terminal writer: {error}"),
+        )
+    })?;
 
     crate::platform::lock_recover(&grid).reply_tx = Some(reply_tx);
     Ok(())
 }
 
 pub(crate) fn resolve_terminal_shell() -> io::Result<TerminalShellSpec> {
-    let candidates = terminal_shell_candidates_with(platform::CURRENT_PLATFORM, |name| {
-        std::env::var_os(name)
-    });
+    let candidates =
+        terminal_shell_candidates_with(platform::CURRENT_PLATFORM, |name| std::env::var_os(name));
     for candidate in candidates {
         if let Some(executable) = platform::resolve_executable(&candidate.executable) {
             let title = terminal_shell_title(&executable);
@@ -371,7 +384,10 @@ pub(crate) fn select_terminal_working_directory(
         {
             return Some(workspace.clone());
         }
-        if let Some(parent) = file.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+        if let Some(parent) = file
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
             return Some(parent.to_path_buf());
         }
     }
@@ -435,7 +451,10 @@ mod tests {
         let candidates = terminal_shell_candidates_with(PlatformKind::Macos, |name| {
             (name == "SHELL").then(|| OsString::from("/opt/homebrew/bin/fish"))
         });
-        assert_eq!(candidates[0].executable, OsString::from("/opt/homebrew/bin/fish"));
+        assert_eq!(
+            candidates[0].executable,
+            OsString::from("/opt/homebrew/bin/fish")
+        );
         assert_eq!(candidates[1].executable, OsString::from("/bin/zsh"));
     }
 
@@ -450,10 +469,7 @@ mod tests {
             Some(PathBuf::from("/work/project"))
         );
         assert_eq!(
-            select_terminal_working_directory(
-                Some(Path::new("/outside/main.rs")),
-                &workspaces,
-            ),
+            select_terminal_working_directory(Some(Path::new("/outside/main.rs")), &workspaces,),
             Some(PathBuf::from("/outside"))
         );
         assert_eq!(
@@ -464,7 +480,10 @@ mod tests {
 
     #[test]
     fn terminal_title_hides_windows_executable_suffix() {
-        assert_eq!(terminal_shell_title(Path::new(r"C:\Tools\pwsh.exe")), "pwsh");
+        assert_eq!(
+            terminal_shell_title(Path::new(r"C:\Tools\pwsh.exe")),
+            "pwsh"
+        );
         assert_eq!(terminal_shell_title(Path::new("/bin/zsh")), "zsh");
     }
 }

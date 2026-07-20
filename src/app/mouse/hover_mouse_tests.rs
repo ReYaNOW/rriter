@@ -64,9 +64,8 @@ fn sql_diagnostic_only_hover_does_not_wait_for_type_popup() {
     );
     assert_eq!(state.effective_hovered_diag_type_target(Some(limit)), None);
 
-    let (show_error, show_type, show_combined) = compute_hover_visibility_from_matches(
-        true, true, false, false, false, false, false, false,
-    );
+    let (show_error, show_type, show_combined) =
+        compute_hover_visibility_from_matches(true, true, false, false, false, false, false, false);
     assert!(show_error);
     assert!(!show_type);
     assert!(!show_combined);
@@ -131,13 +130,9 @@ fn sql_hover_uses_same_fractional_scroll_rounding_as_renderer() {
     let text_top_bias = (baseline_offset - line_height * 0.5).clamp(0.0, line_height * 0.5);
     let pointer_y = visual_line_top - render_scroll_y + text_top_bias + line_height * 0.5;
 
-    let content_y = hover_screen_y_to_content_y(
-        pointer_y,
-        render_scroll_y,
-        line_height,
-        baseline_offset,
-    )
-    .expect("pointer must map back into the rendered SQL line");
+    let content_y =
+        hover_screen_y_to_content_y(pointer_y, render_scroll_y, line_height, baseline_offset)
+            .expect("pointer must map back into the rendered SQL line");
 
     assert!(hover_content_y_in_line_hitbox(
         content_y,
@@ -159,20 +154,15 @@ fn sql_warning_pointer_selection_respects_horizontal_scroll_and_ranges() {
     let left_padding = 120.0;
     let scroll_x = 16.0;
     let char_width = 10.0;
-    let pointer_for = |col: usize| {
-        left_padding + col as f32 * char_width - scroll_x + char_width * 0.5
-    };
+    let pointer_for =
+        |col: usize| left_padding + col as f32 * char_width - scroll_x + char_width * 0.5;
     let selected_code = |line: usize, pointer_x: f32| {
         diagnostics.iter().find_map(|diag| {
             if diag.start_line as usize != line {
                 return None;
             }
-            let (start, end) = diagnostic_visual_byte_range_on_line(
-                &editor,
-                line,
-                diag.start_col,
-                diag.end_col,
-            )?;
+            let (start, end) =
+                diagnostic_visual_byte_range_on_line(&editor, line, diag.start_col, diag.end_col)?;
             let line_start = editor.line_offsets[line];
             let start_col = start.saturating_sub(line_start);
             let end_col = end.saturating_sub(line_start);

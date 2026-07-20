@@ -2,7 +2,9 @@ use super::{CURRENT_PLATFORM, PlatformKind};
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio};
+use std::process::{
+    Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Output, Stdio,
+};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
@@ -303,9 +305,8 @@ fn terminate_windows_job(
     job: windows_sys::Win32::Foundation::HANDLE,
     exit_code: u32,
 ) -> io::Result<()> {
-    let result = unsafe {
-        windows_sys::Win32::System::JobObjects::TerminateJobObject(job, exit_code)
-    };
+    let result =
+        unsafe { windows_sys::Win32::System::JobObjects::TerminateJobObject(job, exit_code) };
     if result == 0 {
         Err(io::Error::last_os_error())
     } else {
@@ -375,7 +376,12 @@ pub fn command_for_tool(program: &OsStr, override_env: &str) -> io::Result<Comma
         .ok_or_else(|| {
             let override_hint = std::env::var_os(override_env)
                 .filter(|value| !value.is_empty())
-                .map(|value| format!(" (configured by {override_env}={})", value.to_string_lossy()))
+                .map(|value| {
+                    format!(
+                        " (configured by {override_env}={})",
+                        value.to_string_lossy()
+                    )
+                })
                 .or_else(|| {
                     super::configured_tool_path_for_env(override_env).map(|value| {
                         format!(" (configured in RRiter settings: {})", value.display())
@@ -453,7 +459,11 @@ fn executable_extensions_with(path_ext: Option<&OsStr>, platform: PlatformKind) 
                 .collect::<Vec<_>>()
         })
         .filter(|extensions| !extensions.is_empty())
-        .unwrap_or_else(|| [".COM", ".EXE", ".BAT", ".CMD"].map(OsString::from).to_vec())
+        .unwrap_or_else(|| {
+            [".COM", ".EXE", ".BAT", ".CMD"]
+                .map(OsString::from)
+                .to_vec()
+        })
 }
 
 pub fn run_command_output(command: &mut Command, timeout: Duration) -> io::Result<Output> {
@@ -560,7 +570,8 @@ fn run_command_output_inner(
         .take_stderr()
         .ok_or_else(|| io::Error::other("child stderr was not piped"))?;
     let stdout_reader = super::spawn_named("rriter-process-stdout", move || read_pipe(stdout))?;
-    let stderr_reader = match super::spawn_named("rriter-process-stderr", move || read_pipe(stderr)) {
+    let stderr_reader = match super::spawn_named("rriter-process-stderr", move || read_pipe(stderr))
+    {
         Ok(reader) => reader,
         Err(error) => {
             let _ = child.terminate(DROP_GRACE_PERIOD);
@@ -612,9 +623,7 @@ fn read_pipe(mut pipe: impl Read) -> io::Result<Vec<u8>> {
     Ok(data)
 }
 
-fn join_pipe_reader(
-    handle: thread::JoinHandle<io::Result<Vec<u8>>>,
-) -> io::Result<Vec<u8>> {
+fn join_pipe_reader(handle: thread::JoinHandle<io::Result<Vec<u8>>>) -> io::Result<Vec<u8>> {
     handle
         .join()
         .map_err(|_| io::Error::other("process output reader panicked"))?
@@ -673,10 +682,8 @@ fn emit_process_line(
         .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "output receiver closed"))
 }
 
-fn drain_process_lines<F>(
-    rx: &mpsc::Receiver<(ProcessOutputStream, String)>,
-    on_line: &mut F,
-) where
+fn drain_process_lines<F>(rx: &mpsc::Receiver<(ProcessOutputStream, String)>, on_line: &mut F)
+where
     F: FnMut(ProcessOutputStream, String),
 {
     while let Ok((stream, line)) = rx.try_recv() {

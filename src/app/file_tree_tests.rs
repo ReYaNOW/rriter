@@ -501,7 +501,10 @@ fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
     );
 
     let start = Instant::now();
-    assert_eq!(crate::app::context_menu::context_menu_anim_progress(start, start), 0.0);
+    assert_eq!(
+        crate::app::context_menu::context_menu_anim_progress(start, start),
+        0.0
+    );
     assert_eq!(
         crate::app::context_menu::context_menu_anim_progress(
             start,
@@ -509,7 +512,10 @@ fn file_tree_context_menu_labels_and_anim_progress_are_stable() {
         ),
         1.0
     );
-    assert_eq!(file_tree_context_menu_anchor(100.0, 80.0, 1.0), (110.0, 90.0));
+    assert_eq!(
+        file_tree_context_menu_anchor(100.0, 80.0, 1.0),
+        (110.0, 90.0)
+    );
     assert_eq!(
         file_tree_context_menu_anchor(100.0, 80.0, 1.5),
         (115.0, 95.0)
@@ -637,10 +643,12 @@ fn file_tree_copy_preserves_symlinks_without_following_cycles() {
         std::fs::read_to_string(destination.join("value.txt")).unwrap(),
         "value"
     );
-    assert!(std::fs::symlink_metadata(destination.join("cycle"))
-        .unwrap()
-        .file_type()
-        .is_symlink());
+    assert!(
+        std::fs::symlink_metadata(destination.join("cycle"))
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
     assert_eq!(
         std::fs::read_link(destination.join("cycle")).unwrap(),
         PathBuf::from(".")
@@ -749,9 +757,13 @@ fn file_tree_cross_volume_move_removes_staging_on_success() {
 
     assert!(!source.exists());
     assert_eq!(std::fs::read_to_string(&destination).unwrap(), "value");
-    assert!(!std::fs::read_dir(&root)
-        .unwrap()
-        .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".rriter-move-")));
+    assert!(!std::fs::read_dir(&root).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".rriter-move-")
+    }));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -769,9 +781,13 @@ fn file_tree_cross_volume_move_restores_source_after_copy_failure() {
     assert!(!error.is_empty());
     assert_eq!(std::fs::read_to_string(&source).unwrap(), "value");
     assert!(!destination.exists());
-    assert!(!std::fs::read_dir(&root)
-        .unwrap()
-        .any(|entry| entry.unwrap().file_name().to_string_lossy().starts_with(".rriter-move-")));
+    assert!(!std::fs::read_dir(&root).unwrap().any(|entry| {
+        entry
+            .unwrap()
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".rriter-move-")
+    }));
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -791,7 +807,11 @@ fn preproduction_file_tree_copy_preserves_file_permissions() {
     copy_path_recursive(&source, &destination).unwrap();
 
     assert_eq!(
-        std::fs::metadata(&destination).unwrap().permissions().mode() & 0o777,
+        std::fs::metadata(&destination)
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
         0o740
     );
     let _ = std::fs::remove_dir_all(root);

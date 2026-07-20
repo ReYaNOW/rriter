@@ -9,8 +9,8 @@ use winit::event::{Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
-mod window_runtime;
 mod about;
+mod window_runtime;
 #[cfg(test)]
 pub(crate) use about::file_watcher_disconnect_message;
 mod source_hover;
@@ -339,9 +339,9 @@ impl ApplicationHandler for App {
                                 .dialog_gl_surface
                                 .as_ref()
                                 .ok_or_else(|| "dialog GL surface is unavailable".to_string())?;
-                            gl_context
-                                .make_current(gl_surface)
-                                .map_err(|error| format!("failed to activate dialog GL surface: {error}"))?;
+                            gl_context.make_current(gl_surface).map_err(|error| {
+                                format!("failed to activate dialog GL surface: {error}")
+                            })?;
 
                             let r = self
                                 .renderer
@@ -357,17 +357,17 @@ impl ApplicationHandler for App {
                             }
 
                             r.draw_dialog_window(&self.base_title);
-                            gl_surface
-                                .swap_buffers(gl_context)
-                                .map_err(|error| format!("failed to present dialog frame: {error}"))?;
+                            gl_surface.swap_buffers(gl_context).map_err(|error| {
+                                format!("failed to present dialog frame: {error}")
+                            })?;
 
                             let main_surface = self
                                 .gl_surface
                                 .as_ref()
                                 .ok_or_else(|| "main GL surface is unavailable".to_string())?;
-                            gl_context
-                                .make_current(main_surface)
-                                .map_err(|error| format!("failed to restore main GL surface: {error}"))?;
+                            gl_context.make_current(main_surface).map_err(|error| {
+                                format!("failed to restore main GL surface: {error}")
+                            })?;
                             let mw = self
                                 .window
                                 .as_ref()
@@ -450,7 +450,10 @@ impl ApplicationHandler for App {
                             NonZeroU32::new(size.width).unwrap(),
                             NonZeroU32::new(size.height).unwrap(),
                         );
-                        self.renderer.as_mut().unwrap().resize(size.width, size.height);
+                        self.renderer
+                            .as_mut()
+                            .unwrap()
+                            .resize(size.width, size.height);
                     }
                     window.request_redraw();
                 }
@@ -489,17 +492,15 @@ impl ApplicationHandler for App {
                     w.request_redraw();
                 }
             }
-            WindowEvent::DroppedFile(path) => {
-                match window_runtime::dropped_path_kind(&path) {
-                    Some(window_runtime::DroppedPathKind::File) => {
-                        self.open_file_in_tab(path, true);
-                    }
-                    Some(window_runtime::DroppedPathKind::Directory) => {
-                        self.apply_selected_workspace_folder(path);
-                    }
-                    None => {}
+            WindowEvent::DroppedFile(path) => match window_runtime::dropped_path_kind(&path) {
+                Some(window_runtime::DroppedPathKind::File) => {
+                    self.open_file_in_tab(path, true);
                 }
-            }
+                Some(window_runtime::DroppedPathKind::Directory) => {
+                    self.apply_selected_workspace_folder(path);
+                }
+                None => {}
+            },
             WindowEvent::MouseWheel { delta, .. } => {
                 self.handle_main_mouse_wheel(delta);
             }
@@ -577,16 +578,19 @@ impl ApplicationHandler for App {
                 self.ui_registry.clear();
 
                 self.ide_panel.flat_diags.clear();
-                let query_diagnostics = self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
-                    crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((
-                        std::path::PathBuf::from(format!(
-                            "SQL-консоль · {}",
-                            meta.database_name
-                        )),
-                        state.editor_diagnostics.clone(),
-                    )),
-                    _ => None,
-                });
+                let query_diagnostics =
+                    self.tabs
+                        .get(self.active_tab)
+                        .and_then(|tab| match &tab.kind {
+                            crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((
+                                std::path::PathBuf::from(format!(
+                                    "SQL-консоль · {}",
+                                    meta.database_name
+                                )),
+                                state.editor_diagnostics.clone(),
+                            )),
+                            _ => None,
+                        });
                 if let Some((path, diagnostics)) = query_diagnostics {
                     self.ide_panel.query_problem_path = Some(path.clone());
                     self.ide_panel.query_problem_diagnostics = diagnostics;
@@ -617,7 +621,9 @@ impl ApplicationHandler for App {
                                     .then(left.start_col.cmp(&right.start_col))
                             });
                             self.ide_panel.flat_diags.extend(
-                                diagnostics.into_iter().map(|(index, _)| (path.clone(), index)),
+                                diagnostics
+                                    .into_iter()
+                                    .map(|(index, _)| (path.clone(), index)),
                             );
                         }
                     } else {
@@ -631,7 +637,9 @@ impl ApplicationHandler for App {
                                     .cmp(&right.start_line)
                                     .then(left.start_col.cmp(&right.start_col))
                             });
-                            self.ide_panel.flat_diags.push(((*path).clone(), usize::MAX));
+                            self.ide_panel
+                                .flat_diags
+                                .push(((*path).clone(), usize::MAX));
                             if !self.ide_panel.problems_collapsed.contains(path) {
                                 self.ide_panel.flat_diags.extend(
                                     diagnostics
@@ -750,7 +758,8 @@ impl ApplicationHandler for App {
 
                 let mut over_search = false;
                 if self.show_search && self.search_anim_y > -10.0 {
-                    let geometry = crate::render_view::search::search_panel_geometry(scrollbar_x, s);
+                    let geometry =
+                        crate::render_view::search::search_panel_geometry(scrollbar_x, s);
                     let search_h = 52.0 * s;
                     if mx >= geometry.x
                         && mx <= geometry.x + geometry.w
@@ -1147,10 +1156,20 @@ impl ApplicationHandler for App {
                     winit::window::CursorIcon::EwResize
                 } else if self.ide_panel.is_resizing_bottom || self.ide_panel.git.graph_resizing {
                     winit::window::CursorIcon::NsResize
-                } else if self.ui_registry.find_at(
-                    self.renderer.as_ref().unwrap().last_mouse_x,
-                    self.renderer.as_ref().unwrap().last_mouse_y,
-                ).is_some_and(|id| matches!(id, crate::ui_system::UiId::DatabaseTableColumnResize(_) | crate::ui_system::UiId::DatabaseQueryColumnResize(_))) {
+                } else if self
+                    .ui_registry
+                    .find_at(
+                        self.renderer.as_ref().unwrap().last_mouse_x,
+                        self.renderer.as_ref().unwrap().last_mouse_y,
+                    )
+                    .is_some_and(|id| {
+                        matches!(
+                            id,
+                            crate::ui_system::UiId::DatabaseTableColumnResize(_)
+                                | crate::ui_system::UiId::DatabaseQueryColumnResize(_)
+                        )
+                    })
+                {
                     winit::window::CursorIcon::EwResize
                 } else if self.api_python_runtime_overlay_active() {
                     let (mx, my) = {
@@ -1323,7 +1342,8 @@ impl ApplicationHandler for App {
 
                     if self.show_search && self.search_anim_y > -10.0 {
                         let scrollbar_x = window_width - minimap_w - scrollbar_w;
-                        let geometry = crate::render_view::search::search_panel_geometry(scrollbar_x, s);
+                        let geometry =
+                            crate::render_view::search::search_panel_geometry(scrollbar_x, s);
                         let search_h = 52.0 * s;
                         let input_x = geometry.x + 10.0 * s;
                         let input_y = self.search_anim_y + 11.0 * s;
@@ -1407,8 +1427,7 @@ impl ApplicationHandler for App {
                     .as_mut()
                     .unwrap()
                     .record_presented_frame(self.show_fps, Instant::now());
-                if crate::render_view::TELEMETRY_ENABLED
-                    .load(std::sync::atomic::Ordering::Relaxed)
+                if crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
                 {
                     crate::render_view::record_swap_telemetry(
                         present_elapsed,

@@ -3,14 +3,14 @@ use super::database_catalog::{
     reconstruct_public_table_ddl,
 };
 use super::database_postgres::{
-    DatabaseBackendError, DatabaseConnectionTestResult, DatabaseListResult, PostgresSession,
-    DatabaseTableListResult, finish_postgres_transaction, list_databases, list_public_tables,
-    test_database_connection,
+    DatabaseBackendError, DatabaseConnectionTestResult, DatabaseListResult,
+    DatabaseTableListResult, PostgresSession, finish_postgres_transaction, list_databases,
+    list_public_tables, test_database_connection,
 };
 use super::database_query::{
     DatabaseQueryCompletionResult, DatabaseQueryDiagnostic, DatabaseQueryMessage,
-    DatabaseQueryMode, DatabaseQueryResultSet, begin_user_query_transaction,
-    history_started_now, load_query_completion_metadata,
+    DatabaseQueryMode, DatabaseQueryResultSet, begin_user_query_transaction, history_started_now,
+    load_query_completion_metadata,
 };
 use super::database_secrets::{
     delete_all_database_secrets, load_database_secret_bundle, save_remembered_database_secrets,
@@ -22,9 +22,8 @@ use super::database_table::{
     begin_table_transaction, count_public_table_rows, load_public_table_chunk,
 };
 use super::{
-    DatabaseConnectionConfig, DatabaseConnectionId, DatabaseGeneration, DatabaseJobId,
-    DatabaseExecutionPolicy, DatabaseSecretBundle, DatabaseSettings, DatabaseTransactionId,
-    SqlConsoleId,
+    DatabaseConnectionConfig, DatabaseConnectionId, DatabaseExecutionPolicy, DatabaseGeneration,
+    DatabaseJobId, DatabaseSecretBundle, DatabaseSettings, DatabaseTransactionId, SqlConsoleId,
 };
 use std::future::Future;
 use std::io;
@@ -486,7 +485,11 @@ impl DatabaseRuntime {
     pub(crate) fn disconnected_for_test() -> Self {
         let (command_tx, _command_rx) = tokio_mpsc::unbounded_channel();
         let (_event_tx, event_rx) = mpsc::channel();
-        Self { command_tx, event_rx, worker: None }
+        Self {
+            command_tx,
+            event_rx,
+            worker: None,
+        }
     }
 
     pub fn drain_events(&self, output: &mut Vec<DatabaseEvent>) -> bool {
@@ -660,101 +663,293 @@ async fn resolve_secrets(
 async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOutcome {
     let execution_policy = command.execution_policy();
     match command {
-        DatabaseCommand::TestConnection { job_id, connection, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::TestConnection {
+            job_id,
+            connection,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match test_database_connection(&connection, &secrets, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::ConnectionTested { job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match test_database_connection(&connection, &secrets, &settings, &ssh_options).await
+                {
+                    Ok(result) => DatabaseEvent::ConnectionTested { job_id, result },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadDatabases { job_id, connection, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadDatabases {
+            job_id,
+            connection,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match list_databases(&connection, &secrets, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::DatabasesLoaded { job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match list_databases(&connection, &secrets, &settings, &ssh_options).await {
+                    Ok(result) => DatabaseEvent::DatabasesLoaded { job_id, result },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadPublicTables { job_id, connection, database_name, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadPublicTables {
+            job_id,
+            connection,
+            database_name,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match list_public_tables(&connection, &secrets, &database_name, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::PublicTablesLoaded { job_id, database_name, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match list_public_tables(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::PublicTablesLoaded {
+                        job_id,
+                        database_name,
+                        result,
+                    },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadMetadata { job_id, connection, database_name, table_name, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadMetadata {
+            job_id,
+            connection,
+            database_name,
+            table_name,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match load_public_table_metadata(&connection, &secrets, &database_name, &table_name, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::MetadataLoaded { connection_id: connection.id, job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match load_public_table_metadata(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    &table_name,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::MetadataLoaded {
+                        connection_id: connection.id,
+                        job_id,
+                        result,
+                    },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadDdl { job_id, connection, database_name, table_name, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadDdl {
+            job_id,
+            connection,
+            database_name,
+            table_name,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match reconstruct_public_table_ddl(&connection, &secrets, &database_name, &table_name, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::DdlLoaded { connection_id: connection.id, job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match reconstruct_public_table_ddl(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    &table_name,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::DdlLoaded {
+                        connection_id: connection.id,
+                        job_id,
+                        result,
+                    },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::CountRows { job_id, connection, database_name, metadata, where_clause, generation, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::CountRows {
+            job_id,
+            connection,
+            database_name,
+            metadata,
+            where_clause,
+            generation,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match count_public_table_rows(&connection, &secrets, &database_name, &metadata, &where_clause, generation, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::TableCountLoaded { connection_id: connection.id, job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match count_public_table_rows(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    &metadata,
+                    &where_clause,
+                    generation,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::TableCountLoaded {
+                        connection_id: connection.id,
+                        job_id,
+                        result,
+                    },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadChunk { job_id, connection, database_name, metadata, where_clause, order_by, page, limit, chunk_index, generation, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadChunk {
+            job_id,
+            connection,
+            database_name,
+            metadata,
+            where_clause,
+            order_by,
+            page,
+            limit,
+            chunk_index,
+            generation,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match load_public_table_chunk(&connection, &secrets, &database_name, &metadata, &where_clause, &order_by, page, limit, chunk_index, generation, &settings, &ssh_options).await {
-                Ok(result) => DatabaseEvent::TableChunkLoaded { connection_id: connection.id, job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match load_public_table_chunk(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    &metadata,
+                    &where_clause,
+                    &order_by,
+                    page,
+                    limit,
+                    chunk_index,
+                    generation,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::TableChunkLoaded {
+                        connection_id: connection.id,
+                        job_id,
+                        result,
+                    },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::LoadQueryCompletion { job_id, connection, database_name, console_id, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::LoadQueryCompletion {
+            job_id,
+            connection,
+            database_name,
+            console_id,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            JobOutcome::event(match load_query_completion_metadata(
-                &connection, &secrets, &database_name, console_id, &settings, &ssh_options,
-            ).await {
-                Ok(result) => DatabaseEvent::QueryCompletionLoaded { job_id, result },
-                Err(error) => failure(job_id, error),
-            })
+            JobOutcome::event(
+                match load_query_completion_metadata(
+                    &connection,
+                    &secrets,
+                    &database_name,
+                    console_id,
+                    &settings,
+                    &ssh_options,
+                )
+                .await
+                {
+                    Ok(result) => DatabaseEvent::QueryCompletionLoaded { job_id, result },
+                    Err(error) => failure(job_id, error),
+                },
+            )
         }
-        DatabaseCommand::RunUserSql { job_id, connection, database_name, console_id, sql, source_offset, mode, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::RunUserSql {
+            job_id,
+            connection,
+            database_name,
+            console_id,
+            sql,
+            source_offset,
+            mode,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             let Some(policy) = execution_policy else {
                 return JobOutcome::event(DatabaseEvent::JobFailed {
                     job_id,
-                    message: "Внутренняя ошибка: для пользовательского SQL не задан режим выполнения".to_string(),
+                    message:
+                        "Внутренняя ошибка: для пользовательского SQL не задан режим выполнения"
+                            .to_string(),
                 });
             };
             if !policy.requires_explicit_transaction() || !policy.requires_global_review() {
@@ -768,26 +963,38 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
             let started = Instant::now();
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::QueryFailed {
-                    connection_id: connection.id,
-                    job_id,
-                    database_name,
-                    console_id,
-                    sql,
-                    started_unix_ms,
-                    duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
-                    message,
-                    diagnostic: None,
-                }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::QueryFailed {
+                        connection_id: connection.id,
+                        job_id,
+                        database_name,
+                        console_id,
+                        sql,
+                        started_unix_ms,
+                        duration_ms: started.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                        message,
+                        diagnostic: None,
+                    });
+                }
             };
             match begin_user_query_transaction(
-                &connection, &secrets, &database_name, &sql, source_offset, mode, &settings, &ssh_options,
-            ).await {
+                &connection,
+                &secrets,
+                &database_name,
+                &sql,
+                source_offset,
+                mode,
+                &settings,
+                &ssh_options,
+            )
+            .await
+            {
                 Ok((session, prepared)) => {
                     let duration_ms = started.elapsed().as_millis().min(u64::MAX as u128) as u64;
                     let transaction_id = transaction_id(job_id);
                     let requires_review = prepared.effects.requires_review();
-                    let review_duration = Duration::from_secs(settings.transaction_review_timeout_seconds);
+                    let review_duration =
+                        Duration::from_secs(settings.transaction_review_timeout_seconds);
                     let deadline = Instant::now() + review_duration;
                     let deadline_unix_ms = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -861,11 +1068,19 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
                 }
             }
         }
-        DatabaseCommand::BeginTableSave { job_id, connection, plan, secrets, settings, mut ssh_options } => {
+        DatabaseCommand::BeginTableSave {
+            job_id,
+            connection,
+            plan,
+            secrets,
+            settings,
+            mut ssh_options,
+        } => {
             let Some(policy) = execution_policy else {
                 return JobOutcome::event(DatabaseEvent::JobFailed {
                     job_id,
-                    message: "Внутренняя ошибка: для сохранения таблицы не задан режим выполнения".to_string(),
+                    message: "Внутренняя ошибка: для сохранения таблицы не задан режим выполнения"
+                        .to_string(),
                 });
             };
             if !policy.requires_explicit_transaction() || !policy.requires_global_review() {
@@ -877,12 +1092,17 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
             ssh_options.cancel = Some(cancel);
             let secrets = match resolve_secrets(connection.clone(), secrets).await {
                 Ok(secrets) => secrets,
-                Err(message) => return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message }),
+                Err(message) => {
+                    return JobOutcome::event(DatabaseEvent::JobFailed { job_id, message });
+                }
             };
-            match begin_table_transaction(&connection, &secrets, &plan, &settings, &ssh_options).await {
+            match begin_table_transaction(&connection, &secrets, &plan, &settings, &ssh_options)
+                .await
+            {
                 Ok((session, prepared)) => {
                     let transaction_id = transaction_id(job_id);
-                    let review_duration = Duration::from_secs(settings.transaction_review_timeout_seconds);
+                    let review_duration =
+                        Duration::from_secs(settings.transaction_review_timeout_seconds);
                     let deadline = Instant::now() + review_duration;
                     let deadline_unix_ms = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
@@ -916,38 +1136,79 @@ async fn run_command(command: DatabaseCommand, cancel: Arc<AtomicBool>) -> JobOu
                 Err(error) => JobOutcome::event(failure(job_id, error)),
             }
         }
-        DatabaseCommand::SaveConnectionSecrets { job_id, connection, mut supplied } => {
+        DatabaseCommand::SaveConnectionSecrets {
+            job_id,
+            connection,
+            mut supplied,
+        } => {
             let connection_for_worker = connection.clone();
             let result = tokio::task::spawn_blocking(move || {
                 let existing = load_database_secret_bundle(&connection_for_worker)?;
-                if supplied.postgres_password.is_none() { supplied.postgres_password = existing.postgres_password; }
-                if supplied.ssh_password.is_none() { supplied.ssh_password = existing.ssh_password; }
-                if supplied.ssh_key_passphrase.is_none() { supplied.ssh_key_passphrase = existing.ssh_key_passphrase; }
-                if supplied.jump_password.is_none() { supplied.jump_password = existing.jump_password; }
-                if supplied.jump_key_passphrase.is_none() { supplied.jump_key_passphrase = existing.jump_key_passphrase; }
+                if supplied.postgres_password.is_none() {
+                    supplied.postgres_password = existing.postgres_password;
+                }
+                if supplied.ssh_password.is_none() {
+                    supplied.ssh_password = existing.ssh_password;
+                }
+                if supplied.ssh_key_passphrase.is_none() {
+                    supplied.ssh_key_passphrase = existing.ssh_key_passphrase;
+                }
+                if supplied.jump_password.is_none() {
+                    supplied.jump_password = existing.jump_password;
+                }
+                if supplied.jump_key_passphrase.is_none() {
+                    supplied.jump_key_passphrase = existing.jump_key_passphrase;
+                }
                 save_remembered_database_secrets(&connection_for_worker, &supplied)
-            }).await;
+            })
+            .await;
             JobOutcome::event(match result {
                 Ok(Ok(())) => DatabaseEvent::ConnectionSecretsSaved { job_id, connection },
-                Ok(Err(error)) => DatabaseEvent::JobFailed { job_id, message: format!("failed to save database secrets: {error}") },
-                Err(error) => DatabaseEvent::JobFailed { job_id, message: format!("database secret worker failed: {error}") },
+                Ok(Err(error)) => DatabaseEvent::JobFailed {
+                    job_id,
+                    message: format!("failed to save database secrets: {error}"),
+                },
+                Err(error) => DatabaseEvent::JobFailed {
+                    job_id,
+                    message: format!("database secret worker failed: {error}"),
+                },
             })
         }
-        DatabaseCommand::DeleteConnectionSecrets { job_id, connection_id } => {
-            let result = tokio::task::spawn_blocking(move || delete_all_database_secrets(connection_id)).await;
-            JobOutcome::event(match result {
-                Ok(Ok(())) => DatabaseEvent::ConnectionSecretsDeleted { job_id, connection_id },
-                Ok(Err(error)) => DatabaseEvent::JobFailed { job_id, message: format!("failed to delete database secrets: {error}") },
-                Err(error) => DatabaseEvent::JobFailed { job_id, message: format!("database secret worker failed: {error}") },
-            })
-        }
-        DatabaseCommand::CancelJob { job_id } => JobOutcome::event(DatabaseEvent::JobCancelled { job_id }),
-        DatabaseCommand::CommitTransaction { job_id, .. }
-        | DatabaseCommand::RollbackTransaction { job_id, .. } => JobOutcome::event(DatabaseEvent::JobFailed {
+        DatabaseCommand::DeleteConnectionSecrets {
             job_id,
-            message: "Транзакция больше не активна".to_string(),
+            connection_id,
+        } => {
+            let result =
+                tokio::task::spawn_blocking(move || delete_all_database_secrets(connection_id))
+                    .await;
+            JobOutcome::event(match result {
+                Ok(Ok(())) => DatabaseEvent::ConnectionSecretsDeleted {
+                    job_id,
+                    connection_id,
+                },
+                Ok(Err(error)) => DatabaseEvent::JobFailed {
+                    job_id,
+                    message: format!("failed to delete database secrets: {error}"),
+                },
+                Err(error) => DatabaseEvent::JobFailed {
+                    job_id,
+                    message: format!("database secret worker failed: {error}"),
+                },
+            })
+        }
+        DatabaseCommand::CancelJob { job_id } => {
+            JobOutcome::event(DatabaseEvent::JobCancelled { job_id })
+        }
+        DatabaseCommand::CommitTransaction { job_id, .. }
+        | DatabaseCommand::RollbackTransaction { job_id, .. } => {
+            JobOutcome::event(DatabaseEvent::JobFailed {
+                job_id,
+                message: "Транзакция больше не активна".to_string(),
+            })
+        }
+        DatabaseCommand::Shutdown => JobOutcome::event(DatabaseEvent::JobCancelled {
+            job_id: DatabaseJobId(0),
         }),
-        DatabaseCommand::Shutdown => JobOutcome::event(DatabaseEvent::JobCancelled { job_id: DatabaseJobId(0) }),
     }
 }
 
@@ -1111,9 +1372,12 @@ fn unknown_host_key(error: &DatabaseBackendError) -> Option<(&str, u16, &str, &s
         _ => return None,
     };
     match ssh_error {
-        DatabaseSshError::UnknownHostKey { host, port, algorithm, fingerprint } => {
-            Some((host, *port, algorithm, fingerprint))
-        }
+        DatabaseSshError::UnknownHostKey {
+            host,
+            port,
+            algorithm,
+            fingerprint,
+        } => Some((host, *port, algorithm, fingerprint)),
         _ => None,
     }
 }
@@ -1131,7 +1395,9 @@ mod tests {
 
     #[test]
     fn command_job_ids_include_table_and_transaction_commands() {
-        let command = DatabaseCommand::CancelJob { job_id: DatabaseJobId(44) };
+        let command = DatabaseCommand::CancelJob {
+            job_id: DatabaseJobId(44),
+        };
         assert_eq!(command.job_id(), Some(DatabaseJobId(44)));
         assert!(!command.starts_job());
         let command = DatabaseCommand::CommitTransaction {
@@ -1190,7 +1456,12 @@ mod tests {
             read.execution_policy(),
             Some(DatabaseExecutionPolicy::InternalReadAutocommit)
         );
-        assert!(!read.execution_policy().unwrap().requires_explicit_transaction());
+        assert!(
+            !read
+                .execution_policy()
+                .unwrap()
+                .requires_explicit_transaction()
+        );
         assert!(!read.execution_policy().unwrap().requires_global_review());
 
         let mutation = DatabaseCommand::BeginTableSave {
@@ -1210,8 +1481,18 @@ mod tests {
             mutation.execution_policy(),
             Some(DatabaseExecutionPolicy::TableMutationReview)
         );
-        assert!(mutation.execution_policy().unwrap().requires_explicit_transaction());
-        assert!(mutation.execution_policy().unwrap().requires_global_review());
+        assert!(
+            mutation
+                .execution_policy()
+                .unwrap()
+                .requires_explicit_transaction()
+        );
+        assert!(
+            mutation
+                .execution_policy()
+                .unwrap()
+                .requires_global_review()
+        );
     }
 
     #[test]
@@ -1225,13 +1506,23 @@ mod tests {
                 fingerprint: "SHA256:test".to_string(),
             }),
         );
-        assert!(matches!(event, DatabaseEvent::HostKeyConfirmationRequired { job_id: DatabaseJobId(9), .. }));
+        assert!(matches!(
+            event,
+            DatabaseEvent::HostKeyConfirmationRequired {
+                job_id: DatabaseJobId(9),
+                ..
+            }
+        ));
     }
 
     #[test]
     fn runtime_can_start_cancel_idle_job_and_shutdown() {
         let mut runtime = DatabaseRuntime::spawn().unwrap();
-        runtime.send(DatabaseCommand::CancelJob { job_id: DatabaseJobId(7) }).unwrap();
+        runtime
+            .send(DatabaseCommand::CancelJob {
+                job_id: DatabaseJobId(7),
+            })
+            .unwrap();
         let event = loop {
             match runtime.try_recv() {
                 Ok(event) => break event,
@@ -1239,7 +1530,12 @@ mod tests {
                 Err(error) => panic!("runtime disconnected: {error}"),
             }
         };
-        assert_eq!(event, DatabaseEvent::JobCancelled { job_id: DatabaseJobId(7) });
+        assert_eq!(
+            event,
+            DatabaseEvent::JobCancelled {
+                job_id: DatabaseJobId(7)
+            }
+        );
         runtime.shutdown();
     }
 
@@ -1306,10 +1602,7 @@ mod tests {
                 assert_eq!(job_id, DatabaseJobId(61));
                 assert_eq!(database_name, "postgres");
                 assert_eq!(console_id, SqlConsoleId(610));
-                assert_eq!(
-                    ssh_options.host_key_policy,
-                    SshHostKeyPolicy::TrustAndStore
-                );
+                assert_eq!(ssh_options.host_key_policy, SshHostKeyPolicy::TrustAndStore);
             }
             _ => panic!("host-key retry changed the command variant"),
         }
@@ -1337,5 +1630,4 @@ mod tests {
             }
         );
     }
-
 }
