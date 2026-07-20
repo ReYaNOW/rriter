@@ -277,6 +277,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
             .load(std::sync::atomic::Ordering::Relaxed),
         tool_paths: app.tool_paths.clone(),
+        dart_settings: app.dart_settings.clone(),
     });
     if app.is_ide_mode {
         app.ide_panel.api.persist();

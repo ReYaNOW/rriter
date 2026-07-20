@@ -358,6 +358,17 @@ pub fn resolve_tool_executable(program: &OsStr, override_env: &str) -> Option<Pa
     resolve_executable(program)
 }
 
+pub fn command_for_executable(program: &Path) -> io::Result<Command> {
+    resolve_executable(program.as_os_str())
+        .map(Command::new)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("executable not found: {}", program.display()),
+            )
+        })
+}
+
 pub fn command_for_tool(program: &OsStr, override_env: &str) -> io::Result<Command> {
     resolve_tool_executable(program, override_env)
         .map(Command::new)

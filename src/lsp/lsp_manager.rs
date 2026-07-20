@@ -40,11 +40,17 @@ pub struct LspManager {
     workspaces: Vec<PathBuf>,
     active_workspaces: Vec<PathBuf>,
     open_python_files: HashMap<crate::platform::PathKey, OpenPythonFile>,
+    open_dart_files: HashMap<crate::platform::PathKey, dart_workspace::OpenDartFile>,
+    dart_workspaces:
+        HashMap<crate::platform::PathKey, dart_workspace::DartWorkspaceState>,
+    closed_dart_documents: Vec<PathBuf>,
     /// Актуальные диагностики для каждого открытого файла
     pub diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     ruff_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    dart_live_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
+    dart_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
     merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
     diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
     diagnostic_total_counts: (usize, usize),
@@ -63,12 +69,16 @@ pub struct LspManager {
     /// Статус ruff сервера
     pub python_status: LspServerStatus,
     pub ty_status: LspServerStatus,
+    pub dart_status: LspServerStatus,
     /// Отключены ли Python-серверы вручную целиком.
     pub python_disabled: bool,
     ruff_disabled: bool,
     ty_disabled: bool,
     ruff_unavailable: bool,
     ty_unavailable: bool,
+    dart_disabled: bool,
+    dart_unavailable: bool,
+    dart_workspace_analysis_enabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
     pub suppress_diagnostics: bool,
 }
@@ -79,16 +89,21 @@ impl LspManager {
     }
 
     pub fn new(workspaces: Vec<PathBuf>) -> Self {
-        LspManager {
+        let mut manager = LspManager {
             python: None,
             ty_process: None,
             workspaces: crate::platform::dedup_paths(workspaces),
             active_workspaces: Vec::new(),
             open_python_files: HashMap::new(),
+            open_dart_files: HashMap::new(),
+            dart_workspaces: HashMap::new(),
+            closed_dart_documents: Vec::new(),
             diagnostics: HashMap::new(),
             instant_diagnostics: HashMap::new(),
             ruff_workspace_diagnostics: HashMap::new(),
             ty_instant_diagnostics: HashMap::new(),
+            dart_live_diagnostics: HashMap::new(),
+            dart_workspace_diagnostics: HashMap::new(),
             merged_diagnostic_indices: HashMap::new(),
             diagnostic_ancestor_severities: HashMap::new(),
             diagnostic_total_counts: (0, 0),
@@ -106,14 +121,20 @@ impl LspManager {
             current_python_lines: None,
             python_status: LspServerStatus::Disabled,
             ty_status: LspServerStatus::Disabled,
+            dart_status: LspServerStatus::Disabled,
             python_disabled: false,
             ruff_disabled: false,
             ty_disabled: false,
             ruff_unavailable: false,
             ty_unavailable: false,
+            dart_disabled: false,
+            dart_unavailable: false,
+            dart_workspace_analysis_enabled: true,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
-        }
+        };
+        manager.schedule_configured_dart_projects();
+        manager
     }
 
     fn relative_lookup_path(&self, path: &Path) -> PathBuf {
@@ -162,16 +183,32 @@ impl LspManager {
             .keys()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
+        let open_dart_files = self
+            .open_dart_files
+            .keys()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
+        let dart_roots = self
+            .dart_workspaces
+            .values()
+            .map(|state| state.root.clone())
+            .collect::<Vec<_>>();
         let keep_path = |path: &PathBuf| {
             active_workspaces
                 .iter()
                 .any(|ws| crate::platform::path_is_within(path, ws))
                 || open_python_files.contains(&crate::platform::PathKey::new(path))
+                || open_dart_files.contains(&crate::platform::PathKey::new(path))
+                || dart_roots
+                    .iter()
+                    .any(|root| crate::platform::path_is_within(path, root))
         };
         let before = self.diagnostics.len()
             + self.instant_diagnostics.len()
             + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
+            + self.dart_live_diagnostics.len()
+            + self.dart_workspace_diagnostics.len()
             + self.merged_diagnostic_indices.len()
             + self.ty_diag_result_ids.len();
         self.diagnostics.retain(|path, _| keep_path(path));
@@ -179,6 +216,9 @@ impl LspManager {
         self.ruff_workspace_diagnostics
             .retain(|path, _| keep_path(path));
         self.ty_instant_diagnostics.retain(|path, _| keep_path(path));
+        self.dart_live_diagnostics.retain(|path, _| keep_path(path));
+        self.dart_workspace_diagnostics
+            .retain(|path, _| keep_path(path));
         self.merged_diagnostic_indices.retain(|path, _| keep_path(path));
         self.ty_diag_result_ids.retain(|path, _| keep_path(path));
         self.rebuild_diag_text_pool();
@@ -186,6 +226,8 @@ impl LspManager {
             + self.instant_diagnostics.len()
             + self.ruff_workspace_diagnostics.len()
             + self.ty_instant_diagnostics.len()
+            + self.dart_live_diagnostics.len()
+            + self.dart_workspace_diagnostics.len()
             + self.merged_diagnostic_indices.len()
             + self.ty_diag_result_ids.len();
         if before != after {
@@ -294,6 +336,10 @@ impl LspManager {
 
     pub fn set_workspaces(&mut self, workspaces: Vec<PathBuf>) {
         self.workspaces = crate::platform::dedup_paths(workspaces);
+        self.reconfigure_dart_workspaces();
+        if self.open_dart_files.is_empty() {
+            self.schedule_configured_dart_projects();
+        }
         if self.refresh_active_workspaces() {
             self.sync_python_processes_after_open_set_change(true);
         } else {
@@ -381,6 +427,13 @@ impl LspManager {
     }
 
     pub fn restart_server(&mut self, name: &str) {
+        if name == DART_SERVER.program {
+            self.dart_disabled = false;
+            self.dart_unavailable = false;
+            self.dart_status = LspServerStatus::Disabled;
+            self.reconfigure_dart_workspaces();
+            return;
+        }
         if self.open_python_files.is_empty() || self.python_disabled {
             return;
         }
@@ -410,6 +463,27 @@ impl LspManager {
     }
 
     pub fn set_server_enabled(&mut self, name: &str, enabled: bool) {
+        if name == DART_SERVER.program {
+            self.dart_disabled = !enabled;
+            if enabled {
+                self.dart_unavailable = false;
+                self.dart_status = LspServerStatus::Disabled;
+                self.reconfigure_dart_workspaces();
+            } else {
+                for state in self.dart_workspaces.values_mut() {
+                    state.cancel_job();
+                    if let Some(process) = state.process.take() {
+                        process.shutdown();
+                    }
+                }
+                self.dart_status = LspServerStatus::Disabled;
+                self.dart_live_diagnostics.clear();
+                self.dart_workspace_diagnostics.clear();
+                self.dirty_diagnostics = true;
+            }
+            self.rebuild_merged_diagnostic_indices();
+            return;
+        }
         self.python_disabled = false;
         let workspaces = self.active_workspaces.clone();
         match name {
@@ -472,7 +546,7 @@ impl LspManager {
     }
 
     /// Лёгкая информация о серверах без клонирования логов.
-    pub fn server_summaries(&self) -> [LspServerSummary<'_>; 2] {
+    pub fn server_summaries(&self) -> [LspServerSummary<'_>; 3] {
         [
             LspServerSummary {
                 name: RUFF_SERVER.program,
@@ -486,6 +560,14 @@ impl LspManager {
                 name: TY_SERVER.program,
                 status: &self.ty_status,
                 log_count: self.server_logs.get(TY_SERVER.program).map_or(0, Vec::len),
+            },
+            LspServerSummary {
+                name: dart_workspace::DART_SERVER_NAME,
+                status: &self.dart_status,
+                log_count: self
+                    .server_logs
+                    .get(dart_workspace::DART_SERVER_NAME)
+                    .map_or(0, Vec::len),
             },
         ]
     }
@@ -502,6 +584,11 @@ impl LspManager {
             .get(TY_SERVER.program)
             .cloned()
             .unwrap_or_default();
+        let dart_logs = self
+            .server_logs
+            .get(dart_workspace::DART_SERVER_NAME)
+            .cloned()
+            .unwrap_or_default();
         vec![
             LspServerInfo {
                 name: RUFF_SERVER.program,
@@ -513,6 +600,11 @@ impl LspManager {
                 status: self.ty_status.clone(),
                 logs: ty_logs,
             },
+            LspServerInfo {
+                name: dart_workspace::DART_SERVER_NAME,
+                status: self.dart_status.clone(),
+                logs: dart_logs,
+            },
         ]
     }
 
@@ -520,13 +612,24 @@ impl LspManager {
         self.server_logs.remove(name);
     }
 
-    /// Возвращает процесс для нужного расширения, запустив при необходимости
-    fn process_for_ext(&mut self, ext: &str) -> Option<&mut LspProcess> {
+    fn ide_process_for_document(&mut self, path: &Path, ext: &str) -> Option<&mut LspProcess> {
+        match ext {
+            "py" | "pyi" => {
+                self.ensure_python();
+                self.ty_process.as_mut()
+            }
+            "dart" => self.dart_process_for_path_mut(path),
+            _ => None,
+        }
+    }
+
+    fn action_process_for_document(&mut self, path: &Path, ext: &str) -> Option<&mut LspProcess> {
         match ext {
             "py" | "pyi" => {
                 self.ensure_python();
                 self.python.as_mut()
             }
+            "dart" => self.dart_process_for_path_mut(path),
             _ => None,
         }
     }
@@ -563,6 +666,10 @@ impl LspManager {
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
             self.dirty_diagnostics = true;
+        } else if ext == "dart" {
+            self.current_python_file = None;
+            self.current_python_lines = None;
+            self.open_dart_document(abs_path, Arc::<str>::from(text), version);
         } else {
             self.current_python_file = None;
             self.current_python_lines = None;
@@ -613,49 +720,132 @@ impl LspManager {
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
             self.dirty_diagnostics = true;
+        } else if ext == "dart"
+            && self
+                .open_dart_files
+                .contains_key(&crate::platform::PathKey::new(&abs_path))
+        {
+            self.current_path = Some(abs_path.clone());
+            self.current_python_file = None;
+            self.current_python_lines = None;
+            self.change_dart_document(abs_path, Arc::<str>::from(text), version);
         }
     }
 
     pub fn request_hover(
         &mut self,
         path: &PathBuf,
-        _ext: &str,
+        ext: &str,
         line: u32,
         col: u32,
     ) -> Option<i32> {
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        if let Some(proc) = &mut self.ty_process {
-            proc.request_hover(&abs_path, line, col)
-        } else {
-            None
-        }
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_hover(&abs_path, line, col))
     }
 
     pub fn request_definition(
         &mut self,
         path: &PathBuf,
-        _ext: &str,
+        ext: &str,
         line: u32,
         col: u32,
     ) -> Option<i32> {
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        if let Some(proc) = &mut self.ty_process {
-            proc.request_definition(&abs_path, line, col)
-        } else {
-            None
-        }
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_definition(&abs_path, line, col))
+    }
+
+    pub fn request_references(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+        include_declaration: bool,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext).and_then(|process| {
+            process.request_references(&abs_path, line, col, include_declaration)
+        })
+    }
+
+    pub fn request_prepare_rename(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_prepare_rename(&abs_path, line, col))
+    }
+
+    pub fn request_rename(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+        new_name: &str,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_rename(&abs_path, line, col, new_name))
+    }
+
+    pub fn request_completion(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+        trigger: Option<&str>,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_completion(&abs_path, line, col, trigger))
+    }
+
+    pub fn request_signature_help(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        line: u32,
+        col: u32,
+        trigger: Option<&str>,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_signature_help(&abs_path, line, col, trigger))
+    }
+
+    pub fn request_inlay_hints(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        start_line: u32,
+        start_col: u32,
+        end_line: u32,
+        end_col: u32,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext).and_then(|process| {
+            process.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
+        })
+    }
+
+    pub fn request_formatting(
+        &mut self,
+        path: &PathBuf,
+        ext: &str,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Option<i32> {
+        let abs_path = self.lookup_abs_path(path);
+        self.ide_process_for_document(&abs_path, ext)
+            .and_then(|process| process.request_formatting(&abs_path, tab_size, insert_spaces))
     }
 
     pub fn request_ty_completion(
@@ -666,20 +856,9 @@ impl LspManager {
         col: u32,
         trigger: Option<&str>,
     ) -> Option<i32> {
-        if !Self::is_python_ext(ext) {
-            return None;
-        }
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.ensure_python();
-        self.ty_process
-            .as_mut()
-            .and_then(|proc| proc.request_completion(&abs_path, line, col, trigger))
+        Self::is_python_ext(ext)
+            .then_some(())
+            .and_then(|_| self.request_completion(path, ext, line, col, trigger))
     }
 
     pub fn request_ty_signature_help(
@@ -690,20 +869,9 @@ impl LspManager {
         col: u32,
         trigger: Option<&str>,
     ) -> Option<i32> {
-        if !Self::is_python_ext(ext) {
-            return None;
-        }
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.ensure_python();
-        self.ty_process
-            .as_mut()
-            .and_then(|proc| proc.request_signature_help(&abs_path, line, col, trigger))
+        Self::is_python_ext(ext)
+            .then_some(())
+            .and_then(|_| self.request_signature_help(path, ext, line, col, trigger))
     }
 
     pub fn request_ty_inlay_hints(
@@ -715,19 +883,8 @@ impl LspManager {
         end_line: u32,
         end_col: u32,
     ) -> Option<i32> {
-        if !Self::is_python_ext(ext) {
-            return None;
-        }
-        let abs_path = if path.is_absolute() {
-            path.clone()
-        } else if let Some(ws) = self.workspaces.first() {
-            ws.join(path)
-        } else {
-            std::env::current_dir().unwrap_or_default().join(path)
-        };
-        self.ensure_python();
-        self.ty_process.as_mut().and_then(|proc| {
-            proc.request_inlay_hints(&abs_path, start_line, start_col, end_line, end_col)
+        Self::is_python_ext(ext).then_some(()).and_then(|_| {
+            self.request_inlay_hints(path, ext, start_line, start_col, end_line, end_col)
         })
     }
 
@@ -763,6 +920,11 @@ impl LspManager {
                 self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
                 self.dirty_diagnostics = true;
             }
+        } else if ext == "dart" {
+            if self.current_path.as_ref() == Some(&abs_path) {
+                self.current_path = None;
+            }
+            self.close_dart_document(&abs_path);
         }
     }
 
@@ -829,7 +991,7 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        let proc = self.process_for_ext(ext)?;
+        let proc = self.action_process_for_document(&abs_path, ext)?;
         proc.request_code_actions(
             &abs_path,
             start_line,
@@ -867,6 +1029,7 @@ impl LspManager {
         if let Some(proc) = &mut self.ty_process {
             proc.poll(&mut all);
         }
+        self.poll_dart_processes(&mut all);
 
         // Обновляем кешированные диагностики и статусы
         let mut received_diagnostics = 0usize;
@@ -874,7 +1037,7 @@ impl LspManager {
         for ev in &mut all {
             match ev {
                 LspEvent::Diagnostics {
-                    server_name,
+                    server,
                     path,
                     version,
                     items,
@@ -882,23 +1045,50 @@ impl LspManager {
                     ..
                 } => {
                     if !self.suppress_diagnostics {
-                        let is_ty = *server_name == TY_SERVER.program;
+                        let is_ty = *server == LspServerKind::Ty;
+                        let is_dart = *server == LspServerKind::Dart;
                         let existing_version = if is_ty {
                             self.ty_instant_diagnostics.get(path).map(|(version, _)| *version)
+                        } else if is_dart {
+                            self.dart_live_diagnostics
+                                .get(path)
+                                .map(|(version, _)| *version)
                         } else {
                             self.instant_diagnostics.get(path).map(|(version, _)| *version)
                         };
-                        let is_open_file = self
-                            .open_python_files
-                            .contains_key(&crate::platform::PathKey::new(path));
-                        if Self::should_accept_diagnostics_version(
-                            existing_version,
-                            *version,
-                            is_open_file,
-                        ) {
+                        let path_key = crate::platform::PathKey::new(path);
+                        let is_open_file = if is_dart {
+                            self.open_dart_files.contains_key(&path_key)
+                        } else {
+                            self.open_python_files.contains_key(&path_key)
+                        };
+                        let current_dart_version = is_dart
+                            .then(|| self.dart_document_version(path))
+                            .flatten();
+                        let version_is_current = if is_dart {
+                            is_open_file
+                                && current_dart_version.is_some_and(|current| {
+                                    version.is_some_and(|incoming| incoming >= current)
+                                })
+                        } else {
+                            true
+                        };
+                        if version_is_current
+                            && Self::should_accept_diagnostics_version(
+                                existing_version,
+                                *version,
+                                is_open_file,
+                            )
+                        {
                             let stored_version = version.unwrap_or(0);
                             received_diagnostics =
                                 received_diagnostics.saturating_add(items.len());
+                            if is_dart {
+                                for diagnostic in items.iter_mut() {
+                                    diagnostic.source =
+                                        Some(Arc::<str>::from(dart_workspace::DART_SERVER_NAME));
+                                }
+                            }
                             self.compact_diagnostic_text(items);
 
                             if is_ty {
@@ -908,6 +1098,10 @@ impl LspManager {
                                 }
                                 let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
                                 self.ty_instant_diagnostics
+                                    .insert(path.clone(), (stored_version, items));
+                            } else if is_dart {
+                                let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
+                                self.dart_live_diagnostics
                                     .insert(path.clone(), (stored_version, items));
                             } else {
                                 let items = Arc::<[Diagnostic]>::from(std::mem::take(items));
@@ -922,8 +1116,17 @@ impl LspManager {
                         }
                     }
                 }
-                LspEvent::StatusChanged { name, status } => {
-                    if *name == TY_SERVER.program {
+                LspEvent::StatusChanged { server, status } => {
+                    if *server == LspServerKind::Dart {
+                        self.dart_status = status.clone();
+                        if *status == LspServerStatus::Running {
+                            self.dart_unavailable = false;
+                        } else if *status == LspServerStatus::Missing {
+                            self.mark_dart_missing();
+                        }
+                        continue;
+                    }
+                    if *server == LspServerKind::Ty {
                         self.ty_status = status.clone();
                         if *status == LspServerStatus::Running {
                             self.ty_unavailable = false;
@@ -959,8 +1162,8 @@ impl LspManager {
                         }
                     }
                 }
-                LspEvent::ConfigurationServed { name } => {
-                    if *name == TY_SERVER.program {
+                LspEvent::ConfigurationServed { server } => {
+                    if *server == LspServerKind::Ty {
                         self.ty_workspace_diag_dirty = true;
                     }
                 }
@@ -990,6 +1193,11 @@ impl LspManager {
         let ruff_workspace_received = self.poll_ruff_workspace_diagnostics();
         if ruff_workspace_received > 0 {
             received_diagnostics = received_diagnostics.saturating_add(ruff_workspace_received);
+            workspace_diagnostics_done = true;
+        }
+        let dart_workspace_received = self.poll_dart_workspace_diagnostics();
+        if dart_workspace_received > 0 {
+            received_diagnostics = received_diagnostics.saturating_add(dart_workspace_received);
             workspace_diagnostics_done = true;
         }
 
@@ -1048,6 +1256,8 @@ impl LspManager {
         self.instant_diagnostics.remove(&abs_path);
         self.ruff_workspace_diagnostics.remove(&abs_path);
         self.ty_instant_diagnostics.remove(&abs_path);
+        self.dart_live_diagnostics.remove(&abs_path);
+        self.dart_workspace_diagnostics.remove(&abs_path);
         self.merged_diagnostic_indices.remove(&abs_path);
         self.ty_diag_result_ids.remove(&abs_path);
         self.rebuild_diag_text_pool();
@@ -1114,6 +1324,32 @@ impl LspManager {
                 }
             }
         }
+        for (_, diags) in self.dart_live_diagnostics.values() {
+            for diag in diags.iter() {
+                if let Some(value) = &diag.code {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.code_href {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.source {
+                    values.push(value.clone());
+                }
+            }
+        }
+        for diags in self.dart_workspace_diagnostics.values() {
+            for diag in diags.iter() {
+                if let Some(value) = &diag.code {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.code_href {
+                    values.push(value.clone());
+                }
+                if let Some(value) = &diag.source {
+                    values.push(value.clone());
+                }
+            }
+        }
         for value in values {
             let _ = self.intern_optional_diag_text(Some(value));
         }
@@ -1156,6 +1392,33 @@ impl LspManager {
             .and_then(|diagnostics| diagnostics.get(index))
     }
 
+    fn dart_workspace_diagnostics_for_abs_path(&self, path: &Path) -> Option<&Arc<[Diagnostic]>> {
+        if self
+            .open_dart_files
+            .contains_key(&crate::platform::PathKey::new(path))
+            || self.dart_live_diagnostics.contains_key(path)
+        {
+            return None;
+        }
+        self.dart_workspace_diagnostics.get(path)
+    }
+
+    fn dart_diagnostic_len_for_abs_path(&self, path: &Path) -> usize {
+        if let Some((_, diagnostics)) = self.dart_live_diagnostics.get(path) {
+            return diagnostics.len();
+        }
+        self.dart_workspace_diagnostics_for_abs_path(path)
+            .map_or(0, |diagnostics| diagnostics.len())
+    }
+
+    fn dart_diagnostic_at_for_abs_path(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
+        if let Some((_, diagnostics)) = self.dart_live_diagnostics.get(path) {
+            return diagnostics.get(index);
+        }
+        self.dart_workspace_diagnostics_for_abs_path(path)
+            .and_then(|diagnostics| diagnostics.get(index))
+    }
+
     fn rebuild_merged_diagnostic_indices(&mut self) {
         let mut paths = std::collections::HashSet::new();
         for path in self.diagnostics.keys() {
@@ -1170,6 +1433,12 @@ impl LspManager {
         for path in self.ty_instant_diagnostics.keys() {
             paths.insert(path.clone());
         }
+        for path in self.dart_live_diagnostics.keys() {
+            paths.insert(path.clone());
+        }
+        for path in self.dart_workspace_diagnostics.keys() {
+            paths.insert(path.clone());
+        }
 
         self.merged_diagnostic_indices.clear();
         for path in paths {
@@ -1178,7 +1447,8 @@ impl LspManager {
                 .ty_instant_diagnostics
                 .get(&path)
                 .map_or(0, |(_, diagnostics)| diagnostics.len());
-            let mut indices = Vec::with_capacity(ruff_len + ty_len);
+            let dart_len = self.dart_diagnostic_len_for_abs_path(&path);
+            let mut indices = Vec::with_capacity(ruff_len + ty_len + dart_len);
             for index in 0..ruff_len {
                 indices.push(MergedDiagnosticIndex {
                     source: DiagnosticSourceKind::Ruff,
@@ -1188,6 +1458,12 @@ impl LspManager {
             for index in 0..ty_len {
                 indices.push(MergedDiagnosticIndex {
                     source: DiagnosticSourceKind::Ty,
+                    index,
+                });
+            }
+            for index in 0..dart_len {
+                indices.push(MergedDiagnosticIndex {
+                    source: DiagnosticSourceKind::Dart,
                     index,
                 });
             }
@@ -1249,6 +1525,9 @@ impl LspManager {
             DiagnosticSourceKind::Legacy => self.diagnostics.get(path)?.get(index.index),
             DiagnosticSourceKind::Ruff => self.ruff_diagnostic_at_for_abs_path(path, index.index),
             DiagnosticSourceKind::Ty => self.ty_instant_diagnostics.get(path)?.1.get(index.index),
+            DiagnosticSourceKind::Dart => {
+                self.dart_diagnostic_at_for_abs_path(path, index.index)
+            }
         }
     }
 
@@ -1258,6 +1537,7 @@ impl LspManager {
                 .ty_instant_diagnostics
                 .get(path)
                 .map_or(0, |(_, diagnostics)| diagnostics.len())
+            + self.dart_diagnostic_len_for_abs_path(path)
     }
 
     fn instant_diagnostic_at_for_abs_path(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
@@ -1265,9 +1545,17 @@ impl LspManager {
         if index < ruff_len {
             return self.ruff_diagnostic_at_for_abs_path(path, index);
         }
-        self.ty_instant_diagnostics
+        let ty_len = self
+            .ty_instant_diagnostics
             .get(path)
-            .and_then(|(_, diagnostics)| diagnostics.get(index - ruff_len))
+            .map_or(0, |(_, diagnostics)| diagnostics.len());
+        if index < ruff_len + ty_len {
+            return self
+                .ty_instant_diagnostics
+                .get(path)
+                .and_then(|(_, diagnostics)| diagnostics.get(index - ruff_len));
+        }
+        self.dart_diagnostic_at_for_abs_path(path, index - ruff_len - ty_len)
     }
 
     pub fn diagnostic_at(&self, path: &Path, index: usize) -> Option<&Diagnostic> {
@@ -1385,6 +1673,19 @@ impl LspManager {
                 }
             }
         }
+        if let Some((_, diagnostics)) = self.dart_live_diagnostics.get(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        } else if let Some(diagnostics) = self.dart_workspace_diagnostics_for_abs_path(path) {
+            for diagnostic in diagnostics.iter() {
+                if Self::update_severity(&mut summary, diagnostic) {
+                    return summary;
+                }
+            }
+        }
         if summary.is_some() {
             return summary;
         }
@@ -1407,6 +1708,8 @@ impl LspManager {
             .chain(self.instant_diagnostics.keys())
             .chain(self.ruff_workspace_diagnostics.keys())
             .chain(self.ty_instant_diagnostics.keys())
+            .chain(self.dart_live_diagnostics.keys())
+            .chain(self.dart_workspace_diagnostics.keys())
         {
             if !paths.iter().any(|existing| existing.as_path() == path.as_path()) {
                 paths.push(path);
@@ -1469,6 +1772,8 @@ impl LspManager {
             .chain(self.instant_diagnostics.keys())
             .chain(self.ruff_workspace_diagnostics.keys())
             .chain(self.ty_instant_diagnostics.keys())
+            .chain(self.dart_live_diagnostics.keys())
+            .chain(self.dart_workspace_diagnostics.keys())
         {
             if crate::platform::path_is_within(diagnostic_path, &abs_path)
                 && let Some(severity) = self.diagnostic_severity_for_abs_path_direct(diagnostic_path)
@@ -1497,9 +1802,17 @@ impl LspManager {
             None
         };
         let ty = self.ty_instant_diagnostics.get(path);
+        let dart = self.dart_live_diagnostics.get(path);
+        let dart_workspace = if dart.is_none() {
+            self.dart_workspace_diagnostics_for_abs_path(path)
+        } else {
+            None
+        };
         let count = ruff.map_or(0, |(_, diags)| diags.len())
             + ruff_workspace.map_or(0, |diags| diags.len())
-            + ty.map_or(0, |(_, diags)| diags.len());
+            + ty.map_or(0, |(_, diags)| diags.len())
+            + dart.map_or(0, |(_, diags)| diags.len())
+            + dart_workspace.map_or(0, |diags| diags.len());
         if count == 0 {
             return (0, Vec::new());
         }
@@ -1515,6 +1828,13 @@ impl LspManager {
         }
         if let Some((version, diagnostics)) = ty {
             max_v = max_v.max(*version);
+            merged.extend(diagnostics.iter());
+        }
+        if let Some((version, diagnostics)) = dart {
+            max_v = max_v.max(*version);
+            merged.extend(diagnostics.iter());
+        }
+        if let Some(diagnostics) = dart_workspace {
             merged.extend(diagnostics.iter());
         }
         (max_v, merged)
@@ -1539,7 +1859,9 @@ impl LspManager {
                     .get(path)
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
             };
-            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+            is_stale(&self.instant_diagnostics)
+                || is_stale(&self.ty_instant_diagnostics)
+                || is_stale(&self.dart_live_diagnostics)
         } else if let Some(ws) = self.workspaces.first() {
             let abs_path = ws.join(path);
             let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
@@ -1547,7 +1869,9 @@ impl LspManager {
                     .get(abs_path.as_path())
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
             };
-            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+            is_stale(&self.instant_diagnostics)
+                || is_stale(&self.ty_instant_diagnostics)
+                || is_stale(&self.dart_live_diagnostics)
         } else {
             let abs_path = self.relative_lookup_path(path);
             let is_stale = |diags: &HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>| {
@@ -1555,7 +1879,9 @@ impl LspManager {
                     .get(abs_path.as_path())
                     .is_some_and(|(version, _)| (*version as u64) < editor_version)
             };
-            is_stale(&self.instant_diagnostics) || is_stale(&self.ty_instant_diagnostics)
+            is_stale(&self.instant_diagnostics)
+                || is_stale(&self.ty_instant_diagnostics)
+                || is_stale(&self.dart_live_diagnostics)
         }
     }
 
@@ -1581,7 +1907,7 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
-        self.process_for_ext(ext)?.request_code_actions(
+        self.action_process_for_document(&abs_path, ext)?.request_code_actions(
             &abs_path,
             0,
             0,
@@ -1603,11 +1929,18 @@ impl LspManager {
 
     fn stop_processes(&mut self) {
         self.python_disabled = true;
+        self.dart_disabled = true;
         if let Some(p) = self.python.take() {
             p.shutdown();
         }
         if let Some(p) = self.ty_process.take() {
             p.shutdown();
+        }
+        for state in self.dart_workspaces.values_mut() {
+            state.cancel_job();
+            if let Some(process) = state.process.take() {
+                process.shutdown();
+            }
         }
     }
 

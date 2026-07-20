@@ -66,6 +66,13 @@ pub enum UiId {
     SettingsOpenDirectory(usize),
     SettingsCopyGraphicsDiagnostics,
     SettingsRefreshTools,
+    SettingsDartToggleSupport,
+    SettingsDartToggleWorkspaceAnalysis,
+    SettingsDartCycleClosingLabels,
+    SettingsDartAdjustNesting(i8),
+    SettingsDartAdjustBlockLines(i8),
+    SettingsDartRestart,
+    SettingsDartOpenLog,
 
     // LSP panel
     LspServerRestart(usize),

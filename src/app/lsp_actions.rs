@@ -453,6 +453,15 @@ impl App {
         preserve_cursor: bool,
     ) {
         if let Some(path) = &self.file_path {
+            if edit
+                .changes
+                .keys()
+                .any(|changed_path| !crate::platform::paths_equal(changed_path, path))
+            {
+                // Никогда не применять только часть rename/quick-fix. Multi-file edits
+                // будут подключены отдельным атомарным workspace transaction API.
+                return;
+            }
             if let Some(changes) = edit.changes.get(path) {
                 let text = self.editor.get_full_text();
                 let mut sorted = changes.clone();

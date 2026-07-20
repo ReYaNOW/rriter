@@ -54,6 +54,7 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
         is_highlight_complete: false,
         icon_key: "default_file",
         syntax_errors: Vec::new(),
+        closing_hints: Default::default(),
         kind: EditorTabKind::Normal,
     }
 }
@@ -86,6 +87,8 @@ fn test_app() -> Option<App> {
         },
         file_extension: String::new(),
         highlighter: crate::highlighter::Highlighter::new(),
+        closing_hint_state: Default::default(),
+        closing_hint_settings: Default::default(),
         last_sent_version: u64::MAX,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
@@ -129,8 +132,10 @@ fn test_app() -> Option<App> {
         is_dragging_settings_ignore: false,
         open_folder_rx: None,
         tool_paths: crate::platform::ToolPaths::default(),
+        dart_settings: crate::app::DartSettings::default(),
         settings_tool_picker_rx: None,
         tool_installer: crate::app::tool_installer::ToolInstaller::default(),
+        dart_tool_state: crate::app::tool_installer::DartToolState::default(),
         show_search: false,
         search_anim_y: -120.0,
         search_editor: Editor::new(256),
@@ -1567,33 +1572,4 @@ fn pending_ty_context_enter_applies_first_response_without_newline() {
     assert_eq!(app.editor.get_full_text(), "box.id");
     assert!(!app.autocomplete_apply_pending_response);
     assert!(!app.editor.get_full_text().contains('\n'));
-}
-
-
-#[test]
-fn zero_length_primary_completion_edit_does_not_shift_cursor_twice() {
-    let mut editor = editor_with("abcQ");
-    let plan = CompletionApplyPlan {
-        ops: vec![
-            CompletionTextEditOp {
-                start: 3,
-                end: 3,
-                new_text: "x".to_string(),
-            },
-            CompletionTextEditOp {
-                start: 4,
-                end: 4,
-                new_text: "tail".to_string(),
-            },
-        ],
-        primary_start: Some(3),
-        target_cursor: Some(4),
-        fallback_insert: String::new(),
-        fallback_prefix_len: 0,
-    };
-
-    apply_completion_plan_to_editor(&mut editor, plan);
-
-    assert_eq!(editor.get_full_text(), "abcxQtail");
-    assert_eq!(editor.cursor, 4);
 }

@@ -17,6 +17,7 @@ pub mod lsp_ui;
 pub mod minimap_ui;
 pub mod search;
 pub mod settings_ui;
+mod settings_tool_rows;
 mod settings_database_ui;
 pub mod sticky;
 pub mod tabs_ui;

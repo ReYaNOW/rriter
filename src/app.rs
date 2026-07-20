@@ -3,6 +3,7 @@ pub mod api_mock;
 pub mod automation;
 pub(crate) mod context_menu;
 pub mod database;
+mod dart_settings;
 mod app_state;
 mod autocomplete;
 pub mod events;
@@ -26,6 +27,7 @@ use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_B
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
+pub use dart_settings::*;
 #[cfg(test)]
 pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,

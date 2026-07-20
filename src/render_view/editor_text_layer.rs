@@ -107,6 +107,31 @@ mod tests {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
+fn closing_hint_matches_visual_line(
+    hint: &crate::languages::dart::ClosingHint,
+    physical_line: usize,
+    start_byte: usize,
+    end_byte: usize,
+    is_folded: bool,
+    is_last_visual_segment: bool,
+) -> bool {
+    !is_folded
+        && is_last_visual_segment
+        && hint.line == physical_line
+        && hint.anchor_byte >= start_byte
+        && hint.anchor_byte <= end_byte
+}
+
+fn closing_hint_screen_x(
+    line_end_x: f32,
+    render_scroll_x: f32,
+    scrollbar_x: f32,
+    scale: f32,
+) -> Option<f32> {
+    let screen_x = (line_end_x - render_scroll_x + 10.0 * scale).round();
+    (screen_x < scrollbar_x).then_some(screen_x)
+}
+
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn refresh_identical_words_cache(
@@ -328,9 +353,16 @@ impl Renderer {
         ctrl_definition_range: Option<(usize, usize)>,
         diff_line_kinds: Option<&[crate::app::git_diff::DiffLineKind]>,
         python_inlay_hints: &[crate::app::PythonInlayHint],
+        closing_hints: &[crate::languages::dart::ClosingHint],
     ) {
         let guide_color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.15];
         let space_adv = self.char_advance(' ');
+        let first_visible_physical_line = self
+            .visual_lines
+            .get(skip_visual_lines)
+            .map_or(0, |line| line.physical_line.saturating_sub(1));
+        let mut closing_hint_idx =
+            closing_hints.partition_point(|hint| hint.line < first_visible_physical_line);
 
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
@@ -752,6 +784,36 @@ impl Renderer {
                 }
             }
 
+            let is_last_visual_segment = self
+                .visual_lines
+                .get(i + 1)
+                .is_none_or(|next| next.physical_line != v_line_info.physical_line);
+            while closing_hint_idx < closing_hints.len()
+                && closing_hints[closing_hint_idx].line < phys_idx
+            {
+                closing_hint_idx += 1;
+            }
+            if let Some(hint) = closing_hints.get(closing_hint_idx)
+                && closing_hint_matches_visual_line(
+                    hint,
+                    phys_idx,
+                    start_byte,
+                    end_byte,
+                    v_line_info.is_folded,
+                    is_last_visual_segment,
+                )
+                && let Some(hint_x) = closing_hint_screen_x(x, render_scroll_x, scrollbar_x, s)
+            {
+                self.draw_string_mono_scaled(
+                    &hint.label,
+                    hint_x,
+                    y.round(),
+                    [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.42],
+                    0.88,
+                );
+                closing_hint_idx += 1;
+            }
+
             if v_line_info.is_folded {
                 let dots_str = "...";
                 let dots_adv = self.measure_ui_width(dots_str, 1.0);
@@ -909,5 +971,76 @@ impl Renderer {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod closing_hint_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    fn hint() -> crate::languages::dart::ClosingHint {
+        crate::languages::dart::ClosingHint {
+            revision: 4,
+            line: 3,
+            anchor_byte: 42,
+            label: Arc::<str>::from("if"),
+            source: crate::languages::dart::ClosingHintSource::SyntaxTree,
+        }
+    }
+
+    #[test]
+    fn closing_hint_visibility_rejects_folded_and_nonfinal_wrap_segments() {
+        let hint = hint();
+        assert!(closing_hint_matches_visual_line(
+            &hint, 3, 40, 45, false, true
+        ));
+        assert!(!closing_hint_matches_visual_line(
+            &hint, 3, 40, 45, true, true
+        ));
+        assert!(!closing_hint_matches_visual_line(
+            &hint, 3, 40, 45, false, false
+        ));
+        assert!(!closing_hint_matches_visual_line(
+            &hint, 2, 40, 45, false, true
+        ));
+    }
+
+    #[test]
+    fn closing_hint_horizontal_position_tracks_scroll_and_clips_before_scrollbar() {
+        assert_eq!(closing_hint_screen_x(120.0, 20.0, 200.0, 1.0), Some(110.0));
+        assert_eq!(closing_hint_screen_x(120.0, 50.0, 200.0, 1.0), Some(80.0));
+        assert_eq!(closing_hint_screen_x(210.0, 0.0, 200.0, 1.0), None);
+    }
+
+    #[test]
+    fn ghost_geometry_does_not_change_document_cursor_selection_or_text() {
+        let mut editor = crate::editor::Editor::new(64);
+        let _ = editor.insert_str("void main() {\n}\n");
+        editor.cursor = 5;
+        editor.selection_anchor = Some(1);
+        let before_text = editor.get_full_text();
+        let before_cursor = editor.cursor;
+        let before_selection = editor.selection_anchor;
+
+        let _ = closing_hint_screen_x(80.0, 12.0, 300.0, 1.25);
+        let _ = closing_hint_matches_visual_line(&hint(), 3, 40, 45, false, true);
+
+        assert_eq!(editor.get_full_text(), before_text);
+        assert_eq!(editor.cursor, before_cursor);
+        assert_eq!(editor.selection_anchor, before_selection);
+    }
+
+    #[test]
+    fn prepared_hint_slice_is_reused_without_ast_work_in_frame_geometry() {
+        let prepared = vec![hint()];
+        let pointer = prepared.as_ptr();
+        for _ in 0..8 {
+            assert!(closing_hint_matches_visual_line(
+                &prepared[0], 3, 40, 45, false, true
+            ));
+            let _ = closing_hint_screen_x(80.0, 0.0, 300.0, 1.0);
+        }
+        assert_eq!(prepared.as_ptr(), pointer);
     }
 }

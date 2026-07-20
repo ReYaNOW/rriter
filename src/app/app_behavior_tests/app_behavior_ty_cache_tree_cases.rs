@@ -146,6 +146,7 @@ fn ty_completion_cache_ignores_uncacheable_prefix_response() {
                 additional_text_edits: Vec::new(),
             },
         ],
+        is_incomplete: false,
     });
 
     app.autocomplete_pending_request_mode = None;
@@ -1243,4 +1244,246 @@ fn autocomplete_shows_self_owner_for_current_class() {
         .unwrap();
     assert_eq!(self_item.kind, SymbolKind::Parameter);
     assert_eq!(self_item.module.as_deref(), Some("BookingService"));
+}
+
+#[test]
+fn dart_lsp_completion_filters_insert_text_and_keeps_language_cache_keys_isolated() {
+    let dart_snapshot = crate::app::autocomplete::AutocompleteSourceSnapshot {
+        source: crate::app::autocomplete::ActiveAutocompleteSource::MainEditor,
+        file_extension: "dart".to_string(),
+        visible_text: "Wid".to_string(),
+        analysis_text: "Wid".to_string(),
+        visible_cursor: 3,
+        analysis_cursor: 3,
+        path: Some(PathBuf::from("/tmp/sample/lib/main.dart")),
+        line_offsets: vec![0],
+        version: 7,
+    };
+    let options = crate::app::autocomplete::build_lsp_autocomplete_options(
+        &dart_snapshot,
+        vec![
+            crate::lsp::LspCompletionItem {
+                label: "StatefulWidget".to_string(),
+                kind: SymbolKind::Class,
+                module: Some("package:flutter/widgets.dart".to_string()),
+                detail: Some("class StatefulWidget".to_string()),
+                insert_text: Some("Widget".to_string()),
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+            crate::lsp::LspCompletionItem {
+                label: "unrelated".to_string(),
+                kind: SymbolKind::Variable,
+                module: None,
+                detail: None,
+                insert_text: None,
+                text_edit: None,
+                additional_text_edits: Vec::new(),
+            },
+        ],
+    );
+    assert_eq!(options.len(), 1);
+    assert_eq!(options[0].0.word, "StatefulWidget");
+    assert_eq!(options[0].0.insert_text.as_deref(), Some("Widget"));
+
+    let dart_key = crate::app::autocomplete::lsp_autocomplete_context_key(
+        &dart_snapshot,
+        AutocompleteMode::LspContext,
+        Some("."),
+        &[PathBuf::from("/tmp/sample")],
+    );
+    let mut python_snapshot = dart_snapshot;
+    python_snapshot.file_extension = "py".to_string();
+    python_snapshot.path = Some(PathBuf::from("/tmp/sample/main.py"));
+    let python_key = crate::app::autocomplete::lsp_autocomplete_context_key(
+        &python_snapshot,
+        AutocompleteMode::LspContext,
+        Some("."),
+        &[PathBuf::from("/tmp/sample")],
+    );
+    assert_ne!(dart_key, python_key);
+    assert!(dart_key.contains("lang=dart"));
+    assert!(python_key.contains("lang=py"));
+}
+
+#[test]
+fn dart_signature_help_uses_active_overload_and_named_argument_syntax() {
+    let help = crate::lsp::LspSignatureHelp {
+        signatures: vec![
+            crate::lsp::LspSignature {
+                label: "Widget()".to_string(),
+                documentation: None,
+                parameters: Vec::new(),
+            },
+            crate::lsp::LspSignature {
+                label: "Widget({required String title, int count = 0})".to_string(),
+                documentation: Some("Creates a widget".to_string()),
+                parameters: vec![
+                    crate::lsp::LspSignatureParameter {
+                        label: "title".to_string(),
+                        documentation: Some("Displayed title".to_string()),
+                    },
+                    crate::lsp::LspSignatureParameter {
+                        label: "count".to_string(),
+                        documentation: None,
+                    },
+                ],
+            },
+        ],
+        active_signature: 1,
+        active_parameter: Some(1),
+    };
+
+    let items = crate::app::autocomplete::lsp_signature_parameter_items(
+        &help,
+        "dart",
+        "Widget(",
+        "Widget(".len(),
+    );
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].insert_text.as_deref(), Some("title: "));
+    assert_eq!(items[0].detail.as_deref(), Some("Displayed title"));
+    assert_eq!(
+        items[1].detail.as_deref(),
+        Some("Widget({required String title, int count = 0})")
+    );
+}
+
+#[test]
+fn dart_completion_response_is_rejected_after_document_version_changes() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let path = PathBuf::from("/tmp/sample/lib/main.dart");
+    app.file_path = Some(path.clone());
+    app.file_extension = "dart".to_string();
+    app.editor = editor_with("Wid");
+    let snapshot = app
+        .active_autocomplete_source_snapshot(
+            crate::app::autocomplete::ActiveAutocompleteSource::MainEditor,
+        )
+        .unwrap();
+    let key = crate::app::autocomplete::lsp_autocomplete_context_key(
+        &snapshot,
+        AutocompleteMode::LspContext,
+        None,
+        &app.ide_workspaces,
+    );
+    app.autocomplete_mode = AutocompleteMode::LspContext;
+    app.autocomplete_pending_request_id = Some(41);
+    app.autocomplete_pending_request_mode = Some(AutocompleteMode::LspContext);
+    app.autocomplete_pending_request_path = Some(path);
+    app.autocomplete_pending_context_key = Some(key);
+    assert!(app.autocomplete_response_matches_current(41));
+    assert!(app.lsp_completion_selection_is_current());
+
+    let _ = app.editor.insert_str("g");
+    assert!(!app.autocomplete_response_matches_current(41));
+    assert!(!app.lsp_completion_selection_is_current());
+}
+
+#[test]
+fn zero_length_primary_completion_edit_does_not_shift_cursor_twice() {
+    let mut editor = editor_with("abcQ");
+    let plan = CompletionApplyPlan {
+        ops: vec![
+            CompletionTextEditOp {
+                start: 3,
+                end: 3,
+                new_text: "x".to_string(),
+            },
+            CompletionTextEditOp {
+                start: 4,
+                end: 4,
+                new_text: "tail".to_string(),
+            },
+        ],
+        primary_start: Some(3),
+        target_cursor: Some(4),
+        fallback_insert: String::new(),
+        fallback_prefix_len: 0,
+    };
+
+    apply_completion_plan_to_editor(&mut editor, plan);
+
+    assert_eq!(editor.get_full_text(), "abcxQtail");
+    assert_eq!(editor.cursor, 4);
+}
+
+#[test]
+fn lsp_completion_plan_applies_main_and_auto_import_edits_atomically() {
+    let mut editor = editor_with("void main() {\n  Wid\n}\n");
+    let primary_start = editor.get_full_text().find("Wid").unwrap();
+    let import = "import 'package:flutter/widgets.dart';\n";
+    let plan = CompletionApplyPlan {
+        ops: vec![
+            CompletionTextEditOp {
+                start: 0,
+                end: 0,
+                new_text: import.to_string(),
+            },
+            CompletionTextEditOp {
+                start: primary_start,
+                end: primary_start + 3,
+                new_text: "Widget".to_string(),
+            },
+        ],
+        primary_start: Some(primary_start),
+        target_cursor: Some(primary_start + "Widget".len()),
+        fallback_insert: String::new(),
+        fallback_prefix_len: 0,
+    };
+
+    let applied = apply_completion_plan_to_editor(&mut editor, plan);
+
+    assert_eq!(applied.len(), 2);
+    assert_eq!(
+        editor.get_full_text(),
+        "import 'package:flutter/widgets.dart';\nvoid main() {\n  Widget\n}\n"
+    );
+    assert_eq!(editor.cursor, import.len() + primary_start + "Widget".len());
+}
+
+#[test]
+fn lsp_completion_plan_rejects_overlapping_or_non_unicode_boundary_edits() {
+    let mut editor = editor_with("a😀bc");
+    let original = editor.get_full_text();
+    let original_cursor = editor.cursor;
+    let overlapping = CompletionApplyPlan {
+        ops: vec![
+            CompletionTextEditOp {
+                start: 0,
+                end: 2,
+                new_text: "x".to_string(),
+            },
+            CompletionTextEditOp {
+                start: 1,
+                end: 3,
+                new_text: "y".to_string(),
+            },
+        ],
+        primary_start: Some(0),
+        target_cursor: Some(1),
+        fallback_insert: "fallback".to_string(),
+        fallback_prefix_len: 0,
+    };
+    assert!(apply_completion_plan_to_editor(&mut editor, overlapping).is_empty());
+    assert_eq!(editor.get_full_text(), original);
+    assert_eq!(editor.cursor, original_cursor);
+
+    let inside_emoji = original.find('😀').unwrap() + 1;
+    let invalid_unicode = CompletionApplyPlan {
+        ops: vec![CompletionTextEditOp {
+            start: inside_emoji,
+            end: inside_emoji,
+            new_text: "x".to_string(),
+        }],
+        primary_start: Some(inside_emoji),
+        target_cursor: Some(inside_emoji + 1),
+        fallback_insert: String::new(),
+        fallback_prefix_len: 0,
+    };
+    assert!(apply_completion_plan_to_editor(&mut editor, invalid_unicode).is_empty());
+    assert_eq!(editor.get_full_text(), original);
+    assert_eq!(editor.cursor, original_cursor);
 }

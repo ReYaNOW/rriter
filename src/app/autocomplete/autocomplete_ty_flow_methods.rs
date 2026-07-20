@@ -1,137 +1,3 @@
-pub(crate) fn ty_signature_parameter_items(
-    names: Vec<String>,
-    text: &str,
-    cursor: usize,
-) -> Vec<crate::lsp::LspCompletionItem> {
-    let used = python_current_call_named_args(text, cursor);
-    let mut seen = FxHashSet::default();
-    let mut out = Vec::with_capacity(names.len());
-    for name in names {
-        if used.contains(&name) || !seen.insert(name.clone()) {
-            continue;
-        }
-        out.push(crate::lsp::LspCompletionItem {
-            label: name.clone(),
-            kind: SymbolKind::Argument,
-            module: None,
-            detail: Some(format!("(parameter) {name}")),
-            insert_text: Some(format!("{name}=")),
-            text_edit: None,
-            additional_text_edits: Vec::new(),
-        });
-    }
-    out
-}
-
-fn ty_auto_import_completion(item: &AutocompleteItem) -> bool {
-    !item.additional_text_edits.is_empty()
-        || item
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.trim_start().starts_with("(import "))
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ActiveAutocompleteSource {
-    MainEditor,
-    ApiMock {
-        spec_id: crate::app::api_client::ApiSpecId,
-        route_idx: usize,
-        part: crate::app::api_mock::ty_check::ApiMockSourcePart,
-    },
-}
-
-impl ActiveAutocompleteSource {
-    fn trace_label(self) -> &'static str {
-        match self {
-            Self::MainEditor => "main",
-            Self::ApiMock { .. } => "api_mock",
-        }
-    }
-
-    fn is_api_mock(self) -> bool {
-        matches!(self, Self::ApiMock { .. })
-    }
-
-    fn cacheable(self) -> bool {
-        matches!(self, Self::MainEditor)
-    }
-}
-
-pub(crate) struct AutocompleteSourceSnapshot {
-    pub(crate) source: ActiveAutocompleteSource,
-    pub(crate) file_extension: String,
-    pub(crate) visible_text: String,
-    pub(crate) analysis_text: String,
-    pub(crate) visible_cursor: usize,
-    pub(crate) analysis_cursor: usize,
-    pub(crate) path: Option<PathBuf>,
-    pub(crate) line_offsets: Vec<usize>,
-    pub(crate) version: i32,
-}
-
-impl AutocompleteSourceSnapshot {
-    pub(crate) fn current_word_prefix(&self) -> String {
-        autocomplete_word_prefix(&self.visible_text, self.visible_cursor)
-    }
-
-    fn editor_context<'a>(&'a self, editor: &'a Editor) -> AutocompleteEditorContext<'a> {
-        AutocompleteEditorContext {
-            editor,
-            file_extension: &self.file_extension,
-            visible_text: &self.visible_text,
-            analysis_text: &self.analysis_text,
-            cursor: self.visible_cursor,
-            analysis_cursor: self.analysis_cursor,
-            path: self.path.as_deref(),
-            line_offsets: &self.line_offsets,
-            source: self.source,
-        }
-    }
-}
-
-pub(crate) struct AutocompleteEditorContext<'a> {
-    pub(crate) editor: &'a Editor,
-    pub(crate) file_extension: &'a str,
-    pub(crate) visible_text: &'a str,
-    pub(crate) analysis_text: &'a str,
-    pub(crate) cursor: usize,
-    pub(crate) analysis_cursor: usize,
-    pub(crate) path: Option<&'a Path>,
-    pub(crate) line_offsets: &'a [usize],
-    pub(crate) source: ActiveAutocompleteSource,
-}
-
-impl AutocompleteEditorContext<'_> {
-    fn current_word_prefix(&self) -> String {
-        autocomplete_word_prefix(self.visible_text, self.cursor)
-    }
-
-    fn lookup_path(&self) -> Option<&Path> {
-        match self.source {
-            ActiveAutocompleteSource::MainEditor => self.path,
-            ActiveAutocompleteSource::ApiMock { .. } => None,
-        }
-    }
-}
-
-pub(crate) fn autocomplete_word_prefix(text: &str, cursor: usize) -> String {
-    let cursor = cursor.min(text.len());
-    let mut p = cursor;
-    let bytes = text.as_bytes();
-    while p > 0 {
-        let b = bytes[p - 1];
-        if !(b.is_ascii_alphanumeric() || b == b'_') {
-            break;
-        }
-        p -= 1;
-    }
-    if p == cursor {
-        return String::new();
-    }
-    text.get(p..cursor).unwrap_or("").to_string()
-}
-
 pub(crate) fn build_ty_autocomplete_options(
     ctx: &AutocompleteEditorContext<'_>,
     mode: AutocompleteMode,
@@ -926,7 +792,6 @@ impl App {
             snapshot.version,
             mode,
         );
-        let cacheable_response = source.cacheable() && prefix.is_empty();
         if let Some(items) = self
             .autocomplete_cache
             .as_ref()
@@ -1006,15 +871,9 @@ impl App {
             }
             self.autocomplete_mode = mode;
             self.autocomplete_pending_request_id = Some(id);
-            if cacheable_response {
-                self.autocomplete_pending_request_mode = Some(mode);
-                self.autocomplete_pending_request_path = Some(path);
-                self.autocomplete_pending_context_key = Some(context_key);
-            } else {
-                self.autocomplete_pending_request_mode = None;
-                self.autocomplete_pending_request_path = None;
-                self.autocomplete_pending_context_key = None;
-            }
+            self.autocomplete_pending_request_mode = Some(mode);
+            self.autocomplete_pending_request_path = Some(path);
+            self.autocomplete_pending_context_key = Some(context_key);
             self.autocomplete_apply_pending_response = false;
             if hide_exact_match {
                 self.hide_autocomplete_popup_keep_request();
@@ -1048,6 +907,267 @@ impl App {
         }
     }
 
+    pub fn request_lsp_autocomplete(&mut self, trigger: Option<&str>) {
+        if matches!(self.file_extension.as_str(), "py" | "pyi") {
+            self.request_ty_autocomplete(AutocompleteMode::TyContext, trigger);
+            return;
+        }
+        if self.file_extension != "dart" || !self.is_ide_mode || self.show_welcome {
+            return;
+        }
+        let source = ActiveAutocompleteSource::MainEditor;
+        let Some(snapshot) = self.active_autocomplete_source_snapshot(source) else {
+            return;
+        };
+        if !self
+            .highlighter
+            .lsp_completion_allowed_at_cursor(&snapshot.file_extension, snapshot.visible_cursor)
+        {
+            self.close_autocomplete();
+            return;
+        }
+        let prefix = snapshot.current_word_prefix();
+        let after_member_dot = snapshot
+            .visible_cursor
+            .checked_sub(1)
+            .and_then(|offset| snapshot.visible_text.as_bytes().get(offset))
+            == Some(&b'.');
+        if trigger.is_none() && prefix.is_empty() && !after_member_dot {
+            self.close_autocomplete();
+            return;
+        }
+        let Some(path) = snapshot.path.clone() else {
+            return;
+        };
+        let mode = AutocompleteMode::LspContext;
+        let context_key =
+            lsp_autocomplete_context_key(&snapshot, mode, trigger, &self.ide_workspaces);
+        if let Some(cache) = self.autocomplete_cache.as_ref().filter(|cache| {
+            cache.mode == mode
+                && cache.path == path
+                && cache.context_key == context_key
+                && !cache.is_incomplete
+        }) {
+            self.autocomplete_mode = mode;
+            self.update_lsp_autocomplete_for_source(source, cache.items.clone());
+            return;
+        }
+        let Some(lsp) = self.lsp.as_mut() else {
+            return;
+        };
+        lsp.notify_change(
+            &path,
+            &snapshot.file_extension,
+            &snapshot.analysis_text,
+            snapshot.version,
+        );
+        let (line, col) = crate::lsp::offset_to_lsp_pos(
+            &snapshot.analysis_text,
+            snapshot.analysis_cursor,
+            &snapshot.line_offsets,
+        );
+        let completion_id =
+            lsp.request_completion(&path, &snapshot.file_extension, line, col, trigger);
+        let signature_id = self
+            .highlighter
+            .lsp_signature_help_allowed_at_cursor(
+                &snapshot.file_extension,
+                snapshot.visible_cursor,
+            )
+            .then(|| {
+                lsp.request_signature_help(
+                    &path,
+                    &snapshot.file_extension,
+                    line,
+                    col,
+                    trigger.filter(|value| matches!(*value, "(" | ",")),
+                )
+            })
+            .flatten();
+        if let Some(id) = completion_id {
+            self.autocomplete_mode = mode;
+            self.autocomplete_pending_request_id = Some(id);
+            self.autocomplete_pending_request_mode = Some(mode);
+            self.autocomplete_pending_request_path = Some(path.clone());
+            self.autocomplete_pending_context_key = Some(context_key);
+            self.autocomplete_apply_pending_response = false;
+            self.autocomplete_detail_popup = None;
+            self.autocomplete_detail_rect = None;
+        }
+        self.autocomplete_signature_request_id = signature_id;
+        if signature_id.is_none() {
+            self.autocomplete_signature_items.clear();
+        }
+    }
+
+    pub(crate) fn autocomplete_response_matches_current(&self, request_id: i32) -> bool {
+        if self.autocomplete_pending_request_id != Some(request_id) {
+            return false;
+        }
+        let (Some(mode), Some(path), Some(expected_key)) = (
+            self.autocomplete_pending_request_mode,
+            self.autocomplete_pending_request_path.as_ref(),
+            self.autocomplete_pending_context_key.as_ref(),
+        ) else {
+            return false;
+        };
+        let Some(source) = self.active_autocomplete_source() else {
+            return false;
+        };
+        let Some(snapshot) = self.active_autocomplete_source_snapshot(source) else {
+            return false;
+        };
+        if snapshot.path.as_ref() != Some(path) {
+            return false;
+        }
+        let actual_key = if mode == AutocompleteMode::LspContext {
+            let trigger = expected_key
+                .split('|')
+                .find_map(|part| part.strip_prefix("trigger="))
+                .filter(|trigger| *trigger != "manual");
+            lsp_autocomplete_context_key(&snapshot, mode, trigger, &self.ide_workspaces)
+        } else {
+            let prefix = snapshot.current_word_prefix();
+            ty_autocomplete_context_key(
+                &snapshot.analysis_text,
+                &snapshot.line_offsets,
+                snapshot.analysis_cursor,
+                &prefix,
+                snapshot.version,
+                mode,
+            )
+        };
+        actual_key == *expected_key
+    }
+
+    pub(crate) fn lsp_completion_selection_is_current(&self) -> bool {
+        if self.autocomplete_mode != AutocompleteMode::LspContext {
+            return true;
+        }
+        let current = self
+            .autocomplete_cache
+            .as_ref()
+            .filter(|cache| cache.mode == AutocompleteMode::LspContext)
+            .map(|cache| (&cache.path, cache.mode, cache.context_key.as_str()))
+            .or_else(|| {
+                Some((
+                    self.autocomplete_pending_request_path.as_ref()?,
+                    self.autocomplete_pending_request_mode?,
+                    self.autocomplete_pending_context_key.as_deref()?,
+                ))
+                .filter(|(_, mode, _)| *mode == AutocompleteMode::LspContext)
+            });
+        let Some((path, mode, context_key)) = current else {
+            return false;
+        };
+        let Some(snapshot) = self
+            .active_autocomplete_source_snapshot(ActiveAutocompleteSource::MainEditor)
+        else {
+            return false;
+        };
+        if snapshot.path.as_ref() != Some(path) || mode != self.autocomplete_mode {
+            return false;
+        }
+        let trigger = context_key
+            .split('|')
+            .find_map(|part| part.strip_prefix("trigger="))
+            .filter(|trigger| *trigger != "manual");
+        lsp_autocomplete_context_key(&snapshot, mode, trigger, &self.ide_workspaces) == context_key
+    }
+
+    pub fn remember_lsp_autocomplete_cache(
+        &mut self,
+        mut items: Vec<crate::lsp::LspCompletionItem>,
+        is_incomplete: bool,
+    ) {
+        let (Some(mode), Some(path), Some(context_key)) = (
+            self.autocomplete_pending_request_mode,
+            self.autocomplete_pending_request_path.clone(),
+            self.autocomplete_pending_context_key.clone(),
+        ) else {
+            return;
+        };
+        if items.len() > AUTOCOMPLETE_CACHE_MAX_ITEMS {
+            items.truncate(AUTOCOMPLETE_CACHE_MAX_ITEMS);
+        }
+        self.autocomplete_cache = Some(AutocompleteCacheEntry {
+            mode,
+            path,
+            context_key,
+            items,
+            is_incomplete,
+        });
+        self.autocomplete_pending_request_mode = None;
+        self.autocomplete_pending_request_path = None;
+        self.autocomplete_pending_context_key = None;
+    }
+
+    pub fn update_lsp_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
+        let Some(source) = self.active_autocomplete_source() else {
+            return;
+        };
+        self.update_lsp_autocomplete_for_source(source, items);
+    }
+
+    fn update_lsp_autocomplete_for_source(
+        &mut self,
+        source: ActiveAutocompleteSource,
+        items: Vec<crate::lsp::LspCompletionItem>,
+    ) {
+        let Some(snapshot) = self.active_autocomplete_source_snapshot(source) else {
+            return;
+        };
+        if snapshot.file_extension == "dart"
+            && !self
+                .highlighter
+                .lsp_completion_allowed_at_cursor(&snapshot.file_extension, snapshot.visible_cursor)
+        {
+            self.close_autocomplete();
+            return;
+        }
+        let prefix = snapshot.current_word_prefix();
+        let mut combined = self.autocomplete_signature_items.clone();
+        combined.extend(items);
+        self.autocomplete_options = build_lsp_autocomplete_options(&snapshot, combined);
+        if self.autocomplete_options.len() == 1
+            && !prefix.is_empty()
+            && self.autocomplete_options[0].0.word == prefix
+        {
+            self.close_autocomplete();
+            return;
+        }
+        self.autocomplete_active = !self.autocomplete_options.is_empty();
+        if !self.autocomplete_active {
+            self.close_autocomplete();
+            return;
+        }
+        self.autocomplete_selected_idx = 0;
+        self.autocomplete_hovered_idx = None;
+        self.autocomplete_scroll.reset();
+        self.refresh_autocomplete_detail_popup();
+        if self.autocomplete_apply_pending_response {
+            self.autocomplete_apply_pending_response = false;
+            self.apply_autocomplete();
+        }
+    }
+
+    pub fn update_lsp_signature_help_autocomplete(&mut self, help: crate::lsp::LspSignatureHelp) {
+        let Some(snapshot) = self.active_autocomplete_source_snapshot(ActiveAutocompleteSource::MainEditor) else {
+            return;
+        };
+        self.autocomplete_signature_items = lsp_signature_parameter_items(
+            &help,
+            &snapshot.file_extension,
+            &snapshot.visible_text,
+            snapshot.visible_cursor,
+        );
+        if self.autocomplete_mode == AutocompleteMode::LspContext
+            && !self.autocomplete_signature_items.is_empty()
+        {
+            self.update_lsp_autocomplete(Vec::new());
+        }
+    }
+
     pub fn remember_ty_autocomplete_cache(
         &mut self,
         mut items: Vec<crate::lsp::LspCompletionItem>,
@@ -1067,6 +1187,7 @@ impl App {
             path,
             context_key,
             items,
+            is_incomplete: false,
         });
         self.autocomplete_pending_request_mode = None;
         self.autocomplete_pending_request_path = None;

@@ -44,6 +44,7 @@ impl Renderer {
         _syntax_errors: &[(usize, usize)],
         ctrl_definition_range: Option<(usize, usize)>,
         python_inlay_hints: &[crate::app::PythonInlayHint],
+        closing_hints: &[crate::languages::dart::ClosingHint],
         ide_workspaces: &[std::path::PathBuf],
         show_readonly_notice: bool,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
@@ -848,6 +849,7 @@ impl Renderer {
                 ctrl_definition_range,
                 active_git_diff_state.map(|state| state.line_kinds.as_slice()),
                 python_inlay_hints,
+                closing_hints,
             );
             self.flush();
             unsafe {

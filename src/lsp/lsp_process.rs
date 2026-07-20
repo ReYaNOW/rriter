@@ -1,6 +1,6 @@
 // src/lsp.rs
 // Быстрый LSP-клиент для RRiter.
-// Поддерживает Ruff и Ty; новые серверы описываются через LspServerDef.
+// Поддерживает Ruff, Ty и Dart; новые серверы описываются через LspServerDef.
 //
 // Архитектура:
 //   Main Thread ──Cmd──▶ Supervisor Thread ──bytes──▶ Writer Thread ──▶ stdin
@@ -11,7 +11,7 @@
 // restart-spam. При рестарте заново отправляются initialize и didOpen.
 // Writer/Reader — легковесные треды, по одному на направление I/O.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, BufRead, BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -25,9 +25,13 @@ mod protocol;
 
 use hover::PendingRequestKind;
 pub use hover::{HoverLineKindPublic, highlight_hover_text};
+#[allow(unused_imports)]
+pub use protocol::LspClosingLabel;
 use protocol::*;
+#[allow(unused_imports)]
 pub use protocol::{
-    CodeAction, LspCompletionItem, LspEvent, LspInlayHint, TextChange, WorkspaceEdit,
+    CodeAction, DefinitionTarget, LspCompletionItem, LspEvent, LspInlayHint, LspServerKind,
+    LspSignature, LspSignatureHelp, LspSignatureParameter, TextChange, WorkspaceEdit,
     highlight_diagnostic_message, offset_to_lsp_pos,
 };
 use std::thread;
@@ -54,7 +58,11 @@ struct LspRestartBudget {
 
 impl LspRestartBudget {
     fn begin_attempt(&mut self) -> Option<u8> {
-        if self.consecutive_attempts >= LSP_MAX_CONSECUTIVE_ATTEMPTS {
+        self.begin_attempt_for(LspServerKind::Ruff)
+    }
+
+    fn begin_attempt_for(&mut self, server: LspServerKind) -> Option<u8> {
+        if self.consecutive_attempts >= server.restart_attempt_limit() {
             return None;
         }
         self.consecutive_attempts += 1;
@@ -208,12 +216,21 @@ enum DiagnosticSourceKind {
     Legacy,
     Ruff,
     Ty,
+    Dart,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct MergedDiagnosticIndex {
     source: DiagnosticSourceKind,
     index: usize,
+}
+
+struct PendingRequestCleanup(Arc<Mutex<HashMap<i32, PendingRequestKind>>>);
+
+impl Drop for PendingRequestCleanup {
+    fn drop(&mut self) {
+        crate::platform::lock_recover(&self.0).clear();
+    }
 }
 
 struct SpawnedProcess {
@@ -236,20 +253,32 @@ fn missing_process_pipe(child: &mut ManagedChild, pipe: &'static str) -> io::Err
     )
 }
 
+fn command_for_server(
+    def: &'static LspServerDef,
+    executable: Option<&Path>,
+    workspace: Option<&Path>,
+) -> io::Result<std::process::Command> {
+    let mut command = if let Some(executable) = executable {
+        platform::command_for_executable(executable)?
+    } else {
+        platform::command_for_tool(def.program.as_ref(), def.override_env)?
+    };
+    if let Some(workspace) = workspace.filter(|workspace| workspace.is_dir()) {
+        command.current_dir(workspace);
+    }
+    command.args(def.args);
+    Ok(command)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn spawn_server(
     def: &'static LspServerDef,
+    executable: Option<&Path>,
     workspace: Option<&Path>,
     event_tx: Sender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) -> io::Result<SpawnedProcess> {
-    let mut cmd = platform::command_for_tool(def.program.as_ref(), def.override_env)?;
-    if let Some(ws) = workspace.filter(|ws| ws.is_dir()) {
-        cmd.current_dir(ws);
-    }
-    for arg in def.args {
-        cmd.arg(arg);
-    }
+    let mut cmd = command_for_server(def, executable, workspace)?;
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -327,10 +356,11 @@ fn spawn_server(
                     continue;
                 }
 
-                dispatch_frame(
+                dispatch_frame_for_server(
                     &body,
                     &event_tx,
-                    def.program,
+                    def.kind,
+                    def.kind.name(),
                     &reader_out_tx,
                     &pending_requests,
                 );
@@ -495,25 +525,27 @@ fn remove_json_text_fields(value: &mut serde_json::Value) -> bool {
 
 fn disable_lsp_server(
     event_tx: &Sender<LspEvent>,
-    server_name: &'static str,
+    server: LspServerKind,
     message: String,
 ) {
+    let server_name = server.name();
     let _ = event_tx.send(LspEvent::Log {
         name: server_name,
         message,
     });
     let _ = event_tx.send(LspEvent::StatusChanged {
-        name: server_name,
+        server,
         status: LspServerStatus::Disabled,
     });
 }
 
 fn report_missing_lsp_server(
     event_tx: &Sender<LspEvent>,
-    server_name: &'static str,
+    server: LspServerKind,
     override_env: &'static str,
     error: &io::Error,
 ) {
+    let server_name = server.name();
     let _ = event_tx.send(LspEvent::Log {
         name: server_name,
         message: format!(
@@ -521,7 +553,7 @@ fn report_missing_lsp_server(
         ),
     });
     let _ = event_tx.send(LspEvent::StatusChanged {
-        name: server_name,
+        server,
         status: LspServerStatus::Missing,
     });
 }
@@ -561,29 +593,31 @@ fn shutdown_spawned_process(
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn run_supervisor(
     def: &'static LspServerDef,
+    executable: Option<PathBuf>,
     workspaces: Vec<PathBuf>,
     cmd_rx: Receiver<Cmd>,
     event_tx: Sender<LspEvent>,
     stop: Arc<AtomicBool>,
 ) {
-    let mut open_file: Option<OpenFile> = None;
+    let mut open_files: HashMap<String, OpenFile> = HashMap::new();
     let mut init_id;
     let mut restart_delay = Duration::from_millis(500);
     let mut restart_budget = LspRestartBudget::default();
     let pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let _pending_cleanup = PendingRequestCleanup(pending_requests.clone());
 
     'outer: loop {
         if stop.load(Ordering::Acquire) {
             return;
         }
-        let Some(attempt) = restart_budget.begin_attempt() else {
+        let Some(attempt) = restart_budget.begin_attempt_for(def.kind) else {
             disable_lsp_server(
                 &event_tx,
-                def.program,
+                def.kind,
                 format!(
                     "[LSP] '{}' disabled after {} consecutive start/crash attempts; fix the server and use Restart to try again",
-                    def.program, LSP_MAX_CONSECUTIVE_ATTEMPTS
+                    def.kind.name(), def.kind.restart_attempt_limit()
                 ),
             );
             return;
@@ -596,12 +630,13 @@ fn run_supervisor(
         }
         crate::platform::lock_recover(&pending_requests).clear();
         let _ = event_tx.send(LspEvent::StatusChanged {
-            name: def.program,
+            server: def.kind,
             status: LspServerStatus::Starting,
         });
         // ── Запускаем процесс ─────────────────────────────────────────
         let mut proc = match spawn_server(
             def,
+            executable.as_deref(),
             workspaces.first().map(|p| p.as_path()),
             event_tx.clone(),
             pending_requests.clone(),
@@ -610,7 +645,7 @@ fn run_supervisor(
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 report_missing_lsp_server(
                     &event_tx,
-                    def.program,
+                    def.kind,
                     def.override_env,
                     &error,
                 );
@@ -621,11 +656,11 @@ fn run_supervisor(
                     name: def.program,
                     message: format!(
                         "[LSP] failed to start '{}' (attempt {}/{}): {}",
-                        def.program, attempt, LSP_MAX_CONSECUTIVE_ATTEMPTS, error
+                        def.kind.name(), attempt, def.kind.restart_attempt_limit(), error
                     ),
                 });
                 let _ = event_tx.send(LspEvent::StatusChanged {
-                    name: def.program,
+                    server: def.kind,
                     status: LspServerStatus::Crashed,
                 });
                 continue 'outer;
@@ -639,13 +674,13 @@ fn run_supervisor(
                 message: "[LSP] request id space exhausted".to_string(),
             });
             let _ = event_tx.send(LspEvent::StatusChanged {
-                name: def.program,
+                server: def.kind,
                 status: LspServerStatus::Disabled,
             });
             return;
         };
         init_id = next_init_id;
-        let init_msg = make_initialize(init_id, &workspaces);
+        let init_msg = make_initialize_for_server(def.kind, init_id, &workspaces);
         if send_and_log(&proc.out_tx, &event_tx, def.program, init_msg).is_err() {
             continue 'outer;
         }
@@ -682,15 +717,15 @@ fn run_supervisor(
         if send_and_log(&proc.out_tx, &event_tx, def.program, make_initialized()).is_err() {
             continue 'outer;
         }
-        let _ = event_tx.send(LspEvent::ServerReady);
+        let _ = event_tx.send(LspEvent::ServerReady { server: def.kind });
         let _ = event_tx.send(LspEvent::StatusChanged {
-            name: def.program,
+            server: def.kind,
             status: LspServerStatus::Running,
         });
         let running_since = Instant::now();
 
-        // Если был открыт файл — reopenуем после рестарта
-        if let Some(ref of) = open_file {
+        // Re-open every document owned by this workspace after a restart.
+        for of in open_files.values() {
             let msg = make_did_open(&of.uri, of.lang, of.version, of.text.as_ref());
             if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                 continue 'outer;
@@ -720,7 +755,7 @@ fn run_supervisor(
                         ),
                     });
                     let _ = event_tx.send(LspEvent::StatusChanged {
-                        name: def.program,
+                        server: def.kind,
                         status: LspServerStatus::Crashed,
                     });
                     break 'inner; // рестарт
@@ -735,7 +770,7 @@ fn run_supervisor(
                         ),
                     });
                     let _ = event_tx.send(LspEvent::StatusChanged {
-                        name: def.program,
+                        server: def.kind,
                         status: LspServerStatus::Crashed,
                     });
                     break 'inner;
@@ -752,18 +787,21 @@ fn run_supervisor(
                         text,
                     }) => {
                         let msg = make_did_open(&uri, lang, version, text.as_ref());
-                        open_file = Some(OpenFile {
-                            uri,
-                            lang,
-                            version,
-                            text,
-                        });
+                        open_files.insert(
+                            uri.clone(),
+                            OpenFile {
+                                uri,
+                                lang,
+                                version,
+                                text,
+                            },
+                        );
                         if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                             break 'inner;
                         }
                     }
                     Ok(Cmd::Change { uri, version, text }) => {
-                        if let Some(ref mut of) = open_file {
+                        if let Some(of) = open_files.get_mut(&uri) {
                             of.version = version;
                             of.text = text.clone();
                         }
@@ -773,12 +811,11 @@ fn run_supervisor(
                         }
                     }
                     Ok(Cmd::Close { uri }) => {
-                        if let Some(ref of) = open_file && of.uri == uri {
+                        if open_files.remove(&uri).is_some() {
                             let msg = make_did_close(&uri);
                             if send_and_log(&proc.out_tx, &event_tx, def.program, msg).is_err() {
                                 break 'inner;
                             }
-                            open_file = None;
                         }
                     }
                     Ok(Cmd::Hover { id, uri, line, col }) => {
@@ -806,6 +843,72 @@ fn run_supervisor(
                             &pending_requests,
                             id,
                             PendingRequestKind::Definition,
+                            msg,
+                        )
+                        .is_err()
+                        {
+                            break 'inner;
+                        }
+                    }
+                    Ok(Cmd::References {
+                        id,
+                        uri,
+                        line,
+                        col,
+                        include_declaration,
+                    }) => {
+                        let msg = make_references(
+                            id,
+                            &uri,
+                            line,
+                            col,
+                            include_declaration,
+                        );
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::References,
+                            msg,
+                        )
+                        .is_err()
+                        {
+                            break 'inner;
+                        }
+                    }
+                    Ok(Cmd::PrepareRename { id, uri, line, col }) => {
+                        let msg = make_prepare_rename(id, &uri, line, col);
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::PrepareRename,
+                            msg,
+                        )
+                        .is_err()
+                        {
+                            break 'inner;
+                        }
+                    }
+                    Ok(Cmd::Rename {
+                        id,
+                        uri,
+                        line,
+                        col,
+                        new_name,
+                    }) => {
+                        let msg = make_rename(id, &uri, line, col, &new_name);
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::Rename,
                             msg,
                         )
                         .is_err()
@@ -874,6 +977,27 @@ fn run_supervisor(
                             &pending_requests,
                             id,
                             PendingRequestKind::InlayHint,
+                            msg,
+                        )
+                        .is_err()
+                        {
+                            break 'inner;
+                        }
+                    }
+                    Ok(Cmd::Formatting {
+                        id,
+                        uri,
+                        tab_size,
+                        insert_spaces,
+                    }) => {
+                        let msg = make_formatting(id, &uri, tab_size, insert_spaces);
+                        if send_tracked_request(
+                            &proc.out_tx,
+                            &event_tx,
+                            def.program,
+                            &pending_requests,
+                            id,
+                            PendingRequestKind::Formatting,
                             msg,
                         )
                         .is_err()
@@ -958,6 +1082,7 @@ pub struct LspProcess {
     cmd_tx: Sender<Cmd>,
     pub event_rx: Receiver<LspEvent>,
     current_uri: Option<String>,
+    open_uris: HashSet<String>,
     def: &'static LspServerDef,
     pub open_file_data: Option<(String, Arc<str>)>, // (lang, text) for re-open after restart
     stop: Arc<AtomicBool>,
@@ -969,6 +1094,14 @@ pub struct LspProcess {
 impl LspProcess {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
+        Self::start_with_executable(def, workspaces, None)
+    }
+
+    fn start_with_executable(
+        def: &'static LspServerDef,
+        workspaces: Vec<PathBuf>,
+        executable: Option<PathBuf>,
+    ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
         let (event_tx, event_rx) = mpsc::channel();
         let ws = workspaces.clone();
@@ -979,7 +1112,14 @@ impl LspProcess {
         let supervisor = match thread::Builder::new()
             .name(format!("lsp-supervisor-{}", def.program))
             .spawn(move || {
-                run_supervisor(def, ws, cmd_rx, supervisor_event_tx, supervisor_stop)
+                run_supervisor(
+                    def,
+                    executable,
+                    ws,
+                    cmd_rx,
+                    supervisor_event_tx,
+                    supervisor_stop,
+                )
             })
         {
             Ok(supervisor) => Some(supervisor),
@@ -989,7 +1129,7 @@ impl LspProcess {
                     message: format!("[LSP] failed to start supervisor thread: {error}"),
                 });
                 let _ = event_tx.send(LspEvent::StatusChanged {
-                    name: def.program,
+                    server: def.kind,
                     status: LspServerStatus::Disabled,
                 });
                 stop.store(true, Ordering::Release);
@@ -1001,6 +1141,7 @@ impl LspProcess {
             cmd_tx,
             event_rx,
             current_uri: None,
+            open_uris: HashSet::new(),
             def,
             open_file_data: None,
             stop,
@@ -1020,7 +1161,7 @@ impl LspProcess {
             message: format!("[LSP] command channel disconnected while sending {action}"),
         });
         events.push(LspEvent::StatusChanged {
-            name: self.def.program,
+            server: self.def.kind,
             status: LspServerStatus::Disabled,
         });
         self.stop.store(true, Ordering::Release);
@@ -1048,6 +1189,7 @@ impl LspProcess {
         ) {
             return false;
         }
+        self.open_uris.insert(uri.clone());
         self.current_uri = Some(uri);
         self.open_file_data = Some((self.def.language_id.to_string(), text));
         true
@@ -1093,6 +1235,54 @@ impl LspProcess {
     pub fn request_definition(&mut self, path: &PathBuf, line: u32, col: u32) -> Option<i32> {
         self.request_position_command(path, line, col, "definition", |id, uri, line, col| {
             Cmd::Definition { id, uri, line, col }
+        })
+    }
+
+    pub fn request_references(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+        include_declaration: bool,
+    ) -> Option<i32> {
+        self.request_position_command(path, line, col, "references", move |id, uri, line, col| {
+            Cmd::References {
+                id,
+                uri,
+                line,
+                col,
+                include_declaration,
+            }
+        })
+    }
+
+    pub fn request_prepare_rename(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+    ) -> Option<i32> {
+        self.request_position_command(path, line, col, "prepare rename", |id, uri, line, col| {
+            Cmd::PrepareRename { id, uri, line, col }
+        })
+    }
+
+    pub fn request_rename(
+        &mut self,
+        path: &PathBuf,
+        line: u32,
+        col: u32,
+        new_name: &str,
+    ) -> Option<i32> {
+        let new_name = new_name.to_string();
+        self.request_position_command(path, line, col, "rename", move |id, uri, line, col| {
+            Cmd::Rename {
+                id,
+                uri,
+                line,
+                col,
+                new_name,
+            }
         })
     }
 
@@ -1162,6 +1352,26 @@ impl LspProcess {
         .then_some(id)
     }
 
+    pub fn request_formatting(
+        &mut self,
+        path: &PathBuf,
+        tab_size: u32,
+        insert_spaces: bool,
+    ) -> Option<i32> {
+        let id = next_id()?;
+        let uri = path_to_uri(path);
+        self.send_command(
+            Cmd::Formatting {
+                id,
+                uri,
+                tab_size,
+                insert_spaces,
+            },
+            "formatting",
+        )
+        .then_some(id)
+    }
+
     pub fn request_workspace_diagnostics(
         &mut self,
         previous_result_ids_json: String,
@@ -1180,10 +1390,14 @@ impl LspProcess {
     /// textDocument/didClose
     pub fn notify_close(&mut self, path: &PathBuf) {
         let uri = path_to_uri(path);
-        if self.current_uri.as_deref() == Some(uri.as_str()) {
-            if self.send_command(Cmd::Close { uri }, "didClose") {
-                self.current_uri = None;
-                self.open_file_data = None;
+        if self.open_uris.remove(&uri) {
+            if self.send_command(Cmd::Close { uri: uri.clone() }, "didClose") {
+                if self.current_uri.as_deref() == Some(uri.as_str()) {
+                    self.current_uri = self.open_uris.iter().next().cloned();
+                }
+                if self.open_uris.is_empty() {
+                    self.open_file_data = None;
+                }
             }
         }
     }
@@ -1236,7 +1450,7 @@ impl LspProcess {
                             message: "[LSP] supervisor event channel disconnected".to_string(),
                         });
                         events.push(LspEvent::StatusChanged {
-                            name: self.def.program,
+                            server: self.def.kind,
                             status: LspServerStatus::Disabled,
                         });
                     }

@@ -406,6 +406,7 @@ impl Renderer {
             None,
             None,
             empty_inlay,
+            &[],
         );
 
         self.line_height = old_line_height;

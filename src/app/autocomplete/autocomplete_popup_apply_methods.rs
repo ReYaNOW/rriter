@@ -1,3 +1,281 @@
+pub(crate) fn ty_signature_parameter_items(
+    names: Vec<String>,
+    text: &str,
+    cursor: usize,
+) -> Vec<crate::lsp::LspCompletionItem> {
+    let used = python_current_call_named_args(text, cursor);
+    let mut seen = FxHashSet::default();
+    let mut out = Vec::with_capacity(names.len());
+    for name in names {
+        if used.contains(&name) || !seen.insert(name.clone()) {
+            continue;
+        }
+        out.push(crate::lsp::LspCompletionItem {
+            label: name.clone(),
+            kind: SymbolKind::Argument,
+            module: None,
+            detail: Some(format!("(parameter) {name}")),
+            insert_text: Some(format!("{name}=")),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        });
+    }
+    out
+}
+
+pub(crate) fn lsp_signature_parameter_items(
+    help: &crate::lsp::LspSignatureHelp,
+    file_extension: &str,
+    text: &str,
+    cursor: usize,
+) -> Vec<crate::lsp::LspCompletionItem> {
+    let Some(signature) = help
+        .signatures
+        .get(help.active_signature)
+        .or_else(|| help.signatures.first())
+    else {
+        return Vec::new();
+    };
+    if matches!(file_extension, "py" | "pyi") {
+        return ty_signature_parameter_items(
+            signature
+                .parameters
+                .iter()
+                .map(|parameter| parameter.label.clone())
+                .collect(),
+            text,
+            cursor,
+        );
+    }
+    let separator = if file_extension == "dart" { ": " } else { "" };
+    signature
+        .parameters
+        .iter()
+        .map(|parameter| crate::lsp::LspCompletionItem {
+            label: parameter.label.clone(),
+            kind: SymbolKind::Argument,
+            module: None,
+            detail: parameter
+                .documentation
+                .clone()
+                .or_else(|| Some(signature.label.clone())),
+            insert_text: Some(format!("{}{separator}", parameter.label)),
+            text_edit: None,
+            additional_text_edits: Vec::new(),
+        })
+        .collect()
+}
+
+fn ty_auto_import_completion(item: &AutocompleteItem) -> bool {
+    !item.additional_text_edits.is_empty()
+        || item
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.trim_start().starts_with("(import "))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ActiveAutocompleteSource {
+    MainEditor,
+    ApiMock {
+        spec_id: crate::app::api_client::ApiSpecId,
+        route_idx: usize,
+        part: crate::app::api_mock::ty_check::ApiMockSourcePart,
+    },
+}
+
+impl ActiveAutocompleteSource {
+    fn trace_label(self) -> &'static str {
+        match self {
+            Self::MainEditor => "main",
+            Self::ApiMock { .. } => "api_mock",
+        }
+    }
+
+    fn is_api_mock(self) -> bool {
+        matches!(self, Self::ApiMock { .. })
+    }
+
+}
+
+pub(crate) struct AutocompleteSourceSnapshot {
+    pub(crate) source: ActiveAutocompleteSource,
+    pub(crate) file_extension: String,
+    pub(crate) visible_text: String,
+    pub(crate) analysis_text: String,
+    pub(crate) visible_cursor: usize,
+    pub(crate) analysis_cursor: usize,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) line_offsets: Vec<usize>,
+    pub(crate) version: i32,
+}
+
+impl AutocompleteSourceSnapshot {
+    pub(crate) fn current_word_prefix(&self) -> String {
+        autocomplete_word_prefix(&self.visible_text, self.visible_cursor)
+    }
+
+    fn editor_context<'a>(&'a self, editor: &'a Editor) -> AutocompleteEditorContext<'a> {
+        AutocompleteEditorContext {
+            editor,
+            file_extension: &self.file_extension,
+            visible_text: &self.visible_text,
+            analysis_text: &self.analysis_text,
+            cursor: self.visible_cursor,
+            analysis_cursor: self.analysis_cursor,
+            path: self.path.as_deref(),
+            line_offsets: &self.line_offsets,
+            source: self.source,
+        }
+    }
+}
+
+pub(crate) struct AutocompleteEditorContext<'a> {
+    pub(crate) editor: &'a Editor,
+    pub(crate) file_extension: &'a str,
+    pub(crate) visible_text: &'a str,
+    pub(crate) analysis_text: &'a str,
+    pub(crate) cursor: usize,
+    pub(crate) analysis_cursor: usize,
+    pub(crate) path: Option<&'a Path>,
+    pub(crate) line_offsets: &'a [usize],
+    pub(crate) source: ActiveAutocompleteSource,
+}
+
+impl AutocompleteEditorContext<'_> {
+    fn current_word_prefix(&self) -> String {
+        autocomplete_word_prefix(self.visible_text, self.cursor)
+    }
+
+    fn lookup_path(&self) -> Option<&Path> {
+        match self.source {
+            ActiveAutocompleteSource::MainEditor => self.path,
+            ActiveAutocompleteSource::ApiMock { .. } => None,
+        }
+    }
+}
+
+pub(crate) fn autocomplete_word_prefix(text: &str, cursor: usize) -> String {
+    let cursor = cursor.min(text.len());
+    let mut p = cursor;
+    let bytes = text.as_bytes();
+    while p > 0 {
+        let b = bytes[p - 1];
+        if !(b.is_ascii_alphanumeric() || b == b'_') {
+            break;
+        }
+        p -= 1;
+    }
+    if p == cursor {
+        return String::new();
+    }
+    text.get(p..cursor).unwrap_or("").to_string()
+}
+
+pub(crate) fn lsp_autocomplete_context_key(
+    snapshot: &AutocompleteSourceSnapshot,
+    mode: AutocompleteMode,
+    trigger: Option<&str>,
+    workspaces: &[PathBuf],
+) -> String {
+    let prefix = snapshot.current_word_prefix();
+    let anchor = snapshot
+        .analysis_cursor
+        .saturating_sub(prefix.len())
+        .min(snapshot.analysis_text.len());
+    let line = snapshot
+        .line_offsets
+        .partition_point(|&offset| offset <= anchor)
+        .saturating_sub(1);
+    let line_start = snapshot
+        .line_offsets
+        .get(line)
+        .copied()
+        .unwrap_or(0)
+        .min(anchor);
+    let context = snapshot
+        .analysis_text
+        .get(line_start..anchor)
+        .unwrap_or("")
+        .trim_end();
+    let workspace = snapshot.path.as_deref().and_then(|path| {
+        workspaces
+            .iter()
+            .filter(|workspace| crate::platform::path_is_within(path, workspace))
+            .max_by_key(|workspace| workspace.components().count())
+    });
+    format!(
+        "{mode:?}|lang={}|v{}|cursor={}|trigger={}|workspace={}|{context}",
+        snapshot.file_extension,
+        snapshot.version,
+        snapshot.analysis_cursor,
+        trigger.unwrap_or("manual"),
+        workspace
+            .map(|path| path.to_string_lossy())
+            .unwrap_or_default()
+    )
+}
+
+pub(crate) fn build_lsp_autocomplete_options(
+    snapshot: &AutocompleteSourceSnapshot,
+    items: Vec<crate::lsp::LspCompletionItem>,
+) -> Vec<(AutocompleteItem, Vec<usize>)> {
+    let prefix = snapshot.current_word_prefix();
+    let prefix_lower = prefix.to_lowercase();
+    let mut seen = FxHashSet::default();
+    let mut matches = Vec::new();
+    for (server_order, item) in items.into_iter().enumerate() {
+        let filter = item.insert_text.as_deref().unwrap_or(&item.label);
+        let filter_lower = filter.to_lowercase();
+        let indices = if prefix.is_empty() {
+            Vec::new()
+        } else if let Some(indices) = fuzzy_match(&prefix_lower, &filter_lower) {
+            indices
+        } else {
+            continue;
+        };
+        let dedup_key = (
+            item.label.clone(),
+            item.text_edit
+                .as_ref()
+                .map(|edit| {
+                    (
+                        edit.start_line,
+                        edit.start_col,
+                        edit.end_line,
+                        edit.end_col,
+                        edit.new_text.clone(),
+                    )
+                }),
+            item.additional_text_edits.clone(),
+        );
+        if !seen.insert(dedup_key) {
+            continue;
+        }
+        let is_prefix = prefix.is_empty() || filter_lower.starts_with(&prefix_lower);
+        let label_len = item.label.len();
+        matches.push((
+            !is_prefix,
+            server_order,
+            label_len,
+            AutocompleteItem::from(item),
+            indices,
+        ));
+    }
+    matches.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then_with(|| left.1.cmp(&right.1))
+            .then_with(|| left.2.cmp(&right.2))
+            .then_with(|| left.3.word.cmp(&right.3.word))
+    });
+    matches
+        .into_iter()
+        .take(80)
+        .map(|(_, _, _, item, indices)| (item, indices))
+        .collect()
+}
+
 fn python_import_completion_text(text: &str) -> bool {
     let trimmed = text.trim_start();
     trimmed.starts_with("from ") || trimmed.starts_with("import ")
@@ -96,6 +374,43 @@ pub(crate) struct CompletionTextEditOp {
     pub(crate) new_text: String,
 }
 
+fn strict_lsp_position_to_offset(text: &str, line: u32, col: u32) -> Option<usize> {
+    let mut current_line = 0u32;
+    let mut current_col = 0u32;
+    for (offset, ch) in text.char_indices() {
+        if current_line == line && current_col == col {
+            return Some(offset);
+        }
+        if ch == '\n' {
+            if current_line == line {
+                return None;
+            }
+            current_line = current_line.checked_add(1)?;
+            current_col = 0;
+            continue;
+        }
+        let next_col = current_col.checked_add(ch.len_utf16() as u32)?;
+        if current_line == line && col > current_col && col < next_col {
+            return None;
+        }
+        current_col = next_col;
+    }
+    (current_line == line && current_col == col).then_some(text.len())
+}
+
+fn completion_text_edit_op(
+    text: &str,
+    change: &crate::lsp::TextChange,
+) -> Option<CompletionTextEditOp> {
+    let start = strict_lsp_position_to_offset(text, change.start_line, change.start_col)?;
+    let end = strict_lsp_position_to_offset(text, change.end_line, change.end_col)?;
+    (start <= end).then(|| CompletionTextEditOp {
+        start,
+        end,
+        new_text: change.new_text.clone(),
+    })
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct CompletionAppliedEdit {
     pub(crate) offset: usize,
@@ -145,17 +460,44 @@ pub(crate) fn apply_completion_plan_to_editor(
         return applied;
     }
 
+    let text = editor.get_full_text();
+    if plan.ops.iter().any(|op| {
+        op.start > op.end
+            || op.end > text.len()
+            || !text.is_char_boundary(op.start)
+            || !text.is_char_boundary(op.end)
+    }) {
+        return Vec::new();
+    }
+    plan.ops.sort_unstable_by(|a, b| {
+        a.start
+            .cmp(&b.start)
+            .then(a.end.cmp(&b.end))
+            .then(a.new_text.cmp(&b.new_text))
+    });
+    plan.ops.dedup_by(|left, right| {
+        left.start == right.start && left.end == right.end && left.new_text == right.new_text
+    });
+    if plan.ops.windows(2).any(|ops| {
+        let left = &ops[0];
+        let right = &ops[1];
+        right.start < left.end
+            || (left.start == left.end
+                && right.start == right.end
+                && left.start == right.start)
+    }) {
+        return Vec::new();
+    }
+
     plan.ops
         .sort_unstable_by(|a, b| b.start.cmp(&a.start).then(b.end.cmp(&a.end)));
     for op in &plan.ops {
-        if op.start <= op.end {
-            let (offset, deleted_len, _) = editor.replace_range(op.start, op.end, &op.new_text);
-            applied.push(CompletionAppliedEdit {
-                offset,
-                deleted_len,
-                inserted_text: op.new_text.clone(),
-            });
-        }
+        let (offset, deleted_len, _) = editor.replace_range(op.start, op.end, &op.new_text);
+        applied.push(CompletionAppliedEdit {
+            offset,
+            deleted_len,
+            inserted_text: op.new_text.clone(),
+        });
     }
     if let (Some(primary_start), Some(mut target_cursor)) =
         (plan.primary_start, plan.target_cursor)
@@ -593,8 +935,10 @@ impl App {
         &mut self,
         physical_key: winit::keyboard::PhysicalKey,
     ) -> bool {
-        if self.autocomplete_mode != AutocompleteMode::TyContext
-            || self.autocomplete_pending_request_id.is_none()
+        if !matches!(
+            self.autocomplete_mode,
+            AutocompleteMode::TyContext | AutocompleteMode::LspContext
+        ) || self.autocomplete_pending_request_id.is_none()
                 && self.autocomplete_signature_request_id.is_none()
             || !matches!(
                 physical_key,
@@ -612,7 +956,10 @@ impl App {
         } else {
             &self.editor
         };
-        if !cursor_after_python_member_dot(editor) && !cursor_inside_python_call_parens(editor) {
+        if self.autocomplete_mode == AutocompleteMode::TyContext
+            && !cursor_after_python_member_dot(editor)
+            && !cursor_inside_python_call_parens(editor)
+        {
             return false;
         }
         self.autocomplete_apply_pending_response = true;
@@ -778,6 +1125,10 @@ impl App {
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return;
         }
+        if !self.lsp_completion_selection_is_current() {
+            self.close_autocomplete();
+            return;
+        }
         let Some((selected_item, _)) = self
             .autocomplete_options
             .get(self.autocomplete_selected_idx)
@@ -831,51 +1182,7 @@ impl App {
     }
 
     pub(crate) fn apply_lsp_completion_item(&mut self, item: &AutocompleteItem) {
-        let Some(main_edit) = item.text_edit.clone() else {
-            if !item.additional_text_edits.is_empty() {
-                if let Some(path) = self.file_path.clone() {
-                    let text = self.editor.get_full_text();
-                    let mut edits = item.additional_text_edits.clone();
-                    if self.autocomplete_mode == AutocompleteMode::TyImports {
-                        append_python_import_edits_to_block(
-                            &self.file_extension,
-                            &text,
-                            &self.editor.line_offsets,
-                            &mut edits,
-                        );
-                    }
-                    let mut changes = std::collections::HashMap::new();
-                    changes.insert(path, edits);
-                    self.apply_workspace_edit(&crate::lsp::WorkspaceEdit { changes }, true);
-                }
-            }
-            let selected = item
-                .insert_text
-                .as_deref()
-                .unwrap_or(&item.word)
-                .to_string();
-            let prefix_len = self.get_current_word_prefix().len();
-            self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
-                ops: Vec::new(),
-                primary_start: None,
-                target_cursor: None,
-                fallback_insert: selected,
-                fallback_prefix_len: prefix_len,
-            });
-
-            self.sync_after_autocomplete();
-
-            if let Some(w) = self.window.as_ref() {
-                App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-                w.request_redraw();
-            }
-            return;
-        };
-
         let text = self.editor.get_full_text();
-        let main_start =
-            crate::lsp::lsp_pos_to_offset(&text, main_edit.start_line, main_edit.start_col);
-        let target_cursor = main_start + main_edit.new_text.len();
         let mut changes = item.additional_text_edits.clone();
         if self.autocomplete_mode == AutocompleteMode::TyImports {
             append_python_import_edits_to_block(
@@ -885,30 +1192,91 @@ impl App {
                 &mut changes,
             );
         }
-        changes.push(main_edit);
 
-        let mut ops = Vec::with_capacity(changes.len());
-        for change in &changes {
-            let start = crate::lsp::lsp_pos_to_offset(&text, change.start_line, change.start_col);
-            let end = crate::lsp::lsp_pos_to_offset(&text, change.end_line, change.end_col);
-            ops.push(CompletionTextEditOp {
-                start,
-                end,
-                new_text: change.new_text.clone(),
-            });
-        }
+        let selected = item
+            .insert_text
+            .as_deref()
+            .unwrap_or(&item.word)
+            .to_string();
+        let prefix_len = self.get_current_word_prefix().len();
+        let (primary_start, target_cursor, fallback_prefix_len) =
+            if let Some(main_edit) = item.text_edit.as_ref() {
+                let Some(main_op) = completion_text_edit_op(&text, main_edit) else {
+                    return;
+                };
+                let primary_start = main_op.start;
+                let target_cursor = primary_start.saturating_add(main_edit.new_text.len());
+                changes.push(main_edit.clone());
+                (Some(primary_start), Some(target_cursor), prefix_len)
+            } else if !changes.is_empty() {
+                let primary_start = self.editor.cursor.saturating_sub(prefix_len);
+                let primary = crate::lsp::TextChange {
+                    start_line: crate::lsp::offset_to_lsp_pos(
+                        &text,
+                        primary_start,
+                        &self.editor.line_offsets,
+                    )
+                    .0,
+                    start_col: crate::lsp::offset_to_lsp_pos(
+                        &text,
+                        primary_start,
+                        &self.editor.line_offsets,
+                    )
+                    .1,
+                    end_line: crate::lsp::offset_to_lsp_pos(
+                        &text,
+                        self.editor.cursor,
+                        &self.editor.line_offsets,
+                    )
+                    .0,
+                    end_col: crate::lsp::offset_to_lsp_pos(
+                        &text,
+                        self.editor.cursor,
+                        &self.editor.line_offsets,
+                    )
+                    .1,
+                    new_text: selected.clone(),
+                };
+                changes.push(primary);
+                (
+                    Some(primary_start),
+                    Some(primary_start.saturating_add(selected.len())),
+                    prefix_len,
+                )
+            } else {
+                self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
+                    ops: Vec::new(),
+                    primary_start: None,
+                    target_cursor: None,
+                    fallback_insert: selected,
+                    fallback_prefix_len: prefix_len,
+                });
+                self.finish_lsp_completion_apply();
+                return;
+            };
+
+        let Some(ops) = changes
+            .iter()
+            .map(|change| completion_text_edit_op(&text, change))
+            .collect::<Option<Vec<_>>>()
+        else {
+            return;
+        };
         self.apply_completion_plan_to_main_editor(CompletionApplyPlan {
             ops,
-            primary_start: Some(main_start),
-            target_cursor: Some(target_cursor),
-            fallback_insert: item.insert_text.as_deref().unwrap_or(&item.word).to_string(),
-            fallback_prefix_len: self.get_current_word_prefix().len(),
+            primary_start,
+            target_cursor,
+            fallback_insert: selected,
+            fallback_prefix_len,
         });
-        self.sync_after_autocomplete();
+        self.finish_lsp_completion_apply();
+    }
 
-        if let Some(w) = self.window.as_ref() {
-            App::update_window_title(w, &self.base_title, self.editor.is_dirty());
-            w.request_redraw();
+    fn finish_lsp_completion_apply(&mut self) {
+        self.sync_after_autocomplete();
+        if let Some(window) = self.window.as_ref() {
+            App::update_window_title(window, &self.base_title, self.editor.is_dirty());
+            window.request_redraw();
         }
     }
 

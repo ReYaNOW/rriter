@@ -3,6 +3,14 @@ use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, RwLock};
 
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ManagedToolInstallPlan {
+    UvBootstrap,
+    UvPackage(&'static str),
+    DartSdkArchive,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ToolKind {
     Git,
@@ -11,16 +19,18 @@ pub enum ToolKind {
     Uv,
     Python,
     Shell,
+    Dart,
 }
 
 impl ToolKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Git,
         Self::Ruff,
         Self::Ty,
         Self::Uv,
         Self::Python,
         Self::Shell,
+        Self::Dart,
     ];
 
     pub const fn index(self) -> usize {
@@ -31,6 +41,7 @@ impl ToolKind {
             Self::Uv => 3,
             Self::Python => 4,
             Self::Shell => 5,
+            Self::Dart => 6,
         }
     }
 
@@ -42,6 +53,7 @@ impl ToolKind {
             3 => Some(Self::Uv),
             4 => Some(Self::Python),
             5 => Some(Self::Shell),
+            6 => Some(Self::Dart),
             _ => None,
         }
     }
@@ -54,6 +66,7 @@ impl ToolKind {
             Self::Uv => "uv",
             Self::Python => "Python",
             Self::Shell => "Терминал",
+            Self::Dart => "Dart SDK",
         }
     }
 
@@ -65,6 +78,7 @@ impl ToolKind {
             Self::Uv => "uv",
             Self::Python => "python",
             Self::Shell => "shell",
+            Self::Dart => "dart",
         }
     }
 
@@ -76,17 +90,30 @@ impl ToolKind {
             Self::Uv => "RRITER_UV_PATH",
             Self::Python => "RRITER_PYTHON_PATH",
             Self::Shell => "RRITER_SHELL",
+            Self::Dart => "RRITER_DART_PATH",
+        }
+    }
+
+    pub const fn managed_install_plan(self) -> Option<ManagedToolInstallPlan> {
+        match self {
+            Self::Uv => Some(ManagedToolInstallPlan::UvBootstrap),
+            Self::Ruff => Some(ManagedToolInstallPlan::UvPackage("ruff")),
+            Self::Ty => Some(ManagedToolInstallPlan::UvPackage("ty")),
+            Self::Dart => Some(ManagedToolInstallPlan::DartSdkArchive),
+            Self::Git | Self::Python | Self::Shell => None,
         }
     }
 
     pub const fn supports_managed_install(self) -> bool {
-        matches!(self, Self::Ruff | Self::Ty | Self::Uv)
+        matches!(
+            self.managed_install_plan(),
+            Some(ManagedToolInstallPlan::UvBootstrap | ManagedToolInstallPlan::UvPackage(_))
+        )
     }
 
     pub const fn managed_package(self) -> Option<&'static str> {
-        match self {
-            Self::Ruff => Some("ruff"),
-            Self::Ty => Some("ty"),
+        match self.managed_install_plan() {
+            Some(ManagedToolInstallPlan::UvPackage(package)) => Some(package),
             _ => None,
         }
     }
@@ -94,7 +121,7 @@ impl ToolKind {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ToolPaths {
-    paths: [Option<PathBuf>; 6],
+    paths: [Option<PathBuf>; 7],
 }
 
 impl ToolPaths {
@@ -118,6 +145,8 @@ pub enum ToolPathSource {
     Environment,
     Settings,
     Path,
+    Flutter,
+    Managed,
 }
 
 impl ToolPathSource {
@@ -126,6 +155,8 @@ impl ToolPathSource {
             Self::Environment => "RRITER_*_PATH",
             Self::Settings => "настройки",
             Self::Path => "PATH",
+            Self::Flutter => "Flutter",
+            Self::Managed => "RRiter",
         }
     }
 }
@@ -135,6 +166,7 @@ pub struct ToolResolution {
     pub path: Option<PathBuf>,
     pub configured_path: Option<PathBuf>,
     pub source: Option<ToolPathSource>,
+    pub sdk_root: Option<PathBuf>,
 }
 
 impl ToolResolution {
@@ -145,12 +177,30 @@ impl ToolResolution {
     pub fn is_invalid_override(&self) -> bool {
         self.path.is_none() && self.configured_path.is_some()
     }
+
+    pub fn source_label(&self, kind: ToolKind) -> Option<&'static str> {
+        self.source.map(|source| {
+            if kind == ToolKind::Dart {
+                match source {
+                    ToolPathSource::Settings => "custom",
+                    ToolPathSource::Path => "system",
+                    ToolPathSource::Environment => "RRITER_DART_PATH",
+                    ToolPathSource::Flutter => "Flutter",
+                    ToolPathSource::Managed => "managed",
+                }
+            } else {
+                source.label()
+            }
+        })
+    }
 }
 
 static TOOL_PATHS: LazyLock<RwLock<ToolPaths>> =
     LazyLock::new(|| RwLock::new(ToolPaths::default()));
-static TOOL_RESOLUTION_CACHE: LazyLock<RwLock<[Option<ToolResolution>; 6]>> =
+static TOOL_RESOLUTION_CACHE: LazyLock<RwLock<[Option<ToolResolution>; 7]>> =
     LazyLock::new(|| RwLock::new(std::array::from_fn(|_| None)));
+static DART_WORKSPACE_ROOT: LazyLock<RwLock<Option<PathBuf>>> =
+    LazyLock::new(|| RwLock::new(None));
 
 pub fn refresh_tool_resolutions() {
     if let Ok(mut cache) = TOOL_RESOLUTION_CACHE.write() {
@@ -161,6 +211,13 @@ pub fn refresh_tool_resolutions() {
 pub fn configure_tool_paths(paths: ToolPaths) {
     if let Ok(mut configured) = TOOL_PATHS.write() {
         *configured = paths;
+    }
+    refresh_tool_resolutions();
+}
+
+pub fn configure_dart_workspace_root(root: Option<PathBuf>) {
+    if let Ok(mut configured) = DART_WORKSPACE_ROOT.write() {
+        *configured = root;
     }
     refresh_tool_resolutions();
 }
@@ -193,12 +250,16 @@ pub fn resolve_tool_kind(kind: ToolKind) -> ToolResolution {
 }
 
 fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
+    if kind == ToolKind::Dart {
+        return resolve_dart_uncached();
+    }
     if let Some(path) = std::env::var_os(kind.override_env()).filter(|value| !value.is_empty()) {
         let configured_path = PathBuf::from(path);
         return ToolResolution {
             path: resolve_executable(configured_path.as_os_str()),
             configured_path: Some(configured_path),
             source: Some(ToolPathSource::Environment),
+            sdk_root: None,
         };
     }
     if let Some(configured_path) = configured_tool_path(kind) {
@@ -206,6 +267,7 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
             path: resolve_executable(configured_path.as_os_str()),
             configured_path: Some(configured_path),
             source: Some(ToolPathSource::Settings),
+            sdk_root: None,
         };
     }
 
@@ -219,6 +281,7 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
         (ToolKind::Shell, PlatformKind::Windows) => &["pwsh.exe", "powershell.exe", "cmd.exe"],
         (ToolKind::Shell, PlatformKind::Macos) => &["/bin/zsh", "/bin/bash", "/bin/sh"],
         (ToolKind::Shell, _) => &["/bin/bash", "/bin/sh"],
+        (ToolKind::Dart, _) => &[],
     };
     let path = candidates
         .iter()
@@ -227,7 +290,248 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
         source: path.as_ref().map(|_| ToolPathSource::Path),
         path,
         configured_path: None,
+        sdk_root: None,
     }
+}
+
+fn resolve_dart_uncached() -> ToolResolution {
+    let workspace = DART_WORKSPACE_ROOT
+        .read()
+        .ok()
+        .and_then(|root| root.clone());
+    resolve_dart_for_workspace(workspace.as_deref())
+}
+
+pub fn resolve_dart_for_workspace(workspace: Option<&Path>) -> ToolResolution {
+    let env_override = std::env::var_os(ToolKind::Dart.override_env())
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let managed_root = data_dir().join("tools").join("managed").join("dart");
+    let path_dart = resolve_executable(OsStr::new(dart_executable_name(CURRENT_PLATFORM)));
+    resolve_dart_with(
+        configured_tool_path(ToolKind::Dart),
+        workspace,
+        env_override,
+        &managed_root,
+        path_dart,
+        discovered_flutter_roots(),
+        CURRENT_PLATFORM,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn resolve_dart_with(
+    configured_path: Option<PathBuf>,
+    workspace: Option<&Path>,
+    env_override: Option<PathBuf>,
+    managed_root: &Path,
+    path_dart: Option<PathBuf>,
+    other_flutter_roots: Vec<PathBuf>,
+    platform: PlatformKind,
+) -> ToolResolution {
+    if let Some(configured_path) = configured_path {
+        return dart_resolution_from_candidate(
+            configured_path.clone(),
+            Some(configured_path),
+            ToolPathSource::Settings,
+            platform,
+        );
+    }
+
+    if workspace.is_some_and(is_flutter_project)
+        && let Some(root) = workspace.and_then(project_flutter_root)
+    {
+        let resolution =
+            dart_resolution_from_flutter_root(&root, ToolPathSource::Flutter, platform);
+        if resolution.is_ready() {
+            return resolution;
+        }
+    }
+
+    if let Some(configured_path) = env_override {
+        return dart_resolution_from_candidate(
+            configured_path.clone(),
+            Some(configured_path),
+            ToolPathSource::Environment,
+            platform,
+        );
+    }
+
+    if let Some(path) = managed_dart_executable_in(managed_root, platform) {
+        return dart_resolution_from_candidate(path, None, ToolPathSource::Managed, platform);
+    }
+
+    if let Some(path) = path_dart {
+        let resolution =
+            dart_resolution_from_candidate(path, None, ToolPathSource::Path, platform);
+        if resolution.is_ready() {
+            return resolution;
+        }
+    }
+
+    for root in other_flutter_roots {
+        let resolution =
+            dart_resolution_from_flutter_root(&root, ToolPathSource::Flutter, platform);
+        if resolution.is_ready() {
+            return resolution;
+        }
+    }
+
+    ToolResolution {
+        path: None,
+        configured_path: None,
+        source: None,
+        sdk_root: None,
+    }
+}
+
+fn dart_resolution_from_flutter_root(
+    root: &Path,
+    source: ToolPathSource,
+    platform: PlatformKind,
+) -> ToolResolution {
+    let candidate = root
+        .join("bin")
+        .join("cache")
+        .join("dart-sdk")
+        .join("bin")
+        .join(dart_executable_name(platform));
+    dart_resolution_from_candidate(candidate, None, source, platform)
+}
+
+pub(super) fn dart_resolution_from_candidate(
+    candidate: PathBuf,
+    configured_path: Option<PathBuf>,
+    source: ToolPathSource,
+    platform: PlatformKind,
+) -> ToolResolution {
+    let path = resolve_dart_candidate(&candidate, platform);
+    let sdk_root = path.as_deref().and_then(dart_sdk_root_for_executable);
+    ToolResolution {
+        path,
+        configured_path,
+        source: Some(source),
+        sdk_root,
+    }
+}
+
+pub(super) fn resolve_dart_candidate(candidate: &Path, platform: PlatformKind) -> Option<PathBuf> {
+    if candidate.is_dir() {
+        let executable = dart_executable_name(platform);
+        let candidates = [
+            candidate.join("bin").join(executable),
+            candidate.join("dart-sdk").join("bin").join(executable),
+            candidate
+                .join("bin")
+                .join("cache")
+                .join("dart-sdk")
+                .join("bin")
+                .join(executable),
+        ];
+        return candidates
+            .into_iter()
+            .find(|path| is_usable_dart_executable(path));
+    }
+    resolve_executable(candidate.as_os_str()).filter(|path| is_usable_dart_executable(path))
+}
+
+fn is_usable_dart_executable(path: &Path) -> bool {
+    if !path.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        return std::fs::metadata(path)
+            .is_ok_and(|metadata| metadata.permissions().mode() & 0o111 != 0);
+    }
+    #[cfg(not(unix))]
+    true
+}
+
+fn dart_sdk_root_for_executable(path: &Path) -> Option<PathBuf> {
+    path.parent()?.parent().map(Path::to_path_buf)
+}
+
+pub(super) fn dart_executable_name(platform: PlatformKind) -> &'static str {
+    if platform == PlatformKind::Windows {
+        "dart.exe"
+    } else {
+        "dart"
+    }
+}
+
+pub(super) fn is_flutter_project(root: &Path) -> bool {
+    let Ok(pubspec) = std::fs::read_to_string(root.join("pubspec.yaml")) else {
+        return false;
+    };
+    pubspec.lines().any(|line| {
+        let line = line.trim();
+        line == "sdk: flutter" || line.starts_with("flutter:")
+    })
+}
+
+fn project_flutter_root(workspace: &Path) -> Option<PathBuf> {
+    let fvm = workspace.join(".fvm").join("flutter_sdk");
+    if fvm.is_dir() {
+        return Some(fvm);
+    }
+    flutter_root_from_package_config(&workspace.join(".dart_tool").join("package_config.json"))
+}
+
+pub(super) fn flutter_root_from_package_config(path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    let root_uri = value
+        .get("packages")?
+        .as_array()?
+        .iter()
+        .find(|package| package.get("name").and_then(serde_json::Value::as_str) == Some("flutter"))?
+        .get("rootUri")?
+        .as_str()?;
+    let base = url::Url::from_directory_path(path.parent()?).ok()?;
+    let package_root = base.join(root_uri).ok()?.to_file_path().ok()?;
+    let packages_dir = package_root.parent()?;
+    let flutter_root = packages_dir.parent()?;
+    (packages_dir.file_name() == Some(OsStr::new("packages")))
+        .then(|| flutter_root.to_path_buf())
+}
+
+fn discovered_flutter_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(root) = std::env::var_os("FLUTTER_ROOT").filter(|value| !value.is_empty()) {
+        roots.push(PathBuf::from(root));
+    }
+    if let Some(flutter) = resolve_executable(OsStr::new(if CURRENT_PLATFORM == PlatformKind::Windows {
+        "flutter.bat"
+    } else {
+        "flutter"
+    }))
+        && let Some(root) = flutter.parent().and_then(Path::parent)
+    {
+        roots.push(root.to_path_buf());
+    }
+    super::dedup_paths(roots)
+}
+
+fn managed_dart_executable_in(root: &Path, platform: PlatformKind) -> Option<PathBuf> {
+    let mut generations = std::fs::read_dir(root)
+        .ok()?
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .collect::<Vec<_>>();
+    generations.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    for entry in generations {
+        let executable = entry
+            .path()
+            .join("dart-sdk")
+            .join("bin")
+            .join(dart_executable_name(platform));
+        if is_usable_dart_executable(&executable) {
+            return Some(executable);
+        }
+    }
+    None
 }
 
 

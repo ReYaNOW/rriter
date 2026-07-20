@@ -828,9 +828,13 @@ pub(crate) enum PendingRequestKind {
     Hover,
     CodeAction,
     Definition,
+    References,
+    PrepareRename,
+    Rename,
     Completion,
     SignatureHelp,
     InlayHint,
+    Formatting,
     WorkspaceDiagnostic,
 }
 

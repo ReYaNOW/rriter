@@ -2,6 +2,7 @@ use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
 use crate::ui_system::UiId;
+use super::DartSettings;
 use glutin::context::PossiblyCurrentContext;
 use glutin::surface::{Surface, WindowSurface};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -52,6 +53,7 @@ pub struct EditorTab {
     pub is_highlighted_once: bool,
     pub is_highlight_complete: bool,
     pub icon_key: &'static str,
+    pub closing_hints: crate::languages::dart::ClosingHintState,
     pub kind: EditorTabKind,
 }
 
@@ -272,6 +274,7 @@ pub enum AutocompleteMode {
     TreeSitter,
     TyContext,
     TyImports,
+    LspContext,
     Sql,
 }
 
@@ -330,6 +333,7 @@ pub struct AutocompleteCacheEntry {
     pub path: PathBuf,
     pub context_key: String,
     pub items: Vec<crate::lsp::LspCompletionItem>,
+    pub is_incomplete: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -902,6 +906,35 @@ pub(crate) fn python_positional_inlay_hints_from_lsp_with_offsets(
     out
 }
 
+pub(crate) fn lsp_inlay_hints_from_lsp_with_offsets(
+    file_extension: &str,
+    text: &str,
+    line_offsets: &[usize],
+    hints: &[crate::lsp::LspInlayHint],
+) -> Vec<PythonInlayHint> {
+    if matches!(file_extension, "py" | "pyi") {
+        return python_positional_inlay_hints_from_lsp_with_offsets(text, line_offsets, hints);
+    }
+    let mut out = hints
+        .iter()
+        .filter(|hint| !hint.label.is_empty())
+        .map(|hint| PythonInlayHint {
+            byte_offset: lsp_pos_to_offset_with_line_offsets(
+                text,
+                line_offsets,
+                hint.line,
+                hint.col,
+            ),
+            label: Arc::<str>::from(hint.label.as_str()),
+        })
+        .collect::<Vec<_>>();
+    out.sort_unstable_by_key(|hint| hint.byte_offset);
+    out.dedup_by(|left, right| {
+        left.byte_offset == right.byte_offset && left.label == right.label
+    });
+    out
+}
+
 fn lsp_pos_to_offset_with_line_offsets(
     text: &str,
     line_offsets: &[usize],
@@ -974,6 +1007,7 @@ impl App {
     }
 
     pub(crate) fn shift_current_python_inlay_hints_for_edits(&mut self, edits: &[SyncEdit]) {
+        self.closing_hint_state.invalidate(self.editor.version);
         if self.python_inlay_hints.is_empty()
             || self.python_inlay_hint_path.as_ref() != self.file_path.as_ref()
         {
@@ -1005,9 +1039,10 @@ pub struct App {
     pub file_path: Option<PathBuf>,
     pub file_key: Option<crate::platform::PathKey>,
     pub text_file_format: crate::platform::TextFileFormat,
-
     pub file_extension: String,
     pub highlighter: Highlighter,
+    pub closing_hint_state: crate::languages::dart::ClosingHintState,
+    pub closing_hint_settings: crate::languages::dart::ClosingHintSettings,
     pub last_sent_version: u64,
 
     pub scroll_y: crate::scroll::ScrollState,
@@ -1068,10 +1103,12 @@ pub struct App {
     pub is_dragging_settings_ignore: bool,
     pub open_folder_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub tool_paths: crate::platform::ToolPaths,
+    pub dart_settings: DartSettings,
     pub settings_tool_picker_rx: Option<
         std::sync::mpsc::Receiver<(crate::platform::ToolKind, Option<PathBuf>)>,
     >,
     pub(crate) tool_installer: crate::app::tool_installer::ToolInstaller,
+    pub(crate) dart_tool_state: crate::app::tool_installer::DartToolState,
 
     pub show_search: bool,
     pub search_anim_y: f32,
@@ -1165,7 +1202,7 @@ pub struct App {
     pub python_inlay_hint_pending_path: Option<PathBuf>,
     pub python_inlay_hint_pending_range: Option<PythonInlayHintLineRange>,
     pub python_inlay_hint_pending_version: u64,
-    pub python_inlay_hint_cache: FxHashMap<PathBuf, PythonInlayHintCacheEntry>,
+    pub python_inlay_hint_cache: FxHashMap<(PathBuf, String), PythonInlayHintCacheEntry>,
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,

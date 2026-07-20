@@ -125,7 +125,7 @@ impl App {
             }
         } else if force_close_autocomplete {
             self.close_autocomplete();
-        } else if should_trigger_autocomplete {
+        } else if should_trigger_autocomplete && self.file_extension != "dart" {
             if let Some(trigger) = ty_completion_trigger {
                 self.request_ty_autocomplete(AutocompleteMode::TyContext, Some(trigger));
             } else if self.autocomplete_active
@@ -139,7 +139,7 @@ impl App {
             } else {
                 self.update_autocomplete();
             }
-        } else {
+        } else if !should_trigger_autocomplete {
             self.close_autocomplete();
         }
 
@@ -189,6 +189,9 @@ impl App {
         if should_notify_lsp {
             self.last_sent_version = self.editor.version;
         }
+        if should_trigger_autocomplete && self.file_extension == "dart" {
+            self.request_lsp_autocomplete(ty_completion_trigger);
+        }
 
         let highlight_updated = self.highlighter.poll(self.editor.version);
         if highlight_updated {
@@ -226,6 +229,7 @@ impl App {
 
             self.is_highlighted_once = true;
             self.is_highlight_complete = self.highlighter.is_complete;
+            self.refresh_dart_closing_hints();
             if self.autocomplete_active {
                 self.update_autocomplete();
             }
@@ -325,6 +329,7 @@ impl App {
                         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                             .load(std::sync::atomic::Ordering::Relaxed),
                         tool_paths: self.tool_paths.clone(),
+                        dart_settings: self.dart_settings.clone(),
                     });
                     if self.is_ide_mode {
                         crate::save_panel_state(&self.ide_panel);
@@ -717,6 +722,17 @@ impl App {
                 cursor_moved = true;
                 is_edit = true;
             }
+            PhysicalKey::Code(KeyCode::Space) if ctrl => {
+                if self.file_extension == "dart" {
+                    self.request_lsp_autocomplete(None);
+                } else {
+                    self.update_autocomplete();
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
             PhysicalKey::Code(KeyCode::Space) => {
                 let (del_info, ins_len) = self.editor.insert_str(" ");
                 if let Some((offset, len)) = del_info {
@@ -847,6 +863,9 @@ impl App {
                         if txt == "." {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
+                        } else if self.file_extension == "dart" && matches!(txt, "(" | ",") {
+                            should_trigger_autocomplete = true;
+                            ty_completion_trigger = Some(if txt == "(" { "(" } else { "," });
                         } else if txt.chars().all(|c| c.is_alphanumeric() || c == '_') {
                             should_trigger_autocomplete = true;
                         }

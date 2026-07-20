@@ -1,6 +1,6 @@
 use crate::platform::{
     PlatformKind, ProcessOutputStream, ToolKind, CURRENT_PLATFORM, resolve_executable,
-    resolve_tool_kind, run_command_streaming_cancelable,
+    resolve_tool_kind, run_command_output_cancelable, run_command_streaming_cancelable,
 };
 use crate::scroll::ScrollState;
 use std::ffi::{OsStr, OsString};
@@ -27,9 +27,235 @@ const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 const UV_INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const TOOL_INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const TOOL_VALIDATE_TIMEOUT: Duration = Duration::from_secs(30);
+const DART_VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 const LOG_LINE_HEIGHT: f32 = 17.0;
 const TRUNCATED_LOG_MARKER: &str =
     "… начало журнала удалено из-за ограничения памяти …";
+
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum DartToolStatus {
+    #[default]
+    NotFound,
+    Checking,
+    Ready,
+    Installing,
+    Updating,
+    Cancelling,
+    Error,
+}
+impl DartToolStatus {
+    pub(crate) const fn label(self) -> &'static str {
+        match self {
+            Self::NotFound => "Не найден",
+            Self::Checking => "Проверка",
+            Self::Ready => "Готов",
+            Self::Installing => "Установка",
+            Self::Updating => "Обновление",
+            Self::Cancelling => "Отмена",
+            Self::Error => "Ошибка",
+        }
+    }
+}
+#[derive(Debug)]
+struct DartProbeResult {
+    generation: u64,
+    result: Result<String, String>,
+}
+
+pub(crate) struct DartToolState {
+    status: DartToolStatus,
+    path: Option<PathBuf>,
+    sdk_root: Option<PathBuf>,
+    source: Option<&'static str>,
+    version: Option<String>,
+    error: Option<String>,
+    generation: u64,
+    rx: Option<Receiver<DartProbeResult>>,
+    cancel: Option<Arc<AtomicBool>>,
+    worker: Option<JoinHandle<()>>,
+}
+impl Default for DartToolState {
+    fn default() -> Self {
+        Self {
+            status: DartToolStatus::NotFound,
+            path: None,
+            sdk_root: None,
+            source: None,
+            version: None,
+            error: None,
+            generation: 0,
+            rx: None,
+            cancel: None,
+            worker: None,
+        }
+    }
+}
+impl DartToolState {
+    pub(crate) fn status(&self) -> DartToolStatus {
+        self.status
+    }
+
+    pub(crate) fn path(&self) -> Option<&Path> {
+        self.path.as_deref()
+    }
+
+    pub(crate) fn sdk_root(&self) -> Option<&Path> {
+        self.sdk_root.as_deref()
+    }
+
+    pub(crate) fn source(&self) -> Option<&'static str> {
+        self.source
+    }
+
+    pub(crate) fn version(&self) -> Option<&str> {
+        self.version.as_deref()
+    }
+
+    pub(crate) fn error(&self) -> Option<&str> {
+        self.error.as_deref()
+    }
+
+    pub(crate) fn refresh(
+        &mut self,
+        workspace: Option<&Path>,
+        window: Option<Arc<Window>>,
+    ) {
+        self.cancel_probe();
+        crate::platform::configure_dart_workspace_root(workspace.map(Path::to_path_buf));
+        let resolution = resolve_tool_kind(ToolKind::Dart);
+        self.path = resolution.path.clone();
+        self.sdk_root = resolution.sdk_root.clone();
+        self.source = resolution.source_label(ToolKind::Dart);
+        self.version = None;
+        self.error = None;
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        let Some(path) = self.path.clone() else {
+            self.status = if resolution.is_invalid_override() {
+                self.error = Some("Выбранный Dart SDK недоступен".to_string());
+                DartToolStatus::Error
+            } else {
+                DartToolStatus::NotFound
+            };
+            return;
+        };
+
+        self.status = DartToolStatus::Checking;
+        let (tx, rx) = mpsc::sync_channel(1);
+        let cancel = Arc::new(AtomicBool::new(false));
+        let worker_cancel = Arc::clone(&cancel);
+        match crate::platform::spawn_named("rriter-dart-version", move || {
+            let result = probe_dart_version(&path, &worker_cancel);
+            let _ = tx.send(DartProbeResult { generation, result });
+            if let Some(window) = window.as_ref() {
+                window.request_redraw();
+            }
+        }) {
+            Ok(worker) => {
+                self.rx = Some(rx);
+                self.cancel = Some(cancel);
+                self.worker = Some(worker);
+            }
+            Err(error) => {
+                self.status = DartToolStatus::Error;
+                self.error = Some(format!("Не удалось запустить проверку Dart: {error}"));
+            }
+        }
+    }
+
+    pub(crate) fn poll(&mut self) -> bool {
+        let Some(rx) = self.rx.as_ref() else {
+            self.join_finished_worker();
+            return false;
+        };
+        let result = match rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(TryRecvError::Empty) => None,
+            Err(TryRecvError::Disconnected) => Some(DartProbeResult {
+                generation: self.generation,
+                result: Err("Проверка Dart завершилась без результата".to_string()),
+            }),
+        };
+        let Some(result) = result else {
+            self.join_finished_worker();
+            return false;
+        };
+        self.rx = None;
+        self.cancel = None;
+        self.join_terminal_worker();
+        if result.generation != self.generation {
+            return false;
+        }
+        match result.result {
+            Ok(version) => {
+                self.status = DartToolStatus::Ready;
+                self.version = Some(version);
+                self.error = None;
+            }
+            Err(error) => {
+                self.status = DartToolStatus::Error;
+                self.version = None;
+                self.error = Some(error);
+            }
+        }
+        true
+    }
+
+    fn cancel_probe(&mut self) {
+        if let Some(cancel) = self.cancel.take() {
+            cancel.store(true, Ordering::Release);
+        }
+        self.rx = None;
+        if let Some(worker) = self.worker.take() {
+            crate::platform::reap_unit_thread(worker);
+        }
+    }
+
+    fn join_finished_worker(&mut self) {
+        if self.worker.as_ref().is_some_and(JoinHandle::is_finished)
+            && let Some(worker) = self.worker.take()
+        {
+            let _ = worker.join();
+        }
+    }
+
+    fn join_terminal_worker(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+impl Drop for DartToolState {
+    fn drop(&mut self) {
+        self.cancel_probe();
+    }
+}
+fn probe_dart_version(path: &Path, cancel: &AtomicBool) -> Result<String, String> {
+    let mut command = Command::new(path);
+    command.arg("--version");
+    let output = run_command_output_cancelable(&mut command, DART_VERSION_TIMEOUT, cancel)
+        .map_err(|error| format!("Не удалось выполнить Dart --version: {error}"))?;
+    if !output.status.success() {
+        return Err(format!("Dart --version завершился с кодом {}", output.status));
+    }
+    parse_dart_version_output(&output.stdout, &output.stderr)
+}
+fn parse_dart_version_output(stdout: &[u8], stderr: &[u8]) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(stdout);
+    let stderr = String::from_utf8_lossy(stderr);
+    let value = stdout
+        .lines()
+        .chain(stderr.lines())
+        .map(str::trim)
+        .find(|line| line.contains("Dart SDK version:"))
+        .unwrap_or_default();
+    if value.is_empty() {
+        Err("Dart --version вернул неизвестный формат".to_string())
+    } else {
+        Ok(value.to_string())
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) enum ToolInstallPhase {
@@ -1266,6 +1492,34 @@ fn tool_executable_name(kind: ToolKind, platform: PlatformKind) -> &'static str 
 }
 
 impl crate::app::App {
+    pub(crate) fn refresh_dart_tool_state(&mut self) {
+        let workspace = self
+            .file_path
+            .as_deref()
+            .and_then(|path| {
+                self.ide_workspaces
+                    .iter()
+                    .find(|workspace| crate::platform::path_is_within(path, workspace))
+            })
+            .or_else(|| self.ide_workspaces.first())
+            .map(PathBuf::as_path);
+        self.dart_tool_state.refresh(workspace, self.window.clone());
+    }
+
+    pub(crate) fn poll_dart_tool_state(&mut self) -> bool {
+        self.dart_tool_state.poll()
+    }
+
+    pub(crate) fn restart_dart_server(&mut self) {
+        self.clear_all_closing_hints();
+        self.refresh_dart_closing_hints();
+        if let Some(lsp) = &mut self.lsp {
+            lsp.restart_server("dart");
+            self.ide_panel.lsp_servers = lsp.servers_info();
+        }
+        self.refresh_dart_tool_state();
+    }
+
     pub(crate) fn trigger_tool_install(&mut self, kind: ToolKind) {
         if self.tool_installer.is_running_for(kind) {
             self.tool_installer.cancel();

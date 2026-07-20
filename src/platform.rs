@@ -23,10 +23,11 @@ mod process;
 mod secret_store;
 mod elevated_save;
 pub use integration::{
-    SystemProxyConfig, ToolKind, ToolPaths, app_paths, async_http_client_builder,
-    blocking_http_client_builder, configure_tool_paths, configured_tool_path,
+    ManagedToolInstallPlan, SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, async_http_client_builder,
+    blocking_http_client_builder, configure_dart_workspace_root, configure_tool_paths,
+    configured_tool_path,
     current_process_memory_kb, proxy_routing_is_configured, refresh_tool_resolutions,
-    resolve_tool_kind, system_proxy_config, user_cache_root,
+    resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config, user_cache_root,
 };
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
@@ -60,7 +61,8 @@ pub(crate) use integration::{
 pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
 pub use secret_store::{delete_system_user_secret, load_system_user_secret, store_system_user_secret};
 pub use process::{
-    ManagedChild, ProcessOutputStream, ProcessTree, command_for_tool, resolve_executable,
+    ManagedChild, ProcessOutputStream, ProcessTree, command_for_executable, command_for_tool,
+    resolve_executable,
     resolve_tool_executable, run_command_output, run_command_output_cancelable,
     run_command_streaming_cancelable,
 };

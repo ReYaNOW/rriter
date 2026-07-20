@@ -72,6 +72,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         is_highlight_complete: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
+        closing_hints: Default::default(),
         kind: EditorTabKind::Normal,
     });
     app.tabs[0].scroll_y.current = 300.0;
@@ -100,6 +101,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         is_highlight_complete: true,
         icon_key: "python",
         syntax_errors: Vec::new(),
+        closing_hints: Default::default(),
         kind: EditorTabKind::Normal,
     });
     app.active_tab = 1;

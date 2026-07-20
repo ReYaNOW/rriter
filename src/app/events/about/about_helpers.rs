@@ -93,7 +93,7 @@ fn python_inlay_hint_request_range(
 }
 
 fn request_python_inlay_hints_if_needed(app: &mut App) {
-    if !app.is_ide_mode || !matches!(app.file_extension.as_str(), "py" | "pyi") {
+    if !app.is_ide_mode || !matches!(app.file_extension.as_str(), "py" | "pyi" | "dart") {
         clear_python_inlay_hint_state(app);
         return;
     }
@@ -106,7 +106,8 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
     else {
         return;
     };
-    if let Some((version, cached_range, hints)) = app.python_inlay_hint_cache.get(&path)
+    let cache_key = (path.clone(), app.file_extension.clone());
+    if let Some((version, cached_range, hints)) = app.python_inlay_hint_cache.get(&cache_key)
         && *version == app.editor.version
         && *cached_range == range
     {
@@ -134,7 +135,7 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
     let Some(lsp) = app.lsp.as_mut() else {
         return;
     };
-    if let Some(id) = lsp.request_ty_inlay_hints(
+    if let Some(id) = lsp.request_inlay_hints(
         &path,
         &app.file_extension,
         start_line,

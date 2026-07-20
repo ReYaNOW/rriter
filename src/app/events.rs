@@ -658,6 +658,13 @@ impl ApplicationHandler for App {
                 } else {
                     &[]
                 };
+                let closing_hints = if self.file_extension == "dart"
+                    && self.closing_hint_state.revision() == self.editor.version
+                {
+                    self.closing_hint_state.hints()
+                } else {
+                    &[]
+                };
                 let (mut wants_pointer, target_sticky) = self.renderer.as_mut().unwrap().draw(
                     &mut self.editor,
                     &self.base_title,
@@ -692,6 +699,7 @@ impl ApplicationHandler for App {
                     &self.highlighter.syntax_errors,
                     ctrl_definition_range,
                     python_inlay_hints,
+                    closing_hints,
                     &self.ide_workspaces,
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
@@ -1029,6 +1037,13 @@ impl ApplicationHandler for App {
                         blink_alpha,
                         &self.tool_paths,
                         &self.tool_installer,
+                        &self.dart_settings,
+                        &self.dart_tool_state,
+                        self.ide_panel
+                            .lsp_servers
+                            .iter()
+                            .find(|server| server.name == "dart")
+                            .map(|server| server.status),
                         self.ide_panel.database.settings(),
                         &mut self.ui_registry,
                     );

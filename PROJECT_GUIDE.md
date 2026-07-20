@@ -391,7 +391,7 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
-* `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, native trust/proxy HTTP builders, and process memory.
+* `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, Dart SDK discovery priority (custom, project Flutter, environment, managed, PATH, other Flutter), native trust/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
 * `src/platform/elevated_save.rs` -> non-shell validated helper request, elevated atomic replacement, result propagation, and Linux `pkexec` compatibility.
 * `src/platform/windows.rs` -> Windows WTF-16 path keys, case folding, UNC/extended-length handling, AppUserModelID, DPAPI, native certificate/proxy discovery, elevation, and process memory.
@@ -400,9 +400,17 @@ Cross-platform boundary for native directories, path identity/persistence, text 
 
 Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules. Native tool paths are configured from settings through `ToolPaths`; feature code must not rewrite process-wide environment variables.
 
+### `src/app/dart_settings.rs`
+
+Defines the persistent Dart language-support contract, closing-label mode, and bounded local block-label thresholds. The settings UI, Dart LSP lifecycle, and closing-label renderer use this persisted source of truth through a small runtime adapter instead of maintaining independent user settings.
+
+### `src/render_view/settings_tool_rows.rs`
+
+Renders the shared external-tool rows and the additional Dart SDK controls using the existing button/UI registry components. It does not own persistence or tool discovery.
+
 ### `src/app/tool_installer.rs`
 
-Owns the settings-driven uv/Ruff/Ty install lifecycle for all three desktop platforms: fixed official uv installer URLs, native PowerShell or `/bin/sh` invocation without shell interpolation, RRiter-owned data/cache layout, isolated `uv tool` environments, native proxy/trust integration, live bounded logs, explicit cancellation, executable validation, tool-resolution refresh, and LSP/API Mock activation after success.
+Owns the settings-driven uv/Ruff/Ty install lifecycle and the bounded asynchronous Dart SDK version/status probe for all three desktop platforms: fixed official uv installer URLs, native PowerShell or `/bin/sh` invocation without shell interpolation, RRiter-owned data/cache layout, isolated `uv tool` environments, native proxy/trust integration, live bounded logs, explicit cancellation, executable validation, tool-resolution refresh, and LSP/API Mock activation after success.
 
 ### `src/app/tool_installer_tests.rs`
 
@@ -1087,9 +1095,9 @@ Use when adding language-specific support.
 
 ### `src/languages/dart.rs`
 
-Dart-specific import-block helpers.
+Dart-specific import-block helpers and the cached closing-label model shared by Tree-sitter block hints and Dart Analysis Server notifications.
 
-Use when Dart import folding behavior changes.
+Use when Dart import folding, local closing-label extraction, server-label validation, or closing-label cache merging changes.
 
 ### `src/languages/python.rs`
 
@@ -1142,6 +1150,7 @@ Implementation is split through `include!`:
 
 * `src/lsp/lsp_process.rs` -> managed process spawn, protocol shutdown, bounded restart supervisor, request send/log helpers, and missing-tool state.
 * `src/lsp/lsp_manager.rs` -> `LspManager` facade, platform-aware workspace identity, explicit retry, diagnostics merge accessors, and JSON formatting.
+* `src/lsp/dart_workspace.rs` -> per-package Dart LSP lifecycle, versioned document routing, debounced `dart analyze --format machine`, and live/workspace diagnostic arbitration.
 * `src/lsp/ruff_workspace.rs` -> timeout-bounded managed `ruff check` workspace diagnostics parser/collector.
 
 Tests live in `src/lsp/lsp_tests.rs`.

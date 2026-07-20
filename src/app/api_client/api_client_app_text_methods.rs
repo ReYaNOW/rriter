@@ -1969,6 +1969,7 @@ impl crate::app::App {
             is_highlighted_once: true,
             is_highlight_complete: true,
             icon_key: "api",
+            closing_hints: Default::default(),
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: id,
@@ -2055,6 +2056,7 @@ impl crate::app::App {
             is_highlighted_once: true,
             is_highlight_complete: true,
             icon_key: "api",
+            closing_hints: Default::default(),
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: id,
@@ -2196,6 +2198,7 @@ impl crate::app::App {
             is_highlighted_once: true,
             is_highlight_complete: true,
             icon_key: "api",
+            closing_hints: Default::default(),
             kind: crate::app::EditorTabKind::ApiClient(
                 ApiClientTabMeta {
                     spec_id: API_MANUAL_MOCK_SPEC_ID,

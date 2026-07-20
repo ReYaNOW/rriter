@@ -133,34 +133,133 @@ fn decode_percent_encoded_path(path: &str) -> Option<String> {
 // ── Кодировщики JSON-RPC сообщений ────────────────────────────────────────────
 
 pub(super) fn make_initialize(id: i32, workspaces: &[PathBuf]) -> Vec<u8> {
-    let (root_uri_json, workspace_json) = if let Some(first_ws) = workspaces.first() {
-        let root_uri = path_to_uri(first_ws);
-        let escaped_root = json_escape(&root_uri);
+    make_initialize_for_server(LspServerKind::Ruff, id, workspaces)
+}
 
-        let mut folders = Vec::new();
-        for (i, ws) in workspaces.iter().enumerate() {
-            let uri = path_to_uri(ws);
-            folders.push(format!(
-                r#"{{"uri":"{}","name":"workspace_{}"}}"#,
-                json_escape(&uri),
-                i
-            ));
-        }
+pub(super) fn make_initialize_for_server(
+    server: LspServerKind,
+    id: i32,
+    workspaces: &[PathBuf],
+) -> Vec<u8> {
+    let root_uri = workspaces.first().map(|workspace| path_to_uri(workspace));
+    let workspace_folders = (!workspaces.is_empty()).then(|| {
+        workspaces
+            .iter()
+            .enumerate()
+            .map(|(index, workspace)| {
+                serde_json::json!({
+                    "uri": path_to_uri(workspace),
+                    "name": format!("workspace_{index}"),
+                })
+            })
+            .collect::<Vec<_>>()
+    });
 
-        (
-            format!(r#""{}""#, escaped_root),
-            format!(r#","workspaceFolders":[{}]"#, folders.join(",")),
-        )
-    } else {
-        (String::from("null"), String::new())
+    let capabilities = match server {
+        LspServerKind::Dart => serde_json::json!({
+            "workspace": {
+                "configuration": true,
+                "workspaceFolders": true
+            },
+            "textDocument": {
+                "synchronization": {
+                    "dynamicRegistration": false,
+                    "willSave": false,
+                    "willSaveWaitUntil": false,
+                    "didSave": true
+                },
+                "publishDiagnostics": {
+                    "relatedInformation": false,
+                    "versionSupport": true,
+                    "codeDescriptionSupport": true
+                },
+                "completion": {
+                    "dynamicRegistration": false,
+                    "completionItem": {
+                        "snippetSupport": false,
+                        "labelDetailsSupport": true,
+                        "insertReplaceSupport": false
+                    }
+                },
+                "inlayHint": { "dynamicRegistration": false },
+                "codeAction": {
+                    "dynamicRegistration": false,
+                    "codeActionLiteralSupport": {
+                        "codeActionKind": {
+                            "valueSet": ["quickfix", "source", "source.fixAll", "source.organizeImports"]
+                        }
+                    }
+                }
+            }
+        }),
+        LspServerKind::Ruff | LspServerKind::Ty => serde_json::json!({
+            "workspace": {
+                "configuration": true,
+                "didChangeConfiguration": { "dynamicRegistration": true },
+                "didChangeWatchedFiles": {
+                    "dynamicRegistration": true,
+                    "relativePatternSupport": true
+                },
+                "workspaceFolders": true
+            },
+            "textDocument": {
+                "synchronization": {
+                    "dynamicRegistration": true,
+                    "willSave": false,
+                    "willSaveWaitUntil": false,
+                    "didSave": true
+                },
+                "publishDiagnostics": {
+                    "relatedInformation": false,
+                    "versionSupport": true,
+                    "codeDescriptionSupport": true
+                },
+                "completion": {
+                    "completionItem": {
+                        "snippetSupport": false,
+                        "labelDetailsSupport": true,
+                        "resolveSupport": {
+                            "properties": ["additionalTextEdits", "textEdit", "detail"]
+                        }
+                    }
+                },
+                "inlayHint": { "dynamicRegistration": false },
+                "codeAction": {
+                    "codeActionLiteralSupport": {
+                        "codeActionKind": {
+                            "valueSet": ["quickfix", "source", "source.fixAll", "source.organizeImports"]
+                        }
+                    },
+                    "resolveSupport": { "properties": ["edit"] }
+                }
+            }
+        }),
     };
 
-    let body = format!(
-        r#"{{"jsonrpc":"2.0","id":{id},"method":"initialize","params":{{"processId":{},"clientInfo":{{"name":"RRiter","version":"0.1"}},"capabilities":{{"workspace":{{"configuration":true,"didChangeConfiguration":{{"dynamicRegistration":true}},"didChangeWatchedFiles":{{"dynamicRegistration":true,"relativePatternSupport":true}},"workspaceFolders":true}},"textDocument":{{"synchronization":{{"dynamicRegistration":true,"willSave":false,"willSaveWaitUntil":false,"didSave":true}},"publishDiagnostics":{{"relatedInformation":false,"versionSupport":true,"codeDescriptionSupport":true}},"completion":{{"completionItem":{{"snippetSupport":false,"labelDetailsSupport":true,"resolveSupport":{{"properties":["additionalTextEdits","textEdit","detail"]}}}}}},"inlayHint":{{"dynamicRegistration":false}},"codeAction":{{"codeActionLiteralSupport":{{"codeActionKind":{{"valueSet":["quickfix","source","source.fixAll","source.organizeImports"]}}}},"resolveSupport":{{"properties":["edit"]}}}}}}}},"rootUri":{}{workspace_json}}}}}"#,
-        std::process::id(),
-        root_uri_json
-    );
-    body.into_bytes()
+    let mut params = serde_json::json!({
+        "processId": std::process::id(),
+        "clientInfo": { "name": "RRiter", "version": "0.1" },
+        "capabilities": capabilities,
+        "rootUri": root_uri,
+    });
+    if let Some(folders) = workspace_folders {
+        params["workspaceFolders"] = serde_json::Value::Array(folders);
+    }
+    if server == LspServerKind::Dart {
+        params["initializationOptions"] = serde_json::json!({
+            "onlyAnalyzeProjectsWithOpenFiles": true,
+            "suggestFromUnimportedLibraries": true,
+            "closingLabels": true
+        });
+    }
+
+    serde_json::to_vec(&serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "initialize",
+        "params": params,
+    }))
+    .unwrap_or_default()
 }
 
 pub(super) fn make_initialized() -> Vec<u8> {
@@ -262,6 +361,32 @@ pub(super) fn make_definition(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8
     make_position_request(id, "textDocument/definition", uri, line, col, "")
 }
 
+pub(super) fn make_references(
+    id: i32,
+    uri: &str,
+    line: u32,
+    col: u32,
+    include_declaration: bool,
+) -> Vec<u8> {
+    let context = format!(r#","context":{{"includeDeclaration":{include_declaration}}}"#);
+    make_position_request(id, "textDocument/references", uri, line, col, &context)
+}
+
+pub(super) fn make_prepare_rename(id: i32, uri: &str, line: u32, col: u32) -> Vec<u8> {
+    make_position_request(id, "textDocument/prepareRename", uri, line, col, "")
+}
+
+pub(super) fn make_rename(
+    id: i32,
+    uri: &str,
+    line: u32,
+    col: u32,
+    new_name: &str,
+) -> Vec<u8> {
+    let context = format!(r#","newName":"{}""#, json_escape(new_name));
+    make_position_request(id, "textDocument/rename", uri, line, col, &context)
+}
+
 pub(super) fn make_completion(
     id: i32,
     uri: &str,
@@ -304,6 +429,22 @@ pub(super) fn make_inlay_hint(
     .into_bytes()
 }
 
+pub(super) fn make_formatting(
+    id: i32,
+    uri: &str,
+    tab_size: u32,
+    insert_spaces: bool,
+) -> Vec<u8> {
+    format!(
+        r#"{{"jsonrpc":"2.0","id":{},"method":"textDocument/formatting","params":{{"textDocument":{{"uri":"{}"}},"options":{{"tabSize":{},"insertSpaces":{}}}}}}}"#,
+        id,
+        json_escape(uri),
+        tab_size,
+        insert_spaces
+    )
+    .into_bytes()
+}
+
 pub(super) fn make_workspace_diagnostic(id: i32, previous_result_ids_json: &str) -> Vec<u8> {
     format!(
         r#"{{"jsonrpc":"2.0","id":{},"method":"workspace/diagnostic","params":{{"identifier":"ty","previousResultIds":{}}}}}"#,
@@ -329,19 +470,44 @@ pub(super) fn write_frame(writer: &mut BufWriter<std::process::ChildStdin>, body
         && writer.flush().is_ok()
 }
 
+fn dart_configuration() -> serde_json::Value {
+    serde_json::json!({
+        "enableSdkFormatter": true,
+        "completeFunctionCalls": true,
+        "enableSnippets": false,
+        "inlayHints": true,
+        "documentation": "full",
+        "showTodos": true,
+        "analysisExcludedFolders": [],
+        "closingLabels": true
+    })
+}
 
 fn configuration_response_for(
-    server_name: &'static str,
+    server: LspServerKind,
     item: &serde_json::Value,
 ) -> serde_json::Value {
-    if server_name != TY_SERVER.program {
-        return serde_json::json!({});
-    }
-
-    match item.get("section").and_then(|v| v.as_str()).unwrap_or("ty") {
-        "ty.diagnosticMode" => serde_json::json!("workspace"),
-        "ty" | "" => serde_json::json!({ "diagnosticMode": "workspace" }),
-        _ => serde_json::json!({}),
+    let section = item.get("section").and_then(|value| value.as_str()).unwrap_or("");
+    match server {
+        LspServerKind::Ty => match section {
+            "ty.diagnosticMode" => serde_json::json!("workspace"),
+            "ty" | "" => serde_json::json!({ "diagnosticMode": "workspace" }),
+            _ => serde_json::json!({}),
+        },
+        LspServerKind::Dart => match section {
+            "dart" | "" => dart_configuration(),
+            "dart.enableSdkFormatter" => serde_json::json!(true),
+            "dart.lineLength" => serde_json::Value::Null,
+            "dart.completeFunctionCalls" => serde_json::json!(true),
+            "dart.enableSnippets" => serde_json::json!(false),
+            "dart.inlayHints" => serde_json::json!(true),
+            "dart.documentation" => serde_json::json!("full"),
+            "dart.showTodos" => serde_json::json!(true),
+            "dart.analysisExcludedFolders" => serde_json::json!([]),
+            "dart.closingLabels" => serde_json::json!(true),
+            _ => serde_json::json!({}),
+        },
+        LspServerKind::Ruff => serde_json::json!({}),
     }
 }
 
@@ -349,7 +515,7 @@ fn emit_workspace_diagnostic_report(
     uri: &str,
     report: &serde_json::Value,
     event_tx: &Sender<LspEvent>,
-    server_name: &'static str,
+    server: LspServerKind,
 ) {
     let kind = report.get("kind").and_then(|v| v.as_str()).unwrap_or("");
     if kind == "unchanged" {
@@ -374,7 +540,7 @@ fn emit_workspace_diagnostic_report(
         .map(str::to_string);
 
     let _ = event_tx.send(LspEvent::Diagnostics {
-        server_name,
+        server,
         path: uri_to_path(uri),
         version,
         items,
@@ -385,7 +551,7 @@ fn emit_workspace_diagnostic_report(
 fn emit_workspace_diagnostics(
     result: &serde_json::Value,
     event_tx: &Sender<LspEvent>,
-    server_name: &'static str,
+    server: LspServerKind,
 ) {
     let Some(items) = result.get("items").and_then(|v| v.as_array()) else {
         return;
@@ -393,12 +559,12 @@ fn emit_workspace_diagnostics(
 
     for item in items {
         if let Some(uri) = item.get("uri").and_then(|v| v.as_str()) {
-            emit_workspace_diagnostic_report(uri, item, event_tx, server_name);
+            emit_workspace_diagnostic_report(uri, item, event_tx, server);
         }
 
         if let Some(related) = item.get("relatedDocuments").and_then(|v| v.as_object()) {
             for (uri, report) in related {
-                emit_workspace_diagnostic_report(uri, report, event_tx, server_name);
+                emit_workspace_diagnostic_report(uri, report, event_tx, server);
             }
         }
     }
@@ -422,6 +588,18 @@ fn rpc_reply_id_json(value: Option<&serde_json::Value>) -> Option<String> {
 pub(super) fn dispatch_frame(
     body: &[u8],
     event_tx: &Sender<LspEvent>,
+    server_name: &'static str,
+    out_tx: &Sender<Vec<u8>>,
+    pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
+) {
+    let server = LspServerKind::from_name(server_name).unwrap_or(LspServerKind::Ruff);
+    dispatch_frame_for_server(body, event_tx, server, server_name, out_tx, pending_requests);
+}
+
+pub(super) fn dispatch_frame_for_server(
+    body: &[u8],
+    event_tx: &Sender<LspEvent>,
+    server: LspServerKind,
     server_name: &'static str,
     out_tx: &Sender<Vec<u8>>,
     pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
@@ -457,7 +635,7 @@ pub(super) fn dispatch_frame(
                 None,
             ),
         });
-        match parse_publish_diagnostics_frame(body, server_name) {
+        match parse_publish_diagnostics_frame(body, server) {
             Ok(event) => {
                 let _ = event_tx.send(event);
             }
@@ -485,7 +663,7 @@ pub(super) fn dispatch_frame(
             ),
         });
         if header.error.is_none() {
-            for event in parse_workspace_diagnostics_frame(body, server_name) {
+            for event in parse_workspace_diagnostics_frame(body, server) {
                 let _ = event_tx.send(event);
             }
         }
@@ -542,12 +720,26 @@ pub(super) fn dispatch_frame(
                             }
                         }
                     }
+                    set_missing_diagnostic_sources(&mut items, server);
                     let _ = event_tx.send(LspEvent::Diagnostics {
-                        server_name,
+                        server,
                         path,
                         version,
                         items,
                         result_id: None,
+                    });
+                }
+            }
+        }
+        Some("dart/textDocument/publishClosingLabels") if server == LspServerKind::Dart => {
+            match parse_closing_labels_frame(body, server) {
+                Ok(event) => {
+                    let _ = event_tx.send(event);
+                }
+                Err(error) => {
+                    let _ = event_tx.send(LspEvent::Log {
+                        name: server_name,
+                        message: format!("[LSP RECV ERROR] invalid publishClosingLabels: {error}"),
                     });
                 }
             }
@@ -593,20 +785,20 @@ pub(super) fn dispatch_frame(
                 {
                     let values = items
                         .iter()
-                        .map(|item| configuration_response_for(server_name, item).to_string())
+                        .map(|item| configuration_response_for(server, item).to_string())
                         .collect::<Vec<_>>();
                     if values.is_empty() {
-                        configuration_response_for(server_name, &serde_json::Value::Null)
+                        configuration_response_for(server, &serde_json::Value::Null)
                             .to_string()
                     } else {
                         values.join(",")
                     }
                 } else {
-                    configuration_response_for(server_name, &serde_json::Value::Null).to_string()
+                    configuration_response_for(server, &serde_json::Value::Null).to_string()
                 };
                 let reply = format!(r#"{{"jsonrpc":"2.0","id":{},"result":[{}]}}"#, req_id, objs);
                 let _ = out_tx.send(reply.into_bytes());
-                let _ = event_tx.send(LspEvent::ConfigurationServed { name: server_name });
+                let _ = event_tx.send(LspEvent::ConfigurationServed { server });
             }
         }
         Some(m) => {
@@ -641,6 +833,43 @@ pub(super) fn dispatch_frame(
                             let _ = event_tx.send(LspEvent::InlayHintsResponse {
                                 request_id: req_id,
                                 hints: Vec::new(),
+                            });
+                        }
+                        Some(PendingRequestKind::Completion) => {
+                            let _ = event_tx.send(LspEvent::CompletionResponse {
+                                request_id: req_id,
+                                items: Vec::new(),
+                                is_incomplete: false,
+                            });
+                        }
+                        Some(PendingRequestKind::SignatureHelp) => {
+                            let _ = event_tx.send(LspEvent::SignatureHelpResponse {
+                                request_id: req_id,
+                                help: LspSignatureHelp::default(),
+                            });
+                        }
+                        Some(PendingRequestKind::References) => {
+                            let _ = event_tx.send(LspEvent::ReferencesResponse {
+                                request_id: req_id,
+                                targets: Vec::new(),
+                            });
+                        }
+                        Some(PendingRequestKind::PrepareRename) => {
+                            let _ = event_tx.send(LspEvent::PrepareRenameResponse {
+                                request_id: req_id,
+                                range: None,
+                            });
+                        }
+                        Some(PendingRequestKind::Rename) => {
+                            let _ = event_tx.send(LspEvent::RenameResponse {
+                                request_id: req_id,
+                                edit: WorkspaceEdit::default(),
+                            });
+                        }
+                        Some(PendingRequestKind::Formatting) => {
+                            let _ = event_tx.send(LspEvent::FormattingResponse {
+                                request_id: req_id,
+                                edits: Vec::new(),
                             });
                         }
                         _ => {}
@@ -682,18 +911,48 @@ pub(super) fn dispatch_frame(
                                 target,
                             });
                         }
+                        Some(PendingRequestKind::References) => {
+                            let targets = parse_definition_targets(result);
+                            let _ = event_tx.send(LspEvent::ReferencesResponse {
+                                request_id: req_id,
+                                targets,
+                            });
+                        }
+                        Some(PendingRequestKind::PrepareRename) => {
+                            let range = if result.is_null() {
+                                None
+                            } else {
+                                parse_prepare_rename_range(result)
+                            };
+                            let _ = event_tx.send(LspEvent::PrepareRenameResponse {
+                                request_id: req_id,
+                                range,
+                            });
+                        }
+                        Some(PendingRequestKind::Rename) => {
+                            let edit = if result.is_null() {
+                                WorkspaceEdit::default()
+                            } else {
+                                parse_workspace_edit_value(result)
+                            };
+                            let _ = event_tx.send(LspEvent::RenameResponse {
+                                request_id: req_id,
+                                edit,
+                            });
+                        }
                         Some(PendingRequestKind::Completion) => {
-                            let items = parse_completion_items(result);
+                            let (items, is_incomplete) = parse_completion_items(result);
                             let _ = event_tx.send(LspEvent::CompletionResponse {
                                 request_id: req_id,
                                 items,
+                                is_incomplete,
                             });
                         }
                         Some(PendingRequestKind::SignatureHelp) => {
-                            let parameters = parse_signature_help_parameters(result);
+                            let help = parse_signature_help(result);
                             let _ = event_tx.send(LspEvent::SignatureHelpResponse {
                                 request_id: req_id,
-                                parameters,
+                                help,
                             });
                         }
                         Some(PendingRequestKind::InlayHint) => {
@@ -703,8 +962,23 @@ pub(super) fn dispatch_frame(
                                 hints,
                             });
                         }
+                        Some(PendingRequestKind::Formatting) => {
+                            let edits = result
+                                .as_array()
+                                .map(|items| {
+                                    items
+                                        .iter()
+                                        .filter_map(parse_text_edit_value)
+                                        .collect()
+                                })
+                                .unwrap_or_default();
+                            let _ = event_tx.send(LspEvent::FormattingResponse {
+                                request_id: req_id,
+                                edits,
+                            });
+                        }
                         Some(PendingRequestKind::WorkspaceDiagnostic) => {
-                            emit_workspace_diagnostics(result, event_tx, server_name);
+                            emit_workspace_diagnostics(result, event_tx, server);
                             let _ = event_tx.send(LspEvent::WorkspaceDiagnosticsDone {
                                 request_id: req_id,
                             });

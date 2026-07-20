@@ -1072,3 +1072,88 @@ mod highlighter_spawn_regression_tests {
 #[cfg(test)]
 #[path = "../highlighter_tests.rs"]
 mod highlighter_tests;
+
+impl Highlighter {
+    pub fn lsp_completion_allowed_at_cursor(&self, ext: &str, cursor: usize) -> bool {
+        if ext != "dart" {
+            return true;
+        }
+        if self.sync_ext != ext || self.sync_text.is_empty() {
+            return false;
+        }
+        let Some(tree) = self.sync_tree.as_ref() else {
+            return false;
+        };
+        let cursor = cursor.min(self.sync_text.len());
+        let start = cursor.saturating_sub(1);
+        let end = cursor.max(start.saturating_add(1)).min(self.sync_text.len());
+        let Some(mut node) = tree.root_node().descendant_for_byte_range(start, end) else {
+            return true;
+        };
+        loop {
+            let kind = node.kind();
+            if kind == "template_substitution" {
+                return true;
+            }
+            if matches!(
+                kind,
+                "comment" | "block_comment" | "documentation_block_comment"
+            ) {
+                return false;
+            }
+            if kind.contains("string_literal") {
+                return false;
+            }
+            let Some(parent) = node.parent() else {
+                return true;
+            };
+            node = parent;
+        }
+    }
+
+    pub fn lsp_signature_help_allowed_at_cursor(&self, ext: &str, cursor: usize) -> bool {
+        if ext != "dart" || self.sync_ext != ext || self.sync_text.is_empty() {
+            return false;
+        }
+        let Some(tree) = self.sync_tree.as_ref() else {
+            return false;
+        };
+        let cursor = cursor.min(self.sync_text.len());
+        let start = cursor.saturating_sub(1);
+        let end = cursor.max(start.saturating_add(1)).min(self.sync_text.len());
+        let Some(mut node) = tree.root_node().descendant_for_byte_range(start, end) else {
+            return false;
+        };
+        loop {
+            if matches!(node.kind(), "arguments" | "argument_part") {
+                return true;
+            }
+            let Some(parent) = node.parent() else {
+                return false;
+            };
+            node = parent;
+        }
+    }
+
+    pub(crate) fn syntax_tree_for(
+        &self,
+        version: u64,
+        extension: &str,
+    ) -> Option<&tree_sitter::Tree> {
+        if self.current_version == version && self.sync_ext == extension {
+            self.sync_tree.as_ref()
+        } else {
+            None
+        }
+    }
+
+    fn shrink_sync_byte_colors_for_small_text(&mut self) {
+        if self.sync_text.len() >= 512 * 1024 {
+            return;
+        }
+        let cap_limit = self.sync_text.len().saturating_mul(2).max(64 * 1024);
+        if self.sync_byte_colors_buf.capacity() > cap_limit {
+            self.sync_byte_colors_buf.shrink_to_fit();
+        }
+    }
+}

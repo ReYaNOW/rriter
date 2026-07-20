@@ -14,6 +14,7 @@ fn test_process_with_events(
         cmd_tx,
         event_rx,
         current_uri: None,
+        open_uris: std::collections::HashSet::new(),
         def,
         open_file_data: None,
         stop: Arc::new(AtomicBool::new(false)),
@@ -70,11 +71,12 @@ fn python_text_with_lines(lines: usize) -> String {
 #[test]
 fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
     static MISSING_SERVER: LspServerDef = LspServerDef {
-        program: "rriter-definitely-missing-lsp-server",
-        override_env: "RRITER_TEST_MISSING_LSP_PATH",
-        args: &[],
-        language_id: "python",
-        extensions: &["py"],
+        kind: LspServerKind::Dart,
+        program: "rriter-definitely-missing-dart-server",
+        override_env: "RRITER_TEST_MISSING_DART_PATH",
+        args: &["language-server"],
+        language_id: "dart",
+        extensions: &["dart"],
     };
     let (_cmd_tx, cmd_rx) = mpsc::channel();
     let (event_tx, event_rx) = mpsc::channel();
@@ -82,6 +84,7 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
 
     run_supervisor(
         &MISSING_SERVER,
+        None,
         Vec::new(),
         cmd_rx,
         event_tx,
@@ -93,16 +96,16 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
     assert!(events.iter().any(|event| matches!(
         event,
         LspEvent::StatusChanged {
-            name,
+            server: LspServerKind::Dart,
             status: LspServerStatus::Starting,
-        } if *name == MISSING_SERVER.program
+        }
     )));
     assert!(events.iter().any(|event| matches!(
         event,
         LspEvent::StatusChanged {
-            name,
+            server: LspServerKind::Dart,
             status: LspServerStatus::Missing,
-        } if *name == MISSING_SERVER.program
+        }
     )));
     assert!(!events.iter().any(|event| matches!(
         event,
@@ -146,13 +149,13 @@ fn unavailable_python_servers_preserve_missing_or_disabled_state_until_retry() {
 
     ruff_tx
         .send(LspEvent::StatusChanged {
-            name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             status: LspServerStatus::Missing,
         })
         .unwrap();
     ty_tx
         .send(LspEvent::StatusChanged {
-            name: TY_SERVER.program,
+            server: LspServerKind::Ty,
             status: LspServerStatus::Disabled,
         })
         .unwrap();
@@ -612,19 +615,19 @@ fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
 
     ruff_tx
         .send(LspEvent::StatusChanged {
-            name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             status: LspServerStatus::Running,
         })
         .unwrap();
     ty_tx
         .send(LspEvent::StatusChanged {
-            name: TY_SERVER.program,
+            server: LspServerKind::Ty,
             status: LspServerStatus::Crashed,
         })
         .unwrap();
     ruff_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(2),
             items: vec![test_diag("ruff", DiagSeverity::Error, Some("E1"))],
@@ -633,7 +636,7 @@ fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
         .unwrap();
     ty_tx
         .send(LspEvent::Diagnostics {
-            server_name: TY_SERVER.program,
+            server: LspServerKind::Ty,
             path: path.clone(),
             version: Some(5),
             items: vec![test_diag("ty", DiagSeverity::Warning, None)],
@@ -643,7 +646,7 @@ fn lsp_manager_poll_merges_events_updates_status_and_keeps_recent_logs() {
     for i in 0..32 {
         ruff_tx
             .send(LspEvent::Log {
-                name: RUFF_SERVER.program,
+                name: "ruff",
                 message: format!("{{\"idx\":{i}}}"),
             })
             .unwrap();
@@ -947,7 +950,7 @@ fn manager_poll_moves_diagnostic_items_into_instant_store() {
 
     ruff_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(4),
             items: vec![
@@ -1046,9 +1049,9 @@ fn send_and_log_removes_only_sent_text_fields_and_keeps_json_shape() {
 #[test]
 fn lsp_process_poll_drains_events_and_shutdown_sends_command() {
     let (proc, rx, tx) = test_process_with_events(&RUFF_SERVER);
-    tx.send(LspEvent::ServerReady).unwrap();
+    tx.send(LspEvent::ServerReady { server: LspServerKind::Ruff }).unwrap();
     tx.send(LspEvent::Log {
-        name: RUFF_SERVER.program,
+        name: "ruff",
         message: "ready".to_string(),
     })
     .unwrap();
@@ -1074,7 +1077,7 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
 
     ruff_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(1),
             items: vec![test_diag("suppressed", DiagSeverity::Error, None)],
@@ -1097,7 +1100,7 @@ fn manager_suppresses_diagnostics_then_flushes_after_delay() {
     manager.last_change = Some(std::time::Instant::now() - Duration::from_secs(4));
     ruff_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(2),
             items: vec![test_diag("flushed", DiagSeverity::Warning, Some("W1"))],
@@ -1129,7 +1132,7 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
 
     ty_tx
         .send(LspEvent::ConfigurationServed {
-            name: TY_SERVER.program,
+            server: LspServerKind::Ty,
         })
         .unwrap();
 
@@ -1148,7 +1151,7 @@ fn manager_requests_ty_workspace_diagnostics_after_config_and_reuses_result_ids(
 
     ty_tx
         .send(LspEvent::Diagnostics {
-            server_name: TY_SERVER.program,
+            server: LspServerKind::Ty,
             path: path.clone(),
             version: None,
             items: vec![test_diag("offscreen", DiagSeverity::Error, Some("T1"))],
@@ -1477,6 +1480,7 @@ fn r3_096_lsp_drop_reaps_unfinished_supervisor_without_blocking() {
         cmd_tx,
         event_rx,
         current_uri: None,
+        open_uris: std::collections::HashSet::new(),
         def: &RUFF_SERVER,
         open_file_data: None,
         stop: Arc::new(AtomicBool::new(false)),
@@ -1533,7 +1537,7 @@ fn open_file_diagnostics_do_not_regress_to_older_or_versionless_results() {
 
     event_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(5),
             items: vec![test_diag("new", DiagSeverity::Error, None)],
@@ -1544,7 +1548,7 @@ fn open_file_diagnostics_do_not_regress_to_older_or_versionless_results() {
 
     event_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: Some(3),
             items: vec![test_diag("old", DiagSeverity::Warning, None)],
@@ -1555,7 +1559,7 @@ fn open_file_diagnostics_do_not_regress_to_older_or_versionless_results() {
 
     event_tx
         .send(LspEvent::Diagnostics {
-            server_name: RUFF_SERVER.program,
+            server: LspServerKind::Ruff,
             path: path.clone(),
             version: None,
             items: vec![test_diag("versionless", DiagSeverity::Info, None)],

@@ -558,3 +558,129 @@ fn tool_log_scrollbar_supports_click_drag_and_release() {
     installer.end_log_scroll_drag();
     assert!(!installer.log_scroll_is_dragging());
 }
+
+#[test]
+fn dart_version_parser_accepts_stdout_and_stderr() {
+    assert_eq!(
+        parse_dart_version_output(b"Dart SDK version: 3.9.0 (stable)\n", b"").unwrap(),
+        "Dart SDK version: 3.9.0 (stable)"
+    );
+    assert_eq!(
+        parse_dart_version_output(b"", b"Dart SDK version: 3.9.1 (stable)\r\n").unwrap(),
+        "Dart SDK version: 3.9.1 (stable)"
+    );
+    assert_eq!(
+        parse_dart_version_output(
+            b"warning: ignored preamble\nDart SDK version: 3.9.2 (stable)\n",
+            b"",
+        )
+        .unwrap(),
+        "Dart SDK version: 3.9.2 (stable)"
+    );
+}
+
+#[test]
+fn dart_version_parser_rejects_empty_and_unknown_output() {
+    assert!(parse_dart_version_output(b"", b"").is_err());
+    assert!(parse_dart_version_output(b"not dart", b"warning").is_err());
+    assert!(parse_dart_version_output(&[0xff, 0xfe], b"").is_err());
+}
+
+#[test]
+fn dart_tool_state_ignores_stale_probe_generation() {
+    let mut state = DartToolState::default();
+    state.status = DartToolStatus::Checking;
+    state.generation = 7;
+    let (tx, rx) = mpsc::sync_channel(1);
+    tx.send(DartProbeResult {
+        generation: 6,
+        result: Ok("Dart SDK version: stale".to_string()),
+    })
+    .unwrap();
+    state.rx = Some(rx);
+
+    assert!(!state.poll());
+    assert_eq!(state.status(), DartToolStatus::Checking);
+    assert!(state.version().is_none());
+}
+
+#[test]
+fn dart_tool_state_transitions_from_checking_to_ready() {
+    let mut state = DartToolState::default();
+    state.status = DartToolStatus::Checking;
+    state.generation = 3;
+    let (tx, rx) = mpsc::sync_channel(1);
+    tx.send(DartProbeResult {
+        generation: 3,
+        result: Ok("Dart SDK version: 3.9.0 (stable)".to_string()),
+    })
+    .unwrap();
+    state.rx = Some(rx);
+
+    assert!(state.poll());
+    assert_eq!(state.status(), DartToolStatus::Ready);
+    assert_eq!(state.version(), Some("Dart SDK version: 3.9.0 (stable)"));
+    assert!(state.error().is_none());
+}
+
+#[test]
+fn dart_tool_state_preserves_probe_error_for_settings_ui() {
+    let mut state = DartToolState::default();
+    state.status = DartToolStatus::Checking;
+    state.generation = 4;
+    let (tx, rx) = mpsc::sync_channel(1);
+    tx.send(DartProbeResult {
+        generation: 4,
+        result: Err("invalid executable".to_string()),
+    })
+    .unwrap();
+    state.rx = Some(rx);
+
+    assert!(state.poll());
+    assert_eq!(state.status(), DartToolStatus::Error);
+    assert_eq!(state.error(), Some("invalid executable"));
+    assert!(state.version().is_none());
+}
+
+#[test]
+fn cancelling_dart_probe_sets_shared_cancel_flag() {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let mut state = DartToolState::default();
+    state.status = DartToolStatus::Checking;
+    state.cancel = Some(Arc::clone(&cancel));
+
+    state.cancel_probe();
+
+    assert!(cancel.load(Ordering::Acquire));
+    assert!(state.cancel.is_none());
+    assert!(state.rx.is_none());
+}
+
+#[test]
+fn dart_tool_status_labels_cover_user_visible_states() {
+    for status in [
+        DartToolStatus::NotFound,
+        DartToolStatus::Checking,
+        DartToolStatus::Ready,
+        DartToolStatus::Installing,
+        DartToolStatus::Updating,
+        DartToolStatus::Cancelling,
+        DartToolStatus::Error,
+    ] {
+        assert!(!status.label().is_empty());
+    }
+}
+
+#[test]
+fn dart_restart_adapter_targets_only_dart_server() {
+    let source = include_str!("tool_installer.rs");
+    let start = source.find("fn restart_dart_server").unwrap();
+    let tail = &source[start..];
+    let end = tail.find("fn trigger_tool_install").unwrap();
+    let body = &tail[..end];
+
+    assert!(body.contains("restart_server(\"dart\")"));
+    assert!(!body.contains("restart_python"));
+    assert!(!body.contains("restart_server(\"ruff\")"));
+    assert!(!body.contains("restart_server(\"ty\")"));
+}

@@ -1607,6 +1607,7 @@ fn database_tab(
         is_highlighted_once: highlighted,
         is_highlight_complete: highlighted,
         icon_key,
+        closing_hints: Default::default(),
         kind,
     }
 }

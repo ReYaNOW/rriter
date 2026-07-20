@@ -180,7 +180,7 @@ fn compact_settings_text(text: &str, max_chars: usize) -> String {
     format!("…{tail}")
 }
 
-fn compact_settings_path(path: &std::path::Path, max_chars: usize) -> String {
+pub(super) fn compact_settings_path(path: &std::path::Path, max_chars: usize) -> String {
     compact_settings_text(&path.to_string_lossy(), max_chars)
 }
 
@@ -221,6 +221,9 @@ impl Renderer {
         blink_alpha: f32,
         tool_paths: &crate::platform::ToolPaths,
         tool_installer: &crate::app::tool_installer::ToolInstaller,
+        dart_settings: &crate::app::DartSettings,
+        dart_tool_state: &crate::app::tool_installer::DartToolState,
+        dart_lsp_status: Option<crate::lsp::LspServerStatus>,
         database_settings: &crate::app::database::DatabaseSettings,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
@@ -806,7 +809,7 @@ impl Renderer {
             );
             content_y = (content_y + (18.0 * s).round()).round();
             self.draw_string_scaled_stable(
-                "uv, Ruff и Ty ставятся в каталог RRiter без изменения PATH и профиля shell.",
+                "uv, Ruff и Ty ставятся управляемо; Dart выбирается из custom, Flutter, managed или PATH.",
                 content_x.round(),
                 content_y,
                 [0.44, 0.46, 0.54, 1.0],
@@ -816,176 +819,19 @@ impl Renderer {
 
             for kind in crate::platform::ToolKind::ALL {
                 let row_y = content_y.round();
-                let stacked_actions = content_available_w < 430.0 * s;
-                let row_h = ((if stacked_actions { 82.0 } else { 47.0 }) * s)
-                    .round()
-                    .max(1.0);
-                let resolution = crate::platform::resolve_tool_kind(kind);
-                let configured = tool_paths.get(kind);
-                let compact_path_chars = if kind.supports_managed_install() { 24 } else { 47 };
-                let status = if resolution.is_ready() {
-                    let path = resolution.path.as_deref().unwrap_or(std::path::Path::new(""));
-                    let source = resolution
-                        .source
-                        .map(|source| source.label())
-                        .unwrap_or("авто");
-                    format!("{source}: {}", compact_settings_path(path, compact_path_chars))
-                } else if resolution.is_invalid_override() {
-                    let path = resolution
-                        .configured_path
-                        .as_deref()
-                        .unwrap_or(std::path::Path::new(""));
-                    format!("Не найден: {}", compact_settings_path(path, compact_path_chars))
-                } else {
-                    "Не найден".to_string()
-                };
-                let status_color = if resolution.is_ready() {
-                    [0.46, 0.82, 0.58, 1.0]
-                } else {
-                    [0.90, 0.52, 0.52, 1.0]
-                };
-
-                self.push_rounded_rect(
+                let row_h = self.draw_settings_tool_row(
+                    kind,
                     content_x,
                     row_y,
-                    content_available_w.round(),
-                    (row_h - (4.0 * s).round()).max(1.0),
-                    5.0 * s,
-                    [0.12, 0.13, 0.17, 1.0],
-                );
-                self.draw_string_scaled_stable(
-                    kind.label(),
-                    (content_x + 10.0 * s).round(),
-                    (row_y + (17.0 * s).round()).round(),
-                    [0.88, 0.88, 0.92, 1.0],
-                    0.88,
-                );
-                self.draw_string_scaled_stable(
-                    &status,
-                    (content_x + 10.0 * s).round(),
-                    (row_y + (35.0 * s).round()).round(),
-                    status_color,
-                    0.70,
-                );
-
-                let action_y = (row_y + if stacked_actions { 44.0 * s } else { 7.0 * s }).round();
-                let action_left = content_x + 8.0 * s;
-                let action_right = content_x + content_available_w - 8.0 * s;
-                let action_gap = (6.0 * s).min((action_right - action_left).max(0.0) * 0.08);
-                let action_count = usize::from(kind.supports_managed_install())
-                    + 1
-                    + usize::from(configured.is_some());
-                let action_w = ((action_right - action_left
-                    - action_gap * action_count.saturating_sub(1) as f32)
-                    / action_count.max(1) as f32)
-                    .max(0.0);
-                let mut action_x = action_left;
-                if kind.supports_managed_install() {
-                    let install_x = action_x.round();
-                    action_x += action_w + action_gap;
-                    let install_disabled = tool_installer.is_running()
-                        && !tool_installer.is_running_for(kind);
-                    let install_text = if tool_installer.is_running_for(kind) {
-                        "Отмена"
-                    } else if resolution.is_ready() {
-                        "Обновить"
-                    } else {
-                        "Установить"
-                    };
-                    if !install_disabled {
-                        ui_registry.register_rect(
-                            crate::ui_system::UiId::SettingsToolInstall(kind.index()),
-                            install_x,
-                            action_y,
-                            action_w,
-                            29.0 * s,
-                            self.last_mouse_x,
-                            self.last_mouse_y,
-                        );
-                    }
-                    crate::widgets::ButtonView {
-                        x: install_x,
-                        y: action_y,
-                        w: action_w,
-                        h: 29.0 * s,
-                        text: install_text,
-                        icon: None,
-                        text_scale: 0.68,
-                        icon_size: 0.0,
-                    }
-                    .render(
-                        self,
-                        self.last_mouse_x,
-                        self.last_mouse_y,
-                        s,
-                        install_disabled,
-                    );
-                }
-
-                let choose_x = action_x.round();
-                action_x += action_w + action_gap;
-                let button_y = action_y;
-                let path_controls_disabled = tool_installer.is_running();
-                if !path_controls_disabled {
-                    ui_registry.register_rect(
-                        crate::ui_system::UiId::SettingsToolPick(kind.index()),
-                        choose_x,
-                        button_y,
-                        action_w,
-                        29.0 * s,
-                        self.last_mouse_x,
-                        self.last_mouse_y,
-                    );
-                }
-                crate::widgets::ButtonView {
-                    x: choose_x,
-                    y: button_y,
-                    w: action_w,
-                    h: 29.0 * s,
-                    text: "Выбрать",
-                    icon: None,
-                    text_scale: 0.72,
-                    icon_size: 0.0,
-                }
-                .render(
-                    self,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
+                    content_available_w,
                     s,
-                    path_controls_disabled,
+                    tool_paths,
+                    tool_installer,
+                    dart_settings,
+                    dart_tool_state,
+                    dart_lsp_status,
+                    ui_registry,
                 );
-
-                if configured.is_some() {
-                    let clear_x = action_x.round();
-                    if !path_controls_disabled {
-                        ui_registry.register_rect(
-                            crate::ui_system::UiId::SettingsToolClear(kind.index()),
-                            clear_x,
-                            button_y,
-                            action_w,
-                            29.0 * s,
-                            self.last_mouse_x,
-                            self.last_mouse_y,
-                        );
-                    }
-                    crate::widgets::ButtonView {
-                        x: clear_x,
-                        y: button_y,
-                        w: action_w,
-                        h: 29.0 * s,
-                        text: "×",
-                        icon: None,
-                        text_scale: 0.92,
-                        icon_size: 0.0,
-                    }
-                    .render(
-                        self,
-                        self.last_mouse_x,
-                        self.last_mouse_y,
-                        s,
-                        path_controls_disabled,
-                    );
-                }
                 content_y = (row_y + row_h).round();
             }
 

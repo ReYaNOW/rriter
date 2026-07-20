@@ -770,13 +770,14 @@ Root:
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
-* `src/platform/integration.rs` -> platform directories, configured tool resolution, shared native-root/proxy HTTP builders, and process memory.
+* `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
 * `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
 * `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
 * `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
 * `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
+* `src/render_view/settings_tool_rows.rs` -> shared external-tool settings rows and Dart SDK controls; keeps tool UI behavior out of the main settings renderer.
 * `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
 * `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
 
@@ -784,6 +785,7 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
 * `src/app/database/database_postgres.rs` -> PostgreSQL TCP/TLS connection backend plus bounded autocommit discovery of databases and `public` tables.
@@ -905,7 +907,7 @@ Syntax/languages:
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
-* `src/languages/dart.rs` -> Dart import-block helpers.
+* `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
 * `src/languages/python_tests.rs` -> Python language helper tests.
 * `src/languages/rust.rs` -> Rust import-block helpers.
@@ -916,6 +918,7 @@ LSP:
 * `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
 * `src/lsp/lsp_process.rs` -> managed server spawn, protocol shutdown, bounded restart supervisor, and missing-tool state.
 * `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, diagnostics/log state, and explicit retry.
+* `src/lsp/dart_workspace.rs` -> Dart package-root lifecycle, versioned open documents, managed `dart analyze` workspace diagnostics, and Dart-specific manager tests.
 * `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
 * `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.

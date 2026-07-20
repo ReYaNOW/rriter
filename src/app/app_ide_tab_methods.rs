@@ -69,6 +69,7 @@ impl App {
             enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                 .load(std::sync::atomic::Ordering::Relaxed),
             tool_paths: self.tool_paths.clone(),
+            dart_settings: self.dart_settings.clone(),
         };
         crate::save_config(&config);
     }
@@ -117,7 +118,12 @@ impl App {
         }
 
         if self.lsp.is_none() {
-            self.lsp = Some(crate::lsp::LspManager::new(self.ide_workspaces.clone()));
+            let mut lsp = crate::lsp::LspManager::new(self.ide_workspaces.clone());
+            lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
+            if !self.dart_settings.enabled {
+                lsp.set_server_enabled("dart", false);
+            }
+            self.lsp = Some(lsp);
         }
 
         let has_startup_file =
@@ -143,6 +149,7 @@ impl App {
                 is_highlight_complete: false,
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
+                closing_hints: Default::default(),
                 kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
@@ -288,6 +295,10 @@ impl App {
         std::mem::swap(
             &mut self.highlighter.syntax_errors,
             &mut self.tabs[ai].syntax_errors,
+        );
+        std::mem::swap(
+            &mut self.closing_hint_state,
+            &mut self.tabs[ai].closing_hints,
         );
         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
         std::mem::swap(&mut self.file_key, &mut self.tabs[ai].file_key);
@@ -553,6 +564,7 @@ mod tests {
             is_highlighted_once: true,
             is_highlight_complete: true,
             icon_key: "default_file",
+            closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
         }
     }

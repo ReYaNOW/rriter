@@ -36,6 +36,7 @@ impl App {
                 is_highlight_complete: false,
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
+                closing_hints: Default::default(),
                 kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
@@ -74,6 +75,7 @@ impl App {
             is_highlight_complete: false,
             icon_key: "default_file",
             syntax_errors: Vec::new(),
+            closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
         };
         self.tabs.push(new_tab);

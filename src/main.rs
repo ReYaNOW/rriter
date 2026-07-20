@@ -39,6 +39,7 @@ pub struct Config {
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
     pub tool_paths: crate::platform::ToolPaths,
+    pub dart_settings: crate::app::DartSettings,
 }
 
 impl Default for Config {
@@ -51,6 +52,7 @@ impl Default for Config {
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
             tool_paths: crate::platform::ToolPaths::default(),
+            dart_settings: crate::app::DartSettings::default(),
         }
     }
 }
@@ -607,6 +609,13 @@ fn format_config_content(config: &Config) -> String {
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
         "tool_paths": tool_paths,
+        "dart": {
+            "enabled": config.dart_settings.enabled,
+            "workspace_analysis": config.dart_settings.workspace_analysis,
+            "closing_labels": config.dart_settings.closing_labels.config_value(),
+            "minimum_nesting_depth": config.dart_settings.minimum_nesting_depth,
+            "minimum_block_lines": config.dart_settings.minimum_block_lines,
+        },
     });
     format!(
         "{}\n",
@@ -688,6 +697,39 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
                 .and_then(crate::platform::decode_persisted_path);
             config.tool_paths.set(kind, path);
         }
+    }
+    if let Some(dart) = value.get("dart").and_then(serde_json::Value::as_object) {
+        if let Some(enabled) = dart.get("enabled").and_then(serde_json::Value::as_bool) {
+            config.dart_settings.enabled = enabled;
+        }
+        if let Some(enabled) = dart
+            .get("workspace_analysis")
+            .and_then(serde_json::Value::as_bool)
+        {
+            config.dart_settings.workspace_analysis = enabled;
+        }
+        if let Some(mode) = dart
+            .get("closing_labels")
+            .and_then(serde_json::Value::as_str)
+        {
+            config.dart_settings.closing_labels =
+                crate::app::DartClosingLabelsMode::from_config_value(mode);
+        }
+        if let Some(value) = dart
+            .get("minimum_nesting_depth")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u8::try_from(value).ok())
+        {
+            config.dart_settings.minimum_nesting_depth = value;
+        }
+        if let Some(value) = dart
+            .get("minimum_block_lines")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| u16::try_from(value).ok())
+        {
+            config.dart_settings.minimum_block_lines = value;
+        }
+        config.dart_settings.normalize();
     }
     config
 }
@@ -1100,6 +1142,7 @@ mod tests {
             is_highlight_complete: false,
             icon_key: "default_file",
             syntax_errors: Vec::new(),
+            closing_hints: Default::default(),
             kind: crate::app::EditorTabKind::Normal,
         }
     }
@@ -1499,6 +1542,15 @@ mod tests {
             crate::platform::ToolKind::Shell,
             Some(PathBuf::from("/opt/Оболочка/bin/zsh")),
         );
+        config.tool_paths.set(
+            crate::platform::ToolKind::Dart,
+            Some(PathBuf::from(r"C:\Program Files\Dart\dart-sdk")),
+        );
+        config.dart_settings.enabled = false;
+        config.dart_settings.workspace_analysis = false;
+        config.dart_settings.closing_labels = crate::app::DartClosingLabelsMode::DartServer;
+        config.dart_settings.minimum_nesting_depth = 5;
+        config.dart_settings.minimum_block_lines = 9;
 
         let formatted = format_config_content(&config);
         assert!(formatted.contains("\"window_width\": 1280.5"));
@@ -1516,6 +1568,11 @@ mod tests {
             reparsed.tool_paths.get(crate::platform::ToolKind::Shell),
             config.tool_paths.get(crate::platform::ToolKind::Shell)
         );
+        assert_eq!(
+            reparsed.tool_paths.get(crate::platform::ToolKind::Dart),
+            config.tool_paths.get(crate::platform::ToolKind::Dart)
+        );
+        assert_eq!(reparsed.dart_settings, config.dart_settings);
 
         let color = parse_kde_color(
             "[Colors:Window]\nBackgroundNormal=1,2,3\n[Colors:Selection]\nBackgroundNormal=128,64,255\n",
@@ -1524,6 +1581,36 @@ mod tests {
         );
         assert_eq!(color, Some([128.0 / 255.0, 64.0 / 255.0, 1.0, 1.0]));
         assert_eq!(parse_kde_color("[Bad]\nColor=1,2\n", "Bad", "Color"), None);
+    }
+
+    #[test]
+    fn old_config_keeps_dart_defaults_and_unknown_mode_is_safe() {
+        let old = parse_config_content(
+            r#"{"window_width": 900, "tool_paths": {}}"#,
+            Config::default(),
+        );
+        assert_eq!(old.dart_settings, crate::app::DartSettings::default());
+
+        let parsed = parse_config_content(
+            r#"{
+  "dart": {
+    "enabled": false,
+    "workspace_analysis": false,
+    "closing_labels": "future-mode",
+    "minimum_nesting_depth": 0,
+    "minimum_block_lines": 50000
+  }
+}"#,
+            Config::default(),
+        );
+        assert!(!parsed.dart_settings.enabled);
+        assert!(!parsed.dart_settings.workspace_analysis);
+        assert_eq!(
+            parsed.dart_settings.closing_labels,
+            crate::app::DartClosingLabelsMode::DartServerAndBlocks
+        );
+        assert_eq!(parsed.dart_settings.minimum_nesting_depth, 1);
+        assert_eq!(parsed.dart_settings.minimum_block_lines, 1000);
     }
 
     #[test]
@@ -2105,6 +2192,8 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         text_file_format,
         file_extension: ext,
         highlighter,
+        closing_hint_state: Default::default(),
+        closing_hint_settings: config.dart_settings.closing_hint_settings(),
         last_sent_version: u64::MAX,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
@@ -2154,8 +2243,10 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         is_dragging_settings_ignore: false,
         open_folder_rx: None,
         tool_paths: config.tool_paths.clone(),
+        dart_settings: config.dart_settings.clone(),
         settings_tool_picker_rx: None,
         tool_installer: crate::app::tool_installer::ToolInstaller::default(),
+        dart_tool_state: crate::app::tool_installer::DartToolState::default(),
 
         show_search: false,
         search_anim_y: -120.0,
@@ -2249,6 +2340,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         active_tab: 0,
         run_ide_on_startup,
     };
+    app.refresh_dart_tool_state();
 
     app.highlighter.reset(
         app.editor.version,

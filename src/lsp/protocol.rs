@@ -91,7 +91,7 @@ pub fn highlight_diagnostic_message(msg: &str) -> Vec<crate::highlighter::ColorS
 }
 
 /// Одна замена текста (из workspace/applyEdit или codeAction)
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TextChange {
     pub start_line: u32,
     pub start_col: u32,
@@ -106,6 +106,16 @@ pub struct WorkspaceEdit {
     pub changes: HashMap<PathBuf, Vec<TextChange>>,
 }
 
+/// Виртуальная closing label от language server. Координаты используют UTF-16, как LSP.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LspClosingLabel {
+    pub label: String,
+    pub start_line: u32,
+    pub start_col: u32,
+    pub end_line: u32,
+    pub end_col: u32,
+}
+
 /// Событие от LSP-сервера → главный поток
 #[derive(Debug)]
 pub enum LspEvent {
@@ -113,17 +123,23 @@ pub enum LspEvent {
         name: &'static str,
         message: String,
     },
-    /// Диагностика для файла (ошибки/предупреждения от ruff)
+    /// Диагностика для файла от типизированного LSP-сервера
     Diagnostics {
-        server_name: &'static str,
+        server: LspServerKind,
         path: PathBuf,
         #[allow(dead_code)]
         version: Option<i32>,
         items: Vec<Diagnostic>,
         result_id: Option<String>,
     },
+    /// Виртуальные подписи закрывающих конструкций для одного документа.
+    ClosingLabels {
+        server: LspServerKind,
+        path: PathBuf,
+        labels: Vec<LspClosingLabel>,
+    },
     ConfigurationServed {
-        name: &'static str,
+        server: LspServerKind,
     },
     WorkspaceDiagnosticsDone {
         request_id: i32,
@@ -134,11 +150,12 @@ pub enum LspEvent {
         actions: Vec<CodeAction>,
     },
     /// Сервер готов принимать запросы
-    ServerReady,
+    ServerReady {
+        server: LspServerKind,
+    },
     /// Статус сервера изменился
     StatusChanged {
-        #[allow(dead_code)]
-        name: &'static str,
+        server: LspServerKind,
         status: LspServerStatus,
     },
     HoverResponse {
@@ -152,15 +169,64 @@ pub enum LspEvent {
     CompletionResponse {
         request_id: i32,
         items: Vec<LspCompletionItem>,
+        is_incomplete: bool,
     },
     SignatureHelpResponse {
         request_id: i32,
-        parameters: Vec<String>,
+        help: LspSignatureHelp,
     },
     InlayHintsResponse {
         request_id: i32,
         hints: Vec<LspInlayHint>,
     },
+    ReferencesResponse {
+        request_id: i32,
+        targets: Vec<DefinitionTarget>,
+    },
+    PrepareRenameResponse {
+        request_id: i32,
+        range: Option<TextChange>,
+    },
+    RenameResponse {
+        request_id: i32,
+        edit: WorkspaceEdit,
+    },
+    FormattingResponse {
+        request_id: i32,
+        edits: Vec<TextChange>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LspServerKind {
+    Ruff,
+    Ty,
+    Dart,
+}
+
+impl LspServerKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Ruff => "ruff",
+            Self::Ty => "ty",
+            Self::Dart => "dart",
+        }
+    }
+
+    pub const fn restart_attempt_limit(self) -> u8 {
+        match self {
+            Self::Ruff | Self::Ty | Self::Dart => 4,
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "ruff" => Some(Self::Ruff),
+            "ty" => Some(Self::Ty),
+            "dart" => Some(Self::Dart),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -189,6 +255,26 @@ pub struct LspCompletionItem {
     pub additional_text_edits: Vec<TextChange>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LspSignatureHelp {
+    pub signatures: Vec<LspSignature>,
+    pub active_signature: usize,
+    pub active_parameter: Option<usize>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LspSignature {
+    pub label: String,
+    pub documentation: Option<String>,
+    pub parameters: Vec<LspSignatureParameter>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LspSignatureParameter {
+    pub label: String,
+    pub documentation: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LspInlayHint {
     pub line: u32,
@@ -199,6 +285,7 @@ pub struct LspInlayHint {
 // ── Конфигурация LSP-серверов ─────────────────────────────────────────────────
 
 pub(super) struct LspServerDef {
+    pub(super) kind: LspServerKind,
     pub(super) program: &'static str,
     pub(super) override_env: &'static str,
     pub(super) args: &'static [&'static str],
@@ -208,6 +295,7 @@ pub(super) struct LspServerDef {
 }
 
 pub(super) const RUFF_SERVER: LspServerDef = LspServerDef {
+    kind: LspServerKind::Ruff,
     program: "ruff",
     override_env: "RRITER_RUFF_PATH",
     args: &["server"],
@@ -216,11 +304,21 @@ pub(super) const RUFF_SERVER: LspServerDef = LspServerDef {
 };
 
 pub(super) const TY_SERVER: LspServerDef = LspServerDef {
+    kind: LspServerKind::Ty,
     program: "ty",
     override_env: "RRITER_TY_PATH",
     args: &["server"],
     language_id: "python",
     extensions: &["py"],
+};
+
+pub(super) const DART_SERVER: LspServerDef = LspServerDef {
+    kind: LspServerKind::Dart,
+    program: "dart",
+    override_env: "RRITER_DART_PATH",
+    args: &["language-server"],
+    language_id: "dart",
+    extensions: &["dart"],
 };
 
 // ── Внутренние команды main → supervisor ─────────────────────────────────────
@@ -269,6 +367,26 @@ pub(super) enum Cmd {
         line: u32,
         col: u32,
     },
+    References {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+        include_declaration: bool,
+    },
+    PrepareRename {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+    },
+    Rename {
+        id: i32,
+        uri: String,
+        line: u32,
+        col: u32,
+        new_name: String,
+    },
     Completion {
         id: i32,
         uri: String,
@@ -290,6 +408,12 @@ pub(super) enum Cmd {
         start_col: u32,
         end_line: u32,
         end_col: u32,
+    },
+    Formatting {
+        id: i32,
+        uri: String,
+        tab_size: u32,
+        insert_spaces: bool,
     },
     WorkspaceDiagnostic {
         id: i32,

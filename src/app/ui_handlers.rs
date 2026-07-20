@@ -639,9 +639,12 @@ impl App {
             UiId::SettingsIdeRemoveWorkspace(idx) => {
                 if idx < self.ide_workspaces.len() {
                     self.ide_workspaces.remove(idx);
+                    self.refresh_dart_tool_state();
                     if let Some(lsp) = &mut self.lsp {
                         lsp.set_workspaces(self.ide_workspaces.clone());
                     }
+                    self.clear_all_closing_hints();
+                    self.refresh_dart_closing_hints();
                     self.save_current_config();
                     self.refresh_file_tree();
                     self.start_file_watcher();
@@ -820,7 +823,68 @@ impl App {
             }
             UiId::SettingsRefreshTools => {
                 crate::platform::refresh_tool_resolutions();
-                self.window.as_ref().unwrap().request_redraw();
+                self.refresh_dart_tool_state();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::SettingsDartToggleSupport => {
+                self.dart_settings.enabled = !self.dart_settings.enabled;
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.set_server_enabled("dart", self.dart_settings.enabled);
+                    self.ide_panel.lsp_servers = lsp.servers_info();
+                }
+                if !self.dart_settings.enabled {
+                    self.clear_all_closing_hints();
+                    self.refresh_dart_closing_hints();
+                }
+                self.save_current_config();
+            }
+            UiId::SettingsDartToggleWorkspaceAnalysis => {
+                self.dart_settings.workspace_analysis = !self.dart_settings.workspace_analysis;
+                if let Some(lsp) = &mut self.lsp {
+                    lsp.set_dart_workspace_analysis_enabled(
+                        self.dart_settings.workspace_analysis,
+                    );
+                }
+                self.save_current_config();
+            }
+            UiId::SettingsDartCycleClosingLabels => {
+                self.dart_settings.closing_labels = self.dart_settings.closing_labels.next();
+                self.sync_dart_closing_hint_settings();
+                self.save_current_config();
+            }
+            UiId::SettingsDartAdjustNesting(delta) => {
+                self.dart_settings.adjust_minimum_nesting_depth(delta);
+                self.sync_dart_closing_hint_settings();
+                self.save_current_config();
+            }
+            UiId::SettingsDartAdjustBlockLines(delta) => {
+                self.dart_settings
+                    .adjust_minimum_block_lines(i16::from(delta));
+                self.sync_dart_closing_hint_settings();
+                self.save_current_config();
+            }
+            UiId::SettingsDartRestart => {
+                self.restart_dart_server();
+            }
+            UiId::SettingsDartOpenLog => {
+                self.ide_panel.open(crate::app::PanelId::LspServers);
+                if let Some(info) = self
+                    .ide_panel
+                    .lsp_servers
+                    .iter()
+                    .find(|info| info.name == "dart")
+                {
+                    self.ide_panel
+                        .lsp_logs_expanded
+                        .insert(info.name.to_string());
+                }
+                crate::save_panel_state(&self.ide_panel);
+                self.show_settings = false;
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
             }
 
             // LSP panel

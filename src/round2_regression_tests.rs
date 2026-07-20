@@ -4,6 +4,7 @@ const API_PANEL: &str = include_str!("render_view/api_client_panel/api_client_pa
 const API_TAB: &str = include_str!("render_view/api_client_tab/api_client_tab_main_renderer.rs");
 const API_AUTH: &str = include_str!("render_view/api_client_tab/api_client_tab_auth_renderer.rs");
 const SETTINGS: &str = include_str!("render_view/settings_ui.rs");
+const SETTINGS_TOOL_ROWS: &str = include_str!("render_view/settings_tool_rows.rs");
 const GIT_UI: &str = include_str!("render_view/ide_panels/ide_panel_git_workspace_renderer.rs");
 const TABS_UI: &str = include_str!("render_view/tabs_ui.rs");
 const TAB_INPUT: &str = include_str!("app/mouse/input.rs");
@@ -115,7 +116,10 @@ fn r2_039_settings_content_width_is_responsive() {
 
 #[test]
 fn r2_040_settings_action_rows_fit_available_width() {
-    has_all(SETTINGS, &["action_count", "action_right", "action_left", "action_gap", "action_w"]);
+    has_all(
+        SETTINGS_TOOL_ROWS,
+        &["action_count", "action_right", "action_left", "action_gap", "action_w"],
+    );
 }
 
 #[test]

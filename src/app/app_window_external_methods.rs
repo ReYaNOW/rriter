@@ -6,6 +6,14 @@ pub(crate) fn external_changes_disconnect_message() -> &'static str {
     "Проверка внешних изменений неожиданно завершилась; выполняется повтор"
 }
 
+fn pick_tool_path(kind: crate::platform::ToolKind, title: &str) -> Option<std::path::PathBuf> {
+    if kind == crate::platform::ToolKind::Dart {
+        crate::platform::pick_folder(title)
+    } else {
+        crate::platform::pick_file(title)
+    }
+}
+
 fn render_should_continue_after_present<T, E>(
     render_suspended: &mut bool,
     result: &Result<T, E>,
@@ -139,6 +147,7 @@ impl App {
         while let Ok(_) = self.highlighter.rx.try_recv() {}
         self.highlighter
             .reset(self.editor.version, "".to_string(), "".to_string(), 0);
+        self.closing_hint_state.invalidate(self.editor.version);
         self.search_results.clear();
         self.search_current_idx = None;
         self.show_search = false;
@@ -175,6 +184,9 @@ impl App {
         self.tool_paths.set(kind, path);
         crate::platform::configure_tool_paths(self.tool_paths.clone());
         self.save_current_config();
+        if kind == crate::platform::ToolKind::Dart {
+            self.restart_dart_server();
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -189,7 +201,7 @@ impl App {
         }
         let title = format!("Выбрать {}", kind.label());
         if crate::platform::native_dialog_requires_main_thread() {
-            let path = crate::platform::pick_file(&title);
+            let path = pick_tool_path(kind, &title);
             if path.is_some() {
                 self.apply_tool_path_selection(kind, path);
             }
@@ -199,7 +211,7 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         self.settings_tool_picker_rx = Some(rx);
         if let Err(err) = crate::platform::spawn_named("rriter-tool-picker", move || {
-            let path = crate::platform::pick_file(&title);
+            let path = pick_tool_path(kind, &title);
             let _ = tx.send((kind, path));
         }) {
             self.settings_tool_picker_rx = None;
@@ -217,10 +229,13 @@ impl App {
             .any(|existing| crate::platform::paths_equal(existing, &path))
         {
             self.ide_workspaces.push(path.clone());
+            self.refresh_dart_tool_state();
         }
         if let Some(lsp) = &mut self.lsp {
             lsp.set_workspaces(self.ide_workspaces.clone());
         }
+        self.clear_all_closing_hints();
+        self.refresh_dart_closing_hints();
         self.ide_panel.file_tree_expanded.insert(path);
         self.refresh_file_tree();
         self.start_file_watcher();
@@ -421,6 +436,11 @@ impl App {
             let content = self.editor.get_full_text();
             if self.write_current_text_to_path(&path, &content) {
                 self.editor.mark_saved();
+                if self.is_ide_mode
+                    && let Some(lsp) = &mut self.lsp
+                {
+                    lsp.notify_saved(&path, &self.file_extension);
+                }
                 self.save_tabs_state();
                 return true;
             }
@@ -498,6 +518,7 @@ impl App {
                 &content,
                 crate::editor::lsp_document_version(self.editor.version),
             );
+            lsp.notify_saved(&path, &self.file_extension);
         }
 
         self.add_recent_file(path);
@@ -554,6 +575,91 @@ impl App {
         }
         self.is_highlighted_once = true;
         self.is_highlight_complete = self.highlighter.is_complete;
+        self.refresh_dart_closing_hints();
+    }
+
+    pub(crate) fn refresh_dart_closing_hints(&mut self) {
+        let revision = self.editor.version;
+        let settings = self.closing_hint_settings;
+        if self.file_extension != "dart"
+            || settings.mode != crate::languages::dart::ClosingHintMode::DartServerAndBlocks
+        {
+            self.closing_hint_state
+                .replace_syntax(revision, Vec::new(), settings);
+            return;
+        }
+
+        let text = self.editor.get_full_text();
+        let hints = {
+            let Some(tree) = self.highlighter.syntax_tree_for(revision, "dart") else {
+                return;
+            };
+            crate::languages::dart::local_closing_hints(&text, tree, revision, settings)
+        };
+        self.closing_hint_state
+            .replace_syntax(revision, hints, settings);
+    }
+
+    pub(crate) fn apply_server_closing_labels(
+        &mut self,
+        path: &std::path::Path,
+        labels: &[crate::lsp::LspClosingLabel],
+    ) -> bool {
+        let settings = self.closing_hint_settings;
+        if self.file_extension == "dart"
+            && self
+                .file_path
+                .as_deref()
+                .is_some_and(|current| crate::platform::paths_equal(current, path))
+        {
+            let revision = self.editor.version;
+            let text = self.editor.get_full_text();
+            let hints = crate::languages::dart::server_closing_hints(&text, revision, labels);
+            self.closing_hint_state
+                .replace_server(revision, hints, settings);
+            return true;
+        }
+
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            if index == self.active_tab
+                || tab.file_extension != "dart"
+                || tab
+                    .file_path
+                    .as_deref()
+                    .is_none_or(|current| !crate::platform::paths_equal(current, path))
+            {
+                continue;
+            }
+            let revision = tab.editor.version;
+            let text = tab.editor.get_full_text();
+            let hints = crate::languages::dart::server_closing_hints(&text, revision, labels);
+            tab.closing_hints.replace_server(revision, hints, settings);
+            return false;
+        }
+        false
+    }
+
+    pub(crate) fn clear_all_closing_hints(&mut self) {
+        self.closing_hint_state.invalidate(self.editor.version);
+        for tab in &mut self.tabs {
+            tab.closing_hints.invalidate(tab.editor.version);
+        }
+    }
+
+    pub(crate) fn set_closing_hint_settings(
+        &mut self,
+        settings: crate::languages::dart::ClosingHintSettings,
+    ) {
+        self.closing_hint_settings = settings;
+        self.closing_hint_state.apply_settings(settings);
+        for tab in &mut self.tabs {
+            tab.closing_hints.apply_settings(settings);
+        }
+        self.refresh_dart_closing_hints();
+    }
+
+    pub(crate) fn sync_dart_closing_hint_settings(&mut self) {
+        self.set_closing_hint_settings(self.dart_settings.closing_hint_settings());
     }
 
     fn wait_for_current_highlight(&mut self) {
@@ -597,6 +703,7 @@ impl App {
     }
 
     fn reset_highlighter_with_text(&mut self, text: String, _seed_immediately: bool) {
+        self.closing_hint_state.invalidate(self.editor.version);
         let priority =
             crate::highlighter::should_prioritize_front_highlight(&self.file_extension, &text);
         if !cfg!(test)
@@ -986,6 +1093,7 @@ impl App {
             tab.editor.clear_history();
             tab.editor.set_original_text();
             tab.editor.sync_edits.clear();
+            tab.closing_hints.invalidate(tab.editor.version);
             tab.text_file_format = change.text_file_format;
             tab.file_key = Some(crate::platform::PathKey::new(&change.path));
             tab.completions.clear();

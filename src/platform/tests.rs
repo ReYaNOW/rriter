@@ -737,3 +737,261 @@ fn preproduction_atomic_write_preserves_existing_permissions() {
     assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
     let _ = fs::remove_dir_all(root);
 }
+
+fn dart_test_root(label: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-dart-{label}-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn write_test_executable(path: &Path) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).unwrap();
+    }
+    fs::write(path, b"#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+fn create_test_dart_sdk(root: &Path, platform: PlatformKind) -> PathBuf {
+    let executable = root
+        .join("bin")
+        .join(integration::dart_executable_name(platform));
+    write_test_executable(&executable);
+    executable
+}
+
+fn create_test_flutter_sdk(root: &Path, platform: PlatformKind) -> PathBuf {
+    let executable = root
+        .join("bin")
+        .join("cache")
+        .join("dart-sdk")
+        .join("bin")
+        .join(integration::dart_executable_name(platform));
+    write_test_executable(&executable);
+    executable
+}
+
+#[test]
+fn dart_tool_kind_and_managed_plan_are_stable() {
+    assert_eq!(ToolKind::Dart.config_key(), "dart");
+    assert_eq!(ToolKind::Dart.override_env(), "RRITER_DART_PATH");
+    assert_eq!(ToolKind::Dart.label(), "Dart SDK");
+    assert_eq!(
+        ToolKind::Dart.managed_install_plan(),
+        Some(ManagedToolInstallPlan::DartSdkArchive)
+    );
+    assert!(!ToolKind::Dart.supports_managed_install());
+    assert_eq!(ToolKind::Dart.managed_package(), None);
+}
+
+#[test]
+fn dart_resolution_follows_documented_priority_order() {
+    let root = dart_test_root("priority");
+    let custom_root = root.join("custom SDK");
+    let custom = create_test_dart_sdk(&custom_root, PlatformKind::Linux);
+
+    let workspace = root.join("flutter project");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("pubspec.yaml"),
+        "dependencies:\n  flutter:\n    sdk: flutter\n",
+    )
+    .unwrap();
+    let project_flutter_root = workspace.join(".fvm").join("flutter_sdk");
+    let project_flutter = create_test_flutter_sdk(&project_flutter_root, PlatformKind::Linux);
+
+    let env_root = root.join("environment");
+    let env_dart = create_test_dart_sdk(&env_root, PlatformKind::Linux);
+
+    let managed_root = root.join("managed");
+    let managed = create_test_dart_sdk(
+        &managed_root.join("0002").join("dart-sdk"),
+        PlatformKind::Linux,
+    );
+
+    let path_root = root.join("system path");
+    let path_dart = create_test_dart_sdk(&path_root, PlatformKind::Linux);
+
+    let other_flutter_root = root.join("other flutter");
+    let other_flutter = create_test_flutter_sdk(&other_flutter_root, PlatformKind::Linux);
+
+    let resolve = |custom_path: Option<PathBuf>,
+                   workspace_path: Option<&Path>,
+                   env_path: Option<PathBuf>,
+                   managed_path: &Path,
+                   path_candidate: Option<PathBuf>| {
+        integration::resolve_dart_with(
+            custom_path,
+            workspace_path,
+            env_path,
+            managed_path,
+            path_candidate,
+            vec![other_flutter_root.clone()],
+            PlatformKind::Linux,
+        )
+    };
+
+    let resolution = resolve(
+        Some(custom_root.clone()),
+        Some(&workspace),
+        Some(env_dart.clone()),
+        &managed_root,
+        Some(path_dart.clone()),
+    );
+    assert_eq!(resolution.path.as_deref(), Some(custom.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Settings));
+
+    let resolution = resolve(
+        None,
+        Some(&workspace),
+        Some(env_dart.clone()),
+        &managed_root,
+        Some(path_dart.clone()),
+    );
+    assert_eq!(resolution.path.as_deref(), Some(project_flutter.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Flutter));
+
+    let resolution = resolve(
+        None,
+        None,
+        Some(env_dart.clone()),
+        &managed_root,
+        Some(path_dart.clone()),
+    );
+    assert_eq!(resolution.path.as_deref(), Some(env_dart.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Environment));
+
+    let resolution = resolve(
+        None,
+        None,
+        None,
+        &managed_root,
+        Some(path_dart.clone()),
+    );
+    assert_eq!(resolution.path.as_deref(), Some(managed.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Managed));
+
+    let empty_managed = root.join("empty managed");
+    let resolution = resolve(
+        None,
+        None,
+        None,
+        &empty_managed,
+        Some(path_dart.clone()),
+    );
+    assert_eq!(resolution.path.as_deref(), Some(path_dart.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Path));
+
+    let resolution = resolve(None, None, None, &empty_managed, None);
+    assert_eq!(resolution.path.as_deref(), Some(other_flutter.as_path()));
+    assert_eq!(resolution.source, Some(integration::ToolPathSource::Flutter));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn dart_custom_sdk_root_supports_spaces_unicode_and_windows_executable_name() {
+    let root = dart_test_root("custom-unicode");
+    let sdk = root.join("SDK с пробелами");
+    let executable = create_test_dart_sdk(&sdk, PlatformKind::Windows);
+
+    let resolution = integration::dart_resolution_from_candidate(
+        sdk.clone(),
+        Some(sdk.clone()),
+        integration::ToolPathSource::Settings,
+        PlatformKind::Windows,
+    );
+
+    assert_eq!(resolution.path.as_deref(), Some(executable.as_path()));
+    assert_eq!(resolution.sdk_root.as_deref(), Some(sdk.as_path()));
+    assert_eq!(resolution.configured_path.as_deref(), Some(sdk.as_path()));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[cfg(unix)]
+#[test]
+fn dart_resolution_accepts_symlink_and_rejects_non_executable_file() {
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    let root = dart_test_root("symlink");
+    let sdk = root.join("sdk");
+    let executable = create_test_dart_sdk(&sdk, PlatformKind::Linux);
+    let link = root.join("dart-link");
+    symlink(&executable, &link).unwrap();
+    assert_eq!(
+        integration::resolve_dart_candidate(&link, PlatformKind::Linux).as_deref(),
+        Some(link.as_path())
+    );
+
+    let blocked = root.join("blocked-dart");
+    fs::write(&blocked, b"not executable").unwrap();
+    fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(integration::resolve_dart_candidate(&blocked, PlatformKind::Linux).is_none());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn non_flutter_pubspec_does_not_claim_flutter_sdk_priority() {
+    let root = dart_test_root("plain-package");
+    fs::write(
+        root.join("pubspec.yaml"),
+        "name: plain\nenvironment:\n  sdk: ^3.0.0\n",
+    )
+    .unwrap();
+    assert!(!integration::is_flutter_project(&root));
+
+    fs::write(
+        root.join("pubspec.yaml"),
+        "name: app\ndependencies:\n  flutter:\n    sdk: flutter\n",
+    )
+    .unwrap();
+    assert!(integration::is_flutter_project(&root));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn flutter_project_sdk_is_derived_from_package_config() {
+    let root = dart_test_root("package-config");
+    let workspace = root.join("app");
+    let flutter_root = root.join("Flutter SDK");
+    create_test_flutter_sdk(&flutter_root, PlatformKind::Linux);
+    let package_config = workspace.join(".dart_tool").join("package_config.json");
+    fs::create_dir_all(package_config.parent().unwrap()).unwrap();
+    let flutter_package = flutter_root.join("packages").join("flutter");
+    fs::create_dir_all(&flutter_package).unwrap();
+    let root_uri = url::Url::from_directory_path(&flutter_package).unwrap();
+    fs::write(
+        &package_config,
+        serde_json::json!({
+            "configVersion": 2,
+            "packages": [{"name": "flutter", "rootUri": root_uri.as_str()}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        integration::flutter_root_from_package_config(&package_config).as_deref(),
+        Some(flutter_root.as_path())
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn malformed_package_config_is_ignored_without_panic() {
+    let root = dart_test_root("bad-package-config");
+    let path = root.join("package_config.json");
+    fs::write(&path, "{bad json").unwrap();
+    assert!(integration::flutter_root_from_package_config(&path).is_none());
+    fs::write(&path, r#"{"packages":[{"name":"flutter","rootUri":"http://invalid"}]}"#).unwrap();
+    assert!(integration::flutter_root_from_package_config(&path).is_none());
+    let _ = fs::remove_dir_all(root);
+}

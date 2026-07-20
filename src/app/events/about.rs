@@ -941,6 +941,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.poll_tool_installer() {
         needs_redraw = true;
     }
+    if app.poll_dart_tool_state() {
+        needs_redraw = true;
+    }
     if app.tool_installer.is_log_open() {
         let max_scroll = app.tool_install_log_max_scroll();
         if app.tool_installer.update_log_scroll(dt, max_scroll) {
@@ -1006,6 +1009,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     w.request_redraw();
                 }
             }
+            crate::lsp::LspEvent::ClosingLabels {
+                server: crate::lsp::LspServerKind::Dart,
+                path,
+                labels,
+            } => {
+                if app.apply_server_closing_labels(&path, &labels)
+                    && let Some(w) = app.window.as_ref()
+                {
+                    w.request_redraw();
+                }
+            }
             crate::lsp::LspEvent::CodeActions {
                 request_id,
                 actions,
@@ -1062,14 +1076,29 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 }
             }
-            crate::lsp::LspEvent::CompletionResponse { request_id, items } => {
-                if app.autocomplete_pending_request_id == Some(request_id) {
+            crate::lsp::LspEvent::CompletionResponse {
+                request_id,
+                items,
+                is_incomplete,
+            } => {
+                if app.autocomplete_response_matches_current(request_id) {
+                    let mode = app.autocomplete_pending_request_mode;
                     app.autocomplete_pending_request_id = None;
-                    app.remember_ty_autocomplete_cache(items.clone());
-                    app.update_ty_autocomplete(items);
+                    if mode == Some(crate::app::AutocompleteMode::LspContext) {
+                        app.remember_lsp_autocomplete_cache(items.clone(), is_incomplete);
+                        app.update_lsp_autocomplete(items);
+                    } else {
+                        app.remember_ty_autocomplete_cache(items.clone());
+                        app.update_ty_autocomplete(items);
+                    }
                     if let Some(w) = app.window.as_ref() {
                         w.request_redraw();
                     }
+                } else if app.autocomplete_pending_request_id == Some(request_id) {
+                    app.autocomplete_pending_request_id = None;
+                    app.autocomplete_pending_request_mode = None;
+                    app.autocomplete_pending_request_path = None;
+                    app.autocomplete_pending_context_key = None;
                 } else if app.autocomplete_detail_request_id == Some(request_id) {
                     if app.autocomplete_active {
                         app.remember_autocomplete_detail_cache(&items);
@@ -1085,11 +1114,27 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             }
             crate::lsp::LspEvent::SignatureHelpResponse {
                 request_id,
-                parameters,
+                help,
             } => {
                 if app.autocomplete_signature_request_id == Some(request_id) {
                     app.autocomplete_signature_request_id = None;
-                    app.update_ty_signature_help_autocomplete(parameters);
+                    if app.autocomplete_mode == crate::app::AutocompleteMode::LspContext {
+                        app.update_lsp_signature_help_autocomplete(help);
+                    } else {
+                        let parameters = help
+                            .signatures
+                            .get(help.active_signature)
+                            .or_else(|| help.signatures.first())
+                            .map(|signature| {
+                                signature
+                                    .parameters
+                                    .iter()
+                                    .map(|parameter| parameter.label.clone())
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        app.update_ty_signature_help_autocomplete(parameters);
+                    }
                     if let Some(w) = app.window.as_ref() {
                         w.request_redraw();
                     }
@@ -1108,14 +1153,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     let version = app.python_inlay_hint_pending_version;
                     if app.file_path.as_ref() == Some(&path) && app.editor.version == version {
                         let text = app.editor.get_full_text();
-                        let parsed =
-                            crate::app::python_positional_inlay_hints_from_lsp_with_offsets(
-                                &text,
-                                &app.editor.line_offsets,
-                                &hints,
-                            );
+                        let parsed = crate::app::lsp_inlay_hints_from_lsp_with_offsets(
+                            &app.file_extension,
+                            &text,
+                            &app.editor.line_offsets,
+                            &hints,
+                        );
                         app.python_inlay_hint_cache
-                            .insert(path.clone(), (version, range, parsed.clone()));
+                            .insert(
+                                (path.clone(), app.file_extension.clone()),
+                                (version, range, parsed.clone()),
+                            );
                         app.python_inlay_hints = parsed;
                         app.python_inlay_hint_path = Some(path);
                         app.python_inlay_hint_range = Some(range);
@@ -1126,10 +1174,15 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
                     }
                 }
             }
-            crate::lsp::LspEvent::ServerReady => {}
+            crate::lsp::LspEvent::ServerReady { .. } => {}
             crate::lsp::LspEvent::StatusChanged { .. } => {}
             crate::lsp::LspEvent::ConfigurationServed { .. } => {}
+            crate::lsp::LspEvent::ClosingLabels { .. } => {}
             crate::lsp::LspEvent::WorkspaceDiagnosticsDone { .. } => {}
+            crate::lsp::LspEvent::ReferencesResponse { .. } => {}
+            crate::lsp::LspEvent::PrepareRenameResponse { .. } => {}
+            crate::lsp::LspEvent::RenameResponse { .. } => {}
+            crate::lsp::LspEvent::FormattingResponse { .. } => {}
             crate::lsp::LspEvent::Log { .. } => {} // Fix All ответ
             crate::lsp::LspEvent::HoverResponse { request_id, text } => {
                 if let Some(ref t) = text {

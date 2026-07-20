@@ -62,6 +62,25 @@ struct PublishDiagnosticsParams<'a> {
 }
 
 #[derive(Deserialize)]
+struct ClosingLabelsFrame<'a> {
+    #[serde(borrow)]
+    params: ClosingLabelsParams<'a>,
+}
+
+#[derive(Deserialize)]
+struct ClosingLabelsParams<'a> {
+    uri: &'a str,
+    #[serde(default, borrow)]
+    labels: Vec<BorrowedClosingLabel<'a>>,
+}
+
+#[derive(Deserialize)]
+struct BorrowedClosingLabel<'a> {
+    label: Cow<'a, str>,
+    range: BorrowedRange,
+}
+
+#[derive(Deserialize)]
 struct WorkspaceDiagnosticFrame<'a> {
     #[serde(default, borrow)]
     result: Option<WorkspaceDiagnosticResult<'a>>,
@@ -249,19 +268,52 @@ fn parse_borrowed_diagnostic_value(v: &BorrowedDiagnostic<'_>) -> Diagnostic {
     }
 }
 
+pub(super) fn parse_closing_labels_frame(
+    body: &[u8],
+    server: LspServerKind,
+) -> Result<LspEvent, serde_json::Error> {
+    let frame: ClosingLabelsFrame<'_> = serde_json::from_slice(body)?;
+    let labels = frame
+        .params
+        .labels
+        .into_iter()
+        .map(|item| LspClosingLabel {
+            label: item.label.into_owned(),
+            start_line: item.range.start.line,
+            start_col: item.range.start.character,
+            end_line: item.range.end.line,
+            end_col: item.range.end.character,
+        })
+        .collect();
+    Ok(LspEvent::ClosingLabels {
+        server,
+        path: uri_to_path(frame.params.uri),
+        labels,
+    })
+}
+
+fn set_missing_diagnostic_sources(items: &mut [Diagnostic], server: LspServerKind) {
+    for item in items {
+        if item.source.is_none() {
+            item.source = Some(Arc::<str>::from(server.name()));
+        }
+    }
+}
+
 pub(super) fn parse_publish_diagnostics_frame(
     body: &[u8],
-    server_name: &'static str,
+    server: LspServerKind,
 ) -> Result<LspEvent, serde_json::Error> {
     let frame: PublishDiagnosticsFrame<'_> = serde_json::from_slice(body)?;
-    let items = frame
+    let mut items = frame
         .params
         .diagnostics
         .iter()
         .map(parse_borrowed_diagnostic_value)
         .collect::<Vec<_>>();
+    set_missing_diagnostic_sources(&mut items, server);
     Ok(LspEvent::Diagnostics {
-        server_name,
+        server,
         path: uri_to_path(frame.params.uri),
         version: frame.params.version,
         items,
@@ -271,7 +323,7 @@ pub(super) fn parse_publish_diagnostics_frame(
 
 pub(super) fn parse_workspace_diagnostics_frame(
     body: &[u8],
-    server_name: &'static str,
+    server: LspServerKind,
 ) -> Vec<LspEvent> {
     let Ok(frame) = serde_json::from_slice::<WorkspaceDiagnosticFrame<'_>>(body) else {
         return Vec::new();
@@ -285,7 +337,7 @@ pub(super) fn parse_workspace_diagnostics_frame(
         if let Some(uri) = item.uri {
             push_workspace_diagnostic_event(
                 &mut events,
-                server_name,
+                server,
                 uri,
                 item.kind,
                 item.version,
@@ -296,7 +348,7 @@ pub(super) fn parse_workspace_diagnostics_frame(
         for (uri, report) in item.related_documents {
             push_workspace_diagnostic_event(
                 &mut events,
-                server_name,
+                server,
                 uri.as_ref(),
                 report.kind,
                 report.version,
@@ -310,7 +362,7 @@ pub(super) fn parse_workspace_diagnostics_frame(
 
 fn push_workspace_diagnostic_event(
     events: &mut Vec<LspEvent>,
-    server_name: &'static str,
+    server: LspServerKind,
     uri: &str,
     kind: Option<&str>,
     version: Option<i32>,
@@ -320,11 +372,16 @@ fn push_workspace_diagnostic_event(
     if kind == Some("unchanged") {
         return;
     }
+    let mut diagnostics = items
+        .iter()
+        .map(parse_borrowed_diagnostic_value)
+        .collect::<Vec<_>>();
+    set_missing_diagnostic_sources(&mut diagnostics, server);
     events.push(LspEvent::Diagnostics {
-        server_name,
+        server,
         path: uri_to_path(uri),
         version,
-        items: items.iter().map(parse_borrowed_diagnostic_value).collect(),
+        items: diagnostics,
         result_id: result_id.map(str::to_string),
     });
 }
@@ -955,7 +1012,21 @@ pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCo
         .map(|items| items.iter().filter_map(parse_text_edit_value).collect())
         .unwrap_or_default();
 
-    let detail = completion_detail(v);
+    let mut detail = completion_detail(v);
+    let deprecated = v
+        .get("deprecated")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+        || v
+            .get("tags")
+            .and_then(|value| value.as_array())
+            .is_some_and(|tags| tags.iter().any(|tag| tag.as_u64() == Some(1)));
+    if deprecated {
+        detail = Some(match detail {
+            Some(detail) => format!("{detail}\nDeprecated"),
+            None => "Deprecated".to_string(),
+        });
+    }
     let kind = refine_completion_kind(
         completion_kind(v.get("kind").and_then(|value| value.as_u64())),
         &label,
@@ -973,18 +1044,47 @@ pub(super) fn parse_completion_item_value(v: &serde_json::Value) -> Option<LspCo
     })
 }
 
-pub(super) fn parse_completion_items(result: &serde_json::Value) -> Vec<LspCompletionItem> {
+pub(super) fn parse_completion_items(
+    result: &serde_json::Value,
+) -> (Vec<LspCompletionItem>, bool) {
     let items = if let Some(arr) = result.as_array() {
         arr
     } else if let Some(arr) = result.get("items").and_then(|value| value.as_array()) {
         arr
     } else {
-        return Vec::new();
+        return (Vec::new(), false);
     };
-    items
+    let is_incomplete = result
+        .get("isIncomplete")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let mut parsed = items
         .iter()
-        .filter_map(parse_completion_item_value)
-        .collect()
+        .enumerate()
+        .filter_map(|(index, value)| {
+            parse_completion_item_value(value).map(|item| {
+                (
+                    value
+                        .get("sortText")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string),
+                    index,
+                    item,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    parsed.sort_by(|left, right| {
+        left.0
+            .as_deref()
+            .unwrap_or("")
+            .cmp(right.0.as_deref().unwrap_or(""))
+            .then(left.1.cmp(&right.1))
+    });
+    (
+        parsed.into_iter().map(|(_, _, item)| item).collect(),
+        is_incomplete,
+    )
 }
 
 fn signature_parameter_name(label: &str) -> Option<String> {
@@ -1029,35 +1129,94 @@ fn parse_signature_parameter_label(
         .and_then(signature_parameter_name)
 }
 
-pub(super) fn parse_signature_help_parameters(result: &serde_json::Value) -> Vec<String> {
+fn lsp_markup_text(value: Option<&serde_json::Value>) -> Option<String> {
+    let value = value?;
+    value
+        .as_str()
+        .map(str::to_string)
+        .or_else(|| value.get("value").and_then(|value| value.as_str()).map(str::to_string))
+}
+
+pub(super) fn parse_signature_help(result: &serde_json::Value) -> LspSignatureHelp {
     let signatures = match result.get("signatures").and_then(|value| value.as_array()) {
         Some(signatures) if !signatures.is_empty() => signatures,
-        _ => return Vec::new(),
+        _ => return LspSignatureHelp::default(),
     };
     let active = result
         .get("activeSignature")
         .and_then(json_usize)
-        .unwrap_or(0);
-    let signature = signatures.get(active).or_else(|| signatures.first());
-    let Some(signature) = signature else {
-        return Vec::new();
-    };
-    let signature_label = signature
-        .get("label")
-        .and_then(|value| value.as_str())
-        .unwrap_or("");
-    let Some(parameters) = signature.get("parameters").and_then(|value| value.as_array()) else {
-        return Vec::new();
-    };
-    let mut out = Vec::with_capacity(parameters.len());
-    for parameter in parameters {
-        if let Some(name) = parse_signature_parameter_label(signature_label, parameter)
-            && !out.contains(&name)
-        {
-            out.push(name);
+        .unwrap_or(0)
+        .min(signatures.len().saturating_sub(1));
+    let active_parameter = result.get("activeParameter").and_then(json_usize);
+    let mut parsed = Vec::with_capacity(signatures.len());
+    for signature in signatures {
+        let label = signature
+            .get("label")
+            .and_then(|value| value.as_str())
+            .unwrap_or("")
+            .to_string();
+        let mut parameters = Vec::new();
+        if let Some(items) = signature.get("parameters").and_then(|value| value.as_array()) {
+            for parameter in items {
+                let Some(name) = parse_signature_parameter_label(&label, parameter) else {
+                    continue;
+                };
+                if parameters
+                    .iter()
+                    .any(|existing: &LspSignatureParameter| existing.label == name)
+                {
+                    continue;
+                }
+                parameters.push(LspSignatureParameter {
+                    label: name,
+                    documentation: lsp_markup_text(parameter.get("documentation")),
+                });
+            }
         }
+        parsed.push(LspSignature {
+            label,
+            documentation: lsp_markup_text(signature.get("documentation")),
+            parameters,
+        });
     }
-    out
+    LspSignatureHelp {
+        signatures: parsed,
+        active_signature: active,
+        active_parameter,
+    }
+}
+
+#[cfg(test)]
+pub(super) fn parse_signature_help_parameters(result: &serde_json::Value) -> Vec<String> {
+    let help = parse_signature_help(result);
+    let Some(signature) = help.signatures.get(help.active_signature) else {
+        return Vec::new();
+    };
+    signature
+        .parameters
+        .iter()
+        .map(|parameter| parameter.label.clone())
+        .collect()
+}
+
+pub(super) fn parse_definition_targets(v: &serde_json::Value) -> Vec<DefinitionTarget> {
+    if let Some(items) = v.as_array() {
+        return items.iter().filter_map(parse_definition_target).collect();
+    }
+    parse_definition_target(v).into_iter().collect()
+}
+
+pub(super) fn parse_prepare_rename_range(v: &serde_json::Value) -> Option<TextChange> {
+    let range = v.get("range").unwrap_or(v);
+    let start = range.get("start")?;
+    let end = range.get("end")?;
+    Some(TextChange {
+        start_line: json_u32_field(start, "line")?,
+        start_col: json_u32_field(start, "character")?,
+        end_line: json_u32_field(end, "line")?,
+        end_col: json_u32_field(end, "character")?,
+        new_text: String::new(),
+    })
 }
 
 fn parse_inlay_hint_label(v: &serde_json::Value) -> Option<String> {

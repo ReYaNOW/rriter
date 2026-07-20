@@ -18,15 +18,6 @@ fn highlighter_runtime_trace_should_log(text_len: usize, priority: bool, elapsed
 }
 
 impl Highlighter {
-    fn shrink_sync_byte_colors_for_small_text(&mut self) {
-        if self.sync_text.len() >= 512 * 1024 {
-            return;
-        }
-        let cap_limit = self.sync_text.len().saturating_mul(2).max(64 * 1024);
-        if self.sync_byte_colors_buf.capacity() > cap_limit {
-            self.sync_byte_colors_buf.shrink_to_fit();
-        }
-    }
 
     pub fn restore_cached_view(&mut self, version: u64, text: String, ext: String) {
         if highlighter_runtime_trace_should_log(text.len(), false, 0.0) {
@@ -1564,6 +1555,43 @@ mod tests {
         assert!(highlighter.pending_priority_anchor.is_none());
         assert!(highlighter.is_complete);
         assert_eq!(highlighter.current_version, 77);
+    }
+
+    #[test]
+    fn dart_lsp_completion_uses_syntax_tree_for_comments_strings_and_interpolation() {
+        let mut highlighter = Highlighter::new();
+        let text = "void main() {
+  // Wid
+  print('Wid');
+  print('${Wid}');
+}
+";
+        highlighter.reset(101, text.to_string(), "dart".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(101, std::time::Duration::from_secs(2)));
+
+        let comment_cursor = text.find("// Wid").unwrap() + "// Wid".len();
+        let string_cursor = text.find("'Wid'").unwrap() + "'Wid".len();
+        let interpolation_cursor = text.find("${Wid}").unwrap() + "${Wid".len();
+        assert!(!highlighter.lsp_completion_allowed_at_cursor("dart", comment_cursor));
+        assert!(!highlighter.lsp_completion_allowed_at_cursor("dart", string_cursor));
+        assert!(highlighter.lsp_completion_allowed_at_cursor("dart", interpolation_cursor));
+    }
+
+    #[test]
+    fn dart_signature_help_is_limited_to_argument_lists() {
+        let mut highlighter = Highlighter::new();
+        let text = "void main() {
+  build(title: 'x', count: 2);
+  final outside = 1;
+}
+";
+        highlighter.reset(102, text.to_string(), "dart".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(102, std::time::Duration::from_secs(2)));
+
+        let argument_cursor = text.find("count: 2").unwrap() + "count".len();
+        let outside_cursor = text.find("outside").unwrap() + "outside".len();
+        assert!(highlighter.lsp_signature_help_allowed_at_cursor("dart", argument_cursor));
+        assert!(!highlighter.lsp_signature_help_allowed_at_cursor("dart", outside_cursor));
     }
 
 }
