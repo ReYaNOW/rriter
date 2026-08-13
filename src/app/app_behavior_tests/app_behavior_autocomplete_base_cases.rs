@@ -1,5 +1,6 @@
 use super::*;
 use crate::platform::Clipboard;
+use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 fn test_theme() -> crate::renderer::Theme {
@@ -220,6 +221,97 @@ fn test_app() -> Option<App> {
         active_tab: 0,
         run_ide_on_startup: false,
     })
+}
+
+fn seed_inlay_hint_state(
+    app: &mut App,
+    path: &str,
+    extension: &str,
+    hints: Vec<PythonInlayHint>,
+) {
+    let path = PathBuf::from(path);
+    let range = (0, app.editor.line_offsets.len() as u32);
+    let version = app.editor.version;
+    app.file_path = Some(path.clone());
+    app.file_extension = extension.to_string();
+    app.python_inlay_hints = hints;
+    app.python_inlay_hint_path = Some(path.clone());
+    app.python_inlay_hint_range = Some(range);
+    app.python_inlay_hint_version = version;
+    app.python_inlay_hint_cache.insert(
+        (path, extension.to_string()),
+        (version, range, app.python_inlay_hints.clone()),
+    );
+}
+
+#[test]
+fn local_inlay_hint_shift_keeps_dart_hint_current_and_invalidates_cached_range() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("call(value)\n");
+    seed_inlay_hint_state(
+        &mut app,
+        "inlay.dart",
+        "dart",
+        vec![PythonInlayHint {
+            byte_offset: 5,
+            label: Arc::<str>::from("value: "),
+        }],
+    );
+    let old_version = app.editor.version;
+
+    let _ = app.editor.replace_range(0, 0, "x");
+    assert_ne!(app.editor.version, old_version);
+    let edits = std::mem::take(&mut app.editor.sync_edits);
+    app.shift_current_python_inlay_hints_for_edits(&edits);
+
+    assert_eq!(app.python_inlay_hints[0].byte_offset, 6);
+    assert_eq!(app.python_inlay_hint_version, app.editor.version);
+    assert!(
+        app.python_inlay_hint_path.as_ref() == app.file_path.as_ref()
+            && app.python_inlay_hint_version == app.editor.version
+    );
+    assert_eq!(app.python_inlay_hint_range, None);
+    assert!(app.python_inlay_hint_cache.is_empty());
+}
+
+#[test]
+fn local_inlay_hint_delete_shifts_survivor_and_removes_intersected_hint() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.editor = editor_with("abcdefghij\n");
+    seed_inlay_hint_state(
+        &mut app,
+        "inlay.py",
+        "py",
+        vec![
+            PythonInlayHint {
+                byte_offset: 2,
+                label: Arc::<str>::from("removed: "),
+            },
+            PythonInlayHint {
+                byte_offset: 8,
+                label: Arc::<str>::from("kept: "),
+            },
+        ],
+    );
+
+    let _ = app.editor.replace_range(1, 4, "");
+    let edits = std::mem::take(&mut app.editor.sync_edits);
+    app.shift_current_python_inlay_hints_for_edits(&edits);
+
+    assert_eq!(
+        app.python_inlay_hints,
+        vec![PythonInlayHint {
+            byte_offset: 5,
+            label: Arc::<str>::from("kept: "),
+        }]
+    );
+    assert_eq!(app.python_inlay_hint_version, app.editor.version);
+    assert_eq!(app.python_inlay_hint_range, None);
+    assert!(app.python_inlay_hint_cache.is_empty());
 }
 
 fn completion(

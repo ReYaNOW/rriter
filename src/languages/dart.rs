@@ -26,10 +26,18 @@ thread_local! {
         std::cell::RefCell::new(tree_sitter::QueryCursor::new());
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum HoverParseMode {
+    CompilationUnit,
+    StatementFragment,
+    TypeFragment,
+}
+
 pub(crate) fn push_hover_highlight_spans(
     source: &str,
     offset: usize,
     spans: &mut Vec<crate::highlighter::ColorSpan>,
+    parse_mode: HoverParseMode,
 ) {
     if source.is_empty() {
         return;
@@ -40,24 +48,66 @@ pub(crate) fn push_hover_highlight_spans(
                 let mut parser = parser_cell.borrow_mut();
                 let queries = queries_cell.borrow();
                 let mut cursor = cursor_cell.borrow_mut();
-                let Some(tree) = parser.parse(source, None) else {
+                let Some(mut tree) = parser.parse(source, None) else {
                     return;
                 };
+
+                // Dartdoc examples can be executable statements, while Type metadata contains
+                // standalone type expressions. Parse each known hover context in matching Dart
+                // syntax instead of applying statement recovery to every errored fragment.
+                const BODY_PREFIX: &str = "void __rriter_hover__() {\n";
+                const TYPE_PREFIX: &str = "void __rriter_hover__(";
+                const TYPE_SUFFIX: &str = " __rriter_value__) {}";
+                let mut wrapped_source = None;
+                let mut source_start = 0usize;
+                let wrapper = match parse_mode {
+                    HoverParseMode::CompilationUnit => None,
+                    HoverParseMode::StatementFragment if tree.root_node().has_error() => {
+                        Some((BODY_PREFIX, "\n}"))
+                    }
+                    HoverParseMode::StatementFragment => None,
+                    HoverParseMode::TypeFragment => Some((TYPE_PREFIX, TYPE_SUFFIX)),
+                };
+                if let Some((prefix, suffix)) = wrapper {
+                    let mut wrapped = String::with_capacity(
+                        prefix
+                            .len()
+                            .saturating_add(source.len())
+                            .saturating_add(suffix.len()),
+                    );
+                    wrapped.push_str(prefix);
+                    wrapped.push_str(source);
+                    wrapped.push_str(suffix);
+                    if let Some(wrapped_tree) = parser.parse(&wrapped, None)
+                        && !wrapped_tree.root_node().has_error()
+                    {
+                        tree = wrapped_tree;
+                        source_start = prefix.len();
+                        wrapped_source = Some(wrapped);
+                    }
+                }
+
+                let parse_source = wrapped_source.as_deref().unwrap_or(source);
+                let source_end = source_start.saturating_add(source.len());
                 for query in queries.iter() {
-                    let mut matches = cursor.matches(query, tree.root_node(), source.as_bytes());
+                    let mut matches =
+                        cursor.matches(query, tree.root_node(), parse_source.as_bytes());
                     while let Some(query_match) = matches.next() {
                         for capture in query_match.captures {
                             let name = query.capture_names()[capture.index as usize];
                             let start = capture.node.start_byte();
                             let end = capture.node.end_byte();
-                            let Some(node_text) = source.get(start..end) else {
+                            if start < source_start || end > source_end {
+                                continue;
+                            }
+                            let Some(node_text) = parse_source.get(start..end) else {
                                 continue;
                             };
                             let color = crate::highlighter::hover_capture_color(name, node_text);
                             if color != crate::highlighter::DRACULA_FG {
                                 spans.push(crate::highlighter::ColorSpan {
-                                    start: offset + start,
-                                    end: offset + end,
+                                    start: offset + start - source_start,
+                                    end: offset + end - source_start,
                                     color,
                                 });
                             }
@@ -1127,6 +1177,218 @@ mod tests {
                 "missing Dart hover syntax color {color:?}: {spans:?}"
             );
         }
+    }
+
+    fn hover_color_at(
+        spans: &[crate::highlighter::ColorSpan],
+        byte: usize,
+    ) -> [f32; 4] {
+        spans
+            .iter()
+            .find(|span| span.start <= byte && byte < span.end)
+            .map_or(crate::highlighter::DRACULA_FG, |span| span.color)
+    }
+
+    #[test]
+    fn dart_lsp_hover_dedents_common_fenced_indent_and_preserves_relative_indent() {
+        let raw = "```dart\n    class RestClient {\n\n      RestClient(Dio dio, {String? baseUrl})\n    }\n```";
+        let (text, _spans, kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert_eq!(
+            text,
+            "class RestClient {\n\n  RestClient(Dio dio, {String? baseUrl})\n}"
+        );
+        assert!(
+            kinds
+                .iter()
+                .all(|kind| *kind == crate::lsp::HoverLineKindPublic::Code)
+        );
+    }
+
+    #[test]
+    fn dart_lsp_hover_does_not_dedent_non_dart_fences() {
+        let raw = "```dart\nclass Dio {}\n```\n```json\n    {\"name\": \"dio\"}\n```";
+        let (text, _spans, kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert!(text.contains("\n    {\"name\": \"dio\"}"));
+        assert_eq!(kinds[1], crate::lsp::HoverLineKindPublic::Text);
+    }
+
+    #[test]
+    fn dart_lsp_hover_drops_only_immediate_redundant_type_metadata() {
+        let raw = "```dart\nDio dio\n```\n\nType: `Dio`";
+        let (text, spans, kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert_eq!(text, "Dio dio");
+        assert_eq!(kinds, vec![crate::lsp::HoverLineKindPublic::Code]);
+        assert_eq!(hover_color_at(&spans, 0), crate::highlighter::DRACULA_CYAN);
+    }
+
+    #[test]
+    fn dart_lsp_hover_keeps_non_redundant_type_metadata() {
+        let raw = "```dart\nDio dio\n```\nType: `Dio?`";
+        let (text, _spans, _kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert_eq!(text, "Dio dio\nType: Dio?");
+    }
+
+    #[test]
+    fn dart_lsp_hover_keeps_unrelated_late_type_metadata() {
+        let raw = "```dart\nDio dio\n```\nParameter documentation.\n\nType: `Dio`";
+        let (text, _spans, _kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert_eq!(text, "Dio dio\nParameter documentation.\n\nType: Dio");
+    }
+
+    #[test]
+    fn dart_lsp_hover_strips_only_paired_declared_in_emphasis() {
+        let raw = "```dart\nclass Dio {}\n```\nDeclared in *package**:dio**/src/dio.dart*.\nDeclared in _dart:core_.";
+        let (text, _spans, _kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        assert!(text.contains("Declared in package:dio/src/dio.dart."));
+        assert!(text.contains("Declared in dart:core."));
+        assert!(!text.contains('*'));
+        assert!(!text.contains("_dart:core_"));
+    }
+
+    #[test]
+    fn dart_lsp_hover_preserves_identifier_underscores_and_unmatched_emphasis() {
+        let raw = "```dart\nclass Dio {}\n```\nusers_employees_client.dart\nfoo_bar_\n_privateName\nsome__name\nunmatched * marker\nunmatched _ marker";
+        let (text, _spans, _kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+
+        for expected in [
+            "users_employees_client.dart",
+            "foo_bar_",
+            "_privateName",
+            "some__name",
+            "unmatched * marker",
+            "unmatched _ marker",
+        ] {
+            assert!(text.lines().any(|line| line == expected), "missing {expected:?}: {text:?}");
+        }
+    }
+
+    #[test]
+    fn dart_lsp_hover_inline_type_loses_backticks_and_keeps_type_color() {
+        let raw = "```dart\nvar value\n```\nType: `String`";
+        let (text, spans, _kinds, inline) = crate::lsp::highlight_hover_text(raw);
+        let string_start = text.find("String").expect("normalized type");
+
+        assert_eq!(text, "var value\nType: String");
+        assert_eq!(inline, vec![(string_start, string_start + "String".len())]);
+        assert_eq!(
+            hover_color_at(&spans, string_start),
+            crate::highlighter::DRACULA_CYAN
+        );
+    }
+
+    #[test]
+    fn dart_hover_type_fragments_use_type_parse_context() {
+        for source in ["String", "Dio", "List<String>"] {
+            let mut spans = Vec::new();
+            push_hover_highlight_spans(source, 0, &mut spans, HoverParseMode::TypeFragment);
+
+            assert_eq!(
+                hover_color_at(&spans, 0),
+                crate::highlighter::DRACULA_CYAN,
+                "type fragment must keep Dart type semantics: {source:?}"
+            );
+            if let Some(inner) = source.find("String").filter(|&offset| offset > 0) {
+                assert_eq!(
+                    hover_color_at(&spans, inner),
+                    crate::highlighter::DRACULA_CYAN
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn dart_hover_statement_fragment_uses_statement_parse_context() {
+        let snippet = "dio.options.baseUrl = \"https://pub.dev\";\ndio.options.connectTimeout = const Duration(seconds: 5);\ndio.options.receiveTimeout = const Duration(seconds: 5);";
+        assert!(parse(snippet).root_node().has_error());
+
+        let mut spans = Vec::new();
+        push_hover_highlight_spans(
+            snippet,
+            0,
+            &mut spans,
+            HoverParseMode::StatementFragment,
+        );
+        let offsets = |token: &str| {
+            snippet
+                .match_indices(token)
+                .map(|(offset, _)| offset)
+                .collect::<Vec<_>>()
+        };
+
+        for offset in offsets("dio") {
+            assert_eq!(hover_color_at(&spans, offset), crate::highlighter::DRACULA_FG);
+        }
+        for member in ["baseUrl", "connectTimeout", "receiveTimeout"] {
+            assert_eq!(
+                hover_color_at(&spans, offsets(member)[0]),
+                crate::highlighter::DRACULA_FG
+            );
+        }
+        assert_eq!(
+            hover_color_at(&spans, offsets("Duration")[0]),
+            crate::highlighter::DRACULA_CYAN
+        );
+        assert_eq!(
+            hover_color_at(&spans, offsets("https://pub.dev")[0]),
+            crate::highlighter::DRACULA_YELLOW
+        );
+        assert_eq!(
+            hover_color_at(&spans, offsets("const")[0]),
+            crate::highlighter::DRACULA_PINK
+        );
+    }
+
+    #[test]
+    fn dart_lsp_hover_options_doc_snippet_uses_consistent_statement_highlighting() {
+        let raw = "```dart\nabstract class Dio\n```\nDeclared in *package:dio/src/dio.dart*.\n\n---\nThe [Dio.options] can be updated in anytime:\n```dart\ndio.options.baseUrl = \"https://pub.dev\";\ndio.options.connectTimeout = const Duration(seconds: 5);\ndio.options.receiveTimeout = const Duration(seconds: 5);\n```";
+        let (text, spans, _kinds, _inline) = crate::lsp::highlight_hover_text(raw);
+        let snippet_start = text
+            .find("dio.options.baseUrl")
+            .expect("rendered hover must contain the Dio options example");
+        let snippet = &text[snippet_start..];
+
+        let token_offsets = |token: &str| {
+            snippet
+                .match_indices(token)
+                .map(|(offset, _)| snippet_start + offset)
+                .collect::<Vec<_>>()
+        };
+        let dio_colors = token_offsets("dio")
+            .into_iter()
+            .map(|byte| hover_color_at(&spans, byte))
+            .collect::<Vec<_>>();
+        let member_colors = ["baseUrl", "connectTimeout", "receiveTimeout"]
+            .into_iter()
+            .map(|token| hover_color_at(&spans, token_offsets(token)[0]))
+            .collect::<Vec<_>>();
+
+        assert_eq!(dio_colors.len(), 3);
+        assert!(
+            dio_colors.windows(2).all(|colors| colors[0] == colors[1]),
+            "same-role dio identifiers must share one color: {dio_colors:?}"
+        );
+        assert!(
+            member_colors.windows(2).all(|colors| colors[0] == colors[1]),
+            "same-role option members must share one color: {member_colors:?}"
+        );
+        assert_eq!(
+            hover_color_at(&spans, token_offsets("Duration")[0]),
+            crate::highlighter::DRACULA_CYAN
+        );
+        assert_eq!(
+            hover_color_at(&spans, token_offsets("https://pub.dev")[0]),
+            crate::highlighter::DRACULA_YELLOW
+        );
+        assert_eq!(
+            hover_color_at(&spans, token_offsets("const")[0]),
+            crate::highlighter::DRACULA_PINK
+        );
     }
 
     #[test]

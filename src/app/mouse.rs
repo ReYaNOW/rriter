@@ -35,6 +35,54 @@ fn panel_scroll_rect(
     }
 }
 
+#[inline(always)]
+pub(crate) fn ide_root_resize_hover_enabled(
+    is_ide_mode: bool,
+    show_settings: bool,
+    popup_blocks_background: bool,
+    blocking_modal_open: bool,
+) -> bool {
+    is_ide_mode && !show_settings && !popup_blocks_background && !blocking_modal_open
+}
+
+#[inline(always)]
+pub(crate) fn ide_root_resize_cursor(
+    mx: f32,
+    my: f32,
+    scale: f32,
+    window_height: f32,
+    panel_left_w: f32,
+    panel_bottom_h: f32,
+    bottom_terminal_transparent: bool,
+) -> Option<winit::window::CursorIcon> {
+    let sidebar_w = 48.0 * scale;
+    let effective_bottom_h = if bottom_terminal_transparent {
+        0.0
+    } else {
+        panel_bottom_h
+    };
+
+    if panel_left_w > 0.0 {
+        let resize_x = sidebar_w + panel_left_w;
+        if (mx - resize_x).abs() < 3.0 * scale
+            && my >= 0.0
+            && my < window_height - effective_bottom_h
+        {
+            return Some(winit::window::CursorIcon::EwResize);
+        }
+    }
+
+    if panel_bottom_h > 0.0 {
+        let resize_y =
+            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, scale);
+        if (my - resize_y).abs() < 6.0 * scale && mx >= sidebar_w {
+            return Some(winit::window::CursorIcon::NsResize);
+        }
+    }
+
+    None
+}
+
 pub(crate) fn app_panel_scroll_rect(
     app: &App,
     panel_id: crate::app::PanelId,
@@ -285,7 +333,56 @@ pub use hover_state_core::{hover_source_line_y_band, is_in_hover_popup_or_bridge
 
 #[cfg(test)]
 mod panel_geometry_tests {
-    use super::{begin_scrollbar_drag, panel_scroll_rect, update_scrollbar_drag};
+    use super::{
+        begin_scrollbar_drag, ide_root_resize_cursor, ide_root_resize_hover_enabled,
+        panel_scroll_rect, update_scrollbar_drag,
+    };
+
+    #[test]
+    fn root_resize_hover_gate_respects_mode_and_blocking_ui() {
+        assert!(ide_root_resize_hover_enabled(true, false, false, false));
+        assert!(!ide_root_resize_hover_enabled(false, false, false, false));
+        assert!(!ide_root_resize_hover_enabled(true, true, false, false));
+        assert!(!ide_root_resize_hover_enabled(true, false, true, false));
+        assert!(!ide_root_resize_hover_enabled(true, false, false, true));
+    }
+
+    #[test]
+    fn bottom_splitter_hover_uses_resize_cursor_before_drag() {
+        let window_height = 900.0;
+        let panel_bottom_h = 180.0;
+        let resize_y =
+            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, 1.0);
+
+        assert_eq!(
+            ide_root_resize_cursor(
+                500.0,
+                resize_y,
+                1.0,
+                window_height,
+                0.0,
+                panel_bottom_h,
+                false,
+            ),
+            Some(winit::window::CursorIcon::NsResize)
+        );
+    }
+
+    #[test]
+    fn side_splitter_hover_uses_resize_cursor_before_drag() {
+        assert_eq!(
+            ide_root_resize_cursor(248.0, 120.0, 1.0, 900.0, 200.0, 0.0, false),
+            Some(winit::window::CursorIcon::EwResize)
+        );
+    }
+
+    #[test]
+    fn root_resize_hover_ignores_non_edges() {
+        assert_eq!(
+            ide_root_resize_cursor(500.0, 300.0, 1.0, 900.0, 200.0, 180.0, false),
+            None
+        );
+    }
 
     #[test]
     fn shared_scrollbar_drag_preserves_pointer_offset_across_moves() {

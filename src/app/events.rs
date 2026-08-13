@@ -1063,17 +1063,17 @@ impl ApplicationHandler for App {
 
                 // Проверяем hover на зонах resize IDE-панелей — они требуют специальный курсор
                 let mut ide_resize_cursor: Option<winit::window::CursorIcon> = None;
-                if self.is_ide_mode
-                    && !self.show_welcome
-                    && !self.show_settings
-                    && !popup_blocks_background
-                    && !self.database_blocking_modal_open()
-                {
+                let blocking_modal_open = self.database_blocking_modal_open();
+                if crate::app::mouse::ide_root_resize_hover_enabled(
+                    self.is_ide_mode,
+                    self.show_settings,
+                    popup_blocks_background,
+                    blocking_modal_open,
+                ) {
                     let r = self.renderer.as_ref().unwrap();
                     let mx = r.last_mouse_x;
                     let my = r.last_mouse_y;
                     let s = r.scale_factor;
-                    let sb_w = 48.0 * s;
 
                     let panel_left_w = self.ide_panel.visible_left_width(s);
                     let panel_bottom_h = if self.ide_panel.any_bottom_open() {
@@ -1083,52 +1083,42 @@ impl ApplicationHandler for App {
                     };
                     let wh = self.window.as_ref().unwrap().inner_size().height as f32;
 
-                    let effective_bottom_h = if self.ide_panel.bottom_terminal_is_transparent() {
-                        0.0
-                    } else {
-                        panel_bottom_h
-                    };
+                    ide_resize_cursor = crate::app::mouse::ide_root_resize_cursor(
+                        mx,
+                        my,
+                        s,
+                        wh,
+                        panel_left_w,
+                        panel_bottom_h,
+                        self.ide_panel.bottom_terminal_is_transparent(),
+                    );
 
-                    if panel_left_w > 0.0 {
-                        let resize_x = sb_w + panel_left_w;
-                        if (mx - resize_x).abs() < 3.0 * s
-                            && my >= 0.0
-                            && my < wh - effective_bottom_h
+                    if !self.show_welcome {
+                        if ide_resize_cursor.is_none()
+                            && self.ui_registry.find_at(mx, my)
+                                == Some(crate::ui_system::UiId::GitGraphResize)
                         {
-                            ide_resize_cursor = Some(winit::window::CursorIcon::EwResize);
+                            ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                         }
-                    }
-                    if panel_bottom_h > 0.0 && ide_resize_cursor.is_none() {
-                        let resize_y =
-                            crate::render_view::ide_bottom_panel_y(wh, panel_bottom_h, s);
-                        if (my - resize_y).abs() < 6.0 * s && mx >= sb_w {
+                        let query_results_resizing =
+                            self.tabs.get(self.active_tab).is_some_and(|tab| {
+                                matches!(
+                                    &tab.kind,
+                                    crate::app::EditorTabKind::DatabaseQuery(_, state)
+                                        if state.result_view.is_resizing_height
+                                )
+                            });
+                        if ide_resize_cursor.is_none()
+                            && (query_results_resizing
+                                || self.ui_registry.find_at(mx, my)
+                                    == Some(crate::ui_system::UiId::DatabaseQueryResultResize))
+                        {
                             ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
                         }
                     }
-                    if ide_resize_cursor.is_none()
-                        && self.ui_registry.find_at(mx, my)
-                            == Some(crate::ui_system::UiId::GitGraphResize)
-                    {
-                        ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
-                    }
-                    let query_results_resizing =
-                        self.tabs.get(self.active_tab).is_some_and(|tab| {
-                            matches!(
-                                &tab.kind,
-                                crate::app::EditorTabKind::DatabaseQuery(_, state)
-                                    if state.result_view.is_resizing_height
-                            )
-                        });
-                    if ide_resize_cursor.is_none()
-                        && (query_results_resizing
-                            || self.ui_registry.find_at(mx, my)
-                                == Some(crate::ui_system::UiId::DatabaseQueryResultResize))
-                    {
-                        ide_resize_cursor = Some(winit::window::CursorIcon::NsResize);
-                    }
                 }
 
-                let cursor_icon = if self.database_blocking_modal_open() {
+                let cursor_icon = if blocking_modal_open {
                     let (mx, my) = self.renderer.as_ref().map_or((-1.0, -1.0), |renderer| {
                         (renderer.last_mouse_x, renderer.last_mouse_y)
                     });

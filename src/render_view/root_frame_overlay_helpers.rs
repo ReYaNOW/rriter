@@ -44,18 +44,60 @@ impl Renderer {
         drew
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_empty_ide_frame(
         &mut self,
         ide_panel: &crate::app::IdePanelState,
         editor: &crate::editor::Editor,
+        lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        lsp_has_diagnostics: bool,
         mx: f32,
         my: f32,
         blink_alpha: f32,
         panel_left_w: f32,
+        panel_bottom_h: f32,
+        continue_bottom_chrome: bool,
+        modal_overlay_open: bool,
         s: f32,
     ) -> (bool, Vec<(usize, usize)>) {
         self.draw_empty_ide(panel_left_w);
+
+        if continue_bottom_chrome {
+            let (ui_mx, ui_my) = if modal_overlay_open {
+                (-1.0, -1.0)
+            } else {
+                (mx, my)
+            };
+            let is_ui_disabled = ide_panel.terminal_focused;
+            self.draw_ide_bottom_panel(
+                ide_panel,
+                lsp,
+                ui_registry,
+                lsp_has_diagnostics,
+                s,
+                ui_mx,
+                ui_my,
+                panel_bottom_h,
+                is_ui_disabled,
+                blink_alpha,
+                None,
+            );
+            self.draw_status_bar(
+                editor,
+                None,
+                lsp,
+                ui_registry,
+                s,
+                ui_mx,
+                ui_my,
+                panel_bottom_h,
+                None,
+                None,
+                None,
+            );
+        }
+
         if self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha) {
             self.flush();
             return (ui_registry.wants_pointer(), Vec::new());
@@ -69,6 +111,22 @@ impl Renderer {
                 self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
             self.flush();
             return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
+        }
+        if continue_bottom_chrome {
+            self.flush();
+            self.register_root_resize_blockers(
+                ide_panel,
+                ui_registry,
+                s,
+                mx,
+                my,
+                panel_left_w,
+                panel_bottom_h,
+                ide_panel.terminal_focused,
+                modal_overlay_open,
+                self.height,
+            );
+            return (ui_registry.wants_pointer(), Vec::new());
         }
         (false, Vec::new())
     }

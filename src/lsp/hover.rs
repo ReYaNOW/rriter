@@ -127,13 +127,91 @@ fn looks_like_dart_hover(msg: &str) -> bool {
     msg.lines().any(|line| line.trim() == "```dart")
 }
 
+fn markdown_emphasis_word_char(ch: char) -> bool {
+    ch.is_alphanumeric() || ch == '_'
+}
+
+fn strip_matched_markdown_emphasis(segment: &str) -> String {
+    #[derive(Clone, Copy)]
+    struct Delimiter {
+        start: usize,
+        end: usize,
+        marker: u8,
+        run_len: usize,
+        can_open: bool,
+        can_close: bool,
+    }
+
+    let bytes = segment.as_bytes();
+    let mut delimiters = Vec::new();
+    let mut byte = 0usize;
+    while byte < bytes.len() {
+        let marker = bytes[byte];
+        if marker != b'*' && marker != b'_' {
+            byte += 1;
+            continue;
+        }
+        let mut end = byte + 1;
+        while end < bytes.len() && bytes[end] == marker {
+            end += 1;
+        }
+        let run_len = end - byte;
+        if run_len <= 2 {
+            let prev = segment[..byte].chars().next_back();
+            let next = segment[end..].chars().next();
+            let intraword_underscore = marker == b'_'
+                && prev.is_some_and(markdown_emphasis_word_char)
+                && next.is_some_and(markdown_emphasis_word_char);
+            delimiters.push(Delimiter {
+                start: byte,
+                end,
+                marker,
+                run_len,
+                can_open: next.is_some_and(|ch| !ch.is_whitespace()) && !intraword_underscore,
+                can_close: prev.is_some_and(|ch| !ch.is_whitespace()) && !intraword_underscore,
+            });
+        }
+        byte = end;
+    }
+
+    let mut matched = vec![false; delimiters.len()];
+    let mut stacks: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
+    for (idx, delimiter) in delimiters.iter().enumerate() {
+        let marker_offset = usize::from(delimiter.marker == b'_') * 2;
+        let stack_idx = marker_offset + delimiter.run_len - 1;
+        if delimiter.can_close
+            && let Some(open_idx) = stacks[stack_idx].pop()
+        {
+            matched[open_idx] = true;
+            matched[idx] = true;
+        } else if delimiter.can_open {
+            stacks[stack_idx].push(idx);
+        }
+    }
+
+    if !matched.iter().any(|is_matched| *is_matched) {
+        return segment.to_string();
+    }
+    let mut out = String::with_capacity(segment.len());
+    let mut from = 0usize;
+    for (delimiter, is_matched) in delimiters.iter().zip(matched) {
+        if !is_matched {
+            continue;
+        }
+        out.push_str(&segment[from..delimiter.start]);
+        from = delimiter.end;
+    }
+    out.push_str(&segment[from..]);
+    out
+}
+
 fn normalize_markdown_inline_code(line: &str) -> (String, Vec<(usize, usize)>) {
     let mut out = String::with_capacity(line.len());
     let mut ranges = Vec::new();
     let mut from = 0usize;
     while let Some(open_rel) = line[from..].find('`') {
         let open = from + open_rel;
-        out.push_str(&line[from..open]);
+        out.push_str(&strip_matched_markdown_emphasis(&line[from..open]));
         let body_start = open + 1;
         let Some(close_rel) = line[body_start..].find('`') else {
             out.push_str(&line[open..]);
@@ -147,8 +225,131 @@ fn normalize_markdown_inline_code(line: &str) -> (String, Vec<(usize, usize)>) {
         }
         from = close + 1;
     }
-    out.push_str(&line[from..]);
+    out.push_str(&strip_matched_markdown_emphasis(&line[from..]));
     (out, ranges)
+}
+
+fn leading_markdown_code_indent(line: &str) -> &str {
+    let end = line
+        .char_indices()
+        .find_map(|(idx, ch)| (!matches!(ch, ' ' | '\t')).then_some(idx))
+        .unwrap_or(line.len());
+    &line[..end]
+}
+
+fn common_markdown_code_indent<'a>(lines: &[&'a str]) -> &'a str {
+    let mut common: Option<&'a str> = None;
+    for line in lines.iter().copied().filter(|line| !line.trim().is_empty()) {
+        let indent = leading_markdown_code_indent(line);
+        common = Some(match common {
+            None => indent,
+            Some(previous) => {
+                let len = previous
+                    .as_bytes()
+                    .iter()
+                    .zip(indent.as_bytes())
+                    .take_while(|(left, right)| left == right)
+                    .count();
+                &previous[..len]
+            }
+        });
+        if common == Some("") {
+            break;
+        }
+    }
+    common.unwrap_or("")
+}
+
+fn normalize_dart_fenced_indentation(msg: &str) -> String {
+    let lines = msg.lines().collect::<Vec<_>>();
+    let mut out = String::with_capacity(msg.len());
+    let mut line_idx = 0usize;
+    while line_idx < lines.len() {
+        let raw = lines[line_idx];
+        out.push_str(raw);
+        out.push('\n');
+        if raw.trim() != "```dart" {
+            line_idx += 1;
+            continue;
+        }
+
+        line_idx += 1;
+        let block_start = line_idx;
+        while line_idx < lines.len() && !lines[line_idx].trim().starts_with("```") {
+            line_idx += 1;
+        }
+        let block = &lines[block_start..line_idx];
+        let common_indent = common_markdown_code_indent(block);
+        for line in block {
+            out.push_str(line.strip_prefix(common_indent).unwrap_or(line));
+            out.push('\n');
+        }
+        if line_idx < lines.len() {
+            out.push_str(lines[line_idx]);
+            out.push('\n');
+            line_idx += 1;
+        }
+    }
+    out.truncate(out.trim_end_matches('\n').len());
+    out
+}
+
+fn normalized_dart_type_for_compare(value: &str) -> String {
+    value.chars().filter(|ch| !ch.is_whitespace()).collect()
+}
+
+fn dart_declaration_reports_type(declaration: &str, metadata: &str) -> bool {
+    let trimmed = declaration.trim().trim_end_matches(';').trim();
+    if trimmed.is_empty()
+        || trimmed.ends_with(')')
+        || trimmed.ends_with('}')
+        || trimmed.ends_with('{')
+        || trimmed.contains('=')
+    {
+        return false;
+    }
+
+    let Some((mut type_part, name)) = trimmed.rsplit_once(char::is_whitespace) else {
+        return false;
+    };
+    let mut name_chars = name.chars();
+    let Some(first) = name_chars.next() else {
+        return false;
+    };
+    if !(first == '_' || first == '$' || first.is_alphabetic())
+        || !name_chars.all(|ch| ch == '_' || ch == '$' || ch.is_alphanumeric())
+    {
+        return false;
+    }
+
+    type_part = type_part.trim_end();
+    loop {
+        let Some((head, tail)) = type_part.split_once(char::is_whitespace) else {
+            break;
+        };
+        if matches!(
+            head,
+            "const" | "covariant" | "external" | "final" | "late" | "required" | "static"
+        ) {
+            type_part = tail.trim_start();
+        } else {
+            break;
+        }
+    }
+    !type_part.is_empty()
+        && !matches!(
+            type_part,
+            "class" | "enum" | "extension" | "mixin" | "typedef" | "var"
+        )
+        && !type_part
+            .chars()
+            .any(|ch| matches!(ch, '(' | ')' | '{' | '}'))
+        && normalized_dart_type_for_compare(type_part) == normalized_dart_type_for_compare(metadata)
+}
+
+fn dart_type_metadata_value(line: &str) -> Option<&str> {
+    let value = line.trim().strip_prefix("Type:")?.trim();
+    (!value.is_empty()).then_some(value)
 }
 
 fn highlight_dart_hover_doc(
@@ -159,27 +360,48 @@ fn highlight_dart_hover_doc(
     Vec<HoverLineKindPublic>,
     Vec<(usize, usize)>,
 ) {
-    let mut text = String::with_capacity(msg.len());
+    let normalized_msg = normalize_dart_fenced_indentation(msg);
+    let mut text = String::with_capacity(normalized_msg.len());
     let mut line_kinds = Vec::new();
     let mut inline_code_ranges = Vec::new();
+    let mut inline_type_ranges = Vec::new();
     let mut in_fence = false;
     let mut dart_fence = false;
+    let mut primary_dart_fence_seen = false;
+    let mut collecting_primary_declaration = false;
+    let mut primary_declaration = None;
+    let mut pending_declaration_type = None;
 
-    for raw in msg.lines() {
+    for raw in normalized_msg.lines() {
         let trimmed = raw.trim();
         if let Some(language) = trimmed.strip_prefix("```") {
             if in_fence {
                 in_fence = false;
                 dart_fence = false;
+                if collecting_primary_declaration {
+                    pending_declaration_type = primary_declaration.take();
+                    collecting_primary_declaration = false;
+                }
             } else {
+                pending_declaration_type = None;
                 in_fence = true;
                 let language = language.trim();
                 dart_fence = language.is_empty() || language == "dart";
+                if dart_fence && !primary_dart_fence_seen {
+                    primary_dart_fence_seen = true;
+                    collecting_primary_declaration = true;
+                }
             }
             continue;
         }
 
         if in_fence {
+            if collecting_primary_declaration
+                && primary_declaration.is_none()
+                && !trimmed.is_empty()
+            {
+                primary_declaration = Some(trimmed.to_string());
+            }
             text.push_str(raw);
             text.push('\n');
             line_kinds.push(if dart_fence {
@@ -191,12 +413,25 @@ fn highlight_dart_hover_doc(
         }
 
         if trimmed.chars().all(|c| c == '-') && trimmed.len() >= 5 {
+            pending_declaration_type = None;
             text.push_str("---\n");
             line_kinds.push(HoverLineKindPublic::Separator);
             continue;
         }
 
         let (line, ranges) = normalize_markdown_inline_code(raw);
+        let type_metadata = dart_type_metadata_value(&line);
+        let is_type_metadata = type_metadata.is_some();
+        if let Some(metadata) = type_metadata {
+            if pending_declaration_type
+                .take()
+                .is_some_and(|declaration| dart_declaration_reports_type(&declaration, metadata))
+            {
+                continue;
+            }
+        } else if !line.trim().is_empty() {
+            pending_declaration_type = None;
+        }
         let (line, kind, removed_prefix) = if let Some(header) = line.trim().strip_prefix("## ") {
             (
                 header,
@@ -218,15 +453,25 @@ fn highlight_dart_hover_doc(
         line_kinds.push(kind);
         for (start, end) in ranges {
             if start >= removed_prefix && end >= removed_prefix {
-                inline_code_ranges.push((
+                let range = (
                     line_start + start - removed_prefix,
                     line_start + end - removed_prefix,
-                ));
+                );
+                inline_code_ranges.push(range);
+                if is_type_metadata {
+                    inline_type_ranges.push(range);
+                }
             }
         }
     }
 
     text.truncate(text.trim_end().len());
+    let rendered_line_count = if text.is_empty() {
+        0
+    } else {
+        text.split('\n').count()
+    };
+    line_kinds.truncate(rendered_line_count);
     let lines: Vec<&str> = text.split('\n').collect();
     let mut line_starts = Vec::with_capacity(lines.len());
     let mut offset = 0usize;
@@ -251,12 +496,27 @@ fn highlight_dart_hover_doc(
             .get(line)
             .map_or(text.len(), |next| next.saturating_sub(1));
         if let Some(code) = text.get(start..end) {
-            crate::languages::dart::push_hover_highlight_spans(code, start, &mut spans);
+            crate::languages::dart::push_hover_highlight_spans(
+                code,
+                start,
+                &mut spans,
+                crate::languages::dart::HoverParseMode::StatementFragment,
+            );
         }
     }
     for &(start, end) in &inline_code_ranges {
         if let Some(code) = text.get(start..end) {
-            crate::languages::dart::push_hover_highlight_spans(code, start, &mut spans);
+            let parse_mode = if inline_type_ranges.contains(&(start, end)) {
+                crate::languages::dart::HoverParseMode::TypeFragment
+            } else {
+                crate::languages::dart::HoverParseMode::CompilationUnit
+            };
+            crate::languages::dart::push_hover_highlight_spans(
+                code,
+                start,
+                &mut spans,
+                parse_mode,
+            );
         }
     }
     spans.sort_unstable_by(|a, b| a.start.cmp(&b.start).then_with(|| b.end.cmp(&a.end)));

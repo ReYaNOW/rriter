@@ -1010,6 +1010,7 @@ impl App {
             return;
         }
         shift_python_inlay_hints_for_edits(&mut self.python_inlay_hints, edits);
+        self.python_inlay_hint_version = self.editor.version;
         self.python_inlay_hint_range = None;
         self.python_inlay_hint_cache.clear();
     }

@@ -428,6 +428,15 @@ fn should_draw_empty_ide_file_tree_overlay(
     is_ide_mode && tabs_empty && file_tree_overlay_open
 }
 
+#[inline(always)]
+fn empty_ide_should_continue_bottom_chrome(
+    is_ide_mode: bool,
+    tabs_empty: bool,
+    panel_bottom_h: f32,
+) -> bool {
+    is_ide_mode && tabs_empty && panel_bottom_h > 0.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -611,6 +620,49 @@ mod tests {
         assert!(!should_draw_empty_ide_file_tree_overlay(false, true, true));
         assert!(!should_draw_empty_ide_file_tree_overlay(true, false, true));
         assert!(!should_draw_empty_ide_file_tree_overlay(true, true, false));
+    }
+
+    #[test]
+    fn empty_ide_bottom_chrome_follows_terminal_and_problems_state() {
+        let mut panels = crate::app::IdePanelState::default();
+        let scale = 1.25;
+        let panel_height = |panels: &crate::app::IdePanelState| {
+            if panels.any_bottom_open() {
+                panels.bottom_height * scale
+            } else {
+                0.0
+            }
+        };
+
+        assert!(!empty_ide_should_continue_bottom_chrome(
+            true,
+            true,
+            panel_height(&panels),
+        ));
+
+        panels.open(crate::app::PanelId::Terminal);
+        assert!(empty_ide_should_continue_bottom_chrome(
+            true,
+            true,
+            panel_height(&panels),
+        ));
+
+        panels.open(crate::app::PanelId::Problems);
+        assert!(empty_ide_should_continue_bottom_chrome(
+            true,
+            true,
+            panel_height(&panels),
+        ));
+        assert!(!empty_ide_should_continue_bottom_chrome(
+            true,
+            false,
+            panel_height(&panels),
+        ));
+        assert!(!empty_ide_should_continue_bottom_chrome(
+            false,
+            true,
+            panel_height(&panels),
+        ));
     }
 
     #[test]
