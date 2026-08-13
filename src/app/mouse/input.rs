@@ -625,7 +625,7 @@ impl App {
                 )
             );
             if !keep_git_menu {
-                self.ide_panel.git.repo_action_menu_workspace_idx = None;
+                self.ide_panel.git.close_repo_action_menu();
                 if clicked_id.is_none() {
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();

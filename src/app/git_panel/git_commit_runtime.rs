@@ -855,6 +855,7 @@ fn push_repo_with_runtime(
     run_git_logged_command(repo_root, &args, "PUSH", true, context, emitter)
 }
 
+#[cfg(test)]
 fn commit_repo(repo_root: &Path, message: &str, amend: bool) -> Result<(), String> {
     let mut emitter = GitRuntimeEmitter::new(None);
     commit_repo_with_runtime(repo_root, message, amend, false, 1, 1, &mut emitter)
@@ -1266,6 +1267,15 @@ mod git_commit_runtime_tests {
         assert!(!state.commit_options.any_enabled());
         state.commit_options.skip_hooks = true;
         assert!(state.commit_options.any_enabled());
+
+        state.close_commit_menus();
+        let third = second + std::time::Duration::from_millis(2);
+        state.toggle_repo_action_menu(3, third);
+        assert_eq!(state.repo_action_menu_workspace_idx, Some(3));
+        assert_eq!(state.active_repo_action_menu_opened_at(), Some(third));
+        state.toggle_repo_action_menu(3, third + std::time::Duration::from_millis(1));
+        assert!(state.repo_action_menu_workspace_idx.is_none());
+        assert!(state.repo_action_menu_opened_at.is_none());
     }
 
     #[test]

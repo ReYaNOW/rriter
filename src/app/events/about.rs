@@ -695,18 +695,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    let context_menu_opened_at = app
-        .ide_panel
-        .file_tree_context_menu
-        .as_ref()
-        .map(|menu| menu.opened_at)
-        .or_else(|| {
-            app.ide_panel
-                .database
-                .context_menu
-                .as_ref()
-                .map(|menu| menu.opened_at)
-        });
+    let context_menu_opened_at = active_context_menu_opened_at(&app.ide_panel);
     if context_menu_opened_at.is_some_and(|opened_at| {
         crate::app::context_menu::context_menu_anim_progress(opened_at, now) < 1.0
     }) {

@@ -13,7 +13,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn refresh_git_panel_window(&mut self) {
         self.ide_panel.git.close_commit_menus();
-        self.ide_panel.git.repo_action_menu_workspace_idx = None;
+        self.ide_panel.git.close_repo_action_menu();
         self.ide_panel.git.snapshot = GitStatusSnapshot::default();
         self.ide_panel.git.selected_file = None;
         self.ide_panel.git.branch_ahead_cache.clear();

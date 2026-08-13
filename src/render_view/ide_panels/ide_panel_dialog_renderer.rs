@@ -860,7 +860,11 @@ impl Renderer {
             opened_at,
             std::time::Instant::now(),
         );
-        let visible_h = (menu_h * anim_progress).max(border * 2.0);
+        let visible_h = crate::app::context_menu::context_menu_visible_height(
+            menu_h,
+            border * 2.0,
+            anim_progress,
+        );
         self.push_rounded_rect_border(
             x,
             y,

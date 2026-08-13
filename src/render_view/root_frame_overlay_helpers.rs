@@ -1,5 +1,22 @@
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    fn draw_ide_context_overlays(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        blink_alpha: f32,
+        panel_left_w: f32,
+        s: f32,
+    ) -> bool {
+        let mut wants_pointer =
+            self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+        wants_pointer |=
+            self.draw_git_dropdown_overlays(ide_panel, ui_registry, mx, my, panel_left_w, s);
+        wants_pointer
+    }
+
     fn draw_ide_modal_overlays(
         &mut self,
         s: f32,
@@ -106,9 +123,17 @@ impl Renderer {
             true,
             true,
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel),
-        ) {
-            let wants_pointer =
-                self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+        ) || crate::render_view::ide_panels::git_dropdown_overlay_active_for_panel(ide_panel)
+        {
+            let wants_pointer = self.draw_ide_context_overlays(
+                ide_panel,
+                ui_registry,
+                mx,
+                my,
+                blink_alpha,
+                panel_left_w,
+                s,
+            );
             self.flush();
             return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
         }

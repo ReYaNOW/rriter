@@ -555,8 +555,15 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
-            wants_pointer |=
-                self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+            wants_pointer |= self.draw_ide_context_overlays(
+                ide_panel,
+                ui_registry,
+                mx,
+                my,
+                blink_alpha,
+                panel_left_w,
+                s,
+            );
             self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
             if show_fps {
                 self.draw_fps_overlay(self.minimap_width);
@@ -648,7 +655,15 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
-            wants_pointer |= self.draw_file_tree_overlays(ide_panel, ui_registry, mx, my, blink_alpha);
+            wants_pointer |= self.draw_ide_context_overlays(
+                ide_panel,
+                ui_registry,
+                mx,
+                my,
+                blink_alpha,
+                panel_left_w,
+                s,
+            );
             self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
             if show_fps { self.draw_fps_overlay(self.minimap_width); }
             self.flush();
@@ -1439,12 +1454,14 @@ impl Renderer {
             } else {
                 my
             };
-            wants_pointer |= self.draw_file_tree_overlays(
+            wants_pointer |= self.draw_ide_context_overlays(
                 ide_panel,
                 ui_registry,
                 overlay_mx,
                 overlay_my,
                 blink_alpha,
+                panel_left_w,
+                s,
             );
             self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
         }

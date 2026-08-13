@@ -334,9 +334,62 @@ fn needs_continuous_poll(
     autocomplete_animating || git_progress_animating || scroll_animating
 }
 
+fn active_context_menu_opened_at(ide_panel: &crate::app::IdePanelState) -> Option<Instant> {
+    [
+        ide_panel
+            .file_tree_context_menu
+            .as_ref()
+            .map(|menu| menu.opened_at),
+        ide_panel
+            .database
+            .context_menu
+            .as_ref()
+            .map(|menu| menu.opened_at),
+        ide_panel.git.commit_menu_opened_at,
+        ide_panel.git.commit_options_menu_opened_at,
+        ide_panel.git.active_repo_action_menu_opened_at(),
+    ]
+    .into_iter()
+    .flatten()
+    .max()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn git_context_menu_open_times_participate_in_animation_redraw_selection() {
+        let mut ide_panel = crate::app::IdePanelState::default();
+        let start = Instant::now();
+
+        ide_panel.git.commit_menu_opened_at = Some(start);
+        assert_eq!(active_context_menu_opened_at(&ide_panel), Some(start));
+
+        let options = start + std::time::Duration::from_millis(2);
+        ide_panel.git.commit_menu_opened_at = None;
+        ide_panel.git.commit_options_menu_opened_at = Some(options);
+        assert_eq!(active_context_menu_opened_at(&ide_panel), Some(options));
+
+        let repo = options + std::time::Duration::from_millis(2);
+        ide_panel.git.commit_options_menu_opened_at = None;
+        ide_panel.git.toggle_repo_action_menu(0, repo);
+        assert_eq!(active_context_menu_opened_at(&ide_panel), Some(repo));
+
+        assert!(crate::app::context_menu::context_menu_anim_progress(
+            repo,
+            repo + std::time::Duration::from_millis(50),
+        ) < 1.0);
+        assert_eq!(
+            crate::app::context_menu::context_menu_anim_progress(
+                repo,
+                repo + std::time::Duration::from_secs_f32(
+                    crate::app::context_menu::CONTEXT_MENU_ANIM_SECS,
+                ),
+            ),
+            1.0
+        );
+    }
 
     #[test]
     fn active_scroll_keeps_event_loop_polling() {

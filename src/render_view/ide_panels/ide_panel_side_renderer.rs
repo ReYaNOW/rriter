@@ -602,6 +602,114 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_git_dropdown_overlays(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+        panel_left_w: f32,
+        s: f32,
+    ) -> bool {
+        if !git_dropdown_overlay_active_for_panel(ide_panel) {
+            return false;
+        }
+
+        let panel_x = 48.0 * s;
+        let title_h = 32.0 * s;
+        let controls = git_commit_controls_layout(panel_x, panel_left_w, title_h, s);
+        let commit_controls_enabled = ide_panel.git.commit_enabled() && !ide_panel.git.pending;
+        let repo_menu = if ide_panel.git.pending {
+            None
+        } else {
+            ide_panel
+                .git
+                .repo_action_menu_workspace_idx
+                .zip(ide_panel.git.active_repo_action_menu_opened_at())
+                .and_then(|(workspace_idx, opened_at)| {
+                    ui_registry
+                        .rect_for(crate::ui_system::UiId::GitRepoActionMenu(workspace_idx))
+                        .map(|(x, y, w, h)| {
+                            (
+                                workspace_idx,
+                                opened_at,
+                                crate::ui_system::UiClipRect::new(x, y, w, h),
+                            )
+                        })
+                })
+        };
+
+        ui_registry.mark_overlay_start();
+
+        if commit_controls_enabled
+            && let Some(opened_at) = ide_panel.git.commit_menu_opened_at
+        {
+            let (menu_x, menu_y) = git_dropdown_anchor(controls.menu, s);
+            let menu_items = ["Commit", "Commit (Amend)", "Commit & Push"];
+            return self.draw_animated_context_menu(
+                menu_x,
+                menu_y,
+                opened_at,
+                menu_items.len(),
+                |idx| menu_items[idx],
+                crate::ui_system::UiId::GitCommitMenuItem,
+                |idx| idx == 2,
+                ui_registry,
+                mx,
+                my,
+            );
+        }
+
+        if commit_controls_enabled
+            && let Some(opened_at) = ide_panel.git.commit_options_menu_opened_at
+        {
+            let (menu_x, menu_y) = git_dropdown_anchor(controls.options, s);
+            let option_label = if ide_panel.git.commit_options.skip_hooks {
+                "✓ Отключить git hooks"
+            } else {
+                "Отключить git hooks"
+            };
+            return self.draw_animated_context_menu(
+                menu_x,
+                menu_y,
+                opened_at,
+                1,
+                |_| option_label,
+                crate::ui_system::UiId::GitCommitOptionsItem,
+                |_| false,
+                ui_registry,
+                mx,
+                my,
+            );
+        }
+
+        if let Some((workspace_idx, opened_at, anchor)) = repo_menu {
+            let (menu_x, menu_y) = git_dropdown_anchor(anchor, s);
+            let menu_items = ["Fetch", "Pull"];
+            return self.draw_animated_context_menu(
+                menu_x,
+                menu_y,
+                opened_at,
+                menu_items.len(),
+                |idx| menu_items[idx],
+                |idx| {
+                    if idx == 0 {
+                        crate::ui_system::UiId::GitFetch(workspace_idx)
+                    } else {
+                        crate::ui_system::UiId::GitPull(workspace_idx)
+                    }
+                },
+                |_| false,
+                ui_registry,
+                mx,
+                my,
+            );
+        }
+
+        false
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_ide_side_panels(
         &mut self,
         ide_panel: &crate::app::IdePanelState,

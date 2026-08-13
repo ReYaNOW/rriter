@@ -55,7 +55,6 @@ impl Renderer {
         let text_scale = crate::render_view::tree_ui::TREE_TEXT_SCALE;
         let mut label_scratch = String::new();
         let mut git_file_tooltip: Option<(usize, usize, String, f32, f32)> = None;
-        let mut repo_action_menu: Option<(usize, f32, f32, f32)> = None;
 
         let input = git_message_input_geometry(panel_x, panel_w, title_h, s);
         let input_x = input.x;
@@ -123,18 +122,14 @@ impl Renderer {
             4.0 * s,
         );
 
-        let commit_y = title_h + 44.0 * s;
+        let commit_controls = git_commit_controls_layout(panel_x, panel_w, title_h, s);
         let commit_enabled = ide_panel.git.commit_enabled();
         let commit_controls_enabled = commit_enabled && !ide_panel.git.pending;
-        let arrow_w = (34.0 * s).min((inner_w * 0.22).max(22.0 * s));
-        let options_w = (32.0 * s).min((inner_w * 0.20).max(22.0 * s));
-        let commit_gap = (4.0 * s).min((inner_w * 0.06).max(0.0));
-        let commit_main_w = (inner_w - arrow_w - options_w - commit_gap * 2.0).max(1.0);
         let commit_btn = Button {
-            x: panel_x + pad,
-            y: commit_y,
-            w: commit_main_w,
-            h: 28.0 * s,
+            x: commit_controls.commit.x,
+            y: commit_controls.commit.y,
+            w: commit_controls.commit.w,
+            h: commit_controls.commit.h,
             text: "Commit".to_string(),
             icon: Some(crate::widgets::IconType::Check),
             text_scale: 0.92,
@@ -154,10 +149,10 @@ impl Renderer {
             );
         }
         let menu_btn = Button {
-            x: panel_x + pad + commit_main_w + commit_gap,
-            y: commit_y,
-            w: arrow_w,
-            h: 28.0 * s,
+            x: commit_controls.menu.x,
+            y: commit_controls.menu.y,
+            w: commit_controls.menu.w,
+            h: commit_controls.menu.h,
             text: String::new(),
             icon: Some(crate::widgets::IconType::Down),
             text_scale: 0.0,
@@ -177,10 +172,10 @@ impl Renderer {
             );
         }
         let options_btn = Button {
-            x: menu_btn.x + menu_btn.w + commit_gap,
-            y: commit_y,
-            w: options_w,
-            h: 28.0 * s,
+            x: commit_controls.options.x,
+            y: commit_controls.options.y,
+            w: commit_controls.options.w,
+            h: commit_controls.options.h,
             text: String::new(),
             icon: None,
             text_scale: 0.0,
@@ -776,13 +771,6 @@ impl Renderer {
                                 2.0,
                                 [0.60, 0.35, 0.85, 0.8],
                             );
-                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
-                            repo_action_menu = Some((
-                                workspace.workspace_idx,
-                                (menu_btn.x + menu_btn.w - menu_w).round(),
-                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
-                                menu_w,
-                            ));
                         }
                     }
                 } else if workspace.ahead > 0 {
@@ -881,13 +869,6 @@ impl Renderer {
                                 2.0,
                                 [0.60, 0.35, 0.85, 0.8],
                             );
-                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
-                            repo_action_menu = Some((
-                                workspace.workspace_idx,
-                                (menu_btn.x + menu_btn.w - menu_w).round(),
-                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
-                                menu_w,
-                            ));
                         }
                     }
                 } else if changed_count > 0 {
@@ -956,13 +937,6 @@ impl Renderer {
                                 2.0,
                                 [0.60, 0.35, 0.85, 0.8],
                             );
-                            let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
-                            repo_action_menu = Some((
-                                workspace.workspace_idx,
-                                (menu_btn.x + menu_btn.w - menu_w).round(),
-                                (menu_btn.y + menu_btn.h + 4.0 * s).round(),
-                                menu_w,
-                            ));
                         }
                     }
                 } else if show_repo_menu {
@@ -999,13 +973,6 @@ impl Renderer {
                             2.0,
                             [0.60, 0.35, 0.85, 0.8],
                         );
-                        let menu_w = (104.0 * s).max(stage_btn_w * 3.0);
-                        repo_action_menu = Some((
-                            workspace.workspace_idx,
-                            (menu_btn.x + menu_btn.w - menu_w).round(),
-                            (menu_btn.y + menu_btn.h + 4.0 * s).round(),
-                            menu_w,
-                        ));
                     }
                 }
             }
@@ -1389,93 +1356,6 @@ impl Renderer {
                 ),
                 crate::app::git_panel::GitBottomPane::Closed => {}
             }
-        }
-
-        if let Some((workspace_idx, menu_x, menu_y, menu_w)) = repo_action_menu
-            && !ide_panel.git.pending
-        {
-            let item_h = 30.0 * s;
-            let menu_h = item_h * 2.0 + 8.0 * s;
-            let panel_bottom = title_h + content_h;
-            let menu_y = menu_y.min(panel_bottom - menu_h - 4.0 * s).max(title_h + 4.0 * s);
-            self.push_rounded_rect(
-                menu_x,
-                menu_y,
-                menu_w,
-                menu_h,
-                7.0 * s,
-                [0.18, 0.19, 0.25, 0.98],
-            );
-            for (idx, &(label, id)) in [
-                ("Fetch", crate::ui_system::UiId::GitFetch(workspace_idx)),
-                ("Pull", crate::ui_system::UiId::GitPull(workspace_idx)),
-            ]
-            .iter()
-            .enumerate()
-            {
-                let item_y = menu_y + 4.0 * s + idx as f32 * item_h;
-                let hovered =
-                    ui_registry.register_rect(id, menu_x, item_y, menu_w, item_h, mx, my);
-                if hovered {
-                    self.push_rounded_rect(
-                        menu_x + 5.0 * s,
-                        item_y + 3.0 * s,
-                        menu_w - 10.0 * s,
-                        item_h - 6.0 * s,
-                        5.0 * s,
-                        [1.0, 1.0, 1.0, 0.07],
-                    );
-                }
-                self.draw_tree_label_clipped(
-                    label,
-                    menu_x + 14.0 * s,
-                    item_y + item_h / 2.0 + 5.0 * s,
-                    menu_w - 28.0 * s,
-                    self.theme.fg,
-                    0.88,
-                    &mut label_scratch,
-                );
-            }
-        }
-
-        if commit_controls_enabled
-            && let Some(opened_at) = ide_panel.git.commit_menu_opened_at
-        {
-            let menu_items = ["Commit", "Commit (Amend)", "Commit & Push"];
-            let _ = self.draw_animated_context_menu(
-                menu_btn.x,
-                menu_btn.y + menu_btn.h + 2.0 * s,
-                opened_at,
-                menu_items.len(),
-                |idx| menu_items[idx],
-                crate::ui_system::UiId::GitCommitMenuItem,
-                |idx| idx == 2,
-                ui_registry,
-                mx,
-                my,
-            );
-        }
-
-        if commit_controls_enabled
-            && let Some(opened_at) = ide_panel.git.commit_options_menu_opened_at
-        {
-            let option_label = if ide_panel.git.commit_options.skip_hooks {
-                "✓ Отключить git hooks"
-            } else {
-                "Отключить git hooks"
-            };
-            let _ = self.draw_animated_context_menu(
-                options_btn.x,
-                options_btn.y + options_btn.h + 2.0 * s,
-                opened_at,
-                1,
-                |_| option_label,
-                crate::ui_system::UiId::GitCommitOptionsItem,
-                |_| false,
-                ui_registry,
-                mx,
-                my,
-            );
         }
 
         self.git_file_tooltip = git_file_tooltip;

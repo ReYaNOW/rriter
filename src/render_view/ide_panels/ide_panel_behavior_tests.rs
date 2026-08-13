@@ -674,12 +674,83 @@ mod tests {
     }
 
     #[test]
-    fn git_commit_and_options_dropdowns_reuse_animated_context_menu_renderer() {
-        let source = include_str!("ide_panel_git_workspace_renderer.rs");
-        assert_eq!(source.matches("draw_animated_context_menu(").count(), 2);
-        assert!(source.contains("commit_menu_opened_at"));
-        assert!(source.contains("commit_options_menu_opened_at"));
-        assert!(!source.contains("if ide_panel.git.commit_menu_open &&"));
+    fn git_commit_control_layout_keeps_shared_anchors_stable_at_fractional_scales() {
+        for scale in [1.0, 1.25, 1.5, 1.75] {
+            let panel_x = 48.0 * scale;
+            let panel_w = 320.0 * scale;
+            let layout = git_commit_controls_layout(panel_x, panel_w, 32.0 * scale, scale);
+
+            assert!(layout.commit.x + layout.commit.w <= layout.menu.x + 0.01);
+            assert!(layout.menu.x + layout.menu.w <= layout.options.x + 0.01);
+            assert!(layout.commit.x >= panel_x);
+            assert!(layout.options.x + layout.options.w <= panel_x + panel_w + 0.01);
+
+            let menu_anchor = git_dropdown_anchor(layout.menu, scale);
+            let options_anchor = git_dropdown_anchor(layout.options, scale);
+            assert_eq!(menu_anchor.0, menu_anchor.0.round());
+            assert_eq!(menu_anchor.1, menu_anchor.1.round());
+            assert_eq!(options_anchor.0, options_anchor.0.round());
+            assert_eq!(options_anchor.1, options_anchor.1.round());
+            assert!(menu_anchor.1 >= layout.menu.y + layout.menu.h);
+            assert!(options_anchor.1 >= layout.options.y + layout.options.h);
+        }
+    }
+
+    #[test]
+    fn all_git_dropdowns_render_only_from_the_late_context_overlay_path() {
+        let workspace = include_str!("ide_panel_git_workspace_renderer.rs");
+        let side = include_str!("ide_panel_side_renderer.rs");
+        let root = include_str!("../root_frame_renderer.rs");
+        let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
+        let overlay = source_between(
+            side,
+            "pub(crate) fn draw_git_dropdown_overlays",
+            "pub(crate) fn draw_ide_side_panels",
+        );
+        let early_side_pass = &side[side
+            .find("pub(crate) fn draw_ide_side_panels")
+            .expect("side-panel pass exists")..];
+
+        assert_eq!(workspace.matches("draw_animated_context_menu(").count(), 0);
+        assert!(!workspace.contains("UiId::GitFetch("));
+        assert!(!workspace.contains("UiId::GitPull("));
+        assert!(!early_side_pass.contains("draw_git_dropdown_overlays("));
+
+        assert_eq!(overlay.matches("draw_animated_context_menu(").count(), 3);
+        assert!(overlay.contains("commit_menu_opened_at"));
+        assert!(overlay.contains("commit_options_menu_opened_at"));
+        assert!(overlay.contains("active_repo_action_menu_opened_at"));
+        assert!(overlay.contains("ui_registry.mark_overlay_start()"));
+        assert!(overlay.contains("UiId::GitFetch"));
+        assert!(overlay.contains("UiId::GitPull"));
+
+        assert!(root_overlays.contains("self.draw_git_dropdown_overlays("));
+        assert_eq!(root.matches("draw_file_tree_overlays(").count(), 0);
+        assert_eq!(root.matches("draw_ide_context_overlays(").count(), 3);
+    }
+
+    #[test]
+    fn git_dropdown_items_registered_after_overlay_mark_win_over_editor_hitboxes() {
+        for overlay_id in [
+            crate::ui_system::UiId::GitCommitMenuItem(0),
+            crate::ui_system::UiId::GitCommitOptionsItem(0),
+            crate::ui_system::UiId::GitFetch(0),
+        ] {
+            let mut registry = crate::ui_system::UiRegistry::new();
+            registry.register_rect(
+                crate::ui_system::UiId::EditorTextBody,
+                0.0,
+                0.0,
+                100.0,
+                40.0,
+                10.0,
+                10.0,
+            );
+            registry.mark_overlay_start();
+            registry.register_rect(overlay_id, 0.0, 0.0, 100.0, 40.0, 10.0, 10.0);
+            assert_eq!(registry.find_overlay_at(10.0, 10.0), Some(overlay_id));
+            assert_eq!(registry.find_at(10.0, 10.0), Some(overlay_id));
+        }
     }
 
 }

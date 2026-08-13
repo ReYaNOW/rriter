@@ -125,6 +125,68 @@ fn file_tree_menu_separator_before(
 }
 
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct GitCommitControlsLayout {
+    commit: crate::ui_system::UiClipRect,
+    menu: crate::ui_system::UiClipRect,
+    options: crate::ui_system::UiClipRect,
+}
+
+fn git_commit_controls_layout(
+    panel_x: f32,
+    panel_w: f32,
+    title_h: f32,
+    scale: f32,
+) -> GitCommitControlsLayout {
+    let pad = (10.0 * scale).min((panel_w * 0.15).max(0.0));
+    let inner_w = (panel_w - pad * 2.0).max(1.0);
+    let arrow_w = (34.0 * scale).min((inner_w * 0.22).max(22.0 * scale));
+    let options_w = (32.0 * scale).min((inner_w * 0.20).max(22.0 * scale));
+    let gap = (4.0 * scale).min((inner_w * 0.06).max(0.0));
+    let commit_w = (inner_w - arrow_w - options_w - gap * 2.0).max(1.0);
+    let y = title_h + 44.0 * scale;
+    let h = 28.0 * scale;
+    let commit = crate::ui_system::UiClipRect::new(panel_x + pad, y, commit_w, h);
+    let menu = crate::ui_system::UiClipRect::new(commit.x + commit.w + gap, y, arrow_w, h);
+    let options = crate::ui_system::UiClipRect::new(menu.x + menu.w + gap, y, options_w, h);
+    GitCommitControlsLayout {
+        commit,
+        menu,
+        options,
+    }
+}
+
+fn git_dropdown_anchor(
+    button: crate::ui_system::UiClipRect,
+    scale: f32,
+) -> (f32, f32) {
+    (
+        button.x.round(),
+        (button.y.round() + button.h.round() + 2.0 * scale).round(),
+    )
+}
+
+fn git_top_panel_visible(ide_panel: &crate::app::IdePanelState) -> bool {
+    ide_panel.slots.iter().any(|slot| {
+        slot.id == crate::app::PanelId::Git
+            && slot.group == crate::app::PanelGroup::Top
+            && slot.open
+    })
+}
+
+pub(crate) fn git_dropdown_overlay_active_for_panel(ide_panel: &crate::app::IdePanelState) -> bool {
+    if !git_top_panel_visible(ide_panel) {
+        return false;
+    }
+    let commit_controls_enabled = ide_panel.git.commit_enabled() && !ide_panel.git.pending;
+    (commit_controls_enabled
+        && (ide_panel.git.commit_menu_opened_at.is_some()
+            || ide_panel.git.commit_options_menu_opened_at.is_some()))
+        || (!ide_panel.git.pending
+            && ide_panel.git.repo_action_menu_workspace_idx.is_some()
+            && ide_panel.git.repo_action_menu_opened_at.is_some())
+}
+
 fn git_row_visual_hovered(
     mx: f32,
     my: f32,

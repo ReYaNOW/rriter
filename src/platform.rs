@@ -73,9 +73,11 @@ pub use secret_store::{
     delete_system_user_secret, load_system_user_secret, store_system_user_secret,
 };
 pub use text_file::{
-    DecodedTextFile, LegacyEncoding, LineEnding, TextEncoding, TextFileFormat, decode_text_bytes,
-    encode_text, read_text_file, write_text_file,
+    DecodedTextFile, TextEncoding, TextFileFormat, decode_text_bytes, encode_text, read_text_file,
+    write_text_file,
 };
+#[cfg(test)]
+pub(crate) use text_file::{LegacyEncoding, LineEnding};
 
 const APP_DIR_NAME: &str = "RRiter";
 const PATH_RECORD_PREFIX: &str = "rriter-path-v1:";

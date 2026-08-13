@@ -324,6 +324,7 @@ pub struct GitPanelState {
     pub commit_options_menu_opened_at: Option<std::time::Instant>,
     pub commit_options: GitCommitOptions,
     pub repo_action_menu_workspace_idx: Option<usize>,
+    pub repo_action_menu_opened_at: Option<std::time::Instant>,
     pub collapsed_workspaces: FxHashSet<usize>,
     pub collapsed_dirs: FxHashMap<usize, FxHashSet<String>>,
     pub scroll: crate::scroll::ScrollState,
@@ -421,6 +422,7 @@ impl Default for GitPanelState {
             commit_options_menu_opened_at: None,
             commit_options: GitCommitOptions::default(),
             repo_action_menu_workspace_idx: None,
+            repo_action_menu_opened_at: None,
             collapsed_workspaces: FxHashSet::default(),
             collapsed_dirs: FxHashMap::default(),
             scroll: crate::scroll::ScrollState::new(15.0),
@@ -499,6 +501,26 @@ impl GitPanelState {
         } else {
             Some(now)
         };
+    }
+
+    pub fn close_repo_action_menu(&mut self) -> bool {
+        let was_open = self.repo_action_menu_workspace_idx.take().is_some();
+        self.repo_action_menu_opened_at = None;
+        was_open
+    }
+
+    pub fn toggle_repo_action_menu(&mut self, workspace_idx: usize, now: std::time::Instant) {
+        if self.repo_action_menu_workspace_idx == Some(workspace_idx) {
+            self.close_repo_action_menu();
+        } else {
+            self.repo_action_menu_workspace_idx = Some(workspace_idx);
+            self.repo_action_menu_opened_at = Some(now);
+        }
+    }
+
+    pub fn active_repo_action_menu_opened_at(&self) -> Option<std::time::Instant> {
+        self.repo_action_menu_workspace_idx
+            .and(self.repo_action_menu_opened_at)
     }
 
     pub fn graph_open(&self) -> bool {
