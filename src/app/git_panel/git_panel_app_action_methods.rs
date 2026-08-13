@@ -134,11 +134,8 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn commit_git_panel_option(&mut self, option_idx: usize) {
-        match option_idx {
-            0 => self.commit_git_panel_with(false, false),
-            1 => self.commit_git_panel_with(true, false),
-            2 => self.commit_git_panel_with(false, true),
-            _ => {}
+        if let Some((amend, push_after)) = git_commit_option_flags(option_idx) {
+            self.commit_git_panel_with(amend, push_after);
         }
     }
 
@@ -150,7 +147,7 @@ impl App {
         if !self.ide_panel.git.commit_enabled() {
             return;
         }
-        self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.close_commit_menus();
         self.ide_panel.git.message_focused = false;
         let message = self.ide_panel.git.message_editor.get_full_text();
         let trimmed = message.trim();
@@ -168,6 +165,7 @@ impl App {
             message: trimmed.to_string(),
             amend,
             push_after,
+            skip_hooks: self.ide_panel.git.commit_options.skip_hooks,
         });
         self.ide_panel.git.message_editor = Editor::new(512);
     }
@@ -332,7 +330,7 @@ impl App {
             self.ide_panel.git.notice = Some("No staged files".to_string());
             return;
         }
-        self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.close_commit_menus();
         self.ide_panel.git.message_focused = false;
         self.ide_panel.git.confirm_dialog = Some(GitConfirmDialog {
             action,
@@ -515,12 +513,11 @@ impl App {
             self.ide_panel.git.pending = true;
             self.ide_panel.git.pending_label = match &action {
                 GitAction::Commit {
-                    push_after: true, ..
-                } => Some("Commit & Push"),
-                GitAction::Commit { .. } => Some("Commit"),
-                GitAction::Push { .. } => Some("Push"),
-                GitAction::Fetch { .. } => Some("Fetch"),
-                GitAction::Pull { .. } => Some("Pull"),
+                    push_after: _, ..
+                } => Some("Подготовка".to_string()),
+                GitAction::Push { .. } => Some("Push".to_string()),
+                GitAction::Fetch { .. } => Some("Fetch".to_string()),
+                GitAction::Pull { .. } => Some("Pull".to_string()),
                 _ => None,
             };
             self.ide_panel.git.pending_started_at = Some(now);
@@ -528,15 +525,24 @@ impl App {
                 .ide_panel
                 .git
                 .pending_label
+                .as_ref()
                 .map(|_| now + std::time::Duration::from_secs(1));
         }
         self.ide_panel.git.notice = None;
 
         let workspaces = self.ide_workspaces.clone();
         let branch_ahead_cache = self.ide_panel.git.branch_ahead_cache.clone();
+        let commit_transaction = matches!(&action, GitAction::Commit { .. });
+        let (runtime_tx, runtime_rx) = if commit_transaction {
+            let (runtime_tx, runtime_rx) = mpsc::sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
+            (Some(runtime_tx), Some(runtime_rx))
+        } else {
+            (None, None)
+        };
         let (tx, rx) = mpsc::channel();
         self.ide_panel.git.rx.push(GitPanelReceiver {
             rx,
+            runtime_rx,
             request_id,
             blocking,
             refresh,
@@ -571,6 +577,8 @@ impl App {
                             notice,
                             preserve_snapshot_on_empty: true,
                             clear_message: false,
+                            refresh_graph: false,
+                            transaction_failed: false,
                         },
                         branch_ahead_cache,
                     });
@@ -594,6 +602,8 @@ impl App {
                                 )),
                                 preserve_snapshot_on_empty: true,
                                 clear_message: false,
+                                refresh_graph: false,
+                                transaction_failed: false,
                             },
                             branch_ahead_cache: command.branch_ahead_cache,
                         });
@@ -604,8 +614,9 @@ impl App {
         }
 
         let worker_tx = tx.clone();
+        let worker_runtime_tx = runtime_tx.clone();
         if let Err(err) = crate::platform::spawn_named("rriter-git-action", move || {
-            let outcome = run_git_action(action);
+            let outcome = run_git_action(action, worker_runtime_tx.as_ref());
             let mut branch_ahead_cache = branch_ahead_cache;
             let snapshot = collect_git_status_with_cache(&workspaces, &mut branch_ahead_cache);
             let _ = worker_tx.send(GitPanelTaskResult {
@@ -615,10 +626,17 @@ impl App {
                     notice: outcome.notice,
                     preserve_snapshot_on_empty: false,
                     clear_message: outcome.clear_message,
+                    refresh_graph: outcome.refresh_graph,
+                    transaction_failed: outcome.transaction_failed,
                 },
                 branch_ahead_cache,
             });
         }) {
+            if let Some(runtime_tx) = runtime_tx {
+                let _ = runtime_tx.send(GitRuntimeEvent::Info(format!(
+                    "Не удалось запустить Git worker: {err}"
+                )));
+            }
             let _ = tx.send(GitPanelTaskResult {
                 event: GitPanelEvent {
                     request_id,
@@ -626,9 +644,20 @@ impl App {
                     notice: Some(format!("Не удалось запустить Git worker: {err}")),
                     preserve_snapshot_on_empty: true,
                     clear_message: false,
+                    refresh_graph: false,
+                    transaction_failed: commit_transaction,
                 },
                 branch_ahead_cache: BranchAheadCache::default(),
             });
         }
+    }
+}
+
+fn git_commit_option_flags(option_idx: usize) -> Option<(bool, bool)> {
+    match option_idx {
+        0 => Some((false, false)),
+        1 => Some((true, false)),
+        2 => Some((false, true)),
+        _ => None,
     }
 }

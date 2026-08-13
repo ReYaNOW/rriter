@@ -673,4 +673,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn git_commit_and_options_dropdowns_reuse_animated_context_menu_renderer() {
+        let source = include_str!("ide_panel_git_workspace_renderer.rs");
+        assert_eq!(source.matches("draw_animated_context_menu(").count(), 2);
+        assert!(source.contains("commit_menu_opened_at"));
+        assert!(source.contains("commit_options_menu_opened_at"));
+        assert!(!source.contains("if ide_panel.git.commit_menu_open &&"));
+    }
+
 }

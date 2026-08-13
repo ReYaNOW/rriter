@@ -214,10 +214,24 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
     };
 
     app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuToggle);
-    assert!(app.ide_panel.git.commit_menu_open);
+    assert!(app.ide_panel.git.commit_menu_open());
+    assert!(app.ide_panel.git.commit_menu_opened_at.is_some());
+
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitOptionsToggle);
+    assert!(!app.ide_panel.git.commit_menu_open());
+    assert!(app.ide_panel.git.commit_options_menu_open());
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitOptionsItem(0));
+    assert!(app.ide_panel.git.commit_options.skip_hooks);
+    assert!(app.ide_panel.git.commit_options.any_enabled());
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitOptionsItem(0));
+    assert!(!app.ide_panel.git.commit_options.skip_hooks);
+
+    app.handle_ui_click(crate::ui_system::UiId::GitCommitMenuToggle);
+    assert!(app.ide_panel.git.commit_menu_open());
 
     app.handle_ui_click(crate::ui_system::UiId::GitFolder(0, 0));
-    assert!(!app.ide_panel.git.commit_menu_open);
+    assert!(!app.ide_panel.git.commit_menu_open());
+    assert!(!app.ide_panel.git.commit_options_menu_open());
     assert!(
         app.ide_panel
             .git
@@ -251,6 +265,26 @@ fn git_panel_ui_handlers_cover_menu_commit_and_folder_state_headless() {
     assert_eq!(app.ide_panel.git.notice.as_deref(), None);
     assert!(app.ide_panel.git.message_focused);
     assert!(!app.ide_panel.git.pending);
+
+    app.handle_ui_click(crate::ui_system::UiId::GitGraphToggle);
+    assert_eq!(
+        app.ide_panel.git.bottom_pane,
+        crate::app::git_panel::GitBottomPane::Graph
+    );
+    app.handle_ui_click(crate::ui_system::UiId::GitLogsToggle);
+    assert_eq!(
+        app.ide_panel.git.bottom_pane,
+        crate::app::git_panel::GitBottomPane::Logs
+    );
+    app.handle_ui_click(crate::ui_system::UiId::GitLogsToggle);
+    assert_eq!(
+        app.ide_panel.git.bottom_pane,
+        crate::app::git_panel::GitBottomPane::Closed
+    );
+    app.ide_panel.git.seed_git_log_for_test("entry");
+    assert!(!app.ide_panel.git.git_logs.is_empty());
+    app.handle_ui_click(crate::ui_system::UiId::GitLogsClear);
+    assert!(app.ide_panel.git.git_logs.is_empty());
 }
 
 #[test]

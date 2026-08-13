@@ -64,8 +64,9 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
-        let closed_git_menu = self.ide_panel.git.commit_menu_open;
-        self.ide_panel.git.commit_menu_open = false;
+        let closed_git_menu = self.ide_panel.git.commit_menu_open()
+            || self.ide_panel.git.commit_options_menu_open();
+        self.ide_panel.git.close_commit_menus();
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let shift = self.modifiers.shift_key();
@@ -340,7 +341,9 @@ impl App {
                 let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
                 let list_y = cy + controls_h;
                 let full_list_h = (ch - controls_h).max(40.0 * s);
-                let (changes_h, divider_h, graph_h) = if self.ide_panel.git.graph_open {
+                let (changes_h, divider_h, bottom_h) = if self.ide_panel.git.bottom_pane
+                    != crate::app::git_panel::GitBottomPane::Closed
+                {
                     crate::app::git_panel::git_graph_split_heights(
                         full_list_h,
                         self.ide_panel.git.graph_height_ratio,
@@ -349,7 +352,7 @@ impl App {
                 } else {
                     (full_list_h, 0.0, 0.0)
                 };
-                if self.ide_panel.git.graph_open {
+                if self.ide_panel.git.graph_open() {
                     let graph_y = list_y + changes_h + divider_h;
                     let graph_header_h = 34.0 * s;
                     if crate::ui_system::point_in_rect(mx, my, (cx, graph_y, cw, graph_header_h)) {
@@ -379,10 +382,10 @@ impl App {
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
-                    if crate::ui_system::point_in_rect(mx, my, (cx, graph_y, cw, graph_h)) {
+                    if crate::ui_system::point_in_rect(mx, my, (cx, graph_y, cw, bottom_h)) {
                         self.ide_panel.git.graph_scroll.anim_speed = 7.0;
                         self.ide_panel.git.graph_scroll.scroll_by(dy);
-                        let rows_h = (graph_h - graph_header_h).max(0.0);
+                        let rows_h = (bottom_h - graph_header_h).max(0.0);
                         let max_scroll = crate::app::git_panel::git_graph_max_scroll(
                             self.ide_panel.git.graph_snapshot.len(),
                             rows_h,
@@ -401,6 +404,22 @@ impl App {
                         {
                             self.load_more_git_graph_commits();
                         }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                    if !crate::ui_system::point_in_rect(mx, my, (cx, list_y, cw, changes_h)) {
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
+                } else if self.ide_panel.git.logs_open() {
+                    let logs_y = list_y + changes_h + divider_h;
+                    if crate::ui_system::point_in_rect(mx, my, (cx, logs_y, cw, bottom_h)) {
+                        let max_scroll = crate::app::git_panel::git_logs_max_scroll(
+                            self.ide_panel.git.git_logs.line_count(),
+                            bottom_h,
+                            s,
+                        );
+                        self.ide_panel.git.scroll_git_logs_by(dy, max_scroll);
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }

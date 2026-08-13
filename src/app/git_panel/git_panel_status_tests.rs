@@ -762,46 +762,7 @@ fn rollback_staged_file(
         .map_err(short_git_error)
 }
 
-fn commit_repo(repo_root: &Path, message: &str, amend: bool) -> Result<(), String> {
-    let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
-    let sig = signature(&repo).map_err(short_git_error)?;
-    let mut index = repo.index().map_err(short_git_error)?;
-    let tree_id = index.write_tree().map_err(short_git_error)?;
-    index.write().map_err(short_git_error)?;
-    let tree = repo.find_tree(tree_id).map_err(short_git_error)?;
-
-    if amend {
-        let head_commit = repo
-            .head()
-            .and_then(|head| head.peel_to_commit())
-            .map_err(short_git_error)?;
-        head_commit
-            .amend(
-                Some("HEAD"),
-                Some(&sig),
-                Some(&sig),
-                None,
-                Some(message),
-                Some(&tree),
-            )
-            .map_err(short_git_error)?;
-    } else {
-        let parent = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
-        let parents: Vec<&git2::Commit<'_>> = parent.iter().collect();
-        repo.commit(Some("HEAD"), &sig, &sig, message, &tree, &parents)
-            .map_err(short_git_error)?;
-    }
-    Ok(())
-}
-
-fn signature(repo: &git2::Repository) -> Result<git2::Signature<'_>, git2::Error> {
-    match repo.signature() {
-        Ok(sig) => Ok(sig),
-        Err(_) => git2::Signature::now("RRiter", "rriter@example.invalid"),
-    }
-}
-
-fn push_repo(repo_root: &Path) -> Result<(), String> {
+fn git_push_target(repo_root: &Path) -> Result<(String, String, String), String> {
     let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
     let head = repo.head().map_err(short_git_error)?;
     let head_name = head
@@ -828,23 +789,25 @@ fn push_repo(repo_root: &Path) -> Result<(), String> {
                 })
         })
         .unwrap_or_else(|| ("origin".to_string(), format!("refs/heads/{branch}")));
-    let remote = repo.find_remote(&remote_name).map_err(|err| {
+    let _remote = repo.find_remote(&remote_name).map_err(|err| {
         format!(
             "Push remote `{}` not found: {}",
             remote_name,
             short_git_error(err)
         )
     })?;
-    let remote_url = remote.url().unwrap_or("<no-url>");
-    let refspec = format!("refs/heads/{branch}:{remote_ref}");
+    Ok((remote_name, branch.to_string(), remote_ref))
+}
+
+fn push_repo(repo_root: &Path) -> Result<(), String> {
+    let (remote_name, branch, remote_ref) = git_push_target(repo_root)?;
     println!(
-        "[GIT PUSH] repo={} remote={} url={} refspec={} backend=git",
+        "[GIT PUSH] repo={} remote={} branch={} backend=git",
         repo_root.display(),
         remote_name,
-        remote_url,
-        refspec
+        branch
     );
-    push_repo_with_git_cli(repo_root, &remote_name, branch, &remote_ref)
+    push_repo_with_git_cli(repo_root, &remote_name, &branch, &remote_ref)
 }
 
 fn fetch_repo(repo_root: &Path) -> Result<(), String> {
@@ -865,16 +828,7 @@ fn push_repo_with_git_cli(
     branch: &str,
     remote_ref: &str,
 ) -> Result<(), String> {
-    let refspec = format!("refs/heads/{branch}:{remote_ref}");
-    run_git_checked_owned(
-        repo_root,
-        vec![
-            std::ffi::OsString::from("push"),
-            std::ffi::OsString::from(remote_name),
-            std::ffi::OsString::from(refspec),
-        ],
-        "PUSH",
-    )
+    run_git_checked_owned(repo_root, git_push_args(remote_name, branch, remote_ref), "PUSH")
 }
 
 fn short_git_error(err: git2::Error) -> String {
@@ -1447,6 +1401,8 @@ mod tests {
             notice: Some("Committed 1 repo(s)".to_string()),
             preserve_snapshot_on_empty: false,
             clear_message: true,
+            refresh_graph: true,
+            transaction_failed: false,
         });
 
         assert_eq!(state.message_editor.get_full_text(), "");
@@ -1608,6 +1564,8 @@ mod tests {
             notice: None,
             preserve_snapshot_on_empty: true,
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         });
 
         assert_eq!(state.latest_request_id, 7);
@@ -1635,6 +1593,8 @@ mod tests {
             notice: None,
             preserve_snapshot_on_empty: false,
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         });
 
         assert!(state.snapshot.workspaces[0].files.is_empty());
@@ -1678,6 +1638,8 @@ mod tests {
             notice: None,
             preserve_snapshot_on_empty: true,
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         });
 
         assert!(state.snapshot.workspaces[0].files.is_empty());
@@ -1726,6 +1688,8 @@ mod tests {
             notice: None,
             preserve_snapshot_on_empty: false,
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         });
 
         assert_eq!(state.snapshot.workspaces[0].files.len(), 1);
@@ -1818,7 +1782,7 @@ mod tests {
     }
 
     #[test]
-    fn git_status_stage_and_commit_round_trip_uses_libgit2_only() {
+    fn git_status_stage_and_commit_round_trip_uses_git_cli_commit() {
         let root = temp_git_root("round_trip");
         std::fs::create_dir_all(root.join("src")).unwrap();
         let repo = git2::Repository::init(&root).unwrap();
@@ -1846,7 +1810,7 @@ mod tests {
 
         commit_repo(&root, "initial commit", false).unwrap();
         let head = repo.head().unwrap().peel_to_commit().unwrap();
-        assert_eq!(head.message().unwrap(), "initial commit");
+        assert_eq!(head.message().unwrap().trim_end_matches('\n'), "initial commit");
         assert!(collect_workspace_status(7, &root).files.is_empty());
 
         std::fs::remove_dir_all(&root).unwrap();

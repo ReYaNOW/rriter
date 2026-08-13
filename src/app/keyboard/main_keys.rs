@@ -381,9 +381,8 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                && self.ide_panel.git.commit_menu_open
+                && self.ide_panel.git.close_commit_menus()
             {
-                self.ide_panel.git.commit_menu_open = false;
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }

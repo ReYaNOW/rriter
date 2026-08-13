@@ -20,6 +20,7 @@ mod integration;
 mod macos;
 mod process;
 mod secret_store;
+mod text_file;
 #[cfg(windows)]
 mod windows;
 #[cfg(test)]
@@ -70,6 +71,10 @@ pub use process::{
 };
 pub use secret_store::{
     delete_system_user_secret, load_system_user_secret, store_system_user_secret,
+};
+pub use text_file::{
+    DecodedTextFile, LegacyEncoding, LineEnding, TextEncoding, TextFileFormat, decode_text_bytes,
+    encode_text, read_text_file, write_text_file,
 };
 
 const APP_DIR_NAME: &str = "RRiter";
@@ -779,206 +784,6 @@ pub fn open_user_secret(record: &[u8], purpose: &str) -> io::Result<Vec<u8>> {
             "Windows DPAPI record cannot be opened on this platform",
         ))
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TextEncoding {
-    Utf8,
-    Utf8Bom,
-    Utf16Le,
-    Utf16Be,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LineEnding {
-    Lf,
-    CrLf,
-    Cr,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct TextFileFormat {
-    pub encoding: TextEncoding,
-    pub line_ending: LineEnding,
-}
-
-impl Default for TextFileFormat {
-    fn default() -> Self {
-        Self {
-            encoding: TextEncoding::Utf8,
-            line_ending: if cfg!(windows) {
-                LineEnding::CrLf
-            } else {
-                LineEnding::Lf
-            },
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct DecodedTextFile {
-    pub text: String,
-    pub format: TextFileFormat,
-}
-
-pub fn read_text_file(path: &Path) -> io::Result<DecodedTextFile> {
-    let bytes = fs::read(path)?;
-    decode_text_bytes(&bytes)
-}
-
-pub fn decode_text_bytes(bytes: &[u8]) -> io::Result<DecodedTextFile> {
-    let (encoding, raw_text) = if let Some(bytes) = bytes.strip_prefix(&[0xef, 0xbb, 0xbf]) {
-        (
-            TextEncoding::Utf8Bom,
-            std::str::from_utf8(bytes)
-                .map_err(invalid_text_error)?
-                .to_string(),
-        )
-    } else if let Some(bytes) = bytes.strip_prefix(&[0xff, 0xfe]) {
-        (TextEncoding::Utf16Le, decode_utf16(bytes, true)?)
-    } else if let Some(bytes) = bytes.strip_prefix(&[0xfe, 0xff]) {
-        (TextEncoding::Utf16Be, decode_utf16(bytes, false)?)
-    } else {
-        (
-            TextEncoding::Utf8,
-            std::str::from_utf8(bytes)
-                .map_err(invalid_text_error)?
-                .to_string(),
-        )
-    };
-    let line_ending = detect_line_ending(&raw_text);
-    Ok(DecodedTextFile {
-        text: normalize_line_endings(&raw_text),
-        format: TextFileFormat {
-            encoding,
-            line_ending,
-        },
-    })
-}
-
-fn invalid_text_error(error: impl std::fmt::Display) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidData,
-        format!("unsupported or invalid text encoding: {error}"),
-    )
-}
-
-fn decode_utf16(bytes: &[u8], little_endian: bool) -> io::Result<String> {
-    if bytes.len() % 2 != 0 {
-        return Err(invalid_text_error("odd UTF-16 byte length"));
-    }
-    let words = bytes.chunks_exact(2).map(|pair| {
-        if little_endian {
-            u16::from_le_bytes([pair[0], pair[1]])
-        } else {
-            u16::from_be_bytes([pair[0], pair[1]])
-        }
-    });
-    std::char::decode_utf16(words)
-        .map(|item| item.map_err(invalid_text_error))
-        .collect()
-}
-
-fn detect_line_ending(text: &str) -> LineEnding {
-    let bytes = text.as_bytes();
-    let mut crlf = 0usize;
-    let mut lf = 0usize;
-    let mut cr = 0usize;
-    let mut idx = 0usize;
-    while idx < bytes.len() {
-        match bytes[idx] {
-            b'\r' if bytes.get(idx + 1) == Some(&b'\n') => {
-                crlf += 1;
-                idx += 2;
-            }
-            b'\r' => {
-                cr += 1;
-                idx += 1;
-            }
-            b'\n' => {
-                lf += 1;
-                idx += 1;
-            }
-            _ => idx += 1,
-        }
-    }
-    if crlf >= lf && crlf >= cr && crlf > 0 {
-        LineEnding::CrLf
-    } else if lf >= cr && lf > 0 {
-        LineEnding::Lf
-    } else if cr > 0 {
-        LineEnding::Cr
-    } else {
-        TextFileFormat::default().line_ending
-    }
-}
-
-fn normalize_line_endings(text: &str) -> String {
-    if !text.as_bytes().contains(&b'\r') {
-        return text.to_string();
-    }
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\r' {
-            if chars.peek() == Some(&'\n') {
-                chars.next();
-            }
-            out.push('\n');
-        } else {
-            out.push(ch);
-        }
-    }
-    out
-}
-
-pub fn encode_text(text: &str, format: TextFileFormat) -> Vec<u8> {
-    let external_text = match format.line_ending {
-        LineEnding::Lf => text.to_string(),
-        LineEnding::CrLf => text.replace('\n', "\r\n"),
-        LineEnding::Cr => text.replace('\n', "\r"),
-    };
-    match format.encoding {
-        TextEncoding::Utf8 => external_text.into_bytes(),
-        TextEncoding::Utf8Bom => {
-            let mut bytes = Vec::with_capacity(external_text.len() + 3);
-            bytes.extend_from_slice(&[0xef, 0xbb, 0xbf]);
-            bytes.extend_from_slice(external_text.as_bytes());
-            bytes
-        }
-        TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
-            let little_endian = format.encoding == TextEncoding::Utf16Le;
-            let mut bytes = Vec::with_capacity(external_text.len() * 2 + 2);
-            bytes.extend_from_slice(if little_endian {
-                &[0xff, 0xfe]
-            } else {
-                &[0xfe, 0xff]
-            });
-            for word in external_text.encode_utf16() {
-                let encoded = if little_endian {
-                    word.to_le_bytes()
-                } else {
-                    word.to_be_bytes()
-                };
-                bytes.extend_from_slice(&encoded);
-            }
-            bytes
-        }
-    }
-}
-
-pub fn write_text_file(path: &Path, text: &str, format: TextFileFormat) -> io::Result<()> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        && !parent.is_dir()
-    {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("parent directory does not exist: {}", parent.display()),
-        ));
-    }
-    atomic_write(path, &encode_text(text, format))
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {

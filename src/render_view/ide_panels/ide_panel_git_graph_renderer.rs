@@ -481,3 +481,245 @@ mod git_graph_scroll_regression_tests {
         assert!(source.contains("let hovered = hover_settled"));
     }
 }
+
+
+fn git_log_semantic_color(
+    theme: &crate::renderer::Theme,
+    kind: crate::app::git_panel::GitLogKind,
+) -> [f32; 4] {
+    match kind {
+        crate::app::git_panel::GitLogKind::Header => [0.72, 0.76, 0.90, 0.92],
+        crate::app::git_panel::GitLogKind::Stdout => {
+            [theme.fg[0], theme.fg[1], theme.fg[2], 0.86]
+        }
+        crate::app::git_panel::GitLogKind::Stderr => [0.96, 0.72, 0.40, 0.95],
+        crate::app::git_panel::GitLogKind::Hook => [0.60, 0.72, 1.00, 0.96],
+        crate::app::git_panel::GitLogKind::Success => [0.42, 0.84, 0.50, 0.96],
+        crate::app::git_panel::GitLogKind::Failure => [0.96, 0.42, 0.46, 0.98],
+        crate::app::git_panel::GitLogKind::Info => [0.60, 0.62, 0.70, 0.88],
+    }
+}
+
+fn git_log_prefix(kind: crate::app::git_panel::GitLogKind) -> &'static str {
+    match kind {
+        crate::app::git_panel::GitLogKind::Stdout => "> ",
+        crate::app::git_panel::GitLogKind::Stderr => "! ",
+        _ => "",
+    }
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl Renderer {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_git_logs_panel(
+        &mut self,
+        panel_x: f32,
+        panel_w: f32,
+        logs_y: f32,
+        logs_h: f32,
+        pad: f32,
+        s: f32,
+        ide_panel: &crate::app::IdePanelState,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
+    ) {
+        if logs_h <= 20.0 * s {
+            return;
+        }
+        self.push_rect(
+            panel_x,
+            logs_y,
+            panel_w,
+            logs_h,
+            [
+                self.theme.bg[0] + 0.018,
+                self.theme.bg[1] + 0.020,
+                self.theme.bg[2] + 0.026,
+                1.0,
+            ],
+        );
+
+        let toolbar_h = crate::app::git_panel::GIT_LOG_TOOLBAR_H * s;
+        self.push_rect(
+            panel_x,
+            logs_y,
+            panel_w,
+            toolbar_h,
+            [
+                self.theme.bg[0] + 0.005,
+                self.theme.bg[1] + 0.006,
+                self.theme.bg[2] + 0.010,
+                1.0,
+            ],
+        );
+        self.draw_string_scaled(
+            "VCS Console",
+            panel_x + pad,
+            logs_y + toolbar_h / 2.0 + 5.0 * s,
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82],
+            0.80,
+        );
+
+        let clear_w = (self.measure_ui_width("Очистить", 0.76) + 18.0 * s).max(58.0 * s);
+        let clear_h = 22.0 * s;
+        let clear_x = panel_x + panel_w - pad - clear_w;
+        let clear_y = logs_y + (toolbar_h - clear_h) / 2.0;
+        let clear_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::GitLogsClear,
+            clear_x,
+            clear_y,
+            clear_w,
+            clear_h,
+            mx,
+            my,
+        );
+        if clear_hovered {
+            self.push_rounded_rect(
+                clear_x,
+                clear_y,
+                clear_w,
+                clear_h,
+                4.0 * s,
+                [1.0, 1.0, 1.0, 0.07],
+            );
+        }
+        self.draw_string_scaled(
+            "Очистить",
+            clear_x + 9.0 * s,
+            clear_y + clear_h / 2.0 + 4.5 * s,
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.78],
+            0.76,
+        );
+
+        let rows_y = logs_y + toolbar_h;
+        let rows_h = (logs_h - toolbar_h).max(0.0);
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::GitLogsBody,
+            panel_x,
+            rows_y,
+            panel_w,
+            rows_h,
+            mx,
+            my,
+        );
+        if rows_h <= 1.0 {
+            return;
+        }
+
+        let row_h = crate::app::git_panel::GIT_LOG_ROW_H * s;
+        let line_count = ide_panel.git.git_logs.line_count();
+        let total_h = line_count as f32 * row_h;
+        let max_scroll = (total_h - rows_h).max(0.0);
+        let scroll = ide_panel.git.logs_scroll.current.clamp(0.0, max_scroll);
+        let render_scroll = scroll.round();
+        let first = (render_scroll / row_h).floor().max(0.0) as usize;
+        let visible_count = (rows_h / row_h).ceil() as usize + 2;
+        let last = (first + visible_count).min(line_count);
+        let text_x = panel_x + pad;
+        let text_scale = 0.78;
+
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            let scissor_y = self.height - (rows_y + rows_h);
+            self.gl.scissor(
+                panel_x.round() as i32,
+                scissor_y.max(0.0).round() as i32,
+                panel_w.max(0.0).round() as i32,
+                rows_h.max(0.0).round() as i32,
+            );
+        }
+
+        for line_idx in first..last {
+            let Some(line) = ide_panel.git.git_logs.line_at(line_idx) else {
+                continue;
+            };
+            let baseline = rows_y.round()
+                + (line_idx as f32 * row_h).round()
+                - render_scroll
+                + (row_h * 0.70).round();
+            let kind = line.kind();
+            let semantic = git_log_semantic_color(&self.theme, kind);
+            let prefix = git_log_prefix(kind);
+            let mut x = text_x;
+            if !prefix.is_empty() {
+                self.draw_string_scaled(prefix, x, baseline, semantic, text_scale);
+                x += self.measure_ui_width(prefix, text_scale);
+            }
+            match line.spans() {
+                crate::app::git_panel::GitLogSpansRef::TruncationMarker => {
+                    self.draw_string_scaled(
+                        crate::app::git_panel::GIT_LOG_TRUNCATION_MARKER,
+                        x,
+                        baseline,
+                        semantic,
+                        text_scale,
+                    );
+                }
+                crate::app::git_panel::GitLogSpansRef::Line(spans) => {
+                    for span in spans {
+                        if x >= panel_x + panel_w - pad {
+                            break;
+                        }
+                        let color = span
+                            .ansi_fg
+                            .and_then(|index| {
+                                crate::app::terminal::ANSI_16_COLORS.get(index as usize).copied()
+                            })
+                            .unwrap_or(semantic);
+                        self.draw_string_scaled(&span.text, x, baseline, color, text_scale);
+                        x += self.measure_ui_width(&span.text, text_scale);
+                    }
+                }
+            }
+        }
+
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+
+        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+            rows_y + 4.0 * s,
+            (rows_h - 8.0 * s).max(1.0),
+            rows_h,
+            total_h,
+            scroll,
+            10.0 * s,
+        ) {
+            self.push_rounded_rect(
+                panel_x + panel_w - 5.0 * s,
+                thumb.start,
+                3.0 * s,
+                thumb.len,
+                1.5 * s,
+                [1.0, 1.0, 1.0, 0.22],
+            );
+        }
+
+        if ide_panel.git.git_logs.is_empty() {
+            let message = "Здесь появятся логи commit-операций";
+            let width = self.measure_ui_width(message, 0.80);
+            self.draw_string_scaled(
+                message,
+                panel_x + ((panel_w - width) / 2.0).max(pad),
+                rows_y + 30.0 * s,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.44],
+                0.80,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod git_logs_renderer_tests {
+    #[test]
+    fn semantic_prefixes_do_not_infer_errors_from_output_text() {
+        use crate::app::git_panel::GitLogKind;
+        assert_eq!(super::git_log_prefix(GitLogKind::Stdout), "> ");
+        assert_eq!(super::git_log_prefix(GitLogKind::Stderr), "! ");
+        assert_eq!(super::git_log_prefix(GitLogKind::Failure), "");
+        assert_eq!(super::git_log_prefix(GitLogKind::Success), "");
+    }
+}

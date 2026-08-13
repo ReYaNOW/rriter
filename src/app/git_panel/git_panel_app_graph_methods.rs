@@ -12,7 +12,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn refresh_git_panel_window(&mut self) {
-        self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.close_commit_menus();
         self.ide_panel.git.repo_action_menu_workspace_idx = None;
         self.ide_panel.git.snapshot = GitStatusSnapshot::default();
         self.ide_panel.git.selected_file = None;
@@ -50,6 +50,17 @@ impl App {
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
         for receiver in receivers {
+            if let Some(runtime_rx) = &receiver.runtime_rx {
+                loop {
+                    match runtime_rx.try_recv() {
+                        Ok(event) => {
+                            self.ide_panel.git.apply_runtime_event(event);
+                            updated = true;
+                        }
+                        Err(mpsc::TryRecvError::Empty | mpsc::TryRecvError::Disconnected) => break,
+                    }
+                }
+            }
             let keep = match poll_one_shot_receiver(&receiver.rx) {
                 OneShotReceiverPoll::Ready(result) => {
                     self.ide_panel
@@ -61,20 +72,16 @@ impl App {
                         if receiver.refresh {
                             refresh_rerun |= self.ide_panel.git.finish_status_refresh();
                         }
-                        let reload_graph = event.notice.as_deref().is_some_and(|notice| {
-                            notice.starts_with("Committed ")
-                                || notice == "Fetch done"
-                                || notice == "Pull done"
-                        });
+                        let reload_graph = event.refresh_graph;
                         self.ide_panel.git.apply_event(event);
                         status_event_applied = true;
                         self.ide_panel.git.pending = false;
                         if reload_graph {
                             reload_graph_cache = true;
-                            prefetch_graph_after_status = self.ide_panel.git.graph_open;
+                            prefetch_graph_after_status = self.ide_panel.git.graph_open();
                             force_prefetch_graph_after_status = prefetch_graph_after_status;
                         } else if self.ide_panel.git.graph_refresh_after_status
-                            && self.ide_panel.git.graph_open
+                            && self.ide_panel.git.graph_open()
                         {
                             prefetch_graph_after_status = true;
                         }
@@ -94,6 +101,13 @@ impl App {
                     }
                     if receiver.request_id == self.ide_panel.git.latest_request_id {
                         self.ide_panel.git.handle_status_disconnect(receiver.request_id);
+                        if receiver.runtime_rx.is_some() {
+                            self.ide_panel.git.git_logs.append(GitLogLine::plain(
+                                GitLogKind::Failure,
+                                "Git commit worker disconnected before a final result",
+                            ));
+                            self.ide_panel.git.open_logs_for_failure();
+                        }
                         updated = true;
                     }
                     false
@@ -154,7 +168,7 @@ impl App {
         if prefetch_graph_after_status {
             self.ide_panel.git.graph_refresh_after_status = false;
             self.prefetch_git_graph_for_known_workspaces(force_prefetch_graph_after_status);
-        } else if self.ide_panel.git.graph_refresh_after_status && !self.ide_panel.git.graph_open {
+        } else if self.ide_panel.git.graph_refresh_after_status && !self.ide_panel.git.graph_open() {
             self.ide_panel.git.graph_refresh_after_status = false;
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
@@ -255,15 +269,20 @@ impl App {
     }
 
     pub fn toggle_git_graph(&mut self) {
-        self.ide_panel.git.commit_menu_open = false;
-        self.ide_panel.git.graph_open = !self.ide_panel.git.graph_open;
-        if self.ide_panel.git.graph_open {
+        self.ide_panel.git.close_commit_menus();
+        self.ide_panel.git.toggle_graph_pane();
+        if self.ide_panel.git.graph_open() {
             self.ensure_git_graph_loaded();
         }
     }
 
+    pub fn toggle_git_logs(&mut self) {
+        self.ide_panel.git.close_commit_menus();
+        self.ide_panel.git.toggle_logs_pane();
+    }
+
     pub fn select_git_graph_workspace(&mut self, workspace_idx: usize) {
-        self.ide_panel.git.commit_menu_open = false;
+        self.ide_panel.git.close_commit_menus();
         if self.ide_panel.git.graph_workspace_idx == Some(workspace_idx) {
             return;
         }

@@ -1,6 +1,7 @@
 use crate::app::App;
 use crate::editor::Editor;
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, mpsc};
 
@@ -216,6 +217,25 @@ struct GitGraphCacheEntry {
 pub(crate) const GIT_GRAPH_CONTROLS_H: f32 = 102.0;
 pub(crate) const GIT_GRAPH_ROW_H: f32 = 34.0;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum GitBottomPane {
+    #[default]
+    Closed,
+    Graph,
+    Logs,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct GitCommitOptions {
+    pub skip_hooks: bool,
+}
+
+impl GitCommitOptions {
+    pub fn any_enabled(self) -> bool {
+        self.skip_hooks
+    }
+}
+
 pub(crate) fn git_graph_divider_h(scale: f32) -> f32 {
     scale.max(1.0)
 }
@@ -300,13 +320,16 @@ pub struct GitPanelState {
     pub message_editor: Editor,
     pub message_focused: bool,
     pub amend: bool,
-    pub commit_menu_open: bool,
+    pub commit_menu_opened_at: Option<std::time::Instant>,
+    pub commit_options_menu_opened_at: Option<std::time::Instant>,
+    pub commit_options: GitCommitOptions,
     pub repo_action_menu_workspace_idx: Option<usize>,
     pub collapsed_workspaces: FxHashSet<usize>,
     pub collapsed_dirs: FxHashMap<usize, FxHashSet<String>>,
     pub scroll: crate::scroll::ScrollState,
     pub pending: bool,
-    pub pending_label: Option<&'static str>,
+    pub pending_label: Option<String>,
+    active_git_hooks: Vec<(String, u64, String)>,
     pub selected_file: Option<(usize, usize)>,
     pending_started_at: Option<std::time::Instant>,
     pending_label_until: Option<std::time::Instant>,
@@ -321,8 +344,11 @@ pub struct GitPanelState {
     pub stage_pending_workspace_idx: Option<usize>,
     pub notice: Option<String>,
     pub confirm_dialog: Option<GitConfirmDialog>,
-    pub graph_open: bool,
+    pub bottom_pane: GitBottomPane,
     pub graph_scroll: crate::scroll::ScrollState,
+    pub logs_scroll: crate::scroll::ScrollState,
+    pub logs_follow_tail: bool,
+    pub(crate) git_logs: GitLogBuffer,
     pub graph_pending: bool,
     pub graph_snapshot: Vec<GitGraphCommit>,
     pub graph_workspace_idx: Option<usize>,
@@ -346,6 +372,7 @@ pub struct GitPanelState {
 
 struct GitPanelReceiver {
     rx: mpsc::Receiver<GitPanelTaskResult>,
+    runtime_rx: Option<mpsc::Receiver<GitRuntimeEvent>>,
     request_id: u64,
     blocking: bool,
     refresh: bool,
@@ -379,6 +406,8 @@ fn poll_one_shot_receiver<T>(rx: &mpsc::Receiver<T>) -> OneShotReceiverPoll<T> {
 struct GitActionOutcome {
     notice: Option<String>,
     clear_message: bool,
+    refresh_graph: bool,
+    transaction_failed: bool,
 }
 
 impl Default for GitPanelState {
@@ -388,13 +417,16 @@ impl Default for GitPanelState {
             message_editor: Editor::new(512),
             message_focused: false,
             amend: false,
-            commit_menu_open: false,
+            commit_menu_opened_at: None,
+            commit_options_menu_opened_at: None,
+            commit_options: GitCommitOptions::default(),
             repo_action_menu_workspace_idx: None,
             collapsed_workspaces: FxHashSet::default(),
             collapsed_dirs: FxHashMap::default(),
             scroll: crate::scroll::ScrollState::new(15.0),
             pending: false,
             pending_label: None,
+            active_git_hooks: Vec::new(),
             selected_file: None,
             pending_started_at: None,
             pending_label_until: None,
@@ -409,8 +441,11 @@ impl Default for GitPanelState {
             stage_pending_workspace_idx: None,
             notice: None,
             confirm_dialog: None,
-            graph_open: false,
+            bottom_pane: GitBottomPane::Closed,
             graph_scroll: crate::scroll::ScrollState::new(15.0),
+            logs_scroll: crate::scroll::ScrollState::new(15.0),
+            logs_follow_tail: true,
+            git_logs: GitLogBuffer::default(),
             graph_pending: false,
             graph_snapshot: Vec::new(),
             graph_workspace_idx: None,
@@ -435,6 +470,106 @@ impl Default for GitPanelState {
 }
 
 impl GitPanelState {
+    pub fn commit_menu_open(&self) -> bool {
+        self.commit_menu_opened_at.is_some()
+    }
+
+    pub fn commit_options_menu_open(&self) -> bool {
+        self.commit_options_menu_opened_at.is_some()
+    }
+
+    pub fn close_commit_menus(&mut self) -> bool {
+        self.commit_menu_opened_at.take().is_some()
+            | self.commit_options_menu_opened_at.take().is_some()
+    }
+
+    pub fn toggle_commit_menu(&mut self, now: std::time::Instant) {
+        self.commit_options_menu_opened_at = None;
+        self.commit_menu_opened_at = if self.commit_menu_opened_at.is_some() {
+            None
+        } else {
+            Some(now)
+        };
+    }
+
+    pub fn toggle_commit_options_menu(&mut self, now: std::time::Instant) {
+        self.commit_menu_opened_at = None;
+        self.commit_options_menu_opened_at = if self.commit_options_menu_opened_at.is_some() {
+            None
+        } else {
+            Some(now)
+        };
+    }
+
+    pub fn graph_open(&self) -> bool {
+        self.bottom_pane == GitBottomPane::Graph
+    }
+
+    pub fn logs_open(&self) -> bool {
+        self.bottom_pane == GitBottomPane::Logs
+    }
+
+    pub fn toggle_graph_pane(&mut self) {
+        self.bottom_pane = if self.graph_open() {
+            GitBottomPane::Closed
+        } else {
+            GitBottomPane::Graph
+        };
+    }
+
+    pub fn toggle_logs_pane(&mut self) {
+        self.bottom_pane = if self.logs_open() {
+            GitBottomPane::Closed
+        } else {
+            GitBottomPane::Logs
+        };
+    }
+
+    pub fn open_logs_for_failure(&mut self) {
+        let was_logs_open = self.logs_open();
+        self.bottom_pane = GitBottomPane::Logs;
+        if !was_logs_open {
+            self.logs_follow_tail = true;
+        }
+        if self.graph_height_ratio < 0.50 {
+            self.graph_height_ratio = 0.50;
+        }
+    }
+
+    pub fn clear_git_logs(&mut self) {
+        self.git_logs.clear();
+        self.logs_scroll.reset();
+        self.logs_follow_tail = true;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_git_log_for_test(&mut self, text: &str) {
+        self.git_logs
+            .append(GitLogLine::plain(GitLogKind::Info, text.to_string()));
+    }
+
+    pub(crate) fn scroll_git_logs_by(&mut self, delta: f32, max_scroll: f32) {
+        self.logs_scroll.anim_speed = 7.0;
+        self.logs_scroll.scroll_by(delta);
+        self.logs_scroll.clamp_target(0.0, max_scroll);
+        self.logs_follow_tail = self.logs_scroll.target >= (max_scroll - 1.0).max(0.0);
+    }
+
+    pub(crate) fn update_git_logs_scroll(&mut self, dt: f32, max_scroll: f32) -> bool {
+        let before_current = self.logs_scroll.current;
+        let before_target = self.logs_scroll.target;
+        if self.logs_follow_tail {
+            self.logs_scroll.set_target(max_scroll);
+        } else {
+            self.logs_scroll.clamp_target(0.0, max_scroll);
+        }
+        self.logs_scroll.clamp_current(0.0, max_scroll);
+        let animated = self.logs_scroll.update(dt);
+        animated
+            || self.logs_scroll.current != before_current
+            || self.logs_scroll.target != before_target
+    }
+
     pub(crate) fn allocate_status_request_id(&mut self) -> u64 {
         let request_id = self.next_request_id.max(1);
         self.next_request_id = request_id.wrapping_add(1).max(1);
@@ -454,6 +589,7 @@ impl GitPanelState {
         self.graph_rx.clear();
         self.pending = false;
         self.pending_label = None;
+        self.active_git_hooks.clear();
         self.pending_started_at = None;
         self.status_refresh_pending = false;
         self.status_refresh_dirty = false;
@@ -567,6 +703,9 @@ impl GitPanelState {
         self.latest_request_id = event.request_id;
         self.applied_request_id = event.request_id;
         self.notice = event.notice;
+        if event.transaction_failed {
+            self.open_logs_for_failure();
+        }
         if event.clear_message {
             self.message_editor = Editor::new(512);
             self.message_focused = false;
@@ -593,6 +732,8 @@ pub struct GitPanelEvent {
     notice: Option<String>,
     preserve_snapshot_on_empty: bool,
     clear_message: bool,
+    refresh_graph: bool,
+    transaction_failed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -649,6 +790,7 @@ enum GitAction {
         message: String,
         amend: bool,
         push_after: bool,
+        skip_hooks: bool,
     },
     RollbackStaged {
         files: Vec<GitStageFileCommand>,

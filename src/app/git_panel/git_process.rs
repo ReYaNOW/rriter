@@ -1,5 +1,6 @@
 const GIT_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20);
 const GIT_NETWORK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+const GIT_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 const GIT_OVERRIDE_ENV: &str = "RRITER_GIT_PATH";
 const GIT_SSL_BACKEND_ENV: &str = "RRITER_GIT_SSL_BACKEND";
 
@@ -52,6 +53,63 @@ fn git_command_for_platform(
     // stdin is closed by the managed runner and the bounded timeout still
     // prevents an invisible terminal prompt from hanging RRiter forever.
     Ok(command)
+}
+
+fn git_commit_args(
+    message: &str,
+    amend: bool,
+    skip_hooks: bool,
+    fallback_identity: bool,
+) -> Vec<std::ffi::OsString> {
+    let mut args = Vec::with_capacity(10);
+    if fallback_identity {
+        args.extend([
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("user.name=RRiter"),
+            std::ffi::OsString::from("-c"),
+            std::ffi::OsString::from("user.email=rriter@example.invalid"),
+        ]);
+    }
+    args.push(std::ffi::OsString::from("commit"));
+    if amend {
+        args.push(std::ffi::OsString::from("--amend"));
+        args.push(std::ffi::OsString::from("--reset-author"));
+    }
+    if skip_hooks {
+        args.push(std::ffi::OsString::from("--no-verify"));
+    }
+    args.push(std::ffi::OsString::from("-m"));
+    args.push(std::ffi::OsString::from(message));
+    args
+}
+
+fn git_push_args(remote_name: &str, branch: &str, remote_ref: &str) -> Vec<std::ffi::OsString> {
+    vec![
+        std::ffi::OsString::from("push"),
+        std::ffi::OsString::from(remote_name),
+        std::ffi::OsString::from(format!("refs/heads/{branch}:{remote_ref}")),
+    ]
+}
+
+fn run_git_streaming_status<F>(
+    repo_root: &std::path::Path,
+    args: &[std::ffi::OsString],
+    label: &str,
+    network: bool,
+    timeout: std::time::Duration,
+    trace2: bool,
+    cancel: &std::sync::atomic::AtomicBool,
+    on_line: F,
+) -> Result<std::process::ExitStatus, String>
+where
+    F: FnMut(crate::platform::ProcessOutputStream, String),
+{
+    let mut command = git_command(repo_root, args, network)?;
+    if trace2 {
+        command.env("GIT_TRACE2_EVENT", "2");
+    }
+    crate::platform::run_command_streaming_cancelable(&mut command, timeout, cancel, on_line)
+        .map_err(|error| git_process_error(label, error))
 }
 
 fn git_output(
@@ -332,5 +390,43 @@ mod git_process_tests {
         assert_eq!(short_command_output(b"first\r\nsecond\r\n"), "first\nsecond");
         let long = "x".repeat(500);
         assert!(short_command_output(long.as_bytes()).len() < long.len());
+    }
+
+    #[test]
+    fn commit_args_preserve_message_and_apply_options_without_shell_joining() {
+        let message = "Unicode ✓\nsecond line";
+        let args = git_commit_args(message, true, true, true);
+        assert_eq!(
+            args,
+            vec![
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("user.name=RRiter"),
+                std::ffi::OsString::from("-c"),
+                std::ffi::OsString::from("user.email=rriter@example.invalid"),
+                std::ffi::OsString::from("commit"),
+                std::ffi::OsString::from("--amend"),
+                std::ffi::OsString::from("--reset-author"),
+                std::ffi::OsString::from("--no-verify"),
+                std::ffi::OsString::from("-m"),
+                std::ffi::OsString::from(message),
+            ]
+        );
+
+        let normal = git_commit_args("message", false, false, false);
+        assert_eq!(
+            normal,
+            vec![
+                std::ffi::OsString::from("commit"),
+                std::ffi::OsString::from("-m"),
+                std::ffi::OsString::from("message"),
+            ]
+        );
+    }
+
+    #[test]
+    fn push_args_never_include_no_verify() {
+        let args = git_push_args("origin", "main", "refs/heads/main");
+        assert_eq!(args[0], "push");
+        assert!(!args.iter().any(|arg| arg == "--no-verify"));
     }
 }

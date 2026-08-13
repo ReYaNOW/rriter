@@ -494,7 +494,7 @@ fn file_open_and_atomic_save_preserve_encoding_bom_and_line_endings() {
         let path = dir.join(name);
         std::fs::write(
             &path,
-            crate::platform::encode_text("first\n😀second\n", format),
+            crate::platform::encode_text("first\n😀second\n", format).unwrap(),
         )
         .unwrap();
 
@@ -512,6 +512,37 @@ fn file_open_and_atomic_save_preserve_encoding_bom_and_line_endings() {
         assert_eq!(decoded.text, "first\n😀changed\n");
         assert_eq!(decoded.format, format);
     }
+
+    let legacy_path = dir.join("windows-1251.txt");
+    let legacy_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Legacy(
+            crate::platform::LegacyEncoding::Windows1251,
+        ),
+        line_ending: crate::platform::LineEnding::Lf,
+    };
+    std::fs::write(
+        &legacy_path,
+        crate::platform::encode_text("Привет\nСтрока\n", legacy_format).unwrap(),
+    )
+    .unwrap();
+    app.load_file_internal(legacy_path.clone(), false, false);
+    assert_eq!(app.text_file_format, legacy_format);
+    app.editor = editor_with("Привет\nСтрока три\n");
+    assert!(app.save_current_file());
+    let saved_bytes = std::fs::read(&legacy_path).unwrap();
+    assert_eq!(
+        crate::platform::read_text_file(&legacy_path).unwrap().format,
+        legacy_format
+    );
+    app.editor = editor_with("Привет 😀\n");
+    assert!(!app.save_current_file());
+    assert_eq!(std::fs::read(&legacy_path).unwrap(), saved_bytes);
+    assert!(
+        app.ide_panel
+            .file_tree_error
+            .as_deref()
+            .is_some_and(|error| error.contains("Windows-1251"))
+    );
 
     let leftovers = std::fs::read_dir(&dir)
         .unwrap()
@@ -969,6 +1000,53 @@ fn check_external_changes_refreshes_clean_tabs_and_leaves_dirty_tabs_alone() {
     std::fs::remove_file(clean_path).ok();
     std::fs::remove_file(dirty_path).ok();
     std::fs::remove_dir(dir).ok();
+}
+
+#[test]
+fn check_external_changes_preserves_legacy_format_and_followup_save() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    let unique = format!(
+        "rriter-tabs-legacy-reload-test-{}-{}",
+        std::process::id(),
+        Instant::now().elapsed().as_nanos()
+    );
+    let dir = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("legacy.txt");
+    let format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Legacy(
+            crate::platform::LegacyEncoding::Windows1251,
+        ),
+        line_ending: crate::platform::LineEnding::Lf,
+    };
+    let initial = "Привет, мир!\nСтрока один.\n";
+    let reloaded = "Привет, мир!\nСтрока два.\n";
+    let saved = "Привет, мир!\nСтрока три.\n";
+    std::fs::write(&path, crate::platform::encode_text(initial, format).unwrap()).unwrap();
+
+    app.is_ide_mode = true;
+    app.open_file_in_tab_internal_options(path.clone(), false, false, false);
+    assert_eq!(app.editor.get_full_text(), initial);
+    assert_eq!(app.text_file_format, format);
+
+    std::fs::write(&path, crate::platform::encode_text(reloaded, format).unwrap()).unwrap();
+    app.check_external_changes();
+    assert_eq!(app.editor.get_full_text(), reloaded);
+    assert_eq!(app.text_file_format, format);
+
+    app.editor = editor_with(saved);
+    assert!(app.save_current_file());
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        crate::platform::encode_text(saved, format).unwrap()
+    );
+    let reopened = crate::platform::read_text_file(&path).unwrap();
+    assert_eq!(reopened.text, saved);
+    assert_eq!(reopened.format, format);
+
+    std::fs::remove_dir_all(dir).ok();
 }
 
 #[test]

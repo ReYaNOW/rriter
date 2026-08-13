@@ -236,8 +236,12 @@ fn write_with_native_elevation(path: &Path, bytes: &[u8]) -> io::Result<()> {
     outcome
 }
 
+fn encode_elevated_text(text: &str, format: TextFileFormat) -> io::Result<Vec<u8>> {
+    encode_text(text, format)
+}
+
 pub fn write_text_file_elevated(path: &Path, text: &str, format: TextFileFormat) -> io::Result<()> {
-    let bytes = encode_text(text, format);
+    let bytes = encode_elevated_text(text, format)?;
     #[cfg(target_os = "linux")]
     {
         let mut command = Command::new("pkexec");
@@ -287,6 +291,17 @@ mod tests {
             std::process::id(),
             COUNTER.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    #[test]
+    fn elevated_text_encoding_rejects_unrepresentable_legacy_text_before_write() {
+        let format = TextFileFormat {
+            encoding: super::super::TextEncoding::Legacy(super::super::LegacyEncoding::Iso8859_5),
+            line_ending: super::super::LineEnding::Lf,
+        };
+        let error = encode_elevated_text("Привет 😀", format).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("ISO-8859-5"));
     }
 
     #[test]

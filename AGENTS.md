@@ -770,6 +770,7 @@ Root:
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
+* `src/platform/text_file.rs` -> centralized UTF/legacy text decoding, format preservation, conservative charset detection, strict re-encoding, and atomic text-save entrypoint.
 * `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
 * `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
@@ -831,6 +832,7 @@ Entrypoints/state:
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
+* `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
@@ -885,7 +887,7 @@ Rendering:
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
-* `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace, dialogs, tests.
+* `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace/logs, dialogs, tests.
 * `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search panel controls/results rendering.
 * `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
 * `src/render_view/search.rs` -> search panel UI.

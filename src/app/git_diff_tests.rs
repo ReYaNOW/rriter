@@ -81,7 +81,7 @@ fn git_diff_loader_normalizes_head_and_preserves_worktree_text_format() {
     };
     std::fs::write(
         &path,
-        crate::platform::encode_text("base\n😀line\n", head_format),
+        crate::platform::encode_text("base\n😀line\n", head_format).unwrap(),
     )
     .unwrap();
 
@@ -102,7 +102,7 @@ fn git_diff_loader_normalizes_head_and_preserves_worktree_text_format() {
     };
     std::fs::write(
         &path,
-        crate::platform::encode_text("changed\n😀line\n", worktree_format),
+        crate::platform::encode_text("changed\n😀line\n", worktree_format).unwrap(),
     )
     .unwrap();
 
@@ -115,6 +115,59 @@ fn git_diff_loader_normalizes_head_and_preserves_worktree_text_format() {
     .unwrap();
     assert_eq!(payload.base_text, "base\n😀line\n");
     assert_eq!(payload.worktree_text, "changed\n😀line\n");
+    assert_eq!(payload.worktree_format, worktree_format);
+
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn git_diff_loader_preserves_legacy_worktree_text_format() {
+    let root = git_diff_test_root("git-diff-legacy-format");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    let path = root.join("notes.txt");
+    let head_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Utf8Bom,
+        line_ending: crate::platform::LineEnding::CrLf,
+    };
+    std::fs::write(
+        &path,
+        crate::platform::encode_text("base\nПривет\n", head_format).unwrap(),
+    )
+    .unwrap();
+
+    {
+        let repo = git2::Repository::init(&root).unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("notes.txt")).unwrap();
+        let tree_id = index.write_tree().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        let signature = git2::Signature::now("RRiter Test", "rriter@example.invalid").unwrap();
+        repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+            .unwrap();
+    }
+
+    let worktree_format = crate::platform::TextFileFormat {
+        encoding: crate::platform::TextEncoding::Legacy(
+            crate::platform::LegacyEncoding::Windows1251,
+        ),
+        line_ending: crate::platform::LineEnding::CrLf,
+    };
+    std::fs::write(
+        &path,
+        crate::platform::encode_text("changed\nПривет\n", worktree_format).unwrap(),
+    )
+    .unwrap();
+
+    let payload = load_git_diff(
+        root.clone(),
+        "notes.txt".to_string(),
+        None,
+        GitFileStatus::Modified,
+    )
+    .unwrap();
+    assert_eq!(payload.base_text, "base\nПривет\n");
+    assert_eq!(payload.worktree_text, "changed\nПривет\n");
     assert_eq!(payload.worktree_format, worktree_format);
 
     std::fs::remove_dir_all(root).ok();
@@ -154,7 +207,7 @@ fn git_diff_untracked_loader_preserves_utf16be_crlf_format() {
     };
     std::fs::write(
         root.join("new.txt"),
-        crate::platform::encode_text("first\nsecond\n", format),
+        crate::platform::encode_text("first\nsecond\n", format).unwrap(),
     )
     .unwrap();
 
@@ -207,7 +260,11 @@ fn git_diff_staged_loader_reads_index_instead_of_worktree() {
         line_ending: crate::platform::LineEnding::CrLf,
     };
     let path = root.join("staged.txt");
-    std::fs::write(&path, crate::platform::encode_text("staged\n", format)).unwrap();
+    std::fs::write(
+        &path,
+        crate::platform::encode_text("staged\n", format).unwrap(),
+    )
+    .unwrap();
     let mut index = repo.index().unwrap();
     index.add_path(Path::new("staged.txt")).unwrap();
     index.write().unwrap();

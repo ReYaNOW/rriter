@@ -829,7 +829,7 @@ impl AutomationController {
                 }
             }
             AutomationStep::ToggleGitGraph => {
-                if !app.ide_panel.git.graph_open {
+                if !app.ide_panel.git.graph_open() {
                     app.toggle_git_graph();
                 }
                 request_redraw(app);

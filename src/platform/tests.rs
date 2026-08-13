@@ -260,10 +260,276 @@ fn text_formats_roundtrip_bom_utf16_and_line_endings() {
             line_ending: LineEnding::Cr,
         },
     ] {
-        let decoded = decode_text_bytes(&encode_text(text, format)).unwrap();
+        let decoded = decode_text_bytes(&encode_text(text, format).unwrap()).unwrap();
         assert_eq!(decoded.text, text);
         assert_eq!(decoded.format, format);
     }
+}
+
+const ISO_8859_5_RUSSIAN_CRLF: &[u8] = &[
+    0xbf, 0xe0, 0xd8, 0xd2, 0xd5, 0xe2, 0x2c, 0x20, 0xdc, 0xd8, 0xe0, 0x21, 0x0d, 0x0a,
+    0xc1, 0xe2, 0xe0, 0xde, 0xda, 0xd0, 0x20, 0xd4, 0xd2, 0xd0, 0x2e, 0x0d, 0x0a,
+];
+const WINDOWS_1251_RUSSIAN_LF: &[u8] = &[
+    0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x2c, 0x20, 0xec, 0xe8, 0xf0, 0x21, 0x0a, 0xd1, 0xf2,
+    0xf0, 0xee, 0xea, 0xe0, 0x20, 0xe4, 0xe2, 0xe0, 0x2e, 0x0a,
+];
+const KOI8_R_RUSSIAN_LF: &[u8] = &[
+    0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4, 0x2c, 0x20, 0xcd, 0xc9, 0xd2, 0x21, 0x0a, 0xf3, 0xd4,
+    0xd2, 0xcf, 0xcb, 0xc1, 0x20, 0xc4, 0xd7, 0xc1, 0x2e, 0x0a,
+];
+const ISO_8859_5_SOURCE_LIKE: &[u8] = &[
+    0x2f, 0x2f, 0x20, 0xbf, 0xe0, 0xd8, 0xd2, 0xd5, 0xe2, 0x2c, 0x20, 0xdc, 0xd8, 0xe0,
+    0x0a, 0x66, 0x6e, 0x20, 0x6d, 0x61, 0x69, 0x6e, 0x28, 0x29, 0x20, 0x7b, 0x0a, 0x20,
+    0x20, 0x20, 0x20, 0x70, 0x72, 0x69, 0x6e, 0x74, 0x6c, 0x6e, 0x21, 0x28, 0x22, 0xe1,
+    0xe2, 0xe0, 0xde, 0xda, 0xd0, 0x22, 0x29, 0x3b, 0x0a, 0x7d, 0x0a,
+];
+const WINDOWS_1251_SOURCE_LIKE: &[u8] = &[
+    0x23, 0x20, 0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x2c, 0x20, 0xec, 0xe8, 0xf0, 0x0a,
+    0x64, 0x65, 0x66, 0x20, 0x6d, 0x61, 0x69, 0x6e, 0x28, 0x29, 0x3a, 0x0a, 0x20, 0x20,
+    0x20, 0x20, 0xf1, 0xf2, 0xf0, 0xee, 0xea, 0xe0, 0x20, 0x3d, 0x20, 0x22, 0xf2, 0xe5,
+    0xf1, 0xf2, 0x22, 0x0a,
+];
+const KOI8_R_SOURCE_LIKE: &[u8] = &[
+    0x2f, 0x2f, 0x20, 0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4, 0x2c, 0x20, 0xcd, 0xc9, 0xd2,
+    0x0a, 0x66, 0x6e, 0x20, 0x6d, 0x61, 0x69, 0x6e, 0x28, 0x29, 0x20, 0x7b, 0x0a, 0x20,
+    0x20, 0x20, 0x20, 0x6c, 0x65, 0x74, 0x20, 0xd3, 0xd4, 0xd2, 0xcf, 0xcb, 0xc1, 0x20,
+    0x3d, 0x20, 0x31, 0x3b, 0x0a, 0x7d, 0x0a,
+];
+const WINDOWS_1251_AMBIGUOUS_SOURCE_LIKE: &[u8] = &[
+    0x2f, 0x2f, 0x20, 0xef, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x0a, 0x6c, 0x65, 0x74, 0x20,
+    0xef, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x20, 0x3d, 0x20, 0x31, 0x3b, 0x0a,
+];
+
+#[test]
+fn legacy_text_encodings_decode_real_fixtures_and_roundtrip() {
+    let fixtures: &[(&[u8], &str, LegacyEncoding, LineEnding)] = &[
+        (
+            ISO_8859_5_RUSSIAN_CRLF,
+            "Привет, мир!\nСтрока два.\n",
+            LegacyEncoding::Iso8859_5,
+            LineEnding::CrLf,
+        ),
+        (
+            WINDOWS_1251_RUSSIAN_LF,
+            "Привет, мир!\nСтрока два.\n",
+            LegacyEncoding::Windows1251,
+            LineEnding::Lf,
+        ),
+        (
+            KOI8_R_RUSSIAN_LF,
+            "Привет, мир!\nСтрока два.\n",
+            LegacyEncoding::Koi8R,
+            LineEnding::Lf,
+        ),
+        (
+            &[
+                0x8f, 0xe0, 0xa8, 0xa2, 0xa5, 0xe2, 0x2c, 0x20, 0xac, 0xa8, 0xe0, 0x21,
+                0x0a, 0x91, 0xe2, 0xe0, 0xae, 0xaa, 0xa0, 0x20, 0xa4, 0xa2, 0xa0, 0x2e,
+                0x0a,
+            ],
+            "Привет, мир!\nСтрока два.\n",
+            LegacyEncoding::Ibm866,
+            LineEnding::Lf,
+        ),
+        (
+            &[
+                0x93, 0x50, 0x72, 0x69, 0x63, 0x65, 0x94, 0x20, 0x83, 0x28, 0x78, 0x29,
+                0x20, 0x97, 0x20, 0x63, 0x61, 0x66, 0xe9, 0x85, 0x0a,
+            ],
+            "“Price” ƒ(x) — café…\n",
+            LegacyEncoding::Windows1252,
+            LineEnding::Lf,
+        ),
+        (
+            &[
+                0x8d, 0x61, 0x9e, 0x6b, 0xfd, 0x20, 0x6b, 0xf9, 0xf2, 0x20, 0x97, 0x20,
+                0x70, 0xf8, 0xed, 0x6c, 0x69, 0x9a, 0x20, 0x9e, 0x6c, 0x75, 0x74, 0xfd,
+                0x2e, 0x0a,
+            ],
+            "Ťažký kůň — příliš žlutý.\n",
+            LegacyEncoding::Windows1250,
+            LineEnding::Lf,
+        ),
+        (
+            &[
+                0xa1, 0xa6, 0xac, 0x20, 0x69, 0x20, 0xb1, 0xb6, 0xbc, 0x2e, 0x20, 0xa3,
+                0xf3, 0x64, 0xbc, 0x2e, 0x0a,
+            ],
+            "ĄŚŹ i ąśź. Łódź.\n",
+            LegacyEncoding::Iso8859_2,
+            LineEnding::Lf,
+        ),
+    ];
+
+    for &(bytes, text, encoding, line_ending) in fixtures {
+        let decoded = decode_text_bytes(bytes)
+            .unwrap_or_else(|error| panic!("failed to decode {encoding:?}: {error}"));
+        assert_eq!(decoded.text, text, "decoded as {encoding:?}");
+        assert_eq!(
+            decoded.format,
+            TextFileFormat {
+                encoding: TextEncoding::Legacy(encoding),
+                line_ending,
+            }
+        );
+        assert_eq!(encode_text(&decoded.text, decoded.format).unwrap(), bytes);
+    }
+}
+
+#[test]
+fn legacy_detection_handles_source_like_cyrillic_fixtures() {
+    let fixtures: &[(&[u8], &str, LegacyEncoding)] = &[
+        (
+            ISO_8859_5_SOURCE_LIKE,
+            "// Привет, мир\nfn main() {\n    println!(\"строка\");\n}\n",
+            LegacyEncoding::Iso8859_5,
+        ),
+        (
+            WINDOWS_1251_SOURCE_LIKE,
+            "# Привет, мир\ndef main():\n    строка = \"тест\"\n",
+            LegacyEncoding::Windows1251,
+        ),
+        (
+            KOI8_R_SOURCE_LIKE,
+            "// Привет, мир\nfn main() {\n    let строка = 1;\n}\n",
+            LegacyEncoding::Koi8R,
+        ),
+    ];
+
+    for &(bytes, expected_text, expected_encoding) in fixtures {
+        let decoded = decode_text_bytes(bytes)
+            .unwrap_or_else(|error| panic!("failed source-like {expected_encoding:?}: {error}"));
+        assert_eq!(decoded.text, expected_text);
+        assert_eq!(
+            decoded.format,
+            TextFileFormat {
+                encoding: TextEncoding::Legacy(expected_encoding),
+                line_ending: LineEnding::Lf,
+            }
+        );
+    }
+}
+
+#[test]
+fn legacy_files_edit_and_save_preserve_original_encoding() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-platform-legacy-roundtrip-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let cases: &[(&str, &[u8], &str, &[u8], LegacyEncoding, LineEnding)] = &[
+        (
+            "iso-8859-5.txt",
+            ISO_8859_5_RUSSIAN_CRLF,
+            "Привет, мир!\nСтрока три.\n",
+            &[
+                0xbf, 0xe0, 0xd8, 0xd2, 0xd5, 0xe2, 0x2c, 0x20, 0xdc, 0xd8, 0xe0, 0x21,
+                0x0d, 0x0a, 0xc1, 0xe2, 0xe0, 0xde, 0xda, 0xd0, 0x20, 0xe2, 0xe0, 0xd8,
+                0x2e, 0x0d, 0x0a,
+            ],
+            LegacyEncoding::Iso8859_5,
+            LineEnding::CrLf,
+        ),
+        (
+            "windows-1251.txt",
+            WINDOWS_1251_RUSSIAN_LF,
+            "Привет, мир!\nСтрока три.\n",
+            &[
+                0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2, 0x2c, 0x20, 0xec, 0xe8, 0xf0, 0x21,
+                0x0a, 0xd1, 0xf2, 0xf0, 0xee, 0xea, 0xe0, 0x20, 0xf2, 0xf0, 0xe8, 0x2e,
+                0x0a,
+            ],
+            LegacyEncoding::Windows1251,
+            LineEnding::Lf,
+        ),
+        (
+            "koi8-r.txt",
+            KOI8_R_RUSSIAN_LF,
+            "Привет, мир!\nСтрока три.\n",
+            &[
+                0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4, 0x2c, 0x20, 0xcd, 0xc9, 0xd2, 0x21,
+                0x0a, 0xf3, 0xd4, 0xd2, 0xcf, 0xcb, 0xc1, 0x20, 0xd4, 0xd2, 0xc9, 0x2e,
+                0x0a,
+            ],
+            LegacyEncoding::Koi8R,
+            LineEnding::Lf,
+        ),
+    ];
+
+    for &(name, initial_bytes, edited_text, edited_bytes, encoding, line_ending) in cases {
+        let path = root.join(name);
+        fs::write(&path, initial_bytes).unwrap();
+        let decoded = read_text_file(&path).unwrap();
+        assert_eq!(decoded.format.encoding, TextEncoding::Legacy(encoding));
+        write_text_file(&path, edited_text, decoded.format).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), edited_bytes);
+        let reopened = read_text_file(&path).unwrap();
+        assert_eq!(reopened.text, edited_text);
+        assert_eq!(reopened.format.line_ending, line_ending);
+        assert_eq!(reopened.format.encoding, TextEncoding::Legacy(encoding));
+    }
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn strict_utf8_precedes_legacy_detection_and_status_labels_are_canonical() {
+    let utf8 = decode_text_bytes("Привет café\n".as_bytes()).unwrap();
+    assert_eq!(utf8.format.encoding, TextEncoding::Utf8);
+    let utf8_bom = decode_text_bytes(b"\xef\xbb\xbfhello\n").unwrap();
+    assert_eq!(utf8_bom.format.encoding, TextEncoding::Utf8Bom);
+    assert_eq!(TextEncoding::Utf8.status_label(), None);
+    assert_eq!(TextEncoding::Utf8Bom.status_label(), None);
+    assert_eq!(TextEncoding::Utf16Le.status_label(), Some("UTF-16 LE"));
+    assert_eq!(TextEncoding::Utf16Be.status_label(), Some("UTF-16 BE"));
+    assert_eq!(
+        TextEncoding::Legacy(LegacyEncoding::Iso8859_5).status_label(),
+        Some("ISO-8859-5")
+    );
+    assert_eq!(
+        TextEncoding::Legacy(LegacyEncoding::Windows1251).status_label(),
+        Some("Windows-1251")
+    );
+}
+
+#[test]
+fn legacy_detection_rejects_binary_control_heavy_and_ambiguous_short_input() {
+    for bytes in [
+        &[0x89, b'P', b'N', b'G', 0x00, 0x80, 0x81, 0x82][..],
+        &[0x01, 0x02, 0x03, 0x81, 0x82, 0x83, 0x84, 0x85][..],
+        &[0xff][..],
+        &[0xc0, 0xc1, 0xc2, 0xc3][..],
+    ] {
+        let error = decode_text_bytes(bytes).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    }
+}
+
+#[test]
+fn legacy_detection_rejects_ambiguous_source_like_cyrillic_input() {
+    let error = decode_text_bytes(WINDOWS_1251_AMBIGUOUS_SOURCE_LIKE).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("ambiguous legacy encoding"));
+}
+
+#[test]
+fn legacy_save_rejects_unrepresentable_text_without_touching_file() {
+    let root = std::env::temp_dir().join(format!(
+        "rriter-platform-legacy-unmappable-{}-{}",
+        std::process::id(),
+        TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("legacy.txt");
+    fs::write(&path, ISO_8859_5_RUSSIAN_CRLF).unwrap();
+    let format = read_text_file(&path).unwrap().format;
+    let error = write_text_file(&path, "Привет 😀\n", format).unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+    assert!(error.to_string().contains("ISO-8859-5"));
+    assert_eq!(fs::read(&path).unwrap(), ISO_8859_5_RUSSIAN_CRLF);
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]

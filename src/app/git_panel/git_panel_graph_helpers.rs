@@ -5,55 +5,92 @@ fn git_stage_click_locked(state: &GitPanelState, workspace_idx: usize) -> bool {
             .is_some_and(|idx| idx != workspace_idx)
 }
 
-fn run_git_action(action: GitAction) -> GitActionOutcome {
+fn run_git_action(
+    action: GitAction,
+    runtime_tx: Option<&mpsc::SyncSender<GitRuntimeEvent>>,
+) -> GitActionOutcome {
     match action {
         GitAction::Refresh | GitAction::LoadGraph { .. } => GitActionOutcome {
             notice: None,
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         },
         GitAction::ToggleStageMany { files } => GitActionOutcome {
             notice: run_stage_files(&files),
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         },
         GitAction::Commit {
             repo_roots,
             message,
             amend,
             push_after,
+            skip_hooks,
         } => {
+            let repo_total = repo_roots.len();
             let mut ok = 0usize;
             let mut errors = Vec::new();
-            for repo_root in repo_roots {
-                match commit_repo(&repo_root, &message, amend) {
+            let mut emitter = GitRuntimeEmitter::new(runtime_tx);
+            for (repo_idx, repo_root) in repo_roots.into_iter().enumerate() {
+                let repo_index = repo_idx + 1;
+                match commit_repo_with_runtime(
+                    &repo_root,
+                    &message,
+                    amend,
+                    skip_hooks,
+                    repo_index,
+                    repo_total,
+                    &mut emitter,
+                ) {
                     Ok(()) => {
                         ok += 1;
-                        if push_after && let Err(err) = push_repo(&repo_root) {
+                        if push_after
+                            && let Err(err) = push_repo_with_runtime(
+                                &repo_root,
+                                repo_index,
+                                repo_total,
+                                &mut emitter,
+                            )
+                        {
                             errors.push(err);
                         }
                     }
                     Err(err) => errors.push(err),
                 }
             }
+            emitter.reliable(GitRuntimeEvent::RefreshingStatus);
+            emitter.finish();
+            let transaction_failed = !errors.is_empty();
             if errors.is_empty() {
                 GitActionOutcome {
                     notice: Some(format!("Committed {ok} repo(s)")),
                     clear_message: ok > 0,
+                    refresh_graph: ok > 0,
+                    transaction_failed,
                 }
             } else if ok > 0 {
                 GitActionOutcome {
                     notice: Some(format!("Committed {ok} repo(s); {}", errors.join(" | "))),
                     clear_message: true,
+                    refresh_graph: true,
+                    transaction_failed,
                 }
             } else {
                 GitActionOutcome {
                     notice: Some(errors.join(" | ")),
                     clear_message: false,
+                    refresh_graph: false,
+                    transaction_failed,
                 }
             }
         }
         GitAction::RollbackStaged { files } => GitActionOutcome {
             notice: rollback_staged_files(&files),
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         },
         GitAction::Push { repo_root } => GitActionOutcome {
             notice: match push_repo(&repo_root) {
@@ -61,20 +98,36 @@ fn run_git_action(action: GitAction) -> GitActionOutcome {
                 Err(err) => Some(err),
             },
             clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
         },
-        GitAction::Fetch { repo_root } => GitActionOutcome {
-            notice: match fetch_repo(&repo_root) {
-                Ok(()) => Some("Fetch done".to_string()),
-                Err(err) => Some(err),
+        GitAction::Fetch { repo_root } => match fetch_repo(&repo_root) {
+            Ok(()) => GitActionOutcome {
+                notice: Some("Fetch done".to_string()),
+                clear_message: false,
+                refresh_graph: true,
+                transaction_failed: false,
             },
-            clear_message: false,
+            Err(err) => GitActionOutcome {
+                notice: Some(err),
+                clear_message: false,
+                refresh_graph: false,
+                transaction_failed: false,
+            },
         },
-        GitAction::Pull { repo_root } => GitActionOutcome {
-            notice: match pull_repo(&repo_root) {
-                Ok(()) => Some("Pull done".to_string()),
-                Err(err) => Some(err),
+        GitAction::Pull { repo_root } => match pull_repo(&repo_root) {
+            Ok(()) => GitActionOutcome {
+                notice: Some("Pull done".to_string()),
+                clear_message: false,
+                refresh_graph: true,
+                transaction_failed: false,
             },
-            clear_message: false,
+            Err(err) => GitActionOutcome {
+                notice: Some(err),
+                clear_message: false,
+                refresh_graph: false,
+                transaction_failed: false,
+            },
         },
     }
 }

@@ -34,7 +34,9 @@ impl Renderer {
         let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * s;
         let list_y = title_h + controls_h;
         let full_list_h = (content_h - controls_h).max(40.0 * s);
-        let (list_h, graph_divider_h, graph_h) = if ide_panel.git.graph_open {
+        let (list_h, graph_divider_h, graph_h) = if ide_panel.git.bottom_pane
+            != crate::app::git_panel::GitBottomPane::Closed
+        {
             crate::app::git_panel::git_graph_split_heights(
                 full_list_h,
                 ide_panel.git.graph_height_ratio,
@@ -123,9 +125,11 @@ impl Renderer {
 
         let commit_y = title_h + 44.0 * s;
         let commit_enabled = ide_panel.git.commit_enabled();
-        let arrow_w = (38.0 * s).min((inner_w * 0.28).max(22.0 * s));
+        let commit_controls_enabled = commit_enabled && !ide_panel.git.pending;
+        let arrow_w = (34.0 * s).min((inner_w * 0.22).max(22.0 * s));
+        let options_w = (32.0 * s).min((inner_w * 0.20).max(22.0 * s));
         let commit_gap = (4.0 * s).min((inner_w * 0.06).max(0.0));
-        let commit_main_w = (inner_w - arrow_w - commit_gap).max(1.0);
+        let commit_main_w = (inner_w - arrow_w - options_w - commit_gap * 2.0).max(1.0);
         let commit_btn = Button {
             x: panel_x + pad,
             y: commit_y,
@@ -136,7 +140,7 @@ impl Renderer {
             text_scale: 0.92,
             icon_size: 20.0 * s,
         };
-        if !commit_enabled {
+        if !commit_controls_enabled {
             render_git_disabled_button(self, &commit_btn, s);
         } else {
             ui_registry.register_button(
@@ -159,7 +163,7 @@ impl Renderer {
             text_scale: 0.0,
             icon_size: 24.0 * s,
         };
-        if !commit_enabled {
+        if !commit_controls_enabled {
             render_git_disabled_button(self, &menu_btn, s);
         } else {
             ui_registry.register_button(
@@ -172,9 +176,61 @@ impl Renderer {
                 false,
             );
         }
+        let options_btn = Button {
+            x: menu_btn.x + menu_btn.w + commit_gap,
+            y: commit_y,
+            w: options_w,
+            h: 28.0 * s,
+            text: String::new(),
+            icon: None,
+            text_scale: 0.0,
+            icon_size: 0.0,
+        };
+        if !commit_controls_enabled {
+            render_git_disabled_button(self, &options_btn, s);
+        } else {
+            ui_registry.register_button(
+                crate::ui_system::UiId::GitCommitOptionsToggle,
+                &options_btn,
+                self,
+                mx,
+                my,
+                s,
+                false,
+            );
+        }
+        let dot_size = (3.0 * s).max(2.0).round();
+        let dot_x = (options_btn.x + (options_btn.w - dot_size) / 2.0).round();
+        let dot_center_y = (options_btn.y + options_btn.h / 2.0).round();
+        let dot_color = if commit_controls_enabled {
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.82]
+        } else {
+            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.34]
+        };
+        for offset in [-5.0 * s, 0.0, 5.0 * s] {
+            self.push_rounded_rect(
+                dot_x,
+                (dot_center_y + offset - dot_size / 2.0).round(),
+                dot_size,
+                dot_size,
+                dot_size / 2.0,
+                dot_color,
+            );
+        }
+        if ide_panel.git.commit_options.any_enabled() {
+            let badge = (6.0 * s).max(4.0).round();
+            self.push_rounded_rect(
+                (options_btn.x + options_btn.w - badge - 3.0 * s).round(),
+                (options_btn.y - badge * 0.25 + 2.0 * s).round(),
+                badge,
+                badge,
+                badge / 2.0,
+                [1.0, 0.55, 0.12, 1.0],
+            );
+        }
 
         let graph_btn_y = title_h + 75.0 * s;
-        let graph_btn_w = (72.0 * s).min(inner_w.max(1.0));
+        let graph_btn_w = (68.0 * s).min(inner_w.max(1.0));
         let graph_btn = Button {
             x: panel_x + pad,
             y: graph_btn_y,
@@ -194,8 +250,8 @@ impl Renderer {
             mx,
             my,
         );
-        render_git_graph_button(self, &graph_btn, s, graph_hovered, ide_panel.git.graph_open);
-        if ide_panel.git.graph_open {
+        render_git_graph_button(self, &graph_btn, s, graph_hovered, ide_panel.git.graph_open());
+        if ide_panel.git.graph_open() {
             self.push_rect(
                 graph_btn.x,
                 graph_btn.y + graph_btn.h - 2.0,
@@ -206,11 +262,43 @@ impl Renderer {
         }
 
         let refresh_gap = 6.0 * s;
-        let refresh_x = graph_btn.x + graph_btn.w + refresh_gap;
+        let logs_btn_x = graph_btn.x + graph_btn.w + refresh_gap;
+        let logs_btn_w = (64.0 * s).min((panel_x + pad + inner_w - logs_btn_x).max(1.0));
+        let logs_btn = Button {
+            x: logs_btn_x,
+            y: graph_btn_y,
+            w: logs_btn_w,
+            h: 22.0 * s,
+            text: "Логи".to_string(),
+            icon: None,
+            text_scale: 0.78,
+            icon_size: 0.0,
+        };
+        let logs_hovered = ui_registry.register_rect(
+            crate::ui_system::UiId::GitLogsToggle,
+            logs_btn.x,
+            logs_btn.y,
+            logs_btn.w,
+            logs_btn.h,
+            mx,
+            my,
+        );
+        render_git_graph_button(self, &logs_btn, s, logs_hovered, ide_panel.git.logs_open());
+        if ide_panel.git.logs_open() {
+            self.push_rect(
+                logs_btn.x,
+                logs_btn.y + logs_btn.h - 2.0,
+                logs_btn.w,
+                2.0,
+                [0.60, 0.35, 0.85, 0.9],
+            );
+        }
+
+        let refresh_x = logs_btn.x + logs_btn.w + refresh_gap;
         let refresh_available_w = (panel_x + pad + inner_w - refresh_x).max(0.0);
         let refresh_label_w = self.measure_ui_width("Обновить", 0.78);
         let refresh_full_w = refresh_label_w + 22.0 * s + 18.0 * s;
-        let mut notice_x = graph_btn.x + graph_btn.w + 8.0 * s;
+        let mut notice_x = logs_btn.x + logs_btn.w + 8.0 * s;
         if refresh_available_w >= 30.0 * s {
             let refresh_icon_only = refresh_available_w < refresh_full_w;
             let refresh_btn = Button {
@@ -1241,7 +1329,7 @@ impl Renderer {
             );
         }
 
-        if ide_panel.git.graph_open {
+        if ide_panel.git.bottom_pane != crate::app::git_panel::GitBottomPane::Closed {
             let divider_hovered = ui_registry.register_rect(
                 crate::ui_system::UiId::GitGraphResize,
                 panel_x,
@@ -1273,19 +1361,34 @@ impl Renderer {
                     [1.0, 1.0, 1.0, 0.10]
                 },
             );
-            self.draw_git_graph_panel(
-                panel_x,
-                panel_w,
-                graph_y,
-                graph_h,
-                pad,
-                s,
-                ide_panel,
-                ui_registry,
-                mx,
-                my,
-                &mut label_scratch,
-            );
+            match ide_panel.git.bottom_pane {
+                crate::app::git_panel::GitBottomPane::Graph => self.draw_git_graph_panel(
+                    panel_x,
+                    panel_w,
+                    graph_y,
+                    graph_h,
+                    pad,
+                    s,
+                    ide_panel,
+                    ui_registry,
+                    mx,
+                    my,
+                    &mut label_scratch,
+                ),
+                crate::app::git_panel::GitBottomPane::Logs => self.draw_git_logs_panel(
+                    panel_x,
+                    panel_w,
+                    graph_y,
+                    graph_h,
+                    pad,
+                    s,
+                    ide_panel,
+                    ui_registry,
+                    mx,
+                    my,
+                ),
+                crate::app::git_panel::GitBottomPane::Closed => {}
+            }
         }
 
         if let Some((workspace_idx, menu_x, menu_y, menu_w)) = repo_action_menu
@@ -1335,59 +1438,44 @@ impl Renderer {
             }
         }
 
-        if ide_panel.git.commit_menu_open && commit_enabled {
-            let menu_w = inner_w.min(230.0 * s).max(120.0 * s).min(panel_w);
-            let menu_x = (panel_x + pad + inner_w - menu_w).max(panel_x + 2.0 * s);
-            let item_h = 32.0 * s;
+        if commit_controls_enabled
+            && let Some(opened_at) = ide_panel.git.commit_menu_opened_at
+        {
             let menu_items = ["Commit", "Commit (Amend)", "Commit & Push"];
-            let menu_h = item_h * menu_items.len() as f32 + 8.0 * s;
-            let menu_y = commit_y + 30.0 * s;
-            self.push_rounded_rect(
-                menu_x,
-                menu_y,
-                menu_w,
-                menu_h,
-                8.0 * s,
-                [0.18, 0.19, 0.25, 0.98],
+            let _ = self.draw_animated_context_menu(
+                menu_btn.x,
+                menu_btn.y + menu_btn.h + 2.0 * s,
+                opened_at,
+                menu_items.len(),
+                |idx| menu_items[idx],
+                crate::ui_system::UiId::GitCommitMenuItem,
+                |idx| idx == 2,
+                ui_registry,
+                mx,
+                my,
             );
-            self.push_rect(
-                menu_x,
-                menu_y + item_h * 2.0 + 4.0 * s,
-                menu_w,
-                1.0,
-                [1.0, 1.0, 1.0, 0.14],
+        }
+
+        if commit_controls_enabled
+            && let Some(opened_at) = ide_panel.git.commit_options_menu_opened_at
+        {
+            let option_label = if ide_panel.git.commit_options.skip_hooks {
+                "✓ Отключить git hooks"
+            } else {
+                "Отключить git hooks"
+            };
+            let _ = self.draw_animated_context_menu(
+                options_btn.x,
+                options_btn.y + options_btn.h + 2.0 * s,
+                opened_at,
+                1,
+                |_| option_label,
+                crate::ui_system::UiId::GitCommitOptionsItem,
+                |_| false,
+                ui_registry,
+                mx,
+                my,
             );
-            for (idx, label) in menu_items.iter().enumerate() {
-                let item_y = menu_y + 4.0 * s + idx as f32 * item_h;
-                let hovered = ui_registry.register_rect(
-                    crate::ui_system::UiId::GitCommitMenuItem(idx),
-                    menu_x,
-                    item_y,
-                    menu_w,
-                    item_h,
-                    mx,
-                    my,
-                );
-                if hovered {
-                    self.push_rounded_rect(
-                        menu_x + 5.0 * s,
-                        item_y + 3.0 * s,
-                        menu_w - 10.0 * s,
-                        item_h - 6.0 * s,
-                        5.0 * s,
-                        [1.0, 1.0, 1.0, 0.07],
-                    );
-                }
-                self.draw_tree_label_clipped(
-                    label,
-                    menu_x + 16.0 * s,
-                    item_y + item_h / 2.0 + 5.5 * s,
-                    menu_w - 32.0 * s,
-                    self.theme.fg,
-                    0.9,
-                    &mut label_scratch,
-                );
-            }
         }
 
         self.git_file_tooltip = git_file_tooltip;

@@ -2,6 +2,114 @@ use alacritty_terminal::vte::{Params, Parser, Perform};
 use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+pub(crate) const ANSI_16_COLORS: [[f32; 4]; 16] = [
+    [0.10, 0.10, 0.10, 1.0],
+    [0.95, 0.30, 0.30, 1.0],
+    [0.30, 0.85, 0.30, 1.0],
+    [0.90, 0.85, 0.20, 1.0],
+    [0.30, 0.60, 1.00, 1.0],
+    [0.90, 0.35, 0.90, 1.0],
+    [0.20, 0.85, 0.85, 1.0],
+    [0.90, 0.90, 0.90, 1.0],
+    [0.45, 0.45, 0.45, 1.0],
+    [1.00, 0.40, 0.40, 1.0],
+    [0.40, 1.00, 0.40, 1.0],
+    [1.00, 1.00, 0.40, 1.0],
+    [0.50, 0.70, 1.00, 1.0],
+    [1.00, 0.50, 1.00, 1.0],
+    [0.40, 1.00, 1.00, 1.0],
+    [1.00, 1.00, 1.00, 1.0],
+];
+
+pub(crate) fn apply_ansi_sgr(
+    params: &Params,
+    fg: &mut Option<u8>,
+    bold: &mut bool,
+    default_fg: Option<u8>,
+    mut bg: Option<&mut u8>,
+    default_bg: u8,
+) {
+    if params.is_empty() {
+        *fg = default_fg;
+        *bold = false;
+        if let Some(bg) = bg.as_deref_mut() {
+            *bg = default_bg;
+        }
+        return;
+    }
+    let values = params.iter().collect::<Vec<_>>();
+    let mut index = 0usize;
+    while index < values.len() {
+        let Some(value) = values[index].first().copied() else {
+            index += 1;
+            continue;
+        };
+        match value {
+            0 => {
+                *fg = default_fg;
+                *bold = false;
+                if let Some(bg) = bg.as_deref_mut() {
+                    *bg = default_bg;
+                }
+            }
+            1 => {
+                *bold = true;
+                if let Some(color) = fg.as_mut()
+                    && *color < 8
+                {
+                    *color += 8;
+                }
+            }
+            22 => {
+                *bold = false;
+                if let Some(color) = fg.as_mut()
+                    && (8..16).contains(color)
+                {
+                    *color -= 8;
+                }
+            }
+            30..=37 => *fg = Some((value - 30) as u8 + if *bold { 8 } else { 0 }),
+            40..=47 => {
+                if let Some(bg) = bg.as_deref_mut() {
+                    *bg = (value - 40) as u8;
+                }
+            }
+            90..=97 => *fg = Some((value - 90 + 8) as u8),
+            100..=107 => {
+                if let Some(bg) = bg.as_deref_mut() {
+                    *bg = (value - 100 + 8) as u8;
+                }
+            }
+            39 => *fg = default_fg,
+            49 => {
+                if let Some(bg) = bg.as_deref_mut() {
+                    *bg = default_bg;
+                }
+            }
+            38 | 48 => {
+                if index + 1 < values.len() && !values[index + 1].is_empty() {
+                    let mode = values[index + 1][0];
+                    if mode == 5 && index + 2 < values.len() && !values[index + 2].is_empty() {
+                        let color = values[index + 2][0] as u8;
+                        if value == 38 {
+                            *fg = Some(color);
+                        } else if let Some(bg) = bg.as_deref_mut() {
+                            *bg = color;
+                        }
+                        index += 2;
+                    } else if mode == 2 && index + 4 < values.len() {
+                        index += 4;
+                    } else {
+                        index += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+}
+
 /// Locks the terminal grid while recovering the inner state after a worker panic.
 ///
 /// A poisoned terminal mutex must not cascade into a UI-thread panic: the grid is
@@ -721,7 +829,7 @@ mod tests {
 
         feed(
             &mut grid,
-            b"\x1b[m\x1b[1;34;104mA\x1b[39;49mB\x1b[38;2;1;2;3;48;2;4;5;6mC\x1b[90;107mD\x1b[0mE",
+            b"\x1b[m\x1b[1;34;104mA\x1b[39;49mB\x1b[38;2;1;2;3;48;2;4;5;6mC\x1b[90;107mD\x1b[0mE\x1b[38;5;13;48;5;6mF",
         );
         assert_eq!(
             (grid.lines[0][0].c, grid.lines[0][0].fg, grid.lines[0][0].bg),
@@ -742,6 +850,10 @@ mod tests {
         assert_eq!(
             (grid.lines[0][4].c, grid.lines[0][4].fg, grid.lines[0][4].bg),
             ('E', 7, 0)
+        );
+        assert_eq!(
+            (grid.lines[0][5].c, grid.lines[0][5].fg, grid.lines[0][5].bg),
+            ('F', 13, 6)
         );
         assert!(!grid.cur_bold);
 
@@ -1244,66 +1356,16 @@ impl Perform for TermGrid {
                 }
             }
             'm' => {
-                if params.is_empty() {
-                    self.cur_fg = 7;
-                    self.cur_bg = 0;
-                    self.cur_bold = false;
-                    return;
-                }
-                let mut i = 0;
-                let iter: Vec<&[u16]> = params.iter().collect();
-                while i < iter.len() {
-                    if iter[i].is_empty() {
-                        i += 1;
-                        continue;
-                    }
-                    let p = iter[i][0];
-                    match p {
-                        0 => {
-                            self.cur_fg = 7;
-                            self.cur_bg = 0;
-                            self.cur_bold = false;
-                        }
-                        1 => {
-                            self.cur_bold = true;
-                            if self.cur_fg < 8 {
-                                self.cur_fg += 8;
-                            }
-                        }
-                        22 => {
-                            self.cur_bold = false;
-                            if self.cur_fg >= 8 && self.cur_fg < 16 {
-                                self.cur_fg -= 8;
-                            }
-                        }
-                        30..=37 => self.cur_fg = (p - 30) as u8 + if self.cur_bold { 8 } else { 0 },
-                        40..=47 => self.cur_bg = (p - 40) as u8,
-                        90..=97 => self.cur_fg = (p - 90 + 8) as u8,
-                        100..=107 => self.cur_bg = (p - 100 + 8) as u8,
-                        39 => self.cur_fg = 7,
-                        49 => self.cur_bg = 0,
-                        38 | 48 => {
-                            if i + 1 < iter.len() && !iter[i + 1].is_empty() {
-                                let mode = iter[i + 1][0];
-                                if mode == 5 && i + 2 < iter.len() && !iter[i + 2].is_empty() {
-                                    let color = iter[i + 2][0] as u8;
-                                    if p == 38 {
-                                        self.cur_fg = color;
-                                    } else {
-                                        self.cur_bg = color;
-                                    }
-                                    i += 2;
-                                } else if mode == 2 && i + 4 < iter.len() {
-                                    i += 4;
-                                } else {
-                                    i += 1;
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
+                let mut fg = Some(self.cur_fg);
+                apply_ansi_sgr(
+                    params,
+                    &mut fg,
+                    &mut self.cur_bold,
+                    Some(7),
+                    Some(&mut self.cur_bg),
+                    0,
+                );
+                self.cur_fg = fg.unwrap_or(7);
             }
             'C' => {
                 let p = params.iter().next().map(|p| p[0]).unwrap_or(1) as usize;

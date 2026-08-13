@@ -457,10 +457,39 @@ mod tests {
             encoding: crate::platform::TextEncoding::Utf16Le,
             line_ending: crate::platform::LineEnding::CrLf,
         };
-        std::fs::write(&path, crate::platform::encode_text("first\nneedle", format)).unwrap();
+        std::fs::write(
+            &path,
+            crate::platform::encode_text("first\nneedle", format).unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             read_project_search_preview_text(&path).as_deref(),
             Some("first\nneedle")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn preview_reader_decodes_windows1251() {
+        let path = std::env::temp_dir().join(format!(
+            "rriter_project_search_preview_legacy_{}_{}.txt",
+            std::process::id(),
+            crate::platform::CURRENT_PLATFORM as u8
+        ));
+        let format = crate::platform::TextFileFormat {
+            encoding: crate::platform::TextEncoding::Legacy(
+                crate::platform::LegacyEncoding::Windows1251,
+            ),
+            line_ending: crate::platform::LineEnding::Lf,
+        };
+        std::fs::write(
+            &path,
+            crate::platform::encode_text("Привет\nneedle", format).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            read_project_search_preview_text(&path).as_deref(),
+            Some("Привет\nneedle")
         );
         let _ = std::fs::remove_file(path);
     }

@@ -753,6 +753,23 @@ pub fn run_project_search(request: ProjectSearchRequest) -> ProjectSearchWorkerR
     result
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ProjectSearchBackend {
+    Grep,
+    Decoded,
+}
+
+fn project_search_backend(query: &str) -> ProjectSearchBackend {
+    if query.is_ascii()
+        && !query.as_bytes().contains(&b'\n')
+        && !query.as_bytes().contains(&b'\r')
+    {
+        ProjectSearchBackend::Grep
+    } else {
+        ProjectSearchBackend::Decoded
+    }
+}
+
 #[derive(Default)]
 struct SearchCaps {
     matches: usize,
@@ -871,10 +888,9 @@ fn stream_project_search(
     let query = request.query;
     let needle = Arc::new(query.as_bytes().to_vec());
     let unicode_case_fallback = !request.case_sensitive && !needle.is_ascii();
-    let grep_pattern = (!unicode_case_fallback
-        && !query.as_bytes().contains(&b'\n')
-        && !query.as_bytes().contains(&b'\r'))
-    .then(|| Arc::<str>::from(regex::escape(&query)));
+    let search_backend = project_search_backend(&query);
+    let grep_pattern = (search_backend == ProjectSearchBackend::Grep)
+        .then(|| Arc::<str>::from(regex::escape(&query)));
     let backend = if grep_pattern.is_some() {
         "grep"
     } else if unicode_case_fallback {
@@ -999,7 +1015,7 @@ fn run_project_search_roots(
             let file = if let (Some(matcher), Some(searcher)) =
                 (grep_matcher.as_ref(), grep_searcher.as_mut())
             {
-                project_search_grep::search_project_file_grep(
+                match project_search_grep::search_project_file_grep(
                     path,
                     &plan,
                     needle.as_slice(),
@@ -1009,7 +1025,25 @@ fn run_project_search_roots(
                     &caps,
                     &profile,
                     &capped_flag,
-                )
+                ) {
+                    project_search_grep::ProjectSearchGrepResult::Complete(file) => file,
+                    project_search_grep::ProjectSearchGrepResult::NeedsDecodedFallback => {
+                        let file = search_project_file(
+                            path,
+                            &plan,
+                            needle.as_slice(),
+                            case_finder.as_ref(),
+                            case_sensitive,
+                            unicode_case_fallback,
+                            &mut file_buf,
+                            &caps,
+                            &profile,
+                            &capped_flag,
+                        );
+                        trim_project_search_buffer(&mut file_buf);
+                        file
+                    }
+                }
             } else {
                 let file = search_project_file(
                     path,
@@ -1176,34 +1210,7 @@ fn search_project_file(
     if matches.is_empty() {
         return None;
     }
-    let reached_cap = {
-        let mut caps = crate::platform::lock_recover(caps);
-        if caps.capped
-            || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
-            || caps.matches >= PROJECT_SEARCH_MATCH_CAP
-        {
-            caps.capped = true;
-            true
-        } else {
-            let room = PROJECT_SEARCH_MATCH_CAP - caps.matches;
-            if matches.len() > room {
-                matches.truncate(room);
-                caps.capped = true;
-            }
-            caps.matches += matches.len();
-            caps.files += 1;
-            if caps.matches >= PROJECT_SEARCH_MATCH_CAP
-                || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
-            {
-                caps.capped = true;
-            }
-            caps.capped
-        }
-    };
-    if reached_cap {
-        capped_flag.store(true, Ordering::Relaxed);
-    }
-    if matches.is_empty() {
+    if !commit_project_search_file_matches(&mut matches, caps, capped_flag) {
         return None;
     }
     let relative_path = plan.relative_display(path);
@@ -1220,6 +1227,43 @@ fn search_project_file(
     })
 }
 
+fn commit_project_search_file_matches(
+    matches: &mut Vec<ProjectSearchMatch>,
+    caps: &Mutex<SearchCaps>,
+    capped_flag: &AtomicBool,
+) -> bool {
+    if matches.is_empty() {
+        return false;
+    }
+    let mut caps = crate::platform::lock_recover(caps);
+    if caps.capped
+        || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP
+        || caps.matches >= PROJECT_SEARCH_MATCH_CAP
+    {
+        caps.capped = true;
+        capped_flag.store(true, Ordering::Relaxed);
+        return false;
+    }
+    let room = PROJECT_SEARCH_MATCH_CAP - caps.matches;
+    if matches.len() > room {
+        matches.truncate(room);
+        caps.capped = true;
+    }
+    if matches.is_empty() {
+        capped_flag.store(caps.capped, Ordering::Relaxed);
+        return false;
+    }
+    caps.matches += matches.len();
+    caps.files += 1;
+    if caps.matches >= PROJECT_SEARCH_MATCH_CAP || caps.files >= PROJECT_SEARCH_FILE_RESULT_CAP {
+        caps.capped = true;
+    }
+    if caps.capped {
+        capped_flag.store(true, Ordering::Relaxed);
+    }
+    true
+}
+
 fn project_search_text(buf: &[u8]) -> Option<Cow<'_, str>> {
     let has_text_bom = buf.starts_with(&[0xef, 0xbb, 0xbf])
         || buf.starts_with(&[0xff, 0xfe])
@@ -1228,7 +1272,9 @@ fn project_search_text(buf: &[u8]) -> Option<Cow<'_, str>> {
         return None;
     }
     if !has_text_bom && memchr::memchr(b'\r', buf).is_none() {
-        return std::str::from_utf8(buf).ok().map(Cow::Borrowed);
+        if let Ok(text) = std::str::from_utf8(buf) {
+            return Some(Cow::Borrowed(text));
+        }
     }
     platform::decode_text_bytes(buf)
         .ok()
@@ -1827,7 +1873,7 @@ mod tests {
     }
 
     #[test]
-    fn project_search_preserves_positions_for_crlf_bom_and_utf16_files() {
+    fn project_search_preserves_positions_for_utf_and_legacy_text_files() {
         let root = temp_workspace("text_formats");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("crlf.txt"), "zero\r\na😀needle\r\n").unwrap();
@@ -1839,7 +1885,8 @@ mod tests {
                     encoding: crate::platform::TextEncoding::Utf8Bom,
                     line_ending: crate::platform::LineEnding::Lf,
                 },
-            ),
+            )
+            .unwrap(),
         )
         .unwrap();
         std::fs::write(
@@ -1850,7 +1897,22 @@ mod tests {
                     encoding: crate::platform::TextEncoding::Utf16Le,
                     line_ending: crate::platform::LineEnding::CrLf,
                 },
-            ),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("windows1251.txt"),
+            crate::platform::encode_text(
+                "Привет\nneedle",
+                crate::platform::TextFileFormat {
+                    encoding: crate::platform::TextEncoding::Legacy(
+                        crate::platform::LegacyEncoding::Windows1251,
+                    ),
+                    line_ending: crate::platform::LineEnding::Lf,
+                },
+            )
+            .unwrap(),
         )
         .unwrap();
 
@@ -1865,7 +1927,7 @@ mod tests {
         });
 
         assert_eq!(result.error, None);
-        assert_eq!(result.total_matches, 3);
+        assert_eq!(result.total_matches, 4);
         let by_name = |name: &str| {
             result
                 .files
@@ -1885,6 +1947,11 @@ mod tests {
         assert_eq!(
             (utf16.start_line, utf16.start_col, utf16.end_col),
             (1, 2, 8)
+        );
+        let windows1251 = by_name("windows1251.txt");
+        assert_eq!(
+            (windows1251.start_line, windows1251.start_col, windows1251.end_col),
+            (1, 0, 6)
         );
         let _ = std::fs::remove_dir_all(root);
     }

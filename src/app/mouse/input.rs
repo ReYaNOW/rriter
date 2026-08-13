@@ -128,6 +128,7 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App) {
     stop_scroll_anim(&mut app.ide_panel.project_search.query_scroll_x);
     stop_scroll_anim(&mut app.ide_panel.git.scroll);
     stop_scroll_anim(&mut app.ide_panel.git.graph_scroll);
+    stop_scroll_anim(&mut app.ide_panel.git.logs_scroll);
     stop_scroll_anim(&mut app.ide_panel.database.scroll);
     if let Some(dialog) = app.ide_panel.database.dialog.as_mut() {
         stop_scroll_anim(&mut dialog.scroll);
@@ -588,17 +589,22 @@ impl App {
             return;
         }
 
-        if state == ElementState::Pressed && self.ide_panel.git.commit_menu_open {
+        if state == ElementState::Pressed
+            && (self.ide_panel.git.commit_menu_open()
+                || self.ide_panel.git.commit_options_menu_open())
+        {
             let clicked_id = self.ui_registry.find_at(mx, my);
             let keep_git_menu = matches!(
                 clicked_id,
                 Some(
                     crate::ui_system::UiId::GitCommitMenuToggle
                         | crate::ui_system::UiId::GitCommitMenuItem(_)
+                        | crate::ui_system::UiId::GitCommitOptionsToggle
+                        | crate::ui_system::UiId::GitCommitOptionsItem(_)
                 )
             );
             if !keep_git_menu {
-                self.ide_panel.git.commit_menu_open = false;
+                self.ide_panel.git.close_commit_menus();
                 if clicked_id.is_none() {
                     self.window.as_ref().unwrap().request_redraw();
                     return;

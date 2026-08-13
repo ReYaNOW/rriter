@@ -246,7 +246,7 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
 }
 
 fn git_graph_rows_bounds(app: &App, scale: f32) -> Option<(f32, f32)> {
-    if !app.ide_panel.git.graph_open {
+    if !app.ide_panel.git.graph_open() {
         return None;
     }
     let (_, content_y, _, content_h, _) =

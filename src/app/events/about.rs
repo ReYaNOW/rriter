@@ -466,6 +466,29 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.ide_panel.git.graph_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.ide_panel.git.logs_open()
+        && app.ide_panel.is_open(crate::app::PanelId::Git)
+        && let Some(renderer) = app.renderer.as_ref()
+    {
+        let scale = renderer.scale_factor;
+        let (_, _, _, content_h, _) =
+            crate::app::mouse::app_panel_scroll_rect(app, crate::app::PanelId::Git, scale);
+        let controls_h = crate::app::git_panel::GIT_GRAPH_CONTROLS_H * scale;
+        let full_list_h = (content_h - controls_h).max(40.0 * scale);
+        let (_, _, logs_h) = crate::app::git_panel::git_graph_split_heights(
+            full_list_h,
+            app.ide_panel.git.graph_height_ratio,
+            scale,
+        );
+        let max_scroll = crate::app::git_panel::git_logs_max_scroll(
+            app.ide_panel.git.git_logs.line_count(),
+            logs_h,
+            scale,
+        );
+        if app.ide_panel.git.update_git_logs_scroll(dt, max_scroll) {
+            needs_redraw = true;
+        }
+    }
     if app.ide_panel.problems_scroll.update(dt) {
         needs_redraw = true;
     }

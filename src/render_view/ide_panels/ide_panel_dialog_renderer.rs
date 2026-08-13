@@ -195,7 +195,7 @@ impl Renderer {
     pub(crate) fn draw_status_bar(
         &mut self,
         editor: &crate::editor::Editor,
-        editor_path: Option<&std::path::PathBuf>,
+        editor_file: Option<(&std::path::PathBuf, crate::platform::TextEncoding)>,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         s: f32,
@@ -304,8 +304,8 @@ impl Renderer {
             text_scale,
         );
 
-        let ext = editor_path
-            .and_then(|path| path.extension())
+        let ext = editor_file
+            .and_then(|(path, _)| path.extension())
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
         let lang = language_display_name_for_ext(ext);
@@ -314,6 +314,20 @@ impl Renderer {
         let lang_w = self.measure_ui_width(&scratch, text_scale).round();
         let lang_x = (bar_x + bar_w - pad_x - lang_w).max(diag_x);
         self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
+
+        let encoding_layout = editor_file
+            .and_then(|(_, encoding)| encoding.status_label())
+            .map(|label| {
+                let width = self.measure_ui_width(label, text_scale).round();
+                (label, width, lang_x - 14.0 * s - width)
+            })
+            .filter(|(_, _, x)| *x > diag_x + diagnostics_w + 8.0 * s);
+        let position_group_right = if let Some((label, _, x)) = encoding_layout {
+            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+            x
+        } else {
+            lang_x
+        };
 
         let (line, character) = cursor_line_and_character(editor);
         const ZERO_SAMPLE: &str = "00000000000000000000";
@@ -357,16 +371,39 @@ impl Renderer {
         if selected_block_w > 0.0 {
             group_w += item_gap + selected_block_w;
         }
-        let line_x = lang_x - 22.0 * s - group_w;
+        let line_x = position_group_right - 22.0 * s - group_w;
         if let Some(label) = progress_label {
             let label_w = self.measure_ui_width(label, 0.82).round();
             let progress_gap = 8.0 * s;
             let track_w = 74.0 * s;
             let track_h = 5.0 * s;
-            let progress_w = label_w + progress_gap + track_w;
+            scratch.clear();
+            if let Some(elapsed) = progress_elapsed_secs {
+                if elapsed >= 60.0 {
+                    let minutes = (elapsed / 60.0).floor() as u64;
+                    let seconds = (elapsed as u64) % 60;
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut scratch,
+                        format_args!("{minutes}:{seconds:02}"),
+                    );
+                } else {
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut scratch,
+                        format_args!("{elapsed:.1}s"),
+                    );
+                }
+            }
+            let elapsed_w = if scratch.is_empty() {
+                0.0
+            } else {
+                self.measure_ui_width(&scratch, 0.76).round()
+            };
+            let elapsed_gap = if elapsed_w > 0.0 { 7.0 * s } else { 0.0 };
+            let progress_w = label_w + elapsed_gap + elapsed_w + progress_gap + track_w;
             let progress_x = line_x - 18.0 * s - progress_w;
             if progress_x > diag_x + diagnostics_w + 8.0 * s {
-                let track_x = progress_x + label_w + progress_gap;
+                let elapsed_x = progress_x + label_w + elapsed_gap;
+                let track_x = elapsed_x + elapsed_w + progress_gap;
                 let track_y = bar_y + (bar_h - track_h) / 2.0;
                 self.draw_string_scaled(
                     label,
@@ -375,6 +412,15 @@ impl Renderer {
                     [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72],
                     0.82,
                 );
+                if elapsed_w > 0.0 {
+                    self.draw_string_scaled(
+                        &scratch,
+                        elapsed_x,
+                        text_y,
+                        [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.52],
+                        0.76,
+                    );
+                }
                 self.push_rounded_rect(
                     track_x,
                     track_y,

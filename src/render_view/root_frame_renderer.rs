@@ -331,7 +331,7 @@ impl Renderer {
                     (Some("Мок-сервер"), None, Some(0.55))
                 }
                 _ => (
-                    ide_panel.git.pending_label,
+                    ide_panel.git.pending_label.as_deref(),
                     ide_panel.git.pending_elapsed_secs(frame_now),
                     None,
                 ),
@@ -1336,7 +1336,7 @@ impl Renderer {
         if is_ide_mode {
             self.draw_status_bar(
                 editor,
-                editor_path,
+                editor_path.zip(tabs.get(active_tab).map(|tab| tab.text_file_format.encoding)),
                 lsp,
                 ui_registry,
                 s,

@@ -391,6 +391,7 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
+* `src/platform/text_file.rs` -> centralized UTF/legacy decoding, `TextFileFormat` preservation, conservative charset detection, strict re-encoding, and atomic text saves.
 * `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, Dart SDK discovery priority (custom, project Flutter, environment, managed, PATH, other Flutter), native trust/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
 * `src/platform/elevated_save.rs` -> non-shell validated helper request, elevated atomic replacement, result propagation, and Linux `pkexec` compatibility.
@@ -459,6 +460,7 @@ Large app files use thin include shells to keep source chunks small:
 * `src/app/app_behavior_tests/*` -> autocomplete basics, Ty cache/tree-sitter cases, member owner cases.
 * `src/app/app_file_behavior_tests/*` -> file/tab flow, IDE definition jumps, UI/Git/API cases.
 * `src/app/git_panel/git_process.rs` -> managed Git CLI, executable override, Schannel/network policy, credential/SSH/proxy preservation, timeout, and failure classification.
+* `src/app/git_panel/git_commit_runtime.rs` -> streaming commit/push execution, Trace2 hook identity, ANSI-aware bounded VCS console, and live commit progress events.
 * `src/app/git_panel/*` -> Git panel types, `App` graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> diff loading/render state and format-preserving worktree save flow.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, CRLF, and invalid-text regressions.
@@ -866,7 +868,7 @@ Implementation is split through `include!`:
 * `src/render_view/ide_panels/ide_panel_side_renderer.rs` -> side/top panels and explorer rows.
 * `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search controls and virtualized result rows.
 * `src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs` -> Git graph/file tooltip drawing.
-* `src/render_view/ide_panels/ide_panel_git_graph_renderer.rs` -> Git graph panel.
+* `src/render_view/ide_panels/ide_panel_git_graph_renderer.rs` -> Git graph panel plus virtualized session VCS console for commit/push attempts.
 * `src/render_view/ide_panels/ide_panel_git_workspace_renderer.rs` -> Git workspace panel.
 * `src/render_view/ide_panels/ide_panel_dialog_renderer.rs` -> bottom panel and file/Git dialogs.
 * `src/render_view/ide_panels/ide_panel_behavior_tests.rs` -> panel behavior/render helper tests.
