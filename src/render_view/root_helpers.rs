@@ -733,4 +733,97 @@ pub struct ModInterval {
     pub bottom: f32,
     pub kind: ModIntervalKind,
     pub state: crate::editor::LineModState,
+    pub(crate) git_kind: Option<crate::editor::GitChangeKind>,
+}
+
+#[inline(always)]
+fn mod_intervals_can_merge(last: &ModInterval, next: &ModInterval) -> bool {
+    next.top <= last.bottom + 0.1
+        && next.kind == last.kind
+        && next.state == last.state
+        && next.git_kind == last.git_kind
+}
+
+#[inline(always)]
+fn mod_interval_color(
+    theme: &crate::renderer::Theme,
+    interval: ModInterval,
+) -> [f32; 4] {
+    match interval.git_kind {
+        Some(crate::editor::GitChangeKind::Added) => theme.modified_saved,
+        Some(crate::editor::GitChangeKind::Modified) => theme.line_num,
+        Some(crate::editor::GitChangeKind::Deleted) => theme.modified_unsaved,
+        None if interval.state == crate::editor::LineModState::ModifiedSaved => {
+            theme.modified_saved
+        }
+        None => theme.modified_unsaved,
+    }
+}
+
+#[cfg(test)]
+mod git_gutter_tests {
+    use super::*;
+
+    fn test_theme() -> crate::renderer::Theme {
+        crate::renderer::Theme {
+            bg: [0.0; 4],
+            fg: [0.0; 4],
+            sel: [0.0; 4],
+            minimap_bg: [0.0; 4],
+            line_num: [0.25; 4],
+            minimap_cursor: [0.0; 4],
+            modified_unsaved: [0.50; 4],
+            modified_saved: [0.75; 4],
+            diag_warn: [0.0; 4],
+            diag_error: [0.0; 4],
+            unused: [0.0; 4],
+        }
+    }
+
+    fn interval(
+        state: crate::editor::LineModState,
+        git_kind: Option<crate::editor::GitChangeKind>,
+    ) -> ModInterval {
+        ModInterval {
+            top: 0.0,
+            bottom: 10.0,
+            kind: ModIntervalKind::Line,
+            state,
+            git_kind,
+        }
+    }
+
+    #[test]
+    fn git_gutter_uses_existing_theme_tokens_for_each_change_kind() {
+        let theme = test_theme();
+        let saved = crate::editor::LineModState::ModifiedSaved;
+        let unsaved = crate::editor::LineModState::ModifiedUnsaved;
+        for (kind, expected) in [
+            (crate::editor::GitChangeKind::Added, theme.modified_saved),
+            (crate::editor::GitChangeKind::Modified, theme.line_num),
+            (crate::editor::GitChangeKind::Deleted, theme.modified_unsaved),
+        ] {
+            assert_eq!(mod_interval_color(&theme, interval(saved, Some(kind))), expected);
+        }
+        assert_eq!(mod_interval_color(&theme, interval(saved, None)), theme.modified_saved);
+        assert_eq!(
+            mod_interval_color(&theme, interval(unsaved, None)),
+            theme.modified_unsaved
+        );
+    }
+
+    #[test]
+    fn mod_intervals_do_not_merge_across_git_change_kinds() {
+        let saved = crate::editor::LineModState::ModifiedSaved;
+        let added = interval(saved, Some(crate::editor::GitChangeKind::Added));
+        let mut adjacent_added = interval(saved, Some(crate::editor::GitChangeKind::Added));
+        adjacent_added.top = 10.0;
+        adjacent_added.bottom = 20.0;
+        let mut adjacent_modified = interval(saved, Some(crate::editor::GitChangeKind::Modified));
+        adjacent_modified.top = 10.0;
+        adjacent_modified.bottom = 20.0;
+
+        assert!(mod_intervals_can_merge(&added, &adjacent_added));
+        assert!(!mod_intervals_can_merge(&added, &adjacent_modified));
+    }
 }

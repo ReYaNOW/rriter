@@ -339,6 +339,7 @@ pub struct GitPanelState {
     applied_request_id: u64,
     rx: Vec<GitPanelReceiver>,
     stage_tx: Option<mpsc::Sender<GitStageCommand>>,
+    stage_reconcile_candidates: FxHashSet<GitStageOwnershipKey>,
     status_refresh_pending: bool,
     status_refresh_dirty: bool,
     branch_ahead_cache: BranchAheadCache,
@@ -377,6 +378,7 @@ struct GitPanelReceiver {
     request_id: u64,
     blocking: bool,
     refresh: bool,
+    status_mutation: bool,
 }
 
 struct GitGraphReceiver {
@@ -437,6 +439,7 @@ impl Default for GitPanelState {
             applied_request_id: 0,
             rx: Vec::new(),
             stage_tx: None,
+            stage_reconcile_candidates: FxHashSet::default(),
             status_refresh_pending: false,
             status_refresh_dirty: false,
             branch_ahead_cache: BranchAheadCache::default(),
@@ -616,6 +619,7 @@ impl GitPanelState {
         self.status_refresh_pending = false;
         self.status_refresh_dirty = false;
         self.stage_pending_workspace_idx = None;
+        self.stage_reconcile_candidates.clear();
         self.graph_pending = false;
         self.graph_pending_roots.clear();
         self.graph_latest_request_by_root.clear();
@@ -681,6 +685,16 @@ impl GitPanelState {
             && !self.graph_pending
     }
 
+    #[cfg(test)]
+    pub(crate) fn applied_status_request_id_for_test(&self) -> u64 {
+        self.applied_request_id
+    }
+
+    #[cfg(test)]
+    pub(crate) fn status_mutation_in_flight_for_test(&self) -> bool {
+        self.rx.iter().any(|receiver| receiver.status_mutation)
+    }
+
     fn begin_status_refresh(&mut self) -> bool {
         if self.status_refresh_pending {
             self.status_refresh_dirty = true;
@@ -721,6 +735,68 @@ impl GitPanelState {
         self.snapshot.has_staged_repo_files()
     }
 
+    fn update_stage_reconcile_candidates(&mut self, files: &[GitStageFileCommand]) {
+        for file in files {
+            let key = GitStageOwnershipKey::new(&file.repo_root, &file.rel_path);
+            if file.staged {
+                self.stage_reconcile_candidates.remove(&key);
+                continue;
+            }
+            let is_modified = self.snapshot.workspaces.iter().any(|workspace| {
+                workspace.repo_root.as_ref().is_some_and(|repo_root| {
+                    crate::platform::PathKey::new(repo_root) == key.repo_root
+                }) && workspace.files.iter().any(|entry| {
+                    entry.rel_path.as_ref() == key.rel_path
+                        && entry.status == GitFileStatus::Modified
+                })
+            });
+            if is_modified {
+                self.stage_reconcile_candidates.insert(key);
+            } else {
+                self.stage_reconcile_candidates.remove(&key);
+            }
+        }
+    }
+
+    fn take_stage_reconcile_candidate(&mut self, repo_root: &Path, rel_path: &str) -> bool {
+        self.stage_reconcile_candidates
+            .remove(&GitStageOwnershipKey::new(repo_root, rel_path))
+    }
+
+    fn clear_stage_reconcile_candidates_for_operation(&mut self, operation: &GitStageOperation) {
+        if let GitStageOperation::ToggleMany(files) = operation {
+            for file in files {
+                self.stage_reconcile_candidates
+                    .remove(&GitStageOwnershipKey::new(&file.repo_root, &file.rel_path));
+            }
+        }
+    }
+
+    fn retain_stage_reconcile_candidates(&mut self) {
+        let snapshot = &self.snapshot;
+        self.stage_reconcile_candidates.retain(|key| {
+            snapshot.workspaces.iter().any(|workspace| {
+                workspace.repo_root.as_ref().is_some_and(|repo_root| {
+                    crate::platform::PathKey::new(repo_root) == key.repo_root
+                }) && workspace.files.iter().any(|file| {
+                    file.rel_path.as_ref() == key.rel_path
+                        && file.staged
+                        && file.status == GitFileStatus::Modified
+                })
+            })
+        });
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_stage_reconcile_candidate_for_test(
+        &self,
+        repo_root: &Path,
+        rel_path: &str,
+    ) -> bool {
+        self.stage_reconcile_candidates
+            .contains(&GitStageOwnershipKey::new(repo_root, rel_path))
+    }
+
     fn apply_event(&mut self, event: GitPanelEvent) {
         self.latest_request_id = event.request_id;
         self.applied_request_id = event.request_id;
@@ -738,12 +814,14 @@ impl GitPanelState {
         if event.preserve_snapshot_on_empty && git_snapshot_has_visible_rows(&self.snapshot) {
             merge_stage_snapshot(&mut self.snapshot, event.snapshot);
             self.stage_pending_workspace_idx = None;
+            self.retain_stage_reconcile_candidates();
             return;
         }
         self.snapshot = event.snapshot;
         if event.preserve_snapshot_on_empty {
             self.stage_pending_workspace_idx = None;
         }
+        self.retain_stage_reconcile_candidates();
     }
 }
 
@@ -786,9 +864,41 @@ struct GitStageFileCommand {
     staged: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct GitStageOwnershipKey {
+    repo_root: crate::platform::PathKey,
+    rel_path: String,
+}
+
+impl GitStageOwnershipKey {
+    fn new(repo_root: &Path, rel_path: &str) -> Self {
+        Self {
+            repo_root: crate::platform::PathKey::new(repo_root),
+            rel_path: rel_path.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct GitIndexEntryIdentity {
+    id: git2::Oid,
+    mode: u32,
+}
+
+#[derive(Clone, Debug)]
+struct GitReconcileFileCommand {
+    repo_root: PathBuf,
+    rel_path: String,
+}
+
+enum GitStageOperation {
+    ToggleMany(Vec<GitStageFileCommand>),
+    ReconcileModified(GitReconcileFileCommand),
+}
+
 struct GitStageCommand {
     request_id: u64,
-    files: Vec<GitStageFileCommand>,
+    operation: GitStageOperation,
     workspaces: Vec<PathBuf>,
     branch_ahead_cache: BranchAheadCache,
     tx: mpsc::Sender<GitPanelTaskResult>,
@@ -806,6 +916,9 @@ enum GitAction {
     },
     ToggleStageMany {
         files: Vec<GitStageFileCommand>,
+    },
+    ReconcileStagedModified {
+        file: GitReconcileFileCommand,
     },
     Commit {
         repo_roots: Vec<PathBuf>,

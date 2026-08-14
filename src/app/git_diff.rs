@@ -517,7 +517,7 @@ fn new_editor_with_text(text: &str, version: u64) -> Editor {
 }
 
 impl App {
-    fn current_git_file_entry_for_diff(&self) -> Option<(PathBuf, GitFileEntry)> {
+    pub(crate) fn current_git_file_entry(&self) -> Option<(PathBuf, GitFileEntry)> {
         if !self.is_ide_mode || self.active_tab_is_git_diff() {
             return None;
         }
@@ -1175,7 +1175,7 @@ impl App {
             return;
         }
 
-        if let Some((repo_root, file)) = self.current_git_file_entry_for_diff() {
+        if let Some((repo_root, file)) = self.current_git_file_entry() {
             let (tx, rx) = mpsc::channel();
             self.inline_git_diff_rx = Some(rx);
             let editor_version = self.editor.version;

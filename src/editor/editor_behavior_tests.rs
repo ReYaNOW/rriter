@@ -296,6 +296,142 @@ mod tests {
         assert!(folds.folded_start_bytes.contains(&4));
     }
 
+    fn editor_with_git_base(base: &str, current: &str) -> Editor {
+        let mut editor = Editor::new(current.len().saturating_add(16));
+        editor.set_clean_text(current);
+        editor.set_git_base_text(Some(base.to_string()));
+        editor
+    }
+
+    #[test]
+    fn git_line_change_kinds_follow_hunk_semantics() {
+        let inserted = editor_with_git_base("a\nb\n", "a\nnew\nb\n");
+        assert_eq!(
+            inserted.get_git_line_change_kind(1),
+            Some(GitChangeKind::Added)
+        );
+        assert!(inserted.git_hunks.iter().any(|hunk| {
+            hunk.before_start == hunk.before_end
+                && hunk.after_start <= 1
+                && hunk.after_end > 1
+        }));
+
+        let inserted_into_empty = editor_with_git_base("", "first\n");
+        assert_eq!(
+            inserted_into_empty.get_git_line_change_kind(0),
+            Some(GitChangeKind::Added)
+        );
+
+        let replaced = editor_with_git_base("a\nold\nb\n", "a\nchanged\nb\n");
+        assert_eq!(
+            replaced.get_git_line_change_kind(1),
+            Some(GitChangeKind::Modified)
+        );
+        assert!(replaced.git_hunks.iter().any(|hunk| {
+            hunk.before_start < hunk.before_end
+                && hunk.after_start <= 1
+                && hunk.after_end > 1
+        }));
+
+        let unequal_replacement = editor_with_git_base(
+            "a\nold1\nold2\nb\n",
+            "a\nnew1\nnew2\nnew3\nb\n",
+        );
+        for line in 1..=3 {
+            assert_eq!(
+                unequal_replacement.get_git_line_change_kind(line),
+                Some(GitChangeKind::Modified)
+            );
+        }
+
+        let deleted = editor_with_git_base("a\ngone\nb\n", "a\nb\n");
+        let deletion_hunk = deleted
+            .git_hunks
+            .iter()
+            .find(|hunk| {
+                hunk.before_start < hunk.before_end && hunk.after_start == hunk.after_end
+            })
+            .unwrap();
+        assert!(matches!(
+            deleted.deleted_gaps.get(deletion_hunk.after_start),
+            Some(Some(LineModState::ModifiedSaved))
+        ));
+        assert!(deleted
+            .line_states
+            .iter()
+            .enumerate()
+            .all(|(line, _)| deleted.get_git_line_change_kind(line).is_none()));
+    }
+
+    #[test]
+    fn git_line_change_kinds_survive_separate_hunks_without_semantic_merging() {
+        let editor = editor_with_git_base(
+            "keep0\nold_mod\nkeep1\ngone\nkeep2\nkeep3\n",
+            "keep0\nnew_mod\nkeep1\nkeep2\nadded\nkeep3\n",
+        );
+
+        assert_eq!(
+            editor.get_git_line_change_kind(1),
+            Some(GitChangeKind::Modified)
+        );
+        assert_eq!(
+            editor.get_git_line_change_kind(4),
+            Some(GitChangeKind::Added)
+        );
+        assert!(editor.get_git_line_change_kind(0).is_none());
+        assert!(editor.get_git_line_change_kind(2).is_none());
+        assert!(editor.get_git_line_change_kind(3).is_none());
+        assert!(editor.get_git_line_change_kind(5).is_none());
+
+        let mut saw_added = false;
+        let mut saw_modified = false;
+        let mut deletion_gap = None;
+        for hunk in &editor.git_hunks {
+            match (
+                hunk.before_start == hunk.before_end,
+                hunk.after_start == hunk.after_end,
+            ) {
+                (true, false) => saw_added = true,
+                (false, true) => deletion_gap = Some(hunk.after_start),
+                (false, false) => saw_modified = true,
+                (true, true) => {}
+            }
+        }
+
+        assert!(saw_added);
+        assert!(saw_modified);
+        let deletion_gap = deletion_gap.unwrap();
+        assert!(matches!(
+            editor.deleted_gaps.get(deletion_gap),
+            Some(Some(LineModState::ModifiedSaved))
+        ));
+    }
+
+    #[test]
+    fn non_git_dirty_markers_keep_saved_unsaved_semantics() {
+        let mut editor = editor_with_git_base("a\nb\n", "a\nnew\nb\n");
+        assert_eq!(
+            editor.get_git_line_change_kind(1),
+            Some(GitChangeKind::Added)
+        );
+
+        editor.set_clean_text("a\nb\n");
+        let b_start = editor.get_full_text().find('b').unwrap();
+        editor.replace_range(b_start, b_start + 1, "changed");
+        assert!(matches!(
+            editor.get_line_modification_state(1),
+            Some(LineModState::ModifiedUnsaved)
+        ));
+        assert!(editor.get_git_line_change_kind(1).is_none());
+
+        editor.mark_saved();
+        assert!(matches!(
+            editor.get_line_modification_state(1),
+            Some(LineModState::ModifiedSaved)
+        ));
+        assert!(editor.get_git_line_change_kind(1).is_none());
+    }
+
     #[test]
     fn editor_clear_history_empty_ops_and_navigation_edges_are_stable() {
         let mut editor = Editor::new(8);

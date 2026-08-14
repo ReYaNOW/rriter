@@ -420,9 +420,48 @@ impl App {
         }
     }
 
+    pub(crate) fn reconcile_saved_current_file_git_index(&mut self) {
+        if self.editor.git_base_text.is_none() || !self.editor.git_hunks.is_empty() {
+            return;
+        }
+        if self.ide_panel.git.pending && self.ide_panel.git.stage_pending_workspace_idx.is_none() {
+            return;
+        }
+        let Some((repo_root, file)) = self.current_git_file_entry() else {
+            return;
+        };
+        if !file.staged || file.status != GitFileStatus::Modified {
+            return;
+        }
+        if !self
+            .ide_panel
+            .git
+            .take_stage_reconcile_candidate(&repo_root, file.rel_path.as_ref())
+        {
+            return;
+        }
+        self.spawn_git_task(GitAction::ReconcileStagedModified {
+            file: GitReconcileFileCommand {
+                repo_root,
+                rel_path: file.rel_path.into(),
+            },
+        });
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn spawn_git_task(&mut self, action: GitAction) {
         let refresh = matches!(&action, GitAction::Refresh);
+        if refresh
+            && self
+                .ide_panel
+                .git
+                .rx
+                .iter()
+                .any(|receiver| receiver.status_mutation)
+        {
+            self.ide_panel.git.status_refresh_dirty = true;
+            return;
+        }
         if refresh && !self.ide_panel.git.begin_status_refresh() {
             return;
         }
@@ -507,7 +546,11 @@ impl App {
         }
 
         let request_id = self.ide_panel.git.allocate_status_request_id();
-        let blocking = !matches!(&action, GitAction::Refresh);
+        let status_mutation = matches!(
+            &action,
+            GitAction::ToggleStageMany { .. } | GitAction::ReconcileStagedModified { .. }
+        );
+        let blocking = !refresh;
         if blocking {
             let now = std::time::Instant::now();
             self.ide_panel.git.pending = true;
@@ -546,72 +589,35 @@ impl App {
             request_id,
             blocking,
             refresh,
+            status_mutation,
         });
 
-        if let GitAction::ToggleStageMany { files } = action {
-            let mut command = Some(GitStageCommand {
-                request_id,
-                files,
-                workspaces,
-                branch_ahead_cache,
-                tx,
-            });
-            if let Some(stage_tx) = &self.ide_panel.git.stage_tx {
-                match stage_tx.send(command.take().unwrap()) {
-                    Ok(()) => return,
-                    Err(err) => command = Some(err.0),
-                }
+        let action = match action {
+            GitAction::ToggleStageMany { files } => {
+                self.ide_panel.git.update_stage_reconcile_candidates(&files);
+                enqueue_git_stage_operation(
+                    &mut self.ide_panel.git,
+                    GitStageOperation::ToggleMany(files),
+                    request_id,
+                    workspaces,
+                    branch_ahead_cache,
+                    tx,
+                );
+                return;
             }
-
-            let (stage_tx, stage_rx) = mpsc::channel::<GitStageCommand>();
-            match crate::platform::spawn_named("rriter-git-stage", move || {
-                for command in stage_rx {
-                    let notice = run_stage_files(&command.files);
-                    let mut branch_ahead_cache = command.branch_ahead_cache;
-                    let snapshot =
-                        collect_git_status_with_cache(&command.workspaces, &mut branch_ahead_cache);
-                    let _ = command.tx.send(GitPanelTaskResult {
-                        event: GitPanelEvent {
-                            request_id: command.request_id,
-                            snapshot,
-                            notice,
-                            preserve_snapshot_on_empty: true,
-                            clear_message: false,
-                            refresh_graph: false,
-                            transaction_failed: false,
-                        },
-                        branch_ahead_cache,
-                    });
-                }
-            }) {
-                Ok(_) => {
-                    self.ide_panel.git.stage_tx = Some(stage_tx.clone());
-                    if let Some(command) = command {
-                        let _ = stage_tx.send(command);
-                    }
-                }
-                Err(err) => {
-                    self.ide_panel.git.stage_tx = None;
-                    if let Some(command) = command {
-                        let _ = command.tx.send(GitPanelTaskResult {
-                            event: GitPanelEvent {
-                                request_id: command.request_id,
-                                snapshot: GitStatusSnapshot::default(),
-                                notice: Some(format!(
-                                    "Не удалось запустить Git stage worker: {err}"
-                                )),
-                                preserve_snapshot_on_empty: true,
-                                clear_message: false,
-                                refresh_graph: false,
-                                transaction_failed: false,
-                            },
-                            branch_ahead_cache: command.branch_ahead_cache,
-                        });
-                    }
-                }
+            GitAction::ReconcileStagedModified { file } => {
+                enqueue_git_stage_operation(
+                    &mut self.ide_panel.git,
+                    GitStageOperation::ReconcileModified(file),
+                    request_id,
+                    workspaces,
+                    branch_ahead_cache,
+                    tx,
+                );
+                return;
             }
-            return;
-        }
+            action => action,
+        };
 
         let worker_tx = tx.clone();
         let worker_runtime_tx = runtime_tx.clone();
@@ -648,6 +654,74 @@ impl App {
                     transaction_failed: commit_transaction,
                 },
                 branch_ahead_cache: BranchAheadCache::default(),
+            });
+        }
+    }
+}
+
+fn enqueue_git_stage_operation(
+    state: &mut GitPanelState,
+    operation: GitStageOperation,
+    request_id: u64,
+    workspaces: Vec<PathBuf>,
+    branch_ahead_cache: BranchAheadCache,
+    tx: mpsc::Sender<GitPanelTaskResult>,
+) {
+    let mut command = GitStageCommand {
+        request_id,
+        operation,
+        workspaces,
+        branch_ahead_cache,
+        tx,
+    };
+    if let Some(stage_tx) = &state.stage_tx {
+        match stage_tx.send(command) {
+            Ok(()) => return,
+            Err(err) => command = err.0,
+        }
+    }
+
+    let (stage_tx, stage_rx) = mpsc::channel::<GitStageCommand>();
+    match crate::platform::spawn_named("rriter-git-stage", move || {
+        let mut owned_stage_entries = FxHashMap::default();
+        for command in stage_rx {
+            let notice =
+                run_git_stage_operation(&command.operation, &mut owned_stage_entries);
+            let mut branch_ahead_cache = command.branch_ahead_cache;
+            let snapshot =
+                collect_git_status_with_cache(&command.workspaces, &mut branch_ahead_cache);
+            let _ = command.tx.send(GitPanelTaskResult {
+                event: GitPanelEvent {
+                    request_id: command.request_id,
+                    snapshot,
+                    notice,
+                    preserve_snapshot_on_empty: true,
+                    clear_message: false,
+                    refresh_graph: false,
+                    transaction_failed: false,
+                },
+                branch_ahead_cache,
+            });
+        }
+    }) {
+        Ok(_) => {
+            state.stage_tx = Some(stage_tx.clone());
+            let _ = stage_tx.send(command);
+        }
+        Err(err) => {
+            state.stage_tx = None;
+            state.clear_stage_reconcile_candidates_for_operation(&command.operation);
+            let _ = command.tx.send(GitPanelTaskResult {
+                event: GitPanelEvent {
+                    request_id: command.request_id,
+                    snapshot: GitStatusSnapshot::default(),
+                    notice: Some(format!("Не удалось запустить Git stage worker: {err}")),
+                    preserve_snapshot_on_empty: true,
+                    clear_message: false,
+                    refresh_graph: false,
+                    transaction_failed: false,
+                },
+                branch_ahead_cache: command.branch_ahead_cache,
             });
         }
     }

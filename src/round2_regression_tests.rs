@@ -15,6 +15,7 @@ const FILE_TREE_UI: &str = include_str!("render_view/ide_panels/ide_panel_side_r
 const TERMINAL_UI: &str = include_str!("render_view/terminal_ui.rs");
 const SEARCH_UI: &str = include_str!("render_view/search.rs");
 const STICKY_UI: &str = include_str!("render_view/sticky.rs");
+const ROOT_FRAME_HELPERS: &str = include_str!("render_view/root_frame_helpers.rs");
 const CORE_TEXT: &str = include_str!("render_view/core_text.rs");
 const EDITOR_TEXT: &str = include_str!("render_view/editor_text_layer.rs");
 const LSP_UI: &str = include_str!("render_view/lsp_ui.rs");
@@ -663,4 +664,19 @@ fn r2_089_event_loop_runtime_error_is_reported_without_unwrap() {
         event_loop_error_message("stage", &"failure"),
         "RRiter: stage: failure"
     );
+}
+
+#[test]
+fn r2_090_inline_git_popup_code_uses_editor_font_renderer() {
+    let start = ROOT_FRAME_HELPERS
+        .find("fn draw_inline_git_text_line")
+        .expect("inline Git text helper must exist");
+    let end = ROOT_FRAME_HELPERS[start..]
+        .find("fn draw_inline_git_popup_panel")
+        .map(|offset| start + offset)
+        .expect("inline Git popup helper must follow text helper");
+    let helper = &ROOT_FRAME_HELPERS[start..end];
+
+    has_all(helper, &["draw_spanned_editor_line_alpha"]);
+    has_none(helper, &["draw_spanned_ui_line_pixel_snapped"]);
 }

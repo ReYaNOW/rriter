@@ -436,6 +436,7 @@ impl App {
             let content = self.editor.get_full_text();
             if self.write_current_text_to_path(&path, &content) {
                 self.editor.mark_saved();
+                self.reconcile_saved_current_file_git_index();
                 if self.is_ide_mode
                     && let Some(lsp) = &mut self.lsp
                 {

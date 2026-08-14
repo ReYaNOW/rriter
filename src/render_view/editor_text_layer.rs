@@ -1,6 +1,6 @@
-use crate::editor::Editor;
+use crate::editor::{Editor, GitChangeKind};
 use crate::highlighter::ColorSpan;
-use crate::render_view::{ModInterval, ModIntervalKind};
+use crate::render_view::{mod_intervals_can_merge, ModInterval, ModIntervalKind};
 use crate::renderer::Renderer;
 
 fn folded_import_keyword_range(
@@ -423,6 +423,10 @@ impl Renderer {
                         bottom: y_top + 3.0,
                         kind: ModIntervalKind::Deleted,
                         state: st,
+                        git_kind: editor
+                            .git_base_text
+                            .is_some()
+                            .then_some(GitChangeKind::Deleted),
                     });
                 }
             }
@@ -433,6 +437,7 @@ impl Renderer {
                     bottom: y_bottom,
                     kind: ModIntervalKind::Line,
                     state: st,
+                    git_kind: editor.get_git_line_change_kind(phys_idx),
                 });
             }
             last_phys_line = Some(phys_idx);
@@ -451,6 +456,10 @@ impl Renderer {
                         bottom: last_bottom_y + 3.0,
                         kind: ModIntervalKind::Deleted,
                         state: st,
+                        git_kind: editor
+                            .git_base_text
+                            .is_some()
+                            .then_some(GitChangeKind::Deleted),
                     });
                 }
             }
@@ -459,10 +468,7 @@ impl Renderer {
         for int in &self.mod_intervals_cache {
             let mut merged = false;
             if let Some(last) = self.merged_intervals_cache.last_mut() {
-                if int.top <= last.bottom + 0.1
-                    && int.kind == last.kind
-                    && int.state == last.state
-                {
+                if mod_intervals_can_merge(last, int) {
                     last.bottom = last.bottom.max(int.bottom);
                     merged = true;
                 }

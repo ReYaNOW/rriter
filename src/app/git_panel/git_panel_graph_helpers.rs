@@ -10,14 +10,11 @@ fn run_git_action(
     runtime_tx: Option<&mpsc::SyncSender<GitRuntimeEvent>>,
 ) -> GitActionOutcome {
     match action {
-        GitAction::Refresh | GitAction::LoadGraph { .. } => GitActionOutcome {
+        GitAction::Refresh
+        | GitAction::LoadGraph { .. }
+        | GitAction::ToggleStageMany { .. }
+        | GitAction::ReconcileStagedModified { .. } => GitActionOutcome {
             notice: None,
-            clear_message: false,
-            refresh_graph: false,
-            transaction_failed: false,
-        },
-        GitAction::ToggleStageMany { files } => GitActionOutcome {
-            notice: run_stage_files(&files),
             clear_message: false,
             refresh_graph: false,
             transaction_failed: false,
@@ -222,16 +219,25 @@ fn git_staged_confirm_files(
         .unwrap_or_default()
 }
 
-fn run_stage_files(files: &[GitStageFileCommand]) -> Option<String> {
+fn run_stage_files(
+    files: &[GitStageFileCommand],
+    owned_stage_entries: &mut FxHashMap<GitStageOwnershipKey, GitIndexEntryIdentity>,
+) -> Option<String> {
     let mut errors = Vec::new();
     for file in files {
-        if let Err(err) = toggle_stage(
+        let key = GitStageOwnershipKey::new(&file.repo_root, &file.rel_path);
+        owned_stage_entries.remove(&key);
+        match toggle_stage_with_identity(
             &file.repo_root,
             &file.rel_path,
             file.old_rel_path.as_deref(),
             file.staged,
         ) {
-            errors.push(err);
+            Ok(Some(identity)) if !file.staged => {
+                owned_stage_entries.insert(key, identity);
+            }
+            Ok(_) => {}
+            Err(err) => errors.push(err),
         }
     }
     if errors.is_empty() {
@@ -239,6 +245,32 @@ fn run_stage_files(files: &[GitStageFileCommand]) -> Option<String> {
     } else {
         Some(errors.join(" | "))
     }
+}
+
+fn run_git_stage_operation(
+    operation: &GitStageOperation,
+    owned_stage_entries: &mut FxHashMap<GitStageOwnershipKey, GitIndexEntryIdentity>,
+) -> Option<String> {
+    match operation {
+        GitStageOperation::ToggleMany(files) => run_stage_files(files, owned_stage_entries),
+        GitStageOperation::ReconcileModified(file) => {
+            run_reconcile_staged_modified(file, owned_stage_entries)
+        }
+    }
+}
+
+fn run_reconcile_staged_modified(
+    file: &GitReconcileFileCommand,
+    owned_stage_entries: &mut FxHashMap<GitStageOwnershipKey, GitIndexEntryIdentity>,
+) -> Option<String> {
+    let key = GitStageOwnershipKey::new(&file.repo_root, &file.rel_path);
+    let owned_identity = owned_stage_entries.remove(&key)?;
+    reconcile_owned_staged_modified_if_worktree_matches_head(
+        &file.repo_root,
+        &file.rel_path,
+        owned_identity,
+    )
+    .err()
 }
 
 fn rollback_staged_files(files: &[GitStageFileCommand]) -> Option<String> {

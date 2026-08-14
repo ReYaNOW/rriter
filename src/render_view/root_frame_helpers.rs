@@ -63,17 +63,9 @@ impl Renderer {
         x: f32,
         y: f32,
         max_x: f32,
-        scale: f32,
     ) {
-        self.draw_spanned_ui_line_pixel_snapped(
-            text,
-            spans,
-            base_offset,
-            x,
-            y,
-            max_x,
-            scale,
-        );
+        let _ =
+            self.draw_spanned_editor_line_alpha(text, spans, base_offset, x, y, max_x, 1.0);
     }
 
     fn draw_inline_git_popup_panel(
@@ -246,7 +238,6 @@ impl Renderer {
                 text_x,
                 row_y + self.baseline_offset,
                 max_text_x,
-                s,
             );
             row_y += row_h;
         }
@@ -260,7 +251,6 @@ impl Renderer {
                 text_x,
                 row_y + self.baseline_offset,
                 max_text_x,
-                s,
             );
         }
 

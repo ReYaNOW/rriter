@@ -12,6 +12,9 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn refresh_git_panel_window(&mut self) {
+        if self.ide_panel.git.pending {
+            return;
+        }
         self.ide_panel.git.close_commit_menus();
         self.ide_panel.git.close_repo_action_menu();
         self.ide_panel.git.snapshot = GitStatusSnapshot::default();
@@ -149,7 +152,10 @@ impl App {
             self.ide_panel.git.status_refresh_dirty = true;
             refresh_rerun = true;
         }
-        if refresh_rerun
+        if refresh_rerun && !self.ide_panel.git.rx.is_empty() {
+            self.ide_panel.git.status_refresh_dirty = true;
+        }
+        if (refresh_rerun || self.ide_panel.git.status_refresh_dirty)
             && self.ide_panel.git.rx.is_empty()
             && !self.ide_panel.git.status_refresh_pending
         {

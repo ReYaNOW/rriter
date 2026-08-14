@@ -137,6 +137,13 @@ pub enum LineModState {
     ModifiedSaved,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GitChangeKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
 #[derive(Clone)]
 pub enum EditOp {
     Insert {
@@ -203,6 +210,7 @@ pub struct Editor {
     pub saved_hashes: Vec<u64>,
     pub git_base_text: Option<String>,
     pub git_hunks: Vec<LineDiffHunk>,
+    git_line_changes: Vec<Option<GitChangeKind>>,
     pub line_states: Vec<Option<LineModState>>,
     pub deleted_gaps: Vec<Option<LineModState>>,
     pub is_dirty: bool,
@@ -236,6 +244,7 @@ impl Editor {
             saved_hashes: vec![],
             git_base_text: None,
             git_hunks: Vec::new(),
+            git_line_changes: Vec::new(),
             line_states: vec![],
             deleted_gaps: vec![],
             is_dirty: false,
@@ -567,6 +576,10 @@ impl Editor {
         self.line_states.get(line).copied().flatten()
     }
 
+    pub(crate) fn get_git_line_change_kind(&self, line: usize) -> Option<GitChangeKind> {
+        self.git_line_changes.get(line).copied().flatten()
+    }
+
     pub fn update_modifications(&mut self) {
         self.rebuild_line_offsets();
 
@@ -615,11 +628,29 @@ impl Editor {
         };
         let mod_orig = orig_info.modified;
         let mut del_orig = orig_info.deleted_gaps;
-        self.git_hunks = if self.git_base_text.is_some() {
-            orig_info.hunks
+        if self.git_base_text.is_some() {
+            self.git_line_changes.clear();
+            self.git_line_changes.resize(curr_hashes.len(), None);
+            for hunk in &orig_info.hunks {
+                if hunk.after_start >= hunk.after_end {
+                    continue;
+                }
+                let kind = if orig_was_empty || hunk.before_start == hunk.before_end {
+                    GitChangeKind::Added
+                } else {
+                    GitChangeKind::Modified
+                };
+                let start = hunk.after_start.min(self.git_line_changes.len());
+                let end = hunk.after_end.min(self.git_line_changes.len());
+                if start < end {
+                    self.git_line_changes[start..end].fill(Some(kind));
+                }
+            }
+            self.git_hunks = orig_info.hunks;
         } else {
-            Vec::new()
-        };
+            self.git_line_changes.clear();
+            self.git_hunks.clear();
+        }
 
         // Treat a line replacement (delete + insert) as just a modification.
         // This prevents showing a deletion gap marker above a modified line.
@@ -986,6 +1017,7 @@ impl Editor {
         self.saved_hashes = self.original_hashes.clone();
         self.git_base_text = None;
         self.git_hunks.clear();
+        self.git_line_changes.clear();
         let line_count = self.original_hashes.len();
         self.line_states = vec![None; line_count];
         self.deleted_gaps = vec![None; line_count + 1];

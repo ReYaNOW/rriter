@@ -678,30 +678,123 @@ fn branch_ahead_cached(
     Ok(ahead)
 }
 
+fn git_index_change_status(status: git2::Status) -> git2::Status {
+    status
+        & (git2::Status::INDEX_NEW
+            | git2::Status::INDEX_MODIFIED
+            | git2::Status::INDEX_DELETED
+            | git2::Status::INDEX_RENAMED
+            | git2::Status::INDEX_TYPECHANGE)
+}
+
+fn git_index_entry_identity(entry: git2::IndexEntry) -> GitIndexEntryIdentity {
+    GitIndexEntryIdentity {
+        id: entry.id,
+        mode: entry.mode,
+    }
+}
+
+fn toggle_stage_with_identity(
+    repo_root: &Path,
+    rel_path: &str,
+    old_rel_path: Option<&str>,
+    staged: bool,
+) -> Result<Option<GitIndexEntryIdentity>, String> {
+    let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
+    let path = Path::new(rel_path);
+    if staged {
+        unstage_path(&repo, path, old_rel_path.map(Path::new)).map_err(short_git_error)?;
+        return Ok(None);
+    }
+
+    let mut index = repo.index().map_err(short_git_error)?;
+    if let Some(old_path) = old_rel_path.map(Path::new)
+        && old_path != path
+    {
+        index.remove_path(old_path).map_err(short_git_error)?;
+    }
+    if repo_root.join(path).exists() {
+        index.add_path(path).map_err(short_git_error)?;
+    } else {
+        index.remove_path(path).map_err(short_git_error)?;
+    }
+    index.write().map_err(short_git_error)?;
+
+    let status = match repo.status_file(path) {
+        Ok(status) => status,
+        Err(err) if err.code() == git2::ErrorCode::NotFound => return Ok(None),
+        Err(err) => return Err(short_git_error(err)),
+    };
+    if git_index_change_status(status) != git2::Status::INDEX_MODIFIED {
+        return Ok(None);
+    }
+    let index = repo.index().map_err(short_git_error)?;
+    Ok(index.get_path(path, 0).map(git_index_entry_identity))
+}
+
 fn toggle_stage(
     repo_root: &Path,
     rel_path: &str,
     old_rel_path: Option<&str>,
     staged: bool,
 ) -> Result<(), String> {
+    toggle_stage_with_identity(repo_root, rel_path, old_rel_path, staged).map(|_| ())
+}
+
+fn reconcile_owned_staged_modified_if_worktree_matches_head(
+    repo_root: &Path,
+    rel_path: &str,
+    owned_identity: GitIndexEntryIdentity,
+) -> Result<bool, String> {
     let repo = git2::Repository::open(repo_root).map_err(short_git_error)?;
     let path = Path::new(rel_path);
-    if staged {
-        unstage_path(&repo, path, old_rel_path.map(Path::new)).map_err(short_git_error)
-    } else {
-        let mut index = repo.index().map_err(short_git_error)?;
-        if let Some(old_path) = old_rel_path.map(Path::new)
-            && old_path != path
-        {
-            index.remove_path(old_path).map_err(short_git_error)?;
-        }
-        if repo_root.join(path).exists() {
-            index.add_path(path).map_err(short_git_error)?;
-        } else {
-            index.remove_path(path).map_err(short_git_error)?;
-        }
-        index.write().map_err(short_git_error)
+    let status = match repo.status_file(path) {
+        Ok(status) => status,
+        Err(err) if err.code() == git2::ErrorCode::NotFound => return Ok(false),
+        Err(err) => return Err(short_git_error(err)),
+    };
+    if git_index_change_status(status) != git2::Status::INDEX_MODIFIED {
+        return Ok(false);
     }
+
+    let current_identity = repo
+        .index()
+        .map_err(short_git_error)?
+        .get_path(path, 0)
+        .map(git_index_entry_identity);
+    if current_identity != Some(owned_identity) {
+        return Ok(false);
+    }
+
+    let head = match repo.head().and_then(|head| head.peel_to_commit()) {
+        Ok(head) => head,
+        Err(err)
+            if matches!(
+                err.code(),
+                git2::ErrorCode::NotFound | git2::ErrorCode::UnbornBranch
+            ) =>
+        {
+            return Ok(false);
+        }
+        Err(err) => return Err(short_git_error(err)),
+    };
+    let tree = head.tree().map_err(short_git_error)?;
+    if tree.get_path(path).is_err() {
+        return Ok(false);
+    }
+    let mut diff_options = git2::DiffOptions::new();
+    diff_options
+        .pathspec(rel_path)
+        .disable_pathspec_match(true);
+    let diff = repo
+        .diff_tree_to_workdir(Some(&tree), Some(&mut diff_options))
+        .map_err(short_git_error)?;
+    if diff.deltas().next().is_some() {
+        return Ok(false);
+    }
+
+    unstage_path(&repo, path, None).map_err(short_git_error)?;
+    Ok(true)
 }
 
 fn unstage_path(
@@ -883,6 +976,22 @@ mod tests {
             ahead: 0,
             error,
         }
+    }
+
+    fn stage_operation(repo_root: &Path, rel_path: &str, staged: bool) -> GitStageOperation {
+        GitStageOperation::ToggleMany(vec![GitStageFileCommand {
+            repo_root: repo_root.to_path_buf(),
+            rel_path: rel_path.to_string(),
+            old_rel_path: None,
+            staged,
+        }])
+    }
+
+    fn reconcile_operation(repo_root: &Path, rel_path: &str) -> GitStageOperation {
+        GitStageOperation::ReconcileModified(GitReconcileFileCommand {
+            repo_root: repo_root.to_path_buf(),
+            rel_path: rel_path.to_string(),
+        })
     }
 
     #[test]
@@ -1814,6 +1923,428 @@ mod tests {
         assert!(collect_workspace_status(7, &root).files.is_empty());
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_unstages_rriter_owned_modified_when_worktree_matches_head() {
+        let root = temp_git_root("reconcile_head");
+        std::fs::create_dir_all(&root).unwrap();
+        let _repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        toggle_stage(&root, "tracked.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"B\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", false),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        let key = GitStageOwnershipKey::new(&root, "tracked.txt");
+        assert!(owned_stage_entries.contains_key(&key));
+
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "tracked.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(!owned_stage_entries.contains_key(&key));
+        assert!(collect_workspace_status(0, &root).files.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_preserves_owned_stage_when_worktree_differs_from_head() {
+        let root = temp_git_root("reconcile_preserve");
+        std::fs::create_dir_all(&root).unwrap();
+        let _repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        toggle_stage(&root, "tracked.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"B\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", false),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        std::fs::write(root.join("tracked.txt"), b"C\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "tracked.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(owned_stage_entries.is_empty());
+        let status = collect_workspace_status(0, &root);
+        assert_eq!(status.files.len(), 1);
+        assert!(status.files[0].staged);
+        assert_eq!(status.files[0].status, GitFileStatus::Modified);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_only_unstages_owned_target_file() {
+        let root = temp_git_root("reconcile_target_only");
+        std::fs::create_dir_all(&root).unwrap();
+        let _repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("one.txt"), b"A1\n").unwrap();
+        std::fs::write(root.join("two.txt"), b"A2\n").unwrap();
+        toggle_stage(&root, "one.txt", None, false).unwrap();
+        toggle_stage(&root, "two.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("one.txt"), b"B1\n").unwrap();
+        std::fs::write(root.join("two.txt"), b"B2\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        let stage_both = GitStageOperation::ToggleMany(vec![
+            GitStageFileCommand {
+                repo_root: root.clone(),
+                rel_path: "one.txt".to_string(),
+                old_rel_path: None,
+                staged: false,
+            },
+            GitStageFileCommand {
+                repo_root: root.clone(),
+                rel_path: "two.txt".to_string(),
+                old_rel_path: None,
+                staged: false,
+            },
+        ]);
+        assert!(run_git_stage_operation(&stage_both, &mut owned_stage_entries).is_none());
+        std::fs::write(root.join("one.txt"), b"A1\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "one.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(!owned_stage_entries.contains_key(&GitStageOwnershipKey::new(&root, "one.txt")));
+        assert!(owned_stage_entries.contains_key(&GitStageOwnershipKey::new(&root, "two.txt")));
+        let status = collect_workspace_status(0, &root);
+        assert_eq!(status.files.len(), 1);
+        assert_eq!(status.files[0].rel_path.as_ref(), "two.txt");
+        assert!(status.files[0].staged);
+        assert_eq!(status.files[0].status, GitFileStatus::Modified);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_never_owns_non_modified_index_statuses() {
+        let root = temp_git_root("reconcile_status_guard");
+        std::fs::create_dir_all(&root).unwrap();
+        let _repo = git2::Repository::init(&root).unwrap();
+        for (path, content) in [
+            ("deleted.txt", b"deleted\n".as_slice()),
+            ("unstaged.txt", b"unstaged\n".as_slice()),
+            ("rename-old.txt", b"rename\n".as_slice()),
+        ] {
+            std::fs::write(root.join(path), content).unwrap();
+            toggle_stage(&root, path, None, false).unwrap();
+        }
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("added.txt"), b"new\n").unwrap();
+        std::fs::write(root.join("untracked.txt"), b"loose\n").unwrap();
+        std::fs::write(root.join("unstaged.txt"), b"changed\n").unwrap();
+        std::fs::remove_file(root.join("deleted.txt")).unwrap();
+        crate::platform::rename_path(
+            &root.join("rename-old.txt"),
+            &root.join("rename-new.txt"),
+        )
+        .unwrap();
+        let renamed = collect_workspace_status(0, &root)
+            .files
+            .into_iter()
+            .find(|file| file.status == GitFileStatus::Renamed)
+            .expect("unstaged rename");
+        assert!(!renamed.staged);
+
+        let mut owned_stage_entries = FxHashMap::default();
+        for operation in [
+            stage_operation(&root, "added.txt", false),
+            stage_operation(&root, "deleted.txt", false),
+            GitStageOperation::ToggleMany(vec![GitStageFileCommand {
+                repo_root: root.clone(),
+                rel_path: renamed.rel_path.to_string(),
+                old_rel_path: renamed.old_rel_path.as_ref().map(ToString::to_string),
+                staged: false,
+            }]),
+        ] {
+            assert!(run_git_stage_operation(&operation, &mut owned_stage_entries).is_none());
+        }
+        assert!(owned_stage_entries.is_empty());
+
+        for path in [
+            "added.txt",
+            "untracked.txt",
+            "unstaged.txt",
+            "deleted.txt",
+            "rename-new.txt",
+        ] {
+            assert!(run_git_stage_operation(
+                &reconcile_operation(&root, path),
+                &mut owned_stage_entries,
+            )
+            .is_none());
+        }
+        let status = collect_workspace_status(0, &root);
+        assert!(status.files.iter().any(|file| {
+            file.rel_path.as_ref() == "added.txt"
+                && file.staged
+                && file.status == GitFileStatus::Added
+        }));
+        assert!(status.files.iter().any(|file| {
+            file.rel_path.as_ref() == "untracked.txt"
+                && !file.staged
+                && file.status == GitFileStatus::Untracked
+        }));
+        assert!(status.files.iter().any(|file| {
+            file.rel_path.as_ref() == "unstaged.txt"
+                && !file.staged
+                && file.status == GitFileStatus::Modified
+        }));
+        assert!(status.files.iter().any(|file| {
+            file.rel_path.as_ref() == "deleted.txt"
+                && file.staged
+                && file.status == GitFileStatus::Deleted
+        }));
+        assert!(status.files.iter().any(|file| {
+            file.rel_path.as_ref() == "rename-new.txt"
+                && file.staged
+                && file.status == GitFileStatus::Renamed
+        }));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_rejects_external_index_replacement() {
+        let root = temp_git_root("reconcile_external_replace");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        toggle_stage(&root, "tracked.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"B\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", false),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        let key = GitStageOwnershipKey::new(&root, "tracked.txt");
+        let owned_identity = owned_stage_entries.get(&key).copied().unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"C\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let external_identity = index
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        assert_ne!(external_identity, owned_identity);
+        drop(index);
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "tracked.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(owned_stage_entries.is_empty());
+        let current_identity = repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        assert_eq!(current_identity, external_identity);
+        let status = collect_workspace_status(0, &root);
+        assert_eq!(status.files.len(), 1);
+        assert!(status.files[0].staged);
+        assert_eq!(status.files[0].status, GitFileStatus::Modified);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn failed_stage_does_not_arm_future_reconcile() {
+        let root = temp_git_root("reconcile_failed_stage");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        toggle_stage(&root, "tracked.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"B\n").unwrap();
+        std::fs::write(repo.path().join("index.lock"), b"locked").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        let notice = run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", false),
+            &mut owned_stage_entries,
+        );
+        assert!(notice.is_some());
+        assert!(owned_stage_entries.is_empty());
+        std::fs::remove_file(repo.path().join("index.lock")).unwrap();
+
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let staged_identity = index
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        drop(index);
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "tracked.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        let current_identity = repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        assert_eq!(current_identity, staged_identity);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn explicit_unstage_clears_owned_stage_provenance() {
+        let root = temp_git_root("reconcile_explicit_unstage");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+        toggle_stage(&root, "tracked.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("tracked.txt"), b"B\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", false),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(!owned_stage_entries.is_empty());
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "tracked.txt", true),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(owned_stage_entries.is_empty());
+
+        std::fs::write(root.join("tracked.txt"), b"C\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(Path::new("tracked.txt")).unwrap();
+        index.write().unwrap();
+        let external_identity = index
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        drop(index);
+        std::fs::write(root.join("tracked.txt"), b"A\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "tracked.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        let current_identity = repo
+            .index()
+            .unwrap()
+            .get_path(Path::new("tracked.txt"), 0)
+            .map(git_index_entry_identity)
+            .unwrap();
+        assert_eq!(current_identity, external_identity);
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn conditional_reconcile_uses_git_normalization_for_autocrlf() {
+        let root = temp_git_root("reconcile_autocrlf");
+        std::fs::create_dir_all(&root).unwrap();
+        let repo = git2::Repository::init(&root).unwrap();
+        repo.config().unwrap().set_bool("core.autocrlf", true).unwrap();
+        std::fs::write(root.join("windows.txt"), b"A\r\nline\r\n").unwrap();
+        toggle_stage(&root, "windows.txt", None, false).unwrap();
+        commit_repo(&root, "initial", false).unwrap();
+
+        std::fs::write(root.join("windows.txt"), b"B\r\nline\r\n").unwrap();
+        let mut owned_stage_entries = FxHashMap::default();
+        assert!(run_git_stage_operation(
+            &stage_operation(&root, "windows.txt", false),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(!owned_stage_entries.is_empty());
+        std::fs::write(root.join("windows.txt"), b"A\r\nline\r\n").unwrap();
+
+        assert!(run_git_stage_operation(
+            &reconcile_operation(&root, "windows.txt"),
+            &mut owned_stage_entries,
+        )
+        .is_none());
+        assert!(collect_workspace_status(0, &root).files.is_empty());
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn stage_reconcile_candidate_is_session_owned_and_invalidated_by_status() {
+        let repo_root = PathBuf::from("/workspace");
+        let mut state = GitPanelState::default();
+        state.snapshot = GitStatusSnapshot {
+            workspaces: vec![git_workspace(
+                vec![git_file("tracked.txt", true, GitFileStatus::Modified)],
+                None,
+            )],
+        };
+        let stage = GitStageFileCommand {
+            repo_root: repo_root.clone(),
+            rel_path: "tracked.txt".to_string(),
+            old_rel_path: None,
+            staged: false,
+        };
+        state.update_stage_reconcile_candidates(std::slice::from_ref(&stage));
+        assert!(state.has_stage_reconcile_candidate_for_test(&repo_root, "tracked.txt"));
+
+        let explicit_unstage = GitStageFileCommand {
+            staged: true,
+            ..stage.clone()
+        };
+        state.update_stage_reconcile_candidates(std::slice::from_ref(&explicit_unstage));
+        assert!(!state.has_stage_reconcile_candidate_for_test(&repo_root, "tracked.txt"));
+
+        state.update_stage_reconcile_candidates(std::slice::from_ref(&stage));
+        state.apply_event(GitPanelEvent {
+            request_id: 1,
+            snapshot: GitStatusSnapshot {
+                workspaces: vec![git_workspace(
+                    vec![git_file("tracked.txt", false, GitFileStatus::Modified)],
+                    None,
+                )],
+            },
+            notice: None,
+            preserve_snapshot_on_empty: false,
+            clear_message: false,
+            refresh_graph: false,
+            transaction_failed: false,
+        });
+        assert!(!state.has_stage_reconcile_candidate_for_test(&repo_root, "tracked.txt"));
     }
 
     #[test]
