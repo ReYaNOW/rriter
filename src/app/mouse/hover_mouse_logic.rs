@@ -732,13 +732,13 @@ pub(crate) fn hover_screen_y_to_content_y(
     cursor_y: f32,
     render_scroll_y: f32,
     line_height: f32,
-    baseline_offset: f32,
+    _baseline_offset: f32,
 ) -> Option<f32> {
     if line_height <= 0.0 {
         return None;
     }
-    let text_top_bias = (baseline_offset - line_height * 0.5).clamp(0.0, line_height * 0.5);
-    Some((cursor_y + render_scroll_y - text_top_bias).max(0.0))
+    // VisualLine.y_offset is row-top content geometry; baseline_offset only places glyphs in it.
+    Some((cursor_y + render_scroll_y).max(0.0))
 }
 
 pub(crate) fn hover_content_y_in_line_hitbox(

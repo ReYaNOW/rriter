@@ -326,6 +326,11 @@ fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Inst
 }
 
 #[inline(always)]
+fn tab_drag_animation_active(ide_panel: &crate::app::IdePanelState) -> bool {
+    ide_panel.tab_drag.is_some() || ide_panel.terminal_tab_drag.is_some()
+}
+
+#[inline(always)]
 fn needs_continuous_poll(
     autocomplete_animating: bool,
     git_progress_animating: bool,
@@ -389,6 +394,25 @@ mod tests {
             ),
             1.0
         );
+    }
+
+    #[test]
+    fn editor_and_terminal_tab_drag_share_continuous_redraw_lifecycle() {
+        let drag = crate::app::TabDragState {
+            start_idx: 0,
+            start_x: 10.0,
+            current_x: 20.0,
+            threshold_passed: true,
+        };
+        let mut ide_panel = crate::app::IdePanelState::default();
+        assert!(!tab_drag_animation_active(&ide_panel));
+
+        ide_panel.tab_drag = Some(drag.clone());
+        assert!(tab_drag_animation_active(&ide_panel));
+
+        ide_panel.tab_drag = None;
+        ide_panel.terminal_tab_drag = Some(drag);
+        assert!(tab_drag_animation_active(&ide_panel));
     }
 
     #[test]

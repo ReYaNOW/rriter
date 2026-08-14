@@ -2,6 +2,121 @@ const INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT: usize = 24 * 1024;
 const INACTIVE_HIGHLIGHT_COMPLETION_CAP_LIMIT: usize = 2048;
 const INACTIVE_HIGHLIGHT_SMALL_CAP_LIMIT: usize = 4096;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TabDragPlacement {
+    pub dragged_x: f32,
+    pub destination: usize,
+}
+
+pub(crate) fn tab_drag_placement(
+    base_x: f32,
+    widths: &[f32],
+    drag: Option<&TabDragState>,
+) -> Option<TabDragPlacement> {
+    let drag = drag?;
+    if !drag.threshold_passed || drag.start_idx >= widths.len() {
+        return None;
+    }
+
+    let start_x = base_x + widths[..drag.start_idx].iter().sum::<f32>();
+    let dragged_x = start_x + (drag.current_x - drag.start_x);
+    let dragged_center = dragged_x + widths[drag.start_idx] * 0.5;
+    let mut destination = drag.start_idx;
+    let mut x = base_x;
+
+    for (idx, &width) in widths.iter().enumerate() {
+        if idx != drag.start_idx {
+            let other_center = x + width * 0.5;
+            if idx < drag.start_idx {
+                if dragged_center < other_center {
+                    destination = destination.min(idx);
+                }
+            } else if dragged_center > other_center {
+                destination = destination.max(idx);
+            }
+        }
+        x += width;
+    }
+
+    Some(TabDragPlacement {
+        dragged_x,
+        destination,
+    })
+}
+
+pub(crate) fn tab_drag_layout(
+    base_x: f32,
+    widths: &[f32],
+    drag: Option<&TabDragState>,
+    actual_xs: &mut Vec<f32>,
+    order: &mut Vec<usize>,
+) -> Option<usize> {
+    actual_xs.clear();
+    order.clear();
+    actual_xs.reserve(widths.len());
+    order.reserve(widths.len());
+
+    let mut x = base_x;
+    for (idx, &width) in widths.iter().enumerate() {
+        actual_xs.push(x);
+        order.push(idx);
+        x += width;
+    }
+
+    let drag = drag?;
+    let placement = tab_drag_placement(base_x, widths, Some(drag))?;
+    order.retain(|&idx| idx != drag.start_idx);
+    order.insert(placement.destination, drag.start_idx);
+
+    let mut x = base_x;
+    for &idx in order.iter() {
+        if idx != drag.start_idx {
+            actual_xs[idx] = x;
+        }
+        x += widths[idx];
+    }
+    actual_xs[drag.start_idx] = placement.dragged_x;
+    Some(drag.start_idx)
+}
+
+pub(crate) fn tab_drag_render_order(
+    order: &[usize],
+    dragged_idx: Option<usize>,
+    render_order: &mut Vec<usize>,
+) {
+    render_order.clear();
+    render_order.reserve(order.len());
+    render_order.extend(order.iter().copied().filter(|idx| Some(*idx) != dragged_idx));
+    if let Some(idx) = dragged_idx {
+        render_order.push(idx);
+    }
+}
+
+pub(crate) fn active_index_after_move(active: usize, from: usize, to: usize) -> usize {
+    if active == from {
+        to
+    } else if from < to && active > from && active <= to {
+        active - 1
+    } else if to < from && active >= to && active < from {
+        active + 1
+    } else {
+        active
+    }
+}
+
+pub(crate) fn active_index_after_remove(active: usize, removed: usize, remaining: usize) -> usize {
+    if remaining == 0 {
+        return 0;
+    }
+    if active == removed {
+        removed.min(remaining - 1)
+    } else if active > removed {
+        active - 1
+    } else {
+        active.min(remaining - 1)
+    }
+}
+
 fn inactive_highlight_cache_over_limit(tab: &EditorTab) -> bool {
     tab.spans.capacity() > INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT
         || tab.completions.capacity() > INACTIVE_HIGHLIGHT_COMPLETION_CAP_LIMIT
@@ -21,6 +136,24 @@ fn compact_tab_highlight_cache(tab: &mut EditorTab) {
     tab.is_highlight_complete = false;
 }
 
+fn ready_terminal_presentation<I>(
+    states: I,
+) -> Option<(usize, crate::app::terminal::TerminalPresentationIntent)>
+where
+    I: IntoIterator<
+        Item = (
+            usize,
+            crate::app::terminal::TerminalPresentationIntent,
+            bool,
+        ),
+    >,
+{
+    states.into_iter().find_map(|(idx, intent, ready)| {
+        (intent != crate::app::terminal::TerminalPresentationIntent::None && ready)
+            .then_some((idx, intent))
+    })
+}
+
 impl App {
     pub(crate) fn terminal_working_directory(&self) -> Option<PathBuf> {
         crate::app::terminal_process::select_terminal_working_directory(
@@ -31,15 +164,166 @@ impl App {
         .or_else(|| std::env::current_dir().ok())
     }
 
+    fn active_terminal_presentation_ready(&self) -> bool {
+        self.ide_panel
+            .terminals
+            .get(self.ide_panel.active_terminal)
+            .is_some_and(|terminal| {
+                crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready
+            })
+    }
+
+    fn cancel_terminal_presentation_intents(&mut self) {
+        for terminal in &mut self.ide_panel.terminals {
+            terminal.presentation_intent =
+                crate::app::terminal::TerminalPresentationIntent::None;
+        }
+    }
+
+    fn hide_terminal_panel_for_pending_presentation(&mut self) {
+        if let Some(slot) = self
+            .ide_panel
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == PanelId::Terminal)
+        {
+            slot.open = false;
+        }
+        self.ide_panel.terminal_focused = false;
+        self.ide_panel.term_search_focused = false;
+        self.ide_panel.enforce_single_open_per_group();
+    }
+
+    pub(crate) fn process_terminal_presentation_intents(&mut self) -> bool {
+        let ready = ready_terminal_presentation(
+            self.ide_panel
+                .terminals
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, terminal)| {
+                    let intent = terminal.presentation_intent;
+                    (intent != crate::app::terminal::TerminalPresentationIntent::None).then(|| {
+                        let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid)
+                            .presentation_ready;
+                        (idx, intent, ready)
+                    })
+                }),
+        );
+        let Some((idx, intent)) = ready else {
+            return false;
+        };
+
+        self.cancel_terminal_presentation_intents();
+        self.ide_panel.active_terminal = idx;
+        if intent == crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady {
+            self.ide_panel.open(PanelId::Terminal);
+            crate::save_panel_state(&self.ide_panel);
+        }
+        self.reveal_active_terminal_tab_now();
+        true
+    }
+
+    pub(crate) fn defer_terminal_panel_until_ready(&mut self) {
+        if !self.ide_panel.is_open(PanelId::Terminal) || self.active_terminal_presentation_ready() {
+            return;
+        }
+        if self.process_terminal_presentation_intents() {
+            return;
+        }
+        let pending = self.ide_panel.terminals.iter().rposition(|terminal| {
+            terminal.presentation_intent
+                != crate::app::terminal::TerminalPresentationIntent::None
+        });
+        if let Some(idx) = pending {
+            self.ide_panel.terminals[idx].presentation_intent =
+                crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady;
+            self.hide_terminal_panel_for_pending_presentation();
+        }
+    }
+
+    pub(crate) fn select_terminal_tab_from_user(&mut self, idx: usize) {
+        if idx >= self.ide_panel.terminals.len() {
+            return;
+        }
+        self.cancel_terminal_presentation_intents();
+        let ready = crate::app::terminal::lock_terminal_grid(&self.ide_panel.terminals[idx].grid)
+            .presentation_ready;
+        if ready {
+            self.ide_panel.active_terminal = idx;
+            self.reveal_active_terminal_tab_now();
+        } else {
+            self.ide_panel.terminals[idx].presentation_intent =
+                crate::app::terminal::TerminalPresentationIntent::ActivateWhenReady;
+        }
+    }
+
     pub(crate) fn add_terminal(&mut self) -> usize {
+        let reveal_panel_when_ready = (self.ide_panel.is_open(PanelId::Terminal)
+            && !self.active_terminal_presentation_ready())
+            || self.ide_panel.terminals.iter().any(|terminal| {
+                terminal.presentation_intent
+                    == crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
+            });
+        self.cancel_terminal_presentation_intents();
+
         let cwd = self.terminal_working_directory();
-        let terminal = crate::app::terminal::Terminal::spawn(
+        let mut terminal = crate::app::terminal::Terminal::spawn(
             self.window.clone(),
             cwd.as_deref(),
         );
+        terminal.presentation_intent = if reveal_panel_when_ready {
+            crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
+        } else {
+            crate::app::terminal::TerminalPresentationIntent::ActivateWhenReady
+        };
+        let idx = self.ide_panel.terminals.len();
         self.ide_panel.terminals.push(terminal);
-        self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1);
-        self.ide_panel.active_terminal
+        if reveal_panel_when_ready {
+            self.hide_terminal_panel_for_pending_presentation();
+        }
+        self.process_terminal_presentation_intents();
+        idx
+    }
+
+    pub(crate) fn reveal_active_terminal_tab_now(&mut self) {
+        let idx = self.ide_panel.active_terminal;
+        if idx >= self.ide_panel.terminals.len() {
+            return;
+        }
+        let Some(s) = self.renderer.as_ref().map(|renderer| renderer.scale_factor) else {
+            return;
+        };
+        let (_, _, panel_w, _, _) = crate::app::mouse::app_panel_scroll_rect(
+            self,
+            crate::app::PanelId::Terminal,
+            s,
+        );
+        if panel_w <= 0.0 {
+            return;
+        }
+        let Some(renderer) = self.renderer.as_mut() else {
+            return;
+        };
+
+        let mut title = String::new();
+        let mut widths = Vec::with_capacity(self.ide_panel.terminals.len());
+        for terminal in &self.ide_panel.terminals {
+            terminal.write_display_title(&mut title);
+            widths.push(crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
+                renderer.measure_ui_width(&title, 1.0),
+                s,
+            ));
+        }
+        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, s);
+        widths.push(8.0 * s + add_size + 8.0 * s);
+        let target = crate::render_view::tabs_ui::tab_strip_reveal_target(
+            &widths,
+            idx,
+            panel_w - 8.0 * s,
+            self.ide_panel.terminal_tab_scroll.target,
+            12.0 * s,
+        );
+        self.ide_panel.terminal_tab_scroll.jump_to(target);
     }
 
     pub(crate) fn shutdown_background_services(&mut self) {
@@ -87,6 +371,11 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn get_clipboard_file_list(&mut self) -> Option<Vec<PathBuf>> {
+        self.clipboard.as_mut()?.get_file_list().ok()
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn enter_ide_mode(&mut self) {
         self.is_ide_mode = true;
 
@@ -114,7 +403,6 @@ impl App {
 
         if self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {
             self.add_terminal();
-            self.ide_panel.terminal_focused = true;
         }
 
         if self.lsp.is_none() {
@@ -372,33 +660,20 @@ impl App {
                 return;
             }
 
-            let tab_pad = 16.0 * s;
-            let icon_size_tab = 20.0 * s;
-            let mut tab_left = 0.0;
-            let mut total_w = 0.0;
-            for (i, title) in titles.iter().enumerate() {
-                let title_w = r.measure_ui_width(title, 1.0);
-                let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
-                if i < idx {
-                    tab_left += tab_w;
-                }
-                total_w += tab_w;
-            }
-
-            let title_w = r.measure_ui_width(&titles[idx], 1.0);
-            let tab_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + title_w + 30.0 * s;
-            let tab_right = tab_left + tab_w;
-            let max_scroll = (total_w - viewport_w).max(0.0);
-            let margin = (12.0 * s).min(viewport_w * 0.25);
-            let mut target = self.tab_scroll.target;
-
-            if tab_left < target + margin {
-                target = tab_left - margin;
-            } else if tab_right > target + viewport_w - margin {
-                target = tab_right + margin - viewport_w;
-            }
-
-            let target = target.clamp(0.0, max_scroll);
+            let widths = titles
+                .iter()
+                .map(|title| {
+                    let title_w = r.measure_ui_width(title, 1.0);
+                    16.0 * s * 2.0 + 20.0 * s + 8.0 * s + title_w + 30.0 * s
+                })
+                .collect::<Vec<_>>();
+            let target = crate::render_view::tabs_ui::tab_strip_reveal_target(
+                &widths,
+                idx,
+                viewport_w,
+                self.tab_scroll.target,
+                12.0 * s,
+            );
             self.tab_scroll.jump_to(target);
         }
     }
@@ -537,6 +812,338 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn drag(start_idx: usize, start_x: f32, current_x: f32, threshold_passed: bool) -> TabDragState {
+        TabDragState {
+            start_idx,
+            start_x,
+            current_x,
+            threshold_passed,
+        }
+    }
+
+    #[test]
+    fn shared_tab_drag_math_crosses_variable_width_centers() {
+        let widths = [80.0, 140.0, 60.0, 110.0];
+        let move_right = drag(1, 150.0, 350.0, true);
+        let placement = tab_drag_placement(10.0, &widths, Some(&move_right)).unwrap();
+        assert_eq!(placement.destination, 3);
+
+        let move_left = drag(3, 335.0, 20.0, true);
+        let placement = tab_drag_placement(10.0, &widths, Some(&move_left)).unwrap();
+        assert_eq!(placement.destination, 0);
+    }
+
+    #[test]
+    fn terminal_creation_routes_share_the_same_session_factory() {
+        let app_tabs = include_str!("app_ide_tab_methods.rs");
+        let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
+        let ui_handlers = include_str!("ui_handlers.rs");
+        let about = include_str!("events/about.rs");
+
+        assert_eq!(app_production.matches("Terminal::spawn(").count(), 1);
+        assert!(app_production.contains("self.ide_panel.terminals.is_empty() {\n            self.add_terminal();"));
+        assert!(ui_handlers.contains("UiId::TerminalAdd => {\n                self.add_terminal();"));
+        assert!(about.matches("app.add_terminal();").count() >= 2);
+    }
+
+    #[test]
+    fn terminal_pending_activation_waits_for_parser_ready_and_latest_request_wins() {
+        use crate::app::terminal::TerminalPresentationIntent as Intent;
+
+        assert_eq!(
+            ready_terminal_presentation([(0, Intent::None, true), (1, Intent::ActivateWhenReady, false)]),
+            None
+        );
+        assert_eq!(
+            ready_terminal_presentation([(0, Intent::None, true), (1, Intent::ActivateWhenReady, true)]),
+            Some((1, Intent::ActivateWhenReady))
+        );
+
+        assert_eq!(
+            ready_terminal_presentation([
+                (0, Intent::None, true),
+                (1, Intent::None, true),
+                (2, Intent::ActivateWhenReady, false),
+            ]),
+            None
+        );
+        assert_eq!(
+            ready_terminal_presentation([
+                (0, Intent::None, true),
+                (1, Intent::None, true),
+                (2, Intent::ActivateWhenReady, true),
+            ]),
+            Some((2, Intent::ActivateWhenReady))
+        );
+    }
+
+    #[test]
+    fn terminal_panel_reveal_intent_uses_parser_readiness_not_layout_readiness() {
+        use crate::app::terminal::TerminalPresentationIntent as Intent;
+
+        assert_eq!(
+            ready_terminal_presentation([(0, Intent::OpenPanelWhenReady, false)]),
+            None
+        );
+        assert_eq!(
+            ready_terminal_presentation([(0, Intent::OpenPanelWhenReady, true)]),
+            Some((0, Intent::OpenPanelWhenReady))
+        );
+    }
+
+    #[test]
+    fn terminal_presentation_routes_share_one_non_blocking_lifecycle() {
+        let app_tabs = include_str!("app_ide_tab_methods.rs");
+        let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
+        let lifecycle = app_production
+            .split("    fn active_terminal_presentation_ready")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn shutdown_background_services")
+            .next()
+            .unwrap();
+        let ui_handlers = include_str!("ui_handlers.rs");
+        let main_keys = include_str!("keyboard/main_keys.rs");
+        let about = include_str!("events/about.rs");
+        let renderer = include_str!("../render_view/terminal_ui.rs");
+
+        assert!(!lifecycle.contains("presentation_visible"));
+        assert!(!lifecycle.contains("sleep("));
+        assert!(lifecycle.contains("cancel_terminal_presentation_intents();"));
+        assert!(lifecycle.contains("TerminalPresentationIntent::ActivateWhenReady"));
+        assert!(lifecycle.contains("TerminalPresentationIntent::OpenPanelWhenReady"));
+        assert!(lifecycle.contains("hide_terminal_panel_for_pending_presentation();"));
+        assert!(lifecycle.contains("self.process_terminal_presentation_intents();"));
+        assert!(!lifecycle.contains(
+            "self.ide_panel.active_terminal = self.ide_panel.terminals.len().saturating_sub(1)"
+        ));
+
+        assert!(ui_handlers.contains(
+            "UiId::TerminalTab(idx) => {\n                self.select_terminal_tab_from_user(idx);"
+        ));
+        assert!(ui_handlers.contains("self.defer_terminal_panel_until_ready();"));
+        assert!(main_keys.contains("self.defer_terminal_panel_until_ready();"));
+        assert!(about.contains("app.process_terminal_presentation_intents()"));
+        assert!(about.matches("app.add_terminal();").count() >= 2);
+        assert!(app_production.contains(
+            "self.ide_panel.is_open(PanelId::Terminal) && self.ide_panel.terminals.is_empty() {\n            self.add_terminal();"
+        ));
+
+        let layout_ready = renderer.find("grid.mark_presentation_layout_ready();").unwrap();
+        let visible = renderer.find("let presentation_visible = grid.presentation_visible();").unwrap();
+        let rendered = renderer
+            .find("let rendered_lines = if presentation_visible { total_lines } else { 0 };")
+            .unwrap();
+        assert!(layout_ready < visible && visible < rendered);
+    }
+
+    #[test]
+    fn pending_terminal_panel_reveal_uses_current_panel_group() {
+        let source = include_str!("app_ide_tab_methods.rs");
+        let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        let process = production
+            .split("    pub(crate) fn process_terminal_presentation_intents")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn defer_terminal_panel_until_ready")
+            .next()
+            .unwrap();
+
+        let open = process
+            .find("self.ide_panel.open(PanelId::Terminal);")
+            .unwrap();
+        let save = process.find("crate::save_panel_state(&self.ide_panel);").unwrap();
+        assert!(open < save);
+        assert!(!process.contains("open_terminal_exclusive"));
+    }
+
+    #[test]
+    fn manual_terminal_selection_cancels_stale_auto_activation_before_switching() {
+        let app_tabs = include_str!("app_ide_tab_methods.rs");
+        let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
+        let selection = app_production
+            .split("    pub(crate) fn select_terminal_tab_from_user")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn add_terminal")
+            .next()
+            .unwrap();
+
+        let cancel = selection.find("self.cancel_terminal_presentation_intents();").unwrap();
+        let ready = selection.find(".presentation_ready;").unwrap();
+        assert!(cancel < ready);
+        assert!(selection.contains("self.ide_panel.active_terminal = idx;"));
+        assert!(selection.contains("TerminalPresentationIntent::ActivateWhenReady"));
+    }
+
+    #[test]
+    fn terminal_tab_reveal_uses_shared_panel_geometry() {
+        let source = include_str!("app_ide_tab_methods.rs");
+        let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        let reveal = production
+            .split("pub(crate) fn reveal_active_terminal_tab_now")
+            .nth(1)
+            .and_then(|tail| tail.split("pub(crate) fn shutdown_background_services").next())
+            .expect("terminal tab reveal method must remain present");
+
+        assert!(reveal.contains("crate::app::mouse::app_panel_scroll_rect("));
+        assert!(reveal.contains("crate::app::PanelId::Terminal"));
+        assert!(!reveal.contains("renderer.width - 48.0 * s"));
+    }
+
+    #[test]
+    fn deferred_terminal_activation_reveals_only_after_active_index_switch() {
+        let source = include_str!("app_ide_tab_methods.rs");
+        let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        let process = production
+            .split("    pub(crate) fn process_terminal_presentation_intents")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn defer_terminal_panel_until_ready")
+            .next()
+            .unwrap();
+        let activate = process.find("self.ide_panel.active_terminal = idx;").unwrap();
+        let reveal = process.find("self.reveal_active_terminal_tab_now();").unwrap();
+        assert!(activate < reveal);
+
+        let selection = production
+            .split("    pub(crate) fn select_terminal_tab_from_user")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn add_terminal")
+            .next()
+            .unwrap();
+        assert!(selection.contains(
+            "self.ide_panel.active_terminal = idx;\n            self.reveal_active_terminal_tab_now();"
+        ));
+    }
+
+    #[test]
+    fn shared_tab_drag_math_handles_first_last_and_single_tab_edges() {
+        let widths = [100.0, 100.0, 100.0];
+        let first_to_last = drag(0, 50.0, 350.0, true);
+        assert_eq!(
+            tab_drag_placement(0.0, &widths, Some(&first_to_last))
+                .unwrap()
+                .destination,
+            2
+        );
+
+        let last_to_first = drag(2, 250.0, -50.0, true);
+        assert_eq!(
+            tab_drag_placement(0.0, &widths, Some(&last_to_first))
+                .unwrap()
+                .destination,
+            0
+        );
+
+        let single = drag(0, 50.0, 200.0, true);
+        assert_eq!(
+            tab_drag_placement(0.0, &[100.0], Some(&single))
+                .unwrap()
+                .destination,
+            0
+        );
+    }
+
+    #[test]
+    fn shared_tab_drag_math_keeps_pending_and_stale_drags_inert() {
+        let widths = [90.0, 120.0, 70.0];
+        assert!(
+            tab_drag_placement(0.0, &widths, Some(&drag(1, 100.0, 104.0, false))).is_none()
+        );
+        assert!(
+            tab_drag_placement(0.0, &widths, Some(&drag(9, 100.0, 250.0, true))).is_none()
+        );
+    }
+
+    #[test]
+    fn shared_tab_drag_layout_matches_file_tab_temporary_order() {
+        let widths = [100.0, 60.0, 140.0];
+        let drag = drag(0, 40.0, 235.0, true);
+        let mut actual = Vec::new();
+        let mut order = Vec::new();
+        let dragged = tab_drag_layout(0.0, &widths, Some(&drag), &mut actual, &mut order);
+
+        assert_eq!(dragged, Some(0));
+        assert_eq!(order, vec![1, 2, 0]);
+        assert_eq!(actual[1], 0.0);
+        assert_eq!(actual[2], 60.0);
+        assert_eq!(actual[0], 195.0);
+
+        let mut render_order = Vec::new();
+        tab_drag_render_order(&order, dragged, &mut render_order);
+        assert_eq!(render_order, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn terminal_active_index_helpers_preserve_identity_across_reorder_and_close() {
+        let mut ids = vec!['a', 'b', 'c', 'd'];
+        let mut active = 2;
+        let moved = ids.remove(0);
+        ids.insert(3, moved);
+        active = active_index_after_move(active, 0, 3);
+        assert_eq!(ids[active], 'c');
+
+        ids.remove(0);
+        active = active_index_after_remove(active, 0, ids.len());
+        assert_eq!(ids[active], 'c');
+    }
+
+    #[test]
+    fn terminal_background_close_preserves_ready_pending_session_identity() {
+        use crate::app::terminal::TerminalPresentationIntent as Intent;
+
+        let mut ids = vec!['a', 'b', 'c'];
+        let (mut active, _) = ready_terminal_presentation([
+            (0, Intent::None, true),
+            (1, Intent::ActivateWhenReady, true),
+            (2, Intent::None, true),
+        ])
+        .unwrap();
+        assert_eq!(ids[active], 'b');
+
+        ids.remove(0);
+        active = active_index_after_remove(active, 0, ids.len());
+        assert_eq!(active, 0);
+        assert_eq!(ids[active], 'b');
+
+        let about = include_str!("events/about.rs");
+        let cleanup = about
+            .split("for idx in closed_terminals.into_iter().rev()")
+            .nth(1)
+            .unwrap()
+            .split("app.defer_terminal_panel_until_ready();")
+            .next()
+            .unwrap();
+        assert!(cleanup.contains("crate::app::active_index_after_remove("));
+        assert!(!cleanup.contains("active_terminal >= app.ide_panel.terminals.len()"));
+    }
+
+    #[test]
+    fn terminal_background_close_keeps_active_identity_for_all_relative_removals() {
+        let mut ids = vec!['a', 'b', 'c', 'd'];
+        let mut active = 2;
+
+        ids.remove(1);
+        active = active_index_after_remove(active, 1, ids.len());
+        ids.remove(0);
+        active = active_index_after_remove(active, 0, ids.len());
+        assert_eq!(ids[active], 'c');
+
+        let mut ids = vec!['a', 'b', 'c'];
+        let mut active = 0;
+        ids.remove(2);
+        active = active_index_after_remove(active, 2, ids.len());
+        assert_eq!(ids[active], 'a');
+
+        let mut ids = vec!['a', 'b', 'c'];
+        let mut active = 1;
+        ids.remove(1);
+        active = active_index_after_remove(active, 1, ids.len());
+        assert_eq!(ids[active], 'c');
+    }
 
     fn tab_with_large_highlight_cache() -> EditorTab {
         let mut spans = Vec::with_capacity(INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT + 1);

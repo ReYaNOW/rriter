@@ -111,6 +111,7 @@ fn stop_api_tab_scroll_anims(state: &mut crate::app::api_client::ApiClientTabSta
 pub(crate) fn stop_click_scroll_anims(app: &mut App) {
     stop_scroll_anim(&mut app.settings_scroll);
     stop_scroll_anim(&mut app.tab_scroll);
+    stop_scroll_anim(&mut app.ide_panel.terminal_tab_scroll);
     stop_scroll_anim(&mut app.scroll_y);
     stop_scroll_anim(&mut app.scroll_x);
     stop_scroll_anim(&mut app.autocomplete_scroll);
@@ -252,6 +253,7 @@ impl App {
         self.ide_panel.git.graph_resizing = false;
         self.ide_panel.file_tree_drag = None;
         self.ide_panel.tab_drag = None;
+        self.ide_panel.terminal_tab_drag = None;
         self.ide_panel.drag = None;
         self.ide_panel.project_search.dragging_field = None;
         self.ide_panel.file_tree_dialog_input_drag = None;
@@ -1281,7 +1283,17 @@ impl App {
                             threshold_passed: false,
                         });
                     } else if let crate::ui_system::UiId::EditorTab(idx) = clicked_id {
+                        self.ide_panel.terminal_tab_drag = None;
                         self.ide_panel.tab_drag = Some(crate::app::TabDragState {
+                            start_idx: idx,
+                            start_x: mx,
+                            current_x: mx,
+                            threshold_passed: false,
+                        });
+                        self.handle_ui_click(clicked_id);
+                    } else if let crate::ui_system::UiId::TerminalTab(idx) = clicked_id {
+                        self.ide_panel.tab_drag = None;
+                        self.ide_panel.terminal_tab_drag = Some(crate::app::TabDragState {
                             start_idx: idx,
                             start_x: mx,
                             current_x: mx,
@@ -1554,53 +1566,86 @@ impl App {
                             );
                         }
 
-                        let mut initial_xs = vec![0.0; self.tabs.len()];
-                        let mut cx = start_cx;
-                        for i in 0..self.tabs.len() {
-                            initial_xs[i] = cx;
-                            cx += widths[i];
-                        }
-
-                        let dragged_x =
-                            initial_xs[drag.start_idx] + (drag.current_x - drag.start_x);
-                        let dragged_w = widths[drag.start_idx];
-
-                        let mut new_idx = drag.start_idx;
-                        let dragged_center = dragged_x + dragged_w / 2.0;
-
-                        for i in 0..self.tabs.len() {
-                            if i == drag.start_idx {
-                                continue;
-                            }
-                            let other_center = initial_xs[i] + widths[i] / 2.0;
-
-                            if i < drag.start_idx {
-                                if dragged_center < other_center {
-                                    new_idx = new_idx.min(i);
-                                }
-                            } else {
-                                if dragged_center > other_center {
-                                    new_idx = new_idx.max(i);
-                                }
+                        if let Some(placement) =
+                            crate::app::tab_drag_placement(start_cx, &widths, Some(&drag))
+                        {
+                            let new_idx = placement.destination;
+                            if new_idx != drag.start_idx {
+                                self.sync_active_tab();
+                                let tab = self.tabs.remove(drag.start_idx);
+                                self.tabs.insert(new_idx, tab);
+                                self.active_tab = crate::app::active_index_after_move(
+                                    self.active_tab,
+                                    drag.start_idx,
+                                    new_idx,
+                                );
+                                self.sync_active_tab();
+                                self.save_tabs_state();
                             }
                         }
-
-                        if new_idx != drag.start_idx {
-                            self.sync_active_tab();
-                            let tab = self.tabs.remove(drag.start_idx);
-                            self.tabs.insert(new_idx, tab);
-
-                            if self.active_tab == drag.start_idx {
-                                self.active_tab = new_idx;
-                            } else if self.active_tab > drag.start_idx && self.active_tab <= new_idx
-                            {
-                                self.active_tab -= 1;
-                            } else if self.active_tab < drag.start_idx && self.active_tab >= new_idx
-                            {
-                                self.active_tab += 1;
+                    }
+                }
+                if let Some(drag) = self.ide_panel.terminal_tab_drag.take() {
+                    if drag.threshold_passed
+                        && self.ide_panel.terminals.len() > 1
+                        && drag.start_idx < self.ide_panel.terminals.len()
+                    {
+                        let s = self.renderer.as_ref().unwrap().scale_factor;
+                        let (panel_x, _, panel_w, _, _) = super::app_panel_scroll_rect(
+                            self,
+                            crate::app::PanelId::Terminal,
+                            s,
+                        );
+                        let mut title = String::new();
+                        let mut widths = Vec::with_capacity(self.ide_panel.terminals.len());
+                        for terminal in &self.ide_panel.terminals {
+                            terminal.write_display_title(&mut title);
+                            let title_w = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .measure_ui_width(&title, 1.0);
+                            widths.push(
+                                crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
+                                    title_w,
+                                    s,
+                                ),
+                            );
+                        }
+                        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(
+                            panel_w,
+                            s,
+                        );
+                        let max_scroll =
+                            crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
+                                panel_w,
+                                widths.iter().sum(),
+                                add_size,
+                                s,
+                            );
+                        let start_cx = crate::render_view::terminal_ui::terminal_tab_base_x(
+                            panel_x,
+                            self.ide_panel.terminal_tab_scroll.current,
+                            max_scroll,
+                            s,
+                        );
+                        if let Some(placement) = crate::app::tab_drag_placement(
+                            start_cx,
+                            &widths,
+                            Some(&drag),
+                        ) {
+                            let new_idx = placement.destination;
+                            if new_idx != drag.start_idx {
+                                let active = crate::app::active_index_after_move(
+                                    self.ide_panel.active_terminal,
+                                    drag.start_idx,
+                                    new_idx,
+                                );
+                                let terminal = self.ide_panel.terminals.remove(drag.start_idx);
+                                self.ide_panel.terminals.insert(new_idx, terminal);
+                                self.ide_panel.active_terminal = active;
+                                self.reveal_active_terminal_tab_now();
                             }
-                            self.sync_active_tab();
-                            self.save_tabs_state();
                         }
                     }
                 }

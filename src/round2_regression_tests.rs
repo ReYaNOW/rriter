@@ -336,17 +336,24 @@ fn r2_056_file_tree_disables_rows_during_inertial_scroll() {
 }
 
 #[test]
-fn r2_057_terminal_tabs_fit_reserved_bar_width() {
+fn r2_057_terminal_tabs_overflow_into_scrollable_strip() {
     for panel_w in [0.0, 20.0, 50.0, 100.0, 640.0] {
         for tab_count in [0, 1, 2, 20, 200] {
-            let layout = crate::render_view::terminal_ui::terminal_tabs_metrics(
-                10.0, panel_w, tab_count, 1.0,
+            let tab_w = crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
+                100.0, 1.0,
             );
-            let used =
-                layout.per_tab * tab_count as f32 + layout.gap * tab_count.saturating_sub(1) as f32;
-            assert!(used <= layout.available + 0.001);
-            assert!(layout.add_x >= 10.0);
-            assert!(layout.add_x + layout.add_size <= 10.0 + panel_w.max(0.0) + 0.001);
+            let add_size =
+                crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, 1.0);
+            let max_scroll = crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
+                panel_w,
+                tab_w * tab_count as f32,
+                add_size,
+                1.0,
+            );
+            assert!(max_scroll >= 0.0);
+            if tab_count >= 2 && panel_w <= 100.0 {
+                assert!(max_scroll > 0.0);
+            }
         }
     }
 }

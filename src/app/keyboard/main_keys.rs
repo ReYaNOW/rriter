@@ -20,11 +20,11 @@ fn apply_terminal_alt_q_shortcut(
             panels.enforce_single_open_per_group();
             false
         } else {
-            panels.open_terminal_exclusive();
+            panels.open(crate::app::PanelId::Terminal);
             !has_terminal
         }
     } else if !is_open {
-        panels.open_terminal_exclusive();
+        panels.open(crate::app::PanelId::Terminal);
         !has_terminal
     } else {
         panels.terminal_focused = !panels.terminal_focused;
@@ -150,6 +150,7 @@ impl App {
                 if needs_terminal {
                     self.add_terminal();
                 }
+                self.defer_terminal_panel_until_ready();
 
                 self.last_action = std::time::Instant::now();
                 if let Some(w) = self.window.as_ref() {
@@ -696,6 +697,19 @@ mod tests {
         panels.is_open(crate::app::PanelId::Terminal)
     }
 
+    fn relocated_top_terminal_with_explorer_open() -> crate::app::IdePanelState {
+        let mut panels = crate::app::IdePanelState::default();
+        let terminal = panels
+            .slots
+            .iter_mut()
+            .find(|slot| slot.id == crate::app::PanelId::Terminal)
+            .unwrap();
+        terminal.group = crate::app::PanelGroup::Top;
+        terminal.open = false;
+        panels.open(crate::app::PanelId::Explorer);
+        panels
+    }
+
     #[test]
     fn terminal_alt_q_opens_terminal_and_requests_spawn_when_missing() {
         let mut panels = crate::app::IdePanelState::default();
@@ -715,6 +729,36 @@ mod tests {
 
         assert!(!needs_spawn);
         assert!(terminal_open(&panels));
+        assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_alt_q_opens_relocated_top_terminal_in_its_current_group() {
+        let mut panels = relocated_top_terminal_with_explorer_open();
+
+        assert!(panels.is_open(crate::app::PanelId::Explorer));
+        assert!(!terminal_open(&panels));
+
+        let needs_spawn = apply_terminal_alt_q_shortcut(&mut panels, false, true);
+
+        assert!(!needs_spawn);
+        assert!(terminal_open(&panels));
+        assert!(!panels.is_open(crate::app::PanelId::Explorer));
+        assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_alt_q_relocated_top_terminal_requests_spawn_when_missing() {
+        let mut panels = relocated_top_terminal_with_explorer_open();
+
+        assert!(panels.is_open(crate::app::PanelId::Explorer));
+        assert!(!terminal_open(&panels));
+
+        let needs_spawn = apply_terminal_alt_q_shortcut(&mut panels, false, false);
+
+        assert!(needs_spawn);
+        assert!(terminal_open(&panels));
+        assert!(!panels.is_open(crate::app::PanelId::Explorer));
         assert!(panels.terminal_focused);
     }
 

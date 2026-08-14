@@ -581,6 +581,24 @@ pub fn user_cache_root() -> PathBuf {
     user_cache_root_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
 }
 
+pub(crate) fn user_home_dir() -> Option<PathBuf> {
+    user_home_dir_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
+}
+
+pub(crate) fn user_home_dir_with(
+    platform: PlatformKind,
+    mut env_value: impl FnMut(&str) -> Option<OsString>,
+) -> Option<PathBuf> {
+    let home = match platform {
+        PlatformKind::Windows => env_value("USERPROFILE").or_else(|| env_value("HOME")),
+        PlatformKind::Linux | PlatformKind::Macos | PlatformKind::Other => {
+            env_value("HOME").or_else(|| env_value("USERPROFILE"))
+        }
+    };
+    home.map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 pub(crate) fn user_cache_root_with(
     platform: PlatformKind,
     mut env_value: impl FnMut(&str) -> Option<OsString>,

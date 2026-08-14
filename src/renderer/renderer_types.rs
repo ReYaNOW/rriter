@@ -296,6 +296,7 @@ pub struct Renderer {
     pub last_scroll_x: f32,
     pub max_scroll_x: f32,
     pub max_tab_scroll_x: f32,
+    pub max_terminal_tab_scroll_x: f32,
     pub last_editor_version_for_scroll_x: u64,
 
     pub last_frame_time: Option<std::time::Instant>,
@@ -365,4 +366,10 @@ pub struct Renderer {
     pub merged_intervals_cache: Vec<crate::render_view::ModInterval>,
     pub tab_x_anim: Vec<f32>,
     pub tab_display_titles: Vec<String>,
+    pub(crate) terminal_tab_x_anim: Vec<f32>,
+    pub(crate) terminal_tab_display_titles: Vec<String>,
+    pub(crate) terminal_tab_widths: Vec<f32>,
+    pub(crate) terminal_tab_actual_xs: Vec<f32>,
+    pub(crate) terminal_tab_order: Vec<usize>,
+    pub(crate) terminal_tab_render_order: Vec<usize>,
 }

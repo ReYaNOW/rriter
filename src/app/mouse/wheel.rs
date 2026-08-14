@@ -25,6 +25,16 @@ fn scroll_autocomplete_list(
     scroll.clamp_target(0.0, autocomplete_max_scroll(total_items, scale));
 }
 
+fn scroll_terminal_tab_strip(
+    scroll: &mut crate::scroll::ScrollState,
+    dy: f32,
+    max_scroll: f32,
+) {
+    scroll.anim_speed = 7.0;
+    scroll.scroll_by(dy);
+    scroll.clamp_target(0.0, max_scroll.max(0.0));
+}
+
 fn scroll_database_dialog_form(
     scroll: &mut crate::scroll::ScrollState,
     dy: f32,
@@ -507,6 +517,27 @@ impl App {
             let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
+                let tab_rect = crate::render_view::terminal_ui::terminal_tab_bar_rect(
+                    cx, cy, cw, ch, s,
+                );
+                if crate::ui_system::point_in_rect(
+                    mx,
+                    my,
+                    (tab_rect.x, tab_rect.y, tab_rect.w, tab_rect.h),
+                ) {
+                    let max_scroll = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.max_terminal_tab_scroll_x)
+                        .unwrap_or(0.0);
+                    scroll_terminal_tab_strip(
+                        &mut self.ide_panel.terminal_tab_scroll,
+                        dy,
+                        max_scroll,
+                    );
+                    self.window.as_ref().unwrap().request_redraw();
+                    return;
+                }
                 if self.ide_panel.terminal_focused {
                     let active = self.ide_panel.active_terminal;
                     if let Some(term) = self.ide_panel.terminals.get_mut(active) {
@@ -1363,6 +1394,18 @@ mod tests {
         assert_eq!(scroll.target, 108.0);
 
         scroll_autocomplete_list(&mut scroll, -500.0, 10, 1.0);
+        assert_eq!(scroll.target, 0.0);
+    }
+
+    #[test]
+    fn terminal_tab_strip_wheel_uses_file_tab_speed_and_clamps() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll_terminal_tab_strip(&mut scroll, 90.0, 60.0);
+        assert_eq!(scroll.anim_speed, 7.0);
+        assert_eq!(scroll.target, 60.0);
+        assert_eq!(scroll.current, 0.0);
+
+        scroll_terminal_tab_strip(&mut scroll, -200.0, 60.0);
         assert_eq!(scroll.target, 0.0);
     }
 

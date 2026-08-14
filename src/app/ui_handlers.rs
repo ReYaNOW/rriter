@@ -478,19 +478,23 @@ impl App {
                 }
             }
             UiId::TerminalTab(idx) => {
-                if idx < self.ide_panel.terminals.len() {
-                    self.ide_panel.active_terminal = idx;
-                }
+                self.select_terminal_tab_from_user(idx);
             }
             UiId::TerminalTabClose(idx) => {
                 if idx < self.ide_panel.terminals.len() {
+                    let active = self.ide_panel.active_terminal;
                     self.ide_panel.terminals.remove(idx);
                     if self.ide_panel.terminals.is_empty() {
                         self.add_terminal();
-                    } else if self.ide_panel.active_terminal >= self.ide_panel.terminals.len() {
-                        self.ide_panel.active_terminal =
-                            self.ide_panel.terminals.len().saturating_sub(1);
+                    } else {
+                        self.ide_panel.active_terminal = crate::app::active_index_after_remove(
+                            active,
+                            idx,
+                            self.ide_panel.terminals.len(),
+                        );
+                        self.reveal_active_terminal_tab_now();
                     }
+                    self.defer_terminal_panel_until_ready();
                 }
             }
             UiId::TerminalAdd => {
@@ -1345,6 +1349,7 @@ impl App {
                     if self.ide_panel.terminals.is_empty() {
                         self.add_terminal();
                     }
+                    self.defer_terminal_panel_until_ready();
                 }
                 if panel_id == crate::app::PanelId::Explorer && self.ide_panel.is_open(panel_id) {
                     if self.ide_panel.file_tree_nodes.is_empty() {

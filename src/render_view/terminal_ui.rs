@@ -4,39 +4,63 @@ use crate::ui_system::UiRegistry;
 use glow::HasContext;
 
 pub(crate) const TERMINAL_TEXT_SCALE: f32 = 1.05;
+const TERMINAL_TAB_BAR_PAD: f32 = 8.0;
+const TERMINAL_TAB_CLOSE_RIGHT_PADDING: f32 = crate::render_view::tabs_ui::STANDARD_TAB_PAD
+    - crate::render_view::tabs_ui::STANDARD_TAB_CLOSE_HIT_PAD;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TerminalTabsMetrics {
-    pub available: f32,
-    pub gap: f32,
-    pub per_tab: f32,
-    pub add_size: f32,
-    pub add_x: f32,
+#[inline(always)]
+pub(crate) fn terminal_tab_bar_rect(
+    panel_x: f32,
+    content_y: f32,
+    panel_w: f32,
+    content_h: f32,
+    scale: f32,
+) -> crate::ui_system::UiClipRect {
+    crate::ui_system::UiClipRect::new(
+        panel_x,
+        content_y,
+        panel_w.max(0.0),
+        (44.0 * scale).min(content_h.max(0.0)),
+    )
 }
 
-pub(crate) fn terminal_tabs_metrics(
+#[inline(always)]
+pub(crate) fn terminal_tab_base_x(
     panel_x: f32,
-    panel_w: f32,
-    tab_count: usize,
+    scroll_x: f32,
+    max_scroll_x: f32,
     scale: f32,
-) -> TerminalTabsMetrics {
-    let panel_w = panel_w.max(0.0);
-    let add_reserve = (34.0 * scale).min(panel_w);
-    let available = (panel_w - 16.0 * scale - add_reserve).max(0.0);
-    let gap = if tab_count > 1 {
-        (4.0 * scale).min(available / (tab_count - 1) as f32)
-    } else {
-        0.0
-    };
-    let per_tab = if tab_count == 0 {
-        0.0
-    } else {
-        ((available - gap * tab_count.saturating_sub(1) as f32) / tab_count as f32)
-            .max(0.0)
-    };
-    let add_size = (20.0 * scale).min(panel_w);
-    let add_x = (panel_x + panel_w - 8.0 * scale - add_size).max(panel_x);
-    TerminalTabsMetrics { available, gap, per_tab, add_size, add_x }
+) -> f32 {
+    panel_x + TERMINAL_TAB_BAR_PAD * scale - scroll_x.clamp(0.0, max_scroll_x).round()
+}
+
+#[inline(always)]
+pub(crate) fn terminal_add_x_after_tabs(
+    tab_base_x: f32,
+    logical_tabs_width: f32,
+    scale: f32,
+) -> f32 {
+    tab_base_x + logical_tabs_width.max(0.0) + TERMINAL_TAB_BAR_PAD * scale
+}
+
+#[inline(always)]
+pub(crate) fn terminal_tab_add_size(panel_w: f32, scale: f32) -> f32 {
+    (20.0 * scale).min(panel_w.max(0.0))
+}
+
+#[inline(always)]
+pub(crate) fn terminal_tab_strip_max_scroll(
+    panel_w: f32,
+    logical_tabs_width: f32,
+    add_size: f32,
+    scale: f32,
+) -> f32 {
+    let content_w = TERMINAL_TAB_BAR_PAD * scale
+        + logical_tabs_width.max(0.0)
+        + TERMINAL_TAB_BAR_PAD * scale
+        + add_size.max(0.0)
+        + TERMINAL_TAB_BAR_PAD * scale;
+    (content_w - panel_w.max(0.0)).max(0.0)
 }
 
 #[inline(always)]
@@ -110,8 +134,41 @@ pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> 
 }
 
 #[inline(always)]
-pub(crate) fn terminal_tab_body_width(tab_w: f32, close_visible: bool, scale: f32) -> f32 {
-    (tab_w - if close_visible { 32.0 * scale } else { 0.0 }).max(0.0)
+pub(crate) fn terminal_tab_body_width(
+    tab_x: f32,
+    tab_w: f32,
+    close: Option<crate::render_view::tabs_ui::StandardTabCloseGeometry>,
+) -> f32 {
+    let tab_w = tab_w.max(0.0);
+    close
+        .map(|close| (close.hit_x - tab_x).clamp(0.0, tab_w))
+        .unwrap_or(tab_w)
+}
+
+#[inline(always)]
+fn terminal_tab_close_geometry(
+    tab_x: f32,
+    tab_w: f32,
+    y: f32,
+    h: f32,
+    scale: f32,
+) -> crate::render_view::tabs_ui::StandardTabCloseGeometry {
+    crate::render_view::tabs_ui::standard_tab_close_geometry_with_right_padding(
+        tab_x,
+        tab_w,
+        y,
+        h,
+        TERMINAL_TAB_CLOSE_RIGHT_PADDING,
+        scale,
+    )
+}
+
+#[inline(always)]
+pub(crate) fn terminal_tab_width_from_title_width(
+    title_w: f32,
+    scale: f32,
+) -> f32 {
+    (title_w + 56.0 * scale).max(0.0)
 }
 
 #[inline(always)]
@@ -269,131 +326,152 @@ impl Renderer {
         my: f32,
     ) {
         let term_tab_h = 32.0 * s;
-        let mut cx = panel_x + 8.0 * s;
         let cy = content_y + 6.0 * s;
-        let mut scratch = std::mem::take(&mut self.scratch_buffer);
         let tab_count = ide_panel.terminals.len();
-        let tab_metrics = terminal_tabs_metrics(panel_x, panel_w, tab_count, s);
-        let tab_gap = tab_metrics.gap;
-        let per_tab_w = tab_metrics.per_tab;
-        ui_registry.push_clip(crate::ui_system::UiClipRect::new(
-            panel_x,
-            content_y,
-            panel_w,
-            term_tab_h + 12.0 * s,
-        ));
+        let tab_clip = terminal_tab_bar_rect(panel_x, content_y, panel_w, content_h, s);
 
-        for i in 0..ide_panel.terminals.len() {
-            let is_active = i == ide_panel.active_terminal;
-            scratch.clear();
-            let _ = std::fmt::Write::write_fmt(
-                &mut scratch,
-                format_args!("{} {}", ide_panel.terminals[i].title, i + 1),
-            );
-            let title_w = self.measure_ui_width(&scratch, 0.9);
-            let tab_w = (title_w + 56.0 * s).min(per_tab_w).max(0.0);
+        let mut display_titles = std::mem::take(&mut self.terminal_tab_display_titles);
+        display_titles.resize_with(tab_count, String::new);
+        display_titles.truncate(tab_count);
+        for (terminal, title) in ide_panel.terminals.iter().zip(display_titles.iter_mut()) {
+            terminal.write_display_title(title);
+        }
+
+        let mut tab_widths = std::mem::take(&mut self.terminal_tab_widths);
+        tab_widths.clear();
+        tab_widths.reserve(tab_count);
+        let mut logical_tabs_width = 0.0;
+        for title in &display_titles {
+            let tab_w = terminal_tab_width_from_title_width(self.measure_ui_width(title, 1.0), s);
+            logical_tabs_width += tab_w;
+            tab_widths.push(tab_w);
+        }
+
+        let add_sz = terminal_tab_add_size(panel_w, s);
+        let max_tab_scroll =
+            terminal_tab_strip_max_scroll(panel_w, logical_tabs_width, add_sz, s);
+        self.max_terminal_tab_scroll_x = max_tab_scroll;
+        let tab_scroll_x = ide_panel.terminal_tab_scroll.current.min(max_tab_scroll).round();
+        let tab_base_x = terminal_tab_base_x(panel_x, tab_scroll_x, max_tab_scroll, s);
+
+        ui_registry.push_clip(tab_clip);
+        self.begin_tab_strip_scissor(tab_clip.x, tab_clip.y, tab_clip.w, tab_clip.h);
+
+        let mut actual_xs = std::mem::take(&mut self.terminal_tab_actual_xs);
+        let mut order = std::mem::take(&mut self.terminal_tab_order);
+        let dragged_idx = crate::app::tab_drag_layout(
+            tab_base_x,
+            &tab_widths,
+            ide_panel.terminal_tab_drag.as_ref(),
+            &mut actual_xs,
+            &mut order,
+        );
+        crate::render_view::tabs_ui::update_tab_x_animation(
+            &mut self.terminal_tab_x_anim,
+            &actual_xs,
+            dragged_idx,
+        );
+        let mut render_order = std::mem::take(&mut self.terminal_tab_render_order);
+        crate::app::tab_drag_render_order(&order, dragged_idx, &mut render_order);
+
+        let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        for &i in &render_order {
+            let tab_w = tab_widths[i];
             if tab_w <= 0.0 {
                 continue;
             }
-
-            let is_hovered = mx >= cx && mx <= cx + tab_w && my >= cy && my <= cy + term_tab_h;
-            let bg_color = if is_active {
-                [
-                    (self.theme.bg[0] + 0.20).min(1.0),
-                    (self.theme.bg[1] + 0.20).min(1.0),
-                    (self.theme.bg[2] + 0.20).min(1.0),
-                    1.0,
-                ]
-            } else if is_hovered {
-                [
-                    (self.theme.bg[0] + 0.12).min(1.0),
-                    (self.theme.bg[1] + 0.12).min(1.0),
-                    (self.theme.bg[2] + 0.12).min(1.0),
-                    1.0,
-                ]
-            } else {
-                [
-                    (self.theme.bg[0] + 0.04).min(1.0),
-                    (self.theme.bg[1] + 0.04).min(1.0),
-                    (self.theme.bg[2] + 0.04).min(1.0),
-                    1.0,
-                ]
-            };
-
-            if bg_color[3] > 0.0 {
-                self.push_rounded_rect(cx, cy, tab_w, term_tab_h, 4.0 * s, bg_color);
-            }
-
-            let text_color = if is_active {
-                self.theme.fg
-            } else {
-                self.theme.line_num
-            };
-            let close_visible = tab_w >= 46.0 * s;
-            let title_max_w = (tab_w - if close_visible { 38.0 * s } else { 18.0 * s })
-                .max(0.0);
-            let mut title_scratch = String::new();
-            self.draw_tree_label_clipped(
-                &scratch,
-                cx + 12.0 * s,
-                cy + term_tab_h / 2.0 + 4.0 * s,
-                title_max_w,
-                text_color,
-                0.9,
-                &mut title_scratch,
+            let cx = self.terminal_tab_x_anim[i];
+            let is_active = i == ide_panel.active_terminal;
+            let is_hovered = mx >= cx
+                && mx <= cx + tab_w
+                && my >= cy
+                && my <= cy + term_tab_h;
+            self.draw_standard_tab_chrome(
+                cx,
+                cy,
+                tab_w,
+                term_tab_h,
+                s,
+                is_active,
+                is_hovered,
+                order.last() != Some(&i),
             );
 
-            let close_sz = 18.0 * s;
-            let close_x = cx + tab_w - 12.0 * s - close_sz;
-            let close_y = (cy + (term_tab_h - close_sz) / 2.0).round();
-            let c_hovered = mx >= close_x - 2.0 * s
-                && mx <= close_x + close_sz + 2.0 * s
-                && my >= close_y - 2.0 * s
-                && my <= close_y + close_sz + 2.0 * s;
-            if close_visible && c_hovered {
-                self.push_rounded_rect(
-                    close_x - 2.0 * s,
-                    close_y - 2.0 * s,
-                    close_sz + 4.0 * s,
-                    close_sz + 4.0 * s,
-                    2.0 * s,
-                    [1.0, 1.0, 1.0, 0.2],
-                );
-            }
-            if close_visible {
-                self.draw_atlas_icon(
-                    crate::widgets::IconType::Close,
-                    close_x,
-                    close_y,
-                    close_sz,
-                    text_color,
-                );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::TerminalTabClose(i),
-                    close_x - 2.0 * s,
-                    close_y - 2.0 * s,
-                    close_sz + 4.0 * s,
-                    close_sz + 4.0 * s,
-                    mx,
-                    my,
-                );
-            }
+            let text_color = if is_active { self.theme.fg } else { self.theme.line_num };
+            let can_show_close = tab_w >= 56.0 * s;
+            let show_close = can_show_close && (is_active || is_hovered);
+            let close = show_close.then(|| {
+                terminal_tab_close_geometry(cx, tab_w, cy, term_tab_h, s)
+            });
+            let title_max_w = (tab_w
+                - if can_show_close { 56.0 * s } else { 32.0 * s })
+                .max(0.0);
+            self.draw_tree_label_clipped(
+                &display_titles[i],
+                cx + crate::render_view::tabs_ui::STANDARD_TAB_PAD * s,
+                crate::render_view::tabs_ui::standard_tab_text_y(cy, term_tab_h, s),
+                title_max_w,
+                text_color,
+                1.0,
+                &mut scratch,
+            );
+
             ui_registry.register_rect(
                 crate::ui_system::UiId::TerminalTab(i),
                 cx,
                 cy,
-                terminal_tab_body_width(tab_w, close_visible, s),
+                terminal_tab_body_width(cx, tab_w, close),
                 term_tab_h,
                 mx,
                 my,
             );
 
-            cx += tab_w + tab_gap;
+            if let Some(close) = close {
+                let close_hovered = mx >= close.hit_x
+                    && mx <= close.hit_x + close.hit_w
+                    && my >= close.hit_y
+                    && my <= close.hit_y + close.hit_h;
+                if close_hovered {
+                    self.push_rounded_rect(
+                        close.hit_x,
+                        close.hit_y,
+                        close.hit_w,
+                        close.hit_h,
+                        4.0 * s,
+                        [1.0, 1.0, 1.0, 0.1],
+                    );
+                }
+                let icon_color = if close_hovered {
+                    [1.0, 1.0, 1.0, 1.0]
+                } else {
+                    [1.0, 1.0, 1.0, 0.8]
+                };
+                self.draw_atlas_icon(
+                    crate::widgets::IconType::Close,
+                    close.icon_x,
+                    close.icon_y,
+                    close.icon_size,
+                    icon_color,
+                );
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::TerminalTabClose(i),
+                    close.hit_x,
+                    close.hit_y,
+                    close.hit_w,
+                    close.hit_h,
+                    mx,
+                    my,
+                );
+            }
         }
         self.scratch_buffer = scratch;
+        self.terminal_tab_display_titles = display_titles;
+        self.terminal_tab_widths = tab_widths;
+        self.terminal_tab_actual_xs = actual_xs;
+        self.terminal_tab_order = order;
+        self.terminal_tab_render_order = render_order;
 
-        let add_sz = tab_metrics.add_size;
-        let add_x = tab_metrics.add_x;
+        let add_x = terminal_add_x_after_tabs(tab_base_x, logical_tabs_width, s);
         let add_y = (cy + (term_tab_h - add_sz) / 2.0).round();
         let add_hovered = add_sz > 0.0
             && mx >= add_x && mx <= add_x + add_sz && my >= add_y && my <= add_y + add_sz;
@@ -423,7 +501,17 @@ impl Renderer {
             mx,
             my,
         );
+        self.end_tab_strip_scissor();
         ui_registry.pop_clip();
+        self.draw_tab_strip_edge_fades(
+            tab_clip.x,
+            tab_clip.y,
+            tab_clip.w,
+            tab_clip.h,
+            s,
+            tab_scroll_x,
+            max_tab_scroll,
+        );
 
         let (term_content_y, term_content_h) = terminal_body_rect(content_y, content_h, s);
 
@@ -460,6 +548,8 @@ impl Renderer {
                     clamp_terminal_pty_dimension(new_rows),
                 );
             }
+            grid.mark_presentation_layout_ready();
+            let presentation_visible = grid.presentation_visible();
             grid.dirty = false;
 
             let ansi_colors = crate::app::terminal::ANSI_16_COLORS;
@@ -497,8 +587,9 @@ impl Renderer {
             }
 
             let mut row_search_results = std::mem::take(&mut self.terminal_row_search_results);
+            let rendered_lines = if presentation_visible { total_lines } else { 0 };
 
-            for i in 0..total_lines {
+            for i in 0..rendered_lines {
                 let offset_from_bottom = total_lines - 1 - i;
                 let draw_y = term_content_y + term_content_h
                     - term_pad_bottom
@@ -642,7 +733,8 @@ impl Renderer {
                     - char_h
                     - (cursor_offset_from_bottom as f32 * char_h)
                     + scroll_offset;
-                if grid.cursor_visible
+                if presentation_visible
+                    && grid.cursor_visible
                     && cursor_px_y + char_h >= term_content_y
                     && cursor_px_y <= term_content_y + term_content_h
                 {
@@ -682,7 +774,7 @@ impl Renderer {
                 );
             }
 
-            if let Some(scrollbar) = terminal_scrollbar_layout(
+            if presentation_visible && let Some(scrollbar) = terminal_scrollbar_layout(
                 panel_x,
                 panel_w,
                 term_content_y,
@@ -956,6 +1048,21 @@ mod tests {
     }
 
     #[test]
+    fn terminal_content_gate_waits_for_output_and_first_layout() {
+        let mut output_first = crate::app::terminal::TermGrid::new(200, 60);
+        output_first.mark_presentation_ready();
+        assert!(!output_first.presentation_visible());
+        output_first.mark_presentation_layout_ready();
+        assert!(output_first.presentation_visible());
+
+        let mut layout_first = crate::app::terminal::TermGrid::new(200, 60);
+        layout_first.mark_presentation_layout_ready();
+        assert!(!layout_first.presentation_visible());
+        layout_first.mark_presentation_ready();
+        assert!(layout_first.presentation_visible());
+    }
+
+    #[test]
     fn terminal_glyph_anchor_shrinks_check_mark_inside_cell() {
         let g = glyph(18.0, 24.0, 1.0, 20.0, 0.0);
         let (x, y, scale) = terminal_glyph_anchor('✔', g, 100.0, 40.0, 12.0, 28.0, 60.0, 1.05);
@@ -1004,10 +1111,204 @@ mod tests {
     }
 
     #[test]
-    fn terminal_tab_body_hitbox_stops_before_close_control() {
-        assert_eq!(terminal_tab_body_width(120.0, true, 1.0), 88.0);
-        assert_eq!(terminal_tab_body_width(120.0, false, 1.0), 120.0);
-        assert_eq!(terminal_tab_body_width(20.0, true, 1.0), 0.0);
+    fn terminal_tabs_keep_natural_width_and_plus_is_reachable_at_max_scroll() {
+        for scale in [1.0, 1.32, 1.333_333_3] {
+            let panel_x = 20.0;
+            let panel_w = 260.0;
+            let widths = [48.0, 72.0, 64.0].map(|title_w| {
+                terminal_tab_width_from_title_width(title_w * scale, scale)
+            });
+            for (width, expected) in widths
+                .iter()
+                .zip([104.0 * scale, 128.0 * scale, 120.0 * scale])
+            {
+                assert!((*width - expected).abs() < 0.001);
+            }
+
+            let logical_tabs_width = widths.iter().sum::<f32>();
+            let add_size = terminal_tab_add_size(panel_w, scale);
+            let max_scroll =
+                terminal_tab_strip_max_scroll(panel_w, logical_tabs_width, add_size, scale);
+            assert!(max_scroll > 0.0);
+
+            let base_x = terminal_tab_base_x(panel_x, max_scroll, max_scroll, scale);
+            let add_x = terminal_add_x_after_tabs(base_x, logical_tabs_width, scale);
+            assert!((add_x + add_size + TERMINAL_TAB_BAR_PAD * scale
+                - (panel_x + panel_w))
+                .abs()
+                <= 0.5);
+        }
+    }
+
+    #[test]
+    fn terminal_tab_strip_has_zero_max_scroll_without_overflow() {
+        let panel_w = 500.0;
+        let widths = [
+            terminal_tab_width_from_title_width(30.0, 1.0),
+            terminal_tab_width_from_title_width(40.0, 1.0),
+        ];
+        let max_scroll = terminal_tab_strip_max_scroll(
+            panel_w,
+            widths.iter().sum(),
+            terminal_tab_add_size(panel_w, 1.0),
+            1.0,
+        );
+        assert_eq!(max_scroll, 0.0);
+    }
+
+    #[test]
+    fn terminal_tab_drag_layout_and_release_share_scrolled_base() {
+        let panel_x = 20.0;
+        let panel_w = 260.0;
+        let widths = [110.0, 130.0, 90.0];
+        let add_size = terminal_tab_add_size(panel_w, 1.0);
+        let max_scroll =
+            terminal_tab_strip_max_scroll(panel_w, widths.iter().sum(), add_size, 1.0);
+        let base_x = terminal_tab_base_x(panel_x, 70.4, max_scroll, 1.0);
+        let drag = crate::app::TabDragState {
+            start_idx: 1,
+            start_x: base_x + 150.0,
+            current_x: base_x + 330.0,
+            threshold_passed: true,
+        };
+        let mut actual_xs = Vec::new();
+        let mut order = Vec::new();
+        crate::app::tab_drag_layout(
+            base_x,
+            &widths,
+            Some(&drag),
+            &mut actual_xs,
+            &mut order,
+        );
+        let placement = crate::app::tab_drag_placement(base_x, &widths, Some(&drag)).unwrap();
+        assert_eq!(placement.destination, 2);
+        assert_eq!(base_x, panel_x + TERMINAL_TAB_BAR_PAD - 70.0);
+    }
+
+    #[test]
+    fn terminal_tab_strip_clip_rejects_hidden_tab_close_and_plus_hitboxes() {
+        let clip = terminal_tab_bar_rect(20.0, 0.0, 200.0, 100.0, 1.0);
+        let mut registry = crate::ui_system::UiRegistry::new();
+        registry.push_clip(clip);
+        registry.register_rect(
+            crate::ui_system::UiId::TerminalTabClose(0),
+            0.0,
+            8.0,
+            12.0,
+            20.0,
+            6.0,
+            15.0,
+        );
+        registry.register_rect(
+            crate::ui_system::UiId::TerminalAdd,
+            230.0,
+            8.0,
+            24.0,
+            24.0,
+            235.0,
+            15.0,
+        );
+        assert_eq!(registry.find_at(6.0, 15.0), None);
+        assert_eq!(registry.find_at(235.0, 15.0), None);
+    }
+
+    #[test]
+    fn terminal_close_geometry_keeps_gap_body_width_and_bounds_invariants() {
+        assert_eq!(terminal_tab_body_width(10.0, 120.0, None), 120.0);
+        assert_eq!(terminal_tab_body_width(10.0, -20.0, None), 0.0);
+
+        for scale in [1.0, 1.25, 1.333_333_3] {
+            let tab_x = 40.0;
+            let title_w = 80.0 * scale;
+            let tab_w = terminal_tab_width_from_title_width(title_w, scale);
+            assert!((tab_w - (title_w + 56.0 * scale)).abs() < 0.001);
+
+            let standard = crate::render_view::tabs_ui::standard_tab_close_geometry(
+                tab_x,
+                tab_w,
+                10.0,
+                32.0 * scale,
+                scale,
+            );
+            let close = terminal_tab_close_geometry(tab_x, tab_w, 10.0, 32.0 * scale, scale);
+            let title_clip_right = tab_x
+                + crate::render_view::tabs_ui::STANDARD_TAB_PAD * scale
+                + (tab_w - 56.0 * scale).max(0.0);
+
+            assert!(title_clip_right < close.hit_x);
+            assert!(
+                (close.hit_x - standard.hit_x
+                    - crate::render_view::tabs_ui::STANDARD_TAB_CLOSE_HIT_PAD * scale)
+                    .abs()
+                    < 0.001
+            );
+            assert!(close.icon_x + close.icon_size <= tab_x + tab_w + 0.001);
+            assert!(close.hit_x + close.hit_w <= tab_x + tab_w + 0.001);
+
+            let body_w = terminal_tab_body_width(tab_x, tab_w, Some(close));
+            assert!((tab_x + body_w - close.hit_x).abs() < 0.001);
+
+            let narrow_w = 20.0 * scale;
+            let narrow_close =
+                terminal_tab_close_geometry(tab_x, narrow_w, 0.0, 32.0 * scale, scale);
+            let narrow_body = terminal_tab_body_width(tab_x, narrow_w, Some(narrow_close));
+            assert!((0.0..=narrow_w).contains(&narrow_body));
+        }
+    }
+
+    #[test]
+    fn terminal_tab_close_hitbox_is_disjoint_from_draggable_body() {
+        let tab_x = 40.0;
+        let tab_w = 160.0;
+        let close = terminal_tab_close_geometry(tab_x, tab_w, 10.0, 32.0, 1.0);
+        let body_w = terminal_tab_body_width(tab_x, tab_w, Some(close));
+        assert_eq!(tab_x + body_w, close.hit_x);
+
+        let mut registry = crate::ui_system::UiRegistry::new();
+        registry.register_rect(
+            crate::ui_system::UiId::TerminalTab(0),
+            tab_x,
+            10.0,
+            body_w,
+            32.0,
+            close.hit_x,
+            close.hit_y + 1.0,
+        );
+        registry.register_rect(
+            crate::ui_system::UiId::TerminalTabClose(0),
+            close.hit_x,
+            close.hit_y,
+            close.hit_w,
+            close.hit_h,
+            close.hit_x,
+            close.hit_y + 1.0,
+        );
+        assert_eq!(
+            registry.find_at(close.hit_x, close.hit_y + 1.0),
+            Some(crate::ui_system::UiId::TerminalTabClose(0))
+        );
+    }
+
+    #[test]
+    fn terminal_file_style_tabs_are_contiguous_at_natural_width() {
+        let title_widths = [80.0, 240.0, 120.0];
+        let widths = title_widths.map(|title_w| {
+            terminal_tab_width_from_title_width(title_w, 1.0)
+        });
+        assert_eq!(widths, [136.0, 296.0, 176.0]);
+
+        let base_x = 20.0 + TERMINAL_TAB_BAR_PAD;
+        let mut actual_xs = Vec::new();
+        let mut order = Vec::new();
+        assert!(crate::app::tab_drag_layout(
+            base_x,
+            &widths,
+            None,
+            &mut actual_xs,
+            &mut order,
+        )
+        .is_none());
+        assert_eq!(actual_xs, [base_x, base_x + widths[0], base_x + widths[0] + widths[1]]);
     }
 
     #[test]

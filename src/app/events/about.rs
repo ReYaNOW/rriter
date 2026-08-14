@@ -282,7 +282,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if app.ide_panel.tab_drag.is_some() {
+    if tab_drag_animation_active(&app.ide_panel) {
         needs_redraw = true;
     }
 
@@ -316,6 +316,14 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     if app.tab_scroll.update(dt) {
+        needs_redraw = true;
+    }
+    if let Some(r) = app.renderer.as_ref() {
+        let max = r.max_terminal_tab_scroll_x;
+        app.ide_panel.terminal_tab_scroll.clamp_target(0.0, max);
+        app.ide_panel.terminal_tab_scroll.clamp_current(0.0, max);
+    }
+    if app.ide_panel.terminal_tab_scroll.update(dt) {
         needs_redraw = true;
     }
 
@@ -654,6 +662,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
 
+    if app.is_ide_mode && app.process_terminal_presentation_intents() {
+        needs_redraw = true;
+    }
+
     if app.is_ide_mode && app.ide_panel.is_open(crate::app::PanelId::Terminal) {
         let mut closed_terminals = Vec::new();
         for (i, term) in app.ide_panel.terminals.iter_mut().enumerate() {
@@ -663,18 +675,23 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
 
         for idx in closed_terminals.into_iter().rev() {
+            let active = app.ide_panel.active_terminal;
             app.ide_panel.terminals.remove(idx);
             needs_redraw = true;
             if app.ide_panel.terminals.is_empty() {
                 app.add_terminal();
-            } else if app.ide_panel.active_terminal >= app.ide_panel.terminals.len() {
-                app.ide_panel.active_terminal = app.ide_panel.terminals.len().saturating_sub(1);
+            } else {
+                app.ide_panel.active_terminal = crate::app::active_index_after_remove(
+                    active,
+                    idx,
+                    app.ide_panel.terminals.len(),
+                );
             }
         }
+        app.defer_terminal_panel_until_ready();
 
         if app.ide_panel.terminals.is_empty() {
             app.add_terminal();
-            app.ide_panel.terminal_focused = true;
         }
         let active = app.ide_panel.active_terminal;
         if let Some(t) = app.ide_panel.terminals.get_mut(active) {

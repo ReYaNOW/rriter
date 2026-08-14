@@ -4,6 +4,8 @@ use crate::app::{
 };
 use crate::editor::Editor;
 use std::borrow::Cow;
+#[cfg(target_os = "linux")]
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -12,6 +14,48 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 mod editor_keys;
 mod main_keys;
 pub(crate) use editor_keys::paired_editor_insert_text;
+
+#[cfg(target_os = "linux")]
+fn terminal_clipboard_paste_bytes(
+    file_list: Option<&[PathBuf]>,
+    text: Option<&str>,
+) -> Option<Vec<u8>> {
+    if let Some(paths) = file_list.filter(|paths| !paths.is_empty()) {
+        let mut out = Vec::new();
+        for (index, path) in paths.iter().enumerate() {
+            if index > 0 {
+                out.push(b' ');
+            }
+            terminal_shell_escape_path(path, &mut out);
+        }
+        return Some(out);
+    }
+    text.map(|text| text.as_bytes().to_vec())
+}
+
+#[cfg(target_os = "linux")]
+fn terminal_shell_escape_path(path: &Path, out: &mut Vec<u8>) {
+    use std::os::unix::ffi::OsStrExt;
+
+    let bytes = path.as_os_str().as_bytes();
+    if bytes.is_empty() {
+        out.extend_from_slice(b"''");
+        return;
+    }
+    for &byte in bytes {
+        match byte {
+            b'\n' | b'\r' => {
+                out.extend_from_slice(&[b'\'', byte, b'\'']);
+                continue;
+            }
+            b' ' | b'\t' | b'\\' | b'\'' | b'"' | b'`' | b'$' | b'&' | b';' | b'|'
+            | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'?' | b'!'
+            | b'#' | b'~' | b'^' | b'%' | b'=' => out.push(b'\\'),
+            _ => {},
+        }
+        out.push(byte);
+    }
+}
 
 fn terminal_key_sequence(
     physical_key: PhysicalKey,
@@ -450,7 +494,18 @@ impl App {
 
         if key_event.state == winit::event::ElementState::Pressed {
             let paste = if primary && key_event.physical_key == PhysicalKey::Code(KeyCode::KeyV) {
-                self.get_clipboard_text()
+                #[cfg(target_os = "linux")]
+                {
+                    let file_list = self.get_clipboard_file_list();
+                    terminal_clipboard_paste_bytes(file_list.as_deref(), None).or_else(|| {
+                        let text = self.get_clipboard_text();
+                        terminal_clipboard_paste_bytes(None, text.as_deref())
+                    })
+                }
+                #[cfg(not(target_os = "linux"))]
+                {
+                    self.get_clipboard_text().map(String::into_bytes)
+                }
             } else {
                 None
             };
@@ -471,7 +526,7 @@ impl App {
                         }
                     }
                     PhysicalKey::Code(KeyCode::KeyV) if primary => {
-                        paste.map(|text| text.into_bytes())
+                        paste
                     }
                     _ => terminal_key_sequence(
                         key_event.physical_key,
@@ -1178,6 +1233,87 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_file_list_paste_keeps_simple_unicode_paths_raw_without_submit_bytes() {
+        for path in [
+            "/home/reyan/test.txt",
+            "/home/reyan/Загрузки/test.patch",
+            "/home/reyan/Документы/test.txt",
+            "/tmp/файл.txt",
+        ] {
+            let pasted = terminal_clipboard_paste_bytes(Some(&[PathBuf::from(path)]), None)
+                .expect("file-list path should paste");
+            assert_eq!(pasted, path.as_bytes(), "path={path:?}");
+            assert_ne!(pasted.first(), Some(&b'\''), "path={path:?}");
+            assert_ne!(pasted.last(), Some(&b'\''), "path={path:?}");
+            assert!(!pasted.contains(&b'\r') && !pasted.contains(&b'\n'));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_file_list_paste_escapes_shell_syntax_and_keeps_multiple_arguments() {
+        for (path, expected) in [
+            ("/home/reyan/My File.txt", b"/home/reyan/My\\ File.txt".as_slice()),
+            ("/tmp/O'Brien.txt", b"/tmp/O\\'Brien.txt".as_slice()),
+            ("/tmp/back\\slash", b"/tmp/back\\\\slash".as_slice()),
+            ("/tmp/$HOME;file", b"/tmp/\\$HOME\\;file".as_slice()),
+        ] {
+            assert_eq!(
+                terminal_clipboard_paste_bytes(Some(&[PathBuf::from(path)]), None),
+                Some(expected.to_vec()),
+                "path={path:?}"
+            );
+        }
+
+        let files = [
+            PathBuf::from("/tmp/файл.txt"),
+            PathBuf::from("/home/reyan/My Directory"),
+        ];
+        assert_eq!(
+            terminal_clipboard_paste_bytes(Some(&files), Some("ignored text")),
+            Some("/tmp/файл.txt /home/reyan/My\\ Directory".as_bytes().to_vec())
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_file_list_paste_normalizes_uri_list_transport_cr_before_formatting() {
+        let expected = "/home/reyan/Загрузки/file.patch";
+        let mut files = [PathBuf::from(format!("{expected}\r"))];
+        crate::platform::normalize_linux_arboard_file_list(&mut files);
+        let pasted = terminal_clipboard_paste_bytes(Some(&files), None).unwrap();
+        assert_eq!(pasted, expected.as_bytes());
+        assert!(!pasted.contains(&b'\r') && !pasted.contains(&b'\n'));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn editor_paste_stays_on_text_clipboard_path() {
+        let editor_keys = include_str!("keyboard/editor_keys.rs");
+        assert!(editor_keys.contains("self.get_clipboard_text()"));
+        assert!(!editor_keys.contains("get_clipboard_file_list"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn terminal_file_list_paste_falls_back_to_ordinary_text() {
+        assert_eq!(
+            terminal_clipboard_paste_bytes(None, Some("echo hello")),
+            Some(b"echo hello".to_vec())
+        );
+        assert_eq!(
+            terminal_clipboard_paste_bytes(Some(&[]), Some("echo hello")),
+            Some(b"echo hello".to_vec())
+        );
+        assert_eq!(
+            terminal_clipboard_paste_bytes(None, Some("echo one\necho two")),
+            Some(b"echo one\necho two".to_vec())
+        );
+        assert_eq!(terminal_clipboard_paste_bytes(None, None), None);
+    }
 
     fn seq(
         code: KeyCode,

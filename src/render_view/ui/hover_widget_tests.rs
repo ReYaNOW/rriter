@@ -208,7 +208,7 @@ fn test_animated_scissor_keeps_nearest_corner_fixed() {
     // Cursor is at 10, 20. Popup is at 100, 100 with size 50, 50.
     // Target is 96, 96, 58, 58 (due to -4.0 margin and +8.0 size)
     // Popup is below cursor, so top-left stays fixed while far edges expand.
-    let expected_w = 58.0 * smooth_hover_width_progress(0.5, 58.0);
+    let expected_w = 58.0 * smooth_hover_width_progress(0.5);
     let expected_h = 58.0 * smooth_hover_height_progress(0.5);
     assert_eq!(sc_x, 96.0);
     assert_eq!(sc_y, 96.0);
@@ -220,7 +220,7 @@ fn test_animated_scissor_keeps_nearest_corner_fixed() {
 fn test_animated_scissor_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor() {
     let (sc_x, sc_y, sc_w, sc_h) =
         compute_animated_scissor(200.0, 200.0, 100.0, 100.0, 50.0, 50.0, 0.5);
-    let expected_w = 58.0 * smooth_hover_width_progress(0.5, 58.0);
+    let expected_w = 58.0 * smooth_hover_width_progress(0.5);
     let expected_h = 58.0 * smooth_hover_height_progress(0.5);
     assert!((sc_x + sc_w - 154.0).abs() < 0.001);
     assert!((sc_y + sc_h - 154.0).abs() < 0.001);
@@ -252,7 +252,7 @@ fn test_animated_scissor_is_zero_at_progress_zero() {
 fn test_animated_popup_frame_keeps_nearest_corner_fixed() {
     let (frame_x, frame_y, frame_w, frame_h) =
         compute_animated_popup_frame(10.0, 20.0, 100.0, 100.0, 50.0, 50.0, 0.5);
-    let expected_w = 50.0 * smooth_hover_width_progress(0.5, 50.0);
+    let expected_w = 50.0 * smooth_hover_width_progress(0.5);
     let expected_h = 50.0 * smooth_hover_height_progress(0.5);
     assert_eq!(frame_x, 100.0);
     assert_eq!(frame_y, 100.0);
@@ -264,7 +264,7 @@ fn test_animated_popup_frame_keeps_nearest_corner_fixed() {
 fn test_animated_popup_frame_keeps_right_edge_and_bottom_edge_fixed_when_popup_above_cursor() {
     let (frame_x, frame_y, frame_w, frame_h) =
         compute_animated_popup_frame(200.0, 200.0, 100.0, 100.0, 50.0, 50.0, 0.5);
-    let expected_w = 50.0 * smooth_hover_width_progress(0.5, 50.0);
+    let expected_w = 50.0 * smooth_hover_width_progress(0.5);
     let expected_h = 50.0 * smooth_hover_height_progress(0.5);
     assert!((frame_x + frame_w - 150.0).abs() < 0.001);
     assert!((frame_y + frame_h - 150.0).abs() < 0.001);
@@ -439,6 +439,50 @@ fn test_wide_popup_right_edge_settles_before_final_frames() {
 }
 
 #[test]
+fn test_small_popup_pixel_width_settles_before_final_frames_when_expanding_right() {
+    let anchor = (10.0, 20.0);
+    for target_w in [120.0, 180.0, 240.0] {
+        let target = (100.2, 100.3, target_w, 80.0);
+        let near_done = compute_animated_popup_frame(
+            anchor.0, anchor.1, target.0, target.1, target.2, target.3, 0.94,
+        );
+        let final_frame = compute_animated_popup_frame(
+            anchor.0, anchor.1, target.0, target.1, target.2, target.3, 1.0,
+        );
+
+        let near_done = pixel_stable_hover_popup_frame(near_done, target, anchor);
+        let final_frame = pixel_stable_hover_popup_frame(final_frame, target, anchor);
+
+        assert_eq!(near_done, final_frame, "target_w={target_w}");
+        assert_eq!(near_done.0, target.0.round(), "target_w={target_w}");
+    }
+}
+
+#[test]
+fn test_small_popup_pixel_width_settles_before_final_frames_when_expanding_left() {
+    for target_w in [120.0, 180.0, 240.0] {
+        let target = (100.2, 100.3, target_w, 80.0);
+        let anchor = (target.0 + target.2 + 100.0, 20.0);
+        let near_done = compute_animated_popup_frame(
+            anchor.0, anchor.1, target.0, target.1, target.2, target.3, 0.94,
+        );
+        let final_frame = compute_animated_popup_frame(
+            anchor.0, anchor.1, target.0, target.1, target.2, target.3, 1.0,
+        );
+
+        let near_done = pixel_stable_hover_popup_frame(near_done, target, anchor);
+        let final_frame = pixel_stable_hover_popup_frame(final_frame, target, anchor);
+
+        assert_eq!(near_done, final_frame, "target_w={target_w}");
+        assert_eq!(
+            near_done.0 + near_done.2,
+            (target.0 + target.2).round(),
+            "target_w={target_w}"
+        );
+    }
+}
+
+#[test]
 fn test_combined_separator_waits_until_frame_reaches_it() {
     let visible =
         compute_combined_separator_visible_rect(100.0, 180.0, 500.0, 100.0, 100.0, 500.0, 60.0);
@@ -553,7 +597,7 @@ fn test_attached_hover_content_scissor_uses_shared_combined_animation() {
     );
     assert_eq!(sc_x, 90.0);
     assert_eq!(sc_y, 70.0);
-    assert_eq!(sc_w, 30.0);
+    assert!((sc_w - 60.0 * smooth_hover_width_progress(0.5)).abs() < 0.001);
     assert!((sc_h - 80.0 * smooth_hover_height_progress(0.5)).abs() < 0.001);
 }
 

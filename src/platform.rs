@@ -32,6 +32,7 @@ pub use integration::{
     refresh_tool_resolutions, resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config,
     user_cache_root,
 };
+pub(crate) use integration::user_home_dir;
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
 
@@ -61,6 +62,7 @@ pub(crate) use integration::parse_windows_proxy_config;
 #[cfg(test)]
 pub(crate) use integration::{
     app_paths_with, parse_macos_proxy_config, parse_pem_certificates, user_cache_root_with,
+    user_home_dir_with,
 };
 #[cfg(all(test, unix))]
 use process::command_for;
@@ -69,6 +71,9 @@ pub use process::{
     resolve_executable, resolve_tool_executable, run_command_output, run_command_output_cancelable,
     run_command_streaming_cancelable,
 };
+pub(crate) use process::{ProcessSnapshot, foreground_process_snapshot};
+#[cfg(test)]
+pub(crate) use process::process_snapshot;
 pub use secret_store::{
     delete_system_user_secret, load_system_user_secret, store_system_user_secret,
 };
@@ -1178,6 +1183,29 @@ impl Clipboard {
 
     pub fn get_text(&mut self) -> Result<String, arboard::Error> {
         clipboard_retry(|| self.inner.get_text())
+    }
+
+    pub fn get_file_list(&mut self) -> Result<Vec<PathBuf>, arboard::Error> {
+        let mut paths = clipboard_retry(|| self.inner.get().file_list())?;
+        #[cfg(target_os = "linux")]
+        normalize_linux_arboard_file_list(&mut paths);
+        Ok(paths)
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn normalize_linux_arboard_file_list(paths: &mut [PathBuf]) {
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+    // text/uri-list uses CRLF, while vendored arboard 3.6.1 splits only on LF.
+    // Remove that one remaining transport CR before paths enter application code.
+    for path in paths {
+        if path.as_os_str().as_bytes().last() != Some(&b'\r') {
+            continue;
+        }
+        let mut bytes = std::mem::take(path).into_os_string().into_vec();
+        bytes.pop();
+        *path = PathBuf::from(OsString::from_vec(bytes));
     }
 }
 

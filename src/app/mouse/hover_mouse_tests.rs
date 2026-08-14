@@ -120,15 +120,14 @@ fn switching_sql_console_context_clears_stale_hover() {
 }
 
 #[test]
-fn sql_hover_uses_same_fractional_scroll_rounding_as_renderer() {
+fn sql_hover_uses_same_row_geometry_and_fractional_scroll_as_renderer() {
     let line_height = 24.0f32;
     let baseline_offset = 19.0f32;
     let editor_top_inset = crate::render_view::editor_content_top_inset(false, true, true, 1.0);
     let scroll_y = 37.6f32;
     let render_scroll_y = scroll_y.round() - editor_top_inset;
     let visual_line_top = line_height * 2.0;
-    let text_top_bias = (baseline_offset - line_height * 0.5).clamp(0.0, line_height * 0.5);
-    let pointer_y = visual_line_top - render_scroll_y + text_top_bias + line_height * 0.5;
+    let pointer_y = visual_line_top - render_scroll_y + line_height * 0.5;
 
     let content_y =
         hover_screen_y_to_content_y(pointer_y, render_scroll_y, line_height, baseline_offset)

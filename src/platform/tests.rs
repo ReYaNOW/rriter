@@ -239,6 +239,59 @@ fn unix_persisted_paths_and_relative_paths_preserve_non_utf8_bytes() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_arboard_file_list_removes_uri_list_transport_cr() {
+    use std::os::unix::ffi::OsStrExt;
+
+    let expected = "/home/reyan/Загрузки/file.patch";
+    let mut paths = [PathBuf::from(format!("{expected}\r"))];
+    normalize_linux_arboard_file_list(&mut paths);
+    assert_eq!(paths[0].as_os_str().as_bytes(), expected.as_bytes());
+    assert!(!paths[0].as_os_str().as_bytes().contains(&b'\r'));
+    assert!(!paths[0].as_os_str().as_bytes().contains(&b'\n'));
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_arboard_file_list_normalizes_each_uri_list_entry() {
+    let mut paths = [
+        PathBuf::from("/tmp/a.txt\r"),
+        PathBuf::from("/home/reyan/Загрузки/b.patch\r"),
+    ];
+    normalize_linux_arboard_file_list(&mut paths);
+    assert_eq!(
+        paths,
+        [
+            PathBuf::from("/tmp/a.txt"),
+            PathBuf::from("/home/reyan/Загрузки/b.patch"),
+        ]
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_arboard_file_list_does_not_trim_other_path_whitespace() {
+    let original = [
+        PathBuf::from("/tmp/a b.txt"),
+        PathBuf::from("/tmp/файл.txt"),
+        PathBuf::from("/tmp/foo\tbar"),
+        PathBuf::from("/tmp/foo "),
+    ];
+    let mut paths = original.clone();
+    normalize_linux_arboard_file_list(&mut paths);
+    assert_eq!(paths, original);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_arboard_file_list_preserves_internal_cr() {
+    let original = PathBuf::from("/tmp/foo\rbar");
+    let mut paths = [original.clone()];
+    normalize_linux_arboard_file_list(&mut paths);
+    assert_eq!(paths[0], original);
+}
+
 #[test]
 fn text_formats_roundtrip_bom_utf16_and_line_endings() {
     let text = "first\nПривет 🌍\n";
@@ -1321,4 +1374,33 @@ fn malformed_package_config_is_ignored_without_panic() {
     .unwrap();
     assert!(integration::flutter_root_from_package_config(&path).is_none());
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn user_home_directory_uses_platform_precedence_without_feature_local_env_logic() {
+    let values = HashMap::from([
+        ("HOME".to_string(), OsString::from("/home/linux")),
+        (
+            "USERPROFILE".to_string(),
+            OsString::from(r"C:\Users\Windows"),
+        ),
+    ]);
+    assert_eq!(
+        user_home_dir_with(PlatformKind::Linux, |name| values.get(name).cloned()),
+        Some(PathBuf::from("/home/linux"))
+    );
+    assert_eq!(
+        user_home_dir_with(PlatformKind::Windows, |name| values.get(name).cloned()),
+        Some(PathBuf::from(r"C:\Users\Windows"))
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn linux_process_snapshot_reads_current_process_metadata_without_shelling_out() {
+    let snapshot = process_snapshot(std::process::id()).expect("current process snapshot");
+    assert_eq!(snapshot.process_id, std::process::id());
+    assert!(snapshot.executable.is_some());
+    assert!(snapshot.cwd.is_some());
+    assert!(!snapshot.args.is_empty());
 }

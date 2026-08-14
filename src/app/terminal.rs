@@ -243,6 +243,8 @@ pub struct TermGrid {
     pub cur_bg: u8,
     pub cur_bold: bool,
     pub dirty: bool,
+    pub(crate) presentation_ready: bool,
+    pub(crate) presentation_layout_ready: bool,
     pub selection: Option<(usize, usize, usize, usize)>,
     pub reply_tx: Option<std::sync::mpsc::Sender<Vec<u8>>>,
     pub saved_cursor: Option<(usize, usize)>,
@@ -251,6 +253,7 @@ pub struct TermGrid {
     pub app_cursor_keys: bool,
     pub mouse_tracking: bool,
     pub pool: Vec<Vec<Cell>>,
+    title_cache: Option<crate::app::terminal_process::TerminalTitleCache>,
 }
 
 impl TermGrid {
@@ -273,6 +276,8 @@ impl TermGrid {
             cur_bg: 0,
             cur_bold: false,
             dirty: true,
+            presentation_ready: false,
+            presentation_layout_ready: false,
             selection: None,
             reply_tx: None,
             saved_cursor: None,
@@ -281,7 +286,34 @@ impl TermGrid {
             app_cursor_keys: false,
             mouse_tracking: false,
             pool: Vec::with_capacity(128),
+            title_cache: None,
         }
+    }
+
+    pub(crate) fn new_with_title_cache(
+        cols: usize,
+        visible_rows: usize,
+        title_cache: crate::app::terminal_process::TerminalTitleCache,
+    ) -> Self {
+        let mut grid = Self::new(cols, visible_rows);
+        grid.title_cache = Some(title_cache);
+        grid
+    }
+
+    #[inline]
+    pub(crate) fn mark_presentation_ready(&mut self) {
+        self.presentation_ready = true;
+        self.dirty = true;
+    }
+
+    #[inline]
+    pub(crate) fn mark_presentation_layout_ready(&mut self) {
+        self.presentation_layout_ready = true;
+    }
+
+    #[inline]
+    pub(crate) fn presentation_visible(&self) -> bool {
+        self.presentation_ready && self.presentation_layout_ready
     }
 
     pub fn resize(&mut self, new_cols: usize, new_rows: usize) {
@@ -582,6 +614,23 @@ mod tests {
         for (x, ch) in text.chars().enumerate() {
             grid.lines[row][x].c = ch;
         }
+    }
+
+    #[test]
+    fn terminal_spawn_error_is_ready_and_keeps_error_text_visible() {
+        let mut grid = TermGrid::new(48, 3);
+        write_terminal_spawn_error(&mut grid, &io::Error::other("spawn failed"));
+
+        assert!(grid.presentation_ready);
+        assert!(!grid.presentation_visible());
+        grid.mark_presentation_layout_ready();
+        assert!(grid.presentation_visible());
+        let text = grid
+            .lines
+            .iter()
+            .flat_map(|line| line.iter().map(|cell| cell.c))
+            .collect::<String>();
+        assert!(text.contains("RRiter terminal error: spawn failed"));
     }
 
     #[test]
@@ -1037,6 +1086,13 @@ mod tests {
             b"\x1B]11;rgb:ffff/ffff/ffff\x1B\\".to_vec()
         );
 
+        feed(&mut grid, b"\x1b]10;?\x07");
+        assert_eq!(
+            rx.recv_timeout(std::time::Duration::from_millis(50))
+                .unwrap(),
+            b"\x1B]10;rgb:ffff/ffff/ffff\x1B\\".to_vec()
+        );
+
         feed(&mut grid, b"\x1b[38;5;123m\x1b[48;2;9;8;7mQ\x1b[999m");
         assert_eq!(grid.lines[1][2].c, 'Q');
         assert_eq!(grid.lines[1][2].fg, 123);
@@ -1087,6 +1143,16 @@ impl Perform for TermGrid {
     fn put(&mut self, _byte: u8) {}
     fn unhook(&mut self) {}
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if params
+            .first()
+            .is_some_and(|selector| *selector == b"0" || *selector == b"2")
+            && let Some(title) =
+                crate::app::terminal_process::terminal_programmed_title(&params[1..])
+            && let Some(cache) = &self.title_cache
+        {
+            crate::platform::lock_recover(cache).set_programmed(title);
+        }
+
         if params.len() >= 2 && params[1] == b"?" {
             if params[0] == b"10" || params[0] == b"11" {
                 if let Some(tx) = &self.reply_tx {
@@ -1402,11 +1468,26 @@ impl Perform for TermGrid {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TerminalPresentationIntent {
+    None,
+    ActivateWhenReady,
+    OpenPanelWhenReady,
+}
+
 pub struct Terminal {
     pub grid: Arc<Mutex<TermGrid>>,
     process: Option<crate::app::terminal_process::TerminalProcess>,
     pub scroll_y: crate::scroll::ScrollState,
-    pub title: String,
+    pub(crate) presentation_intent: TerminalPresentationIntent,
+    title_cache: crate::app::terminal_process::TerminalTitleCache,
+}
+
+fn write_terminal_spawn_error(grid: &mut TermGrid, error: &io::Error) {
+    let message = format!("RRiter terminal error: {error}\r\n");
+    let mut parser = Parser::new();
+    parser.advance(grid, message.as_bytes());
+    grid.mark_presentation_ready();
 }
 
 impl Terminal {
@@ -1415,18 +1496,28 @@ impl Terminal {
         window: Option<std::sync::Arc<winit::window::Window>>,
         cwd: Option<&std::path::Path>,
     ) -> Self {
-        let grid = Arc::new(Mutex::new(TermGrid::new(200, 60)));
-        let result =
-            crate::app::terminal_process::TerminalProcess::spawn(grid.clone(), window, cwd);
-        let (process, title) = match result {
-            Ok((process, shell)) => (Some(process), shell.title),
+        let title_cache = Arc::new(Mutex::new(
+            crate::app::terminal_process::TerminalTitleState::new("terminal".to_string()),
+        ));
+        let grid = Arc::new(Mutex::new(TermGrid::new_with_title_cache(
+            200,
+            60,
+            title_cache.clone(),
+        )));
+        let result = crate::app::terminal_process::TerminalProcess::spawn(
+            grid.clone(),
+            title_cache.clone(),
+            window,
+            cwd,
+        );
+        let process = match result {
+            Ok((process, _shell)) => Some(process),
             Err(error) => {
-                let message = format!("RRiter terminal error: {error}\r\n");
+                crate::platform::lock_recover(&title_cache)
+                    .set_fallback("terminal error".to_string());
                 let mut grid = crate::platform::lock_recover(&grid);
-                let mut parser = Parser::new();
-                parser.advance(&mut *grid, message.as_bytes());
-                grid.dirty = true;
-                (None, "terminal error".to_string())
+                write_terminal_spawn_error(&mut grid, &error);
+                None
             }
         };
 
@@ -1434,8 +1525,13 @@ impl Terminal {
             grid,
             process,
             scroll_y: crate::scroll::ScrollState::new(7.0),
-            title,
+            presentation_intent: TerminalPresentationIntent::None,
+            title_cache,
         }
+    }
+
+    pub(crate) fn write_display_title(&self, output: &mut String) {
+        crate::platform::lock_recover(&self.title_cache).write_resolved(output);
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {

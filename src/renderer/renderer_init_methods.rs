@@ -578,6 +578,7 @@ impl Renderer {
                 last_scroll_x: 0.0,
                 max_scroll_x: 0.0,
                 max_tab_scroll_x: 0.0,
+                max_terminal_tab_scroll_x: 0.0,
                 last_editor_version_for_scroll_x: u64::MAX,
                 fps: 0.0,
                 frame_count: 0,
@@ -641,6 +642,12 @@ impl Renderer {
                 merged_intervals_cache: Vec::with_capacity(64),
                 tab_x_anim: Vec::new(),
                 tab_display_titles: Vec::new(),
+                terminal_tab_x_anim: Vec::new(),
+                terminal_tab_display_titles: Vec::new(),
+                terminal_tab_widths: Vec::new(),
+                terminal_tab_actual_xs: Vec::new(),
+                terminal_tab_order: Vec::new(),
+                terminal_tab_render_order: Vec::new(),
             };
 
             for i in 32..128u8 {

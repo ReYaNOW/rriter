@@ -776,6 +776,15 @@ impl App {
                 return;
             }
 
+            if let Some(ref mut drag) = self.ide_panel.terminal_tab_drag {
+                drag.current_x = px;
+                if (px - drag.start_x).abs() > 5.0 * s {
+                    drag.threshold_passed = true;
+                }
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+
             if self.ide_panel.git.graph_resizing {
                 let (_, content_y, _, content_h, _) =
                     super::app_panel_scroll_rect(self, crate::app::PanelId::Git, s);

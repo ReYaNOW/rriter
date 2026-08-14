@@ -21,6 +21,188 @@ pub enum ProcessOutputStream {
     Stderr,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ProcessSnapshot {
+    pub process_id: u32,
+    pub executable: Option<PathBuf>,
+    pub cwd: Option<PathBuf>,
+    pub args: Vec<OsString>,
+}
+
+pub(crate) fn process_snapshot(process_id: u32) -> Option<ProcessSnapshot> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStringExt;
+
+        let base = PathBuf::from("/proc").join(process_id.to_string());
+        let executable = std::fs::read_link(base.join("exe")).ok();
+        let cwd = std::fs::read_link(base.join("cwd")).ok();
+        let args = std::fs::read(base.join("cmdline"))
+            .ok()
+            .map(|bytes| {
+                bytes
+                    .split(|byte| *byte == 0)
+                    .filter(|arg| !arg.is_empty())
+                    .map(|arg| OsString::from_vec(arg.to_vec()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if executable.is_none() && args.is_empty() {
+            return None;
+        }
+        return Some(ProcessSnapshot {
+            process_id,
+            executable,
+            cwd,
+            args,
+        });
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = process_id;
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ForegroundProcessCandidate {
+    process_id: u32,
+    depth: usize,
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_group(process_id: u32) -> Option<u32> {
+    let stat = std::fs::read(
+        PathBuf::from("/proc")
+            .join(process_id.to_string())
+            .join("stat"),
+    )
+    .ok()?;
+    let command_end = stat.iter().rposition(|byte| *byte == b')')?;
+    let fields = std::str::from_utf8(stat.get(command_end + 1..)?).ok()?;
+    let mut fields = fields.split_ascii_whitespace();
+    fields.next()?; // state
+    fields.next()?; // parent pid
+    fields.next()?.parse().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_children(process_id: u32) -> Vec<u32> {
+    let children = std::fs::read_to_string(
+        PathBuf::from("/proc")
+            .join(process_id.to_string())
+            .join("task")
+            .join(process_id.to_string())
+            .join("children"),
+    )
+    .unwrap_or_default();
+    children
+        .split_ascii_whitespace()
+        .filter_map(|child| child.parse().ok())
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn select_effective_foreground_process(
+    candidates: &[ForegroundProcessCandidate],
+) -> Option<u32> {
+    candidates
+        .iter()
+        .max_by_key(|candidate| (candidate.depth, candidate.process_id))
+        .map(|candidate| candidate.process_id)
+}
+
+/// Resolves the effective executable inside a foreground terminal process group.
+///
+/// Linux job wrappers can remain the process-group leader while the real
+/// foreground executable is a descendant in the same group. Traverse only
+/// that group's descendant tree instead of scanning every process in `/proc`.
+pub(crate) fn foreground_process_snapshot(process_group: u32) -> Option<ProcessSnapshot> {
+    #[cfg(target_os = "linux")]
+    {
+        let mut stack = Vec::with_capacity(4);
+        let mut candidates = Vec::with_capacity(4);
+        stack.push(ForegroundProcessCandidate {
+            process_id: process_group,
+            depth: 0,
+        });
+
+        while let Some(candidate) = stack.pop() {
+            for child in linux_process_children(candidate.process_id) {
+                if linux_process_group(child) == Some(process_group) {
+                    stack.push(ForegroundProcessCandidate {
+                        process_id: child,
+                        depth: candidate.depth.saturating_add(1),
+                    });
+                }
+            }
+            candidates.push(candidate);
+        }
+
+        let effective = select_effective_foreground_process(&candidates)?;
+        return process_snapshot(effective).or_else(|| {
+            (effective != process_group)
+                .then(|| process_snapshot(process_group))
+                .flatten()
+        });
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = process_group;
+        None
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod foreground_process_tests {
+    use super::{ForegroundProcessCandidate, select_effective_foreground_process};
+
+    fn candidate(process_id: u32, depth: usize) -> ForegroundProcessCandidate {
+        ForegroundProcessCandidate { process_id, depth }
+    }
+
+    #[test]
+    fn foreground_group_leader_htop_is_effective_without_children() {
+        assert_eq!(
+            select_effective_foreground_process(&[candidate(100, 0)]),
+            Some(100)
+        );
+    }
+
+    #[test]
+    fn foreground_fish_wrapper_prefers_ssh_child_in_same_group() {
+        assert_eq!(
+            select_effective_foreground_process(&[candidate(100, 0), candidate(101, 1)]),
+            Some(101)
+        );
+    }
+
+    #[test]
+    fn foreground_fish_wrapper_chain_prefers_deepest_ssh_child() {
+        assert_eq!(
+            select_effective_foreground_process(&[
+                candidate(100, 0),
+                candidate(101, 1),
+                candidate(102, 2),
+            ]),
+            Some(102)
+        );
+    }
+
+    #[test]
+    fn foreground_ssh_exit_returns_selection_to_fish_leader() {
+        let with_child = [candidate(100, 0), candidate(101, 1)];
+        assert_eq!(select_effective_foreground_process(&with_child), Some(101));
+        assert_eq!(
+            select_effective_foreground_process(&[candidate(100, 0)]),
+            Some(100)
+        );
+    }
+}
+
 /// A child process whose complete descendant tree is owned by RRiter.
 ///
 /// Unix children are placed in a dedicated process group before `exec`. Windows

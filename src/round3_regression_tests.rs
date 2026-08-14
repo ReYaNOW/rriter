@@ -8,7 +8,9 @@ use crate::{
     render_view::{
         search::search_panel_geometry,
         terminal_ui::{
-            clamp_terminal_pty_dimension, terminal_search_geometry, terminal_tabs_metrics,
+            clamp_terminal_pty_dimension, terminal_tab_add_size,
+            terminal_tab_strip_max_scroll, terminal_tab_width_from_title_width,
+            terminal_search_geometry,
         },
     },
 };
@@ -19,17 +21,23 @@ fn rect_is_finite_non_negative(x: f32, y: f32, w: f32, h: f32) {
 }
 
 #[test]
-fn r3_006_terminal_tabs_fit_even_when_gap_has_to_collapse() {
-    let m = terminal_tabs_metrics(0.0, 50.0, 20, 1.0);
-    let used = m.per_tab * 20.0 + m.gap * 19.0;
-    assert!(used <= m.available + f32::EPSILON);
+fn r3_006_terminal_tabs_preserve_natural_width_under_overflow() {
+    let width = terminal_tab_width_from_title_width(100.0, 1.0);
+    assert_eq!(width, 156.0);
+    assert!(width > 50.0);
 }
 
 #[test]
-fn r3_007_terminal_add_button_remains_inside_panel() {
-    let m = terminal_tabs_metrics(100.0, 50.0, 20, 1.0);
-    assert!(m.add_x >= 100.0);
-    assert!(m.add_x + m.add_size <= 150.0 + f32::EPSILON);
+fn r3_007_terminal_plus_contributes_to_scrollable_content_width() {
+    let panel_w = 50.0;
+    let tabs_w = terminal_tab_width_from_title_width(100.0, 1.0) * 2.0;
+    let max_scroll = terminal_tab_strip_max_scroll(
+        panel_w,
+        tabs_w,
+        terminal_tab_add_size(panel_w, 1.0),
+        1.0,
+    );
+    assert!(max_scroll > tabs_w - panel_w);
 }
 
 #[test]
@@ -1093,21 +1101,16 @@ fn r3_110_hover_trace_time_before_epoch_is_safe() {
 }
 
 #[test]
-fn r3_112_terminal_tab_metrics_bound_the_actual_total_width() {
+fn r3_112_terminal_tab_overflow_produces_scroll_range_instead_of_forced_fit() {
     for panel_w in 0..=200 {
         for count in 0..=40 {
-            let metrics = terminal_tabs_metrics(13.0, panel_w as f32, count, 1.0);
-            let used = if count == 0 {
-                0.0
-            } else {
-                metrics.per_tab * count as f32 + metrics.gap * count.saturating_sub(1) as f32
-            };
-            assert!(
-                used <= metrics.available + 0.001,
-                "w={panel_w} count={count} used={used} available={}",
-                metrics.available
-            );
-            assert!(metrics.add_x + metrics.add_size <= 13.0 + panel_w as f32 + 0.001);
+            let tab_w = terminal_tab_width_from_title_width(100.0, 1.0);
+            let tabs_w = tab_w * count as f32;
+            let add_size = terminal_tab_add_size(panel_w as f32, 1.0);
+            let max_scroll =
+                terminal_tab_strip_max_scroll(panel_w as f32, tabs_w, add_size, 1.0);
+            let content_w = 8.0 + tabs_w + 8.0 + add_size + 8.0;
+            assert!((max_scroll - (content_w - panel_w as f32).max(0.0)).abs() < 0.001);
         }
     }
 }

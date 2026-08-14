@@ -381,12 +381,8 @@ struct HoverPopupPop {
     scrollbar_alpha: f32,
 }
 
-fn smooth_hover_width_progress(anim_progress: f32, target_w: f32) -> f32 {
-    if target_w >= 320.0 {
-        smooth_hover_anim_progress((anim_progress / 0.94).clamp(0.0, 1.0))
-    } else {
-        smooth_hover_anim_progress(anim_progress)
-    }
+fn smooth_hover_width_progress(anim_progress: f32) -> f32 {
+    smooth_hover_anim_progress((anim_progress / 0.94).clamp(0.0, 1.0))
 }
 
 fn smooth_hover_height_progress(anim_progress: f32) -> f32 {
@@ -412,7 +408,7 @@ fn compute_hover_popup_anim_rect(
     } else {
         (my - target_y).abs() <= (my - bottom).abs()
     };
-    let width_progress = smooth_hover_width_progress(anim_progress, target_w);
+    let width_progress = smooth_hover_width_progress(anim_progress);
     let height_progress = smooth_hover_height_progress(anim_progress);
     let anim_w = target_w * width_progress;
     let anim_h = target_h * height_progress;

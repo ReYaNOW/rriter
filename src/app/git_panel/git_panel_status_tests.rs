@@ -732,6 +732,7 @@ fn toggle_stage_with_identity(
     Ok(index.get_path(path, 0).map(git_index_entry_identity))
 }
 
+#[cfg(test)]
 fn toggle_stage(
     repo_root: &Path,
     rel_path: &str,
