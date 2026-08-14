@@ -6,7 +6,7 @@ use crate::render_view::{editor_bottom_blank_lines, editor_max_scroll_for_lines}
 use crate::renderer::{Renderer, Vertex};
 
 const MINIMAP_MAX_VISIBLE_LINES: usize = 900;
-const MINIMAP_MIN_LINE_HEIGHT: f32 = 1.5;
+const MINIMAP_MIN_LINE_HEIGHT: f32 = 2.0;
 const MINIMAP_MASK_CHARS: usize = 96;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -495,6 +495,40 @@ mod tests {
         assert!(middle.end - middle.start <= 1_024);
         assert_eq!(bottom.end, total_lines);
         assert!(bottom.end - bottom.start <= 1_024);
+    }
+
+    #[test]
+    fn large_file_minimap_uses_two_pixel_minimum_line_height() {
+        let total_lines = 12_000;
+        let editor_height = 1_200.0;
+        let editor_line_height = 26.0;
+        let max_scroll = total_lines as f32 * editor_line_height - editor_height;
+        let metrics = minimap_view_metrics(
+            total_lines,
+            editor_height,
+            editor_line_height,
+            max_scroll * 0.5,
+            max_scroll,
+        );
+        let visible_range = minimap_visible_visual_line_range(total_lines, metrics);
+
+        assert_eq!(metrics.line_height, MINIMAP_MIN_LINE_HEIGHT);
+        assert!(
+            visible_range.end - visible_range.start
+                <= (editor_height / MINIMAP_MIN_LINE_HEIGHT).ceil() as usize + 4
+        );
+
+        let small_file_lines = 100;
+        let small_file_max_scroll =
+            small_file_lines as f32 * editor_line_height - editor_height;
+        let small_file_metrics = minimap_view_metrics(
+            small_file_lines,
+            editor_height,
+            editor_line_height,
+            0.0,
+            small_file_max_scroll,
+        );
+        assert!(small_file_metrics.line_height > MINIMAP_MIN_LINE_HEIGHT);
     }
 
     #[test]

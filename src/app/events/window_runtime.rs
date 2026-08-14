@@ -8,6 +8,7 @@ use glutin::context::{
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{GlSurface, Surface, WindowSurface};
 use glutin_winit::DisplayBuilder;
+use std::cmp::Reverse;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use winit::event_loop::ActiveEventLoop;
@@ -91,6 +92,10 @@ struct BootstrappedWindow {
     renderer: Renderer,
 }
 
+fn framebuffer_config_rank(hardware_accelerated: bool, num_samples: u8) -> (bool, Reverse<u8>) {
+    (hardware_accelerated, Reverse(num_samples))
+}
+
 fn window_attributes(app: &App) -> WindowAttributes {
     let icon_bytes = include_bytes!("../../icons/icon.png");
     let window_icon = image::load_from_memory(icon_bytes)
@@ -171,13 +176,18 @@ fn create_glow_context(gl_config: &Config) -> glow::Context {
 }
 
 fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWindow, String> {
-    let template = ConfigTemplateBuilder::new().with_transparency(false);
+    let template = ConfigTemplateBuilder::new()
+        .with_transparency(false)
+        .with_depth_size(0)
+        .with_stencil_size(0);
     let display_builder =
         DisplayBuilder::new().with_window_attributes(Some(window_attributes(app)));
     let (window, gl_config) = display_builder
         .build(event_loop, template, |configs| {
             configs
-                .max_by_key(|config| config.num_samples())
+                .max_by_key(|config| {
+                    framebuffer_config_rank(config.hardware_accelerated(), config.num_samples())
+                })
                 .unwrap_or_else(|| panic!("no OpenGL framebuffer configuration is available"))
         })
         .map_err(|error| format!("window/display creation failed: {error}"))?;
@@ -292,7 +302,14 @@ pub(super) fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlContextPlan, gl_context_plans};
+    use super::{GlContextPlan, framebuffer_config_rank, gl_context_plans};
+
+    #[test]
+    fn framebuffer_config_rank_prefers_hardware_then_minimum_samples() {
+        assert!(framebuffer_config_rank(true, 0) > framebuffer_config_rank(true, 8));
+        assert!(framebuffer_config_rank(true, 8) > framebuffer_config_rank(false, 0));
+        assert!(framebuffer_config_rank(false, 0) > framebuffer_config_rank(false, 8));
+    }
 
     #[test]
     fn graphics_context_plan_is_platform_specific() {
