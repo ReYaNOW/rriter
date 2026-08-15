@@ -5,7 +5,6 @@ enum AboutWaitPlan {
 }
 
 const DRAG_AUTOSCROLL_EDGE_PX: f32 = 58.0;
-const DRAG_AUTOSCROLL_BOTTOM_GAP_PX: f32 = 72.0;
 const DRAG_AUTOSCROLL_MIN_SPEED: f32 = 360.0;
 const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 7200.0;
 const DRAG_AUTOSCROLL_ACCEL: f32 = 0.40;
@@ -210,6 +209,70 @@ fn drag_autoscroll_delta(pos: f32, start: f32, end: f32, edge: f32) -> f32 {
     }
 }
 
+#[inline(always)]
+fn selection_drag_autoscroll_delta(pos: f32, start: f32, end: f32) -> f32 {
+    if pos < start {
+        pos - start
+    } else if pos > end {
+        pos - end
+    } else {
+        0.0
+    }
+}
+
+#[inline(always)]
+pub(super) fn selection_drag_active_on_cursor_leave(
+    is_dragging: bool,
+    show_settings: bool,
+    is_dragging_terminal: bool,
+    last_click_ui_id: Option<crate::ui_system::UiId>,
+) -> bool {
+    is_dragging
+        && !show_settings
+        && matches!(
+            (last_click_ui_id, is_dragging_terminal),
+            (Some(crate::ui_system::UiId::EditorTextBody), false)
+                | (Some(crate::ui_system::UiId::TerminalBody), true)
+        )
+}
+
+#[inline(always)]
+pub(super) fn project_cursor_outside_window_on_leave(
+    x: f32,
+    y: f32,
+    window_w: f32,
+    window_h: f32,
+) -> (f32, f32) {
+    if !x.is_finite()
+        || !y.is_finite()
+        || !window_w.is_finite()
+        || !window_h.is_finite()
+        || window_w <= 0.0
+        || window_h <= 0.0
+        || x < 0.0
+        || x > window_w
+        || y < 0.0
+        || y > window_h
+    {
+        return (x, y);
+    }
+
+    let left = x;
+    let right = window_w - x;
+    let top = y;
+    let bottom = window_h - y;
+
+    if left <= right && left <= top && left <= bottom {
+        (-1.0, y)
+    } else if right <= top && right <= bottom {
+        (window_w + 1.0, y)
+    } else if top <= bottom {
+        (x, -1.0)
+    } else {
+        (x, window_h + 1.0)
+    }
+}
+
 fn drag_autoscroll_speed(delta: f32, is_top_edge: bool) -> f32 {
     let amount = delta.abs();
     let speed = (amount * amount * DRAG_AUTOSCROLL_ACCEL)
@@ -219,11 +282,6 @@ fn drag_autoscroll_speed(delta: f32, is_top_edge: bool) -> f32 {
     } else {
         speed
     }
-}
-
-fn drag_autoscroll_editor_bottom(window_height: f32, editor_top: f32, scale: f32) -> f32 {
-    let bottom_gap = DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale;
-    (window_height - bottom_gap).max(editor_top + 24.0 * scale)
 }
 
 fn terminal_drag_cell(
@@ -473,7 +531,7 @@ mod tests {
     }
 
     #[test]
-    fn drag_autoscroll_uses_inside_edge_band_and_outside_window_distance() {
+    fn tab_drag_autoscroll_keeps_inside_edge_band_and_outside_window_distance() {
         assert_eq!(drag_autoscroll_delta(50.0, 100.0, 500.0, 40.0), -50.0);
         assert_eq!(drag_autoscroll_delta(120.0, 100.0, 500.0, 40.0), -20.0);
         assert_eq!(drag_autoscroll_delta(480.0, 100.0, 500.0, 40.0), 20.0);
@@ -484,26 +542,232 @@ mod tests {
     }
 
     #[test]
-    fn drag_autoscroll_bottom_edge_ignores_open_bottom_panel() {
-        let scale = 1.0;
-        let window_height = 900.0;
-        let editor_top = 38.0;
-        let bottom_panel_h = 260.0;
-        let edge = DRAG_AUTOSCROLL_EDGE_PX * scale;
+    fn selection_drag_autoscroll_starts_only_outside_viewport() {
+        for pos in [100.0, 101.0, 120.0, 480.0, 499.0, 500.0] {
+            assert_eq!(selection_drag_autoscroll_delta(pos, 100.0, 500.0), 0.0);
+        }
 
-        let editor_bottom = drag_autoscroll_editor_bottom(window_height, editor_top, scale);
-        let old_panel_sensitive_bottom =
-            window_height - bottom_panel_h - DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale;
-        let y_near_old_panel_edge = old_panel_sensitive_bottom + edge + 1.0;
+        assert_eq!(selection_drag_autoscroll_delta(99.0, 100.0, 500.0), -1.0);
+        assert_eq!(selection_drag_autoscroll_delta(80.0, 100.0, 500.0), -20.0);
+        assert_eq!(selection_drag_autoscroll_delta(501.0, 100.0, 500.0), 1.0);
+        assert_eq!(selection_drag_autoscroll_delta(540.0, 100.0, 500.0), 40.0);
+    }
 
+    #[test]
+    fn selection_drag_autoscroll_preserves_far_outside_distance() {
+        assert_eq!(selection_drag_autoscroll_delta(-200.0, 100.0, 500.0), -300.0);
+        assert_eq!(selection_drag_autoscroll_delta(1400.0, 100.0, 500.0), 900.0);
+    }
+
+    #[test]
+    fn cursor_leave_projection_crosses_nearest_window_edge() {
         assert_eq!(
-            editor_bottom,
-            window_height - DRAG_AUTOSCROLL_BOTTOM_GAP_PX * scale
+            project_cursor_outside_window_on_leave(400.0, 599.0, 800.0, 600.0),
+            (400.0, 601.0)
         );
         assert_eq!(
-            drag_autoscroll_delta(y_near_old_panel_edge, editor_top, editor_bottom, edge),
+            project_cursor_outside_window_on_leave(400.0, 1.0, 800.0, 600.0),
+            (400.0, -1.0)
+        );
+        assert_eq!(
+            project_cursor_outside_window_on_leave(1.0, 300.0, 800.0, 600.0),
+            (-1.0, 300.0)
+        );
+        assert_eq!(
+            project_cursor_outside_window_on_leave(799.0, 300.0, 800.0, 600.0),
+            (801.0, 300.0)
+        );
+        assert_eq!(
+            project_cursor_outside_window_on_leave(0.0, 0.0, 800.0, 600.0),
+            (-1.0, 0.0)
+        );
+        assert_eq!(
+            project_cursor_outside_window_on_leave(400.0, 601.0, 800.0, 600.0),
+            (400.0, 601.0)
+        );
+
+        let (_, left_exit_y) =
+            project_cursor_outside_window_on_leave(1.0, 300.0, 800.0, 600.0);
+        let (_, right_exit_y) =
+            project_cursor_outside_window_on_leave(799.0, 300.0, 800.0, 600.0);
+        assert_eq!(selection_drag_autoscroll_delta(left_exit_y, 100.0, 500.0), 0.0);
+        assert_eq!(selection_drag_autoscroll_delta(right_exit_y, 100.0, 500.0), 0.0);
+    }
+
+    #[test]
+    fn cursor_leave_projection_is_selection_only() {
+        use crate::ui_system::UiId;
+
+        assert!(selection_drag_active_on_cursor_leave(
+            true,
+            false,
+            false,
+            Some(UiId::EditorTextBody),
+        ));
+        assert!(selection_drag_active_on_cursor_leave(
+            true,
+            false,
+            true,
+            Some(UiId::TerminalBody),
+        ));
+
+        for (is_terminal, id) in [
+            (false, UiId::EditorScrollbarY),
+            (false, UiId::EditorMinimap),
+            (true, UiId::TerminalTab(0)),
+        ] {
+            assert!(!selection_drag_active_on_cursor_leave(
+                true,
+                false,
+                is_terminal,
+                Some(id),
+            ));
+        }
+        assert!(!selection_drag_active_on_cursor_leave(
+            false,
+            false,
+            false,
+            Some(UiId::EditorTextBody),
+        ));
+        assert!(!selection_drag_active_on_cursor_leave(
+            true,
+            true,
+            false,
+            Some(UiId::EditorTextBody),
+        ));
+        assert!(!selection_drag_active_on_cursor_leave(
+            true,
+            false,
+            true,
+            Some(UiId::EditorTextBody),
+        ));
+        assert!(!selection_drag_active_on_cursor_leave(
+            true,
+            false,
+            false,
+            Some(UiId::TerminalBody),
+        ));
+    }
+
+    #[test]
+    fn non_ide_editor_bottom_autoscroll_starts_after_native_cursor_leave() {
+        let window_w = 800.0;
+        let window_h = 600.0;
+        let editor_top = 38.0;
+        let editor_h = crate::render_view::editor_view_height(
+            window_h,
+            editor_top,
+            0.0,
+            false,
+            1.0,
+        );
+        let editor_bottom = editor_top + editor_h;
+        assert_eq!(editor_bottom, window_h);
+
+        let last_inside_y = window_h - 1.0;
+        assert_eq!(
+            selection_drag_autoscroll_delta(last_inside_y, editor_top, editor_bottom),
             0.0
         );
+
+        let (_, projected_y) = project_cursor_outside_window_on_leave(
+            window_w * 0.5,
+            last_inside_y,
+            window_w,
+            window_h,
+        );
+        assert!(projected_y > window_h);
+        assert!(selection_drag_autoscroll_delta(projected_y, editor_top, editor_bottom) > 0.0);
+    }
+
+    #[test]
+    fn selection_autoscroll_uses_registered_body_rects_and_updates_endpoints() {
+        let about = include_str!("../about.rs");
+        let terminal = about
+            .split("if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings")
+            .nth(1)
+            .unwrap()
+            .split("if app.is_dragging && !app.ide_panel.is_dragging_terminal")
+            .next()
+            .unwrap();
+        assert!(terminal.contains("rect_for(crate::ui_system::UiId::TerminalBody)"));
+        assert!(terminal.contains(
+            "selection_drag_autoscroll_delta(my, term_y, term_y + term_h)"
+        ));
+        assert!(terminal.contains("term.scroll_y.target ="));
+        assert!(terminal.contains("terminal_drag_cell("));
+        assert!(terminal.contains("grid.selection = Some"));
+        assert!(!terminal.contains("DRAG_AUTOSCROLL_EDGE_PX"));
+        assert!(!terminal.contains("terminal_body_rect("));
+
+        let editor = about
+            .split(
+                "if app.is_dragging && !app.ide_panel.is_dragging_terminal && !app.scroll_y.is_dragging",
+            )
+            .nth(1)
+            .unwrap()
+            .split("if let Some(w) = app.window.as_ref()")
+            .next()
+            .unwrap();
+        assert!(editor.contains("rect_for(crate::ui_system::UiId::EditorTextBody)"));
+        assert!(editor.contains(
+            "selection_drag_autoscroll_delta(my, editor_y, editor_y + editor_h)"
+        ));
+        assert!(editor.contains(
+            "selection_drag_autoscroll_delta(mx, editor_x, editor_x + editor_w)"
+        ));
+        assert!(editor.contains("app.scroll_y.target +="));
+        assert!(editor.contains("app.scroll_x.target +="));
+        assert!(editor.contains("app.editor.set_cursor_at_pos("));
+        assert!(!editor.contains("DRAG_AUTOSCROLL_EDGE_PX"));
+        assert!(!editor.contains("drag_autoscroll_editor_bottom("));
+    }
+
+    #[test]
+    fn selection_drag_lifecycle_projects_cursor_leave_until_release_or_focus_loss() {
+        let cursor = include_str!("../../mouse/cursor.rs");
+        let cursor_move = cursor
+            .split("pub fn handle_main_cursor_moved")
+            .nth(1)
+            .unwrap()
+            .split("if self.dialog_window.is_some()")
+            .next()
+            .unwrap();
+        assert!(cursor_move.contains("renderer.last_mouse_x = px;"));
+        assert!(cursor_move.contains("renderer.last_mouse_y = py;"));
+
+        let events = include_str!("../../events.rs");
+        assert!(events.contains(
+            "WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position)"
+        ));
+        let cursor_left = events
+            .split("WindowEvent::CursorLeft { .. } => {")
+            .nth(1)
+            .unwrap()
+            .split("WindowEvent::Ime")
+            .next()
+            .unwrap();
+        assert!(cursor_left.contains("about::selection_drag_active_on_cursor_leave("));
+        assert!(cursor_left.contains("about::project_cursor_outside_window_on_leave("));
+        assert!(!cursor_left.contains("cancel_pointer_interactions"));
+        let focus = events
+            .split("WindowEvent::Focused(focused) =>")
+            .nth(1)
+            .unwrap()
+            .split("WindowEvent::Occluded")
+            .next()
+            .unwrap();
+        assert!(focus.contains("self.cancel_pointer_interactions();"));
+
+        let input = include_str!("../../mouse/input.rs");
+        let release = input
+            .split("// Завершаем DnD и ресайз IDE-панелей")
+            .nth(1)
+            .unwrap()
+            .split("if state == ElementState::Pressed")
+            .next()
+            .unwrap();
+        assert!(release.contains("self.cancel_pointer_interactions();"));
     }
 
     #[test]

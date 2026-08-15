@@ -508,6 +508,28 @@ impl ApplicationHandler for App {
                 self.handle_main_mouse_input(event_loop, state, button);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
+            WindowEvent::CursorLeft { .. } => {
+                if about::selection_drag_active_on_cursor_leave(
+                    self.is_dragging,
+                    self.show_settings,
+                    self.ide_panel.is_dragging_terminal,
+                    self.last_click_ui_id,
+                ) {
+                    let window_size = self.window.as_ref().map(|window| window.inner_size());
+                    if let (Some(size), Some(renderer)) = (window_size, self.renderer.as_mut()) {
+                        // Wayland CursorLeft carries no new outside position, so project the last
+                        // in-surface position across its nearest edge for active selection scroll.
+                        let (x, y) = about::project_cursor_outside_window_on_leave(
+                            renderer.last_mouse_x,
+                            renderer.last_mouse_y,
+                            size.width as f32,
+                            size.height as f32,
+                        );
+                        renderer.last_mouse_x = x;
+                        renderer.last_mouse_y = y;
+                    }
+                }
+            }
             WindowEvent::Ime(Ime::Commit(text)) => {
                 self.handle_main_ime_commit(&text);
             }

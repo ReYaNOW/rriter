@@ -770,27 +770,20 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
 
     if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings {
         if app.window.is_some() {
-            let terminal_panel = app.renderer.as_ref().map(|renderer| {
-                crate::app::mouse::app_panel_scroll_rect(
-                    app,
-                    crate::app::PanelId::Terminal,
-                    renderer.scale_factor,
-                )
-            });
-            if let (Some(r), Some((content_x, content_y, _, content_h, _))) =
-                (app.renderer.as_mut(), terminal_panel)
+            let terminal_body = app
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::TerminalBody);
+            if let (Some(r), Some((term_x, term_y, _, term_h))) =
+                (app.renderer.as_mut(), terminal_body)
             {
                 let s = r.scale_factor;
                 let mx = r.last_mouse_x;
                 let my = r.last_mouse_y;
-                let panel_x = content_x + 10.0 * s;
+                let panel_x = term_x + 10.0 * s;
                 let char_w =
                     r.char_advance('A') * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
                 let char_h = r.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-                let (term_y, term_h) =
-                    crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
-                let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
-                let drag_delta = drag_autoscroll_delta(my, term_y, term_y + term_h, edge);
+                let drag_delta = selection_drag_autoscroll_delta(my, term_y, term_y + term_h);
 
                 if drag_delta != 0.0 {
                     let active = app.ide_panel.active_terminal;
@@ -839,21 +832,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     if app.is_dragging && !app.ide_panel.is_dragging_terminal && !app.scroll_y.is_dragging {
-        if let Some(w) = app.window.as_ref() {
-            let wh = w.inner_size().height as f32;
-            let ww = w.inner_size().width as f32;
+        if let Some((editor_x, editor_y, editor_w, editor_h)) = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::EditorTextBody)
+        {
             let my = app.renderer.as_ref().unwrap().last_mouse_y;
             let mx = app.renderer.as_ref().unwrap().last_mouse_x;
-            let minimap_w = app.renderer.as_ref().unwrap().minimap_width;
-            let padding = app.renderer.as_ref().unwrap().left_padding;
-            let editor_top = tab_bar_h;
-            let editor_bottom = drag_autoscroll_editor_bottom(wh, editor_top, s);
-            let edge = (DRAG_AUTOSCROLL_EDGE_PX * s).max(28.0);
-
-            let drag_scroll_delta_y = drag_autoscroll_delta(my, editor_top, editor_bottom, edge);
-
-            let view_right_edge = ww - minimap_w;
-            let drag_scroll_delta_x = drag_autoscroll_delta(mx, padding, view_right_edge, edge);
+            let drag_scroll_delta_y =
+                selection_drag_autoscroll_delta(my, editor_y, editor_y + editor_h);
+            let drag_scroll_delta_x =
+                selection_drag_autoscroll_delta(mx, editor_x, editor_x + editor_w);
 
             if drag_scroll_delta_y != 0.0 || drag_scroll_delta_x != 0.0 {
                 if drag_scroll_delta_y != 0.0 {

@@ -406,6 +406,7 @@ pub struct IdePanelState {
     pub terminals: Vec<crate::app::terminal::Terminal>,
     pub terminal_tab_scroll: crate::scroll::ScrollState,
     pub active_terminal: usize,
+    pub(crate) next_terminal_creation_number: u64,
     pub terminal_focused: bool,
     pub is_dragging_terminal: bool,
     pub tab_drag: Option<TabDragState>,
@@ -417,7 +418,6 @@ pub struct IdePanelState {
     pub term_search_results: Vec<(usize, usize, usize, usize)>,
     pub term_search_current_idx: Option<usize>,
 }
-
 impl Default for IdePanelState {
     fn default() -> Self {
         Self {
@@ -515,6 +515,7 @@ impl Default for IdePanelState {
             terminals: Vec::new(),
             terminal_tab_scroll: crate::scroll::ScrollState::new(7.0),
             active_terminal: 0,
+            next_terminal_creation_number: 1,
             terminal_focused: false,
             is_dragging_terminal: false,
             tab_drag: None,
@@ -528,7 +529,6 @@ impl Default for IdePanelState {
         }
     }
 }
-
 impl IdePanelState {
     pub fn problem_diagnostic<'a>(
         &'a self,

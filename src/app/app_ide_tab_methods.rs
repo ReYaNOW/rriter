@@ -117,6 +117,12 @@ pub(crate) fn active_index_after_remove(active: usize, removed: usize, remaining
     }
 }
 
+fn take_terminal_creation_number(next: &mut u64) -> u64 {
+    let number = *next;
+    *next = number.saturating_add(1);
+    number
+}
+
 fn inactive_highlight_cache_over_limit(tab: &EditorTab) -> bool {
     tab.spans.capacity() > INACTIVE_HIGHLIGHT_SPAN_CAP_LIMIT
         || tab.completions.capacity() > INACTIVE_HIGHLIGHT_COMPLETION_CAP_LIMIT
@@ -154,6 +160,28 @@ where
     })
 }
 
+fn terminal_tab_reveal_target(
+    widths_with_add: &[f32],
+    active_idx: usize,
+    reveal_right_tail: bool,
+    viewport_w: f32,
+    current_target: f32,
+    margin: f32,
+) -> f32 {
+    let reveal_idx = if reveal_right_tail {
+        widths_with_add.len().saturating_sub(1)
+    } else {
+        active_idx
+    };
+    crate::render_view::tabs_ui::tab_strip_reveal_target(
+        widths_with_add,
+        reveal_idx,
+        viewport_w,
+        current_target,
+        margin,
+    )
+}
+
 impl App {
     pub(crate) fn terminal_working_directory(&self) -> Option<PathBuf> {
         crate::app::terminal_process::select_terminal_working_directory(
@@ -177,6 +205,7 @@ impl App {
         for terminal in &mut self.ide_panel.terminals {
             terminal.presentation_intent =
                 crate::app::terminal::TerminalPresentationIntent::None;
+            terminal.reveal_right_tail_when_presented = false;
         }
     }
 
@@ -213,13 +242,15 @@ impl App {
             return false;
         };
 
+        let reveal_right_tail = self.ide_panel.terminals[idx].reveal_right_tail_when_presented
+            && idx + 1 == self.ide_panel.terminals.len();
         self.cancel_terminal_presentation_intents();
         self.ide_panel.active_terminal = idx;
         if intent == crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady {
             self.ide_panel.open(PanelId::Terminal);
             crate::save_panel_state(&self.ide_panel);
         }
-        self.reveal_active_terminal_tab_now();
+        self.reveal_active_terminal_tab_now_for_presentation(reveal_right_tail);
         true
     }
 
@@ -257,6 +288,25 @@ impl App {
         }
     }
 
+    pub(crate) fn close_terminal_tab_at(&mut self, idx: usize) {
+        if idx >= self.ide_panel.terminals.len() {
+            return;
+        }
+        let active = self.ide_panel.active_terminal;
+        self.ide_panel.terminals.remove(idx);
+        if self.ide_panel.terminals.is_empty() {
+            self.add_terminal();
+        } else {
+            self.ide_panel.active_terminal = crate::app::active_index_after_remove(
+                active,
+                idx,
+                self.ide_panel.terminals.len(),
+            );
+            self.reveal_active_terminal_tab_now();
+        }
+        self.defer_terminal_panel_until_ready();
+    }
+
     pub(crate) fn add_terminal(&mut self) -> usize {
         let reveal_panel_when_ready = (self.ide_panel.is_open(PanelId::Terminal)
             && !self.active_terminal_presentation_ready())
@@ -267,15 +317,19 @@ impl App {
         self.cancel_terminal_presentation_intents();
 
         let cwd = self.terminal_working_directory();
+        let display_number =
+            take_terminal_creation_number(&mut self.ide_panel.next_terminal_creation_number);
         let mut terminal = crate::app::terminal::Terminal::spawn(
             self.window.clone(),
             cwd.as_deref(),
+            display_number,
         );
         terminal.presentation_intent = if reveal_panel_when_ready {
             crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
         } else {
             crate::app::terminal::TerminalPresentationIntent::ActivateWhenReady
         };
+        terminal.reveal_right_tail_when_presented = true;
         let idx = self.ide_panel.terminals.len();
         self.ide_panel.terminals.push(terminal);
         if reveal_panel_when_ready {
@@ -286,6 +340,10 @@ impl App {
     }
 
     pub(crate) fn reveal_active_terminal_tab_now(&mut self) {
+        self.reveal_active_terminal_tab_now_for_presentation(false);
+    }
+
+    fn reveal_active_terminal_tab_now_for_presentation(&mut self, reveal_right_tail: bool) {
         let idx = self.ide_panel.active_terminal;
         if idx >= self.ide_panel.terminals.len() {
             return;
@@ -316,9 +374,10 @@ impl App {
         }
         let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, s);
         widths.push(8.0 * s + add_size + 8.0 * s);
-        let target = crate::render_view::tabs_ui::tab_strip_reveal_target(
+        let target = terminal_tab_reveal_target(
             &widths,
             idx,
+            reveal_right_tail,
             panel_w - 8.0 * s,
             self.ide_panel.terminal_tab_scroll.target,
             12.0 * s,
@@ -842,9 +901,82 @@ mod tests {
         let about = include_str!("events/about.rs");
 
         assert_eq!(app_production.matches("Terminal::spawn(").count(), 1);
+        assert!(app_production.contains("take_terminal_creation_number("));
         assert!(app_production.contains("self.ide_panel.terminals.is_empty() {\n            self.add_terminal();"));
         assert!(ui_handlers.contains("UiId::TerminalAdd => {\n                self.add_terminal();"));
         assert!(about.matches("app.add_terminal();").count() >= 2);
+    }
+
+    #[test]
+    fn terminal_creation_numbers_are_monotonic_and_survive_close_and_reorder() {
+        let mut panels = crate::app::IdePanelState::default();
+        let mut numbers = vec![
+            take_terminal_creation_number(&mut panels.next_terminal_creation_number),
+            take_terminal_creation_number(&mut panels.next_terminal_creation_number),
+            take_terminal_creation_number(&mut panels.next_terminal_creation_number),
+        ];
+        assert_eq!(numbers, vec![1, 2, 3]);
+
+        numbers.remove(1);
+        assert_eq!(numbers, vec![1, 3]);
+        numbers.push(take_terminal_creation_number(
+            &mut panels.next_terminal_creation_number,
+        ));
+        assert_eq!(numbers, vec![1, 3, 4]);
+
+        let moved = numbers.remove(1);
+        numbers.insert(0, moved);
+        assert_eq!(numbers, vec![3, 1, 4]);
+    }
+
+    #[test]
+    fn terminal_tab_close_routes_share_one_app_lifecycle() {
+        let app_tabs = include_str!("app_ide_tab_methods.rs");
+        let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
+        let close = app_production
+            .split("    pub(crate) fn close_terminal_tab_at")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn add_terminal")
+            .next()
+            .unwrap();
+        let ui_handlers = include_str!("ui_handlers.rs");
+        let main_keys = include_str!("keyboard/main_keys.rs");
+        let editor_keys = include_str!("keyboard/editor_keys.rs");
+
+        assert!(close.contains("self.ide_panel.terminals.remove(idx);"));
+        assert!(close.contains("self.add_terminal();"));
+        assert!(close.contains("crate::app::active_index_after_remove("));
+        assert!(close.contains("self.reveal_active_terminal_tab_now();"));
+        assert!(close.contains("self.defer_terminal_panel_until_ready();"));
+        assert!(!close.contains("Terminal::spawn("));
+
+        let mouse_close = ui_handlers
+            .split("UiId::TerminalTabClose(idx) => {")
+            .nth(1)
+            .unwrap()
+            .split("UiId::TerminalAdd => {")
+            .next()
+            .unwrap();
+        assert!(mouse_close.contains("self.close_terminal_tab_at(idx);"));
+        assert!(!mouse_close.contains("terminals.remove("));
+
+        let shortcut_close = main_keys
+            .find("self.close_terminal_tab_at(self.ide_panel.active_terminal);")
+            .unwrap();
+        let search_dispatch = main_keys
+            .find("self.handle_terminal_search_keyboard_input(key_event);")
+            .unwrap();
+        let terminal_dispatch = main_keys
+            .find("self.handle_terminal_keyboard_input(key_event);")
+            .unwrap();
+        assert!(shortcut_close < search_dispatch);
+        assert!(shortcut_close < terminal_dispatch);
+        assert!(main_keys[shortcut_close..search_dispatch].contains("return;"));
+
+        assert!(editor_keys.contains(
+            "PhysicalKey::Code(KeyCode::Digit4) if ctrl => {\n                self.close_tab_at(self.active_tab);"
+        ));
     }
 
     #[test]
@@ -993,6 +1125,196 @@ mod tests {
     }
 
     #[test]
+    fn new_terminal_reveal_targets_plus_tail_at_fractional_scales() {
+        for scale in [1.0, 1.32, 1.333_333_3] {
+            let panel_x = 20.0;
+            let panel_w = 260.0;
+            let tab_widths = [30.0, 50.0, 80.0].map(|title_w| {
+                crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
+                    title_w * scale,
+                    scale,
+                )
+            });
+            let logical_tabs_width = tab_widths.iter().sum::<f32>();
+            let add_size =
+                crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, scale);
+            let mut widths_with_add = tab_widths.to_vec();
+            widths_with_add.push(8.0 * scale + add_size + 8.0 * scale);
+            let viewport_w = panel_w - 8.0 * scale;
+            let max_scroll = crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
+                panel_w,
+                logical_tabs_width,
+                add_size,
+                scale,
+            );
+
+            let target = terminal_tab_reveal_target(
+                &widths_with_add,
+                tab_widths.len() - 1,
+                true,
+                viewport_w,
+                0.0,
+                12.0 * scale,
+            );
+            assert!((target - max_scroll).abs() < 0.001);
+
+            let base_x = crate::render_view::terminal_ui::terminal_tab_base_x(
+                panel_x,
+                target,
+                max_scroll,
+                scale,
+            );
+            let last_left = base_x + tab_widths[..tab_widths.len() - 1].iter().sum::<f32>();
+            let last_right = base_x + logical_tabs_width;
+            let add_x = crate::render_view::terminal_ui::terminal_add_x_after_tabs(
+                base_x,
+                logical_tabs_width,
+                scale,
+            );
+            let viewport_right = panel_x + panel_w;
+
+            assert!(last_left >= panel_x - 0.5);
+            assert!(last_right <= viewport_right + 0.5);
+            assert!(add_x >= panel_x - 0.5);
+            assert!(add_x + add_size <= viewport_right + 0.5);
+        }
+    }
+
+    #[test]
+    fn terminal_tail_reveal_stays_zero_without_overflow_and_old_tab_selection_stays_ordinary() {
+        let scale = 1.0;
+        let panel_w = 600.0;
+        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, scale);
+        let mut widths = vec![90.0, 110.0, 100.0];
+        widths.push(8.0 * scale + add_size + 8.0 * scale);
+        assert_eq!(
+            terminal_tab_reveal_target(
+                &widths,
+                2,
+                true,
+                panel_w - 8.0 * scale,
+                0.0,
+                12.0 * scale,
+            ),
+            0.0
+        );
+
+        let panel_w = 220.0;
+        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, scale);
+        let mut widths = vec![100.0, 120.0, 130.0];
+        widths.push(8.0 * scale + add_size + 8.0 * scale);
+        let viewport_w = panel_w - 8.0 * scale;
+        let tail_target = terminal_tab_reveal_target(
+            &widths,
+            2,
+            true,
+            viewport_w,
+            0.0,
+            12.0 * scale,
+        );
+        let first_tab_target = terminal_tab_reveal_target(
+            &widths,
+            0,
+            false,
+            viewport_w,
+            tail_target,
+            12.0 * scale,
+        );
+
+        assert!(tail_target > 0.0);
+        assert_eq!(first_tab_target, 0.0);
+    }
+
+    #[test]
+    fn terminal_tail_reveal_clamps_at_max_when_last_tab_is_wider_than_viewport() {
+        let scale = 1.0;
+        let panel_x = 20.0;
+        let panel_w = 220.0;
+        let tab_widths = [
+            crate::render_view::terminal_ui::terminal_tab_width_from_title_width(34.0, scale),
+            crate::render_view::terminal_ui::terminal_tab_width_from_title_width(320.0, scale),
+        ];
+        let logical_tabs_width = tab_widths.iter().sum::<f32>();
+        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, scale);
+        let mut widths_with_add = tab_widths.to_vec();
+        widths_with_add.push(8.0 * scale + add_size + 8.0 * scale);
+        let max_scroll = crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
+            panel_w,
+            logical_tabs_width,
+            add_size,
+            scale,
+        );
+        let target = terminal_tab_reveal_target(
+            &widths_with_add,
+            1,
+            true,
+            panel_w - 8.0 * scale,
+            0.0,
+            12.0 * scale,
+        );
+        assert!((target - max_scroll).abs() < 0.001);
+
+        let base_x = crate::render_view::terminal_ui::terminal_tab_base_x(
+            panel_x,
+            target,
+            max_scroll,
+            scale,
+        );
+        let last_left = base_x + tab_widths[0];
+        let last_right = base_x + logical_tabs_width;
+        let add_x = crate::render_view::terminal_ui::terminal_add_x_after_tabs(
+            base_x,
+            logical_tabs_width,
+            scale,
+        );
+        let viewport_right = panel_x + panel_w;
+
+        assert!(last_left < panel_x);
+        assert!(last_right >= panel_x && last_right <= viewport_right + 0.5);
+        assert!(add_x >= panel_x && add_x + add_size <= viewport_right + 0.5);
+    }
+
+    #[test]
+    fn new_terminal_tail_reveal_uses_the_existing_deferred_presentation_lifecycle() {
+        let source = include_str!("app_ide_tab_methods.rs");
+        let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        let add = production
+            .split("    pub(crate) fn add_terminal")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn reveal_active_terminal_tab_now")
+            .next()
+            .unwrap();
+        let process = production
+            .split("    pub(crate) fn process_terminal_presentation_intents")
+            .nth(1)
+            .unwrap()
+            .split("    pub(crate) fn defer_terminal_panel_until_ready")
+            .next()
+            .unwrap();
+        let cancel = production
+            .split("    fn cancel_terminal_presentation_intents")
+            .nth(1)
+            .unwrap()
+            .split("    fn hide_terminal_panel_for_pending_presentation")
+            .next()
+            .unwrap();
+
+        assert!(add.contains("terminal.reveal_right_tail_when_presented = true;"));
+        let capture = process
+            .find("let reveal_right_tail = self.ide_panel.terminals[idx].reveal_right_tail_when_presented")
+            .unwrap();
+        assert!(process.contains("&& idx + 1 == self.ide_panel.terminals.len();"));
+        let cancel_intents = process.find("self.cancel_terminal_presentation_intents();").unwrap();
+        let activate = process.find("self.ide_panel.active_terminal = idx;").unwrap();
+        let reveal = process
+            .find("self.reveal_active_terminal_tab_now_for_presentation(reveal_right_tail);")
+            .unwrap();
+        assert!(capture < cancel_intents && cancel_intents < activate && activate < reveal);
+        assert!(cancel.contains("terminal.reveal_right_tail_when_presented = false;"));
+    }
+
+    #[test]
     fn deferred_terminal_activation_reveals_only_after_active_index_switch() {
         let source = include_str!("app_ide_tab_methods.rs");
         let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
@@ -1004,7 +1326,9 @@ mod tests {
             .next()
             .unwrap();
         let activate = process.find("self.ide_panel.active_terminal = idx;").unwrap();
-        let reveal = process.find("self.reveal_active_terminal_tab_now();").unwrap();
+        let reveal = process
+            .find("self.reveal_active_terminal_tab_now_for_presentation(reveal_right_tail);")
+            .unwrap();
         assert!(activate < reveal);
 
         let selection = production

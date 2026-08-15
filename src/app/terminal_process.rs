@@ -5,15 +5,18 @@ use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 const INITIAL_COLS: u16 = 200;
 const INITIAL_ROWS: u16 = 60;
 const TERMINAL_SHUTDOWN_GRACE: Duration = Duration::from_millis(500);
-const TERMINAL_PRESENTATION_FALLBACK: Duration = Duration::from_millis(120);
 const TERMINAL_TITLE_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
+const TERMINAL_EXIT_BEFORE_OUTPUT: &[u8] = b"RRiter terminal exited before producing output\r\n";
 pub(crate) const TERMINAL_TITLE_MAX_BYTES: usize = 256;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -28,6 +31,7 @@ pub(crate) struct TerminalTitleState {
     fallback: String,
     detected: Option<String>,
     programmed: Option<ProgrammedTerminalTitle>,
+    display_suffix: Box<str>,
     generation: u64,
     observation_serial: u64,
 }
@@ -40,9 +44,16 @@ impl TerminalTitleState {
             fallback,
             detected: None,
             programmed: None,
+            display_suffix: Box::<str>::default(),
             generation: 0,
             observation_serial: 0,
         }
+    }
+
+    pub(crate) fn new_numbered(fallback: String, display_number: u64) -> Self {
+        let mut state = Self::new(fallback);
+        state.display_suffix = format!(" ({display_number})").into_boxed_str();
+        state
     }
 
     pub(crate) fn set_fallback(&mut self, fallback: String) {
@@ -98,6 +109,7 @@ impl TerminalTitleState {
     pub(crate) fn write_resolved(&self, output: &mut String) {
         output.clear();
         output.push_str(self.resolved());
+        output.push_str(&self.display_suffix);
     }
 }
 
@@ -635,11 +647,6 @@ fn install_terminal_title_refresh(
     Ok((None, None))
 }
 
-#[inline]
-fn terminal_presentation_wait_remaining(elapsed: Duration) -> Duration {
-    TERMINAL_PRESENTATION_FALLBACK.saturating_sub(elapsed)
-}
-
 fn advance_terminal_output_batch(
     parser: &mut Parser,
     grid: &mut TermGrid,
@@ -648,7 +655,16 @@ fn advance_terminal_output_batch(
     for chunk in chunks {
         parser.advance(grid, chunk);
     }
-    grid.mark_presentation_ready();
+    grid.dirty = true;
+}
+
+fn finish_terminal_output_stream(parser: &mut Parser, grid: &mut TermGrid) -> bool {
+    if grid.presentation_ready {
+        return false;
+    }
+
+    parser.advance(grid, TERMINAL_EXIT_BEFORE_OUTPUT);
+    true
 }
 
 fn install_terminal_io_threads(
@@ -659,33 +675,18 @@ fn install_terminal_io_threads(
 ) -> io::Result<()> {
     let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let reader_finished = Arc::new(AtomicBool::new(false));
 
     let parser_grid = grid.clone();
+    let parser_reader_finished = reader_finished.clone();
     crate::platform::spawn_named("rriter-terminal-parser", move || {
         let mut parser = Parser::new();
-        let presentation_wait_started = Instant::now();
         let request_redraw = || {
             if let Some(window) = window.as_ref() {
                 window.request_redraw();
             }
         };
-        let mut first = match rx.recv_timeout(terminal_presentation_wait_remaining(
-            presentation_wait_started.elapsed(),
-        )) {
-            Ok(first) => Some(first),
-            Err(error) => {
-                let Ok(mut grid) = parser_grid.lock() else {
-                    return;
-                };
-                grid.mark_presentation_ready();
-                drop(grid);
-                request_redraw();
-                match error {
-                    std::sync::mpsc::RecvTimeoutError::Timeout => rx.recv().ok(),
-                    std::sync::mpsc::RecvTimeoutError::Disconnected => None,
-                }
-            }
-        };
+        let mut first = rx.recv().ok();
 
         while let Some(first_chunk) = first {
             let mut chunks = vec![first_chunk];
@@ -710,33 +711,21 @@ fn install_terminal_io_threads(
             request_redraw();
             first = rx.recv().ok();
         }
-    })
-    .map_err(|error| {
-        io::Error::new(
-            error.kind(),
-            format!("failed to spawn terminal parser: {error}"),
-        )
-    })?;
 
-    crate::platform::spawn_named("rriter-terminal-reader", move || {
-        let mut reader = reader;
-        let mut buffer = [0_u8; 65_536];
-        loop {
-            match reader.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(read) => {
-                    if tx.send(buffer[..read].to_vec()).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+        if parser_reader_finished.load(Ordering::Acquire) {
+            let Ok(mut grid) = parser_grid.lock() else {
+                return;
+            };
+            if finish_terminal_output_stream(&mut parser, &mut grid) {
+                drop(grid);
+                request_redraw();
             }
         }
     })
     .map_err(|error| {
         io::Error::new(
             error.kind(),
-            format!("failed to spawn terminal reader: {error}"),
+            format!("failed to spawn terminal parser: {error}"),
         )
     })?;
 
@@ -754,6 +743,29 @@ fn install_terminal_io_threads(
         io::Error::new(
             error.kind(),
             format!("failed to spawn terminal writer: {error}"),
+        )
+    })?;
+
+    crate::platform::spawn_named("rriter-terminal-reader", move || {
+        let mut reader = reader;
+        let mut buffer = [0_u8; 65_536];
+        loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    if tx.send(buffer[..read].to_vec()).is_err() {
+                        break;
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        reader_finished.store(true, Ordering::Release);
+    })
+    .map_err(|error| {
+        io::Error::new(
+            error.kind(),
+            format!("failed to spawn terminal reader: {error}"),
         )
     })?;
 
@@ -952,6 +964,81 @@ mod tests {
         title
     }
 
+    #[test]
+    fn numbered_display_title_keeps_suffix_across_dynamic_and_ssh_titles() {
+        let home = Path::new("/home/reyan");
+        let cwd = Path::new("/home/reyan/projects/car-wash-api");
+        let mut state = TerminalTitleState::new_numbered("car-wash-api : fish".to_string(), 3);
+        assert_eq!(resolved_title(&state), "car-wash-api : fish (3)");
+
+        let htop = process_snapshot("htop", "/home/reyan/projects/car-wash-api", &["htop"]);
+        state.observe_transition(
+            Some(terminal_title_for_snapshot(
+                &htop,
+                Some(cwd),
+                Some(home),
+                "fish",
+            )),
+            false,
+        );
+        assert_eq!(resolved_title(&state), "car-wash-api : htop (3)");
+
+        let fish = process_snapshot("fish", "/home/reyan/projects/car-wash-api", &["fish"]);
+        state.observe_transition(
+            Some(terminal_title_for_snapshot(
+                &fish,
+                Some(cwd),
+                Some(home),
+                "fish",
+            )),
+            false,
+        );
+        assert_eq!(resolved_title(&state), "car-wash-api : fish (3)");
+
+        let ssh = process_snapshot(
+            "ssh",
+            "/home/reyan/projects/car-wash-api",
+            &["ssh", "reyan@89.169.37.107"],
+        );
+        state.observe_transition(
+            Some(terminal_title_for_snapshot(
+                &ssh,
+                Some(cwd),
+                Some(home),
+                "fish",
+            )),
+            false,
+        );
+        assert_eq!(resolved_title(&state), "(reyan) 89.169.37.107 (3)");
+    }
+
+    #[test]
+    fn numbered_title_stays_in_single_allocation_light_renderer_string_path() {
+        let source = include_str!("terminal_process.rs");
+        let writer = source
+            .split("pub(crate) fn write_resolved")
+            .nth(1)
+            .unwrap()
+            .split("\n    }\n}")
+            .next()
+            .unwrap();
+        assert!(writer.contains("output.push_str(&self.display_suffix);"));
+        assert!(!writer.contains("format!("));
+
+        let renderer = include_str!("../render_view/terminal_ui.rs");
+        let title_path = renderer
+            .split("let mut display_titles")
+            .nth(1)
+            .unwrap()
+            .split("let mut actual_xs")
+            .next()
+            .unwrap();
+        assert!(title_path.contains("terminal.write_display_title(title);"));
+        assert!(title_path.contains("self.measure_ui_width(title, 1.0)"));
+        assert!(!title_path.contains("display_suffix"));
+        assert!(!title_path.contains("format!("));
+    }
+
     fn parser_grid() -> (TermGrid, TerminalTitleCache) {
         let cache = Arc::new(Mutex::new(TerminalTitleState::new("fallback".to_string())));
         (
@@ -961,23 +1048,31 @@ mod tests {
     }
 
     #[test]
-    fn terminal_presentation_fallback_budget_is_bounded_without_sleep() {
-        assert_eq!(
-            terminal_presentation_wait_remaining(Duration::ZERO),
-            Duration::from_millis(120)
+    fn terminal_presentation_waits_for_displayable_output_without_timeout_fallback() {
+        let mut grid = TermGrid::new(24, 3);
+        let mut parser = Parser::new();
+
+        assert!(!grid.presentation_ready);
+        advance_terminal_output_batch(
+            &mut parser,
+            &mut grid,
+            &[b"\x1b[?25l\x1b[2J\r\n\t   \x1b[?25h".to_vec()],
         );
-        assert_eq!(
-            terminal_presentation_wait_remaining(Duration::from_millis(45)),
-            Duration::from_millis(75)
+        assert!(!grid.presentation_ready);
+
+        advance_terminal_output_batch(
+            &mut parser,
+            &mut grid,
+            &[b"\x1b[32muser@host> \x1b[0m".to_vec()],
         );
-        assert_eq!(
-            terminal_presentation_wait_remaining(Duration::from_millis(120)),
-            Duration::ZERO
-        );
-        assert_eq!(
-            terminal_presentation_wait_remaining(Duration::from_secs(1)),
-            Duration::ZERO
-        );
+        assert!(grid.presentation_ready);
+
+        let source = include_str!("terminal_process.rs");
+        let production = source.split("\n#[cfg(test)]").next().unwrap_or(source);
+        assert!(!production.contains("TERMINAL_PRESENTATION_FALLBACK"));
+        assert!(!production.contains("terminal_presentation_wait_remaining"));
+        assert!(!production.contains("grid.mark_presentation_ready();"));
+        assert!(production.contains("let mut first = rx.recv().ok();"));
     }
 
     #[test]
@@ -1004,6 +1099,31 @@ mod tests {
         advance_terminal_output_batch(&mut parser, &mut actual, &[b"!".to_vec()]);
         assert!(actual.presentation_ready);
         assert!(actual.dirty);
+    }
+
+    #[test]
+    fn terminal_stream_end_before_displayable_output_shows_explicit_state_once() {
+        let mut grid = TermGrid::new(64, 3);
+        let mut parser = Parser::new();
+        advance_terminal_output_batch(
+            &mut parser,
+            &mut grid,
+            &[b"\x1b[?25l\x1b[2J\r\n".to_vec()],
+        );
+        assert!(!grid.presentation_ready);
+
+        assert!(finish_terminal_output_stream(&mut parser, &mut grid));
+        assert!(grid.presentation_ready);
+        let text = grid
+            .lines
+            .iter()
+            .flat_map(|line| line.iter().map(|cell| cell.c))
+            .collect::<String>();
+        assert!(text.contains("RRiter terminal exited before producing output"));
+
+        let lines = grid.lines.clone();
+        assert!(!finish_terminal_output_stream(&mut parser, &mut grid));
+        assert!(grid.lines == lines);
     }
 
     #[test]

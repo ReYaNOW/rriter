@@ -54,6 +54,18 @@ fn apply_problems_alt_w_shortcut(panels: &mut crate::app::IdePanelState) {
     panels.toggle(crate::app::PanelId::Problems);
 }
 
+fn is_terminal_tab_close_shortcut(
+    panels: &crate::app::IdePanelState,
+    physical_key: PhysicalKey,
+    primary: bool,
+) -> bool {
+    primary
+        && physical_key == PhysicalKey::Code(KeyCode::Digit4)
+        && panels.is_open(crate::app::PanelId::Terminal)
+        && (panels.terminal_focused
+            || (panels.term_show_search && panels.term_search_focused))
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
@@ -670,6 +682,15 @@ impl App {
                 }
             }
 
+            if is_terminal_tab_close_shortcut(&self.ide_panel, key_event.physical_key, ctrl) {
+                self.close_terminal_tab_at(self.ide_panel.active_terminal);
+                self.last_action = std::time::Instant::now();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+
             if self.ide_panel.is_open(crate::app::PanelId::Terminal)
                 && self.ide_panel.term_show_search
                 && self.ide_panel.term_search_focused
@@ -822,6 +843,51 @@ mod tests {
         assert!(panels.is_open(crate::app::PanelId::Terminal));
         assert!(!panels.is_open(crate::app::PanelId::Problems));
         assert!(panels.terminal_focused);
+    }
+
+    #[test]
+    fn terminal_ctrl4_shortcut_targets_terminal_or_search_focus_only() {
+        let mut panels = crate::app::IdePanelState::default();
+        panels.open(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+
+        assert!(is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::Digit4),
+            true,
+        ));
+        assert!(!is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::Digit4),
+            false,
+        ));
+
+        panels.terminal_focused = false;
+        panels.term_show_search = true;
+        panels.term_search_focused = true;
+        assert!(is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::Digit4),
+            true,
+        ));
+
+        panels.term_show_search = false;
+        assert!(!is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::Digit4),
+            true,
+        ));
+        panels.term_search_focused = false;
+        assert!(!is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::Digit4),
+            true,
+        ));
+        assert!(!is_terminal_tab_close_shortcut(
+            &panels,
+            PhysicalKey::Code(KeyCode::KeyC),
+            true,
+        ));
     }
 
     #[test]

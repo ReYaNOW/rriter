@@ -1124,6 +1124,9 @@ impl Perform for TermGrid {
             return;
         }
         self.put_char(c);
+        if !self.presentation_ready && !c.is_whitespace() {
+            self.mark_presentation_ready();
+        }
     }
     fn execute(&mut self, byte: u8) {
         match byte {
@@ -1480,6 +1483,7 @@ pub struct Terminal {
     process: Option<crate::app::terminal_process::TerminalProcess>,
     pub scroll_y: crate::scroll::ScrollState,
     pub(crate) presentation_intent: TerminalPresentationIntent,
+    pub(crate) reveal_right_tail_when_presented: bool,
     title_cache: crate::app::terminal_process::TerminalTitleCache,
 }
 
@@ -1495,9 +1499,13 @@ impl Terminal {
     pub fn spawn(
         window: Option<std::sync::Arc<winit::window::Window>>,
         cwd: Option<&std::path::Path>,
+        display_number: u64,
     ) -> Self {
         let title_cache = Arc::new(Mutex::new(
-            crate::app::terminal_process::TerminalTitleState::new("terminal".to_string()),
+            crate::app::terminal_process::TerminalTitleState::new_numbered(
+                "terminal".to_string(),
+                display_number,
+            ),
         ));
         let grid = Arc::new(Mutex::new(TermGrid::new_with_title_cache(
             200,
@@ -1526,6 +1534,7 @@ impl Terminal {
             process,
             scroll_y: crate::scroll::ScrollState::new(7.0),
             presentation_intent: TerminalPresentationIntent::None,
+            reveal_right_tail_when_presented: false,
             title_cache,
         }
     }
