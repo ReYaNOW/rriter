@@ -3254,8 +3254,8 @@ F collect_runtime_events@1410>23u
 F real_commit_hook_runs_and_trace2_identifies_it_structurally@1425>24g,24h
 F failing_hook_blocks_commit_but_no_verify_bypasses_commit_hooks_only@1450>24g,24h
 F commit_fallback_identity_is_command_local_and_does_not_write_repo_config@1471>23w,24g
-F configured_identity_is_preserved_and_amend_reset_author_matches_old_semantics@1489>23w,24g,28g
-F streaming_push_reports_pre_push_hook_by_trace2_name@1518>23v,23w,24g
+F configured_identity_is_preserved_and_amend_reset_author_matches_old_semantics@1501>23w,24g,28g
+F streaming_push_reports_pre_push_hook_by_trace2_name@1530>23v,23w,24g
 I GitAnsiDecoder
 F default@525
 F decode_line@535

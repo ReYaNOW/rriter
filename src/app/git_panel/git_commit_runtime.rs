@@ -1470,14 +1470,26 @@ mod git_commit_runtime_tests {
     #[test]
     fn commit_fallback_identity_is_command_local_and_does_not_write_repo_config() {
         let (root, repo, _marker) = make_hook_repo("identity", 0);
-        let config = repo.config().unwrap();
-        assert!(config.get_string("user.name").is_err());
-        assert!(config.get_string("user.email").is_err());
-        drop(config);
+        {
+            let mut config = repo
+                .config()
+                .unwrap()
+                .open_level(git2::ConfigLevel::Local)
+                .unwrap();
+            config.set_str("user.name", "").unwrap();
+            config.set_str("user.email", "").unwrap();
+        }
+        assert!(repo.signature().is_err());
+
         commit_repo(&root, "identity", false).unwrap();
-        let config = repo.config().unwrap();
-        assert!(config.get_string("user.name").is_err());
-        assert!(config.get_string("user.email").is_err());
+
+        let config = repo
+            .config()
+            .unwrap()
+            .open_level(git2::ConfigLevel::Local)
+            .unwrap();
+        assert_eq!(config.get_string("user.name").as_deref(), Ok(""));
+        assert_eq!(config.get_string("user.email").as_deref(), Ok(""));
         let commit = repo.head().unwrap().peel_to_commit().unwrap();
         assert_eq!(commit.author().name(), Some("RRiter"));
         assert_eq!(commit.author().email(), Some("rriter@example.invalid"));
