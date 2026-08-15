@@ -2,8 +2,8 @@ use crate::app::App;
 use crate::renderer::Renderer;
 use glutin::config::{Config, ConfigTemplateBuilder, GlConfig};
 use glutin::context::{
-    ContextApi, ContextAttributesBuilder, GlProfile, NotCurrentContext, NotCurrentGlContext,
-    PossiblyCurrentContext, Version,
+    ContextApi, ContextAttributesBuilder, GlContext, GlProfile, NotCurrentContext,
+    NotCurrentGlContext, PossiblyCurrentContext, Priority, Version,
 };
 use glutin::display::{GetGlDisplay, GlDisplay};
 use glutin::surface::{GlSurface, Surface, WindowSurface};
@@ -29,7 +29,11 @@ impl GlContextPlan {
         }
     }
 
-    fn attributes(self, raw_window_handle: RawWindowHandle) -> glutin::context::ContextAttributes {
+    fn attributes(
+        self,
+        raw_window_handle: RawWindowHandle,
+        priority_request: GlContextPriorityRequest,
+    ) -> glutin::context::ContextAttributes {
         let version = match self {
             Self::Desktop { major, minor } | Self::Gles { major, minor } => {
                 Version::new(major, minor)
@@ -43,7 +47,63 @@ impl GlContextPlan {
                 ContextAttributesBuilder::new().with_context_api(ContextApi::Gles(Some(version)))
             }
         };
+        let builder = match priority_request {
+            GlContextPriorityRequest::Default => builder,
+            GlContextPriorityRequest::High => builder.with_priority(Priority::High),
+        };
         builder.build(Some(raw_window_handle))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GlContextPriorityRequest {
+    Default,
+    High,
+}
+
+impl GlContextPriorityRequest {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Default => "default priority",
+            Self::High => "High priority",
+        }
+    }
+}
+
+fn gl_context_priority_requests(
+    platform: crate::platform::PlatformKind,
+) -> &'static [GlContextPriorityRequest] {
+    const LINUX: &[GlContextPriorityRequest] = &[
+        GlContextPriorityRequest::High,
+        GlContextPriorityRequest::Default,
+    ];
+    const DEFAULT: &[GlContextPriorityRequest] = &[GlContextPriorityRequest::Default];
+    match platform {
+        crate::platform::PlatformKind::Linux => LINUX,
+        crate::platform::PlatformKind::Windows
+        | crate::platform::PlatformKind::Macos
+        | crate::platform::PlatformKind::Other => DEFAULT,
+    }
+}
+
+fn gl_context_attempts(
+    platform: crate::platform::PlatformKind,
+) -> impl Iterator<Item = (GlContextPlan, GlContextPriorityRequest)> {
+    let priorities = gl_context_priority_requests(platform);
+    gl_context_plans(platform).iter().copied().flat_map(move |plan| {
+        priorities
+            .iter()
+            .copied()
+            .map(move |priority| (plan, priority))
+    })
+}
+
+fn gpu_priority_label(priority: Priority) -> &'static str {
+    match priority {
+        Priority::Low => "Low",
+        Priority::Medium => "Medium",
+        Priority::High => "High",
+        Priority::Realtime => "Realtime",
     }
 }
 
@@ -96,6 +156,10 @@ fn framebuffer_config_rank(hardware_accelerated: bool, num_samples: u8) -> (bool
     (hardware_accelerated, Reverse(num_samples))
 }
 
+fn blocking_swap_interval() -> glutin::surface::SwapInterval {
+    glutin::surface::SwapInterval::Wait(NonZeroU32::MIN)
+}
+
 fn window_attributes(app: &App) -> WindowAttributes {
     let icon_bytes = include_bytes!("../../icons/icon.png");
     let window_icon = image::load_from_memory(icon_bytes)
@@ -123,11 +187,15 @@ fn create_not_current_context(
 ) -> Result<(NotCurrentContext, String), String> {
     let display = gl_config.display();
     let mut errors = Vec::new();
-    for plan in gl_context_plans(crate::platform::CURRENT_PLATFORM) {
-        let attributes = plan.attributes(raw_window_handle);
+    for (plan, priority_request) in gl_context_attempts(crate::platform::CURRENT_PLATFORM) {
+        let attributes = plan.attributes(raw_window_handle, priority_request);
         match unsafe { display.create_context(gl_config, &attributes) } {
             Ok(context) => return Ok((context, plan.label())),
-            Err(error) => errors.push(format!("{}: {error}", plan.label())),
+            Err(error) => errors.push(format!(
+                "{} / {}: {error}",
+                plan.label(),
+                priority_request.label()
+            )),
         }
     }
     Err(format!(
@@ -139,12 +207,9 @@ fn create_not_current_context(
 fn create_surface_and_context(
     gl_config: &Config,
     window: &Window,
+    raw_window_handle: RawWindowHandle,
     not_current_context: NotCurrentContext,
 ) -> Result<(Surface<WindowSurface>, PossiblyCurrentContext), String> {
-    let raw_window_handle = window
-        .window_handle()
-        .map_err(|error| format!("window handle is unavailable: {error}"))?
-        .as_raw();
     let size = window.inner_size();
     let attributes = glutin::surface::SurfaceAttributesBuilder::<WindowSurface>::new().build(
         raw_window_handle,
@@ -157,10 +222,7 @@ fn create_surface_and_context(
     let context = not_current_context
         .make_current(&surface)
         .map_err(|error| format!("making OpenGL context current failed: {error}"))?;
-    let _ = surface.set_swap_interval(
-        &context,
-        glutin::surface::SwapInterval::Wait(NonZeroU32::MIN),
-    );
+    let _ = surface.set_swap_interval(&context, blocking_swap_interval());
     Ok((surface, context))
 }
 
@@ -199,7 +261,16 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
         .as_raw();
     let (not_current_context, requested_context) =
         create_not_current_context(&gl_config, raw_window_handle)?;
-    let (surface, context) = create_surface_and_context(&gl_config, &window, not_current_context)?;
+    let (surface, context) = create_surface_and_context(
+        &gl_config,
+        &window,
+        raw_window_handle,
+        not_current_context,
+    )?;
+    let requested_context = format!(
+        "{requested_context} / GPU priority {}",
+        gpu_priority_label(context.priority())
+    );
     let renderer = Renderer::new(
         create_glow_context(&gl_config),
         window.scale_factor() as f32,
@@ -302,7 +373,13 @@ pub(super) fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlContextPlan, framebuffer_config_rank, gl_context_plans};
+    use super::{
+        GlContextPlan, GlContextPriorityRequest, blocking_swap_interval, framebuffer_config_rank,
+        gl_context_attempts, gl_context_plans, gpu_priority_label,
+    };
+    use glutin::context::Priority;
+    use glutin::surface::SwapInterval;
+    use std::num::NonZeroU32;
 
     #[test]
     fn framebuffer_config_rank_prefers_hardware_then_minimum_samples() {
@@ -328,6 +405,62 @@ mod tests {
             gl_context_plans(crate::platform::PlatformKind::Linux)
                 .iter()
                 .any(|plan| matches!(plan, GlContextPlan::Gles { major: 3, minor: 0 }))
+        );
+    }
+
+    #[test]
+    fn linux_priority_fallback_stays_within_each_graphics_plan() {
+        let attempts = gl_context_attempts(crate::platform::PlatformKind::Linux)
+            .take(4)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            attempts,
+            [
+                (
+                    GlContextPlan::Desktop { major: 4, minor: 1 },
+                    GlContextPriorityRequest::High,
+                ),
+                (
+                    GlContextPlan::Desktop { major: 4, minor: 1 },
+                    GlContextPriorityRequest::Default,
+                ),
+                (
+                    GlContextPlan::Desktop { major: 3, minor: 3 },
+                    GlContextPriorityRequest::High,
+                ),
+                (
+                    GlContextPlan::Desktop { major: 3, minor: 3 },
+                    GlContextPriorityRequest::Default,
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn non_linux_context_attempts_do_not_request_explicit_high_priority() {
+        for platform in [
+            crate::platform::PlatformKind::Windows,
+            crate::platform::PlatformKind::Macos,
+            crate::platform::PlatformKind::Other,
+        ] {
+            assert!(
+                gl_context_attempts(platform)
+                    .all(|(_, priority)| priority == GlContextPriorityRequest::Default)
+            );
+        }
+    }
+
+    #[test]
+    fn graphics_priority_diagnostics_distinguish_assigned_priority() {
+        assert_eq!(gpu_priority_label(Priority::High), "High");
+        assert_eq!(gpu_priority_label(Priority::Medium), "Medium");
+    }
+
+    #[test]
+    fn swap_policy_is_blocking_for_all_window_backends() {
+        assert_eq!(
+            blocking_swap_interval(),
+            SwapInterval::Wait(NonZeroU32::MIN)
         );
     }
 

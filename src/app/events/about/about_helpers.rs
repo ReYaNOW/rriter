@@ -474,8 +474,12 @@ mod tests {
     }
 
     #[test]
-    fn active_scroll_keeps_event_loop_polling() {
-        assert!(needs_continuous_poll(false, false, true));
+    fn active_animation_keeps_event_loop_polling() {
+        for (autocomplete, git_progress, scroll) in
+            [(true, false, false), (false, true, false), (false, false, true)]
+        {
+            assert!(needs_continuous_poll(autocomplete, git_progress, scroll));
+        }
         assert!(!needs_continuous_poll(false, false, false));
     }
 
@@ -758,6 +762,17 @@ mod tests {
             .next()
             .unwrap();
         assert!(focus.contains("self.cancel_pointer_interactions();"));
+        assert!(focus.contains("self.render_suspended = false;"));
+        assert!(focus.contains("self.render_suspended = true;"));
+        let occluded = events
+            .split("WindowEvent::Occluded(occluded) =>")
+            .nth(1)
+            .unwrap()
+            .split("WindowEvent::ScaleFactorChanged")
+            .next()
+            .unwrap();
+        assert!(occluded.contains("self.render_suspended = occluded;"));
+        assert!(occluded.contains("if !occluded"));
 
         let input = include_str!("../../mouse/input.rs");
         let release = input
