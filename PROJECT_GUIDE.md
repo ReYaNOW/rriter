@@ -303,6 +303,10 @@ Standard-library-only Windows release driver. It discovers Visual Studio Build T
 
 Standard-library-only macOS release driver. It builds native or Universal 2 executables, runs the project test suite once on the native architecture with the serial-test policy, applies the selected deployment target to both Cargo and `Info.plist`, creates a Retina `.app` and ICNS, signs nested code before the bundle under hardened runtime, optionally notarizes/staples, creates a DMG, verifies Gatekeeper, and can launch RRiter. Run `python3 scripts/build_macos.py --self-test` on any platform.
 
+#### `scripts/pgo_postgres_fixture.py`
+
+Standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools. It listens only on `127.0.0.1` with an ephemeral port, implements the narrow startup/simple/extended-query protocol subset exercised by RRiter `tokio-postgres`, serves the deterministic `rriter_pgo.public.pgo_items` dataset, fails unknown SQL instead of fabricating success, and exposes protocol/SQL/lifecycle telemetry for PGO validation. It is a transport-boundary test/training helper, not an alternate RRiter database backend.
+
 Full operator commands live in `WINDOWS_BUILD.md` and `MACOS_BUILD.md`.
 
 #### `Cargo.toml`
@@ -400,6 +404,14 @@ Cross-platform boundary for native directories, path identity/persistence, text 
 * `src/platform/tests.rs` -> platform/path/text/atomic-write/modifier/tool-resolution regression tests that can run on Linux, plus target-gated native tests.
 
 Use these APIs instead of introducing platform checks, lossy path strings, unmanaged long-lived child processes, or shell-command strings in feature modules. Native tool paths are configured from settings through `ToolPaths`; feature code must not rewrite process-wide environment variables.
+
+### `src/app/automation_database.rs`
+
+PGO-only semantic Database Tools automation. It consumes the loopback PostgreSQL fixture endpoint from isolated PGO environment variables, seeds a TLS-disabled/SSH-disabled connection with an explicit empty session secret bundle, then drives the normal `App`/`DatabaseRuntime` catalog, DDL, table, transaction-review/rollback, query-completion, Run, Explain, and result-scroll paths. It contains no alternate database backend.
+
+### `src/app/automation_dart.rs`
+
+PGO-only Dart automation setup and state waits. It disables external Dart server/workspace analysis before the generated workspace is applied, keeps syntax-block closing labels enabled, and requires current-revision tree-sitter syntax hints with explicit diagnostics before the scenario renders and scrolls the Dart source.
 
 ### `src/app/dart_settings.rs`
 

@@ -1188,6 +1188,38 @@ mod tests {
     }
 
     #[test]
+    fn disabled_dart_support_keeps_generated_package_sdk_independent() {
+        let root = temp_dir("disabled-pgo-package");
+        let lib = root.join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::write(
+            root.join("pubspec.yaml"),
+            "name: rriter_pgo_fixture\npublish_to: none\n",
+        )
+        .unwrap();
+        let file = lib.join("pgo_training.dart");
+        let text = Arc::<str>::from("void pgoDartTarget() {}\n");
+        std::fs::write(&file, text.as_ref()).unwrap();
+
+        let mut manager = LspManager::new(vec![root.clone()]);
+        manager.set_server_enabled(DART_SERVER_NAME, false);
+        manager.set_dart_workspace_analysis_enabled(false);
+        manager.open_dart_document(file.clone(), text, 1);
+
+        let root_key = crate::platform::PathKey::new(&root);
+        let file_key = crate::platform::PathKey::new(&file);
+        let state = manager.dart_workspaces.get(&root_key).unwrap();
+        assert!(manager.dart_disabled);
+        assert!(!manager.dart_workspace_analysis_enabled);
+        assert!(state.process.is_none());
+        assert!(state.job.is_none());
+        assert!(state.due_at.is_none());
+        assert!(manager.open_dart_files.contains_key(&file_key));
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn dart_enable_and_restart_do_not_depend_on_open_python_documents() {
         let mut manager = LspManager::new(Vec::new());
         manager.python_disabled = true;

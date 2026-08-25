@@ -6,14 +6,17 @@ use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 
 use crate::app::api_client::ApiFocus;
+use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
+use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
 use crate::app::{App, PanelId};
 
-pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 12;
+pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 16;
 
 const TIMED_SCROLL_HZ: f32 = 120.0;
 const TIMED_SCROLL_PAUSE_SECS: f32 = 2.0;
 const GIT_FIXTURE_COMMIT_COUNT: usize = 1_000;
 const GIT_FIXTURE_BRANCH_COUNT: usize = 50;
+const PGO_HOVER_MAX_INSTALL_ATTEMPTS: u32 = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct TimedScrollPlan {
@@ -201,6 +204,8 @@ enum AutomationStep {
     },
     ResetApiTabScroll,
     ClearApiRouteFilter,
+    Dart(DartAutomationStep),
+    Database(DatabaseAutomationStep),
     ShowSettings(bool),
     SetSettingsTab(usize),
     AddSettingsIgnore(&'static str),
@@ -295,6 +300,8 @@ impl AutomationStep {
             }
             Self::ResetApiTabScroll => "reset-api-tab-scroll".to_string(),
             Self::ClearApiRouteFilter => "clear-api-route-filter".to_string(),
+            Self::Dart(step) => step.name(),
+            Self::Database(step) => step.name(),
             Self::ShowSettings(show) => format!("show-settings:{show}"),
             Self::SetSettingsTab(tab) => format!("settings-tab:{tab}"),
             Self::AddSettingsIgnore(pattern) => format!("add-settings-ignore:{pattern}"),
@@ -321,6 +328,8 @@ impl AutomationStep {
             | Self::WaitApiResponse { .. }
             | Self::TriggerAutocomplete(_)
             | Self::ShowHover { .. } => Duration::from_secs(30),
+            Self::Dart(step) => step.timeout(),
+            Self::Database(step) => step.timeout(),
             Self::ScrollEditorTimed { duration_secs }
             | Self::ScrollGitGraphTimed { duration_secs }
             | Self::ScrollApiRoutesTimed { duration_secs }
@@ -343,17 +352,36 @@ pub enum AutomationTick {
     Exit,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AutomationFailure {
+    index: usize,
+    name: String,
+    step_elapsed_ms: u64,
+    reason: String,
+    previous_completed_step: Option<String>,
+    context: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutomationFailureKind {
+    Failed,
+    Timeout,
+    GlobalTimeout,
+}
+
 pub struct AutomationController {
     options: AutomationOptions,
     steps: Vec<AutomationStep>,
     step_index: usize,
     step_progress: u32,
+    step_start_logged: bool,
     started_at: Instant,
     step_started_at: Instant,
     completed: Vec<String>,
     skipped: Vec<String>,
-    failure: Option<String>,
+    failure: Option<AutomationFailure>,
     report_written: bool,
+    hover_last_anchor: Option<(f32, f32)>,
 }
 
 impl AutomationController {
@@ -365,12 +393,14 @@ impl AutomationController {
             steps,
             step_index: 0,
             step_progress: 0,
+            step_start_logged: false,
             started_at: now,
             step_started_at: now,
             completed: Vec::with_capacity(256),
             skipped: Vec::with_capacity(8),
             failure: None,
             report_written: false,
+            hover_last_anchor: None,
         }
     }
 
@@ -381,36 +411,68 @@ impl AutomationController {
         now: Instant,
     ) -> AutomationTick {
         if now.saturating_duration_since(self.started_at) > self.options.timeout {
-            return self.fail_and_exit(format!(
-                "global timeout after {:.1}s at {}",
-                self.options.timeout.as_secs_f32(),
-                self.current_step_name()
-            ));
+            let step = self.steps.get(self.step_index).cloned();
+            let name = step
+                .as_ref()
+                .map(AutomationStep::name)
+                .unwrap_or_else(|| "complete".to_string());
+            let context = step
+                .as_ref()
+                .map(|step| {
+                    step_failure_context(
+                        app,
+                        step,
+                        self.step_progress,
+                        self.hover_last_anchor,
+                    )
+                })
+                .filter(|context| !context.is_empty());
+            return self.fail_and_exit(
+                name,
+                format!(
+                    "global timeout after {:.1}s",
+                    self.options.timeout.as_secs_f32()
+                ),
+                context,
+                now,
+                AutomationFailureKind::GlobalTimeout,
+            );
         }
 
         let Some(step) = self.steps.get(self.step_index).cloned() else {
             return self.finish_and_exit();
         };
+        self.log_step_start(&step);
         if now.saturating_duration_since(self.step_started_at) > step.timeout() {
-            let mut message = format!(
-                "step timeout after {:.1}s: {}",
-                step.timeout().as_secs_f32(),
-                step.name()
+            let message = format!(
+                "step timeout after {:.1}s",
+                step.timeout().as_secs_f32()
             );
-            if matches!(
-                step,
-                AutomationStep::ShowHover { .. } | AutomationStep::ScrollHoverTimed { .. }
-            ) {
-                message.push_str("; ");
-                message.push_str(&hover_state_diagnostics());
-            }
+            let context = step_failure_context(
+                app,
+                &step,
+                self.step_progress,
+                self.hover_last_anchor,
+            );
             if step.optional() {
-                println!("PGO_AUTOMATION_SKIP {message}");
-                self.skipped.push(message);
+                println!(
+                    "PGO_AUTOMATION_SKIP index={} name={:?} reason={:?} context={:?}",
+                    self.step_index,
+                    step.name(),
+                    message,
+                    context
+                );
+                self.skipped.push(format!("{}: {message}", step.name()));
                 self.advance(step.name(), now);
                 return AutomationTick::Running;
             }
-            return self.fail_and_exit(message);
+            return self.fail_and_exit(
+                step.name(),
+                message,
+                (!context.is_empty()).then_some(context),
+                now,
+                AutomationFailureKind::Timeout,
+            );
         }
 
         let result = self.run_step(app, event_loop, &step, now);
@@ -421,12 +483,38 @@ impl AutomationController {
                 AutomationTick::Running
             }
             StepResult::Failed(message) if step.optional() => {
-                println!("PGO_AUTOMATION_SKIP {message}");
-                self.skipped.push(message);
+                let context = step_failure_context(
+                    app,
+                    &step,
+                    self.step_progress,
+                    self.hover_last_anchor,
+                );
+                println!(
+                    "PGO_AUTOMATION_SKIP index={} name={:?} reason={:?} context={:?}",
+                    self.step_index,
+                    step.name(),
+                    message,
+                    context
+                );
+                self.skipped.push(format!("{}: {message}", step.name()));
                 self.advance(step.name(), now);
                 AutomationTick::Running
             }
-            StepResult::Failed(message) => self.fail_and_exit(message),
+            StepResult::Failed(message) => {
+                let context = step_failure_context(
+                    app,
+                    &step,
+                    self.step_progress,
+                    self.hover_last_anchor,
+                );
+                self.fail_and_exit(
+                    step.name(),
+                    message,
+                    (!context.is_empty()).then_some(context),
+                    now,
+                    AutomationFailureKind::Failed,
+                )
+            }
             StepResult::Exit => self.finish_and_exit(),
         }
     }
@@ -493,11 +581,23 @@ impl AutomationController {
                 }
             }
             AutomationStep::OpenPanel(panel) => {
-                open_panel_semantic(app, *panel);
-                if app.ide_panel.is_open(*panel) {
-                    StepResult::Done
+                if begin_open_panel_action(&mut self.step_progress) {
+                    open_panel_semantic(app, *panel);
+                }
+                if *panel != PanelId::Terminal {
+                    if app.ide_panel.is_open(*panel) {
+                        StepResult::Done
+                    } else {
+                        StepResult::Failed(format!("panel did not open: {panel:?}"))
+                    }
                 } else {
-                    StepResult::Failed(format!("panel did not open: {panel:?}"))
+                    match terminal_panel_open_state(app) {
+                        TerminalPanelOpenState::Open => StepResult::Done,
+                        TerminalPanelOpenState::WaitingForPresentation => StepResult::Pending,
+                        TerminalPanelOpenState::ClosedUnexpectedly => {
+                            StepResult::Failed("panel did not open: Terminal".to_string())
+                        }
+                    }
                 }
             }
             AutomationStep::ExpandWorkspaceRoot => {
@@ -729,7 +829,14 @@ impl AutomationController {
                     StepResult::Failed(format!("completion was not applied: {expected}"))
                 }
             }
-            AutomationStep::ShowHover { needle, text } => show_hover_semantic(app, needle, text),
+            AutomationStep::ShowHover { needle, text } => show_hover_semantic(
+                app,
+                &self.options.workspace,
+                needle,
+                text,
+                &mut self.step_progress,
+                &mut self.hover_last_anchor,
+            ),
             AutomationStep::ScrollHoverTimed { duration_secs } => {
                 let hover_ready = crate::app::mouse::HOVER_STATE.with(|state| {
                     let state = state.borrow();
@@ -1236,6 +1343,45 @@ impl AutomationController {
                 request_redraw(app);
                 StepResult::Done
             }
+            AutomationStep::Dart(dart_step) => {
+                match crate::app::automation_dart::run(app, *dart_step) {
+                    DartStepResult::Pending => StepResult::Pending,
+                    DartStepResult::Done => StepResult::Done,
+                    DartStepResult::Failed(message) => StepResult::Failed(message),
+                }
+            }
+            AutomationStep::Database(database_step) => match *database_step {
+                DatabaseAutomationStep::ScrollTableTimed { duration_secs } => {
+                    let mut failure = None;
+                    let result = self.timed_scroll(app, now, duration_secs, |app, direction| {
+                        if failure.is_none()
+                            && let Err(error) = crate::app::automation_database::scroll_table(
+                                app, direction,
+                            )
+                        {
+                            failure = Some(error);
+                        }
+                    });
+                    failure.map_or(result, StepResult::Failed)
+                }
+                DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs } => {
+                    let mut failure = None;
+                    let result = self.timed_scroll(app, now, duration_secs, |app, direction| {
+                        if failure.is_none()
+                            && let Err(error) =
+                                crate::app::automation_database::scroll_query_result(app, direction)
+                        {
+                            failure = Some(error);
+                        }
+                    });
+                    failure.map_or(result, StepResult::Failed)
+                }
+                _ => match crate::app::automation_database::run_step(app, *database_step) {
+                    DatabaseStepResult::Pending => StepResult::Pending,
+                    DatabaseStepResult::Done => StepResult::Done,
+                    DatabaseStepResult::Failed(message) => StepResult::Failed(message),
+                },
+            },
             AutomationStep::ShowSettings(show) => {
                 app.show_settings = *show;
                 app.settings_anim_progress = if *show { 0.0 } else { 1.0 };
@@ -1324,6 +1470,20 @@ impl AutomationController {
         StepResult::Pending
     }
 
+    fn log_step_start(&mut self, step: &AutomationStep) -> bool {
+        if self.step_start_logged {
+            return false;
+        }
+        println!(
+            "PGO_AUTOMATION_STEP_START index={} name={} timeout_ms={}",
+            self.step_index,
+            step.name(),
+            step.timeout().as_millis()
+        );
+        self.step_start_logged = true;
+        true
+    }
+
     fn advance(&mut self, name: String, now: Instant) {
         println!(
             "PGO_AUTOMATION_STEP index={} name={} status=ok",
@@ -1332,6 +1492,7 @@ impl AutomationController {
         self.completed.push(name);
         self.step_index += 1;
         self.step_progress = 0;
+        self.step_start_logged = false;
         self.step_started_at = now;
     }
 
@@ -1342,9 +1503,47 @@ impl AutomationController {
             .unwrap_or_else(|| "complete".to_string())
     }
 
-    fn fail_and_exit(&mut self, message: String) -> AutomationTick {
-        eprintln!("PGO_AUTOMATION_FAILED {message}");
-        self.failure = Some(message);
+    fn fail_and_exit(
+        &mut self,
+        name: String,
+        reason: String,
+        context: Option<String>,
+        now: Instant,
+        kind: AutomationFailureKind,
+    ) -> AutomationTick {
+        let failure = AutomationFailure {
+            index: self.step_index,
+            name,
+            step_elapsed_ms: duration_ms(
+                now.saturating_duration_since(self.step_started_at),
+            ),
+            reason,
+            previous_completed_step: self.completed.last().cloned(),
+            context,
+        };
+        let prefix = match kind {
+            AutomationFailureKind::Timeout => "PGO_AUTOMATION_TIMEOUT",
+            AutomationFailureKind::Failed | AutomationFailureKind::GlobalTimeout => {
+                "PGO_AUTOMATION_FAILED"
+            }
+        };
+        let kind_field = if kind == AutomationFailureKind::GlobalTimeout {
+            " kind=global-timeout"
+        } else {
+            ""
+        };
+        eprintln!(
+            "{prefix}{kind_field} index={} name={} step_elapsed_ms={} total_elapsed_ms={} previous_step={:?} reason={:?} context={:?} report={:?}",
+            failure.index,
+            failure.name,
+            failure.step_elapsed_ms,
+            duration_ms(now.saturating_duration_since(self.started_at)),
+            failure.previous_completed_step.as_deref().unwrap_or("none"),
+            failure.reason,
+            failure.context.as_deref().unwrap_or(""),
+            self.options.report_path
+        );
+        self.failure = Some(failure);
         self.write_report("failed");
         AutomationTick::Exit
     }
@@ -1370,7 +1569,14 @@ impl AutomationController {
             self.step_index
         );
         eprintln!("PGO_AUTOMATION_INTERRUPTED {message}");
-        self.failure = Some(message);
+        self.failure = Some(AutomationFailure {
+            index: self.step_index,
+            name: self.current_step_name(),
+            step_elapsed_ms: duration_ms(self.step_started_at.elapsed()),
+            reason: message,
+            previous_completed_step: self.completed.last().cloned(),
+            context: None,
+        });
         self.write_report("failed");
     }
 
@@ -1379,6 +1585,7 @@ impl AutomationController {
             return;
         }
         self.report_written = true;
+        let failure = self.failure.as_ref();
         let report = json!({
             "status": status,
             "scenario_version": PGO_AUTOMATION_SCENARIO_VERSION,
@@ -1392,7 +1599,14 @@ impl AutomationController {
             "duration_ms": self.started_at.elapsed().as_millis(),
             "completed_steps": self.completed,
             "skipped_steps": self.skipped,
-            "failed_step": self.failure,
+            "failed_step": failure.map(|failure| failure.reason.as_str()),
+            "failed_step_index": failure.map(|failure| failure.index),
+            "failed_step_name": failure.map(|failure| failure.name.as_str()),
+            "failed_step_elapsed_ms": failure.map(|failure| failure.step_elapsed_ms),
+            "failure_reason": failure.map(|failure| failure.reason.as_str()),
+            "previous_completed_step": failure
+                .and_then(|failure| failure.previous_completed_step.as_deref()),
+            "failure_context": failure.and_then(|failure| failure.context.as_deref()),
         });
         if let Some(parent) = self.options.report_path.parent() {
             if let Err(error) = std::fs::create_dir_all(parent) {
@@ -1455,6 +1669,122 @@ enum StepResult {
     Done,
     Failed(String),
     Exit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TerminalPanelOpenState {
+    Open,
+    WaitingForPresentation,
+    ClosedUnexpectedly,
+}
+
+fn duration_ms(duration: Duration) -> u64 {
+    duration.as_millis().min(u128::from(u64::MAX)) as u64
+}
+
+fn begin_open_panel_action(step_progress: &mut u32) -> bool {
+    if *step_progress != 0 {
+        return false;
+    }
+    *step_progress = 1;
+    true
+}
+
+fn terminal_panel_open_state_from_values(
+    panel_open: bool,
+    terminals: impl IntoIterator<
+        Item = (crate::app::terminal::TerminalPresentationIntent, bool),
+    >,
+) -> TerminalPanelOpenState {
+    if panel_open {
+        return TerminalPanelOpenState::Open;
+    }
+    if terminals.into_iter().any(|(intent, _presentation_ready)| {
+        intent == crate::app::terminal::TerminalPresentationIntent::OpenPanelWhenReady
+    }) {
+        TerminalPanelOpenState::WaitingForPresentation
+    } else {
+        TerminalPanelOpenState::ClosedUnexpectedly
+    }
+}
+
+fn terminal_panel_open_state(app: &App) -> TerminalPanelOpenState {
+    terminal_panel_open_state_from_values(
+        app.ide_panel.is_open(PanelId::Terminal),
+        app.ide_panel.terminals.iter().map(|terminal| {
+            let ready = crate::app::terminal::lock_terminal_grid(&terminal.grid).presentation_ready;
+            (terminal.presentation_intent, ready)
+        }),
+    )
+}
+
+fn panel_failure_diagnostics(app: &App, requested_panel: PanelId) -> String {
+    let open_top_panel = app
+        .ide_panel
+        .slots
+        .iter()
+        .find(|slot| {
+            slot.open && slot.group == crate::app::app_state::PanelGroup::Top
+        })
+        .map(|slot| format!("{:?}", slot.id))
+        .unwrap_or_else(|| "none".to_string());
+    let open_bottom_panel = app
+        .ide_panel
+        .open_bottom_panel_id()
+        .map(|panel| format!("{panel:?}"))
+        .unwrap_or_else(|| "none".to_string());
+    let active_terminal = if app.ide_panel.terminals.is_empty() {
+        "none".to_string()
+    } else {
+        app.ide_panel.active_terminal.to_string()
+    };
+    let terminal_presentation = app
+        .ide_panel
+        .terminals
+        .get(app.ide_panel.active_terminal)
+        .map_or_else(
+            || "active_terminal_state=none".to_string(),
+            |terminal| {
+                let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
+                format!(
+                    "presentation_ready={} presentation_layout_ready={} presentation_intent={:?}",
+                    grid.presentation_ready,
+                    grid.presentation_layout_ready,
+                    terminal.presentation_intent
+                )
+            },
+        );
+    format!(
+        "requested_panel={requested_panel:?} open_top_panel={open_top_panel} open_bottom_panel={open_bottom_panel} requested_panel_open={} terminal_count={} active_terminal={active_terminal} terminal_focused={} term_search_focused={} {terminal_presentation} {}",
+        app.ide_panel.is_open(requested_panel),
+        app.ide_panel.terminals.len(),
+        app.ide_panel.terminal_focused,
+        app.ide_panel.term_search_focused,
+        crate::app::automation_database::transient_diagnostics(app),
+    )
+}
+
+fn step_failure_context(
+    app: &App,
+    step: &AutomationStep,
+    step_progress: u32,
+    hover_last_anchor: Option<(f32, f32)>,
+) -> String {
+    match step {
+        AutomationStep::OpenPanel(panel) => panel_failure_diagnostics(app, *panel),
+        AutomationStep::Database(_) => crate::app::automation_database::diagnostics(app),
+        AutomationStep::ShowHover { needle, .. } => hover_failure_diagnostics(
+            app,
+            app.editor.get_full_text().find(needle),
+            step_progress,
+            hover_last_anchor,
+        ),
+        AutomationStep::ScrollHoverTimed { .. } => hover_state_diagnostics(),
+        AutomationStep::Dart(DartAutomationStep::WaitClosingHints { minimum_count }) => {
+            crate::app::automation_dart::diagnostics(app, *minimum_count)
+        }
+        _ => String::new(),
+    }
 }
 
 fn request_redraw(app: &App) {
@@ -1550,6 +1880,56 @@ fn hover_popup_status(state: &crate::app::mouse::HoverState, byte_offset: usize)
     (matching, matching && state.rect.is_some())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct HoverPrerequisites {
+    active_file_matches: bool,
+    autocomplete_inactive: bool,
+    editor_clean: bool,
+    highlight_current: bool,
+    external_changes_idle: bool,
+    renderer_ready: bool,
+}
+
+impl HoverPrerequisites {
+    fn ready(self) -> bool {
+        self.active_file_matches
+            && self.autocomplete_inactive
+            && self.editor_clean
+            && self.highlight_current
+            && self.external_changes_idle
+            && self.renderer_ready
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HoverProgressAction {
+    WaitStable,
+    WaitDraw,
+    Done,
+    Install,
+    FailRepeatedClear,
+}
+
+fn hover_progress_action(
+    prerequisites: HoverPrerequisites,
+    popup_status: (bool, bool),
+    install_attempts: u32,
+) -> HoverProgressAction {
+    if !prerequisites.ready() {
+        return HoverProgressAction::WaitStable;
+    }
+    let (matching_popup, drawn_rect) = popup_status;
+    if drawn_rect {
+        HoverProgressAction::Done
+    } else if matching_popup {
+        HoverProgressAction::WaitDraw
+    } else if install_attempts < PGO_HOVER_MAX_INSTALL_ATTEMPTS {
+        HoverProgressAction::Install
+    } else {
+        HoverProgressAction::FailRepeatedClear
+    }
+}
+
 fn hover_state_diagnostics() -> String {
     crate::app::mouse::HOVER_STATE.with(|state| {
         let state = state.borrow();
@@ -1567,35 +1947,141 @@ fn hover_state_diagnostics() -> String {
     })
 }
 
-fn show_hover_semantic(app: &mut App, needle: &str, text: &str) -> StepResult {
-    let editor_text = app.editor.get_full_text();
-    let Some(byte_offset) = editor_text.find(needle) else {
-        return StepResult::Failed(format!("hover target was not found: {needle}"));
-    };
+fn hover_highlight_is_current(
+    app_highlight_complete: bool,
+    highlighter_complete: bool,
+    highlighter_version: u64,
+    editor_version: u64,
+) -> bool {
+    app_highlight_complete && highlighter_complete && highlighter_version == editor_version
+}
 
-    let (has_matching_popup, has_drawn_rect) = crate::app::mouse::HOVER_STATE
-        .with(|state| hover_popup_status(&state.borrow(), byte_offset));
-    if has_drawn_rect {
-        return StepResult::Done;
+fn hover_prerequisites(app: &App, expected_file: &Path) -> HoverPrerequisites {
+    HoverPrerequisites {
+        active_file_matches: app
+            .file_path
+            .as_deref()
+            .is_some_and(|path| crate::platform::paths_equal(path, expected_file)),
+        autocomplete_inactive: !app.autocomplete_active,
+        editor_clean: !app.editor.is_dirty(),
+        highlight_current: hover_highlight_is_current(
+            app.is_highlight_complete,
+            app.highlighter.is_complete,
+            app.highlighter.current_version,
+            app.editor.version,
+        ),
+        external_changes_idle: app.external_changes_rx.is_none(),
+        renderer_ready: app.renderer.is_some(),
     }
-    if has_matching_popup {
-        request_redraw(app);
-        return StepResult::Pending;
-    }
+}
 
-    let scale = app
-        .renderer
-        .as_ref()
-        .map_or(1.0, |renderer| renderer.scale_factor);
-    let anchor = (340.0 * scale, 180.0 * scale);
-    let mut popup = crate::app::events::source_hover_popup_for_editor(
+fn hover_blocker_diagnostics(app: &App) -> String {
+    let database_query_modal_open = app.tabs.get(app.active_tab).is_some_and(|tab| {
+        matches!(
+            &tab.kind,
+            crate::app::EditorTabKind::DatabaseQuery(_, state) if state.review.is_some()
+        )
+    });
+    let file_tree_overlay_open =
+        crate::app::file_tree::file_tree_overlay_active_for_panel(&app.ide_panel);
+    let api_blocking_popup = app.ide_panel.api.mock_python_runtime_open
+        || app.ide_panel.api.mock_guide_open
+        || app.ide_panel.api.mock_server_detail_open;
+    format!(
+        "terminal_focused={} file_tree_overlay_open={} database_modal={} database_query_modal={} project_search_help={} api_blocking_popup={} settings_open={} dialog_window_open={}",
+        app.ide_panel.terminal_focused,
+        file_tree_overlay_open,
+        app.ide_panel.database.modal_open(),
+        database_query_modal_open,
+        app.ide_panel.project_search.help_open,
+        api_blocking_popup,
+        app.show_settings,
+        app.dialog_window.is_some(),
+    )
+}
+
+fn hover_failure_diagnostics(
+    app: &App,
+    target_byte_offset: Option<usize>,
+    install_attempts: u32,
+    derived_anchor: Option<(f32, f32)>,
+) -> String {
+    let active_file = app.file_path.as_deref().map_or_else(
+        || "<none>".to_string(),
+        |path| path.display().to_string(),
+    );
+    let renderer = app.renderer.as_ref().map_or_else(
+        || "renderer=none".to_string(),
+        |renderer| {
+            format!(
+                "renderer_mouse=({:.1},{:.1}) hide_popups_until_mouse_move={} renderer_scroll=({:.1},{:.1})",
+                renderer.last_mouse_x,
+                renderer.last_mouse_y,
+                renderer.hide_popups_until_mouse_move,
+                renderer.last_scroll_x,
+                renderer.last_scroll_y,
+            )
+        },
+    );
+    format!(
+        "active_file={} editor_version={} editor_dirty={} app_highlight_complete={} highlighter_version={} highlighter_complete={} highlight_current={} autocomplete_active={} external_changes_pending={} target_byte_offset={:?} install_attempts={} derived_anchor={:?} {} {} {}",
+        active_file,
+        app.editor.version,
+        app.editor.is_dirty(),
+        app.is_highlight_complete,
+        app.highlighter.current_version,
+        app.highlighter.is_complete,
+        hover_highlight_is_current(
+            app.is_highlight_complete,
+            app.highlighter.is_complete,
+            app.highlighter.current_version,
+            app.editor.version,
+        ),
+        app.autocomplete_active,
+        app.external_changes_rx.is_some(),
+        target_byte_offset,
+        install_attempts,
+        derived_anchor,
+        hover_state_diagnostics(),
+        renderer,
+        hover_blocker_diagnostics(app),
+    )
+}
+
+fn prepare_automation_hover_pointer(
+    app: &mut App,
+    byte_offset: usize,
+) -> Option<(f32, f32)> {
+    let scale = app.renderer.as_ref()?.scale_factor;
+    let editor_top_inset = app.editor_top_inset(scale);
+    let render_scroll_y = app.scroll_y.current.round() - editor_top_inset;
+    let renderer = app.renderer.as_mut()?;
+    let anchor = crate::app::mouse::hover_anchor_for_byte(
+        renderer,
         &app.editor,
         byte_offset,
-        text.to_string(),
-        Some("tests.pgo_completion_hover"),
-        anchor,
+        render_scroll_y,
     );
-    popup.anim_progress = 1.0;
+
+    renderer.last_mouse_x = anchor.0;
+    renderer.last_mouse_y = anchor.1;
+    renderer.update_popup_mouse_move_gate();
+    if renderer.hide_popups_until_mouse_move {
+        // Exact overlap with last_known_mouse is still "no move" to production gate.
+        // Nudge internal semantic pointer by one pixel, trip same gate, then restore target.
+        renderer.last_mouse_x = anchor.0 + 1.0;
+        renderer.update_popup_mouse_move_gate();
+        renderer.last_mouse_x = anchor.0;
+        renderer.last_mouse_y = anchor.1;
+        renderer.update_popup_mouse_move_gate();
+    }
+    Some(anchor)
+}
+
+fn install_automation_hover_popup(
+    byte_offset: usize,
+    popup: crate::app::mouse::HoverPopup,
+) {
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
         *state = crate::app::mouse::HoverState::default();
@@ -1603,12 +2089,74 @@ fn show_hover_semantic(app: &mut App, needle: &str, text: &str) -> StepResult {
         state.timer = 1.0;
         state.popup = Some(popup);
     });
-    println!(
-        "PGO_AUTOMATION_HOVER installed target={needle} byte_offset={byte_offset} {}",
-        hover_state_diagnostics()
-    );
-    request_redraw(app);
-    StepResult::Pending
+}
+
+fn show_hover_semantic(
+    app: &mut App,
+    workspace: &Path,
+    needle: &str,
+    text: &str,
+    install_attempts: &mut u32,
+    last_anchor: &mut Option<(f32, f32)>,
+) -> StepResult {
+    if *install_attempts == 0 {
+        *last_anchor = None;
+    }
+
+    let expected_file = workspace.join("tests/pgo_completion_hover.py");
+    let prerequisites = hover_prerequisites(app, &expected_file);
+    if !prerequisites.active_file_matches {
+        return StepResult::Pending;
+    }
+
+    let editor_text = app.editor.get_full_text();
+    let Some(byte_offset) = editor_text.find(needle) else {
+        return StepResult::Failed(format!("hover target was not found: {needle}"));
+    };
+
+    let popup_status = crate::app::mouse::HOVER_STATE
+        .with(|state| hover_popup_status(&state.borrow(), byte_offset));
+    match hover_progress_action(prerequisites, popup_status, *install_attempts) {
+        HoverProgressAction::WaitStable => StepResult::Pending,
+        HoverProgressAction::Done => StepResult::Done,
+        HoverProgressAction::WaitDraw => {
+            request_redraw(app);
+            StepResult::Pending
+        }
+        HoverProgressAction::FailRepeatedClear => StepResult::Failed(format!(
+            "synthetic hover disappeared before draw after {} install attempts; {}",
+            *install_attempts,
+            hover_failure_diagnostics(app, Some(byte_offset), *install_attempts, *last_anchor),
+        )),
+        HoverProgressAction::Install => {
+            let Some(anchor) = prepare_automation_hover_pointer(app, byte_offset) else {
+                return StepResult::Pending;
+            };
+            *last_anchor = Some(anchor);
+            *install_attempts = (*install_attempts).saturating_add(1);
+
+            let mut popup = crate::app::events::source_hover_popup_for_editor(
+                &app.editor,
+                byte_offset,
+                text.to_string(),
+                Some("tests.pgo_completion_hover"),
+                anchor,
+            );
+            popup.anim_progress = 1.0;
+            install_automation_hover_popup(byte_offset, popup);
+            println!(
+                "PGO_AUTOMATION_HOVER install_attempt={} target={} byte_offset={} derived_anchor=({:.1},{:.1}) {}",
+                *install_attempts,
+                needle,
+                byte_offset,
+                anchor.0,
+                anchor.1,
+                hover_failure_diagnostics(app, Some(byte_offset), *install_attempts, *last_anchor),
+            );
+            request_redraw(app);
+            StepResult::Pending
+        }
+    }
 }
 
 fn scroll_active_api_tab(app: &mut App, delta: f32) {
@@ -1863,6 +2411,7 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
             width: 1280,
             height: 800,
         },
+        S::Dart(DartAutomationStep::Setup),
         S::ApplyWorkspace,
         S::WaitFileTree,
         S::OpenPanel(PanelId::Explorer),
@@ -1899,6 +2448,33 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
         S::PreviousSearchResult,
         S::WaitMillis(250),
         S::CloseSearch,
+        S::OpenFile(PathBuf::from("lib/pgo_training.dart")),
+        S::WaitHighlight,
+        S::Dart(DartAutomationStep::WaitClosingHints { minimum_count: 8 }),
+        S::WaitFrames(8),
+        S::ToggleFirstFold,
+        S::WaitFrames(4),
+        S::ToggleFirstFold,
+        S::OpenSearch,
+        S::SetSearchQuery("pgoDartTarget"),
+        S::NextSearchResult,
+        S::PreviousSearchResult,
+        S::CloseSearch,
+        S::WaitFrames(8),
+        S::ScrollEditorTimed { duration_secs: 10 },
+        S::JumpMinimap(0.18),
+        S::WaitFrames(6),
+        S::SetEditorCursorAfter("// pgoDartEditTarget"),
+        S::FocusEditor,
+        S::TypeText("\n  final int pgoDartEditedValue = pgoDartTargetValue + 1;"),
+        S::WaitHighlight,
+        S::Dart(DartAutomationStep::WaitClosingHints { minimum_count: 8 }),
+        S::WaitFrames(8),
+        S::SaveCurrentFile,
+        S::WaitHighlight,
+        S::JumpMinimap(0.05),
+        S::WaitFrames(8),
+        S::ScrollEditorTimed { duration_secs: 10 },
         S::OpenFile(PathBuf::from("src/large.rs")),
         S::WaitHighlight,
         S::ScrollEditorTimed { duration_secs: 22 },
@@ -1986,6 +2562,40 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
             body_marker: "RRITER_PGO_LOCAL_API_OK",
         },
         S::WaitMillis(500),
+        S::OpenPanel(PanelId::Database),
+        S::Database(DatabaseAutomationStep::SetupConnection),
+        S::Database(DatabaseAutomationStep::LoadCatalog),
+        S::Database(DatabaseAutomationStep::WaitCatalog),
+        S::Database(DatabaseAutomationStep::LoadTables),
+        S::Database(DatabaseAutomationStep::WaitTables),
+        S::Database(DatabaseAutomationStep::LoadDdl),
+        S::Database(DatabaseAutomationStep::WaitDdl),
+        S::WaitFrames(6),
+        S::Database(DatabaseAutomationStep::DismissDdl),
+        S::Database(DatabaseAutomationStep::OpenTable),
+        S::Database(DatabaseAutomationStep::WaitTable),
+        S::WaitFrames(8),
+        S::Database(DatabaseAutomationStep::ScrollTableTimed { duration_secs: 8 }),
+        S::Database(DatabaseAutomationStep::SortTable),
+        S::Database(DatabaseAutomationStep::WaitTableReload),
+        S::WaitFrames(6),
+        S::Database(DatabaseAutomationStep::EditTableCell),
+        S::Database(DatabaseAutomationStep::SaveTableChanges),
+        S::Database(DatabaseAutomationStep::WaitTableReview),
+        S::WaitFrames(6),
+        S::Database(DatabaseAutomationStep::RollbackTableTransaction),
+        S::Database(DatabaseAutomationStep::WaitTableTransactionFinished),
+        S::Database(DatabaseAutomationStep::OpenQuery),
+        S::Database(DatabaseAutomationStep::WaitQueryCompletion),
+        S::Database(DatabaseAutomationStep::SetQueryText),
+        S::Database(DatabaseAutomationStep::RunQuery),
+        S::Database(DatabaseAutomationStep::WaitQueryResult),
+        S::WaitFrames(6),
+        S::Database(DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs: 8 }),
+        S::Database(DatabaseAutomationStep::RunExplain),
+        S::Database(DatabaseAutomationStep::WaitExplain),
+        S::WaitFrames(6),
+        S::Database(DatabaseAutomationStep::AssertIdle),
         S::OpenPanel(PanelId::Explorer),
         S::WaitFrames(3),
         S::OpenFileTreeContext,
@@ -2060,6 +2670,93 @@ mod tests {
         let steps = full_pgo_scenario(&root);
         assert!(matches!(steps.first(), Some(AutomationStep::WaitReady)));
         assert!(matches!(steps.last(), Some(AutomationStep::Finish)));
+        let setup_dart = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::Dart(DartAutomationStep::Setup)
+            ))
+            .unwrap();
+        let apply_workspace = steps
+            .iter()
+            .position(|step| matches!(step, AutomationStep::ApplyWorkspace))
+            .unwrap();
+        let open_dart = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::OpenFile(path) if path == Path::new("lib/pgo_training.dart")
+            ))
+            .unwrap();
+        let open_large = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::OpenFile(path) if path == Path::new("src/large.rs")
+            ))
+            .unwrap();
+        let dart_steps = &steps[open_dart..open_large];
+        assert!(setup_dart < apply_workspace);
+        assert!(apply_workspace < open_dart);
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::WaitHighlight
+        )));
+        assert_eq!(
+            dart_steps
+                .iter()
+                .filter(|step| matches!(
+                    step,
+                    AutomationStep::Dart(DartAutomationStep::WaitClosingHints {
+                        minimum_count: 8
+                    })
+                ))
+                .count(),
+            2
+        );
+        assert_eq!(
+            dart_steps
+                .windows(2)
+                .filter(|pair| matches!(
+                    pair,
+                    [
+                        AutomationStep::Dart(DartAutomationStep::WaitClosingHints {
+                            minimum_count: 8
+                        }),
+                        AutomationStep::WaitFrames(_)
+                    ]
+                ))
+                .count(),
+            2
+        );
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::ToggleFirstFold
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::SetSearchQuery("pgoDartTarget")
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::ScrollEditorTimed { duration_secs: 10 }
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::JumpMinimap(fraction) if (*fraction - 0.18).abs() < f32::EPSILON
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::SetEditorCursorAfter("// pgoDartEditTarget")
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::TypeText(text) if text.contains("pgoDartEditedValue")
+        )));
+        assert!(dart_steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::SaveCurrentFile
+        )));
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::LoadGitGraph {
@@ -2147,6 +2844,114 @@ mod tests {
                 .iter()
                 .any(|step| step.name().contains("terminal-ready"))
         );
+        for required in [
+            DatabaseAutomationStep::SetupConnection,
+            DatabaseAutomationStep::WaitCatalog,
+            DatabaseAutomationStep::WaitTables,
+            DatabaseAutomationStep::WaitDdl,
+            DatabaseAutomationStep::WaitTable,
+            DatabaseAutomationStep::WaitTableReview,
+            DatabaseAutomationStep::WaitTableTransactionFinished,
+            DatabaseAutomationStep::WaitQueryCompletion,
+            DatabaseAutomationStep::WaitQueryResult,
+            DatabaseAutomationStep::WaitExplain,
+        ] {
+            assert!(steps.iter().any(|step| matches!(
+                step,
+                AutomationStep::Database(candidate) if *candidate == required
+            )));
+        }
+        assert!(steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::Database(DatabaseAutomationStep::ScrollTableTimed { duration_secs: 8 })
+        )));
+        assert!(steps.iter().any(|step| matches!(
+            step,
+            AutomationStep::Database(DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs: 8 })
+        )));
+        let ddl_index = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::Database(DatabaseAutomationStep::LoadDdl)
+            ))
+            .unwrap();
+        assert!(matches!(
+            steps.get(ddl_index + 1),
+            Some(AutomationStep::Database(DatabaseAutomationStep::WaitDdl))
+        ));
+        assert!(matches!(
+            steps.get(ddl_index + 2),
+            Some(AutomationStep::WaitFrames(6))
+        ));
+        assert!(matches!(
+            steps.get(ddl_index + 3),
+            Some(AutomationStep::Database(DatabaseAutomationStep::DismissDdl))
+        ));
+        assert!(matches!(
+            steps.get(ddl_index + 4),
+            Some(AutomationStep::Database(DatabaseAutomationStep::OpenTable))
+        ));
+
+        let explain_index = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::Database(DatabaseAutomationStep::WaitExplain)
+            ))
+            .unwrap();
+        assert!(matches!(
+            steps.get(explain_index + 1),
+            Some(AutomationStep::WaitFrames(6))
+        ));
+        assert!(matches!(
+            steps.get(explain_index + 2),
+            Some(AutomationStep::Database(DatabaseAutomationStep::AssertIdle))
+        ));
+        assert!(matches!(
+            steps.get(explain_index + 3),
+            Some(AutomationStep::OpenPanel(PanelId::Explorer))
+        ));
+
+        let problems_index = steps
+            .iter()
+            .rposition(|step| matches!(step, AutomationStep::OpenPanel(PanelId::Problems)))
+            .unwrap();
+        assert!(matches!(
+            steps.get(problems_index + 1),
+            Some(AutomationStep::WaitFrames(8))
+        ));
+        assert!(matches!(
+            steps.get(problems_index + 2),
+            Some(AutomationStep::OpenPanel(PanelId::Terminal))
+        ));
+        assert!(matches!(
+            steps.get(problems_index + 3),
+            Some(AutomationStep::WaitTerminal)
+        ));
+        if cfg!(target_os = "linux") {
+            assert!(matches!(
+                steps.get(problems_index + 4),
+                Some(AutomationStep::RunTerminalHtop)
+            ));
+            assert!(matches!(
+                steps.get(problems_index + 5),
+                Some(AutomationStep::WaitTerminalHtopVisible)
+            ));
+            assert!(matches!(
+                steps.get(problems_index + 6),
+                Some(AutomationStep::WaitMillis(10_000))
+            ));
+            assert!(matches!(
+                steps.get(problems_index + 7),
+                Some(AutomationStep::InterruptTerminal)
+            ));
+            assert!(matches!(
+                steps.get(problems_index + 8),
+                Some(AutomationStep::WaitTerminalHtopExit)
+            ));
+        }
+
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::AddSettingsIgnore(".rriter-pgo-ignore/**")
@@ -2155,6 +2960,7 @@ mod tests {
             PanelId::Explorer,
             PanelId::Git,
             PanelId::ApiClient,
+            PanelId::Database,
             PanelId::Terminal,
             PanelId::Problems,
             PanelId::LspServers,
@@ -2184,6 +2990,149 @@ mod tests {
         )));
 
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn step_start_marker_is_emitted_once_until_step_advances() {
+        let unique = format!("rriter-pgo-step-start-{}", std::process::id());
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        let mut controller = AutomationController::new(AutomationOptions {
+            workspace: root.clone(),
+            report_path: root.join("automation-report.json"),
+            timeout: Duration::from_secs(30),
+        });
+        let first = controller.steps[0].clone();
+        assert!(controller.log_step_start(&first));
+        assert!(!controller.log_step_start(&first));
+        controller.advance(first.name(), Instant::now());
+        let second = controller.steps[1].clone();
+        assert!(controller.log_step_start(&second));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn timeout_report_keeps_backward_failure_and_structured_metadata() {
+        let unique = format!("rriter-pgo-failure-report-{}", std::process::id());
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        let report_path = root.join("automation-report.json");
+        let mut controller = AutomationController::new(AutomationOptions {
+            workspace: root.clone(),
+            report_path: report_path.clone(),
+            timeout: Duration::from_secs(30),
+        });
+        controller.step_index = 1;
+        controller.completed.push("wait-8-frames".to_string());
+        let now = Instant::now();
+        controller.started_at = now - Duration::from_millis(900);
+        controller.step_started_at = now - Duration::from_millis(125);
+        let step_name = controller.steps[controller.step_index].name();
+
+        assert_eq!(
+            controller.fail_and_exit(
+                step_name.clone(),
+                "step timeout after 0.1s".to_string(),
+                Some("diagnostic-context".to_string()),
+                now,
+                AutomationFailureKind::Timeout,
+            ),
+            AutomationTick::Exit
+        );
+
+        let report: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(&report_path).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(report["failed_step"], "step timeout after 0.1s");
+        assert_eq!(report["failed_step_index"], 1);
+        assert_eq!(report["failed_step_name"], step_name);
+        assert_eq!(report["failed_step_elapsed_ms"], 125);
+        assert_eq!(report["failure_reason"], "step timeout after 0.1s");
+        assert_eq!(report["previous_completed_step"], "wait-8-frames");
+        assert_eq!(report["failure_context"], "diagnostic-context");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_step_metadata_tracks_index_name_reason_elapsed_and_previous_step() {
+        let unique = format!("rriter-pgo-failure-metadata-{}", std::process::id());
+        let root = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        let report_path = root.join("automation-report.json");
+        let mut controller = AutomationController::new(AutomationOptions {
+            workspace: root.clone(),
+            report_path: report_path.clone(),
+            timeout: Duration::from_secs(30),
+        });
+        controller.step_index = 2;
+        controller.completed.push("previous-step".to_string());
+        let now = Instant::now();
+        controller.started_at = now - Duration::from_millis(500);
+        controller.step_started_at = now - Duration::from_millis(42);
+        let step_name = controller.steps[controller.step_index].name();
+
+        assert_eq!(
+            controller.fail_and_exit(
+                step_name.clone(),
+                "forced failure".to_string(),
+                Some("state-context".to_string()),
+                now,
+                AutomationFailureKind::Failed,
+            ),
+            AutomationTick::Exit
+        );
+        let failure = controller.failure.as_ref().unwrap();
+        assert_eq!(failure.index, 2);
+        assert_eq!(failure.name, step_name);
+        assert_eq!(failure.reason, "forced failure");
+        assert_eq!(failure.step_elapsed_ms, 42);
+        assert_eq!(failure.previous_completed_step.as_deref(), Some("previous-step"));
+        assert_eq!(failure.context.as_deref(), Some("state-context"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn terminal_open_panel_waits_for_existing_open_when_ready_lifecycle() {
+        use crate::app::terminal::TerminalPresentationIntent;
+
+        assert_eq!(
+            terminal_panel_open_state_from_values(
+                false,
+                [(TerminalPresentationIntent::OpenPanelWhenReady, false)],
+            ),
+            TerminalPanelOpenState::WaitingForPresentation
+        );
+        assert_eq!(
+            terminal_panel_open_state_from_values(
+                false,
+                [(TerminalPresentationIntent::OpenPanelWhenReady, true)],
+            ),
+            TerminalPanelOpenState::WaitingForPresentation
+        );
+        assert_eq!(
+            terminal_panel_open_state_from_values(
+                true,
+                [(TerminalPresentationIntent::None, true)],
+            ),
+            TerminalPanelOpenState::Open
+        );
+        assert_eq!(
+            terminal_panel_open_state_from_values(
+                false,
+                [(TerminalPresentationIntent::ActivateWhenReady, false)],
+            ),
+            TerminalPanelOpenState::ClosedUnexpectedly
+        );
+    }
+
+    #[test]
+    fn terminal_open_panel_semantic_action_runs_only_on_first_poll() {
+        let mut step_progress = 0;
+        assert!(begin_open_panel_action(&mut step_progress));
+        assert_eq!(step_progress, 1);
+        assert!(!begin_open_panel_action(&mut step_progress));
+        assert_eq!(step_progress, 1);
     }
 
     #[test]
@@ -2343,6 +3292,181 @@ mod tests {
             ]
         );
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    fn ready_hover_prerequisites() -> HoverPrerequisites {
+        HoverPrerequisites {
+            active_file_matches: true,
+            autocomplete_inactive: true,
+            editor_clean: true,
+            highlight_current: true,
+            external_changes_idle: true,
+            renderer_ready: true,
+        }
+    }
+
+    #[test]
+    fn completion_hover_sequence_is_preserved() {
+        let root = std::env::temp_dir().join(format!(
+            "rriter-pgo-hover-sequence-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(root.join("tests")).unwrap();
+        let names = full_pgo_scenario(&root)
+            .into_iter()
+            .map(|step| step.name())
+            .collect::<Vec<_>>();
+        let expected = [
+            "open-file:tests/pgo_completion_hover.py",
+            "wait-highlight",
+            "set-cursor-after:pgo_completion_result = pri",
+            "trigger-autocomplete:print",
+            "wait-900ms",
+            "select-autocomplete:print",
+            "wait-900ms",
+            "apply-autocomplete:print",
+            "save-current-file",
+            "show-hover:pgo_hover_target",
+            "scroll-hover-timed:5s",
+            "clear-hover",
+        ];
+        assert!(names.windows(expected.len()).any(|window| {
+            window
+                .iter()
+                .map(String::as_str)
+                .eq(expected.iter().copied())
+        }));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hover_waits_for_external_change_worker_before_install() {
+        let mut prerequisites = ready_hover_prerequisites();
+        prerequisites.external_changes_idle = false;
+        assert_eq!(
+            hover_progress_action(prerequisites, (false, false), 0),
+            HoverProgressAction::WaitStable
+        );
+    }
+
+    #[test]
+    fn hover_waits_for_current_highlight_revision_before_install() {
+        assert!(!hover_highlight_is_current(true, true, 6, 7));
+        assert!(!hover_highlight_is_current(false, true, 7, 7));
+        assert!(!hover_highlight_is_current(true, false, 7, 7));
+        assert!(hover_highlight_is_current(true, true, 7, 7));
+
+        let mut prerequisites = ready_hover_prerequisites();
+        prerequisites.highlight_current = false;
+        assert_eq!(
+            hover_progress_action(prerequisites, (false, false), 0),
+            HoverProgressAction::WaitStable
+        );
+        prerequisites.highlight_current = true;
+        assert_eq!(
+            hover_progress_action(prerequisites, (false, false), 0),
+            HoverProgressAction::Install
+        );
+    }
+
+    #[test]
+    fn hover_pointer_contract_uses_source_geometry_and_production_mouse_gate() {
+        let source = include_str!("automation.rs");
+        let start = source
+            .find("fn prepare_automation_hover_pointer")
+            .expect("automation hover pointer helper");
+        let tail = &source[start..];
+        let end = tail
+            .find("fn install_automation_hover_popup")
+            .expect("automation hover install helper");
+        let helper = &tail[..end];
+        assert!(helper.contains("editor_top_inset"));
+        assert!(helper.contains("scroll_y.current.round()"));
+        assert!(helper.contains("hover_anchor_for_byte"));
+        assert!(helper.contains("renderer.last_mouse_x = anchor.0"));
+        assert!(helper.contains("renderer.last_mouse_y = anchor.1"));
+        assert!(helper.contains("renderer.update_popup_mouse_move_gate()"));
+        assert!(!helper.contains("hide_popups_until_mouse_move = false"));
+        assert!(!helper.contains("340.0"));
+        assert!(!helper.contains("set_cursor_position"));
+    }
+
+    #[test]
+    fn hover_transient_clear_can_wait_and_reinstall_then_finish() {
+        let ready = ready_hover_prerequisites();
+        assert_eq!(
+            hover_progress_action(ready, (false, false), 0),
+            HoverProgressAction::Install
+        );
+
+        let popup = crate::app::events::source_hover_popup_for_editor(
+            &crate::editor::Editor::new(64),
+            0,
+            "hover text".to_string(),
+            None,
+            (12.0, 24.0),
+        );
+        install_automation_hover_popup(0, popup);
+        assert!(crate::app::mouse::clear_hover_popup(None));
+
+        let mut transient = ready;
+        transient.external_changes_idle = false;
+        assert_eq!(
+            hover_progress_action(transient, (false, false), 1),
+            HoverProgressAction::WaitStable
+        );
+        assert_eq!(
+            hover_progress_action(ready, (false, false), 1),
+            HoverProgressAction::Install
+        );
+
+        let mut state = crate::app::mouse::HoverState::default();
+        let popup = crate::app::events::source_hover_popup_for_editor(
+            &crate::editor::Editor::new(64),
+            0,
+            "hover text".to_string(),
+            None,
+            (12.0, 24.0),
+        );
+        state.byte_offset = Some(0);
+        state.popup = Some(popup);
+        state.rect = Some((1.0, 2.0, 3.0, 4.0));
+        assert_eq!(
+            hover_progress_action(ready, hover_popup_status(&state, 0), 2),
+            HoverProgressAction::Done
+        );
+    }
+
+    #[test]
+    fn hover_persistent_clear_fails_after_bounded_reinstalls() {
+        assert_eq!(
+            hover_progress_action(
+                ready_hover_prerequisites(),
+                (false, false),
+                PGO_HOVER_MAX_INSTALL_ATTEMPTS,
+            ),
+            HoverProgressAction::FailRepeatedClear
+        );
+    }
+
+    #[test]
+    fn synthetic_hover_install_has_no_lsp_request_dependency() {
+        let popup = crate::app::events::source_hover_popup_for_editor(
+            &crate::editor::Editor::new(64),
+            0,
+            "hover text".to_string(),
+            None,
+            (12.0, 24.0),
+        );
+        install_automation_hover_popup(0, popup);
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            let state = state.borrow();
+            assert_eq!(state.request_id, None);
+            assert_eq!(state.definition_request_id, None);
+            assert_eq!(state.byte_offset, Some(0));
+            assert!(state.popup.is_some());
+        });
+        crate::app::mouse::clear_hover_popup(None);
     }
 
     #[test]

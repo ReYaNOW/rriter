@@ -769,6 +769,7 @@ Root:
 * `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
+* `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/platform/text_file.rs` -> centralized UTF/legacy text decoding, format preservation, conservative charset detection, strict re-encoding, and atomic text-save entrypoint.
 * `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
@@ -786,6 +787,8 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/automation_database.rs` -> PGO-only semantic Database Tools workload: fixture endpoint parsing, in-memory secretless PostgreSQL connection seeding, production DB waits/actions, table/query scrolling, diagnostics, and regression tests.
+* `src/app/automation_dart.rs` -> PGO-only Dart setup/waits: disables external Dart SDK/LSP work for deterministic training while requiring current tree-sitter syntax closing hints, with diagnostics and regression tests.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.

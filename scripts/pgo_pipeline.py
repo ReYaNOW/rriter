@@ -27,15 +27,47 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from pgo_postgres_fixture import (
+    PGO_DATABASE_NAME,
+    PGO_DATABASE_USER,
+    LocalPostgresFixture,
+    PostgresFixtureTelemetry,
+)
+
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_VERSION = 12
-FIXTURE_VERSION = 5
+SCENARIO_VERSION = 16
+FIXTURE_VERSION = 6
 DEFAULT_TIMEOUT_SECONDS = 600
 OPENAPI_BULK_PATH_COUNT = 512
 OPENAPI_SCHEMA_COUNT = 192
 OPENAPI_BULK_METHODS = ("get", "post", "patch", "delete")
 LOCAL_API_MARKER = "RRITER_PGO_LOCAL_API_OK"
 LOCAL_API_TOKEN = "rriter-pgo-bearer-token"
+PGO_DATABASE_ENV_HOST = "RRITER_PGO_DATABASE_HOST"
+PGO_DATABASE_ENV_PORT = "RRITER_PGO_DATABASE_PORT"
+PGO_DATABASE_ENV_NAME = "RRITER_PGO_DATABASE_NAME"
+PGO_DATABASE_ENV_USER = "RRITER_PGO_DATABASE_USER"
+REQUIRED_DATABASE_SQL_FAMILIES = frozenset(
+    {
+        "list_databases",
+        "list_public_tables",
+        "table_metadata",
+        "table_constraints",
+        "table_indexes",
+        "table_count",
+        "table_chunk",
+        "completion_columns",
+        "completion_enums",
+        "completion_functions",
+        "completion_operators",
+        "user_select",
+        "explain",
+        "begin",
+        "set_local",
+        "update_returning",
+        "rollback",
+    }
+)
 
 
 class PgoError(RuntimeError):
@@ -732,8 +764,42 @@ def _copy_python_test_fixtures(workspace: Path) -> list[str]:
     return copied
 
 
+def _dart_fixture_source() -> str:
+    lines = [
+        "// Deterministic Dart fixture for parser/highlight/fold/closing-label PGO training.\n",
+        "import 'dart:async';\n", "import 'dart:collection';\n\n",
+        "class PgoAnnotation { final String name; const PgoAnnotation(this.name); }\n",
+        "const pgoAnnotation = PgoAnnotation('rriter-pgo');\n",
+        "enum PgoState { idle, running, complete }\n",
+        "typedef PgoMapper<T> = T Function(T value);\n",
+        "extension PgoIterableExtension on Iterable<int> { int get total => fold(0, (a, b) => a + b); }\n\n",
+        "@pgoAnnotation\nabstract class PgoWorker<T extends num> {\n  const PgoWorker();\n  Future<T> run(T value);\n}\n\n",
+        "class PgoConfig<T> {\n  final String name;\n  final T? value;\n  const PgoConfig({required this.name, this.value});\n",
+        "  String describe() => 'PgoConfig(name: $name, value: $value)';\n}\n\n",
+        "const pgoDartCompletionTarget = 'deterministic-completion-marker';\n",
+        "const pgoDartBanner = '''RRiter PGO\nDart syntax fixture\nclosing labels\n''';\n\n",
+    ]
+    for index in range(36):
+        lines.extend([
+            f"class PgoNode{index} {{\n  final int seed;\n  const PgoNode{index}(this.seed);\n",
+            f"  Future<int> compute{index}(List<int> values) async {{\n    var total = seed;\n    final queue = Queue<int>()..addAll(values);\n",
+            f"    for (final value in queue) {{\n      if ((value + {index}) % 2 == 0) {{\n        try {{\n          var cursor = value;\n",
+            "          while (cursor > 0) {\n            total += cursor;\n            cursor -= 1;\n          }\n",
+            "        } catch (error) {\n          total -= error.hashCode;\n        } finally {\n          total += values.length;\n        }\n",
+            "      } else {\n        total -= value;\n      }\n    }\n    await Future<void>.delayed(Duration.zero);\n    return total;\n  }\n}\n\n",
+        ])
+    lines.extend([
+        "Future<int> pgoDartTarget(List<int> values, {PgoState state = PgoState.running}) async {\n",
+        "  int nested(int value) {\n    if (value > 1) {\n      for (var i = 0; i < value; i++) {\n        value += i;\n      }\n    }\n    return value;\n  }\n",
+        "  final int pgoDartTargetValue = nested(values.length);\n  // pgoDartEditTarget\n",
+        "  switch (state) {\n    case PgoState.idle:\n      return pgoDartTargetValue;\n    case PgoState.running:\n      return await const PgoNode0(3).compute0(values);\n    case PgoState.complete:\n      return values.total;\n  }\n}\n",
+    ])
+    return "".join(lines)
+
+
 def _write_fixture_files(workspace: Path) -> None:
     (workspace / "src").mkdir(parents=True, exist_ok=True)
+    (workspace / "lib").mkdir(parents=True, exist_ok=True)
     (workspace / "Cargo.toml").write_text(
         "[package]\nname = \"rriter-pgo-fixture\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
         encoding="utf-8",
@@ -765,6 +831,13 @@ def _write_fixture_files(workspace: Path) -> None:
         "def total(items: list[Job]) -> int:\n"
         "    return sum(item.weight for item in items)\n",
         encoding="utf-8",
+    )
+    (workspace / "pubspec.yaml").write_text(
+        "name: rriter_pgo_fixture\nversion: 0.0.0\npublish_to: none\nenvironment:\n  sdk: '>=3.0.0 <4.0.0'\n",
+        encoding="utf-8",
+    )
+    (workspace / "lib" / "pgo_training.dart").write_text(
+        _dart_fixture_source(), encoding="utf-8"
     )
     large = ["// Deterministic large Rust file used for editor render and scroll training.\n"]
     for index in range(6000):
@@ -811,6 +884,7 @@ def isolated_runtime_environment(
     paths: PgoPaths,
     *,
     profile_dir: Path | None = None,
+    database_endpoint: tuple[str, int] | None = None,
 ) -> dict[str, str]:
     environment = base_environment(config)
     home = paths.state_dir / "home"
@@ -849,9 +923,72 @@ def isolated_runtime_environment(
             "no_proxy": "127.0.0.1,localhost",
         }
     )
+    if database_endpoint is not None:
+        host, port = database_endpoint
+        if host != "127.0.0.1" or not (1 <= port <= 65535):
+            raise PgoError(
+                "PGO database fixture endpoint must be an IPv4 loopback port; "
+                f"got {host}:{port}"
+            )
+        environment.update(
+            {
+                PGO_DATABASE_ENV_HOST: host,
+                PGO_DATABASE_ENV_PORT: str(port),
+                PGO_DATABASE_ENV_NAME: PGO_DATABASE_NAME,
+                PGO_DATABASE_ENV_USER: PGO_DATABASE_USER,
+            }
+        )
     if "linux" in config.target:
         environment["WINIT_UNIX_BACKEND"] = "wayland"
     return environment
+
+
+def database_fixture_telemetry_payload(
+    telemetry: PostgresFixtureTelemetry,
+) -> dict[str, object]:
+    return {
+        "accepted_connection_count": telemetry.accepted_connection_count,
+        "startup_count": telemetry.startup_count,
+        "ssl_request_count": telemetry.ssl_request_count,
+        "sql_families": list(telemetry.sql_families),
+        "family_counts": dict(telemetry.family_counts),
+        "protocol_errors": list(telemetry.protocol_errors),
+        "unexpected_sql": list(telemetry.unexpected_sql),
+        "peer_disconnects": list(telemetry.peer_disconnects),
+        "worker_errors": list(telemetry.worker_errors),
+    }
+
+
+def validate_database_fixture_telemetry(
+    telemetry: PostgresFixtureTelemetry,
+) -> None:
+    if telemetry.accepted_connection_count < 1 or telemetry.startup_count < 1:
+        raise PgoError(
+            "RRiter did not establish a PostgreSQL wire-protocol session with the PGO fixture; "
+            f"accepted={telemetry.accepted_connection_count} startup={telemetry.startup_count}"
+        )
+    problems: list[str] = []
+    if telemetry.ssl_request_count:
+        problems.append(f"ssl_request_count={telemetry.ssl_request_count}")
+    if telemetry.protocol_errors:
+        problems.append(f"protocol_errors={telemetry.protocol_errors}")
+    if telemetry.unexpected_sql:
+        problems.append(f"unexpected_sql={telemetry.unexpected_sql}")
+    if telemetry.worker_errors:
+        problems.append(f"worker_errors={telemetry.worker_errors}")
+    if problems:
+        raise PgoError("PGO PostgreSQL fixture reported errors: " + "; ".join(problems))
+    missing = sorted(
+        family
+        for family in REQUIRED_DATABASE_SQL_FAMILIES
+        if telemetry.family_count(family) < 1
+    )
+    if missing:
+        observed = sorted(name for name, count in telemetry.family_counts if count > 0)
+        raise PgoError(
+            "PGO database workload did not exercise required production SQL families; "
+            f"missing={missing} observed={observed}"
+        )
 
 
 def validate_training_environment(config: PgoConfig) -> None:
@@ -869,6 +1006,38 @@ def validate_training_environment(config: PgoConfig) -> None:
                 "Linux PGO training requires a live Wayland session "
                 "(WAYLAND_DISPLAY is not set)"
             )
+
+
+def describe_pgo_process_failure(returncode: int, *, os_name: str | None = None) -> str:
+    platform_name = os.name if os_name is None else os_name
+    if platform_name == "posix" and returncode < 0:
+        signal_number = -returncode
+        try:
+            signal_name = signal.Signals(signal_number).name
+        except ValueError:
+            signal_name = f"signal {signal_number}"
+        return f"RRiter PGO process terminated by {signal_name} ({signal_number})"
+    return f"RRiter PGO process exited with code {returncode}"
+
+
+def automation_failure_message(report: Mapping[str, object], report_path: Path) -> str:
+    index = report.get("failed_step_index")
+    name = report.get("failed_step_name")
+    reason = (
+        report.get("failure_reason")
+        or report.get("failed_step")
+        or report.get("status")
+        or "unknown error"
+    )
+    previous = report.get("previous_completed_step")
+    return (
+        "RRiter automation failed "
+        f"step={index if index is not None else 'unknown'} "
+        f"name={name if name is not None else 'unknown'} "
+        f"reason={reason} "
+        f"previous={previous if previous is not None else 'none'} "
+        f"report={report_path}"
+    )
 
 
 def run_training(
@@ -890,39 +1059,80 @@ def run_training(
         "--pgo-timeout-seconds",
         str(config.timeout_seconds),
     ]
+    database_fixture = LocalPostgresFixture()
     api_server = LocalApiServer.start()
     try:
+        database_fixture.start()
+        database_endpoint = database_fixture.endpoint
+        print(
+            "[rriter-pgo] local PostgreSQL fixture: "
+            f"{database_endpoint[0]}:{database_endpoint[1]}/{PGO_DATABASE_NAME}",
+            flush=True,
+        )
         _set_openapi_server_url(paths.fixture_dir / "openapi.json", api_server.base_url)
         result = runner.run_process_tree(
             command,
             cwd=paths.fixture_dir,
-            env=isolated_runtime_environment(config, paths, profile_dir=profile_dir),
+            env=isolated_runtime_environment(
+                config,
+                paths,
+                profile_dir=profile_dir,
+                database_endpoint=database_endpoint,
+            ),
             timeout=config.timeout_seconds + 45,
             check=False,
         )
         local_request_count = api_server.server.request_count
         local_request = dict(api_server.server.last_request)
     finally:
+        database_fixture.stop()
         api_server.stop()
+    database_telemetry = database_fixture.telemetry()
+    report: dict[str, object] | None = None
+    report_error: Exception | None = None
+    if paths.report_path.is_file():
+        try:
+            loaded_report = json.loads(paths.report_path.read_text(encoding="utf-8"))
+            if not isinstance(loaded_report, dict):
+                raise PgoError("automation report root must be an object")
+            report = loaded_report
+        except (OSError, json.JSONDecodeError, PgoError) as error:
+            report_error = error
+
     if result.returncode != 0:
-        raise PgoError(f"RRiter PGO automation exited with code {result.returncode}")
+        message = describe_pgo_process_failure(result.returncode)
+        if report is not None:
+            if report.get("status") == "success":
+                message += f"; automation report status=success report={paths.report_path}"
+            else:
+                message += "; " + automation_failure_message(report, paths.report_path)
+        elif report_error is not None:
+            message += (
+                f"; structured automation report is invalid: {report_error}; "
+                "inspect the last PGO_AUTOMATION_STEP_START printed above"
+            )
+        else:
+            message += (
+                f"; structured automation report is absent: {paths.report_path}; "
+                "inspect the last PGO_AUTOMATION_STEP_START printed above"
+            )
+        raise PgoError(message)
     if not paths.report_path.is_file():
         raise PgoError(
-            "RRiter exited with code 0 before writing the automation report; "
-            "the window may have been closed before the scenario finished: "
+            "RRiter exited with code 0 before writing the structured automation report; "
+            "the window may have been closed before the scenario finished; "
+            "inspect the last PGO_AUTOMATION_STEP_START printed above: "
             f"{paths.report_path}"
         )
-    try:
-        report = json.loads(paths.report_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as error:
-        raise PgoError(f"invalid automation report: {error}") from error
+    if report_error is not None:
+        raise PgoError(f"invalid automation report: {report_error}") from report_error
+    if report is None:
+        raise PgoError(f"automation report could not be loaded: {paths.report_path}")
     if report.get("status") != "success":
-        raise PgoError(
-            "RRiter automation failed: "
-            + str(report.get("failed_step") or report.get("status") or "unknown error")
-        )
+        raise PgoError(automation_failure_message(report, paths.report_path))
     if int(report.get("scenario_version", -1)) != SCENARIO_VERSION:
         raise PgoError("automation report scenario version does not match the pipeline")
+    validate_database_fixture_telemetry(database_telemetry)
     if local_request_count < 1 or not local_request.get("accepted"):
         raise PgoError(
             "RRiter did not complete the authenticated local API request; "
@@ -930,6 +1140,7 @@ def run_training(
         )
     report["local_api_requests"] = local_request_count
     report["local_api_last_request"] = local_request
+    report["database_fixture"] = database_fixture_telemetry_payload(database_telemetry)
     paths.report_path.write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
@@ -959,13 +1170,22 @@ def existing_run_executable(config: PgoConfig, paths: PgoPaths) -> Path:
             f"{description} RRiter executable is missing: {executable}; "
             f"run `{rebuild_command}` before `make pgo-script`"
         )
-    automation_source = paths.root / "src" / "app" / "automation.rs"
-    if (
-        automation_source.is_file()
-        and executable.stat().st_mtime_ns < automation_source.stat().st_mtime_ns
-    ):
+    automation_sources = [
+        paths.root / "src" / "app" / "automation.rs",
+        paths.root / "src" / "app" / "automation_database.rs",
+    ]
+    stale_source = next(
+        (
+            source
+            for source in automation_sources
+            if source.is_file() and executable.stat().st_mtime_ns < source.stat().st_mtime_ns
+        ),
+        None,
+    )
+    if stale_source is not None:
+        relative_source = stale_source.relative_to(paths.root)
         raise PgoError(
-            f"{description} RRiter is older than src/app/automation.rs; "
+            f"{description} RRiter is older than {relative_source}; "
             f"run `{rebuild_command}` and repeat `make pgo-script`"
         )
     return executable
@@ -1210,12 +1430,40 @@ def self_test() -> None:
             paths.fixture_dir / "src" / "main.rs",
             paths.fixture_dir / "src" / "worker.py",
             paths.fixture_dir / "src" / "large.rs",
+            paths.fixture_dir / "pubspec.yaml",
+            paths.fixture_dir / "lib" / "pgo_training.dart",
             paths.fixture_dir / "openapi.json",
             paths.fixture_dir / "tests" / "pgo_completion_hover.py",
             paths.fixture_dir / ".rriter-pgo-python-tests.json",
         ]
         if not all(path.is_file() for path in required):
             raise PgoError("fixture self-test failed")
+        dart_text = (paths.fixture_dir / "lib" / "pgo_training.dart").read_text(
+            encoding="utf-8"
+        )
+        pubspec_text = (paths.fixture_dir / "pubspec.yaml").read_text(encoding="utf-8")
+        generated_dart = _dart_fixture_source()
+        if generated_dart != _dart_fixture_source() or dart_text != generated_dart:
+            raise PgoError("Dart fixture generation is not deterministic")
+        if len(dart_text.splitlines()) < 600 or dart_text.count("while (cursor > 0)") < 30:
+            raise PgoError("Dart fixture is unexpectedly small or lacks nested blocks")
+        for marker in (
+            "import 'dart:async';",
+            "extension PgoIterableExtension",
+            "Future<int> pgoDartTarget",
+            "pgoDartCompletionTarget",
+            "switch (state)",
+            "// pgoDartEditTarget",
+        ):
+            if marker not in dart_text:
+                raise PgoError(f"Dart fixture marker is missing: {marker}")
+        if (
+            "package:" in dart_text
+            or "dependencies:" in pubspec_text
+            or "http://" in pubspec_text
+            or "https://" in pubspec_text
+        ):
+            raise PgoError("Dart fixture must remain offline and dependency-free")
         openapi_path = paths.fixture_dir / "openapi.json"
         openapi_fixture = json.loads(openapi_path.read_text(encoding="utf-8"))
         fixture_paths = openapi_fixture.get("paths", {})

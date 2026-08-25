@@ -3,6 +3,8 @@ pub mod api_mock;
 mod app_state;
 mod autocomplete;
 pub mod automation;
+mod automation_database;
+mod automation_dart;
 pub(crate) mod context_menu;
 mod dart_settings;
 pub mod database;
