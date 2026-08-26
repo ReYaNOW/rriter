@@ -196,6 +196,7 @@ impl Renderer {
         &mut self,
         editor: &crate::editor::Editor,
         editor_file: Option<(&std::path::PathBuf, crate::platform::TextEncoding)>,
+        markdown_mode: crate::app::MarkdownMode,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         s: f32,
@@ -244,91 +245,100 @@ impl Renderer {
         let diag_x = bar_x + pad_x;
         let icon_y = bar_y + (bar_h - icon_sz) / 2.0;
         let text_y = bar_y + bar_h / 2.0 + 5.0 * s;
-
         let mut scratch = std::mem::take(&mut self.scratch_buffer);
+        let ext = editor_file
+            .and_then(|(path, _)| path.extension())
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("");
+        let language = language_display_name_for_ext(ext);
+        let language_w = self.measure_ui_width(language, text_scale).round();
+        let status_markdown_mode = markdown_status_mode_for_ext(ext, markdown_mode);
+        let mode_text_w = status_markdown_mode
+            .map(markdown_status_mode_label)
+            .map(|label| self.measure_ui_width(label, 0.82).round());
+        let bar_rect = crate::ui_system::UiClipRect::new(bar_x, bar_y, bar_w, bar_h);
+        let language_layout = status_language_layout(bar_rect, language_w, mode_text_w, s);
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
         let error_w = self.measure_ui_width(&scratch, text_scale).round();
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
         let warning_w = self.measure_ui_width(&scratch, text_scale).round();
-
         let diagnostics_w =
             icon_sz + icon_gap + error_w + item_gap + icon_sz + icon_gap + warning_w + pad_x;
-        let diagnostics_hovered = ui_registry.register_rect(
-            crate::ui_system::UiId::StatusDiagnostics,
-            diag_x - 4.0 * s,
-            bar_y,
-            diagnostics_w,
-            bar_h,
-            mx,
-            my,
-        );
-        if diagnostics_hovered {
-            self.push_rect(
+        let diagnostics_right = diag_x + diagnostics_w;
+        let show_diagnostics =
+            status_diagnostics_fit(language_layout, diagnostics_right, s);
+        let diagnostics_hovered = if show_diagnostics {
+            let hovered = ui_registry.register_rect(
+                crate::ui_system::UiId::StatusDiagnostics,
                 diag_x - 4.0 * s,
                 bar_y,
                 diagnostics_w,
                 bar_h,
-                [1.0, 1.0, 1.0, 0.07],
+                mx,
+                my,
             );
-        }
-
-        self.draw_atlas_icon(
-            crate::widgets::IconType::Error,
-            diag_x,
-            icon_y,
-            icon_sz,
-            [1.0, 1.0, 1.0, 1.0],
-        );
-        scratch.clear();
-        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
-        let error_text_x = diag_x + icon_sz + icon_gap;
-        self.draw_string_scaled(&scratch, error_text_x, text_y, self.theme.fg, text_scale);
-
-        let warn_icon_x = error_text_x + error_w + item_gap;
-        self.draw_atlas_icon(
-            crate::widgets::IconType::Warning,
-            warn_icon_x,
-            icon_y,
-            icon_sz,
-            [1.0, 1.0, 1.0, 1.0],
-        );
-        scratch.clear();
-        let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
-        self.draw_string_scaled(
-            &scratch,
-            warn_icon_x + icon_sz + icon_gap,
+            if hovered {
+                self.push_rect(
+                    diag_x - 4.0 * s,
+                    bar_y,
+                    diagnostics_w,
+                    bar_h,
+                    [1.0, 1.0, 1.0, 0.07],
+                );
+            }
+            self.draw_atlas_icon(
+                crate::widgets::IconType::Error,
+                diag_x,
+                icon_y,
+                icon_sz,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
+            let error_text_x = diag_x + icon_sz + icon_gap;
+            self.draw_string_scaled(&scratch, error_text_x, text_y, self.theme.fg, text_scale);
+            let warn_icon_x = error_text_x + error_w + item_gap;
+            self.draw_atlas_icon(
+                crate::widgets::IconType::Warning,
+                warn_icon_x,
+                icon_y,
+                icon_sz,
+                [1.0, 1.0, 1.0, 1.0],
+            );
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", warning_count));
+            self.draw_string_scaled(
+                &scratch,
+                warn_icon_x + icon_sz + icon_gap,
+                text_y,
+                self.theme.fg,
+                text_scale,
+            );
+            hovered
+        } else {
+            false
+        };
+        let left_status_limit = if show_diagnostics {
+            diagnostics_right
+        } else {
+            bar_x + pad_x
+        };
+        let position_group_right = self.draw_status_language_group(
+            language,
+            editor_file.map(|(_, encoding)| encoding),
+            status_markdown_mode,
+            language_layout,
+            left_status_limit,
+            ui_registry,
+            bar_rect,
+            s,
+            mx,
+            my,
             text_y,
-            self.theme.fg,
             text_scale,
         );
-
-        let ext = editor_file
-            .and_then(|(path, _)| path.extension())
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("");
-        let lang = language_display_name_for_ext(ext);
-        scratch.clear();
-        scratch.push_str(lang);
-        let lang_w = self.measure_ui_width(&scratch, text_scale).round();
-        let lang_x = (bar_x + bar_w - pad_x - lang_w).max(diag_x);
-        self.draw_string_scaled(&scratch, lang_x, text_y, self.theme.fg, text_scale);
-
-        let encoding_layout = editor_file
-            .and_then(|(_, encoding)| encoding.status_label())
-            .map(|label| {
-                let width = self.measure_ui_width(label, text_scale).round();
-                (label, width, lang_x - 14.0 * s - width)
-            })
-            .filter(|(_, _, x)| *x > diag_x + diagnostics_w + 8.0 * s);
-        let position_group_right = if let Some((label, _, x)) = encoding_layout {
-            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
-            x
-        } else {
-            lang_x
-        };
-
         let (line, character) = cursor_line_and_character(editor);
         const ZERO_SAMPLE: &str = "00000000000000000000";
         let item_gap = 14.0 * s;
@@ -401,7 +411,7 @@ impl Renderer {
             let elapsed_gap = if elapsed_w > 0.0 { 7.0 * s } else { 0.0 };
             let progress_w = label_w + elapsed_gap + elapsed_w + progress_gap + track_w;
             let progress_x = line_x - 18.0 * s - progress_w;
-            if progress_x > diag_x + diagnostics_w + 8.0 * s {
+            if progress_x > left_status_limit + 8.0 * s {
                 let elapsed_x = progress_x + label_w + elapsed_gap;
                 let track_x = elapsed_x + elapsed_w + progress_gap;
                 let track_y = bar_y + (bar_h - track_h) / 2.0;
@@ -452,7 +462,7 @@ impl Renderer {
                 }
             }
         }
-        if line_x > diag_x + diagnostics_w + 8.0 * s {
+        if line_x > left_status_limit + 8.0 * s {
             self.draw_string_scaled("Стр", line_x, text_y, pos_color, text_scale);
             self.draw_string_mono_scaled(
                 &line_digits,

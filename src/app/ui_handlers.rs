@@ -454,6 +454,9 @@ impl App {
             | UiId::ProjectSearchHelpPopup
             | UiId::InlineGitPanelBody
             | UiId::GitDiffPanelBody => {}
+            UiId::MarkdownModeToggle => {
+                self.toggle_markdown_mode();
+            }
             UiId::StatusDiagnostics => {
                 self.ide_panel.toggle(crate::app::PanelId::Problems);
                 crate::save_panel_state(&self.ide_panel);
@@ -565,6 +568,7 @@ impl App {
                     let old_version = self.editor.version;
                     self.editor = Editor::new(8192);
                     self.editor.version = old_version + 1;
+                    self.markdown = Default::default();
                     self.editor.set_original_text();
                     self.editor.sync_edits.clear();
                     while let Ok(_) = self.highlighter.rx.try_recv() {}
@@ -1018,6 +1022,10 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::LspServerFixAll(idx) => {
+                if self.markdown_mode() == crate::app::MarkdownMode::Read {
+                    self.show_readonly_notice();
+                    return;
+                }
                 if let Some(lsp) = &mut self.lsp {
                     if idx < self.ide_panel.lsp_servers.len() {
                         if let Some(path) = self.file_path.clone() {
@@ -1806,6 +1814,13 @@ impl App {
                         self.scroll_x.current = self.scroll_x.target;
                     }
                 }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
+            UiId::MarkdownReadBody => {
+                self.is_dragging = false;
+                self.is_editor_drag_pending = false;
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

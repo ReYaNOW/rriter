@@ -1595,6 +1595,7 @@ fn database_tab(
         text_file_format: crate::platform::TextFileFormat::default(),
         base_title: title,
         file_extension: extension.to_string(),
+        markdown: Default::default(),
         scroll_y: ScrollState::new(15.0),
         scroll_x: ScrollState::new(15.0),
         spans: Vec::new(),

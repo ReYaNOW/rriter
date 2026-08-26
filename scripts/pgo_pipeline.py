@@ -35,8 +35,8 @@ from pgo_postgres_fixture import (
 )
 
 ROOT = Path(__file__).resolve().parents[1]
-SCENARIO_VERSION = 16
-FIXTURE_VERSION = 6
+SCENARIO_VERSION = 17
+FIXTURE_VERSION = 7
 DEFAULT_TIMEOUT_SECONDS = 600
 OPENAPI_BULK_PATH_COUNT = 512
 OPENAPI_SCHEMA_COUNT = 192
@@ -805,7 +805,54 @@ def _write_fixture_files(workspace: Path) -> None:
         encoding="utf-8",
     )
     (workspace / "README.md").write_text(
-        "# RRiter PGO fixture\n\nDeterministic workspace for native GUI automation.\n",
+        "# RRiter PGO Markdown fixture\n\n"
+        "Deterministic workspace for native GUI automation and Markdown training.\n\n"
+        "## Edit and Read coverage\n\n"
+        "### Semantic structures\n\n"
+        "Ordinary paragraph text wraps across the preview viewport and keeps source markers visible in Edit mode. "
+        "A second sentence makes the paragraph long enough to exercise wrapping deterministically.\n\n"
+        "Unicode: \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 \U0001f600 \u2014 \u043f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 UTF-8 \u0433\u0440\u0430\u043d\u0438\u0446.\n\n"
+        "**strong text** and *emphasis text* plus `inline_code(42)`.\n\n"
+        "[deterministic link](https://example.invalid/path)\n\n"
+        "> Block quote first line.\n"
+        "> Multiline quote continuation with **strong quote text**.\n\n"
+        "- unordered item\n"
+        "- [ ] unchecked task\n"
+        "- [x] checked task\n"
+        "  - nested unordered item\n\n"
+        "1. ordered first\n"
+        "2. ordered second\n\n"
+        "---\n\n"
+        "| left | center | right |\n"
+        "| :--- | :----: | ----: |\n"
+        "| alpha | beta | gamma |\n"
+        "| \u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 | \U0001f600 | 42 |\n\n"
+        "```rust\n"
+        "fn main() {\n"
+        "    let value = 42;\n"
+        "    println!(\"{value}\");\n"
+        "}\n"
+        "```\n\n"
+        "```python\n"
+        "def answer():\n"
+        "    return 42\n"
+        "```\n\n"
+        "```bash\n"
+        "echo \"markdown pgo\"\n"
+        "```\n\n"
+        "## Scroll coverage A\n\n"
+        "Paragraph A repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
+        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
+        "## Scroll coverage B\n\n"
+        "Paragraph B repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
+        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
+        "## Scroll coverage C\n\n"
+        "Paragraph C repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
+        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
+        "## Scroll coverage D\n\n"
+        "Paragraph D repeats deterministic Markdown body text for real vertical scrolling without a large fixture. "
+        "It covers wrapping, glyph layout, and preview virtualization.\n\n"
+        "Incremental edit anchor: RRITER_PGO_MARKDOWN_EDIT_TARGET\n",
         encoding="utf-8",
     )
     (workspace / ".rriter-pgo-fixture.json").write_text(

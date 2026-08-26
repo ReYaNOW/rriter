@@ -8,9 +8,10 @@ use winit::event_loop::ActiveEventLoop;
 use crate::app::api_client::ApiFocus;
 use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
 use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
+use crate::app::automation_markdown::{MarkdownAutomationStep, MarkdownStepResult};
 use crate::app::{App, PanelId};
 
-pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 16;
+pub const PGO_AUTOMATION_SCENARIO_VERSION: u32 = 17;
 
 const TIMED_SCROLL_HZ: f32 = 120.0;
 const TIMED_SCROLL_PAUSE_SECS: f32 = 2.0;
@@ -109,7 +110,7 @@ pub struct AutomationOptions {
 }
 
 #[derive(Debug, Clone)]
-enum AutomationStep {
+pub(super) enum AutomationStep {
     WaitReady,
     ResizeWindow {
         width: u32,
@@ -139,6 +140,7 @@ enum AutomationStep {
     ScrollEditorTimed {
         duration_secs: u16,
     },
+    Markdown(MarkdownAutomationStep),
     JumpMinimap(f32),
     ToggleFirstFold,
     SetEditorCursorAfter(&'static str),
@@ -243,6 +245,7 @@ impl AutomationStep {
             Self::ScrollEditorTimed { duration_secs } => {
                 format!("scroll-editor-timed:{duration_secs}s")
             }
+            Self::Markdown(step) => step.name(),
             Self::JumpMinimap(fraction) => format!("jump-minimap:{fraction:.2}"),
             Self::ToggleFirstFold => "toggle-first-fold".to_string(),
             Self::SetEditorCursorAfter(needle) => format!("set-cursor-after:{needle}"),
@@ -330,6 +333,7 @@ impl AutomationStep {
             | Self::ShowHover { .. } => Duration::from_secs(30),
             Self::Dart(step) => step.timeout(),
             Self::Database(step) => step.timeout(),
+            Self::Markdown(step) => step.timeout(),
             Self::ScrollEditorTimed { duration_secs }
             | Self::ScrollGitGraphTimed { duration_secs }
             | Self::ScrollApiRoutesTimed { duration_secs }
@@ -751,6 +755,31 @@ impl AutomationController {
                     app.scroll_y.clamp_target(0.0, max_scroll);
                 })
             }
+            AutomationStep::Markdown(markdown_step) => match *markdown_step {
+                MarkdownAutomationStep::ScrollReadTimed { duration_secs } => {
+                    match crate::app::automation_markdown::prepare_read_scroll(app) {
+                        Ok(true) => {}
+                        Ok(false) => return StepResult::Pending,
+                        Err(error) => return StepResult::Failed(error),
+                    }
+                    let mut failure = None;
+                    let result = self.timed_scroll(app, now, duration_secs, |app, direction| {
+                        if failure.is_none()
+                            && let Err(error) =
+                                crate::app::automation_markdown::scroll_read(app, direction)
+                        {
+                            failure = Some(error);
+                        }
+                    });
+                    request_redraw(app);
+                    failure.map_or(result, StepResult::Failed)
+                }
+                _ => match crate::app::automation_markdown::run_step(app, *markdown_step) {
+                    MarkdownStepResult::Pending => StepResult::Pending,
+                    MarkdownStepResult::Done => StepResult::Done,
+                    MarkdownStepResult::Failed(message) => StepResult::Failed(message),
+                },
+            },
             AutomationStep::JumpMinimap(fraction) => {
                 let Some(renderer) = app.renderer.as_mut() else {
                     return StepResult::Pending;
@@ -1787,7 +1816,7 @@ fn step_failure_context(
     }
 }
 
-fn request_redraw(app: &App) {
+pub(super) fn request_redraw(app: &App) {
     if let Some(window) = app.window.as_ref() {
         window.request_redraw();
     }
@@ -2426,9 +2455,9 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
         S::OpenFile(PathBuf::from("src/worker.py")),
         S::WaitHighlight,
         S::WaitMillis(350),
-        S::OpenFile(PathBuf::from("README.md")),
-        S::WaitHighlight,
-        S::WaitMillis(350),
+    ];
+    steps.extend(crate::app::automation_markdown::markdown_scenario_steps());
+    steps.extend([
         S::SwitchToFile(PathBuf::from("src/main.rs")),
         S::WaitFrames(2),
         S::SwitchToFile(PathBuf::from("src/worker.py")),
@@ -2480,7 +2509,7 @@ fn full_pgo_scenario(workspace: &Path) -> Vec<AutomationStep> {
         S::ScrollEditorTimed { duration_secs: 22 },
         S::JumpMinimap(0.72),
         S::WaitMillis(500),
-    ];
+    ]);
 
     for python_test in fixture_python_tests(workspace) {
         let should_scroll = python_test
@@ -2698,6 +2727,35 @@ mod tests {
         let dart_steps = &steps[open_dart..open_large];
         assert!(setup_dart < apply_workspace);
         assert!(apply_workspace < open_dart);
+
+        let open_worker = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::OpenFile(path) if path == Path::new("src/worker.py")
+            ))
+            .unwrap();
+        let open_markdown = steps
+            .iter()
+            .position(|step| matches!(
+                step,
+                AutomationStep::OpenFile(path) if path == Path::new("README.md")
+            ))
+            .unwrap();
+        let return_to_main = steps
+            .iter()
+            .enumerate()
+            .skip(open_markdown + 1)
+            .find_map(|(index, step)| matches!(
+                step,
+                AutomationStep::SwitchToFile(path) if path == Path::new("src/main.rs")
+            ).then_some(index))
+            .unwrap();
+        assert!(open_worker < open_markdown);
+        assert!(open_markdown < return_to_main);
+        assert!(steps[open_markdown..return_to_main]
+            .iter()
+            .any(|step| matches!(step, AutomationStep::Markdown(_))));
         assert!(dart_steps.iter().any(|step| matches!(
             step,
             AutomationStep::WaitHighlight

@@ -702,6 +702,11 @@ mod tests {
         let side = include_str!("ide_panel_side_renderer.rs");
         let root = include_str!("../root_frame_renderer.rs");
         let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
+        let shared_finish = source_between(
+            root_overlays,
+            "fn finish_root_overlays_and_telemetry",
+            "fn finalize_root_frame_telemetry",
+        );
         let overlay = source_between(
             side,
             "pub(crate) fn draw_git_dropdown_overlays",
@@ -726,7 +731,13 @@ mod tests {
 
         assert!(root_overlays.contains("self.draw_git_dropdown_overlays("));
         assert_eq!(root.matches("draw_file_tree_overlays(").count(), 0);
-        assert_eq!(root.matches("draw_ide_context_overlays(").count(), 3);
+        assert_eq!(root.matches("draw_ide_context_overlays(").count(), 2);
+        assert_eq!(
+            shared_finish
+                .matches("self.draw_ide_context_overlays(")
+                .count(),
+            1
+        );
     }
 
     #[test]
@@ -751,6 +762,59 @@ mod tests {
             assert_eq!(registry.find_overlay_at(10.0, 10.0), Some(overlay_id));
             assert_eq!(registry.find_at(10.0, 10.0), Some(overlay_id));
         }
+    }
+
+    #[test]
+    fn markdown_status_mode_and_labels_follow_active_mode_only_for_markdown() {
+        assert_eq!(
+            markdown_status_mode_for_ext("md", crate::app::MarkdownMode::Read),
+            Some(crate::app::MarkdownMode::Read)
+        );
+        assert_eq!(
+            markdown_status_mode_for_ext("markdown", crate::app::MarkdownMode::Edit),
+            Some(crate::app::MarkdownMode::Edit)
+        );
+        assert_eq!(
+            markdown_status_mode_for_ext("py", crate::app::MarkdownMode::Read),
+            None
+        );
+        assert_eq!(
+            markdown_status_mode_label(crate::app::MarkdownMode::Edit),
+            "↔ Редактирование"
+        );
+        assert_eq!(
+            markdown_status_mode_label(crate::app::MarkdownMode::Read),
+            "↔ Чтение"
+        );
+    }
+
+    #[test]
+    fn markdown_status_narrow_layout_stays_inside_bar_without_overlap() {
+        let bar = crate::ui_system::UiClipRect::new(48.0, 700.0, 312.0, 28.0);
+        let layout = status_language_layout(bar, 70.0, Some(112.0), 1.0);
+        let mode = layout.mode_rect.expect("markdown mode button");
+        assert!(mode.w > 0.0 && mode.h > 0.0);
+        assert_rect_inside(mode, bar);
+        assert!(mode.x + mode.w <= layout.language_x - 8.0 + 0.5);
+        assert!(!status_diagnostics_fit(layout, mode.x + 1.0, 1.0));
+
+        let mut registry = crate::ui_system::UiRegistry::new();
+        let mx = mode.x + mode.w * 0.5;
+        let my = mode.y + mode.h * 0.5;
+        assert!(registry.register_rect_clipped(
+            crate::ui_system::UiId::MarkdownModeToggle,
+            mode.x,
+            mode.y,
+            mode.w,
+            mode.h,
+            bar,
+            mx,
+            my,
+        ));
+        assert_eq!(
+            registry.find_at(mx, my),
+            Some(crate::ui_system::UiId::MarkdownModeToggle)
+        );
     }
 
 }

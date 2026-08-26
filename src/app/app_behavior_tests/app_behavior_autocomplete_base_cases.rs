@@ -19,7 +19,7 @@ fn test_theme() -> crate::renderer::Theme {
     }
 }
 
-fn editor_with(text: &str) -> Editor {
+pub(crate) fn editor_with(text: &str) -> Editor {
     let mut editor = Editor::new(text.len() + 64);
     let _ = editor.insert_str(text);
     editor.cursor = text.len();
@@ -29,7 +29,7 @@ fn editor_with(text: &str) -> Editor {
     editor
 }
 
-fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
+pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
     EditorTab {
         editor: editor_with(text),
         file_path: path.map(PathBuf::from),
@@ -43,6 +43,7 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
             .and_then(|p| std::path::Path::new(p).extension())
             .map(|ext| ext.to_string_lossy().to_string())
             .unwrap_or_default(),
+        markdown: Default::default(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),
@@ -60,7 +61,7 @@ fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab {
     }
 }
 
-fn test_app() -> Option<App> {
+pub(crate) fn test_app() -> Option<App> {
     let now = Instant::now();
     Some(App {
         automation: None,
@@ -87,6 +88,7 @@ fn test_app() -> Option<App> {
             line_ending: crate::platform::LineEnding::Lf,
         },
         file_extension: String::new(),
+        markdown: Default::default(),
         highlighter: crate::highlighter::Highlighter::new(),
         closing_hint_state: Default::default(),
         closing_hint_settings: Default::default(),

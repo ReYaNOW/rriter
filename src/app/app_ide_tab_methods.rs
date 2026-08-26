@@ -484,6 +484,7 @@ impl App {
                 text_file_format: self.text_file_format,
                 base_title: self.base_title.clone(),
                 file_extension: self.file_extension.clone(),
+                markdown: Default::default(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -655,6 +656,7 @@ impl App {
         );
         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
         std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
+        std::mem::swap(&mut self.markdown, &mut self.tabs[ai].markdown);
         std::mem::swap(&mut self.scroll_y, &mut self.tabs[ai].scroll_y);
         std::mem::swap(&mut self.scroll_x, &mut self.tabs[ai].scroll_x);
         std::mem::swap(&mut self.search_results, &mut self.tabs[ai].search_results);
@@ -867,6 +869,7 @@ impl App {
         self.save_tabs_state();
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -1483,6 +1486,7 @@ mod tests {
             text_file_format: crate::platform::TextFileFormat::default(),
             base_title: "large.rs".to_string(),
             file_extension: "rs".to_string(),
+            markdown: Default::default(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans,

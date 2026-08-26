@@ -264,6 +264,7 @@ pub(crate) fn language_display_name_for_ext(ext: &str) -> &'static str {
         "c" => "C",
         "cpp" => "C++",
         "make" => "Makefile",
+        "md" => "Markdown",
         _ => "Text",
     }
 }
@@ -557,6 +558,8 @@ mod tests {
         assert_eq!(language_display_name_for_ext("pyi"), "Python");
         assert_eq!(language_display_name_for_ext("rs"), "Rust");
         assert_eq!(language_display_name_for_ext("ts"), "TypeScript");
+        assert_eq!(language_display_name_for_ext("md"), "Markdown");
+        assert_eq!(language_display_name_for_ext("markdown"), "Markdown");
         assert_eq!(language_display_name_for_ext("txt"), "Text");
     }
 

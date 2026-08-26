@@ -759,7 +759,27 @@ class PgoPipelineTests(unittest.TestCase):
             self.assertIn("/automation/featured/{resource_id}", openapi["paths"])
             self.assertIn("/automation/ping", openapi["paths"])
             self.assertTrue((workspace / "src" / "worker.py").is_file())
-            self.assertTrue((workspace / "README.md").is_file())
+            markdown = (workspace / "README.md").read_text(encoding="utf-8")
+            for marker in (
+                "# RRiter PGO Markdown fixture",
+                "## Edit and Read coverage",
+                "### Semantic structures",
+                "**strong text**",
+                "*emphasis text*",
+                "`inline_code(42)`",
+                "[deterministic link](https://example.invalid/path)",
+                "> Multiline quote continuation",
+                "- [ ] unchecked task",
+                "- [x] checked task",
+                "| :--- | :----: | ----: |",
+                "```rust",
+                "```python",
+                "```bash",
+                "\u043a\u0438\u0440\u0438\u043b\u043b\u0438\u0446\u0430 \U0001f600",
+                "RRITER_PGO_MARKDOWN_EDIT_TARGET",
+            ):
+                self.assertIn(marker, markdown)
+            self.assertGreaterEqual(len(markdown.splitlines()), 60)
 
     def test_dart_fixture_generation_is_deterministic(self) -> None:
         self.assertEqual(

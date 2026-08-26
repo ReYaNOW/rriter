@@ -60,6 +60,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "main.py".to_string(),
         file_extension: "py".to_string(),
+        markdown: Default::default(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),
@@ -85,6 +86,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "output.py".to_string(),
         file_extension: "py".to_string(),
+        markdown: Default::default(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: vec![crate::highlighter::ColorSpan {

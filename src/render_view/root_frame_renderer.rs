@@ -18,6 +18,7 @@ impl Renderer {
         active_tab: usize,
         scroll_x: f32,
         scroll_y: f32,
+        markdown: &mut crate::app::MarkdownTabState,
         blink_alpha: f32,
         show_fps: bool,
         spans: &[ColorSpan],
@@ -69,6 +70,7 @@ impl Renderer {
         let mut telemetry_side_panel_time = 0.0;
         let mut telemetry_root_phases = [0.0; 5];
         let mut telemetry_chrome_details = [0.0; 6];
+        let markdown_read_active = crate::render_view::markdown_read::markdown_read_active(markdown.mode);
 
         let cursor_phys_line = editor
             .line_offsets
@@ -198,75 +200,76 @@ impl Renderer {
 
         let mut wants_pointer = false;
 
-        let cursor_phys_line = editor
-            .line_offsets
-            .partition_point(|&o| o <= editor.cursor)
-            .saturating_sub(1);
+        let (total_lines, visible_cursor_line) = if markdown_read_active {
+            // Preview owns its own virtualized layout and scroll surface; avoid rebuilding
+            // source-only fold mappings on a Read-mode frame.
+            (1, 0)
+        } else {
+            let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
+                let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
+                let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+                let end_hash = (fold_end as u64).rotate_left(32);
+                acc ^ line_hash ^ end_hash
+            });
+            let phys_to_visual_stale = self.phys_to_visual_editor_version != editor.version
+                || self.phys_to_visual_line_count != editor.line_offsets.len()
+                || self.phys_to_visual_fold_count != editor.folded_lines.len()
+                || self.phys_to_visual_fold_checksum != fold_checksum
+                || self.phys_to_visual.len() != editor.line_offsets.len();
 
-        let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
-            let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
-            let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            let end_hash = (fold_end as u64).rotate_left(32);
-            acc ^ line_hash ^ end_hash
-        });
-        let phys_to_visual_stale = self.phys_to_visual_editor_version != editor.version
-            || self.phys_to_visual_line_count != editor.line_offsets.len()
-            || self.phys_to_visual_fold_count != editor.folded_lines.len()
-            || self.phys_to_visual_fold_checksum != fold_checksum
-            || self.phys_to_visual.len() != editor.line_offsets.len();
+            if phys_to_visual_stale {
+                self.phys_to_visual.clear();
+                self.phys_to_visual.resize(editor.line_offsets.len(), 0);
 
-        let (total_lines, visible_cursor_line) = if phys_to_visual_stale {
-            self.phys_to_visual.clear();
-            self.phys_to_visual.resize(editor.line_offsets.len(), 0);
-
-            let mut visible_lines_count = 0;
-            let mut visible_cursor_line = 0;
-            let mut temp_phys = 0;
-            while temp_phys < editor.line_offsets.len() {
-                self.phys_to_visual[temp_phys] = visible_lines_count;
-                if temp_phys == cursor_phys_line {
-                    visible_cursor_line = visible_lines_count;
-                }
-                let is_folded = editor.folded_lines.contains(&temp_phys)
-                    && editor.foldable_lines.contains_key(&temp_phys);
-                let fold_end = if is_folded {
-                    editor.foldable_lines.get(&temp_phys).copied()
-                } else {
-                    None
-                };
-                visible_lines_count += 1;
-                if let Some(end) = fold_end {
-                    if cursor_phys_line > temp_phys && cursor_phys_line <= end {
-                        visible_cursor_line = visible_lines_count - 1;
+                let mut visible_lines_count = 0;
+                let mut visible_cursor_line = 0;
+                let mut temp_phys = 0;
+                while temp_phys < editor.line_offsets.len() {
+                    self.phys_to_visual[temp_phys] = visible_lines_count;
+                    if temp_phys == cursor_phys_line {
+                        visible_cursor_line = visible_lines_count;
                     }
-                    while temp_phys < end {
-                        temp_phys += 1;
-                        if temp_phys < editor.line_offsets.len() {
-                            self.phys_to_visual[temp_phys] = visible_lines_count - 1;
+                    let is_folded = editor.folded_lines.contains(&temp_phys)
+                        && editor.foldable_lines.contains_key(&temp_phys);
+                    let fold_end = if is_folded {
+                        editor.foldable_lines.get(&temp_phys).copied()
+                    } else {
+                        None
+                    };
+                    visible_lines_count += 1;
+                    if let Some(end) = fold_end {
+                        if cursor_phys_line > temp_phys && cursor_phys_line <= end {
+                            visible_cursor_line = visible_lines_count - 1;
+                        }
+                        while temp_phys < end {
+                            temp_phys += 1;
+                            if temp_phys < editor.line_offsets.len() {
+                                self.phys_to_visual[temp_phys] = visible_lines_count - 1;
+                            }
                         }
                     }
+                    temp_phys += 1;
                 }
-                temp_phys += 1;
+                self.phys_to_visual_editor_version = editor.version;
+                self.phys_to_visual_line_count = editor.line_offsets.len();
+                self.phys_to_visual_fold_count = editor.folded_lines.len();
+                self.phys_to_visual_fold_checksum = fold_checksum;
+                (visible_lines_count.max(1), visible_cursor_line)
+            } else {
+                let total_lines = self
+                    .phys_to_visual
+                    .last()
+                    .copied()
+                    .map(|line| line + 1)
+                    .unwrap_or(1)
+                    .max(1);
+                let visible_cursor_line = self
+                    .phys_to_visual
+                    .get(cursor_phys_line)
+                    .copied()
+                    .unwrap_or(cursor_phys_line);
+                (total_lines, visible_cursor_line)
             }
-            self.phys_to_visual_editor_version = editor.version;
-            self.phys_to_visual_line_count = editor.line_offsets.len();
-            self.phys_to_visual_fold_count = editor.folded_lines.len();
-            self.phys_to_visual_fold_checksum = fold_checksum;
-            (visible_lines_count.max(1), visible_cursor_line)
-        } else {
-            let total_lines = self
-                .phys_to_visual
-                .last()
-                .copied()
-                .map(|line| line + 1)
-                .unwrap_or(1)
-                .max(1);
-            let visible_cursor_line = self
-                .phys_to_visual
-                .get(cursor_phys_line)
-                .copied()
-                .unwrap_or(cursor_phys_line);
-            (total_lines, visible_cursor_line)
         };
         let s = self.scale_factor;
         let mx = if show_settings || dialog_window_open {
@@ -393,7 +396,9 @@ impl Renderer {
         // self.height = real_height — текст рендерится на полную высоту окна,
         // включая зону нижней панели (нужно для работы прозрачности панели).
         let cache_start = telemetry_frame_start.map(|_| Instant::now());
-        self.update_cache(editor, scroll_x, scroll_y, is_resizing);
+        if !markdown_read_active {
+            self.update_cache(editor, scroll_x, scroll_y, is_resizing);
+        }
         if let Some(cache_start) = cache_start {
             telemetry_root_phases[1] = cache_start.elapsed().as_secs_f32();
         }
@@ -401,8 +406,9 @@ impl Renderer {
         let render_scroll_x = scroll_x.round();
         let render_scroll_y = scroll_y.round() - tab_bar_h;
 
-        if self.last_editor_version_for_scroll_x != editor.version
-            || (self.last_width - self.width).abs() > 0.5
+        if !markdown_read_active
+            && (self.last_editor_version_for_scroll_x != editor.version
+                || (self.last_width - self.width).abs() > 0.5)
         {
             let longest_idx = editor.longest_line_idx;
             let start_byte = editor.line_offsets.get(longest_idx).copied().unwrap_or(0);
@@ -444,9 +450,6 @@ impl Renderer {
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
 
-        editor.ensure_indent_cache_updated();
-        let indent_levels = editor.get_cached_indent_levels();
-        let (first, second) = editor.text_parts();
 
         let active_api_route = tabs.get(active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::ApiClient(meta, state) if !state.auth_view => {
@@ -541,6 +544,7 @@ impl Renderer {
                 self.draw_status_bar(
                     editor,
                     None,
+                    markdown.mode,
                     lsp,
                     ui_registry,
                     s,
@@ -642,6 +646,7 @@ impl Renderer {
             self.draw_status_bar(
                 editor,
                 None,
+                markdown.mode,
                 lsp,
                 ui_registry,
                 s,
@@ -709,6 +714,132 @@ impl Renderer {
             self.was_empty_ide = false;
         }
 
+        if markdown_read_active {
+            if let Some(pre_editor_start) = pre_editor_start {
+                telemetry_root_phases[2] = pre_editor_start.elapsed().as_secs_f32();
+            }
+            let gutter_x = if is_ide_mode {
+                48.0 * s + panel_left_w
+            } else {
+                0.0
+            };
+            let content_x = if is_ide_mode {
+                gutter_x.round() + 1.0
+            } else {
+                0.0
+            };
+            let stage_start = telemetry_frame_start.map(|_| Instant::now());
+            self.draw_markdown_read(
+                markdown,
+                editor.version,
+                spans,
+                content_x,
+                tab_bar_h,
+                (self.width - content_x).max(0.0),
+                editor_height,
+                ui_registry,
+            );
+            if let Some(stage_start) = stage_start {
+                telemetry_editor_time = stage_start.elapsed().as_secs_f32();
+            }
+
+            let chrome_start = telemetry_frame_start.map(|_| Instant::now());
+            let mut chrome_detail_start = chrome_start;
+            let tab_tooltip = self.draw_root_tab_chrome(
+                tabs,
+                active_tab,
+                editor,
+                editor_title,
+                editor_path,
+                show_welcome,
+                is_ide_mode,
+                gutter_x,
+                panel_bottom_h,
+                tab_bar_visual_h,
+                s,
+                ui_mx,
+                ui_my,
+                mx,
+                my,
+                ui_registry,
+                tab_scroll_x,
+                ide_panel,
+                lsp,
+                ide_workspaces,
+            );
+            if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+                telemetry_chrome_details[0] = start.elapsed().as_secs_f32();
+            }
+            self.draw_root_fps_if_visible(show_fps, 0.0);
+            if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+                telemetry_chrome_details[1] = start.elapsed().as_secs_f32();
+            }
+            if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+                telemetry_chrome_details[2] = start.elapsed().as_secs_f32();
+            }
+            self.draw_root_bottom_status_and_dim(
+                editor,
+                editor_path,
+                markdown.mode,
+                tabs,
+                active_tab,
+                ide_panel,
+                lsp,
+                ui_registry,
+                has_lsp_diagnostics,
+                s,
+                ui_mx,
+                ui_my,
+                panel_bottom_h,
+                is_ui_disabled,
+                blink_alpha,
+                active_api_route,
+                is_ide_mode,
+                status_progress_label,
+                status_progress_elapsed,
+                status_progress_value,
+                dialog_window_open,
+            );
+            if let Some(start) = chrome_detail_start.replace(Instant::now()) {
+                telemetry_chrome_details[3] = start.elapsed().as_secs_f32();
+            }
+            let wants_pointer = self.finish_root_overlays_and_telemetry(
+                wants_pointer,
+                tab_tooltip,
+                ide_panel,
+                editor,
+                ui_registry,
+                is_ide_mode,
+                panel_left_w,
+                panel_bottom_h,
+                s,
+                mx,
+                my,
+                ui_mx,
+                ui_my,
+                blink_alpha,
+                show_readonly_notice,
+                tab_bar_h,
+                is_ui_disabled,
+                modal_overlay_open,
+                real_height,
+                chrome_detail_start,
+                telemetry_frame_start,
+                chrome_start,
+                telemetry_was_typing,
+                telemetry_was_scrolling,
+                telemetry_editor_time,
+                telemetry_minimap_time,
+                telemetry_side_panel_time,
+                telemetry_root_phases,
+                telemetry_chrome_details,
+            );
+            return (wants_pointer, Vec::new());
+        }
+
+        editor.ensure_indent_cache_updated();
+        let indent_levels = editor.get_cached_indent_levels();
+        let (first, second) = editor.text_parts();
         let first_len = first.len();
         let len = first_len + second.len();
 
@@ -1102,52 +1233,51 @@ impl Renderer {
             s,
         );
 
-        let mut tab_tooltip = None;
-        if show_welcome && is_ide_mode {
-            self.draw_ide_welcome_bounce(gutter_x, panel_bottom_h, ui_registry, mx, my, s);
-        } else if !show_welcome && is_ide_mode {
+        let tab_tooltip = self.draw_root_tab_chrome(
+            tabs,
+            active_tab,
+            editor,
+            editor_title,
+            editor_path,
+            show_welcome,
+            is_ide_mode,
+            gutter_x,
+            panel_bottom_h,
+            tab_bar_visual_h,
+            s,
+            ui_mx,
+            ui_my,
+            mx,
+            my,
+            ui_registry,
+            tab_scroll_x,
+            ide_panel,
+            lsp,
+            ide_workspaces,
+        );
+        if !show_welcome
+            && is_ide_mode
+            && let Some((query_meta, query_state)) = active_database_query
+        {
             let tab_x = gutter_x.round() + 1.0;
             let tab_w = self.width - tab_x;
-            tab_tooltip = self.draw_tab_bar(
-                tabs,
-                active_tab,
-                editor,
-                editor_title,
-                editor_path,
+            self.draw_database_query_chrome(
                 tab_x,
-                0.0,
-                tab_w,
                 tab_bar_visual_h,
+                tab_w,
+                tab_bar_h + editor_height,
+                database_query_results_h,
                 s,
+                query_meta,
+                query_state,
+                &ide_panel.database.persisted.query_history,
+                ui_registry,
                 ui_mx,
                 ui_my,
-                ui_registry,
-                tab_scroll_x,
-                ide_panel.tab_drag.as_ref(),
-                lsp,
-                &ide_panel.api,
-                ide_workspaces,
+                mx,
+                my,
             );
             self.flush();
-            if let Some((query_meta, query_state)) = active_database_query {
-                self.draw_database_query_chrome(
-                    tab_x,
-                    tab_bar_visual_h,
-                    tab_w,
-                    tab_bar_h + editor_height,
-                    database_query_results_h,
-                    s,
-                    query_meta,
-                    query_state,
-                    &ide_panel.database.persisted.query_history,
-                    ui_registry,
-                    ui_mx,
-                    ui_my,
-                    mx,
-                    my,
-                );
-                self.flush();
-            }
         }
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {
             telemetry_chrome_details[0] = start.elapsed().as_secs_f32();
@@ -1268,9 +1398,7 @@ impl Renderer {
             s,
         );
 
-        if show_fps {
-            self.draw_fps_overlay(minimap_w);
-        }
+        self.draw_root_fps_if_visible(show_fps, minimap_w);
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {
             telemetry_chrome_details[1] = start.elapsed().as_secs_f32();
         }
@@ -1324,42 +1452,32 @@ impl Renderer {
 
         // self.height уже = real_height на всём протяжении, ничего восстанавливать не нужно
 
-        if is_ide_mode && panel_bottom_h > 0.0 {
-            self.draw_ide_bottom_panel(
-                ide_panel,
-                lsp,
-                ui_registry,
-                has_lsp_diagnostics,
-                s,
-                ui_mx,
-                ui_my,
-                panel_bottom_h,
-                is_ui_disabled,
-                blink_alpha,
-                active_api_route,
-            );
-        }
-
-        if is_ide_mode {
-            self.draw_status_bar(
-                editor,
-                editor_path.zip(tabs.get(active_tab).map(|tab| tab.text_file_format.encoding)),
-                lsp,
-                ui_registry,
-                s,
-                ui_mx,
-                ui_my,
-                panel_bottom_h,
-                status_progress_label,
-                status_progress_elapsed,
-                status_progress_value,
-            );
-        }
+        self.draw_root_bottom_status_and_dim(
+            editor,
+            editor_path,
+            markdown.mode,
+            tabs,
+            active_tab,
+            ide_panel,
+            lsp,
+            ui_registry,
+            has_lsp_diagnostics,
+            s,
+            ui_mx,
+            ui_my,
+            panel_bottom_h,
+            is_ui_disabled,
+            blink_alpha,
+            active_api_route,
+            is_ide_mode,
+            status_progress_label,
+            status_progress_elapsed,
+            status_progress_value,
+            dialog_window_open,
+        );
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {
             telemetry_chrome_details[3] = start.elapsed().as_secs_f32();
         }
-
-        self.draw_dialog_dim_if_open(dialog_window_open);
 
         let status_bar_y = if is_ide_mode {
             ide_status_bar_y(self.height, panel_bottom_h, s)
@@ -1425,222 +1543,38 @@ impl Renderer {
             );
         }
 
-        if let Some((path, tx, ty)) = tab_tooltip {
-            self.draw_tab_tooltip(&path, tx, ty, s);
-        }
+        let wants_pointer = self.finish_root_overlays_and_telemetry(
+            wants_pointer,
+            tab_tooltip,
+            ide_panel,
+            editor,
+            ui_registry,
+            is_ide_mode,
+            panel_left_w,
+            panel_bottom_h,
+            s,
+            mx,
+            my,
+            ui_mx,
+            ui_my,
+            blink_alpha,
+            show_readonly_notice,
+            tab_bar_h,
+            is_ui_disabled,
+            modal_overlay_open,
+            real_height,
+            chrome_detail_start,
+            telemetry_frame_start,
+            chrome_start,
+            telemetry_was_typing,
+            telemetry_was_scrolling,
+            telemetry_editor_time,
+            telemetry_minimap_time,
+            telemetry_side_panel_time,
+            telemetry_root_phases,
+            telemetry_chrome_details,
+        );
 
-        let mouse_in_blocking_bottom_panel = is_ide_mode
-            && panel_bottom_h > 0.0
-            && ide_panel.bottom_panel_blocks_editor_hover()
-            && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
-            && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
-
-        if is_ide_mode {
-            let overlay_mx = if mouse_in_blocking_bottom_panel {
-                -1.0
-            } else {
-                mx
-            };
-            let overlay_my = if mouse_in_blocking_bottom_panel {
-                -1.0
-            } else {
-                my
-            };
-            wants_pointer |= self.draw_ide_context_overlays(
-                ide_panel,
-                ui_registry,
-                overlay_mx,
-                overlay_my,
-                blink_alpha,
-                panel_left_w,
-                s,
-            );
-            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
-        }
-
-        if is_ide_mode {
-            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
-        } else {
-            self.reset_git_file_tooltip_overlay();
-        }
-
-        if show_readonly_notice {
-            self.draw_readonly_notice(tab_bar_h, s);
-        }
-
-        if let Some(start) = chrome_detail_start.replace(Instant::now()) {
-            telemetry_chrome_details[4] = start.elapsed().as_secs_f32();
-        }
-        self.flush();
-        if let Some(start) = chrome_detail_start {
-            telemetry_chrome_details[5] = start.elapsed().as_secs_f32();
-        }
-
-        // Регистрация хитбоксов ресайза в самом конце, чтобы они перекрывали все панели и блокираторы
-        // Блокируем resize, когда терминал в фокусе
-        if is_ide_mode {
-            self.register_root_resize_blockers(
-                ide_panel,
-                ui_registry,
-                s,
-                mx,
-                my,
-                panel_left_w,
-                panel_bottom_h,
-                is_ui_disabled,
-                modal_overlay_open,
-                real_height,
-            );
-        }
-
-        if let Some(frame_start_time) = telemetry_frame_start {
-            let elapsed = frame_start_time.elapsed().as_secs_f32();
-            if let Some(chrome_start) = chrome_start {
-                telemetry_root_phases[4] = chrome_start.elapsed().as_secs_f32();
-            }
-            TELEMETRY.with(|t| {
-                let mut t = t.borrow_mut();
-                if telemetry_was_typing.unwrap_or(false) {
-                    t.type_time += elapsed;
-                    t.type_count += 1;
-                } else if telemetry_was_scrolling.unwrap_or(false) {
-                    t.scroll_time += elapsed;
-                    t.scroll_count += 1;
-                } else {
-                    t.render_time += elapsed;
-                    t.render_count += 1;
-                }
-                t.editor_time += telemetry_editor_time;
-                t.editor_count += u32::from(telemetry_editor_time > 0.0);
-                t.minimap_time += telemetry_minimap_time;
-                t.minimap_count += u32::from(telemetry_minimap_time > 0.0);
-                t.side_panel_time += telemetry_side_panel_time;
-                t.side_panel_count += u32::from(telemetry_side_panel_time > 0.0);
-                t.root_other_time += (elapsed
-                    - telemetry_editor_time
-                    - telemetry_minimap_time
-                    - telemetry_side_panel_time)
-                    .max(0.0);
-                t.root_other_count += 1;
-                for (index, elapsed) in telemetry_root_phases.into_iter().enumerate() {
-                    t.root_phase_time[index] += elapsed;
-                    t.root_phase_count[index] += 1;
-                }
-                for (index, elapsed) in telemetry_chrome_details.into_iter().enumerate() {
-                    t.chrome_detail_time[index] += elapsed;
-                    t.chrome_detail_count[index] += 1;
-                }
-
-                if t.last_print.elapsed().as_secs() >= 10 {
-                    let r_avg = if t.render_count > 0 {
-                        (t.render_time / t.render_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    let s_avg = if t.scroll_count > 0 {
-                        (t.scroll_time / t.scroll_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    let ty_avg = if t.type_count > 0 {
-                        (t.type_time / t.type_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    println!(
-                        "📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms",
-                        r_avg, s_avg, ty_avg
-                    );
-                    let stage_avg = |time: f32, count: u32| {
-                        if count > 0 { time / count as f32 * 1000.0 } else { 0.0 }
-                    };
-                    println!(
-                        "📊 Frame split: Editor {:.2}ms | Minimap {:.2}ms | Side {:.2}ms | Swap {:.2}ms",
-                        stage_avg(t.editor_time, t.editor_count),
-                        stage_avg(t.minimap_time, t.minimap_count),
-                        stage_avg(t.side_panel_time, t.side_panel_count),
-                        stage_avg(t.swap_time, t.swap_count),
-                    );
-                    println!(
-                        "📊 Root other: {:.2}ms",
-                        stage_avg(t.root_other_time, t.root_other_count),
-                    );
-                    println!(
-                        "📊 Root phases: Prep {:.2}ms | Cache {:.2}ms | Pre-editor {:.2}ms | Overlays {:.2}ms | Chrome {:.2}ms",
-                        stage_avg(t.root_phase_time[0], t.root_phase_count[0]),
-                        stage_avg(t.root_phase_time[1], t.root_phase_count[1]),
-                        stage_avg(t.root_phase_time[2], t.root_phase_count[2]),
-                        stage_avg(t.root_phase_time[3], t.root_phase_count[3]),
-                        stage_avg(t.root_phase_time[4], t.root_phase_count[4]),
-                    );
-                    let measured_frames = t.render_count + t.scroll_count + t.type_count;
-                    println!(
-                        "📊 Flush: Avg {:.3}ms | Max {:.2}ms | Calls/frame {:.1} | Vertices/frame {:.0}",
-                        stage_avg(t.flush_time, t.flush_count),
-                        t.flush_max_time * 1000.0,
-                        t.flush_count as f32 / measured_frames.max(1) as f32,
-                        t.flush_vertices as f32 / measured_frames.max(1) as f32,
-                    );
-                    println!(
-                        "📊 Chrome detail: Tabs {:.2}ms | Sticky-scroll {:.2}ms | Popups {:.2}ms | Bottom-status {:.2}ms | Overlays {:.2}ms | Final-flush {:.2}ms",
-                        stage_avg(t.chrome_detail_time[0], t.chrome_detail_count[0]),
-                        stage_avg(t.chrome_detail_time[1], t.chrome_detail_count[1]),
-                        stage_avg(t.chrome_detail_time[2], t.chrome_detail_count[2]),
-                        stage_avg(t.chrome_detail_time[3], t.chrome_detail_count[3]),
-                        stage_avg(t.chrome_detail_time[4], t.chrome_detail_count[4]),
-                        stage_avg(t.chrome_detail_time[5], t.chrome_detail_count[5]),
-                    );
-                    let present_fps = if t.scroll_present_interval_time > 0.0 {
-                        t.scroll_present_interval_count as f32 / t.scroll_present_interval_time
-                    } else {
-                        0.0
-                    };
-                    println!(
-                        "📊 Scroll present: {:.0} FPS | Avg gap {:.2}ms | Max gap {:.2}ms | Frames {}",
-                        present_fps,
-                        stage_avg(
-                            t.scroll_present_interval_time,
-                            t.scroll_present_interval_count,
-                        ),
-                        t.max_scroll_present_interval * 1000.0,
-                        t.scroll_present_interval_count,
-                    );
-
-                    t.render_time = 0.0;
-                    t.render_count = 0;
-                    t.scroll_time = 0.0;
-                    t.scroll_count = 0;
-                    t.type_time = 0.0;
-                    t.type_count = 0;
-                    t.editor_time = 0.0;
-                    t.editor_count = 0;
-                    t.minimap_time = 0.0;
-                    t.minimap_count = 0;
-                    t.side_panel_time = 0.0;
-                    t.side_panel_count = 0;
-                    t.swap_time = 0.0;
-                    t.swap_count = 0;
-                    t.scroll_present_interval_time = 0.0;
-                    t.scroll_present_interval_count = 0;
-                    t.max_scroll_present_interval = 0.0;
-                    t.root_other_time = 0.0;
-                    t.root_other_count = 0;
-                    t.root_phase_time = [0.0; 5];
-                    t.root_phase_count = [0; 5];
-                    t.flush_time = 0.0;
-                    t.flush_count = 0;
-                    t.flush_max_time = 0.0;
-                    t.flush_vertices = 0;
-                    t.chrome_detail_time = [0.0; 6];
-                    t.chrome_detail_count = [0; 6];
-                    t.last_print = Instant::now();
-                }
-            });
-        }
-
-        (
-            wants_pointer | ui_registry.wants_pointer(),
-            target_sticky_lines,
-        )
+        (wants_pointer, target_sticky_lines)
     }
 }

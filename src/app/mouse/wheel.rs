@@ -1272,6 +1272,24 @@ impl App {
             return;
         }
 
+        let hovered = self.ui_registry.find_at(mx, my);
+        match crate::app::markdown::handle_markdown_read_wheel(
+            self.markdown_mode(),
+            hovered,
+            &mut self.markdown.read_scroll_y,
+            self.markdown.read_max_scroll,
+            dy,
+        ) {
+            crate::app::markdown::MarkdownReadWheelResult::Scrolled => {
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+            crate::app::markdown::MarkdownReadWheelResult::Blocked => return,
+            crate::app::markdown::MarkdownReadWheelResult::NotRead => {}
+        }
+
         self.scroll_y.anim_speed = 7.0;
         self.scroll_x.anim_speed = 7.0;
 

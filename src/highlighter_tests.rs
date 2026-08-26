@@ -9,6 +9,15 @@ fn wait(highlighter: &mut Highlighter, version: u64) {
     assert_eq!(highlighter.current_version, version);
 }
 
+fn color_at(highlighter: &Highlighter, offset: usize) -> [f32; 4] {
+    highlighter
+        .spans
+        .iter()
+        .find(|span| span.start <= offset && offset < span.end)
+        .map(|span| span.color)
+        .unwrap_or(DRACULA_FG)
+}
+
 #[test]
 fn highlighter_drop_cancels_worker_without_leaving_background_work() {
     let baseline = active_highlighter_worker_count();
@@ -50,7 +59,124 @@ fn tree_sitter_language_labels_follow_highlighter_extensions() {
     assert_eq!(tree_sitter_lang_name_for_ext("hpp"), "cpp");
     assert_eq!(tree_sitter_lang_name_for_ext("makefile"), "make");
     assert_eq!(tree_sitter_lang_name_for_ext("sql"), "sql");
+    assert_eq!(tree_sitter_lang_name_for_ext("md"), "md");
+    assert_eq!(tree_sitter_lang_name_for_ext("markdown"), "md");
     assert_eq!(tree_sitter_lang_name_for_ext("txt"), "");
+}
+
+#[test]
+fn markdown_injection_aliases_reuse_existing_rriter_languages() {
+    let cases = [
+        ("rust", "rs"),
+        ("rs", "rs"),
+        ("python", "py"),
+        ("py", "py"),
+        ("shell", "bash"),
+        ("sh", "bash"),
+        ("bash", "bash"),
+        ("javascript", "js"),
+        ("js", "js"),
+        ("typescript", "ts"),
+        ("ts", "ts"),
+        ("tsx", "tsx"),
+        ("html", "html"),
+        ("css", "css"),
+        ("json", "json"),
+        ("toml", "toml"),
+        ("go", "go"),
+        ("java", "java"),
+        ("csharp", "cs"),
+        ("cs", "cs"),
+        ("dart", "dart"),
+        ("c", "c"),
+        ("cpp", "cpp"),
+        ("c++", "cpp"),
+        ("sql", "sql"),
+        ("make", "make"),
+        ("makefile", "make"),
+        ("regex", "regex"),
+        ("markdown", "md"),
+        ("md", "md"),
+        ("markdown_inline", "markdown_inline"),
+    ];
+    for (input, expected) in cases {
+        assert_eq!(normalize_injection_language(input), Some(expected));
+    }
+    assert_eq!(normalize_injection_language("yaml"), None);
+    assert_eq!(normalize_injection_language("latex"), None);
+}
+
+#[test]
+fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections() {
+    let source = concat!(
+        "# H1\n## H2\n### H3\n\n",
+        "Setext\n------\n\n",
+        "> цитата 👋\n\n",
+        "- item\n- [ ] todo\n- [x] done\n1. ordered\n\n",
+        "---\n\n",
+        "| a | b |\n| :- | -: |\n| 1 | 2 |\n\n",
+        "Текст *em* **strong** `inline` [link](https://example.invalid) ![alt](img).\n\n",
+        "```rust\nfn main() { let value = 1; }\n```\n\n",
+        "```python\ndef answer():\n    return 42\n```\n\n",
+        "```unknown-lang\nplain_code()\n```\n",
+    );
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(1, source.to_string(), "md".to_string(), 0);
+    wait(&mut highlighter, 1);
+
+    let h1 = source.find("H1").unwrap();
+    let em = source.find("*em*").unwrap() + 1;
+    let strong = source.find("strong").unwrap();
+    let inline = source.find("inline").unwrap();
+    let link = source.find("link").unwrap();
+    let uri = source.find("https://").unwrap();
+    let rust_fn = source.find("fn main").unwrap();
+    let python_def = source.find("def answer").unwrap();
+    let unknown = source.find("plain_code").unwrap();
+
+    assert_eq!(color_at(&highlighter, h1), DRACULA_PURPLE);
+    assert_eq!(color_at(&highlighter, em), DRACULA_ORANGE);
+    assert_eq!(color_at(&highlighter, strong), DRACULA_PINK);
+    assert_eq!(color_at(&highlighter, inline), DRACULA_YELLOW);
+    assert_eq!(color_at(&highlighter, link), DRACULA_GREEN);
+    assert_eq!(color_at(&highlighter, uri), DRACULA_CYAN);
+    assert_eq!(color_at(&highlighter, rust_fn), DRACULA_PINK);
+    assert_eq!(color_at(&highlighter, python_def), DRACULA_PINK);
+    assert_eq!(color_at(&highlighter, unknown), DRACULA_FG);
+}
+
+#[test]
+fn markdown_highlighter_incremental_edit_reparses_new_structure() {
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(1, "plain\n".to_string(), "md".to_string(), 0);
+    wait(&mut highlighter, 1);
+    assert_eq!(color_at(&highlighter, 0), DRACULA_FG);
+
+    highlighter.apply_edits(
+        2,
+        vec![SyncEdit::Insert {
+            offset: 0,
+            text: "# ".to_string(),
+        }],
+        Some(0),
+        Some(2),
+    );
+    wait(&mut highlighter, 2);
+    assert_eq!(color_at(&highlighter, 2), DRACULA_PURPLE);
+}
+
+#[test]
+fn markdown_link_punctuation_is_not_recolored_by_rainbow_brackets() {
+    assert!(!should_apply_rainbow_brackets("md"));
+    assert!(!should_apply_rainbow_brackets("markdown_inline"));
+    assert!(should_apply_rainbow_brackets("rs"));
+
+    let source = "[link](https://example.invalid)\n";
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(1, source.to_string(), "md".to_string(), 0);
+    wait(&mut highlighter, 1);
+    assert_eq!(color_at(&highlighter, source.find('[').unwrap()), DRACULA_COMMENT);
+    assert_eq!(color_at(&highlighter, source.find('(').unwrap()), DRACULA_COMMENT);
 }
 
 #[test]

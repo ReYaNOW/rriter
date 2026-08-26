@@ -1126,6 +1126,7 @@ mod tests {
             text_file_format: crate::platform::TextFileFormat::default(),
             base_title: path.unwrap_or("Безымянный").to_string(),
             file_extension: String::new(),
+            markdown: Default::default(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -2112,6 +2113,7 @@ Ctrl + Y\tПовторить отмененное действие
 Ctrl + X\tВырезать выделенный текст
 Ctrl + C\tСкопировать выделенный текст
 Ctrl + V\tВставить текст из буфера обмена
+Ctrl/Cmd + Shift + V\tMarkdown: чтение / редактирование
 Ctrl + A\tВыделить весь текст в документе
 Ctrl + Bksp\tУдалить слово слева от курсора
 Ctrl + Del\tУдалить слово справа от курсора
@@ -2191,6 +2193,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         file_key,
         text_file_format,
         file_extension: ext,
+        markdown: Default::default(),
         highlighter,
         closing_hint_state: Default::default(),
         closing_hint_settings: config.dart_settings.closing_hint_settings(),

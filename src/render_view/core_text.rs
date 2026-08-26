@@ -77,6 +77,14 @@ pub(crate) fn wrapped_text_ranges(
     max_width: f32,
     mut advance: impl FnMut(char) -> f32,
 ) -> Vec<(usize, usize)> {
+    wrapped_text_ranges_with_offsets(text, max_width, |_, ch| advance(ch))
+}
+
+pub(crate) fn wrapped_text_ranges_with_offsets(
+    text: &str,
+    max_width: f32,
+    mut advance: impl FnMut(usize, char) -> f32,
+) -> Vec<(usize, usize)> {
     if text.is_empty() {
         return vec![(0, 0)];
     }
@@ -98,7 +106,7 @@ pub(crate) fn wrapped_text_ranges(
                 next_start = next;
                 break;
             }
-            let next_width = width + advance(ch);
+            let next_width = width + advance(cursor, ch);
             if next_width > max_width && cursor > line_start {
                 line_end = last_break.filter(|&offset| offset > line_start).unwrap_or(cursor);
                 next_start = line_end;

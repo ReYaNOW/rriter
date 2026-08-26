@@ -1,4 +1,4 @@
-use super::DartSettings;
+use super::{DartSettings, MarkdownTabState};
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
 use crate::renderer::{Renderer, Theme};
@@ -41,6 +41,7 @@ pub struct EditorTab {
     pub text_file_format: crate::platform::TextFileFormat,
     pub base_title: String,
     pub file_extension: String,
+    pub markdown: MarkdownTabState,
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
     pub spans: Vec<crate::highlighter::ColorSpan>,
@@ -1041,6 +1042,7 @@ pub struct App {
     pub file_key: Option<crate::platform::PathKey>,
     pub text_file_format: crate::platform::TextFileFormat,
     pub file_extension: String,
+    pub markdown: MarkdownTabState,
     pub highlighter: Highlighter,
     pub closing_hint_state: crate::languages::dart::ClosingHintState,
     pub closing_hint_settings: crate::languages::dart::ClosingHintSettings,

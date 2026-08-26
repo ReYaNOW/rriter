@@ -413,6 +413,10 @@ PGO-only semantic Database Tools automation. It consumes the loopback PostgreSQL
 
 PGO-only Dart automation setup and state waits. It disables external Dart server/workspace analysis before the generated workspace is applied, keeps syntax-block closing labels enabled, and requires current-revision tree-sitter syntax hints with explicit diagnostics before the scenario renders and scrolls the Dart source.
 
+### `src/app/automation_markdown.rs`
+
+PGO-only Markdown automation. It owns semantic Edit/Read mode and readiness steps, delegates preview movement to the production Markdown Read scroll path, and provides the deterministic incremental Edit → Read → Edit workload chunk plus focused sequence regressions used by the central PGO scenario.
+
 ### `src/app/dart_settings.rs`
 
 Defines the persistent Dart language-support contract, closing-label mode, and bounded local block-label thresholds. The settings UI, Dart LSP lifecycle, and closing-label renderer use this persisted source of truth through a small runtime adapter instead of maintaining independent user settings.
@@ -456,6 +460,7 @@ Implementation is split through `include!`:
 * `src/app/app_ide_tab_methods.rs` -> IDE mode startup, tab titles, reveal/current tab sync.
 * `src/app/app_file_tab_methods.rs` -> file/tab open, save, switch, highlight wait.
 * `src/app/app_window_external_methods.rs` -> window title, search, close, external file changes.
+* `src/app/markdown.rs` -> per-tab Markdown mode/read-scroll state, lazy incremental semantic parser cache, central mode API, and focused state regressions.
 
 Autocomplete-specific `App` methods live in `src/app/autocomplete.rs`.
 Python completion/fold/source-owner helpers live in `src/app/python_completion.rs`.
@@ -842,8 +847,9 @@ Implementation is split through `include!`:
 
 * `src/render_view/root_helpers.rs` -> frame constants/helpers/tests.
 * `src/render_view/root_frame_helpers.rs` -> inline-git and Git diff floating panel helpers.
-* `src/render_view/root_frame_overlay_helpers.rs` -> overlay, resize, search, and notice helpers.
+* `src/render_view/root_frame_overlay_helpers.rs` -> shared root tab/status/modal/finalization/telemetry path plus overlay, resize, search, and notice helpers.
 * `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
+* `src/render_view/markdown_read.rs` -> version/width-cached Markdown Read presentation, block virtualization, fenced-code span reuse, and independent preview scroll geometry.
 * `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract toggles and locked class block rendering.
 
@@ -1112,6 +1118,10 @@ Use when adding language-specific support.
 Dart-specific import-block helpers and the cached closing-label model shared by Tree-sitter block hints and Dart Analysis Server notifications.
 
 Use when Dart import folding, local closing-label extraction, server-label validation, or closing-label cache merging changes.
+
+### `src/languages/markdown.rs`
+
+Markdown semantic-model helpers built only from `tree-sitter-md`. The module owns the block/inline model used by future Read-mode layout and exposes a stateful incremental parser so model refreshes can be version-cached outside the render path.
 
 ### `src/languages/python.rs`
 

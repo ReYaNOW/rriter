@@ -41,6 +41,143 @@ fn dialog_button_text_baseline(btn_y: f32, btn_h: f32, scale: f32) -> f32 {
     (btn_y + btn_h * 0.5 + 5.0 * scale).round()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StatusLanguageLayout {
+    language_x: f32,
+    mode_rect: Option<crate::ui_system::UiClipRect>,
+    group_left: f32,
+}
+
+fn markdown_status_mode_for_ext(
+    extension: &str,
+    mode: crate::app::MarkdownMode,
+) -> Option<crate::app::MarkdownMode> {
+    crate::app::is_markdown_extension(extension).then_some(mode)
+}
+
+fn markdown_status_mode_label(mode: crate::app::MarkdownMode) -> &'static str {
+    match mode {
+        crate::app::MarkdownMode::Edit => "↔ Редактирование",
+        crate::app::MarkdownMode::Read => "↔ Чтение",
+    }
+}
+
+fn status_language_layout(
+    bar: crate::ui_system::UiClipRect,
+    language_w: f32,
+    mode_text_w: Option<f32>,
+    scale: f32,
+) -> StatusLanguageLayout {
+    let pad = (10.0 * scale).round();
+    let gap = (8.0 * scale).round();
+    let language_x = (bar.x + bar.w - pad - language_w)
+        .max(bar.x + pad)
+        .round();
+    let mode_rect = mode_text_w.and_then(|text_w| {
+        let desired_w = (text_w + 16.0 * scale).round();
+        let x = (language_x - gap - desired_w).max(bar.x + pad).round();
+        let available_w = (language_x - gap - x).max(0.0).round();
+        let w = desired_w.min(available_w);
+        let h = (bar.h - 6.0 * scale).max(1.0).round();
+        let y = (bar.y + (bar.h - h) * 0.5).round();
+        (w > 1.0).then_some(crate::ui_system::UiClipRect::new(x, y, w, h))
+    });
+    StatusLanguageLayout {
+        language_x,
+        group_left: mode_rect.map_or(language_x, |rect| rect.x),
+        mode_rect,
+    }
+}
+
+fn status_diagnostics_fit(
+    layout: StatusLanguageLayout,
+    diagnostics_right: f32,
+    scale: f32,
+) -> bool {
+    layout.group_left > diagnostics_right + 8.0 * scale
+}
+
+#[cfg_attr(coverage_nightly, coverage(off))]
+impl Renderer {
+    #[allow(clippy::too_many_arguments)]
+    fn draw_status_language_group(
+        &mut self,
+        language: &str,
+        encoding: Option<crate::platform::TextEncoding>,
+        markdown_mode: Option<crate::app::MarkdownMode>,
+        layout: StatusLanguageLayout,
+        left_limit: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        bar: crate::ui_system::UiClipRect,
+        scale: f32,
+        mx: f32,
+        my: f32,
+        text_y: f32,
+        text_scale: f32,
+    ) -> f32 {
+        self.draw_string_scaled(
+            language,
+            layout.language_x,
+            text_y,
+            self.theme.fg,
+            text_scale,
+        );
+
+        if let (Some(mode), Some(rect)) = (markdown_mode, layout.mode_rect) {
+            let hovered = ui_registry.register_rect_clipped(
+                crate::ui_system::UiId::MarkdownModeToggle,
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                bar,
+                mx,
+                my,
+            );
+            let alpha = if hovered { 0.16 } else { 0.09 };
+            self.push_rounded_rect(
+                rect.x,
+                rect.y,
+                rect.w,
+                rect.h,
+                5.0 * scale,
+                [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha],
+            );
+            let label = markdown_status_mode_label(mode);
+            let mode_scale = 0.82;
+            let full_label_w = self.measure_ui_width(label, mode_scale).round();
+            let (visible_label, label_w) = if full_label_w + 12.0 * scale <= rect.w {
+                (label, full_label_w)
+            } else {
+                let short = "↔";
+                (short, self.measure_ui_width(short, mode_scale).round())
+            };
+            let label_x = (rect.x + (rect.w - label_w) * 0.5).round();
+            self.draw_string_scaled(
+                visible_label,
+                label_x,
+                text_y,
+                self.theme.fg,
+                mode_scale,
+            );
+        }
+
+        let encoding_layout = encoding
+            .and_then(crate::platform::TextEncoding::status_label)
+            .map(|label| {
+                let width = self.measure_ui_width(label, text_scale).round();
+                (label, layout.group_left - 14.0 * scale - width)
+            })
+            .filter(|(_, x)| *x > left_limit + 8.0 * scale);
+        if let Some((label, x)) = encoding_layout {
+            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+            x
+        } else {
+            layout.group_left
+        }
+    }
+}
+
 fn project_search_help_content_factor(dialog_h: f32, scale: f32) -> f32 {
     if scale <= 0.0 {
         return 1.0;

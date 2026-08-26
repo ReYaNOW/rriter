@@ -1,10 +1,14 @@
 pub mod api_client;
 pub mod api_mock;
+mod markdown;
+pub use markdown::{MarkdownMode, MarkdownTabState};
+pub(crate) use markdown::is_markdown_extension;
 mod app_state;
 mod autocomplete;
 pub mod automation;
 mod automation_database;
 mod automation_dart;
+mod automation_markdown;
 pub(crate) mod context_menu;
 mod dart_settings;
 pub mod database;

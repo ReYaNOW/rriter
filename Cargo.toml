@@ -38,6 +38,7 @@ tree-sitter-regex = "0.25.0"
 tree-sitter-typescript = "0.23.2"
 tree-sitter-make = "1.1.1"
 tree-sitter-sequel = "0.3.11"
+tree-sitter-md = { version = "0.5.3", features = ["parser"] }
 
 imara-diff = "0.2.0"
 regex = { version = "1.13.1", default-features = false, features = ["std"] }

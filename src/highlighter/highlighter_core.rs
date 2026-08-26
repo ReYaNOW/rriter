@@ -264,6 +264,15 @@ fn resolve_color(
     let mut color = match name {
         "fg" | "property" | "field" | "py_assign" => DRACULA_FG,
         "interpolation" => MARKER_INTERPOLATION,
+        "text.title" => DRACULA_PURPLE,
+        "text.literal" => DRACULA_YELLOW,
+        "text.uri" => DRACULA_CYAN,
+        "text.reference" => DRACULA_GREEN,
+        "text.emphasis" => DRACULA_ORANGE,
+        "text.strong" => DRACULA_PINK,
+        "punctuation.special" | "punctuation.delimiter" => DRACULA_COMMENT,
+        "string.escape" => DRACULA_PINK,
+        "none" => DRACULA_FG,
         "string" => DRACULA_YELLOW,
         "comment" => DRACULA_COMMENT,
         "function" | "function.call" | "py_function" => DRACULA_GREEN,
@@ -488,7 +497,7 @@ fn collect_query_highlight_spans(
                     continue;
                 }
 
-                if color != DRACULA_FG {
+                if color != DRACULA_FG || name == "none" {
                     spans.push(ColorSpan {
                         start: cap.node.start_byte(),
                         end: cap.node.end_byte(),
@@ -1320,6 +1329,37 @@ fn flatten_spans_for_range(
     flat
 }
 
+pub(crate) fn normalize_injection_language(name: &str) -> Option<&'static str> {
+    match name.trim() {
+        "rust" | "rs" => Some("rs"),
+        "python" | "py" => Some("py"),
+        "shell" | "sh" | "bash" => Some("bash"),
+        "javascript" | "js" => Some("js"),
+        "typescript" | "ts" => Some("ts"),
+        "tsx" => Some("tsx"),
+        "html" => Some("html"),
+        "css" => Some("css"),
+        "json" => Some("json"),
+        "toml" => Some("toml"),
+        "go" => Some("go"),
+        "java" => Some("java"),
+        "csharp" | "cs" => Some("cs"),
+        "dart" => Some("dart"),
+        "c" => Some("c"),
+        "cpp" | "c++" => Some("cpp"),
+        "sql" => Some("sql"),
+        "make" | "makefile" => Some("make"),
+        "regex" => Some("regex"),
+        "markdown" | "md" => Some("md"),
+        "markdown_inline" => Some("markdown_inline"),
+        _ => None,
+    }
+}
+
+pub(crate) fn should_apply_rainbow_brackets(lang_name: &str) -> bool {
+    !lang_name.is_empty() && !matches!(lang_name, "bash" | "md" | "markdown_inline")
+}
+
 pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
     match ext {
         "sh" | "bash" => "bash",
@@ -1341,6 +1381,7 @@ pub fn tree_sitter_lang_name_for_ext(ext: &str) -> &'static str {
         "cpp" | "cc" | "cxx" | "hpp" => "cpp",
         "make" | "mk" | "mak" | "makefile" | "Makefile" | "GNUmakefile" => "make",
         "sql" => "sql",
+        "md" | "markdown" => "md",
         _ => "",
     }
 }

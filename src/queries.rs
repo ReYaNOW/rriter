@@ -81,6 +81,7 @@ pub fn get_params_query(lang_name: &str) -> Option<&'static str> {
 
 pub fn get_injection_query(lang_name: &str) -> Option<&'static str> {
     match lang_name {
+        "md" => Some(tree_sitter_md::INJECTION_QUERY_BLOCK),
         "html" => Some(
             r#"
             ((script_element (raw_text) @injection.content) (#set! injection.language "js"))
@@ -335,6 +336,14 @@ pub fn get_folding_query(lang_name: &str) -> Option<&'static str> {
 
 pub fn get_ts_config(lang_name: &str) -> Option<(tree_sitter::Language, Vec<&'static str>)> {
     match lang_name {
+        "md" => Some((
+            tree_sitter_md::LANGUAGE.into(),
+            vec![tree_sitter_md::HIGHLIGHT_QUERY_BLOCK],
+        )),
+        "markdown_inline" => Some((
+            tree_sitter_md::INLINE_LANGUAGE.into(),
+            vec![tree_sitter_md::HIGHLIGHT_QUERY_INLINE],
+        )),
         "bash" => Some((
             tree_sitter_bash::LANGUAGE.into(),
             vec![
@@ -978,7 +987,7 @@ mod tests {
     fn test_all_tree_sitter_queries_are_valid() {
         let languages = [
             "bash", "rs", "py", "toml", "go", "js", "ts", "tsx", "regex", "java", "cs", "dart",
-            "html", "css", "json", "c", "cpp", "sql", "make",
+            "html", "css", "json", "c", "cpp", "sql", "make", "md", "markdown_inline",
         ];
         let mut all_passed = true;
 

@@ -659,6 +659,7 @@ impl App {
                 .extension()
                 .map(|ext| ext.to_string_lossy().into_owned())
                 .unwrap_or_default(),
+            markdown: Default::default(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -1430,7 +1431,7 @@ impl App {
         }
     }
 
-    pub fn show_readonly_diff_notice(&mut self) {
+    pub fn show_readonly_notice(&mut self) {
         self.readonly_notice_until =
             Some(std::time::Instant::now() + std::time::Duration::from_secs(2));
         if let Some(window) = self.window.as_ref() {

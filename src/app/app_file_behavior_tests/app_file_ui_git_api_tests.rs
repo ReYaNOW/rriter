@@ -1090,6 +1090,7 @@ fn undo_redo_rebuilds_diff_decorations() {
         text_file_format: crate::platform::TextFileFormat::default(),
         base_title: "Diff: main.rs".to_string(),
         file_extension: "rs".to_string(),
+        markdown: Default::default(),
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),

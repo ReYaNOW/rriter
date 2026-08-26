@@ -908,50 +908,10 @@ impl App {
                             if idx >= menu.items.len() {
                                 return;
                             }
-                            let menu_clone = self.lsp_actions_menu.take().unwrap();
-                            let item = menu_clone.items[idx].clone();
-                            let cursor_line = menu_clone.cursor_line;
-                            drop(menu_clone);
-                            match item {
-                                crate::app::LspActionItem::CodeAction(action) => {
-                                    if let Some(edit) = action.edit {
-                                        self.apply_workspace_edit(&edit, false);
-                                    }
-                                }
-                                crate::app::LspActionItem::AddNoqa { codes } => {
-                                    self.insert_noqa_comment(cursor_line, &codes);
-                                }
-                                crate::app::LspActionItem::AddNoqaAll => {
-                                    self.insert_noqa_comment(cursor_line, &[]);
-                                }
-                                crate::app::LspActionItem::FixAll => {
-                                    if let Some(lsp) = &mut self.lsp {
-                                        if let Some(path) = self.file_path.clone() {
-                                            if let Some(id) =
-                                                lsp.request_fix_all(&path, &self.file_extension)
-                                            {
-                                                self.pending_fix_all_id = Some(id);
-                                            }
-                                        }
-                                    }
-                                }
-                                crate::app::LspActionItem::OrganizeImports => {
-                                    if let Some(lsp) = &mut self.lsp {
-                                        if let Some(path) = self.file_path.clone() {
-                                            if let Some(id) = lsp.request_organize_imports(
-                                                &path,
-                                                &self.file_extension,
-                                            ) {
-                                                self.pending_fix_all_id = Some(id);
-                                            }
-                                        }
-                                    }
-                                }
-                                crate::app::LspActionItem::CompleteImports => {
-                                    self.request_ty_autocomplete(AutocompleteMode::TyImports, None);
-                                }
+                            if let Some(menu) = self.lsp_actions_menu.as_mut() {
+                                menu.selected = idx;
                             }
-                            self.window.as_ref().unwrap().request_redraw();
+                            self.apply_selected_lsp_action();
                             return;
                         }
                     }
@@ -1931,5 +1891,25 @@ mod tests {
             autocomplete_item_index_at(202.0, 60.0, rect, 0.0, 10, 1.0),
             None
         );
+    }
+
+
+    #[test]
+    fn mouse_lsp_action_route_delegates_to_central_action_path() {
+        let source = include_str!("input.rs");
+        let start = source
+            .find("if let Some(menu) = self.lsp_actions_menu.as_ref()")
+            .expect("LSP mouse menu route");
+        let end = source[start..]
+            .find("// Глобальная обработка декларативного UI")
+            .map(|offset| start + offset)
+            .expect("end of LSP mouse menu route");
+        let route = &source[start..end];
+
+        assert!(route.contains("menu.selected = idx;"));
+        assert!(route.contains("self.apply_selected_lsp_action();"));
+        assert!(!route.contains("LspActionItem::"));
+        assert!(!route.contains("request_fix_all"));
+        assert!(!route.contains("request_organize_imports"));
     }
 }

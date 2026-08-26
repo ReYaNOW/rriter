@@ -420,6 +420,7 @@ pub enum UiId {
     EditorScrollbarY,
     EditorScrollbarX,
     EditorTextBody,
+    MarkdownReadBody,
     EditorMinimap,
 
     // Panels
@@ -441,6 +442,7 @@ pub enum UiId {
     ProblemFileToggle(usize),
     StatusBar,
     StatusDiagnostics,
+    MarkdownModeToggle,
     TerminalBody,
     TerminalScrollY,
     TerminalTab(usize),

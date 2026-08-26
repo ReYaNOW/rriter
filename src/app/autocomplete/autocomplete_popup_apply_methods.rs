@@ -1122,6 +1122,11 @@ impl App {
             });
             return;
         }
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.close_autocomplete();
+            self.show_readonly_notice();
+            return;
+        }
         if !self.autocomplete_active || self.autocomplete_options.is_empty() {
             return;
         }

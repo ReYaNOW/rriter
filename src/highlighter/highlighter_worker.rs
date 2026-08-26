@@ -827,18 +827,10 @@ impl Highlighter {
                                 }
 
                                 for (inj_lang_name, ranges) in injected_regions {
-                                    let mapped_lang = match inj_lang_name.as_str() {
-                                        "js" | "javascript" => "js",
-                                        "ts" | "typescript" => "ts",
-                                        "tsx" => "tsx",
-                                        "html" => "html",
-                                        "css" => "css",
-                                        "regex" => "regex",
-                                        "json" => "json",
-                                        "c" => "c",
-                                        "cpp" | "c++" => "cpp",
-                                        "make" | "makefile" => "make",
-                                        _ => continue,
+                                    let Some(mapped_lang) =
+                                        normalize_injection_language(&inj_lang_name)
+                                    else {
+                                        continue;
                                     };
 
                                     if let Some((inj_lang, inj_queries)) =
@@ -930,7 +922,7 @@ impl Highlighter {
                         color: DRACULA_FG,
                     }]
                 } else {
-                    let apply_rainbow_brackets = !lang_name.is_empty() && lang_name != "bash";
+                    let apply_rainbow_brackets = should_apply_rainbow_brackets(lang_name);
 
                     let merged_spans = merge_highlight_spans(
                         last_full_spans.clone(),

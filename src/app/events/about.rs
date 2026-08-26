@@ -274,11 +274,16 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if app.scroll_y.update(dt) {
+    let markdown_read = app.markdown_mode() == crate::app::MarkdownMode::Read;
+    if !markdown_read && app.scroll_y.update(dt) {
         needs_redraw = true;
     }
 
-    if app.scroll_x.update(dt) {
+    if markdown_read && app.markdown.read_scroll_y.update(dt) {
+        needs_redraw = true;
+    }
+
+    if !markdown_read && app.scroll_x.update(dt) {
         needs_redraw = true;
     }
 
@@ -436,6 +441,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
     }
     if app.poll_external_changes() {
+        needs_redraw = true;
+    }
+    if app.refresh_markdown_read_model_if_stale() {
         needs_redraw = true;
     }
     if app.ide_panel.explorer_scroll.update(dt) {

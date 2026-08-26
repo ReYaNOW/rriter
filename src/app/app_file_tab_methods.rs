@@ -14,6 +14,7 @@ impl App {
             self.text_file_format = crate::platform::TextFileFormat::default();
             self.base_title = "Безымянный".to_string();
             self.file_extension = String::new();
+            self.markdown = Default::default();
 
             let mut tab_editor = crate::editor::Editor::new(8192);
             tab_editor.version = old_version + 1;
@@ -24,6 +25,7 @@ impl App {
                 text_file_format: crate::platform::TextFileFormat::default(),
                 base_title: String::new(),
                 file_extension: String::new(),
+                markdown: Default::default(),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -63,6 +65,7 @@ impl App {
             text_file_format: crate::platform::TextFileFormat::default(),
             base_title: "Безымянный".to_string(),
             file_extension: String::new(),
+            markdown: Default::default(),
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),

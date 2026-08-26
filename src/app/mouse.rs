@@ -1,4 +1,4 @@
-use crate::app::{App, AutocompleteMode};
+use crate::app::App;
 use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;

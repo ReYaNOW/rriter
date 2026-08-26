@@ -164,6 +164,7 @@ impl App {
         }
 
         self.file_extension = String::new();
+        self.markdown = Default::default();
 
         self.scroll_y.reset();
         self.scroll_x.reset();
@@ -503,6 +504,11 @@ impl App {
             .extension()
             .map(|extension| extension.to_string_lossy().into_owned())
             .unwrap_or_default();
+        if crate::app::is_markdown_extension(&old_extension)
+            != crate::app::is_markdown_extension(&self.file_extension)
+        {
+            self.markdown = Default::default();
+        }
         self.editor.mark_saved();
 
         if self.is_ide_mode
@@ -846,6 +852,7 @@ impl App {
                     .extension()
                     .map(|e| e.to_string_lossy().to_string())
                     .unwrap_or_default();
+                self.markdown = Default::default();
                 self.is_highlighted_once = false;
                 self.is_highlight_complete = false;
                 if start_highlighter {

@@ -86,6 +86,81 @@ pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MarkdownEditorKeyAction {
+    ToggleMode,
+    ReadonlyNotice,
+    ScrollLines(i8),
+    ScrollPages(i8),
+    ScrollStart,
+    ScrollEnd,
+    Consume,
+}
+
+fn markdown_editor_key_action(
+    markdown_document: bool,
+    read_mode: bool,
+    physical_key: PhysicalKey,
+    primary: bool,
+    shift: bool,
+    alt: bool,
+    has_text_insert: bool,
+    repeat: bool,
+) -> Option<MarkdownEditorKeyAction> {
+    if !markdown_document {
+        return None;
+    }
+    if primary && shift && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV)) {
+        return Some(if repeat {
+            MarkdownEditorKeyAction::Consume
+        } else {
+            MarkdownEditorKeyAction::ToggleMode
+        });
+    }
+    if !read_mode {
+        return None;
+    }
+
+    if has_text_insert
+        || matches!(
+            physical_key,
+            PhysicalKey::Code(
+                KeyCode::Enter
+                    | KeyCode::NumpadEnter
+                    | KeyCode::Tab
+                    | KeyCode::Space
+                    | KeyCode::Backspace
+                    | KeyCode::Delete
+            )
+        )
+        || (primary
+            && matches!(
+                physical_key,
+                PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)
+            ))
+        || (alt && matches!(physical_key, PhysicalKey::Code(KeyCode::Enter)))
+    {
+        return Some(MarkdownEditorKeyAction::ReadonlyNotice);
+    }
+
+    match physical_key {
+        PhysicalKey::Code(KeyCode::ArrowUp) => Some(MarkdownEditorKeyAction::ScrollLines(-1)),
+        PhysicalKey::Code(KeyCode::ArrowDown) => Some(MarkdownEditorKeyAction::ScrollLines(1)),
+        PhysicalKey::Code(KeyCode::PageUp) => Some(MarkdownEditorKeyAction::ScrollPages(-1)),
+        PhysicalKey::Code(KeyCode::PageDown) => Some(MarkdownEditorKeyAction::ScrollPages(1)),
+        PhysicalKey::Code(KeyCode::Home) => Some(MarkdownEditorKeyAction::ScrollStart),
+        PhysicalKey::Code(KeyCode::End) => Some(MarkdownEditorKeyAction::ScrollEnd),
+        PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight)
+        | PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyW) if primary => {
+            Some(MarkdownEditorKeyAction::Consume)
+        }
+        PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight) => {
+            Some(MarkdownEditorKeyAction::Consume)
+        }
+        _ => None,
+    }
+}
+
 impl App {
     fn finish_editor_edit_after_input(
         &mut self,
@@ -250,8 +325,10 @@ impl App {
         if text.is_empty() || self.show_welcome {
             return;
         }
-        if self.active_tab_is_git_diff() {
-            self.show_readonly_diff_notice();
+        if self.active_tab_is_git_diff()
+            || self.markdown_mode() == crate::app::MarkdownMode::Read
+        {
+            self.show_readonly_notice();
             return;
         }
 
@@ -333,6 +410,79 @@ impl App {
                     event_loop.exit();
                 }
                 _ => {}
+            }
+            return;
+        }
+
+        let has_text_insert = crate::platform::text_input_modifiers_allowed(self.modifiers)
+            && key_text_for_editor_insert(
+                physical_key,
+                key_event.text.as_deref(),
+                key_event.logical_key.to_text(),
+                shift,
+            )
+            .is_some();
+        let markdown_action = markdown_editor_key_action(
+            self.active_document_is_markdown(),
+            self.markdown_mode() == crate::app::MarkdownMode::Read,
+            physical_key,
+            ctrl,
+            shift,
+            self.modifiers.alt_key(),
+            has_text_insert,
+            key_event.repeat,
+        );
+        if let Some(action) = markdown_action {
+            match action {
+                MarkdownEditorKeyAction::ToggleMode => self.toggle_markdown_mode(),
+                MarkdownEditorKeyAction::ReadonlyNotice => self.show_readonly_notice(),
+                MarkdownEditorKeyAction::ScrollLines(direction) => {
+                    let line_step = self
+                        .renderer
+                        .as_ref()
+                        .map(|renderer| renderer.line_height.round().max(1.0))
+                        .unwrap_or(24.0);
+                    crate::app::markdown::scroll_markdown_read(
+                        &mut self.markdown.read_scroll_y,
+                        self.markdown.read_max_scroll,
+                        line_step * f32::from(direction),
+                    );
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                MarkdownEditorKeyAction::ScrollPages(direction) => {
+                    let page = self
+                        .window
+                        .as_ref()
+                        .map(|window| window.inner_size().height as f32)
+                        .or_else(|| self.renderer.as_ref().map(|renderer| renderer.height))
+                        .unwrap_or(600.0)
+                        * 0.8;
+                    crate::app::markdown::scroll_markdown_read(
+                        &mut self.markdown.read_scroll_y,
+                        self.markdown.read_max_scroll,
+                        page * f32::from(direction),
+                    );
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                MarkdownEditorKeyAction::ScrollStart => {
+                    self.markdown.read_scroll_y.animate_to(0.0);
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                MarkdownEditorKeyAction::ScrollEnd => {
+                    self.markdown
+                        .read_scroll_y
+                        .animate_to(self.markdown.read_max_scroll);
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                MarkdownEditorKeyAction::Consume => {}
             }
             return;
         }
@@ -424,7 +574,7 @@ impl App {
                     PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV)
                 ));
             if text_insert || edit_key {
-                self.show_readonly_diff_notice();
+                self.show_readonly_notice();
                 return;
             }
         }
@@ -1144,5 +1294,150 @@ mod tests {
         assert_eq!(paired_editor_insert_text("'"), ("''", true));
         assert_eq!(paired_editor_insert_text("\""), ("\"\"", true));
         assert_eq!(paired_editor_insert_text("x"), ("x", false));
+    }
+
+    #[test]
+    fn markdown_primary_shift_v_toggles_before_paste_only_for_markdown() {
+        let key = PhysicalKey::Code(KeyCode::KeyV);
+        assert_eq!(
+            markdown_editor_key_action(true, false, key, true, true, false, false, false),
+            Some(MarkdownEditorKeyAction::ToggleMode)
+        );
+        assert_eq!(
+            markdown_editor_key_action(true, true, key, true, true, false, false, false),
+            Some(MarkdownEditorKeyAction::ToggleMode)
+        );
+        assert_eq!(
+            markdown_editor_key_action(true, false, key, true, true, false, false, true),
+            Some(MarkdownEditorKeyAction::Consume)
+        );
+        assert_eq!(
+            markdown_editor_key_action(true, false, key, true, false, false, false, false),
+            None
+        );
+        assert_eq!(
+            markdown_editor_key_action(false, false, key, true, true, false, false, false),
+            None
+        );
+    }
+
+    #[test]
+    fn markdown_read_consumes_every_editor_mutation_key() {
+        for (key, primary, alt, has_text) in [
+            (KeyCode::Backspace, false, false, false),
+            (KeyCode::Delete, false, false, false),
+            (KeyCode::Enter, false, false, false),
+            (KeyCode::NumpadEnter, false, false, false),
+            (KeyCode::Tab, false, false, false),
+            (KeyCode::Space, false, false, false),
+            (KeyCode::KeyX, true, false, false),
+            (KeyCode::KeyV, true, false, false),
+            (KeyCode::KeyZ, true, false, false),
+            (KeyCode::KeyY, true, false, false),
+            (KeyCode::KeyA, false, false, true),
+            (KeyCode::Enter, false, true, false),
+        ] {
+            assert_eq!(
+                markdown_editor_key_action(
+                    true,
+                    true,
+                    PhysicalKey::Code(key),
+                    primary,
+                    false,
+                    alt,
+                    has_text,
+                    false,
+                ),
+                Some(MarkdownEditorKeyAction::ReadonlyNotice),
+                "key {key:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn markdown_read_navigation_never_routes_to_source_cursor() {
+        assert_eq!(
+            markdown_editor_key_action(
+                true, true, PhysicalKey::Code(KeyCode::ArrowUp), false, false, false, false, false
+            ),
+            Some(MarkdownEditorKeyAction::ScrollLines(-1))
+        );
+        assert_eq!(
+            markdown_editor_key_action(
+                true, true, PhysicalKey::Code(KeyCode::PageDown), false, false, false, false, false
+            ),
+            Some(MarkdownEditorKeyAction::ScrollPages(1))
+        );
+        assert_eq!(
+            markdown_editor_key_action(
+                true, true, PhysicalKey::Code(KeyCode::Home), false, false, false, false, false
+            ),
+            Some(MarkdownEditorKeyAction::ScrollStart)
+        );
+        assert_eq!(
+            markdown_editor_key_action(
+                true, true, PhysicalKey::Code(KeyCode::End), false, false, false, false, false
+            ),
+            Some(MarkdownEditorKeyAction::ScrollEnd)
+        );
+        assert_eq!(
+            markdown_editor_key_action(
+                true, true, PhysicalKey::Code(KeyCode::ArrowLeft), false, false, false, false, false
+            ),
+            Some(MarkdownEditorKeyAction::Consume)
+        );
+    }
+
+    #[test]
+    fn markdown_read_ime_commit_is_readonly_and_edit_routing_recovers() {
+        use crate::app::app_behavior_tests::{editor_with, test_app};
+        use std::path::PathBuf;
+
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.show_welcome = false;
+        app.file_path = Some(PathBuf::from("/tmp/readme.md"));
+        app.file_extension = "md".to_string();
+        app.editor = editor_with("source");
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        let before = app.editor.get_full_text();
+        let version = app.editor.version;
+        app.handle_editor_ime_commit("ж");
+        assert_eq!(app.editor.get_full_text(), before);
+        assert_eq!(app.editor.version, version);
+        assert!(app.readonly_notice_until.is_some());
+
+        app.toggle_markdown_mode();
+        assert_eq!(app.markdown_mode(), crate::app::MarkdownMode::Edit);
+        assert_eq!(
+            markdown_editor_key_action(
+                true, false, PhysicalKey::Code(KeyCode::KeyA), false, false, false, true, false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn markdown_shortcut_uses_primary_modifier_and_precedes_autocomplete_and_paste() {
+        let source = include_str!("editor_keys.rs");
+        let source = &source[source
+            .find("pub fn handle_editor_keyboard_input")
+            .expect("editor keyboard handler")..];
+        let primary = source
+            .find("primary_shortcut_modifier(self.modifiers)")
+            .expect("platform primary modifier");
+        let route = source.find("let markdown_action =").expect("markdown route");
+        let autocomplete = source
+            .find("if self.autocomplete_active")
+            .expect("autocomplete route");
+        let paste = source
+            .find("PhysicalKey::Code(KeyCode::KeyV) if ctrl")
+            .expect("legacy paste route");
+        assert!(primary < route);
+        assert!(route < autocomplete);
+        assert!(autocomplete < paste);
+        assert!(include_str!("../../main.rs")
+            .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование"));
     }
 }

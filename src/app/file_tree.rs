@@ -1243,6 +1243,11 @@ impl App {
                     .extension()
                     .map(|ext| ext.to_string_lossy().to_string())
                     .unwrap_or_default();
+                if crate::app::is_markdown_extension(&old_ext)
+                    != crate::app::is_markdown_extension(&self.file_extension)
+                {
+                    self.markdown = Default::default();
+                }
                 if let Some(lsp) = &mut self.lsp {
                     lsp.notify_close(&current_path, &old_ext);
                     let text = self.editor.get_full_text();
@@ -1271,10 +1276,16 @@ impl App {
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
                         .unwrap_or_else(|| "Безымянный".to_string());
+                    let old_extension = tab.file_extension.clone();
                     tab.file_extension = updated
                         .extension()
                         .map(|ext| ext.to_string_lossy().to_string())
                         .unwrap_or_default();
+                    if crate::app::is_markdown_extension(&old_extension)
+                        != crate::app::is_markdown_extension(&tab.file_extension)
+                    {
+                        tab.markdown = Default::default();
+                    }
                     tab.icon_key = crate::app::file_icons::file_icon_key_for_name(&tab.base_title);
                 }
             }

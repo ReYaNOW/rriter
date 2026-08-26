@@ -703,6 +703,7 @@ impl ApplicationHandler for App {
                     self.active_tab,
                     self.scroll_x.current,
                     self.scroll_y.current,
+                    &mut self.markdown,
                     blink_alpha,
                     self.show_fps,
                     &self.highlighter.spans,

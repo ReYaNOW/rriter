@@ -331,6 +331,11 @@ impl App {
 
     /// Применяет выбранный элемент меню LSP
     pub fn apply_selected_lsp_action(&mut self) {
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.lsp_actions_menu = None;
+            self.show_readonly_notice();
+            return;
+        }
         let menu = match self.lsp_actions_menu.take() {
             Some(m) => m,
             None => return,
@@ -378,6 +383,10 @@ impl App {
 
     /// Вставляет/обновляет # noqa комментарий на указанной строке
     pub(crate) fn insert_noqa_comment(&mut self, line: u32, codes: &[String]) {
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.show_readonly_notice();
+            return;
+        }
         let line = line as usize;
         let line_start = self.editor.line_offsets.get(line).copied().unwrap_or(0);
         let line_end_raw = if line + 1 < self.editor.line_offsets.len() {
@@ -454,6 +463,10 @@ impl App {
         edit: &crate::lsp::WorkspaceEdit,
         preserve_cursor: bool,
     ) {
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.show_readonly_notice();
+            return;
+        }
         if let Some(path) = &self.file_path {
             if edit
                 .changes
