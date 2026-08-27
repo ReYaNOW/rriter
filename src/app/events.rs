@@ -509,6 +509,11 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
             WindowEvent::CursorLeft { .. } => {
+                if self.markdown.clear_code_copy_transient()
+                    && let Some(window) = self.window.as_ref()
+                {
+                    window.request_redraw();
+                }
                 if about::selection_drag_active_on_cursor_leave(
                     self.is_dragging,
                     self.show_settings,

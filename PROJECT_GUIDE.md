@@ -850,6 +850,7 @@ Implementation is split through `include!`:
 * `src/render_view/root_frame_overlay_helpers.rs` -> shared root tab/status/modal/finalization/telemetry path plus overlay, resize, search, and notice helpers.
 * `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
 * `src/render_view/markdown_read.rs` -> version/width-cached Markdown Read presentation, block virtualization, fenced-code span reuse, and independent preview scroll geometry.
+* `src/render_view/markdown_read_interaction.rs` -> included Reader interaction chunk for cached visual/source mapping, hit-testing, selection/copy, source-backed search targeting, and visible selection/search overlays.
 * `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract toggles and locked class block rendering.
 

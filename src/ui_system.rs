@@ -421,6 +421,7 @@ pub enum UiId {
     EditorScrollbarX,
     EditorTextBody,
     MarkdownReadBody,
+    MarkdownCodeCopy(usize),
     EditorMinimap,
 
     // Panels

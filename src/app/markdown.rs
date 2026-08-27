@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use super::{App, EditorTabKind};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -34,7 +36,13 @@ pub(crate) fn handle_markdown_read_wheel(
     if mode != MarkdownMode::Read {
         return MarkdownReadWheelResult::NotRead;
     }
-    if hovered != Some(crate::ui_system::UiId::MarkdownReadBody) {
+    if !matches!(
+        hovered,
+        Some(
+            crate::ui_system::UiId::MarkdownReadBody
+                | crate::ui_system::UiId::MarkdownCodeCopy(_)
+        )
+    ) {
         return MarkdownReadWheelResult::Blocked;
     }
     scroll_markdown_read(read_scroll, read_max_scroll, dy);
@@ -58,6 +66,11 @@ pub struct MarkdownTabState {
     semantic_refresh_count: usize,
     pub(crate) read_layout: crate::render_view::markdown_read::MarkdownReadLayoutCache,
     pub(crate) read_max_scroll: f32,
+    pub(crate) read_selection_anchor: Option<usize>,
+    pub(crate) read_selection_cursor: Option<usize>,
+    pub(crate) read_selecting: bool,
+    pub(crate) copied_code_block: Option<usize>,
+    pub(crate) code_copy_hover_valid: bool,
 }
 
 impl Default for MarkdownTabState {
@@ -75,6 +88,11 @@ impl Default for MarkdownTabState {
             semantic_refresh_count: 0,
             read_layout: crate::render_view::markdown_read::MarkdownReadLayoutCache::default(),
             read_max_scroll: 0.0,
+            read_selection_anchor: None,
+            read_selection_cursor: None,
+            read_selecting: false,
+            copied_code_block: None,
+            code_copy_hover_valid: false,
         }
     }
 }
@@ -91,6 +109,9 @@ impl MarkdownTabState {
         {
             return true;
         }
+
+        self.clear_read_selection();
+        self.clear_code_copy_transient();
 
         let edit = if self.read_parser.is_some() && self.read_model_version.is_some() {
             Some(markdown_replacement_edit(&self.read_source, &source))
@@ -138,6 +159,73 @@ impl MarkdownTabState {
 
     fn needs_read_model_refresh(&self, version: u64) -> bool {
         self.read_document(version).is_none()
+    }
+
+    pub(crate) fn read_selection_range(&self) -> Option<Range<usize>> {
+        let anchor = self.read_selection_anchor?;
+        let cursor = self.read_selection_cursor?;
+        (anchor != cursor).then_some(anchor.min(cursor)..anchor.max(cursor))
+    }
+
+    pub(crate) fn begin_read_selection(&mut self, byte: usize) {
+        let byte = byte.min(self.read_source.len());
+        self.read_selection_anchor = Some(byte);
+        self.read_selection_cursor = Some(byte);
+        self.read_selecting = true;
+    }
+
+    pub(crate) fn update_read_selection(&mut self, byte: usize) {
+        if self.read_selecting {
+            self.read_selection_cursor = Some(byte.min(self.read_source.len()));
+        }
+    }
+
+    pub(crate) fn finish_read_selection(&mut self) {
+        self.read_selecting = false;
+    }
+
+    pub(crate) fn clear_read_selection(&mut self) {
+        self.read_selection_anchor = None;
+        self.read_selection_cursor = None;
+        self.read_selecting = false;
+    }
+
+    pub(crate) fn mark_code_copy_hover_valid(&mut self) -> bool {
+        let changed = !self.code_copy_hover_valid;
+        self.code_copy_hover_valid = true;
+        changed
+    }
+
+    pub(crate) fn update_code_copy_hover(&mut self, hovered_block: Option<usize>) -> bool {
+        if self.copied_code_block.is_some() && self.copied_code_block != hovered_block {
+            self.copied_code_block = None;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub(crate) fn clear_code_copy_transient(&mut self) -> bool {
+        let changed = self.code_copy_hover_valid || self.copied_code_block.is_some();
+        self.code_copy_hover_valid = false;
+        self.copied_code_block = None;
+        changed
+    }
+
+    pub(crate) fn update_read_scroll(&mut self, dt: f32) -> bool {
+        let changed = self.read_scroll_y.update(dt);
+        if changed {
+            self.copied_code_block = None;
+        }
+        changed
+    }
+
+    pub(crate) fn selected_read_text(&self) -> Option<String> {
+        let range = self.read_selection_range()?;
+        let text = self
+            .read_layout
+            .copy_source_selection(self.read_source.as_str(), &range);
+        (!text.is_empty()).then_some(text)
     }
 
     #[cfg(test)]
@@ -222,6 +310,7 @@ impl App {
         if !self.active_document_is_markdown() || self.markdown.mode == mode {
             return;
         }
+        self.markdown.clear_code_copy_transient();
         if mode == MarkdownMode::Read {
             self.close_autocomplete();
             self.lsp_actions_menu = None;
@@ -256,6 +345,109 @@ impl App {
         let source = self.editor.get_full_text();
         self.markdown.refresh_read_model(self.editor.version, source);
         true
+    }
+
+    pub(crate) fn begin_markdown_read_selection_at(&mut self, x: f32, y: f32) -> bool {
+        if self.markdown_mode() != MarkdownMode::Read {
+            return false;
+        }
+        let Some(frame) = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+        else {
+            return false;
+        };
+        let version = self.editor.version;
+        let byte = {
+            let markdown = &self.markdown;
+            let Some(renderer) = self.renderer.as_mut() else {
+                return false;
+            };
+            renderer.markdown_read_source_byte_at(markdown, version, frame, x, y)
+        };
+        let Some(byte) = byte else {
+            return false;
+        };
+        self.markdown.begin_read_selection(byte);
+        self.is_dragging = false;
+        self.is_editor_drag_pending = false;
+        true
+    }
+
+    pub(crate) fn update_markdown_read_selection_at(&mut self, x: f32, y: f32) -> bool {
+        if !self.markdown.read_selecting || self.markdown_mode() != MarkdownMode::Read {
+            return false;
+        }
+        let Some(frame) = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+        else {
+            return false;
+        };
+        let version = self.editor.version;
+        let byte = {
+            let markdown = &self.markdown;
+            let Some(renderer) = self.renderer.as_mut() else {
+                return false;
+            };
+            renderer.markdown_read_source_byte_at(markdown, version, frame, x, y)
+        };
+        let Some(byte) = byte else {
+            return false;
+        };
+        self.markdown.update_read_selection(byte);
+        true
+    }
+
+    pub(crate) fn copy_markdown_read_selection(&mut self) -> bool {
+        let Some(text) = self.markdown.selected_read_text() else {
+            return false;
+        };
+        self.set_clipboard_text(text);
+        true
+    }
+
+    pub(crate) fn copy_markdown_read_code_block(&mut self, block_id: usize) -> bool {
+        if self.markdown_mode() != MarkdownMode::Read {
+            return false;
+        }
+        let Some(text) = self
+            .markdown
+            .read_layout
+            .code_block_copy_text(self.markdown.read_source.as_str(), block_id)
+        else {
+            return false;
+        };
+        self.set_clipboard_text(text);
+        self.markdown.copied_code_block = Some(block_id);
+        true
+    }
+
+    pub(crate) fn update_markdown_code_copy_hover_at(&mut self, x: f32, y: f32) -> bool {
+        if self.markdown_mode() != MarkdownMode::Read {
+            return self.markdown.clear_code_copy_transient();
+        }
+        let Some(frame) = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+        else {
+            return self.markdown.clear_code_copy_transient();
+        };
+        let mut changed = self.markdown.mark_code_copy_hover_valid();
+        if self.markdown.copied_code_block.is_none() {
+            return changed;
+        }
+        let hovered = self.renderer.as_ref().and_then(|renderer| {
+            renderer.markdown_read_code_block_at(
+                &self.markdown,
+                self.editor.version,
+                frame,
+                x,
+                y,
+            )
+        });
+        changed |= self.markdown.update_code_copy_hover(hovered);
+        changed
     }
 }
 
@@ -420,6 +612,18 @@ mod tests {
             MarkdownReadWheelResult::Scrolled
         );
         assert!(read_scroll.target > 40.0);
+        let before_copy_button_wheel = read_scroll.target;
+        assert_eq!(
+            handle_markdown_read_wheel(
+                MarkdownMode::Read,
+                Some(crate::ui_system::UiId::MarkdownCodeCopy(123)),
+                &mut read_scroll,
+                500.0,
+                80.0,
+            ),
+            MarkdownReadWheelResult::Scrolled
+        );
+        assert!(read_scroll.target > before_copy_button_wheel);
         assert_eq!(
             (
                 source_x.current,
@@ -578,6 +782,259 @@ mod tests {
         assert_eq!(app.editor.selection_anchor, Some(2));
         assert!(!app.is_dragging);
         assert!(!app.is_editor_drag_pending);
+    }
+
+    #[test]
+    fn markdown_reader_document_focus_handoff_clears_keyboard_owners_and_preserves_source_state() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.show_welcome = false;
+        app.is_ide_mode = true;
+        app.editor = editor_with("source text\n");
+        app.editor.cursor = 8;
+        app.editor.selection_anchor = Some(2);
+        app.markdown.mode = MarkdownMode::Read;
+        app.markdown.read_source = "source text\n".to_string();
+
+        app.ide_panel.open(crate::app::PanelId::Terminal);
+        app.ide_panel.open(crate::app::PanelId::ApiClient);
+        app.ide_panel.terminal_focused = true;
+        app.ide_panel.term_show_search = true;
+        app.ide_panel.term_search_focused = true;
+        app.show_search = true;
+        app.search_focused = true;
+        app.ide_panel.file_tree_focused = true;
+        app.ide_panel.lsp_logs_focused = Some("rust-analyzer".to_string());
+        app.ide_panel.lsp_log_filter_focused = true;
+        app.ide_panel.git.message_focused = true;
+        app.settings_ignore_focused = true;
+        app.ide_panel.api.route_filter = "old".to_string();
+        app.ide_panel.api.input_editor = editor_with("new filter");
+        app.ide_panel.api.focused = Some(crate::app::api_client::ApiFocus::RouteFilter);
+
+        let hidden_source = (app.editor.cursor, app.editor.selection_anchor);
+        assert!(!app.editor_has_input_focus());
+
+        app.focus_document_text_surface();
+        app.markdown.begin_read_selection(1);
+        app.markdown.update_read_selection(6);
+
+        assert!(!app.ide_panel.terminal_focused);
+        assert!(app.ide_panel.is_open(crate::app::PanelId::Terminal));
+        assert!(!app.ide_panel.term_search_focused);
+        assert!(!app.search_focused);
+        assert!(app.show_search);
+        assert!(!app.ide_panel.file_tree_focused);
+        assert!(app.ide_panel.lsp_logs_focused.is_none());
+        assert!(!app.ide_panel.lsp_log_filter_focused);
+        assert!(!app.ide_panel.git.message_focused);
+        assert!(!app.settings_ignore_focused);
+        assert!(app.ide_panel.api.focused.is_none());
+        assert_eq!(app.ide_panel.api.route_filter, "new filter");
+        assert!(app.ide_panel.is_open(crate::app::PanelId::ApiClient));
+        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden_source);
+        assert_eq!(app.markdown.read_selection_range(), Some(1..6));
+        assert!(app.markdown.read_selecting);
+        assert!(app.editor_has_input_focus());
+    }
+
+    #[test]
+    fn markdown_reader_reverse_selection_is_independent_from_hidden_editor_selection() {
+        let Some(mut app) = markdown_source_app("# Heading\n\nText **strong** with `code λ`.\n") else {
+            return;
+        };
+        app.editor.cursor = 7;
+        app.editor.selection_anchor = Some(2);
+        let source = app.editor.get_full_text();
+        let hidden = (app.editor.cursor, app.editor.selection_anchor);
+        assert!(app.markdown.refresh_read_model(app.editor.version, source.clone()));
+        app.markdown.read_layout =
+            crate::render_view::markdown_read::build_test_markdown_read_layout(&source, 500.0);
+
+        app.markdown.begin_read_selection(source.len());
+        app.markdown.update_read_selection(0);
+        app.markdown.finish_read_selection();
+
+        assert_eq!(app.markdown.read_selection_range(), Some(0..source.len()));
+        let copied = app.markdown.selected_read_text().expect("reader selection text");
+        assert!(copied.contains("Heading"));
+        assert!(copied.contains("Text strong with code λ."));
+        assert!(!copied.contains("**"));
+        assert!(!copied.contains('`'));
+        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
+    }
+
+    #[test]
+    fn markdown_reader_selection_is_per_tab() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.tabs = vec![
+            tab_with("a.md", Some("/tmp/a.md"), "alpha\n"),
+            tab_with("b.md", Some("/tmp/b.md"), "bravo\n"),
+        ];
+        app.active_tab = 0;
+        app.sync_active_tab();
+        app.markdown.read_selection_anchor = Some(1);
+        app.markdown.read_selection_cursor = Some(4);
+        app.sync_active_tab();
+
+        app.active_tab = 1;
+        app.sync_active_tab();
+        assert_eq!(app.markdown.read_selection_range(), None);
+        app.markdown.read_selection_anchor = Some(0);
+        app.markdown.read_selection_cursor = Some(2);
+        app.sync_active_tab();
+
+        app.active_tab = 0;
+        app.sync_active_tab();
+        assert_eq!(app.markdown.read_selection_range(), Some(1..4));
+
+        app.active_tab = 1;
+        app.sync_active_tab();
+        assert_eq!(app.markdown.read_selection_range(), Some(0..2));
+    }
+
+    #[test]
+    fn markdown_code_copy_hover_lifecycle_clears_on_leave_and_reenters_as_copy() {
+        let mut state = MarkdownTabState::default();
+
+        assert!(state.mark_code_copy_hover_valid());
+        assert!(state.code_copy_hover_valid);
+        assert!(state.clear_code_copy_transient());
+        assert!(!state.code_copy_hover_valid);
+        assert_eq!(state.copied_code_block, None);
+
+        assert!(state.mark_code_copy_hover_valid());
+        state.copied_code_block = Some(10);
+        assert!(!state.update_code_copy_hover(Some(10)));
+        assert!(state.clear_code_copy_transient());
+        assert!(!state.code_copy_hover_valid);
+        assert_eq!(state.copied_code_block, None);
+
+        assert!(state.mark_code_copy_hover_valid());
+        assert!(!state.update_code_copy_hover(Some(10)));
+        assert_eq!(state.copied_code_block, None);
+        state.copied_code_block = Some(10);
+        assert!(state.update_code_copy_hover(Some(20)));
+        assert_eq!(state.copied_code_block, None);
+    }
+
+    #[test]
+    fn markdown_code_copy_scroll_change_drops_check_without_losing_pointer_validity() {
+        let mut state = MarkdownTabState::default();
+        state.code_copy_hover_valid = true;
+        state.copied_code_block = Some(10);
+        state.read_scroll_y.animate_to(120.0);
+
+        assert!(state.update_read_scroll(1.0 / 60.0));
+        assert_eq!(state.copied_code_block, None);
+        assert!(state.code_copy_hover_valid);
+
+        state.read_scroll_y.animate_to(0.0);
+        assert!(state.update_read_scroll(1.0 / 60.0));
+        assert_eq!(state.copied_code_block, None);
+        assert!(state.code_copy_hover_valid);
+    }
+
+    #[test]
+    fn markdown_code_copy_transient_state_does_not_survive_tab_switch() {
+        let Some(mut app) = test_app() else {
+            return;
+        };
+        app.is_ide_mode = true;
+        app.show_welcome = false;
+        app.tabs = vec![
+            tab_with("a.md", Some("/tmp/a.md"), "```rust\na\n```\n"),
+            tab_with("b.md", Some("/tmp/b.md"), "```bash\nb\n```\n"),
+        ];
+        app.active_tab = 0;
+        app.sync_active_tab();
+        app.markdown.code_copy_hover_valid = true;
+        app.markdown.copied_code_block = Some(1);
+
+        app.switch_to_tab(1);
+        assert!(!app.markdown.code_copy_hover_valid);
+        assert_eq!(app.markdown.copied_code_block, None);
+
+        app.switch_to_tab(0);
+        assert!(!app.markdown.code_copy_hover_valid);
+        assert_eq!(app.markdown.copied_code_block, None);
+    }
+
+    #[test]
+    fn markdown_code_copy_does_not_touch_hidden_source_cursor_or_selection() {
+        let source = "```rust\nlet x = 1;\n```\n";
+        let Some(mut app) = markdown_source_app(source) else {
+            return;
+        };
+        app.editor.cursor = 7;
+        app.editor.selection_anchor = Some(2);
+        let hidden = (app.editor.cursor, app.editor.selection_anchor);
+        app.set_markdown_mode(MarkdownMode::Read);
+        app.markdown.read_layout =
+            crate::render_view::markdown_read::build_test_markdown_read_layout(source, 500.0);
+
+        assert!(app.copy_markdown_read_code_block(0));
+        assert_eq!(app.markdown.copied_code_block, Some(0));
+        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
+    }
+
+    #[test]
+    fn markdown_reader_search_scrolls_read_surface_without_touching_hidden_selection() {
+        let mut source = String::from("# top\n\nfirst needle\n\n");
+        for i in 0..120 {
+            source.push_str("paragraph ");
+            source.push_str(&i.to_string());
+            source.push_str(" with padding words\n\n");
+        }
+        source.push_str("last needle\n");
+        let Some(mut app) = markdown_source_app(&source) else {
+            return;
+        };
+        app.editor.cursor = 5;
+        app.editor.selection_anchor = Some(1);
+        let hidden = (app.editor.cursor, app.editor.selection_anchor);
+        app.set_markdown_mode(MarkdownMode::Read);
+        app.markdown.read_layout =
+            crate::render_view::markdown_read::build_test_markdown_read_layout(&source, 320.0);
+        app.markdown.read_max_scroll = app.markdown.read_layout.content_height();
+
+        let first = source.find("needle").expect("first match");
+        let last = source.rfind("needle").expect("last match");
+        app.search_results = vec![
+            (first, first + "needle".len()),
+            (last, last + "needle".len()),
+        ];
+        app.search_current_idx = Some(0);
+        app.jump_to_search_result();
+        let first_target = app.markdown.read_scroll_y.target;
+        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
+
+        app.search_current_idx = Some(1);
+        app.jump_to_search_result();
+        let last_target = app.markdown.read_scroll_y.target;
+        assert!(last_target > first_target);
+        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
+    }
+
+    #[test]
+    fn markdown_edit_search_still_selects_source_match() {
+        let Some(mut app) = markdown_source_app("before needle after\n") else {
+            return;
+        };
+        let start = app.editor.get_full_text().find("needle").expect("match");
+        let end = start + "needle".len();
+        app.search_results = vec![(start, end)];
+        app.search_current_idx = Some(0);
+
+        app.jump_to_search_result();
+
+        assert_eq!(app.editor.cursor, end);
+        assert_eq!(app.editor.selection_anchor, Some(start));
     }
 
     #[test]

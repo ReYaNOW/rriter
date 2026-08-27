@@ -279,7 +279,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if markdown_read && app.markdown.read_scroll_y.update(dt) {
+    if markdown_read && app.markdown.update_read_scroll(dt) {
         needs_redraw = true;
     }
 

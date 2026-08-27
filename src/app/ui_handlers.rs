@@ -457,6 +457,12 @@ impl App {
             UiId::MarkdownModeToggle => {
                 self.toggle_markdown_mode();
             }
+            UiId::MarkdownCodeCopy(block_id) => {
+                let _ = self.copy_markdown_read_code_block(block_id);
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::StatusDiagnostics => {
                 self.ide_panel.toggle(crate::app::PanelId::Problems);
                 crate::save_panel_state(&self.ide_panel);
@@ -1845,16 +1851,10 @@ impl App {
                 }
                 self.is_dragging = false;
                 self.is_editor_drag_pending = true;
-                self.ide_panel.file_tree_focused = false;
+                self.focus_document_text_surface();
                 crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();
-                self.ide_panel.lsp_logs_focused = None;
-                self.search_focused = false;
-                self.ide_panel.term_search_focused = false;
-                self.ide_panel.git.message_focused = false;
-                self.ide_panel.git.close_commit_menus();
-                self.settings_ignore_focused = false;
 
                 if let Some(r) = self.renderer.as_mut() {
                     let mx = r.last_mouse_x;

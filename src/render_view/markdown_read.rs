@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use crate::app::{MarkdownMode, MarkdownTabState};
-use crate::highlighter::ColorSpan;
+use crate::highlighter::{ColorSpan, DRACULA_YELLOW};
 use crate::languages::markdown::{
     MarkdownBlock, MarkdownBlockKind, MarkdownDocument, MarkdownInlineSpan, MarkdownInlineStyle,
     MarkdownListKind, MarkdownTableAlignment,
@@ -9,7 +9,10 @@ use crate::languages::markdown::{
 use crate::renderer::Renderer;
 use crate::ui_system::UiRegistry;
 
-const BODY_SCALE: f32 = 0.92;
+const BODY_SCALE: f32 = 0.96;
+const INLINE_CODE_PAD_X: f32 = 4.0;
+const INLINE_CODE_EXTRA_PAD_Y: f32 = 0.75;
+const INLINE_CODE_BG_MIX: f32 = 0.10;
 const BODY_LINE_H: f32 = 24.0;
 const BLOCK_GAP: f32 = 12.0;
 const CONTENT_PAD: f32 = 28.0;
@@ -76,6 +79,7 @@ impl TextStyle {
 #[derive(Clone, Debug)]
 struct StyledRun {
     range: Range<usize>,
+    source_range: Option<Range<usize>>,
     style: TextStyle,
 }
 
@@ -86,21 +90,37 @@ struct StyledText {
 }
 
 impl StyledText {
-    fn push(&mut self, text: &str, style: TextStyle) {
+    fn push(&mut self, text: &str, style: TextStyle, source_range: Option<Range<usize>>) {
         if text.is_empty() {
             return;
+        }
+        if let Some(source_range) = source_range.as_ref() {
+            debug_assert_eq!(source_range.end.saturating_sub(source_range.start), text.len());
         }
         let start = self.text.len();
         self.text.push_str(text);
         let end = self.text.len();
-        if let Some(last) = self.runs.last_mut()
-            && last.style == style
-            && last.range.end == start
-        {
-            last.range.end = end;
-        } else {
-            self.runs.push(StyledRun { range: start..end, style });
+        if let Some(last) = self.runs.last_mut() {
+            let source_contiguous = match (&last.source_range, &source_range) {
+                (Some(last_source), Some(source)) => last_source.end == source.start,
+                (None, None) => true,
+                _ => false,
+            };
+            if last.style == style && last.range.end == start && source_contiguous {
+                last.range.end = end;
+                if let (Some(last_source), Some(source)) =
+                    (last.source_range.as_mut(), source_range.as_ref())
+                {
+                    last_source.end = source.end;
+                }
+                return;
+            }
         }
+        self.runs.push(StyledRun {
+            range: start..end,
+            source_range,
+            style,
+        });
     }
 }
 
@@ -127,6 +147,7 @@ struct TextBlock {
     prefix: Option<ReadPrefix>,
     heading_level: Option<u8>,
     mono: bool,
+    line_height: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -138,9 +159,11 @@ struct CodeLine {
 #[derive(Clone, Debug)]
 struct CodeBlock {
     lines: Vec<CodeLine>,
+    content_ranges: Vec<Range<usize>>,
     x: f32,
     quote_depth: usize,
     language: Option<String>,
+    line_height: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +175,7 @@ struct TableCell {
 
 #[derive(Clone, Debug)]
 struct TableRow {
+    source_range: Range<usize>,
     cells: Vec<TableCell>,
     y: f32,
     h: f32,
@@ -179,6 +203,7 @@ enum ReadBlockKind {
 
 #[derive(Clone, Debug)]
 struct ReadBlock {
+    source_range: Range<usize>,
     top: f32,
     bottom: f32,
     kind: ReadBlockKind,
@@ -234,11 +259,29 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
             MarkdownBlockKind::Heading { level, content_ranges, inlines } => {
                 let styled = styled_from_inlines(self.source, inlines, content_ranges);
                 let scale = heading_scale(*level);
-                self.append_text(styled, scale, indent, quote_depth, prefix, Some(*level), false);
+                self.append_text(
+                    styled,
+                    scale,
+                    indent,
+                    quote_depth,
+                    prefix,
+                    Some(*level),
+                    false,
+                    block.source_range.clone(),
+                );
             }
             MarkdownBlockKind::Paragraph { content_ranges, inlines } => {
                 let styled = styled_from_inlines(self.source, inlines, content_ranges);
-                self.append_text(styled, BODY_SCALE, indent, quote_depth, prefix, None, false);
+                self.append_text(
+                    styled,
+                    BODY_SCALE,
+                    indent,
+                    quote_depth,
+                    prefix,
+                    None,
+                    false,
+                    block.source_range.clone(),
+                );
             }
             MarkdownBlockKind::BlockQuote { depth, blocks } => {
                 let depth = (*depth).max(quote_depth + 1);
@@ -274,25 +317,43 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                             Some(item_prefix),
                             None,
                             false,
+                            item.source_range.clone(),
                         );
                     }
                 }
             }
             MarkdownBlockKind::Code(code) => {
-                self.append_code(&code.content_ranges, code.language.clone(), indent, quote_depth, prefix);
+                self.append_code(
+                    &code.content_ranges,
+                    code.language.clone(),
+                    indent,
+                    quote_depth,
+                    prefix,
+                    block.source_range.clone(),
+                );
             }
             MarkdownBlockKind::Table(table) => {
-                self.append_table(table, indent, quote_depth, prefix);
+                self.append_table(table, indent, quote_depth, prefix, block.source_range.clone());
             }
             MarkdownBlockKind::ThematicBreak => {
                 if prefix.is_some() {
-                    self.append_text(StyledText::default(), BODY_SCALE, indent, quote_depth, prefix, None, false);
+                    self.append_text(
+                        StyledText::default(),
+                        BODY_SCALE,
+                        indent,
+                        quote_depth,
+                        prefix,
+                        None,
+                        false,
+                        block.source_range.clone(),
+                    );
                 }
                 let top = self.y + (5.0 * self.scale).round();
                 let h = (1.0 * self.scale).round().max(1.0);
                 let x = indent + CONTENT_PAD * self.scale;
                 let width = (self.width - x - CONTENT_PAD * self.scale).max(1.0);
                 self.blocks.push(ReadBlock {
+                    source_range: block.source_range.clone(),
                     top,
                     bottom: top + h,
                     kind: ReadBlockKind::Rule { x, width, quote_depth },
@@ -301,15 +362,28 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
             }
             MarkdownBlockKind::LinkReference(reference) => {
                 let mut styled = StyledText::default();
-                styled.push("Reference: ", TextStyle::default().with(TextStyle::EMPHASIS));
+                styled.push(
+                    "Reference: ",
+                    TextStyle::default().with(TextStyle::EMPHASIS),
+                    None,
+                );
                 if let Some(range) = reference.label_range.as_ref() {
                     push_source_range(&mut styled, self.source, range, TextStyle::default().with(TextStyle::LINK));
                 }
                 if let Some(range) = reference.destination_range.as_ref() {
-                    styled.push("  ", TextStyle::default());
+                    styled.push("  ", TextStyle::default(), None);
                     push_source_range(&mut styled, self.source, range, TextStyle::default().with(TextStyle::LINK));
                 }
-                self.append_text(styled, 0.82, indent, quote_depth, prefix, None, false);
+                self.append_text(
+                    styled,
+                    0.82,
+                    indent,
+                    quote_depth,
+                    prefix,
+                    None,
+                    false,
+                    block.source_range.clone(),
+                );
             }
             MarkdownBlockKind::HtmlRaw | MarkdownBlockKind::MetadataRaw | MarkdownBlockKind::Raw => {
                 let mut styled = StyledText::default();
@@ -319,7 +393,16 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                     &block.source_range,
                     TextStyle::default().with(TextStyle::RAW),
                 );
-                self.append_text(styled, 0.82, indent, quote_depth, prefix, None, true);
+                self.append_text(
+                    styled,
+                    0.82,
+                    indent,
+                    quote_depth,
+                    prefix,
+                    None,
+                    true,
+                    block.source_range.clone(),
+                );
             }
         }
     }
@@ -334,6 +417,7 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         prefix: Option<ReadPrefix>,
         heading_level: Option<u8>,
         mono: bool,
+        source_range: Range<usize>,
     ) {
         let prefix_w = prefix_width(prefix.as_ref(), self.scale);
         let x = (CONTENT_PAD * self.scale + indent + prefix_w).round();
@@ -345,14 +429,15 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
             .round()
             .max(1.0);
         let mut advance = |offset: usize, ch: char| {
-            let run_idx = styled.runs.partition_point(|run| run.range.end <= offset);
-            let inline_mono = styled
-                .runs
-                .get(run_idx)
-                .is_some_and(|run| run.range.start <= offset && run.style.contains(TextStyle::CODE));
-            ((self.advance)(ch, mono || inline_mono) * text_scale)
-                .round()
-                .max(1.0)
+            styled_char_advance(
+                &styled,
+                offset,
+                ch,
+                text_scale,
+                self.scale,
+                mono,
+                &mut self.advance,
+            )
         };
         let ranges = crate::render_view::core_text::wrapped_text_ranges_with_offsets(
             &styled.text,
@@ -376,6 +461,7 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         let line_count = lines.len().max(1) as f32;
         let bottom = (self.y + line_count * line_h).round();
         self.blocks.push(ReadBlock {
+            source_range,
             top,
             bottom,
             kind: ReadBlockKind::Text(TextBlock {
@@ -387,6 +473,7 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                 prefix,
                 heading_level,
                 mono,
+                line_height: line_h,
             }),
         });
         self.y = bottom + (BLOCK_GAP * self.scale).round();
@@ -399,15 +486,26 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         indent: f32,
         quote_depth: usize,
         prefix: Option<ReadPrefix>,
+        source_range: Range<usize>,
     ) {
         if prefix.is_some() {
-            self.append_text(StyledText::default(), BODY_SCALE, indent, quote_depth, prefix, None, false);
+            self.append_text(
+                StyledText::default(),
+                BODY_SCALE,
+                indent,
+                quote_depth,
+                prefix,
+                None,
+                false,
+                source_range.clone(),
+            );
         }
-        let pad = (12.0 * self.scale).round();
+        let pad = code_block_padding(self.scale);
+        let header_h = code_header_height(self.scale);
         let x = (CONTENT_PAD * self.scale + indent).round();
         let line_h = (BODY_LINE_H * self.scale).round().max(1.0);
         let top = self.y;
-        let mut y = top + pad;
+        let mut y = top + pad + header_h;
         let mut lines = Vec::new();
         for range in ranges {
             let Some(text) = self.source.get(range.clone()) else { continue };
@@ -431,9 +529,17 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         }
         let bottom = (y + pad).round();
         self.blocks.push(ReadBlock {
+            source_range,
             top,
             bottom,
-            kind: ReadBlockKind::Code(CodeBlock { lines, x, quote_depth, language }),
+            kind: ReadBlockKind::Code(CodeBlock {
+                lines,
+                content_ranges: ranges.to_vec(),
+                x,
+                quote_depth,
+                language,
+                line_height: line_h,
+            }),
         });
         self.y = bottom + (BLOCK_GAP * self.scale).round();
     }
@@ -444,9 +550,19 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         indent: f32,
         quote_depth: usize,
         prefix: Option<ReadPrefix>,
+        source_range: Range<usize>,
     ) {
         if prefix.is_some() {
-            self.append_text(StyledText::default(), BODY_SCALE, indent, quote_depth, prefix, None, false);
+            self.append_text(
+                StyledText::default(),
+                BODY_SCALE,
+                indent,
+                quote_depth,
+                prefix,
+                None,
+                false,
+                source_range.clone(),
+            );
         }
         let x = (CONTENT_PAD * self.scale + indent).round();
         let width = (self.width - x - CONTENT_PAD * self.scale).max(40.0 * self.scale).round();
@@ -477,12 +593,15 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                 });
                 let max_text_w = (cell_w - pad * 2.0).max(8.0);
                 let mut advance = |offset: usize, ch: char| {
-                    let run_idx = styled.runs.partition_point(|run| run.range.end <= offset);
-                    let inline_mono = styled
-                        .runs
-                        .get(run_idx)
-                        .is_some_and(|run| run.range.start <= offset && run.style.contains(TextStyle::CODE));
-                    ((self.advance)(ch, inline_mono) * 0.82).round().max(1.0)
+                    styled_char_advance(
+                        &styled,
+                        offset,
+                        ch,
+                        0.82,
+                        self.scale,
+                        false,
+                        &mut self.advance,
+                    )
                 };
                 let lines = crate::render_view::core_text::wrapped_text_ranges_with_offsets(
                     &styled.text,
@@ -500,12 +619,19 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                 });
             }
             let h = (pad * 2.0 + max_lines as f32 * line_h).round();
-            rows.push(TableRow { cells, y: row_y, h, header: is_header });
+            rows.push(TableRow {
+                source_range: row.source_range.clone(),
+                cells,
+                y: row_y,
+                h,
+                header: is_header,
+            });
             row_y += h;
         }
         let top = self.y;
         let bottom = row_y.max(top + line_h + pad * 2.0);
         self.blocks.push(ReadBlock {
+            source_range,
             top,
             bottom,
             kind: ReadBlockKind::Table(TableBlock {
@@ -524,13 +650,83 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
 
 fn heading_scale(level: u8) -> f32 {
     match level {
-        1 => 1.48,
-        2 => 1.28,
-        3 => 1.12,
-        4 => 1.02,
-        5 => 0.96,
-        _ => 0.90,
+        1 => 1.60,
+        2 => 1.42,
+        3 => 1.27,
+        4 => 1.16,
+        5 => 1.07,
+        _ => 1.00,
     }
+}
+
+fn inline_code_padding_x(scale: f32) -> f32 {
+    (INLINE_CODE_PAD_X * scale).round().max(1.0)
+}
+
+fn inline_code_vertical_bounds(baseline_y: f32, scale_factor: f32, text_scale: f32) -> (f32, f32) {
+    let extra_pad = (INLINE_CODE_EXTRA_PAD_Y * scale_factor).round().max(1.0);
+    let top = baseline_y.round() - (17.0 * scale_factor * text_scale).round() - extra_pad;
+    let height = (20.0 * scale_factor * text_scale).round().max(1.0) + extra_pad * 2.0;
+    (top.round(), height.round())
+}
+
+fn inline_code_background(bg: [f32; 4], fg: [f32; 4]) -> [f32; 4] {
+    [
+        bg[0] + (fg[0] - bg[0]) * INLINE_CODE_BG_MIX,
+        bg[1] + (fg[1] - bg[1]) * INLINE_CODE_BG_MIX,
+        bg[2] + (fg[2] - bg[2]) * INLINE_CODE_BG_MIX,
+        bg[3],
+    ]
+}
+
+fn markdown_text_color(style: TextStyle, theme_fg: [f32; 4]) -> [f32; 4] {
+    if style.contains(TextStyle::CODE) {
+        DRACULA_YELLOW
+    } else if style.contains(TextStyle::LINK) {
+        [0.47, 0.68, 0.96, 1.0]
+    } else if style.contains(TextStyle::STRONG) {
+        [0.95, 0.93, 0.98, 1.0]
+    } else if style.contains(TextStyle::EMPHASIS) {
+        [0.78, 0.75, 0.87, 1.0]
+    } else if style.contains(TextStyle::IMAGE) {
+        [0.73, 0.70, 0.86, 1.0]
+    } else if style.contains(TextStyle::RAW) {
+        faded(theme_fg, 0.80)
+    } else {
+        theme_fg
+    }
+}
+
+fn styled_char_advance<F: FnMut(char, bool) -> f32>(
+    styled: &StyledText,
+    offset: usize,
+    ch: char,
+    text_scale: f32,
+    layout_scale: f32,
+    mono: bool,
+    advance: &mut F,
+) -> f32 {
+    let run_idx = styled.runs.partition_point(|run| run.range.end <= offset);
+    let run = styled
+        .runs
+        .get(run_idx)
+        .filter(|run| run.range.start <= offset && offset < run.range.end);
+    let inline_mono = run.is_some_and(|run| run.style.contains(TextStyle::CODE));
+    let mut width = (advance(ch, mono || inline_mono) * text_scale)
+        .round()
+        .max(1.0);
+    if inline_mono
+        && let Some(run) = run
+    {
+        let pad = inline_code_padding_x(layout_scale);
+        if offset == run.range.start {
+            width += pad;
+        }
+        if offset.saturating_add(ch.len_utf8()) >= run.range.end {
+            width += pad;
+        }
+    }
+    width
 }
 
 fn ordered_prefix(index: u64) -> ReadPrefix {
@@ -549,7 +745,7 @@ fn prefix_width(prefix: Option<&ReadPrefix>, scale: f32) -> f32 {
 
 fn push_source_range(styled: &mut StyledText, source: &str, range: &Range<usize>, style: TextStyle) {
     if let Some(text) = source.get(range.clone()) {
-        styled.push(text, style);
+        styled.push(text, style, Some(range.clone()));
     }
 }
 
@@ -580,11 +776,18 @@ fn append_inline(styled: &mut StyledText, source: &str, span: &MarkdownInlineSpa
         MarkdownInlineStyle::Link { .. } | MarkdownInlineStyle::Uri => style = style.with(TextStyle::LINK),
         MarkdownInlineStyle::Image { .. } => {
             style = style.with(TextStyle::IMAGE);
-            styled.push("Image: ", style);
+            styled.push("Image: ", style, None);
         }
         MarkdownInlineStyle::HtmlRaw | MarkdownInlineStyle::Raw => style = style.with(TextStyle::RAW),
         MarkdownInlineStyle::HardBreak => {
-            styled.push("\n", style);
+            let source_range = source
+                .get(span.source_range.clone())
+                .and_then(|text| text.rfind('\n'))
+                .map(|offset| {
+                    let start = span.source_range.start + offset;
+                    start..start + 1
+                });
+            styled.push("\n", style, source_range);
             return;
         }
         MarkdownInlineStyle::Text | MarkdownInlineStyle::Escape => {}
@@ -682,6 +885,8 @@ impl Renderer {
         markdown: &mut MarkdownTabState,
         editor_version: u64,
         spans: &[ColorSpan],
+        search_results: &[(usize, usize)],
+        search_current_idx: Option<usize>,
         x: f32,
         y: f32,
         w: f32,
@@ -725,12 +930,12 @@ impl Renderer {
             let scale = self.scale_factor;
             let mut advance = |ch: char, mono: bool| {
                 if mono {
-                    self.get_glyph(ch)
+                    self.char_advance(ch)
                 } else {
                     self.get_ui_glyph(ch)
+                        .map(|glyph| glyph.advance)
+                        .unwrap_or(10.0 * scale)
                 }
-                .map(|glyph| glyph.advance)
-                .unwrap_or(10.0 * scale)
             };
             let builder = LayoutBuilder::new(source, content_w, scale, &mut advance);
             let mut builder = builder;
@@ -766,9 +971,27 @@ impl Renderer {
         }
         let visible_top = (scroll_y - OVERSCAN * self.scale_factor).max(0.0);
         let visible_bottom = scroll_y + h + OVERSCAN * self.scale_factor;
+        let hovered_code_block = markdown_read_code_block_at_if_hover_valid(
+            markdown.code_copy_hover_valid,
+            &markdown.read_layout,
+            (x, y, w, h),
+            scroll_y,
+            self.scale_factor,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
+        let copied_code_block = markdown.copied_code_block;
+        let selection = markdown.read_selection_range();
+        let highlights = ReadHighlights {
+            selection: selection.as_ref(),
+            search_results,
+            search_current_idx,
+        };
+        ui_registry.push_clip(crate::ui_system::UiClipRect::new(x, y, w, h));
         for idx in visible {
+            let block = &markdown.read_layout.blocks[idx];
             self.draw_markdown_block(
-                &markdown.read_layout.blocks[idx],
+                block,
                 markdown.read_source.as_str(),
                 spans,
                 x,
@@ -777,8 +1000,20 @@ impl Renderer {
                 content_w,
                 visible_top,
                 visible_bottom,
+                highlights,
             );
+            if hovered_code_block == Some(block.source_range.start) {
+                self.draw_markdown_code_copy_action(
+                    block,
+                    x,
+                    y - scroll_y,
+                    content_w,
+                    copied_code_block == Some(block.source_range.start),
+                    ui_registry,
+                );
+            }
         }
+        ui_registry.pop_clip();
         self.flush();
         unsafe {
             use glow::HasContext;
@@ -816,6 +1051,7 @@ impl Renderer {
         content_w: f32,
         visible_top: f32,
         visible_bottom: f32,
+        highlights: ReadHighlights<'_>,
     ) {
         let offset_y = frame_y - scroll_y;
         match &block.kind {
@@ -840,12 +1076,13 @@ impl Renderer {
                         &line.range,
                         frame_x + text.x,
                         line.y + offset_y,
+                        highlights,
                     );
                 }
             }
             ReadBlockKind::Code(code) => {
                 self.draw_quote_guides(code.quote_depth, frame_x, block.top + offset_y, block.bottom + offset_y);
-                let pad = 12.0 * self.scale_factor;
+                let pad = code_block_padding(self.scale_factor);
                 let left = frame_x + code.x;
                 let right = frame_x + content_w - CONTENT_PAD * self.scale_factor;
                 self.push_rounded_rect(
@@ -857,12 +1094,16 @@ impl Renderer {
                     [0.11, 0.12, 0.15, 0.96],
                 );
                 if let Some(language) = code.language.as_deref().filter(|lang| !lang.is_empty()) {
-                    let language_w = self.measure_ui_width(language, 0.66);
-                    let language_x = (right - language_w - pad).max(left + pad);
+                    let header = code_header_geometry(
+                        left,
+                        right,
+                        block.top + offset_y,
+                        self.scale_factor,
+                    );
                     self.draw_string_scaled_pixel_snapped(
                         language,
-                        language_x,
-                        block.top + offset_y + 16.0 * self.scale_factor,
+                        header.language_x,
+                        header.text_y,
                         faded(self.theme.line_num, 0.9),
                         0.66,
                     );
@@ -870,7 +1111,16 @@ impl Renderer {
                 for idx in visible_code_line_range(&code.lines, visible_top, visible_bottom) {
                     let line = &code.lines[idx];
                     let slice = source.get(line.source_range.clone()).unwrap_or("");
-                    self.draw_spanned_editor_line_alpha(
+                    self.draw_mono_source_highlights(
+                        slice,
+                        line.source_range.start,
+                        left + pad,
+                        line.y + offset_y,
+                        code.line_height,
+                        1.0,
+                        highlights,
+                    );
+                    self.draw_spanned_editor_line_pixel_snapped_alpha(
                         slice,
                         spans,
                         Some(line.source_range.start),
@@ -909,8 +1159,7 @@ impl Renderer {
                         );
                         for line_idx in visible_lines {
                             let range = &cell.lines[line_idx];
-                            let text = cell.styled.text.get(range.clone()).unwrap_or("");
-                            let measured = self.measure_ui_width(text, 0.82);
+                            let measured = self.measure_styled_fragment(&cell.styled, range, 0.82);
                             let tx = match cell.alignment {
                                 MarkdownTableAlignment::Center => cell_x + (cell_w - measured) * 0.5,
                                 MarkdownTableAlignment::Right => cell_x + cell_w - cell_padding - measured,
@@ -921,7 +1170,16 @@ impl Renderer {
                                 + line_idx as f32 * line_height
                                 + baseline_offset)
                                 .round();
-                            self.draw_styled_fragment(&cell.styled, range, tx, baseline, 0.82);
+                            self.draw_styled_fragment(
+                                &cell.styled,
+                                range,
+                                tx,
+                                baseline,
+                                0.82,
+                                false,
+                                line_height,
+                                highlights,
+                            );
                         }
                     }
                 }
@@ -971,68 +1229,91 @@ impl Renderer {
         }
     }
 
-    fn draw_styled_text_line(&mut self, block: &TextBlock, range: &Range<usize>, x: f32, y: f32) {
+    fn draw_styled_text_line(
+        &mut self,
+        block: &TextBlock,
+        range: &Range<usize>,
+        x: f32,
+        y: f32,
+        highlights: ReadHighlights<'_>,
+    ) {
+        let force_bold = block.heading_level.is_some();
         if block.mono {
+            self.draw_styled_source_highlights(
+                &block.styled,
+                range,
+                x,
+                y,
+                block.scale,
+                true,
+                block.line_height,
+                highlights,
+            );
             let text = block.styled.text.get(range.clone()).unwrap_or("");
-            self.draw_string_mono_scaled(text, x, y, faded(self.theme.fg, 0.88), block.scale);
+            self.draw_string_mono_scaled_pixel_snapped(
+                text,
+                x,
+                y,
+                faded(self.theme.fg, 0.88),
+                block.scale,
+                force_bold,
+            );
             return;
         }
-        self.draw_styled_fragment(&block.styled, range, x, y, block.scale);
+        self.draw_styled_fragment(
+            &block.styled,
+            range,
+            x,
+            y,
+            block.scale,
+            force_bold,
+            block.line_height,
+            highlights,
+        );
     }
 
-    fn draw_styled_fragment(&mut self, styled: &StyledText, range: &Range<usize>, mut x: f32, y: f32, scale: f32) {
+    #[allow(clippy::too_many_arguments)]
+    fn measure_styled_fragment(
+        &mut self,
+        styled: &StyledText,
+        range: &Range<usize>,
+        scale: f32,
+    ) -> f32 {
+        let pad = inline_code_padding_x(self.scale_factor);
         let visible_runs = visible_styled_run_range(&styled.runs, range);
+        let mut width = 0.0;
         for run in &styled.runs[visible_runs] {
             let start = run.range.start.max(range.start);
             let end = run.range.end.min(range.end);
-            if start >= end { continue; }
-            let Some(text) = styled.text.get(start..end) else { continue };
-            let style = run.style;
-            let inline_code = style.contains(TextStyle::CODE);
-            let width = if inline_code {
-                self.measure_mono_width(text, scale)
-            } else {
-                self.measure_ui_width(text, scale)
+            if start >= end {
+                continue;
+            }
+            let Some(text) = styled.text.get(start..end) else {
+                continue;
             };
-            if inline_code {
-                self.push_rounded_rect(
-                    x - 2.0 * self.scale_factor,
-                    y - 17.0 * self.scale_factor * scale,
-                    width + 4.0 * self.scale_factor,
-                    20.0 * self.scale_factor * scale,
-                    3.0 * self.scale_factor,
-                    [0.13, 0.14, 0.18, 0.98],
-                );
-            }
-            let color = if style.contains(TextStyle::LINK) {
-                [0.47, 0.68, 0.96, 1.0]
-            } else if style.contains(TextStyle::STRONG) {
-                [0.95, 0.93, 0.98, 1.0]
-            } else if style.contains(TextStyle::EMPHASIS) {
-                [0.78, 0.75, 0.87, 1.0]
-            } else if style.contains(TextStyle::IMAGE) {
-                [0.73, 0.70, 0.86, 1.0]
-            } else if style.contains(TextStyle::RAW) {
-                faded(self.theme.fg, 0.80)
+            if run.style.contains(TextStyle::CODE) {
+                width += self.measure_mono_width_pixel_snapped(text, scale);
+                if start == run.range.start {
+                    width += pad;
+                }
+                if end == run.range.end {
+                    width += pad;
+                }
             } else {
-                self.theme.fg
-            };
-            if inline_code {
-                self.draw_string_mono_scaled(text, x, y, color, scale);
-            } else {
-                self.draw_string_scaled_pixel_snapped(text, x, y, color, scale);
+                width += self.measure_ui_width(text, scale);
             }
-            if style.contains(TextStyle::LINK) {
-                self.push_rect(x, y + 2.0 * self.scale_factor, width, 1.0, faded(color, 0.65));
-            }
-            x += width;
         }
+        width
     }
+
+
 }
 
 pub(crate) fn markdown_read_active(mode: MarkdownMode) -> bool {
     mode == MarkdownMode::Read
 }
+
+include!("markdown_read_interaction.rs");
 
 #[cfg(test)]
 mod tests {
@@ -1043,26 +1324,35 @@ mod tests {
         MarkdownParseState::default().parse(source).expect("markdown parse")
     }
 
-    fn layout_with_advance(
+    fn layout_with_scale_and_advance(
         source: &str,
         width: f32,
+        scale: f32,
         advance: impl FnMut(char, bool) -> f32,
     ) -> MarkdownReadLayoutCache {
         let doc = parse(source);
-        let mut builder = LayoutBuilder::new(source, width, 1.0, advance);
+        let mut builder = LayoutBuilder::new(source, width, scale, advance);
         builder.append_blocks(&doc.blocks, 0.0, 0, None);
         let (blocks, content_height) = builder.finish();
         MarkdownReadLayoutCache {
             key: Some(LayoutKey {
                 version: 1,
                 width_bits: width.to_bits(),
-                scale_bits: 1.0f32.to_bits(),
+                scale_bits: scale.to_bits(),
                 font_size_bits: 16.0f32.to_bits(),
             }),
             blocks,
             content_height,
             rebuild_count: 1,
         }
+    }
+
+    fn layout_with_advance(
+        source: &str,
+        width: f32,
+        advance: impl FnMut(char, bool) -> f32,
+    ) -> MarkdownReadLayoutCache {
+        layout_with_scale_and_advance(source, width, 1.0, advance)
     }
 
     fn layout(source: &str, width: f32) -> MarkdownReadLayoutCache {
@@ -1085,13 +1375,90 @@ mod tests {
 
     #[test]
     fn headings_have_strict_visual_hierarchy() {
-        let cache = layout("# One\n\n## Two\n\n### Three\n", 800.0);
-        let scales = cache.blocks.iter().filter_map(|block| match &block.kind {
-            ReadBlockKind::Text(text) if text.heading_level.is_some() => Some(text.scale),
-            _ => None,
-        }).collect::<Vec<_>>();
-        assert_eq!(scales.len(), 3);
-        assert!(scales[0] > scales[1] && scales[1] > scales[2]);
+        let cache = layout(
+            "# One\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six\n\nBody\n",
+            800.0,
+        );
+        let scales = cache
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) if text.heading_level.is_some() => Some(text.scale),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(scales, (1..=6).map(heading_scale).collect::<Vec<_>>());
+        assert!(scales.windows(2).all(|pair| pair[0] > pair[1]));
+        assert!(scales[0] - scales[5] > 0.58, "hierarchy must exceed previous span");
+        assert!(scales[5] >= BODY_SCALE);
+        assert!(BODY_SCALE >= 0.95);
+    }
+
+    #[test]
+    fn reader_layout_baselines_are_pixel_stable_at_fractional_scales() {
+        let source = "# Heading\n\nParagraph with `inline code` and unicode 😀.\n\n```rust\nfn main() {}\n```\n\n| left | right |\n| --- | --- |\n| one | `two` |\n";
+        for scale in [1.25, 1.32, 1.5, 1.75] {
+            let cache = layout_with_scale_and_advance(source, 720.0 * scale, scale, |_, _| 8.0);
+            for block in &cache.blocks {
+                assert_eq!(block.top.fract(), 0.0, "scale {scale}: block top {}", block.top);
+                assert_eq!(block.bottom.fract(), 0.0, "scale {scale}: block bottom {}", block.bottom);
+                match &block.kind {
+                    ReadBlockKind::Text(text) => {
+                        for line in &text.lines {
+                            assert_eq!(line.y.fract(), 0.0, "scale {scale}: text baseline {}", line.y);
+                        }
+                    }
+                    ReadBlockKind::Code(code) => {
+                        for line in &code.lines {
+                            assert_eq!(line.y.fract(), 0.0, "scale {scale}: code baseline {}", line.y);
+                        }
+                    }
+                    ReadBlockKind::Table(table) => {
+                        let baseline_offset = (table.line_height * 0.82).round();
+                        for row in &table.rows {
+                            assert_eq!(row.y.fract(), 0.0, "scale {scale}: row y {}", row.y);
+                            assert_eq!(row.h.fract(), 0.0, "scale {scale}: row h {}", row.h);
+                            for cell in &row.cells {
+                                for line_idx in 0..cell.lines.len() {
+                                    let baseline = (row.y
+                                        + table.cell_padding
+                                        + line_idx as f32 * table.line_height
+                                        + baseline_offset)
+                                        .round();
+                                    assert_eq!(baseline.fract(), 0.0);
+                                }
+                            }
+                        }
+                    }
+                    ReadBlockKind::Rule { .. } => {}
+                }
+            }
+
+            let line_h = (BODY_LINE_H * scale * BODY_SCALE).round().max(1.0);
+            let baseline = (line_h * 0.82).round();
+            let (pill_top, pill_h) = inline_code_vertical_bounds(baseline, scale, BODY_SCALE);
+            assert!(pill_top >= 0.0, "scale {scale}: inline pill starts above line");
+            assert!(pill_top + pill_h <= line_h, "scale {scale}: inline pill overlaps next line");
+        }
+    }
+
+    #[test]
+    fn inline_code_padding_and_reader_style_are_part_of_geometry() {
+        let mut styled = StyledText::default();
+        let code_style = TextStyle::default().with(TextStyle::CODE);
+        styled.push("ab", code_style, Some(0..2));
+        let mut advance = |_: char, mono: bool| if mono { 10.0 } else { 4.0 };
+        let first = styled_char_advance(&styled, 0, 'a', BODY_SCALE, 1.0, false, &mut advance);
+        let second = styled_char_advance(&styled, 1, 'b', BODY_SCALE, 1.0, false, &mut advance);
+        assert_eq!(first + second, 28.0);
+        assert_eq!(inline_code_padding_x(1.0), 4.0);
+        assert_eq!(markdown_text_color(code_style, [0.0; 4]), DRACULA_YELLOW);
+
+        let bg = [0.156, 0.164, 0.211, 1.0];
+        let fg = [0.972, 0.972, 0.949, 1.0];
+        let inline_bg = inline_code_background(bg, fg);
+        assert!(inline_bg[0] > bg[0] && inline_bg[1] > bg[1] && inline_bg[2] > bg[2]);
+        assert!(inline_bg[0] < fg[0] && inline_bg[1] < fg[1] && inline_bg[2] < fg[2]);
     }
 
 
@@ -1156,135 +1523,6 @@ mod tests {
     }
 
     #[test]
-    fn visible_selection_is_bounded_for_long_documents() {
-        let source = (0..4000).map(|i| format!("paragraph {i}\n\n")).collect::<String>();
-        let cache = layout(&source, 600.0);
-        let visible = visible_block_range(&cache.blocks, 20_000.0, 20_800.0);
-        assert!(visible.len() < cache.blocks.len() / 8);
-    }
-
-    #[test]
-    fn huge_code_block_inner_selection_is_bounded() {
-        let mut source = String::from("```rust\n");
-        for i in 0..10_000 {
-            source.push_str("let value_");
-            source.push_str(&i.to_string());
-            source.push_str(" = 42;\n");
-        }
-        source.push_str("```\n");
-        let cache = layout(&source, 620.0);
-        let code = cache
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                ReadBlockKind::Code(code) => Some(code),
-                _ => None,
-            })
-            .expect("code block");
-        assert!(code.lines.len() >= 10_000);
-        let center = code.lines[5_000].y;
-        let visible = visible_code_line_range(&code.lines, center - 500.0, center + 500.0);
-        assert!(visible.len() < 64, "selected {} of {} code lines", visible.len(), code.lines.len());
-    }
-
-    #[test]
-    fn huge_pipe_table_inner_selection_is_bounded() {
-        let mut source = String::from("| left | right |\n| --- | --- |\n");
-        for i in 0..3_000 {
-            source.push('|');
-            source.push_str(&i.to_string());
-            source.push_str(" | value |\n");
-        }
-        let cache = layout(&source, 620.0);
-        let table = cache
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                ReadBlockKind::Table(table) => Some(table),
-                _ => None,
-            })
-            .expect("table block");
-        assert!(table.rows.len() >= 3_000);
-        assert!(table.cell_width > 0.0);
-        assert_eq!(table.cell_width, table.width / 2.0);
-        let center = table.rows[1_500].y;
-        let visible = visible_table_row_range(&table.rows, center - 500.0, center + 500.0);
-        assert!(visible.len() < 64, "selected {} of {} rows", visible.len(), table.rows.len());
-    }
-
-    #[test]
-    fn huge_wrapped_table_cell_line_selection_is_bounded() {
-        let mut source = String::from("| content |\n| --- |\n| ");
-        for _ in 0..1_200 {
-            source.push_str("слово😀слово😀 ");
-        }
-        source.push_str("|\n");
-
-        let cache = layout(&source, 72.0);
-        let table = cache
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                ReadBlockKind::Table(table) => Some(table),
-                _ => None,
-            })
-            .expect("table block");
-        assert!(table.rows.len() <= 3, "unexpected row count: {}", table.rows.len());
-
-        let (row, cell) = table
-            .rows
-            .iter()
-            .flat_map(|row| row.cells.iter().map(move |cell| (row, cell)))
-            .max_by_key(|(_, cell)| cell.lines.len())
-            .expect("table cell");
-        assert!(
-            cell.lines.len() >= 3_000,
-            "expected thousands of wrapped cell lines, got {}",
-            cell.lines.len()
-        );
-
-        let viewport_h = table.line_height * 40.0;
-        let middle_idx = cell.lines.len() / 2;
-        let middle_top = row.y
-            + table.cell_padding
-            + middle_idx as f32 * table.line_height;
-        let middle = visible_table_cell_line_range(
-            cell.lines.len(),
-            row.y,
-            table.cell_padding,
-            table.line_height,
-            middle_top,
-            middle_top + viewport_h,
-        );
-        assert!(middle.len() < 64, "selected {} of {} cell lines", middle.len(), cell.lines.len());
-        assert!(middle.len() * 20 < cell.lines.len());
-        for idx in middle.clone() {
-            let range = &cell.lines[idx];
-            assert!(cell.styled.text.is_char_boundary(range.start));
-            assert!(cell.styled.text.is_char_boundary(range.end));
-        }
-
-        let end_top = row.y
-            + table.cell_padding
-            + cell.lines.len().saturating_sub(24) as f32 * table.line_height;
-        let end = visible_table_cell_line_range(
-            cell.lines.len(),
-            row.y,
-            table.cell_padding,
-            table.line_height,
-            end_top,
-            end_top + viewport_h,
-        );
-        assert!(end.len() < 64, "selected {} end cell lines", end.len());
-        assert_eq!(end.end, cell.lines.len());
-        for idx in end {
-            let range = &cell.lines[idx];
-            assert!(cell.styled.text.is_char_boundary(range.start));
-            assert!(cell.styled.text.is_char_boundary(range.end));
-        }
-    }
-
-    #[test]
     fn table_draw_uses_cached_geometry_without_full_row_scan() {
         let source = include_str!("markdown_read.rs");
         let draw_start = source.find("    fn draw_markdown_block(").expect("draw function");
@@ -1299,65 +1537,6 @@ mod tests {
         assert!(draw_path.contains("visible_table_cell_line_range("));
         assert!(!draw_path.contains("table.rows.iter()"));
         assert!(!draw_path.contains("cell.lines.iter()"));
-    }
-
-    #[test]
-    fn styled_run_selection_is_bounded_near_end_of_huge_unicode_paragraph() {
-        let mut styled = StyledText::default();
-        let plain = TextStyle::default();
-        let strong = plain.with(TextStyle::STRONG);
-        for i in 0..6_000 {
-            let style = if i % 2 == 0 { plain } else { strong };
-            styled.push(if i % 3 == 0 { "слово😀" } else { "text" }, style);
-        }
-        assert!(styled.runs.len() >= 5_000);
-
-        let first = styled.runs.len() - 24;
-        let last = styled.runs.len() - 8;
-        let text_range = styled.runs[first].range.start..styled.runs[last].range.end;
-        assert!(styled.text.is_char_boundary(text_range.start));
-        assert!(styled.text.is_char_boundary(text_range.end));
-
-        let visible = visible_styled_run_range(&styled.runs, &text_range);
-        assert!(visible.start >= first);
-        assert!(visible.len() <= last - first + 1);
-        assert!(visible.len() < 32, "selected {} of {} styled runs", visible.len(), styled.runs.len());
-        for run in &styled.runs[visible] {
-            assert!(run.range.end > text_range.start);
-            assert!(run.range.start < text_range.end);
-            assert!(styled.text.is_char_boundary(run.range.start));
-            assert!(styled.text.is_char_boundary(run.range.end));
-        }
-    }
-
-    #[test]
-    fn huge_wrapped_paragraph_inner_selection_is_bounded() {
-        let mut source = String::new();
-        for i in 0..12_000 {
-            if i > 0 {
-                source.push(' ');
-            }
-            source.push_str("слово😀");
-        }
-        source.push('\n');
-        let cache = layout(&source, 140.0);
-        let text = cache
-            .blocks
-            .iter()
-            .find_map(|block| match &block.kind {
-                ReadBlockKind::Text(text) => Some(text),
-                _ => None,
-            })
-            .expect("paragraph block");
-        assert!(text.lines.len() > 1_000);
-        let center = text.lines[text.lines.len() / 2].y;
-        let visible = visible_text_line_range(&text.lines, center - 500.0, center + 500.0);
-        assert!(visible.len() < 64, "selected {} of {} text lines", visible.len(), text.lines.len());
-        for idx in visible {
-            let range = &text.lines[idx].range;
-            assert!(text.styled.text.is_char_boundary(range.start));
-            assert!(text.styled.text.is_char_boundary(range.end));
-        }
     }
 
     #[test]

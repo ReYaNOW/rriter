@@ -595,6 +595,26 @@ impl App {
                 && self.ide_panel.file_tree_focused)
     }
 
+    pub(crate) fn focus_document_text_surface(&mut self) {
+        if self.ide_panel.api.focused.is_some() {
+            if self.active_tab_is_api_client()
+                || self.ide_panel.is_open(crate::app::PanelId::ApiClient)
+            {
+                self.commit_api_focus();
+            }
+            self.ide_panel.api.focused = None;
+        }
+        self.ide_panel.file_tree_focused = false;
+        self.ide_panel.lsp_logs_focused = None;
+        self.ide_panel.lsp_log_filter_focused = false;
+        self.search_focused = false;
+        self.ide_panel.term_search_focused = false;
+        self.ide_panel.terminal_focused = false;
+        self.ide_panel.git.message_focused = false;
+        self.ide_panel.git.close_commit_menus();
+        self.settings_ignore_focused = false;
+    }
+
     pub(crate) fn autosave_current_file_if_dirty(&mut self) -> bool {
         if !self.is_ide_mode
             || self.active_tab_is_git_diff()
@@ -864,7 +884,13 @@ impl App {
                     return;
                 }
             }
-            let cursor = self.editor.cursor;
+            let cursor = if self.markdown_mode() == crate::app::MarkdownMode::Read {
+                self.markdown
+                    .read_selection_cursor
+                    .unwrap_or(self.editor.cursor)
+            } else {
+                self.editor.cursor
+            };
             let mut nearest_idx = 0;
             let mut min_dist = usize::MAX;
             for (i, &(s_start, s_end)) in self.search_results.iter().enumerate() {
@@ -894,6 +920,52 @@ impl App {
         let database_query = self.active_tab_is_database_query();
         if let Some(idx) = self.search_current_idx {
             if let Some(&(start, end)) = self.search_results.get(idx) {
+                if self.markdown_mode() == crate::app::MarkdownMode::Read
+                    && self.active_document_is_markdown()
+                {
+                    let target_y = self
+                        .markdown
+                        .read_layout
+                        .source_target_y(&(start..end));
+                    if let Some(target_y) = target_y {
+                        let visible_h = if let Some(r) = self.renderer.as_ref() {
+                            let wh = self
+                                .window
+                                .as_ref()
+                                .map(|window| window.inner_size().height as f32)
+                                .unwrap_or(r.height);
+                            let s = r.scale_factor;
+                            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                                show_welcome,
+                                is_ide_mode,
+                                database_query,
+                                s,
+                            );
+                            let panel_bottom_h = if self.is_ide_mode {
+                                self.ide_panel.editor_reserved_bottom_height(s)
+                            } else {
+                                0.0
+                            };
+                            crate::render_view::editor_view_height(
+                                wh,
+                                tab_bar_h,
+                                panel_bottom_h,
+                                self.is_ide_mode,
+                                s,
+                            )
+                        } else {
+                            600.0
+                        };
+                        let target = (target_y - visible_h / 2.0)
+                            .clamp(0.0, self.markdown.read_max_scroll)
+                            .round();
+                        self.markdown.read_scroll_y.animate_to(target);
+                    }
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
                 if let Some(r) = self.renderer.as_mut() {

@@ -16,6 +16,32 @@ fn highlight_trace_should_log(text_len: usize, priority: bool, elapsed_ms: f64) 
             || elapsed_ms >= HIGHLIGHT_TRACE_SLOW_MS)
 }
 
+fn resolve_injected_capture_color(
+    parent_lang_name: &str,
+    injected_lang_name: &str,
+    name: &str,
+    node: tree_sitter::Node<'_>,
+    node_text: &str,
+) -> [f32; 4] {
+    if parent_lang_name == "md" && injected_lang_name == "bash" {
+        if name == "command_word"
+            || (name == "any_word"
+                && node.parent().is_some_and(|parent| parent.kind() == "command_name"))
+        {
+            return DRACULA_GREEN;
+        }
+        if name == "any_word" {
+            return if node_text.starts_with('-') && node_text.len() > 1 {
+                DRACULA_PURPLE
+            } else {
+                DRACULA_YELLOW
+            };
+        }
+    }
+    capture_color_override(injected_lang_name, name, node)
+        .unwrap_or_else(|| resolve_color(name, node_text, node.start_byte(), &[]))
+}
+
 impl Highlighter {
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
@@ -810,11 +836,34 @@ impl Highlighter {
 
                                             if !inj_lang.is_empty() {
                                                 if let Some(node) = content_node {
+                                                    let mut end_byte = node.end_byte();
+                                                    let mut end_point = node.end_position();
+                                                    if inj_lang.trim() == "markdown_inline" {
+                                                        let bytes = text.as_bytes();
+                                                        if bytes.get(end_byte) == Some(&b'\r')
+                                                            && bytes.get(end_byte + 1)
+                                                                == Some(&b'\n')
+                                                        {
+                                                            end_byte += 2;
+                                                            end_point = tree_sitter::Point::new(
+                                                                end_point.row + 1,
+                                                                0,
+                                                            );
+                                                        } else if bytes.get(end_byte)
+                                                            == Some(&b'\n')
+                                                        {
+                                                            end_byte += 1;
+                                                            end_point = tree_sitter::Point::new(
+                                                                end_point.row + 1,
+                                                                0,
+                                                            );
+                                                        }
+                                                    }
                                                     let range = tree_sitter::Range {
                                                         start_byte: node.start_byte(),
-                                                        end_byte: node.end_byte(),
+                                                        end_byte,
                                                         start_point: node.start_position(),
-                                                        end_point: node.end_position(),
+                                                        end_point,
                                                     };
                                                     injected_regions
                                                         .entry(inj_lang)
@@ -880,11 +929,12 @@ impl Highlighter {
                                                                         )
                                                                         .unwrap_or("");
 
-                                                                    let color = resolve_color(
+                                                                    let color = resolve_injected_capture_color(
+                                                                        lang_name,
+                                                                        mapped_lang,
                                                                         name,
+                                                                        cap.node,
                                                                         node_text,
-                                                                        cap.node.start_byte(),
-                                                                        &[],
                                                                     );
                                                                     if color != DRACULA_FG {
                                                                         spans.push(ColorSpan {

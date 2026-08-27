@@ -3,7 +3,7 @@ use crate::editor::Editor;
 use crate::renderer::{Renderer, Vertex, VisualLine, glyph_quad_rect};
 use glow::HasContext;
 
-fn pixel_snapped_ui_glyph_rect(
+fn pixel_snapped_glyph_rect(
     draw_x: f32,
     baseline_y: f32,
     offset_x: f32,
@@ -31,6 +31,15 @@ fn pixel_snapped_ui_glyph_rect(
         glyph_w,
         glyph_h,
     ))
+}
+
+#[inline(always)]
+fn editor_glyph_pass_x_positions(ch: char, q_x: f32) -> ([f32; 2], usize) {
+    if matches!(ch, '.' | ':') {
+        ([q_x, q_x + 1.0], 2)
+    } else {
+        ([q_x, q_x], 1)
+    }
 }
 
 fn for_each_spanned_ui_char(
@@ -250,15 +259,54 @@ mod tests {
 
     #[test]
     fn compact_ui_glyphs_snap_offsets_and_sizes_independently() {
-        let rect = pixel_snapped_ui_glyph_rect(10.0, 100.0, 0.4, 12.4, 7.4, 10.4, 0.74);
+        let rect = pixel_snapped_glyph_rect(10.0, 100.0, 0.4, 12.4, 7.4, 10.4, 0.74);
 
         assert_eq!(rect, Some((10.0, 91.0, 5.0, 8.0)));
     }
 
     #[test]
+    fn markdown_mono_glyph_geometry_is_pixel_stable_at_fractional_scale() {
+        let rect = pixel_snapped_glyph_rect(13.4, 101.6, 0.35, 12.55, 7.45, 10.6, 0.96)
+            .expect("visible mono glyph");
+        for value in [rect.0, rect.1, rect.2, rect.3] {
+            assert_eq!(value.fract(), 0.0);
+        }
+        assert_eq!(
+            rect,
+            pixel_snapped_glyph_rect(13.4, 101.6, 0.35, 12.55, 7.45, 10.6, 0.96)
+                .expect("repeat mono glyph"),
+        );
+    }
+
+    #[test]
+    fn pixel_snapped_editor_glyph_passes_preserve_punctuation_semantics() {
+        let rect = pixel_snapped_glyph_rect(13.4, 101.6, 0.35, 12.55, 7.45, 10.6, 1.0)
+            .expect("visible editor glyph");
+        for value in [rect.0, rect.1, rect.2, rect.3] {
+            assert_eq!(value.fract(), 0.0);
+        }
+
+        let (normal_x, normal_count) = editor_glyph_pass_x_positions('a', rect.0);
+        assert_eq!(normal_count, 1);
+        assert_eq!(&normal_x[..normal_count], &[rect.0]);
+
+        for punctuation in ['.', ':'] {
+            let (pass_x, pass_count) = editor_glyph_pass_x_positions(punctuation, rect.0);
+            assert_eq!(pass_count, 2);
+            assert_eq!(pass_x[0], rect.0);
+            assert_eq!(pass_x[1], rect.0 + 1.0);
+            assert!(pass_x[..pass_count].iter().all(|x| x.fract() == 0.0));
+        }
+
+        let (emoji_x, emoji_count) = editor_glyph_pass_x_positions('😀', rect.0);
+        assert_eq!(emoji_count, 1);
+        assert_eq!(&emoji_x[..emoji_count], &[rect.0]);
+    }
+
+    #[test]
     fn compact_ui_glyphs_skip_empty_quads() {
         assert_eq!(
-            pixel_snapped_ui_glyph_rect(10.0, 100.0, 0.0, 0.0, 0.0, 10.0, 0.74),
+            pixel_snapped_glyph_rect(10.0, 100.0, 0.0, 0.0, 0.0, 10.0, 0.74),
             None
         );
     }
@@ -291,7 +339,7 @@ mod tests {
 
         assert_eq!(stable_bottom(10.0, first), stable_bottom(18.0, second));
 
-        let old_first = pixel_snapped_ui_glyph_rect(
+        let old_first = pixel_snapped_glyph_rect(
             10.0,
             baseline,
             first.offset_x,
@@ -301,7 +349,7 @@ mod tests {
             scale,
         )
         .expect("visible first glyph");
-        let old_second = pixel_snapped_ui_glyph_rect(
+        let old_second = pixel_snapped_glyph_rect(
             18.0,
             baseline,
             second.offset_x,
@@ -457,32 +505,15 @@ impl Renderer {
         let Some(glyph) = self.get_glyph(ch) else {
             return;
         };
-        self.push_quad(
+        self.push_editor_glyph_quads(
+            ch,
+            glyph,
             x + glyph.offset_x,
             baseline_y - glyph.offset_y,
             glyph.width,
             glyph.height,
-            glyph.u,
-            glyph.v,
-            glyph.uw,
-            glyph.vh,
             color,
-            glyph.is_emoji,
         );
-        if matches!(ch, '.' | ':') {
-            self.push_quad(
-                x + glyph.offset_x + 1.0,
-                baseline_y - glyph.offset_y,
-                glyph.width,
-                glyph.height,
-                glyph.u,
-                glyph.v,
-                glyph.uw,
-                glyph.vh,
-                color,
-                glyph.is_emoji,
-            );
-        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -517,10 +548,121 @@ impl Renderer {
         draw_x
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn draw_spanned_editor_line_pixel_snapped_alpha(
+        &mut self,
+        text: &str,
+        spans: &[crate::highlighter::ColorSpan],
+        base_offset: Option<usize>,
+        x: f32,
+        y: f32,
+        max_x: f32,
+        alpha: f32,
+    ) -> f32 {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        let alpha = alpha.clamp(0.0, 1.0);
+        for_each_spanned_ui_char(text, spans, base_offset, |ch, span_color| {
+            if draw_x > max_x {
+                return;
+            }
+            let advance = Self::snapped_text_advance(self.char_advance(ch), 1.0);
+            if !matches!(ch, ' ' | '\t')
+                && let Some(glyph) = self.get_glyph(ch)
+                && let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_glyph_rect(
+                    draw_x,
+                    baseline_y,
+                    glyph.offset_x,
+                    glyph.offset_y,
+                    glyph.width,
+                    glyph.height,
+                    1.0,
+                )
+            {
+                let mut color = if span_color[0].is_nan() {
+                    self.theme.fg
+                } else {
+                    span_color
+                };
+                color[3] *= alpha;
+                self.push_editor_glyph_quads(ch, glyph, q_x, q_y, q_w, q_h, color);
+            }
+            draw_x += advance;
+        });
+        draw_x
+    }
+
     #[inline]
     pub(crate) fn snapped_text_advance(advance: f32, scale: f32) -> f32 {
         let px = (advance * scale).round();
         if px <= 0.0 && advance > 0.0 { 1.0 } else { px }
+    }
+
+    #[inline(always)]
+    fn push_editor_glyph_quads(
+        &mut self,
+        ch: char,
+        glyph: crate::renderer::GlyphInfo,
+        q_x: f32,
+        q_y: f32,
+        q_w: f32,
+        q_h: f32,
+        color: [f32; 4],
+    ) {
+        let (pass_x, pass_count) = editor_glyph_pass_x_positions(ch, q_x);
+        for pass_x in &pass_x[..pass_count] {
+            self.push_quad(
+                *pass_x,
+                q_y,
+                q_w,
+                q_h,
+                glyph.u,
+                glyph.v,
+                glyph.uw,
+                glyph.vh,
+                color,
+                glyph.is_emoji,
+            );
+        }
+    }
+
+    #[inline(always)]
+    pub(crate) fn push_weighted_glyph_quad(
+        &mut self,
+        glyph: crate::renderer::GlyphInfo,
+        q_x: f32,
+        q_y: f32,
+        q_w: f32,
+        q_h: f32,
+        color: [f32; 4],
+        bold: bool,
+    ) {
+        self.push_quad(
+            q_x,
+            q_y,
+            q_w,
+            q_h,
+            glyph.u,
+            glyph.v,
+            glyph.uw,
+            glyph.vh,
+            color,
+            glyph.is_emoji,
+        );
+        if bold && glyph.is_emoji == 0.0 && glyph.width > 0.0 {
+            self.push_quad(
+                q_x + 1.0,
+                q_y,
+                q_w,
+                q_h,
+                glyph.u,
+                glyph.v,
+                glyph.uw,
+                glyph.vh,
+                color,
+                glyph.is_emoji,
+            );
+        }
     }
 
     pub fn update_cache(
@@ -1387,21 +1529,37 @@ impl Renderer {
         color: [f32; 4],
         scale: f32,
     ) {
+        self.draw_string_scaled_pixel_snapped_weighted(text, x, y, color, scale, false);
+    }
+
+    pub(crate) fn draw_string_scaled_pixel_snapped_weighted(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        scale: f32,
+        bold: bool,
+    ) {
         let mut draw_x = x.round();
         let baseline_y = y.round();
         for c in text.chars() {
             if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
                 continue;
             }
-            if let Some(g) = self.get_ui_glyph(c) {
-                if let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_ui_glyph_rect(
-                    draw_x, baseline_y, g.offset_x, g.offset_y, g.width, g.height, scale,
+            if let Some(glyph) = self.get_ui_glyph(c) {
+                if let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_glyph_rect(
+                    draw_x,
+                    baseline_y,
+                    glyph.offset_x,
+                    glyph.offset_y,
+                    glyph.width,
+                    glyph.height,
+                    scale,
                 ) {
-                    self.push_quad(
-                        q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, color, g.is_emoji,
-                    );
+                    self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
                 }
-                draw_x += Self::snapped_text_advance(g.advance, scale);
+                draw_x += Self::snapped_text_advance(glyph.advance, scale);
             }
         }
     }
@@ -1445,7 +1603,7 @@ impl Renderer {
                 let mut color = if span_color[0].is_nan() { self.theme.fg } else { span_color };
                 color[3] *= alpha;
                 if ch != ' ' && ch != '\t'
-                    && let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_ui_glyph_rect(
+                    && let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_glyph_rect(
                         draw_x,
                         baseline_y,
                         glyph.offset_x,
@@ -1505,6 +1663,47 @@ impl Renderer {
             w += self.char_advance(c) * scale;
         }
         w
+    }
+
+    pub(crate) fn draw_string_mono_scaled_pixel_snapped(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        scale: f32,
+        bold: bool,
+    ) {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        for ch in text.chars() {
+            if ch == '\n' || ch == '\r' || ch == '\u{FE0F}' || ch == '\u{200D}' {
+                continue;
+            }
+            let advance = Self::snapped_text_advance(self.char_advance(ch), scale);
+            if !matches!(ch, ' ' | '\t')
+                && let Some(glyph) = self.get_glyph(ch)
+                && let Some((q_x, q_y, q_w, q_h)) = pixel_snapped_glyph_rect(
+                    draw_x,
+                    baseline_y,
+                    glyph.offset_x,
+                    glyph.offset_y,
+                    glyph.width,
+                    glyph.height,
+                    scale,
+                )
+            {
+                self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
+            }
+            draw_x += advance;
+        }
+    }
+
+    pub(crate) fn measure_mono_width_pixel_snapped(&mut self, text: &str, scale: f32) -> f32 {
+        text.chars()
+            .filter(|ch| !matches!(*ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}'))
+            .map(|ch| Self::snapped_text_advance(self.char_advance(ch), scale))
+            .sum()
     }
 
     pub fn push_rounded_rect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, color: [f32; 4]) {

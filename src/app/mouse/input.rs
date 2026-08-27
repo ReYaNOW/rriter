@@ -238,9 +238,25 @@ pub(super) fn apply_autocomplete_scroll_drag(
     scroll.is_dragging = true;
 }
 
+fn finish_markdown_read_selection_on_left_release(
+    markdown: &mut crate::app::markdown::MarkdownTabState,
+    state: ElementState,
+    button: winit::event::MouseButton,
+) -> bool {
+    if state != ElementState::Released
+        || button != winit::event::MouseButton::Left
+        || !markdown.read_selecting
+    {
+        return false;
+    }
+    markdown.finish_read_selection();
+    true
+}
+
 impl App {
     pub(crate) fn cancel_pointer_interactions(&mut self) {
         self.finish_database_table_drag();
+        self.markdown.finish_read_selection();
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         self.is_dragging_search = false;
@@ -362,6 +378,15 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
+        let finish_read_selection = state == ElementState::Released
+            && button == winit::event::MouseButton::Left
+            && self.markdown.read_selecting;
+        if finish_read_selection {
+            let _ = self.update_markdown_read_selection_at(mx, my);
+        }
+        if finish_markdown_read_selection_on_left_release(&mut self.markdown, state, button) {
+            self.window.as_ref().unwrap().request_redraw();
+        }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             stop_click_scroll_anims(self);
             if self.ide_panel.database.dialog.is_some() {
@@ -1113,6 +1138,16 @@ impl App {
                     }
                 }
                 if let Some(clicked_id) = clicked_id {
+                    if clicked_id == crate::ui_system::UiId::MarkdownReadBody
+                        && button == winit::event::MouseButton::Left
+                    {
+                        if state == ElementState::Pressed {
+                            self.focus_document_text_surface();
+                            let _ = self.begin_markdown_read_selection_at(mx, my);
+                        }
+                        self.window.as_ref().unwrap().request_redraw();
+                        return;
+                    }
                     if matches!(
                         clicked_id,
                         crate::ui_system::UiId::EditorTab(_)
@@ -1788,6 +1823,32 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_reader_left_release_finishes_before_ui_dispatch_and_preserves_range() {
+        let mut markdown = crate::app::markdown::MarkdownTabState::default();
+        markdown.read_source = "abcdef".to_string();
+        markdown.begin_read_selection(1);
+        markdown.update_read_selection(5);
+        assert!(markdown.read_selecting);
+
+        let release_target = crate::ui_system::UiId::BottomPanelBody;
+        assert_ne!(release_target, crate::ui_system::UiId::MarkdownReadBody);
+        assert!(finish_markdown_read_selection_on_left_release(
+            &mut markdown,
+            ElementState::Released,
+            winit::event::MouseButton::Left,
+        ));
+
+        assert!(!markdown.read_selecting);
+        assert_eq!(markdown.read_selection_range(), Some(1..5));
+        assert!(!finish_markdown_read_selection_on_left_release(
+            &mut markdown,
+            ElementState::Released,
+            winit::event::MouseButton::Left,
+        ));
+        assert!(!markdown.read_selecting);
+    }
 
     #[test]
     fn hover_rect_helpers_union_and_padding_are_inclusive() {

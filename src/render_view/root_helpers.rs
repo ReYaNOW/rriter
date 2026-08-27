@@ -1,4 +1,6 @@
 pub(crate) const IDE_RESIZE_HIGHLIGHT_COLOR: [f32; 4] = [0.60, 0.35, 0.85, 0.4];
+pub(crate) const SEARCH_ACTIVE_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.6, 0.0, 0.5];
+pub(crate) const SEARCH_HIGHLIGHT_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 0.35];
 
 pub mod core_text;
 mod database_table_tab;

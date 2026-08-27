@@ -202,6 +202,12 @@ impl App {
             renderer.update_popup_mouse_move_gate();
         }
 
+        if self.update_markdown_code_copy_hover_at(px, py)
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
+        }
+
         if self.dialog_window.is_some() {
             return;
         }
@@ -657,6 +663,13 @@ impl App {
         }
 
         if self.drag_api_route_text_selection_from_last_mouse() {
+            clear_hover_popup(self.renderer.as_mut());
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
+        if self.markdown.read_selecting {
+            let _ = self.update_markdown_read_selection_at(px, py);
             clear_hover_popup(self.renderer.as_mut());
             self.window.as_ref().unwrap().request_redraw();
             return;

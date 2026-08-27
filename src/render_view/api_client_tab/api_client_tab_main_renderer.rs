@@ -108,32 +108,7 @@ impl Renderer {
             let q_y = (baseline_y - glyph.offset_y * scale).round();
             let q_w = (glyph.width * scale).round().max(1.0);
             let q_h = (glyph.height * scale).round().max(1.0);
-            self.push_quad(
-                q_x,
-                q_y,
-                q_w,
-                q_h,
-                glyph.u,
-                glyph.v,
-                glyph.uw,
-                glyph.vh,
-                color,
-                glyph.is_emoji,
-            );
-            if bold && glyph.is_emoji == 0.0 && glyph.width > 0.0 {
-                self.push_quad(
-                    q_x + 1.0,
-                    q_y,
-                    q_w,
-                    q_h,
-                    glyph.u,
-                    glyph.v,
-                    glyph.uw,
-                    glyph.vh,
-                    color,
-                    glyph.is_emoji,
-                );
-            }
+            self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
             draw_x += advance;
         }
         draw_x - x.round()

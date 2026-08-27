@@ -708,9 +708,9 @@ impl Renderer {
                     } else if is_search_res {
                         let w = if is_newline { 10.0 } else { adv };
                         let color = if is_active_search {
-                            [1.0, 0.6, 0.0, 0.5]
+                            crate::render_view::SEARCH_ACTIVE_HIGHLIGHT_COLOR
                         } else {
-                            [0.6, 0.6, 0.6, 0.35]
+                            crate::render_view::SEARCH_HIGHLIGHT_COLOR
                         };
                         self.push_rect(
                             x - render_scroll_x,

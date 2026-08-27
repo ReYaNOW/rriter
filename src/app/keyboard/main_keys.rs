@@ -66,6 +66,90 @@ fn is_terminal_tab_close_shortcut(
             || (panels.term_show_search && panels.term_search_focused))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum MarkdownGlobalToggleAction {
+    ToggleMode,
+    Consume,
+}
+
+fn terminal_owns_keyboard_context(
+    is_ide_mode: bool,
+    show_settings: bool,
+    show_search: bool,
+    search_focused: bool,
+    panels: &crate::app::IdePanelState,
+) -> bool {
+    if !is_ide_mode || !panels.is_open(crate::app::PanelId::Terminal) {
+        return false;
+    }
+
+    let higher_priority_non_terminal_owner = show_settings
+        || file_tree_text_input_owns_keyboard_context(panels)
+        || (panels.is_open(crate::app::PanelId::Search)
+            && panels.project_search.focused.is_some())
+        || (panels.is_open(crate::app::PanelId::LspServers)
+            && panels.lsp_log_filter_focused)
+        || (panels.is_open(crate::app::PanelId::Git) && panels.git.message_focused)
+        || (panels.is_open(crate::app::PanelId::ApiClient) && panels.api.focused.is_some())
+        || (panels.is_open(crate::app::PanelId::LspServers)
+            && panels.lsp_logs_focused.is_some());
+    if higher_priority_non_terminal_owner {
+        return false;
+    }
+
+    if panels.term_show_search && panels.term_search_focused {
+        return true;
+    }
+    if show_search && search_focused {
+        return false;
+    }
+    panels.terminal_focused
+}
+
+fn file_tree_text_input_owns_keyboard_context(panels: &crate::app::IdePanelState) -> bool {
+    let hard_modal_open = panels.api.mock_contract_field_delete_dialog.is_some()
+        || panels.api.mock_route_reset_dialog.is_some()
+        || panels.git.confirm_dialog.is_some()
+        || panels.file_tree_context_menu.is_some()
+        || panels.file_tree_move_dialog.is_some()
+        || panels.file_tree_delete_dialog.is_some();
+    !hard_modal_open
+        && (panels.file_tree_rename_dialog.is_some() || panels.file_tree_create_dialog.is_some())
+}
+
+fn markdown_global_toggle_action(
+    markdown_document: bool,
+    is_ide_mode: bool,
+    show_settings: bool,
+    show_search: bool,
+    search_focused: bool,
+    panels: &crate::app::IdePanelState,
+    physical_key: PhysicalKey,
+    primary: bool,
+    shift: bool,
+    repeat: bool,
+) -> Option<MarkdownGlobalToggleAction> {
+    if !markdown_document
+        || terminal_owns_keyboard_context(
+            is_ide_mode,
+            show_settings,
+            show_search,
+            search_focused,
+            panels,
+        )
+        || !primary
+        || !shift
+        || physical_key != PhysicalKey::Code(KeyCode::KeyV)
+    {
+        return None;
+    }
+    Some(if repeat {
+        MarkdownGlobalToggleAction::Consume
+    } else {
+        MarkdownGlobalToggleAction::ToggleMode
+    })
+}
+
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
@@ -123,7 +207,25 @@ impl App {
             return;
         }
 
-        if self.handle_file_tree_modal_keyboard(&key_event) {
+        let markdown_toggle = if key_event.state == ElementState::Pressed {
+            markdown_global_toggle_action(
+                self.active_document_is_markdown(),
+                self.is_ide_mode,
+                self.show_settings,
+                self.show_search,
+                self.search_focused,
+                &self.ide_panel,
+                key_event.physical_key,
+                ctrl,
+                self.modifiers.shift_key(),
+                key_event.repeat,
+            )
+        } else {
+            None
+        };
+        let defer_file_tree_text_input = markdown_toggle.is_some()
+            && file_tree_text_input_owns_keyboard_context(&self.ide_panel);
+        if !defer_file_tree_text_input && self.handle_file_tree_modal_keyboard(&key_event) {
             return;
         }
 
@@ -411,6 +513,14 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
                 return;
             }
+
+            if let Some(action) = markdown_toggle {
+                if action == MarkdownGlobalToggleAction::ToggleMode {
+                    self.toggle_markdown_mode();
+                }
+                return;
+            }
+
             // ── Ввод в поле игнора настроек ──────────────────────────────
             if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused {
                 self.last_action = std::time::Instant::now();
@@ -942,5 +1052,258 @@ mod tests {
             false,
             false,
         ));
+    }
+
+    fn markdown_toggle_for_test(
+        panels: &crate::app::IdePanelState,
+        show_settings: bool,
+        show_search: bool,
+        search_focused: bool,
+        primary: bool,
+        shift: bool,
+        repeat: bool,
+    ) -> Option<MarkdownGlobalToggleAction> {
+        markdown_global_toggle_action(
+            true,
+            true,
+            show_settings,
+            show_search,
+            search_focused,
+            panels,
+            PhysicalKey::Code(KeyCode::KeyV),
+            primary,
+            shift,
+            repeat,
+        )
+    }
+
+    fn stale_terminal_focus_state() -> crate::app::IdePanelState {
+        let mut panels = crate::app::IdePanelState::default();
+        panels.open(crate::app::PanelId::Terminal);
+        panels.terminal_focused = true;
+        panels
+    }
+
+    #[test]
+    fn markdown_global_toggle_matches_only_primary_shift_v_and_consumes_repeat() {
+        let panels = crate::app::IdePanelState::default();
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode)
+        );
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, true),
+            Some(MarkdownGlobalToggleAction::Consume)
+        );
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, false, false),
+            None,
+            "plain Primary+V must keep focused-field paste semantics"
+        );
+        assert_eq!(
+            markdown_global_toggle_action(
+                false,
+                true,
+                false,
+                false,
+                false,
+                &panels,
+                PhysicalKey::Code(KeyCode::KeyV),
+                true,
+                true,
+                false,
+            ),
+            None,
+            "non-Markdown documents must not gain a mode action"
+        );
+        assert_eq!(
+            markdown_global_toggle_action(
+                true,
+                true,
+                false,
+                false,
+                false,
+                &panels,
+                PhysicalKey::Code(KeyCode::KeyC),
+                true,
+                true,
+                false,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn markdown_global_toggle_uses_actual_terminal_keyboard_owner() {
+        let mut panels = stale_terminal_focus_state();
+        assert!(terminal_owns_keyboard_context(
+            true, false, false, false, &panels
+        ));
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, false),
+            None,
+            "actual terminal body owner keeps terminal semantics"
+        );
+
+        panels.terminal_focused = false;
+        panels.term_show_search = true;
+        panels.term_search_focused = true;
+        assert!(terminal_owns_keyboard_context(
+            true, false, false, false, &panels
+        ));
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, false),
+            None,
+            "actual terminal-search owner keeps terminal-search semantics"
+        );
+
+        panels.term_search_focused = false;
+        assert!(!terminal_owns_keyboard_context(
+            true, false, false, false, &panels
+        ));
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode),
+            "open terminal without keyboard ownership must not block Markdown toggle"
+        );
+    }
+
+    #[test]
+    fn markdown_global_toggle_beats_stale_terminal_focus_for_project_search() {
+        let mut panels = stale_terminal_focus_state();
+        panels.open(crate::app::PanelId::Search);
+        panels.project_search.focused =
+            Some(crate::app::project_search::ProjectSearchField::Query);
+
+        assert!(panels.is_open(crate::app::PanelId::Terminal));
+        assert!(panels.terminal_focused, "fixture must preserve stale terminal focus");
+        assert_eq!(
+            panels.project_search.focused,
+            Some(crate::app::project_search::ProjectSearchField::Query)
+        );
+        assert!(!terminal_owns_keyboard_context(
+            true, false, false, false, &panels
+        ));
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode),
+            "central route must consume Primary+Shift+V before project-search KeyV paste"
+        );
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, true, true),
+            Some(MarkdownGlobalToggleAction::Consume),
+            "repeat must remain consumed instead of reaching project-search paste"
+        );
+        assert_eq!(
+            markdown_toggle_for_test(&panels, false, false, false, true, false, false),
+            None,
+            "plain Primary+V remains available to project-search paste"
+        );
+    }
+
+    #[test]
+    fn markdown_global_toggle_beats_stale_terminal_focus_for_other_text_owners() {
+        let mut global_search = stale_terminal_focus_state();
+        assert_eq!(
+            markdown_toggle_for_test(&global_search, false, true, true, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode),
+            "global Search outranks stale terminal body focus"
+        );
+
+        global_search.term_show_search = true;
+        global_search.term_search_focused = true;
+        assert_eq!(
+            markdown_toggle_for_test(&global_search, false, true, true, true, true, false),
+            None,
+            "actual terminal Search still outranks global Search"
+        );
+
+        let mut git = stale_terminal_focus_state();
+        git.open(crate::app::PanelId::Git);
+        git.git.message_focused = true;
+        assert_eq!(
+            markdown_toggle_for_test(&git, false, false, false, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode),
+            "Git message focus must outrank stale terminal body focus"
+        );
+
+        let settings = stale_terminal_focus_state();
+        assert_eq!(
+            markdown_toggle_for_test(&settings, true, false, false, true, true, false),
+            Some(MarkdownGlobalToggleAction::ToggleMode),
+            "Settings keyboard ownership must outrank stale terminal body focus"
+        );
+    }
+
+    #[test]
+    fn file_tree_name_inputs_defer_to_global_toggle_but_hard_modals_keep_priority() {
+        let mut panels = crate::app::IdePanelState::default();
+        panels.file_tree_create_dialog = Some(crate::app::file_tree::FileTreeCreateDialog {
+            kind: crate::app::file_tree::FileTreeCreateKind::File,
+            parent_dir: std::path::PathBuf::from("/tmp"),
+            editor: crate::editor::Editor::new(64),
+            error: None,
+        });
+        assert!(file_tree_text_input_owns_keyboard_context(&panels));
+
+        panels.file_tree_delete_dialog = Some(crate::app::file_tree::FileTreeDeleteDialog {
+            paths: vec![std::path::PathBuf::from("/tmp/example.md")],
+            error: None,
+        });
+        assert!(
+            !file_tree_text_input_owns_keyboard_context(&panels),
+            "hard confirmation must retain priority over the underlying name field"
+        );
+    }
+
+    #[test]
+    fn markdown_global_toggle_precedes_non_terminal_text_field_routes() {
+        let source = include_str!("main_keys.rs");
+        let source = &source[source
+            .find("fn handle_main_keyboard_input_inner")
+            .expect("main keyboard handler")..];
+        let primary = source
+            .find("primary_shortcut_modifier(self.modifiers)")
+            .expect("platform primary modifier");
+        let route_match = source
+            .find("let markdown_toggle = if key_event.state == ElementState::Pressed")
+            .expect("central markdown toggle match");
+        let file_tree_defer = source
+            .find("let defer_file_tree_text_input = markdown_toggle.is_some()")
+            .expect("file-tree text input deferral");
+        let file_tree_modal = source
+            .find("self.handle_file_tree_modal_keyboard(&key_event)")
+            .expect("file-tree modal route");
+        let route_apply = source
+            .find("if let Some(action) = markdown_toggle")
+            .expect("central markdown toggle apply");
+        assert!(primary < route_match);
+        assert!(route_match < file_tree_defer);
+        assert!(file_tree_defer < file_tree_modal);
+        assert!(file_tree_modal < route_apply);
+
+        for marker in [
+            "if self.show_settings && self.settings_tab == 0 && self.settings_ignore_focused",
+            "self.handle_project_search_keyboard_input(key_event);",
+            "self.handle_lsp_log_filter_keyboard_input(key_event);",
+            "self.handle_git_message_keyboard_input(key_event);",
+            "if self.handle_api_client_keyboard_input(&key_event)",
+            "self.handle_terminal_search_keyboard_input(key_event);",
+            "self.handle_search_keyboard_input(key_event);",
+            "self.handle_terminal_keyboard_input(key_event);",
+            "self.handle_editor_keyboard_input(event_loop, key_event);",
+        ] {
+            let routed_field = source
+                .find(marker)
+                .unwrap_or_else(|| panic!("missing route: {marker}"));
+            assert!(route_apply < routed_field, "Markdown toggle must precede {marker}");
+        }
+
+        let dialog_window = source
+            .find("if self.dialog_window.is_some()")
+            .expect("dialog route");
+        assert!(dialog_window < route_apply);
+        assert!(include_str!("../../main.rs")
+            .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование"));
     }
 }

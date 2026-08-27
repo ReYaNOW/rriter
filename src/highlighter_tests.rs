@@ -115,8 +115,8 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
         "- item\n- [ ] todo\n- [x] done\n1. ordered\n\n",
         "---\n\n",
         "| a | b |\n| :- | -: |\n| 1 | 2 |\n\n",
-        "Текст *em* **strong** `inline` [link](https://example.invalid) ![alt](img).\n\n",
-        "```rust\nfn main() { let value = 1; }\n```\n\n",
+        "Текст *em* **strong** `inline` [link](https://example.invalid) [titled](https://example.invalid \"title\") ![alt](img).\n\n",
+        "```rust\nfn main() { let value = \"rust\"; }\n```\n\n",
         "```python\ndef answer():\n    return 42\n```\n\n",
         "```unknown-lang\nplain_code()\n```\n",
     );
@@ -130,19 +130,135 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
     let inline = source.find("inline").unwrap();
     let link = source.find("link").unwrap();
     let uri = source.find("https://").unwrap();
+    let link_title = source.find("\"title\"").unwrap() + 1;
     let rust_fn = source.find("fn main").unwrap();
+    let rust_name = source.find("main()").unwrap();
+    let rust_string = source.find("\"rust\"").unwrap() + 1;
     let python_def = source.find("def answer").unwrap();
+    let python_name = source.find("answer()").unwrap();
     let unknown = source.find("plain_code").unwrap();
 
     assert_eq!(color_at(&highlighter, h1), DRACULA_PURPLE);
     assert_eq!(color_at(&highlighter, em), DRACULA_ORANGE);
     assert_eq!(color_at(&highlighter, strong), DRACULA_PINK);
-    assert_eq!(color_at(&highlighter, inline), DRACULA_YELLOW);
+    assert_eq!(color_at(&highlighter, inline), DRACULA_GREEN);
     assert_eq!(color_at(&highlighter, link), DRACULA_GREEN);
     assert_eq!(color_at(&highlighter, uri), DRACULA_CYAN);
+    assert_eq!(color_at(&highlighter, link_title), DRACULA_YELLOW);
     assert_eq!(color_at(&highlighter, rust_fn), DRACULA_PINK);
+    assert_eq!(color_at(&highlighter, rust_name), DRACULA_GREEN);
+    assert_eq!(color_at(&highlighter, rust_string), DRACULA_YELLOW);
     assert_eq!(color_at(&highlighter, python_def), DRACULA_PINK);
+    assert_eq!(color_at(&highlighter, python_name), DRACULA_GREEN);
     assert_eq!(color_at(&highlighter, unknown), DRACULA_FG);
+}
+
+#[test]
+fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
+    let source = concat!(
+        "* `handle_main_mouse_input`\n",
+        "* `src/render_view/editor_text_layer.rs`\n",
+        "* `start_active_api_request`\n",
+        "* `query_graph_tool`\n\n",
+        "```bash\n",
+        "code-review-graph build --skip-postprocess\n",
+        "```\n",
+    );
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(1, source.to_string(), "md".to_string(), 0);
+    wait(&mut highlighter, 1);
+
+    for inline in [
+        "handle_main_mouse_input",
+        "src/render_view/editor_text_layer.rs",
+        "start_active_api_request",
+        "query_graph_tool",
+    ] {
+        assert_eq!(
+            color_at(&highlighter, source.find(inline).unwrap()),
+            DRACULA_GREEN,
+            "inline code should be green: {inline}"
+        );
+    }
+
+    assert_eq!(
+        color_at(&highlighter, source.find('`').unwrap()),
+        DRACULA_COMMENT
+    );
+    assert_eq!(
+        color_at(&highlighter, source.find("code-review-graph").unwrap()),
+        DRACULA_GREEN
+    );
+    assert_eq!(
+        color_at(&highlighter, source.find("build --").unwrap()),
+        DRACULA_YELLOW
+    );
+    assert_eq!(
+        color_at(&highlighter, source.find("--skip-postprocess").unwrap()),
+        DRACULA_PURPLE
+    );
+}
+
+#[test]
+fn standalone_bash_keeps_existing_palette_outside_markdown_injection() {
+    let source = "code-review-graph build --skip-postprocess\n";
+    let mut highlighter = Highlighter::new();
+    highlighter.reset(1, source.to_string(), "sh".to_string(), 0);
+    wait(&mut highlighter, 1);
+
+    assert_eq!(
+        color_at(&highlighter, source.find("code-review-graph").unwrap()),
+        DRACULA_CYAN
+    );
+    assert_eq!(
+        color_at(&highlighter, source.find("build").unwrap()),
+        DRACULA_FG
+    );
+    assert_eq!(
+        color_at(&highlighter, source.find("--skip-postprocess").unwrap()),
+        DRACULA_PURPLE
+    );
+}
+
+#[test]
+fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
+    let inline_source = "`handle_main_mouse_input`\n";
+    let mut inline_highlighter = Highlighter::new();
+    inline_highlighter.reset(1, inline_source.to_string(), "md".to_string(), 0);
+    wait(&mut inline_highlighter, 1);
+    assert_eq!(color_at(&inline_highlighter, 1), DRACULA_GREEN);
+
+    inline_highlighter.apply_edits(
+        2,
+        vec![SyncEdit::Delete { offset: 0, len: 1 }],
+        Some(0),
+        Some(0),
+    );
+    wait(&mut inline_highlighter, 2);
+    assert_ne!(color_at(&inline_highlighter, 0), DRACULA_GREEN);
+
+    let fenced_source = "```bash\ncode-review-graph build --skip-postprocess\n```\n";
+    let mut fenced_highlighter = Highlighter::new();
+    fenced_highlighter.reset(1, fenced_source.to_string(), "md".to_string(), 0);
+    wait(&mut fenced_highlighter, 1);
+    let command = fenced_source.find("code-review-graph").unwrap();
+    assert_eq!(color_at(&fenced_highlighter, command), DRACULA_GREEN);
+
+    let language = fenced_source.find("bash").unwrap();
+    fenced_highlighter.apply_edits(
+        2,
+        vec![SyncEdit::Delete {
+            offset: language,
+            len: "bash".len(),
+        }],
+        Some(language),
+        Some(language),
+    );
+    wait(&mut fenced_highlighter, 2);
+    assert_ne!(
+        color_at(&fenced_highlighter, command - "bash".len()),
+        DRACULA_GREEN
+    );
 }
 
 #[test]

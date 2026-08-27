@@ -891,6 +891,7 @@ Rendering:
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract controls and locked contract block helpers.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
 * `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, preview scroll geometry, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_read_interaction.rs` -> `markdown_read.rs` include chunk for Reader visual/source mapping, mouse hit-testing, selection/copy, search target/highlight geometry, and focused large-layout interaction regressions. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
 * `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace/logs, dialogs, tests.

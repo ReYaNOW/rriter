@@ -733,6 +733,8 @@ impl Renderer {
                 markdown,
                 editor.version,
                 spans,
+                search_results,
+                search_current_idx,
                 content_x,
                 tab_bar_h,
                 (self.width - content_x).max(0.0),

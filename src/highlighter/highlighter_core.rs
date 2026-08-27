@@ -353,6 +353,15 @@ fn resolve_color(
     color
 }
 
+fn capture_color_override(
+    lang_name: &str,
+    name: &str,
+    node: tree_sitter::Node<'_>,
+) -> Option<[f32; 4]> {
+    (lang_name == "markdown_inline" && name == "text.literal" && node.kind() == "code_span")
+        .then_some(DRACULA_GREEN)
+}
+
 pub(crate) fn hover_capture_color(name: &str, node_text: &str) -> [f32; 4] {
     resolve_color(name, node_text, 0, &[])
 }
@@ -486,7 +495,9 @@ fn collect_query_highlight_spans(
                     continue;
                 }
 
-                let color = resolve_color(name, node_text, cap.node.start_byte(), &param_scopes);
+                let color = capture_color_override(lang_name, name, cap.node).unwrap_or_else(|| {
+                    resolve_color(name, node_text, cap.node.start_byte(), &param_scopes)
+                });
                 if lang_name == "py" && name == "docstring" {
                     crate::languages::python::push_docstring_highlight_spans(
                         text,

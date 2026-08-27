@@ -798,9 +798,11 @@ impl App {
         self.save_active_database_query();
         self.commit_api_focus();
         self.ide_panel.api.focused = None;
+        self.markdown.clear_code_copy_transient();
         self.sync_active_tab();
         self.active_tab = new_idx;
         self.sync_active_tab();
+        self.markdown.clear_code_copy_transient();
         self.prefetch_active_tab_git_graph();
 
         if self.active_tab_is_api_client() || self.active_tab_is_database_table() {
