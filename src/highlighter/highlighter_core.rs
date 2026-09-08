@@ -224,6 +224,7 @@ pub(crate) const DRACULA_ORANGE: [f32; 4] = [0.973, 0.584, 0.502, 1.0];
 pub(crate) const DRACULA_PINK: [f32; 4] = [1.0, 0.474, 0.776, 1.0];
 pub(crate) const DRACULA_PURPLE: [f32; 4] = [0.741, 0.576, 0.976, 1.0];
 pub(crate) const DRACULA_YELLOW: [f32; 4] = [0.945, 0.980, 0.549, 1.0];
+pub(crate) const MARKDOWN_GOLD: [f32; 4] = [0.902, 0.714, 0.451, 1.0];
 
 const MARKER_INTERPOLATION: [f32; 4] = [-1.0, 0.0, 0.0, 1.0];
 pub(crate) const TREE_SITTER_HIGHLIGHT_MAX_BYTES: usize = 64 * 1024;
@@ -359,7 +360,7 @@ fn capture_color_override(
     node: tree_sitter::Node<'_>,
 ) -> Option<[f32; 4]> {
     (lang_name == "markdown_inline" && name == "text.literal" && node.kind() == "code_span")
-        .then_some(DRACULA_GREEN)
+        .then_some(MARKDOWN_GOLD)
 }
 
 pub(crate) fn hover_capture_color(name: &str, node_text: &str) -> [f32; 4] {

@@ -141,13 +141,13 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
     assert_eq!(color_at(&highlighter, h1), DRACULA_PURPLE);
     assert_eq!(color_at(&highlighter, em), DRACULA_ORANGE);
     assert_eq!(color_at(&highlighter, strong), DRACULA_PINK);
-    assert_eq!(color_at(&highlighter, inline), DRACULA_GREEN);
+    assert_eq!(color_at(&highlighter, inline), MARKDOWN_GOLD);
     assert_eq!(color_at(&highlighter, link), DRACULA_GREEN);
     assert_eq!(color_at(&highlighter, uri), DRACULA_CYAN);
-    assert_eq!(color_at(&highlighter, link_title), DRACULA_YELLOW);
+    assert_eq!(color_at(&highlighter, link_title), MARKDOWN_GOLD);
     assert_eq!(color_at(&highlighter, rust_fn), DRACULA_PINK);
     assert_eq!(color_at(&highlighter, rust_name), DRACULA_GREEN);
-    assert_eq!(color_at(&highlighter, rust_string), DRACULA_YELLOW);
+    assert_eq!(color_at(&highlighter, rust_string), MARKDOWN_GOLD);
     assert_eq!(color_at(&highlighter, python_def), DRACULA_PINK);
     assert_eq!(color_at(&highlighter, python_name), DRACULA_GREEN);
     assert_eq!(color_at(&highlighter, unknown), DRACULA_FG);
@@ -157,27 +157,26 @@ fn markdown_edit_highlighting_covers_blocks_inline_unicode_and_fenced_injections
 fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
     let source = concat!(
         "* `handle_main_mouse_input`\n",
-        "* `src/render_view/editor_text_layer.rs`\n",
-        "* `start_active_api_request`\n",
-        "* `query_graph_tool`\n\n",
+        "* `src/render_view/editor_text_layer.rs`\n\n",
         "```bash\n",
-        "code-review-graph build --skip-postprocess\n",
+        "code-review-graph build project --skip-postprocess -v --output=path /tmp/путь \"quoted value\"\n",
+        "```\n",
+        "```sh\n",
+        "code-review-graph build /tmp/sh-path\n",
+        "```\n",
+        "```shell\n",
+        "code-review-graph build /tmp/shell-path\n",
         "```\n",
     );
     let mut highlighter = Highlighter::new();
     highlighter.reset(1, source.to_string(), "md".to_string(), 0);
     wait(&mut highlighter, 1);
 
-    for inline in [
-        "handle_main_mouse_input",
-        "src/render_view/editor_text_layer.rs",
-        "start_active_api_request",
-        "query_graph_tool",
-    ] {
+    for inline in ["handle_main_mouse_input", "src/render_view/editor_text_layer.rs"] {
         assert_eq!(
             color_at(&highlighter, source.find(inline).unwrap()),
-            DRACULA_GREEN,
-            "inline code should be green: {inline}"
+            MARKDOWN_GOLD,
+            "inline code should use markdown gold: {inline}"
         );
     }
 
@@ -189,19 +188,37 @@ fn markdown_edit_highlighting_colors_inline_code_and_fenced_bash_by_context() {
         color_at(&highlighter, source.find("code-review-graph").unwrap()),
         DRACULA_GREEN
     );
+    for arg in ["build project", "project --", "/tmp/путь"] {
+        assert_eq!(
+            color_at(&highlighter, source.find(arg).unwrap()),
+            DRACULA_FG,
+            "plain markdown-fenced bash argument should be foreground: {arg}"
+        );
+    }
+    for option in ["--skip-postprocess", "-v", "--output=path"] {
+        assert_eq!(
+            color_at(&highlighter, source.find(option).unwrap()),
+            DRACULA_PURPLE,
+            "markdown-fenced bash option should remain purple: {option}"
+        );
+    }
     assert_eq!(
-        color_at(&highlighter, source.find("build --").unwrap()),
-        DRACULA_YELLOW
+        color_at(&highlighter, source.find("quoted value").unwrap()),
+        MARKDOWN_GOLD,
+        "quoted bash strings keep string semantics but use markdown gold"
     );
-    assert_eq!(
-        color_at(&highlighter, source.find("--skip-postprocess").unwrap()),
-        DRACULA_PURPLE
-    );
+    for alias_path in ["/tmp/sh-path", "/tmp/shell-path"] {
+        assert_eq!(
+            color_at(&highlighter, source.find(alias_path).unwrap()),
+            DRACULA_FG,
+            "bash aliases should share markdown argument colors: {alias_path}"
+        );
+    }
 }
 
 #[test]
 fn standalone_bash_keeps_existing_palette_outside_markdown_injection() {
-    let source = "code-review-graph build --skip-postprocess\n";
+    let source = "code-review-graph build --skip-postprocess \"quoted value\"\n";
     let mut highlighter = Highlighter::new();
     highlighter.reset(1, source.to_string(), "sh".to_string(), 0);
     wait(&mut highlighter, 1);
@@ -218,6 +235,10 @@ fn standalone_bash_keeps_existing_palette_outside_markdown_injection() {
         color_at(&highlighter, source.find("--skip-postprocess").unwrap()),
         DRACULA_PURPLE
     );
+    assert_eq!(
+        color_at(&highlighter, source.find("quoted value").unwrap()),
+        DRACULA_YELLOW
+    );
 }
 
 #[test]
@@ -226,7 +247,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
     let mut inline_highlighter = Highlighter::new();
     inline_highlighter.reset(1, inline_source.to_string(), "md".to_string(), 0);
     wait(&mut inline_highlighter, 1);
-    assert_eq!(color_at(&inline_highlighter, 1), DRACULA_GREEN);
+    assert_eq!(color_at(&inline_highlighter, 1), MARKDOWN_GOLD);
 
     inline_highlighter.apply_edits(
         2,
@@ -235,7 +256,7 @@ fn markdown_incremental_edits_refresh_backtick_and_fence_injection_colors() {
         Some(0),
     );
     wait(&mut inline_highlighter, 2);
-    assert_ne!(color_at(&inline_highlighter, 0), DRACULA_GREEN);
+    assert_ne!(color_at(&inline_highlighter, 0), MARKDOWN_GOLD);
 
     let fenced_source = "```bash\ncode-review-graph build --skip-postprocess\n```\n";
     let mut fenced_highlighter = Highlighter::new();

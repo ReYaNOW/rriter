@@ -10,6 +10,7 @@ pub(crate) use geometry::{
 };
 
 pub const MAX_VERTICES: usize = 32_768;
+pub(crate) const EDITOR_SURFACE_BG: [f32; 4] = [0.173, 0.180, 0.224, 1.0];
 pub const ATLAS_SIZE_W: i32 = 1024;
 pub const ATLAS_SIZE_H: i32 = 1024;
 pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;

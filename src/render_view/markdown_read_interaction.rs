@@ -4,17 +4,22 @@
 use crate::widgets::{IconButton, IconType};
 
 const CODE_PAD: f32 = 12.0;
-const CODE_HEADER_H: f32 = 24.0;
-const CODE_ACTION_SIZE: f32 = 26.0;
+const CODE_HEADER_H: f32 = 30.0;
+const CODE_ACTION_SIZE: f32 = 30.0;
 const CODE_ACTION_ICON_SIZE: f32 = 16.0;
+const CODE_LANGUAGE_SCALE: f32 = 0.80;
+const CODE_LANGUAGE_COPY_GAP: f32 = 6.0;
+const CODE_LANGUAGE_BASELINE_OFFSET: f32 = 13.5;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct CodeHeaderGeometry {
     language_x: f32,
+    language_max_w: f32,
     text_y: f32,
     button_x: f32,
     button_y: f32,
     button_size: f32,
+    button_icon_size: f32,
 }
 
 fn code_block_padding(scale: f32) -> f32 {
@@ -28,13 +33,27 @@ fn code_header_height(scale: f32) -> f32 {
 fn code_header_geometry(left: f32, right: f32, top: f32, scale: f32) -> CodeHeaderGeometry {
     let pad = code_block_padding(scale);
     let header_h = code_header_height(scale);
-    let button_size = (CODE_ACTION_SIZE * scale).round().max(1.0).min(header_h);
+    let left = left.round();
+    let right = right.round().max(left);
+    let available_w = right - left;
+    let button_size = (CODE_ACTION_SIZE * scale).round().max(1.0).min(available_w);
+    let button_x = (right - pad - button_size)
+        .round()
+        .clamp(left, (right - button_size).max(left));
+    let button_icon_size = (CODE_ACTION_ICON_SIZE * scale)
+        .round()
+        .max(1.0)
+        .min(button_size);
+    let language_x = (left + pad).round().min(button_x);
+    let language_gap = (CODE_LANGUAGE_COPY_GAP * scale).round().max(1.0);
     CodeHeaderGeometry {
-        language_x: (left + pad).round(),
-        text_y: (top + pad + header_h * 0.68).round(),
-        button_x: (right - pad - button_size).round(),
+        language_x,
+        language_max_w: (button_x - language_gap - language_x).max(0.0),
+        text_y: (top + pad + CODE_LANGUAGE_BASELINE_OFFSET * scale).round(),
+        button_x,
         button_y: (top + pad + (header_h - button_size) * 0.5).round(),
         button_size,
+        button_icon_size,
     }
 }
 
@@ -365,6 +384,13 @@ fn nearest_baseline_index<T>(
 }
 
 fn styled_source_boundary(styled: &StyledText, visual: usize) -> Option<usize> {
+    let next_idx = styled.runs.partition_point(|run| run.range.start < visual);
+    if let Some(run) = styled.runs.get(next_idx)
+        && run.range.start == visual
+        && let Some(source_range) = run.source_range.as_ref()
+    {
+        return Some(source_range.start);
+    }
     let idx = styled.runs.partition_point(|run| run.range.end < visual);
     if let Some(run) = styled.runs.get(idx)
         && run.range.start <= visual
@@ -384,6 +410,43 @@ fn styled_source_boundary(styled: &StyledText, visual: usize) -> Option<usize> {
                 .iter()
                 .find_map(|run| run.source_range.as_ref().map(|range| range.start))
         })
+}
+
+fn visual_byte_at_x<F>(
+    text: &str,
+    source_start: usize,
+    target_x: f32,
+    mut metrics_for: F,
+) -> usize
+where
+    F: FnMut(usize, char) -> VisualCharMetrics,
+{
+    if target_x <= 0.0 {
+        return source_start;
+    }
+    let mut x = 0.0;
+    let mut byte = source_start;
+    for ch in text.chars() {
+        let metrics = metrics_for(byte, ch);
+        let leading = metrics.leading.max(0.0);
+        let advance = metrics.advance.max(0.0);
+        let trailing = metrics.trailing.max(0.0);
+        let next_byte = byte + ch.len_utf8();
+
+        x += leading;
+        if advance > 0.0 {
+            if target_x <= x + advance * 0.5 {
+                return byte;
+            }
+            x += advance;
+            if target_x <= x + trailing {
+                return next_byte;
+            }
+        }
+        x += trailing;
+        byte = next_byte;
+    }
+    source_start + text.len()
 }
 
 #[derive(Clone, Copy)]
@@ -486,7 +549,7 @@ impl Renderer {
             size: header.button_size,
             icon: Some(if copied { IconType::Check } else { IconType::Copy }),
             is_active: false,
-            icon_size: Some((CODE_ACTION_ICON_SIZE * self.scale_factor).round()),
+            icon_size: Some(header.button_icon_size),
             active_square_width: None,
             custom_color: copied.then_some([0.3, 0.9, 0.4, 1.0]),
         };
@@ -541,7 +604,7 @@ impl Renderer {
             ReadBlockKind::Code(code) => {
                 let line_idx = nearest_baseline_index(&code.lines, doc_y, |line| line.y)?;
                 let line = &code.lines[line_idx];
-                let pad = 12.0 * self.scale_factor;
+                let pad = code_block_padding(self.scale_factor);
                 let local_x = mouse_x - (frame_x + code.x + pad);
                 let text = markdown
                     .read_source
@@ -609,43 +672,24 @@ impl Renderer {
         text_scale: f32,
         mono: bool,
     ) -> usize {
-        if target_x <= 0.0 {
-            return range.start;
-        }
         let Some(text) = styled.text.get(range.clone()) else {
             return range.start;
         };
-        let mut x = 0.0;
-        let mut byte = range.start;
-        for ch in text.chars() {
-            let width = {
-                let layout_scale = self.scale_factor;
-                let mut advance = |c: char, use_mono: bool| {
-                    if use_mono {
-                        self.char_advance(c)
-                    } else {
-                        self.get_ui_glyph(c)
-                            .map(|glyph| glyph.advance)
-                            .unwrap_or(10.0 * layout_scale)
-                    }
-                };
-                styled_char_advance(
-                    styled,
-                    byte,
-                    ch,
-                    text_scale,
-                    layout_scale,
-                    mono,
-                    &mut advance,
-                )
+        let layout_scale = self.scale_factor;
+        visual_byte_at_x(text, range.start, target_x, |byte, ch| {
+            let mut advance = |c: char, use_mono: bool| {
+                self.markdown_read_char_advance(c, use_mono)
             };
-            if target_x <= x + width * 0.5 {
-                return byte;
-            }
-            x += width;
-            byte += ch.len_utf8();
-        }
-        range.end
+            styled_char_metrics(
+                styled,
+                byte,
+                ch,
+                text_scale,
+                layout_scale,
+                mono,
+                &mut advance,
+            )
+        })
     }
 
     fn mono_source_byte_at_x(
@@ -655,20 +699,9 @@ impl Renderer {
         target_x: f32,
         scale: f32,
     ) -> usize {
-        if target_x <= 0.0 {
-            return source_start;
-        }
-        let mut x = 0.0;
-        let mut byte = source_start;
-        for ch in text.chars() {
-            let width = Self::snapped_text_advance(self.char_advance(ch), scale);
-            if target_x <= x + width * 0.5 {
-                return byte;
-            }
-            x += width;
-            byte += ch.len_utf8();
-        }
-        source_start + text.len()
+        visual_byte_at_x(text, source_start, target_x, |_, ch| {
+            VisualCharMetrics::glyph(mono_char_pixel_advance(ch, scale, || self.char_advance(ch)))
+        })
     }
 }
 
@@ -809,13 +842,7 @@ impl Renderer {
             let width = {
                 let scale = self.scale_factor;
                 let mut advance = |c: char, use_mono: bool| {
-                    if use_mono {
-                        self.char_advance(c)
-                    } else {
-                        self.get_ui_glyph(c)
-                            .map(|glyph| glyph.advance)
-                            .unwrap_or(10.0 * scale)
-                    }
+                    self.markdown_read_char_advance(c, use_mono)
                 };
                 styled_char_advance(
                     styled,
@@ -830,14 +857,16 @@ impl Renderer {
             if let Some(source_range) = run.source_range.as_ref() {
                 let source_start = source_range.start + byte.saturating_sub(run.range.start);
                 let source_end = source_start + ch.len_utf8();
-                self.draw_source_highlight_rects(
-                    source_start..source_end,
-                    x,
-                    top,
-                    width,
-                    line_height,
-                    highlights,
-                );
+                if width > 0.0 {
+                    self.draw_source_highlight_rects(
+                        source_start..source_end,
+                        x,
+                        top,
+                        width,
+                        line_height,
+                        highlights,
+                    );
+                }
             }
             x += width;
             byte += ch.len_utf8();
@@ -898,16 +927,18 @@ impl Renderer {
         let top = (baseline_y - line_height * 0.82).round();
         let mut source_byte = source_start;
         for ch in text.chars() {
-            let width = Self::snapped_text_advance(self.char_advance(ch), scale);
+            let width = mono_char_pixel_advance(ch, scale, || self.char_advance(ch));
             let end = source_byte + ch.len_utf8();
-            self.draw_source_highlight_rects(
-                source_byte..end,
-                x,
-                top,
-                width,
-                line_height,
-                highlights,
-            );
+            if width > 0.0 {
+                self.draw_source_highlight_rects(
+                    source_byte..end,
+                    x,
+                    top,
+                    width,
+                    line_height,
+                    highlights,
+                );
+            }
             x += width;
             source_byte = end;
         }
@@ -976,6 +1007,30 @@ mod interaction_tests {
 
     fn layout(source: &str, width: f32) -> MarkdownReadLayoutCache {
         build_test_markdown_read_layout(source, width)
+    }
+
+    fn mapped_styled_source_byte(
+        styled: &StyledText,
+        range: &Range<usize>,
+        target_x: f32,
+        text_scale: f32,
+        layout_scale: f32,
+        raw_advance: f32,
+    ) -> usize {
+        let text = styled.text.get(range.clone()).expect("styled range");
+        let visual = visual_byte_at_x(text, range.start, target_x, |byte, ch| {
+            let mut advance = |_ch: char, _mono: bool| raw_advance;
+            styled_char_metrics(
+                styled,
+                byte,
+                ch,
+                text_scale,
+                layout_scale,
+                false,
+                &mut advance,
+            )
+        });
+        styled_source_boundary(styled, visual).expect("source boundary")
     }
 
     fn paint_layers(style: TextStyle, highlights: ReadHighlights<'_>) -> Vec<StyledRunPaintLayer> {
@@ -1129,6 +1184,268 @@ mod interaction_tests {
         assert!(!copied.contains("**"));
         assert!(!copied.contains('`'));
     }
+
+    #[test]
+    fn reader_visual_mapping_skips_hidden_markdown_syntax_and_link_destination() {
+        let source = "**bold** **жир** _курсив_ [label](https://example.com) and `code`\n";
+        let cache = layout(source, 520.0);
+        let styled = cache
+            .blocks
+            .iter()
+            .find_map(|block| match &block.kind {
+                ReadBlockKind::Text(text) => Some(&text.styled),
+                _ => None,
+            })
+            .expect("paragraph");
+
+        assert!(!styled.text.contains("https://"));
+        assert!(!styled.text.contains("**"));
+        assert!(!styled.text.contains('`'));
+        for needle in ["bold", "жир", "курсив", "label", "code"] {
+            let visual = styled.text.find(needle).expect("visual needle");
+            let source_byte = source.find(needle).expect("source needle");
+            for (relative, _) in needle.char_indices() {
+                assert_eq!(
+                    styled_source_boundary(styled, visual + relative),
+                    Some(source_byte + relative)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn inline_code_hit_test_uses_drawn_glyph_midpoint_not_padded_cell_midpoint() {
+        let mut styled = StyledText::default();
+        styled.push(
+            "ab",
+            TextStyle::default().with(TextStyle::CODE),
+            Some(40..42),
+        );
+        let range = 0..styled.text.len();
+        let mut advance = |_ch: char, _mono: bool| 8.0;
+        let first = styled_char_metrics(&styled, 0, 'a', 1.0, 1.0, false, &mut advance);
+        let second = styled_char_metrics(&styled, 1, 'b', 1.0, 1.0, false, &mut advance);
+
+        assert_eq!(first, VisualCharMetrics { leading: 4.0, advance: 8.0, trailing: 0.0 });
+        assert_eq!(second, VisualCharMetrics { leading: 0.0, advance: 8.0, trailing: 4.0 });
+        let first_midpoint = first.leading + first.advance * 0.5;
+        assert_eq!(first_midpoint, 8.0);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, 7.0, 1.0, 1.0, 8.0), 40);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, 9.0, 1.0, 1.0, 8.0), 41);
+
+        let second_left = first.width() + second.leading;
+        let second_midpoint = second_left + second.advance * 0.5;
+        assert_eq!(second_midpoint, 16.0);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, 15.0, 1.0, 1.0, 8.0), 41);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, 17.0, 1.0, 1.0, 8.0), 42);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, -5.0, 1.0, 1.0, 8.0), 40);
+        assert_eq!(mapped_styled_source_byte(&styled, &range, 30.0, 1.0, 1.0, 8.0), 42);
+    }
+
+    #[test]
+    fn inline_code_hit_test_matches_wrapped_run_geometry_at_fractional_scales() {
+        let mut styled = StyledText::default();
+        styled.push(
+            "abcd",
+            TextStyle::default().with(TextStyle::CODE),
+            Some(100..104),
+        );
+        let first_line = 0..2;
+        let second_line = 2..4;
+
+        for layout_scale in [1.25, 1.5, 1.75] {
+            let raw_advance = 8.0 * layout_scale;
+            let mut advance = |_ch: char, _mono: bool| raw_advance;
+            let b = styled_char_metrics(
+                &styled,
+                1,
+                'b',
+                BODY_SCALE,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            let c = styled_char_metrics(
+                &styled,
+                2,
+                'c',
+                BODY_SCALE,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            let d = styled_char_metrics(
+                &styled,
+                3,
+                'd',
+                BODY_SCALE,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            let pad = inline_code_padding_x(layout_scale);
+            assert_eq!(b.trailing, 0.0, "soft wrap must not invent right padding");
+            assert_eq!(c.leading, 0.0, "continuation line must not invent left padding");
+            assert_eq!(d.trailing, pad);
+
+            let c_midpoint = c.advance * 0.5;
+            assert_eq!(
+                mapped_styled_source_byte(
+                    &styled,
+                    &second_line,
+                    c_midpoint - 0.25,
+                    BODY_SCALE,
+                    layout_scale,
+                    raw_advance,
+                ),
+                102,
+            );
+            assert_eq!(
+                mapped_styled_source_byte(
+                    &styled,
+                    &second_line,
+                    c_midpoint + 0.25,
+                    BODY_SCALE,
+                    layout_scale,
+                    raw_advance,
+                ),
+                103,
+            );
+
+            let first_a = styled_char_metrics(
+                &styled,
+                0,
+                'a',
+                BODY_SCALE,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            assert_eq!(first_a.leading, pad);
+            let a_midpoint = pad + first_a.advance * 0.5;
+            assert_eq!(
+                mapped_styled_source_byte(
+                    &styled,
+                    &first_line,
+                    a_midpoint - 0.25,
+                    BODY_SCALE,
+                    layout_scale,
+                    raw_advance,
+                ),
+                100,
+            );
+            assert_eq!(
+                mapped_styled_source_byte(
+                    &styled,
+                    &first_line,
+                    a_midpoint + 0.25,
+                    BODY_SCALE,
+                    layout_scale,
+                    raw_advance,
+                ),
+                101,
+            );
+        }
+    }
+
+    #[test]
+    fn table_inline_code_hit_test_keeps_midpoint_after_alignment_translation() {
+        let mut styled = StyledText::default();
+        styled.push(
+            "ab",
+            TextStyle::default().with(TextStyle::CODE),
+            Some(200..202),
+        );
+        let range = 0..2;
+        let text_scale = 0.82;
+
+        for layout_scale in [1.25, 1.5, 1.75] {
+            let raw_advance = 8.0 * layout_scale;
+            let mut advance = |_ch: char, _mono: bool| raw_advance;
+            let first = styled_char_metrics(
+                &styled,
+                0,
+                'a',
+                text_scale,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            let second = styled_char_metrics(
+                &styled,
+                1,
+                'b',
+                text_scale,
+                layout_scale,
+                false,
+                &mut advance,
+            );
+            let measured = first.width() + second.width();
+            let cell_x = 100.0;
+            let cell_w = 90.0 * layout_scale;
+            let cell_pad = (6.0 * layout_scale).round();
+            let centers = [
+                cell_x + (cell_w - measured) * 0.5,
+                cell_x + cell_w - cell_pad - measured,
+            ];
+
+            for tx in centers {
+                let midpoint_world = tx + first.leading + first.advance * 0.5;
+                for (world_x, expected) in [
+                    (midpoint_world - 0.25, 200usize),
+                    (midpoint_world + 0.25, 201usize),
+                ] {
+                    assert_eq!(
+                        mapped_styled_source_byte(
+                            &styled,
+                            &range,
+                            world_x - tx,
+                            text_scale,
+                            layout_scale,
+                            raw_advance,
+                        ),
+                        expected,
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reader_visual_byte_mapping_skips_zero_width_unicode_and_keeps_tabs() {
+        let text = "a\u{200D}\u{FE0F}\u{0301}\tb";
+        let tab_byte = text.find('\t').expect("tab");
+        let b_byte = text.find('b').expect("b");
+        let mapped = |target_x: f32| {
+            visual_byte_at_x(text, 100, target_x, |byte, ch| {
+                let local = byte - 100;
+                let advance = if text_char_is_non_rendering_control(ch) || ch == '\u{0301}' {
+                    0.0
+                } else if local == tab_byte {
+                    16.0
+                } else {
+                    8.0
+                };
+                VisualCharMetrics::glyph(advance)
+            })
+        };
+
+        assert_eq!(mapped(3.0), 100);
+        assert_eq!(mapped(9.0), 100 + tab_byte);
+        assert_eq!(mapped(17.0), 100 + b_byte);
+        assert_eq!(mapped(40.0), 100 + text.len());
+        for byte in [mapped(3.0), mapped(9.0), mapped(17.0), mapped(40.0)] {
+            assert!(text.is_char_boundary(byte - 100));
+        }
+    }
+
+    #[test]
+    fn code_hit_test_padding_matches_draw_at_fractional_scales() {
+        for scale in [1.0, 1.25, 1.3, 1.5, 1.75, 2.0] {
+            assert_eq!(code_block_padding(scale), (CODE_PAD * scale).round());
+        }
+    }
+
     #[test]
     fn reader_selection_across_wrapped_blocks_does_not_copy_soft_wraps() {
         let source = "alpha beta gamma delta epsilon zeta eta theta\n\nsecond block\n";
@@ -1231,9 +1548,90 @@ mod interaction_tests {
         let right = 520.0 - CONTENT_PAD;
         let header = code_header_geometry(left, right, block.top, 1.0);
         assert_eq!(header.language_x, left + pad);
+        assert_eq!(header.button_size, CODE_ACTION_SIZE);
+        assert_eq!(header.button_icon_size, CODE_ACTION_ICON_SIZE);
         assert!(header.button_x > header.language_x);
+        assert!(header.language_max_w > 0.0);
+        assert!(
+            header.language_x + header.language_max_w
+                <= header.button_x - CODE_LANGUAGE_COPY_GAP
+        );
         assert!(header.button_y >= block.top + pad);
         assert!(header.button_y + header.button_size <= block.top + pad + header_h);
+    }
+
+    #[test]
+    fn code_header_language_and_copy_geometry_never_overlap_at_fractional_dpi() {
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 2.0] {
+            let left = (28.0 * scale).round();
+            let top = (40.0 * scale).round();
+            let right = (260.0 * scale).round();
+            let header = code_header_geometry(left, right, top, scale);
+            let pad = code_block_padding(scale);
+            let header_h = code_header_height(scale);
+            let gap = (CODE_LANGUAGE_COPY_GAP * scale).round().max(1.0);
+
+            assert_eq!(header.button_size, (CODE_ACTION_SIZE * scale).round());
+            assert_eq!(header.button_icon_size, (CODE_ACTION_ICON_SIZE * scale).round());
+            assert!(header.language_max_w >= 0.0);
+            assert!(header.language_x + header.language_max_w + gap <= header.button_x);
+            assert!(header.button_y >= top + pad);
+            assert!(header.button_y + header.button_size <= top + pad + header_h);
+            let old_text_y = (top + pad + 24.0 * scale * 0.68).round();
+            assert!(header.text_y <= old_text_y - (2.0 * scale).round());
+            assert_eq!(header.text_y.fract(), 0.0);
+        }
+    }
+
+    #[test]
+    fn code_header_compacts_copy_inside_narrow_and_partially_visible_blocks() {
+        let cases = [
+            (100.0, 130.0, 1.0),
+            (118.0, 142.0, 1.25),
+            (-18.0, 20.0, 1.0),
+            (164.0, 174.0, 1.5),
+        ];
+        for (left, right, scale) in cases {
+            let header = code_header_geometry(left, right, 40.0, scale);
+            let rounded_left = left.round();
+            let rounded_right = right.round().max(rounded_left);
+
+            assert!(header.button_x >= rounded_left, "case {left}..{right}");
+            assert!(
+                header.button_x + header.button_size <= rounded_right,
+                "case {left}..{right}"
+            );
+            assert!(header.button_icon_size <= header.button_size);
+            assert!(header.language_x <= header.button_x);
+            assert_eq!(header.language_max_w, 0.0);
+        }
+
+        let narrow = code_header_geometry(100.0, 130.0, 0.0, 1.0);
+        assert_eq!(narrow.button_x, 100.0);
+        assert_eq!(narrow.button_size, 30.0);
+        assert_eq!(narrow.button_icon_size, 16.0);
+        assert_eq!(narrow.button_x + narrow.button_size, 130.0);
+    }
+
+    #[test]
+    fn nested_quote_list_code_header_gives_copy_priority_at_narrow_width() {
+        let source = "> - nested\n>\n>   ```rust\n>   code\n>   ```\n";
+        let cache = layout(source, 180.0);
+        let (block, code) = cache
+            .blocks
+            .iter()
+            .find_map(|block| match &block.kind {
+                ReadBlockKind::Code(code) => Some((block, code)),
+                _ => None,
+            })
+            .expect("nested quoted code block");
+        assert!(code.quote_depth > 0);
+        assert!(code.x > CONTENT_PAD);
+
+        let header = code_header_geometry(code.x, code.x + 30.0, block.top, 1.0);
+        assert_eq!(header.language_max_w, 0.0);
+        assert_eq!(header.button_x, code.x.round());
+        assert_eq!(header.button_x + header.button_size, (code.x + 30.0).round());
     }
 
     #[test]

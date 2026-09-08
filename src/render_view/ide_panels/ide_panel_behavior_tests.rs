@@ -58,6 +58,49 @@ mod tests {
     }
 
     #[test]
+    fn clipped_label_prefix_uses_draw_advances_and_selected_text_fits() {
+        let text = "h".repeat(40);
+        let max_w = 300.0;
+        let ellipsis_w = 12.0;
+        let raw_advance = 8.509_09;
+        let draw_advance = Renderer::snapped_text_advance(raw_advance, 1.0);
+        let prefix_len = clipped_label_prefix_len(&text, max_w, ellipsis_w, |_| draw_advance);
+        let selected = format!("{}…", &text[..prefix_len]);
+        let selected_w = selected
+            .chars()
+            .map(|ch| if ch == '…' { ellipsis_w } else { draw_advance })
+            .sum::<f32>();
+
+        assert_eq!(prefix_len, 32);
+        assert_eq!(selected.matches('…').count(), 1);
+        assert_eq!(selected_w, max_w);
+        assert!(33.0 * draw_advance + ellipsis_w > max_w);
+    }
+
+    #[test]
+    fn clipped_label_prefix_handles_fractional_dpi_cyrillic_and_ellipsis_only_budget() {
+        let text = "Приветмир";
+        for scale in [0.80_f32, 1.0, 1.25, 1.5, 1.75, 2.0] {
+            let advance = |ch: char| {
+                let raw = if ch.is_ascii() { 7.2 } else { 8.35 };
+                Renderer::snapped_text_advance(raw, scale)
+            };
+            let ellipsis_w = Renderer::snapped_text_advance(9.4, scale);
+            let max_w = ellipsis_w + Renderer::snapped_text_advance(8.35, scale) * 3.0;
+            let prefix_len = clipped_label_prefix_len(text, max_w, ellipsis_w, advance);
+            let selected_w = text[..prefix_len].chars().map(advance).sum::<f32>() + ellipsis_w;
+
+            assert!(text.is_char_boundary(prefix_len));
+            assert!(selected_w <= max_w, "scale {scale}: {selected_w} > {max_w}");
+            assert_eq!(
+                clipped_label_prefix_len(text, ellipsis_w, ellipsis_w, advance),
+                0,
+                "scale {scale}"
+            );
+        }
+    }
+
+    #[test]
     fn project_search_match_preview_clips_around_hit() {
         let text = format!("{}needle{}", "a".repeat(30), "b".repeat(30));
         let (visible, start, end) =

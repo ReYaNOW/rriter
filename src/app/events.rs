@@ -63,6 +63,23 @@ struct AutocompleteFrameStats {
     popup: AutocompletePopupStats,
 }
 
+#[inline]
+fn markdown_read_cursor_icon(
+    wants_pointer: bool,
+    popup_blocks_background: bool,
+    ui_registry: &crate::ui_system::UiRegistry,
+) -> winit::window::CursorIcon {
+    if wants_pointer {
+        winit::window::CursorIcon::Pointer
+    } else if popup_blocks_background {
+        winit::window::CursorIcon::Default
+    } else if ui_registry.wants_text() {
+        winit::window::CursorIcon::Text
+    } else {
+        winit::window::CursorIcon::Default
+    }
+}
+
 impl Default for AutocompleteFrameStats {
     fn default() -> Self {
         Self {
@@ -1288,6 +1305,12 @@ impl ApplicationHandler for App {
                     } else {
                         winit::window::CursorIcon::Default
                     }
+                } else if self.markdown_mode() == crate::app::MarkdownMode::Read {
+                    markdown_read_cursor_icon(
+                        wants_pointer,
+                        popup_blocks_background,
+                        &self.ui_registry,
+                    )
                 } else if wants_pointer {
                     winit::window::CursorIcon::Pointer
                 } else if popup_blocks_background {
@@ -1518,7 +1541,48 @@ impl ApplicationHandler for App {
 
 #[cfg(test)]
 mod tests {
-    use super::autocomplete_detail_placement;
+    use super::{autocomplete_detail_placement, markdown_read_cursor_icon};
+    use crate::ui_system::{UiId, UiRegistry};
+
+    #[test]
+    fn markdown_read_cursor_uses_registry_surface_and_pointer_priority() {
+        let mut registry = UiRegistry::new();
+        assert!(registry.register_text_region(
+            UiId::MarkdownReadBody,
+            10.0,
+            20.0,
+            200.0,
+            100.0,
+            10.0,
+            40.0,
+        ));
+        assert_eq!(
+            markdown_read_cursor_icon(false, false, &registry),
+            winit::window::CursorIcon::Text
+        );
+        assert_eq!(
+            markdown_read_cursor_icon(false, true, &registry),
+            winit::window::CursorIcon::Default
+        );
+        assert_eq!(
+            markdown_read_cursor_icon(true, true, &registry),
+            winit::window::CursorIcon::Pointer
+        );
+
+        assert!(registry.register_blocker(
+            UiId::StatusBar,
+            0.0,
+            0.0,
+            300.0,
+            200.0,
+            10.0,
+            40.0,
+        ));
+        assert_eq!(
+            markdown_read_cursor_icon(false, false, &registry),
+            winit::window::CursorIcon::Default
+        );
+    }
 
     #[test]
     fn autocomplete_detail_placement_stays_below_completion_window() {

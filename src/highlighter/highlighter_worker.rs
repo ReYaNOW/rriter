@@ -34,12 +34,17 @@ fn resolve_injected_capture_color(
             return if node_text.starts_with('-') && node_text.len() > 1 {
                 DRACULA_PURPLE
             } else {
-                DRACULA_YELLOW
+                DRACULA_FG
             };
         }
     }
-    capture_color_override(injected_lang_name, name, node)
-        .unwrap_or_else(|| resolve_color(name, node_text, node.start_byte(), &[]))
+    let color = capture_color_override(injected_lang_name, name, node)
+        .unwrap_or_else(|| resolve_color(name, node_text, node.start_byte(), &[]));
+    if parent_lang_name == "md" && color == DRACULA_YELLOW {
+        MARKDOWN_GOLD
+    } else {
+        color
+    }
 }
 
 impl Highlighter {

@@ -1,17 +1,19 @@
 use std::ops::Range;
 
+use super::core_text::text_char_is_non_rendering_control;
 use crate::app::{MarkdownMode, MarkdownTabState};
-use crate::highlighter::{ColorSpan, DRACULA_YELLOW};
+use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
 use crate::languages::markdown::{
     MarkdownBlock, MarkdownBlockKind, MarkdownDocument, MarkdownInlineSpan, MarkdownInlineStyle,
     MarkdownListKind, MarkdownTableAlignment,
 };
-use crate::renderer::Renderer;
+use crate::renderer::{EDITOR_SURFACE_BG, Renderer};
 use crate::ui_system::UiRegistry;
 
 const BODY_SCALE: f32 = 0.96;
 const INLINE_CODE_PAD_X: f32 = 4.0;
 const INLINE_CODE_EXTRA_PAD_Y: f32 = 0.75;
+const INLINE_CODE_EXTRA_BOTTOM_PAD_Y: f32 = 2.0;
 const INLINE_CODE_BG_MIX: f32 = 0.10;
 const BODY_LINE_H: f32 = 24.0;
 const BLOCK_GAP: f32 = 12.0;
@@ -19,6 +21,7 @@ const CONTENT_PAD: f32 = 28.0;
 const QUOTE_INDENT: f32 = 18.0;
 const LIST_INDENT: f32 = 26.0;
 const OVERSCAN: f32 = 96.0;
+const READ_SCROLLBAR_W: f32 = 9.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LayoutKey {
@@ -664,9 +667,10 @@ fn inline_code_padding_x(scale: f32) -> f32 {
 }
 
 fn inline_code_vertical_bounds(baseline_y: f32, scale_factor: f32, text_scale: f32) -> (f32, f32) {
-    let extra_pad = (INLINE_CODE_EXTRA_PAD_Y * scale_factor).round().max(1.0);
-    let top = baseline_y.round() - (17.0 * scale_factor * text_scale).round() - extra_pad;
-    let height = (20.0 * scale_factor * text_scale).round().max(1.0) + extra_pad * 2.0;
+    let top_pad = (INLINE_CODE_EXTRA_PAD_Y * scale_factor).round().max(1.0);
+    let bottom_pad = top_pad + (INLINE_CODE_EXTRA_BOTTOM_PAD_Y * scale_factor).round().max(1.0);
+    let top = baseline_y.round() - (17.0 * scale_factor * text_scale).round() - top_pad;
+    let height = (20.0 * scale_factor * text_scale).round().max(1.0) + top_pad + bottom_pad;
     (top.round(), height.round())
 }
 
@@ -681,7 +685,7 @@ fn inline_code_background(bg: [f32; 4], fg: [f32; 4]) -> [f32; 4] {
 
 fn markdown_text_color(style: TextStyle, theme_fg: [f32; 4]) -> [f32; 4] {
     if style.contains(TextStyle::CODE) {
-        DRACULA_YELLOW
+        MARKDOWN_GOLD
     } else if style.contains(TextStyle::LINK) {
         [0.47, 0.68, 0.96, 1.0]
     } else if style.contains(TextStyle::STRONG) {
@@ -697,6 +701,75 @@ fn markdown_text_color(style: TextStyle, theme_fg: [f32; 4]) -> [f32; 4] {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct VisualCharMetrics {
+    leading: f32,
+    advance: f32,
+    trailing: f32,
+}
+
+impl VisualCharMetrics {
+    #[inline]
+    fn glyph(advance: f32) -> Self {
+        Self {
+            advance,
+            ..Self::default()
+        }
+    }
+
+    #[inline]
+    fn width(self) -> f32 {
+        self.leading + self.advance + self.trailing
+    }
+}
+
+fn styled_char_metrics<F: FnMut(char, bool) -> f32>(
+    styled: &StyledText,
+    offset: usize,
+    ch: char,
+    text_scale: f32,
+    layout_scale: f32,
+    mono: bool,
+    advance: &mut F,
+) -> VisualCharMetrics {
+    let run_idx = styled.runs.partition_point(|run| run.range.end <= offset);
+    let run = styled
+        .runs
+        .get(run_idx)
+        .filter(|run| run.range.start <= offset && offset < run.range.end);
+    let inline_mono = run.is_some_and(|run| run.style.contains(TextStyle::CODE));
+    let raw_advance = if matches!(ch, '\n' | '\r') || text_char_is_non_rendering_control(ch) {
+        0.0
+    } else {
+        advance(ch, mono || inline_mono)
+    };
+    let mut metrics = VisualCharMetrics::glyph(Renderer::snapped_text_advance(
+        raw_advance,
+        text_scale,
+    ));
+    if inline_mono
+        && let Some(run) = run
+    {
+        let pad = inline_code_padding_x(layout_scale);
+        if offset == run.range.start {
+            metrics.leading = pad;
+        }
+        if offset.saturating_add(ch.len_utf8()) >= run.range.end {
+            metrics.trailing = pad;
+        }
+    }
+    metrics
+}
+
+#[inline]
+fn mono_char_pixel_advance<F: FnOnce() -> f32>(ch: char, scale: f32, advance: F) -> f32 {
+    if matches!(ch, '\n' | '\r') || text_char_is_non_rendering_control(ch) {
+        0.0
+    } else {
+        Renderer::snapped_text_advance(advance(), scale)
+    }
+}
+
 fn styled_char_advance<F: FnMut(char, bool) -> f32>(
     styled: &StyledText,
     offset: usize,
@@ -706,27 +779,57 @@ fn styled_char_advance<F: FnMut(char, bool) -> f32>(
     mono: bool,
     advance: &mut F,
 ) -> f32 {
-    let run_idx = styled.runs.partition_point(|run| run.range.end <= offset);
-    let run = styled
-        .runs
-        .get(run_idx)
-        .filter(|run| run.range.start <= offset && offset < run.range.end);
-    let inline_mono = run.is_some_and(|run| run.style.contains(TextStyle::CODE));
-    let mut width = (advance(ch, mono || inline_mono) * text_scale)
-        .round()
-        .max(1.0);
-    if inline_mono
-        && let Some(run) = run
-    {
-        let pad = inline_code_padding_x(layout_scale);
-        if offset == run.range.start {
-            width += pad;
-        }
-        if offset.saturating_add(ch.len_utf8()) >= run.range.end {
-            width += pad;
-        }
+    styled_char_metrics(
+        styled,
+        offset,
+        ch,
+        text_scale,
+        layout_scale,
+        mono,
+        advance,
+    )
+    .width()
+}
+
+#[inline]
+fn markdown_read_scrollbar_width(max_scroll: f32, scale: f32) -> f32 {
+    if max_scroll > 0.0 {
+        (READ_SCROLLBAR_W * scale).round().max(4.0)
+    } else {
+        0.0
     }
-    width
+}
+
+fn register_markdown_read_text_surface(
+    ui_registry: &mut UiRegistry,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    scrollbar_w: f32,
+    mouse_x: f32,
+    mouse_y: f32,
+) {
+    ui_registry.register_text_region(
+        crate::ui_system::UiId::MarkdownReadBody,
+        x,
+        y,
+        w,
+        h,
+        mouse_x,
+        mouse_y,
+    );
+    if scrollbar_w > 0.0 {
+        ui_registry.register_blocker(
+            crate::ui_system::UiId::MarkdownReadScrollbar,
+            x + (w - scrollbar_w).max(0.0),
+            y,
+            scrollbar_w,
+            h,
+            mouse_x,
+            mouse_y,
+        );
+    }
 }
 
 fn ordered_prefix(index: u64) -> ReadPrefix {
@@ -880,6 +983,15 @@ fn faded(color: [f32; 4], alpha: f32) -> [f32; 4] {
 }
 
 impl Renderer {
+    #[inline]
+    fn markdown_read_char_advance(&mut self, ch: char, mono: bool) -> f32 {
+        if mono {
+            self.char_advance(ch)
+        } else {
+            self.get_ui_glyph(ch).map_or(0.0, |glyph| glyph.advance)
+        }
+    }
+
     pub(crate) fn draw_markdown_read(
         &mut self,
         markdown: &mut MarkdownTabState,
@@ -893,18 +1005,18 @@ impl Renderer {
         h: f32,
         ui_registry: &mut UiRegistry,
     ) {
-        self.push_rect(x, y, w, h, self.theme.bg);
-        ui_registry.register_blocker(
-            crate::ui_system::UiId::MarkdownReadBody,
-            x,
-            y,
-            w,
-            h,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
+        self.push_rect(x, y, w, h, EDITOR_SURFACE_BG);
 
         let Some(document) = markdown.read_document(editor_version) else {
+            ui_registry.register_blocker(
+                crate::ui_system::UiId::MarkdownReadBody,
+                x,
+                y,
+                w,
+                h,
+                self.last_mouse_x,
+                self.last_mouse_y,
+            );
             self.draw_string_scaled_pixel_snapped(
                 "Markdown preview is preparing…",
                 x + 28.0 * self.scale_factor,
@@ -928,15 +1040,7 @@ impl Renderer {
         if !markdown.read_layout.is_valid_for(key) {
             let source = markdown.read_source.as_str();
             let scale = self.scale_factor;
-            let mut advance = |ch: char, mono: bool| {
-                if mono {
-                    self.char_advance(ch)
-                } else {
-                    self.get_ui_glyph(ch)
-                        .map(|glyph| glyph.advance)
-                        .unwrap_or(10.0 * scale)
-                }
-            };
+            let mut advance = |ch: char, mono: bool| self.markdown_read_char_advance(ch, mono);
             let builder = LayoutBuilder::new(source, content_w, scale, &mut advance);
             let mut builder = builder;
             builder.append_blocks(&document.blocks, 0.0, 0, None);
@@ -951,6 +1055,17 @@ impl Renderer {
         markdown.read_max_scroll = max_scroll;
         markdown.read_scroll_y.clamp_target(0.0, max_scroll);
         markdown.read_scroll_y.clamp_current(0.0, max_scroll);
+        let scrollbar_w = markdown_read_scrollbar_width(max_scroll, self.scale_factor);
+        register_markdown_read_text_surface(
+            ui_registry,
+            x,
+            y,
+            w,
+            h,
+            scrollbar_w,
+            self.last_mouse_x,
+            self.last_mouse_y,
+        );
         let scroll_y = markdown.read_scroll_y.current.round();
         let visible = visible_block_range(
             &markdown.read_layout.blocks,
@@ -1020,8 +1135,8 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        if max_scroll > 0.0 {
-            let bar_w = (9.0 * self.scale_factor).round().max(4.0);
+        if scrollbar_w > 0.0 {
+            let bar_w = scrollbar_w;
             let track_x = (x + w - bar_w).round();
             let thumb_h = (h / markdown.read_layout.content_height.max(h) * h)
                 .max(20.0 * self.scale_factor)
@@ -1100,13 +1215,17 @@ impl Renderer {
                         block.top + offset_y,
                         self.scale_factor,
                     );
-                    self.draw_string_scaled_pixel_snapped(
+                    let mut scratch = std::mem::take(&mut self.scratch_buffer);
+                    self.draw_tree_label_clipped(
                         language,
                         header.language_x,
                         header.text_y,
+                        header.language_max_w,
                         faded(self.theme.line_num, 0.9),
-                        0.66,
+                        CODE_LANGUAGE_SCALE,
+                        &mut scratch,
                     );
+                    self.scratch_buffer = scratch;
                 }
                 for idx in visible_code_line_range(&code.lines, visible_top, visible_bottom) {
                     let line = &code.lines[idx];
@@ -1437,8 +1556,13 @@ mod tests {
             let line_h = (BODY_LINE_H * scale * BODY_SCALE).round().max(1.0);
             let baseline = (line_h * 0.82).round();
             let (pill_top, pill_h) = inline_code_vertical_bounds(baseline, scale, BODY_SCALE);
+            let (next_pill_top, _) =
+                inline_code_vertical_bounds(baseline + line_h, scale, BODY_SCALE);
             assert!(pill_top >= 0.0, "scale {scale}: inline pill starts above line");
-            assert!(pill_top + pill_h <= line_h, "scale {scale}: inline pill overlaps next line");
+            assert!(
+                pill_top + pill_h <= next_pill_top,
+                "scale {scale}: inline pills overlap adjacent lines"
+            );
         }
     }
 
@@ -1452,13 +1576,96 @@ mod tests {
         let second = styled_char_advance(&styled, 1, 'b', BODY_SCALE, 1.0, false, &mut advance);
         assert_eq!(first + second, 28.0);
         assert_eq!(inline_code_padding_x(1.0), 4.0);
-        assert_eq!(markdown_text_color(code_style, [0.0; 4]), DRACULA_YELLOW);
+        assert_eq!(markdown_text_color(code_style, [0.0; 4]), MARKDOWN_GOLD);
 
         let bg = [0.156, 0.164, 0.211, 1.0];
         let fg = [0.972, 0.972, 0.949, 1.0];
         let inline_bg = inline_code_background(bg, fg);
         assert!(inline_bg[0] > bg[0] && inline_bg[1] > bg[1] && inline_bg[2] > bg[2]);
         assert!(inline_bg[0] < fg[0] && inline_bg[1] < fg[1] && inline_bg[2] < fg[2]);
+    }
+
+    #[test]
+    fn reader_metrics_match_draw_for_omitted_and_zero_advance_chars() {
+        let text = "a\u{200D}\u{FE0F}\u{0301}b";
+        let mut styled = StyledText::default();
+        styled.push(text, TextStyle::default(), Some(0..text.len()));
+        let mut widths = Vec::new();
+        for (offset, ch) in text.char_indices() {
+            let mut advance = |c: char, _mono: bool| {
+                assert!(
+                    !text_char_is_non_rendering_control(c),
+                    "non-rendering control reached glyph advance"
+                );
+                if c == '\u{0301}' { 0.0 } else { 8.0 }
+            };
+            widths.push(styled_char_advance(
+                &styled,
+                offset,
+                ch,
+                1.0,
+                1.0,
+                false,
+                &mut advance,
+            ));
+        }
+        assert_eq!(widths, vec![8.0, 0.0, 0.0, 0.0, 8.0]);
+    }
+
+    #[test]
+    fn reader_text_surface_cursor_excludes_preview_scrollbar_and_respects_overlays() {
+        let cursor_at = |mouse_x: f32| {
+            let mut registry = UiRegistry::new();
+            register_markdown_read_text_surface(
+                &mut registry,
+                10.0,
+                20.0,
+                200.0,
+                100.0,
+                10.0,
+                mouse_x,
+                40.0,
+            );
+            (registry.cursor_code(), registry.find_at(mouse_x, 40.0))
+        };
+
+        assert_eq!(cursor_at(10.0), (2, Some(crate::ui_system::UiId::MarkdownReadBody)));
+        assert_eq!(cursor_at(199.0), (2, Some(crate::ui_system::UiId::MarkdownReadBody)));
+        assert_eq!(
+            cursor_at(205.0),
+            (0, Some(crate::ui_system::UiId::MarkdownReadScrollbar))
+        );
+        assert_eq!(cursor_at(211.0), (0, None));
+
+        let mut copy = UiRegistry::new();
+        register_markdown_read_text_surface(
+            &mut copy, 10.0, 20.0, 200.0, 100.0, 10.0, 50.0, 40.0,
+        );
+        assert!(copy.register_rect(
+            crate::ui_system::UiId::MarkdownCodeCopy(1),
+            40.0,
+            30.0,
+            30.0,
+            30.0,
+            50.0,
+            40.0,
+        ));
+        assert_eq!(copy.cursor_code(), 1);
+
+        let mut overlay = UiRegistry::new();
+        register_markdown_read_text_surface(
+            &mut overlay, 10.0, 20.0, 200.0, 100.0, 10.0, 50.0, 40.0,
+        );
+        assert!(overlay.register_blocker(
+            crate::ui_system::UiId::SearchPanelBody,
+            20.0,
+            25.0,
+            100.0,
+            60.0,
+            50.0,
+            40.0,
+        ));
+        assert_eq!(overlay.cursor_code(), 0);
     }
 
 

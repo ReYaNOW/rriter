@@ -442,10 +442,10 @@ impl Renderer {
                 .bind_texture(glow::TEXTURE_2D, self.color_texture);
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.clear_color(
-                0.173, // #2c
-                0.180, // #2e
-                0.224, // #39
-                1.0,
+                crate::renderer::EDITOR_SURFACE_BG[0],
+                crate::renderer::EDITOR_SURFACE_BG[1],
+                crate::renderer::EDITOR_SURFACE_BG[2],
+                crate::renderer::EDITOR_SURFACE_BG[3],
             );
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }

@@ -421,6 +421,7 @@ pub enum UiId {
     EditorScrollbarX,
     EditorTextBody,
     MarkdownReadBody,
+    MarkdownReadScrollbar,
     MarkdownCodeCopy(usize),
     EditorMinimap,
 

@@ -1824,7 +1824,7 @@ impl App {
                     window.request_redraw();
                 }
             }
-            UiId::MarkdownReadBody => {
+            UiId::MarkdownReadBody | UiId::MarkdownReadScrollbar => {
                 self.is_dragging = false;
                 self.is_editor_drag_pending = false;
                 if let Some(window) = self.window.as_ref() {

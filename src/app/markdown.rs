@@ -40,6 +40,7 @@ pub(crate) fn handle_markdown_read_wheel(
         hovered,
         Some(
             crate::ui_system::UiId::MarkdownReadBody
+                | crate::ui_system::UiId::MarkdownReadScrollbar
                 | crate::ui_system::UiId::MarkdownCodeCopy(_)
         )
     ) {
@@ -612,6 +613,18 @@ mod tests {
             MarkdownReadWheelResult::Scrolled
         );
         assert!(read_scroll.target > 40.0);
+        let before_scrollbar_wheel = read_scroll.target;
+        assert_eq!(
+            handle_markdown_read_wheel(
+                MarkdownMode::Read,
+                Some(crate::ui_system::UiId::MarkdownReadScrollbar),
+                &mut read_scroll,
+                500.0,
+                80.0,
+            ),
+            MarkdownReadWheelResult::Scrolled
+        );
+        assert!(read_scroll.target > before_scrollbar_wheel);
         let before_copy_button_wheel = read_scroll.target;
         assert_eq!(
             handle_markdown_read_wheel(

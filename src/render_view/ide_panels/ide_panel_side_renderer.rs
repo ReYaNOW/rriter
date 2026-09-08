@@ -26,14 +26,27 @@ impl Renderer {
         }
         let prefix_len = clipped_label_prefix_len(text, max_w, ellipsis_w, |ch| {
             self.get_ui_glyph(ch)
-                .map(|g| g.advance * scale)
+                .map(|g| Self::snapped_text_advance(g.advance, scale))
                 .unwrap_or(0.0)
         });
-        scratch.clear();
-        scratch.push_str(&text[..prefix_len]);
-        scratch.push_str(ellipsis);
-        self.draw_string_scaled_stable(scratch, x, y, color, scale);
-        self.measure_ui_width(scratch, scale).min(max_w)
+        let mut prefix_len = prefix_len;
+        loop {
+            scratch.clear();
+            scratch.push_str(&text[..prefix_len]);
+            scratch.push_str(ellipsis);
+            let draw_w = self.measure_ui_width(scratch, scale);
+            if draw_w <= max_w {
+                self.draw_string_scaled_stable(scratch, x, y, color, scale);
+                return draw_w;
+            }
+            if prefix_len == 0 {
+                return 0.0;
+            }
+            prefix_len = text[..prefix_len]
+                .char_indices()
+                .next_back()
+                .map_or(0, |(idx, _)| idx);
+        }
     }
 
     fn draw_git_graph_row_text(&mut self, text: &str, x: f32, y: f32, color: [f32; 4], scale: f32) {
@@ -117,7 +130,7 @@ impl Renderer {
             } else {
                 let prefix_len = clipped_label_prefix_len(text, max_text_w, ellipsis_w, |ch| {
                     self.get_ui_glyph(ch)
-                        .map(|g| g.advance * scale)
+                        .map(|g| Self::snapped_text_advance(g.advance, scale))
                         .unwrap_or(0.0)
                 });
                 scratch.clear();
@@ -169,7 +182,7 @@ impl Renderer {
         }
         let prefix_len = clipped_label_prefix_len(text, max_w, ellipsis_w, |ch| {
             self.get_ui_glyph(ch)
-                .map(|g| g.advance * scale)
+                .map(|g| Self::snapped_text_advance(g.advance, scale))
                 .unwrap_or(0.0)
         });
         scratch.clear();
