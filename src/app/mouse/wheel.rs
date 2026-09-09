@@ -25,11 +25,7 @@ fn scroll_autocomplete_list(
     scroll.clamp_target(0.0, autocomplete_max_scroll(total_items, scale));
 }
 
-fn scroll_terminal_tab_strip(
-    scroll: &mut crate::scroll::ScrollState,
-    dy: f32,
-    max_scroll: f32,
-) {
+fn scroll_terminal_tab_strip(scroll: &mut crate::scroll::ScrollState, dy: f32, max_scroll: f32) {
     scroll.anim_speed = 7.0;
     scroll.scroll_by(dy);
     scroll.clamp_target(0.0, max_scroll.max(0.0));
@@ -74,8 +70,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_wheel(&mut self, delta: MouseScrollDelta) {
         self.lsp_actions_menu = None;
-        let closed_git_menu = self.ide_panel.git.commit_menu_open()
-            || self.ide_panel.git.commit_options_menu_open();
+        let closed_git_menu =
+            self.ide_panel.git.commit_menu_open() || self.ide_panel.git.commit_options_menu_open();
         self.ide_panel.git.close_commit_menus();
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -517,9 +513,8 @@ impl App {
             let (cx, cy, cw, ch, _) = app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
 
             if crate::ui_system::point_in_rect(mx, my, (cx, cy, cw, ch)) {
-                let tab_rect = crate::render_view::terminal_ui::terminal_tab_bar_rect(
-                    cx, cy, cw, ch, s,
-                );
+                let tab_rect =
+                    crate::render_view::terminal_ui::terminal_tab_bar_rect(cx, cy, cw, ch, s);
                 if crate::ui_system::point_in_rect(
                     mx,
                     my,
@@ -758,7 +753,22 @@ impl App {
         }) else {
             return;
         };
+        #[cfg(not(test))]
         let Some(window_size) = self.window.as_ref().map(|window| window.inner_size()) else {
+            return;
+        };
+        // Test-only native-window boundary: all routing and scroll policy below are unchanged.
+        #[cfg(test)]
+        let Some(window_size) = self
+            .window
+            .as_ref()
+            .map(|window| window.inner_size())
+            .or_else(|| {
+                self.renderer.as_ref().map(|renderer| {
+                    winit::dpi::PhysicalSize::new(renderer.width as u32, renderer.height as u32)
+                })
+            })
+        else {
             return;
         };
         let window_h = window_size.height as f32;
@@ -1273,11 +1283,16 @@ impl App {
         }
 
         let hovered = self.ui_registry.find_at(mx, my);
+        let read_scroll_bounds = self.markdown.read_scroll_bounds();
+        let allow_stale_editor_surface = self
+            .markdown
+            .pending_read_accepts_stale_editor_surface(self.editor.version);
         match crate::app::markdown::handle_markdown_read_wheel(
             self.markdown_mode(),
             hovered,
-            &mut self.markdown.read_scroll_y,
-            self.markdown.read_max_scroll,
+            allow_stale_editor_surface,
+            &mut self.scroll_y,
+            read_scroll_bounds,
             dy,
         ) {
             crate::app::markdown::MarkdownReadWheelResult::Scrolled => {
@@ -1304,7 +1319,10 @@ impl App {
             self.scroll_x.scroll_by(dx);
         }
 
+        #[cfg(not(test))]
         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+        #[cfg(test)]
+        let wh = window_h;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let tab_bar_h = crate::render_view::editor_content_top_inset(
             self.show_welcome,
@@ -1331,11 +1349,18 @@ impl App {
             .get_max_scroll(&self.editor, visible_h);
         let max_scroll_x = self.renderer.as_ref().unwrap().max_scroll_x;
 
-        self.scroll_y.clamp_target(0.0, max_scroll_y);
-        self.scroll_y.target = self.scroll_y.target.round();
+        if self.markdown.shared_vertical_scroll_uses_editor_bounds() {
+            self.scroll_y.clamp_target(0.0, max_scroll_y);
+            self.scroll_y.target = self.scroll_y.target.round();
+        }
         self.scroll_x.clamp_target(0.0, max_scroll_x);
         self.scroll_x.target = self.scroll_x.target.round();
+        #[cfg(not(test))]
         self.window.as_ref().unwrap().request_redraw();
+        #[cfg(test)]
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
     }
 }
 

@@ -460,7 +460,9 @@ Implementation is split through `include!`:
 * `src/app/app_ide_tab_methods.rs` -> IDE mode startup, tab titles, reveal/current tab sync.
 * `src/app/app_file_tab_methods.rs` -> file/tab open, save, switch, highlight wait.
 * `src/app/app_window_external_methods.rs` -> window title, search, close, external file changes.
-* `src/app/markdown.rs` -> per-tab Markdown mode/read-scroll state, lazy incremental semantic parser cache, central mode API, and focused state regressions.
+* `src/app/markdown.rs` -> per-tab Markdown mode/semantic/selection state, lazy incremental parser cache, central mode API, and focused shared-scroll regressions.
+* `src/app/markdown_scroll_transition.rs` -> included shared vertical-scroll transition layer: source-anchor rebase, cold-layout pending state, and short-lived carry-over for lossy Read/Edit projections; the authoritative physics remains the tab-owned `App.scroll_y`/`EditorTab.scroll_y`.
+* `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.
 
 Autocomplete-specific `App` methods live in `src/app/autocomplete.rs`.
 Python completion/fold/source-owner helpers live in `src/app/python_completion.rs`.
@@ -849,8 +851,10 @@ Implementation is split through `include!`:
 * `src/render_view/root_frame_helpers.rs` -> inline-git and Git diff floating panel helpers.
 * `src/render_view/root_frame_overlay_helpers.rs` -> shared root tab/status/modal/finalization/telemetry path plus overlay, resize, search, and notice helpers.
 * `src/render_view/root_frame_renderer.rs` -> main `Renderer::draw`.
-* `src/render_view/markdown_read.rs` -> version/width-cached Markdown Read presentation, block virtualization, fenced-code span reuse, and independent preview scroll geometry.
-* `src/render_view/markdown_read_interaction.rs` -> included Reader interaction chunk for cached visual/source mapping, hit-testing, selection/copy, source-backed search targeting, and visible selection/search overlays.
+* `src/render_view/markdown_read.rs` -> version/width/scale/font-cached Markdown Read presentation, block virtualization, fenced-code span reuse, shared vertical-scroll bounds, and pre-draw pending transition resolution.
+* `src/render_view/markdown_scroll.rs` -> included scroll-geometry chunk for source-backed viewport anchors, Reader source-line indexing (including wrapped text/table cells), and fold-aware full-editor source projection without cursor mutation.
+* `src/render_view/markdown_scroll_review_tests.rs` -> stage-1 geometry regression include covering hidden/container syntax, half-open source lookup, fractional-scale round trips, and local fallback ownership.
+* `src/render_view/markdown_read_interaction.rs` -> included Reader interaction chunk for cached visual/source mapping, hit-testing, selection/copy, source-backed search targeting through the shared scroll locator, and visible selection/search overlays.
 * `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract toggles and locked class block rendering.
 

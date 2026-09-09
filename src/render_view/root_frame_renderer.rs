@@ -9,6 +9,112 @@ impl Renderer {
         self.fps_string = fps_text;
     }
 
+    fn resolve_markdown_edit_scroll_transition(
+        &mut self,
+        markdown: &mut crate::app::MarkdownTabState,
+        editor: &Editor,
+        scroll: &mut crate::scroll::ScrollState,
+        current_sticky_lines: &[(usize, usize)],
+        editor_height: f32,
+    ) -> bool {
+        let Some(transition) = markdown.pending_transition_for(crate::app::MarkdownMode::Edit)
+        else {
+            return false;
+        };
+        if !markdown.pending_transition_is_valid(&transition, editor.version) {
+            markdown.cancel_stale_scroll_transition();
+            return false;
+        }
+
+        let sticky_inset = current_sticky_lines.len() as f32 * self.line_height;
+        let deferred_applied = scroll.deferred_current_rebase_applied() == Some(true);
+        let reproject_applied_current = deferred_applied
+            && !markdown.deferred_current_geometry_matches_edit(
+                editor.version,
+                self.line_height,
+                sticky_inset,
+            );
+        let applied_anchor = if reproject_applied_current {
+            let Some((geometry, viewport_inset)) = markdown.deferred_edit_current_geometry() else {
+                markdown.cancel_stale_scroll_transition();
+                return false;
+            };
+            if geometry.version != editor.version {
+                markdown.cancel_stale_scroll_transition();
+                return false;
+            }
+            self.markdown_edit_viewport_anchor_with_line_height(
+                editor,
+                scroll.current + viewport_inset,
+                geometry.line_height,
+            )
+        } else {
+            None
+        };
+
+        let anchor = if reproject_applied_current {
+            applied_anchor
+        } else if let Some(anchor) = transition.anchor.clone() {
+            Some(anchor)
+        } else if transition.from == crate::app::MarkdownMode::Read {
+            transition.origin_read_width.and_then(|width| {
+                self.prepare_markdown_read_layout(markdown, editor.version, width)
+                    .then(|| {
+                        markdown
+                            .read_layout
+                            .viewport_source_anchor(transition.origin_scroll_y)
+                    })
+                    .flatten()
+            })
+        } else {
+            None
+        };
+        let Some(anchor) = anchor else {
+            markdown.cancel_stale_scroll_transition();
+            return false;
+        };
+        let Some(line_y) = self.markdown_edit_source_y(editor, &anchor.source_range) else {
+            markdown.cancel_stale_scroll_transition();
+            return false;
+        };
+        let max_scroll = self.get_max_scroll(editor, editor_height);
+        if let Some((target, relative_delta)) =
+            markdown.pending_absolute_scroll_target(crate::app::MarkdownMode::Edit, scroll.target)
+        {
+            let target = match target {
+                crate::app::MarkdownAbsoluteScrollTarget::Source {
+                    source_range,
+                    viewport_ratio,
+                } => {
+                    let Some(source_y) = self.markdown_edit_source_y(editor, &source_range) else {
+                        markdown.cancel_stale_scroll_transition();
+                        return false;
+                    };
+                    source_y - editor_height * viewport_ratio
+                }
+                crate::app::MarkdownAbsoluteScrollTarget::Start => 0.0,
+                crate::app::MarkdownAbsoluteScrollTarget::End => max_scroll,
+            };
+            if !target.is_finite() {
+                markdown.cancel_stale_scroll_transition();
+                return false;
+            }
+            let max_scroll = max_scroll.max(0.0);
+            let resolved_target = target.clamp(0.0, max_scroll).round();
+            scroll.set_target((resolved_target + relative_delta).clamp(0.0, max_scroll));
+            markdown.remember_pending_absolute_scroll_target_y(resolved_target);
+        }
+        markdown.apply_scroll_transition_with_reprojection(
+            scroll,
+            editor.version,
+            anchor,
+            line_y,
+            sticky_inset,
+            max_scroll,
+            reproject_applied_current,
+        )
+    }
+
     pub fn draw(
         &mut self,
         editor: &mut Editor,
@@ -17,7 +123,7 @@ impl Renderer {
         tabs: &[crate::app::EditorTab],
         active_tab: usize,
         scroll_x: f32,
-        scroll_y: f32,
+        scroll_y_state: &mut crate::scroll::ScrollState,
         markdown: &mut crate::app::MarkdownTabState,
         blink_alpha: f32,
         show_fps: bool,
@@ -50,6 +156,7 @@ impl Renderer {
         show_readonly_notice: bool,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
+        let mut scroll_y = scroll_y_state.current;
         if self.current_python_inlay_hints.as_slice() != python_inlay_hints {
             self.current_python_inlay_hints.clear();
             self.current_python_inlay_hints
@@ -70,7 +177,8 @@ impl Renderer {
         let mut telemetry_side_panel_time = 0.0;
         let mut telemetry_root_phases = [0.0; 5];
         let mut telemetry_chrome_details = [0.0; 6];
-        let markdown_read_active = crate::render_view::markdown_read::markdown_read_active(markdown.mode);
+        let markdown_read_active =
+            crate::render_view::markdown_read::markdown_read_active(markdown.mode);
 
         let cursor_phys_line = editor
             .line_offsets
@@ -89,26 +197,27 @@ impl Renderer {
                 .borrow_mut()
                 .set_database_query_hover_context(query_hover_source.map(|(id, _)| id));
         });
-        let (diag_version, instant_raw, stale_instant_diagnostics) = if let Some(diagnostics) = query_diagnostics {
-            (
-                crate::editor::lsp_document_version(editor.version),
-                diagnostics.iter().collect::<Vec<_>>(),
-                false,
-            )
-        } else if let Some(l) = lsp {
-            if let Some(p) = editor_path {
-                let (version, diagnostics) = l.instant_merged_diagnostics(p);
+        let (diag_version, instant_raw, stale_instant_diagnostics) =
+            if let Some(diagnostics) = query_diagnostics {
                 (
-                    version,
-                    diagnostics,
-                    l.has_stale_instant_diagnostics(p, editor.version),
+                    crate::editor::lsp_document_version(editor.version),
+                    diagnostics.iter().collect::<Vec<_>>(),
+                    false,
                 )
+            } else if let Some(l) = lsp {
+                if let Some(p) = editor_path {
+                    let (version, diagnostics) = l.instant_merged_diagnostics(p);
+                    (
+                        version,
+                        diagnostics,
+                        l.has_stale_instant_diagnostics(p, editor.version),
+                    )
+                } else {
+                    (0, Vec::new(), false)
+                }
             } else {
                 (0, Vec::new(), false)
-            }
-        } else {
-            (0, Vec::new(), false)
-        };
+            };
 
         let get_byte_offset = |line: u32, utf16_col: u32| -> usize {
             let line = line as usize;
@@ -205,71 +314,13 @@ impl Renderer {
             // source-only fold mappings on a Read-mode frame.
             (1, 0)
         } else {
-            let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
-                let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
-                let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-                let end_hash = (fold_end as u64).rotate_left(32);
-                acc ^ line_hash ^ end_hash
-            });
-            let phys_to_visual_stale = self.phys_to_visual_editor_version != editor.version
-                || self.phys_to_visual_line_count != editor.line_offsets.len()
-                || self.phys_to_visual_fold_count != editor.folded_lines.len()
-                || self.phys_to_visual_fold_checksum != fold_checksum
-                || self.phys_to_visual.len() != editor.line_offsets.len();
-
-            if phys_to_visual_stale {
-                self.phys_to_visual.clear();
-                self.phys_to_visual.resize(editor.line_offsets.len(), 0);
-
-                let mut visible_lines_count = 0;
-                let mut visible_cursor_line = 0;
-                let mut temp_phys = 0;
-                while temp_phys < editor.line_offsets.len() {
-                    self.phys_to_visual[temp_phys] = visible_lines_count;
-                    if temp_phys == cursor_phys_line {
-                        visible_cursor_line = visible_lines_count;
-                    }
-                    let is_folded = editor.folded_lines.contains(&temp_phys)
-                        && editor.foldable_lines.contains_key(&temp_phys);
-                    let fold_end = if is_folded {
-                        editor.foldable_lines.get(&temp_phys).copied()
-                    } else {
-                        None
-                    };
-                    visible_lines_count += 1;
-                    if let Some(end) = fold_end {
-                        if cursor_phys_line > temp_phys && cursor_phys_line <= end {
-                            visible_cursor_line = visible_lines_count - 1;
-                        }
-                        while temp_phys < end {
-                            temp_phys += 1;
-                            if temp_phys < editor.line_offsets.len() {
-                                self.phys_to_visual[temp_phys] = visible_lines_count - 1;
-                            }
-                        }
-                    }
-                    temp_phys += 1;
-                }
-                self.phys_to_visual_editor_version = editor.version;
-                self.phys_to_visual_line_count = editor.line_offsets.len();
-                self.phys_to_visual_fold_count = editor.folded_lines.len();
-                self.phys_to_visual_fold_checksum = fold_checksum;
-                (visible_lines_count.max(1), visible_cursor_line)
-            } else {
-                let total_lines = self
-                    .phys_to_visual
-                    .last()
-                    .copied()
-                    .map(|line| line + 1)
-                    .unwrap_or(1)
-                    .max(1);
-                let visible_cursor_line = self
-                    .phys_to_visual
-                    .get(cursor_phys_line)
-                    .copied()
-                    .unwrap_or(cursor_phys_line);
-                (total_lines, visible_cursor_line)
-            }
+            let total_lines = self.ensure_editor_visual_line_map(editor);
+            let visible_cursor_line = self
+                .phys_to_visual
+                .get(cursor_phys_line)
+                .copied()
+                .unwrap_or(cursor_phys_line);
+            (total_lines, visible_cursor_line)
         };
         let s = self.scale_factor;
         let mx = if show_settings || dialog_window_open {
@@ -298,11 +349,10 @@ impl Renderer {
             crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((meta, state)),
             _ => None,
         });
-        let database_query_modal_open = active_database_query
-            .is_some_and(|(_, state)| state.review.is_some());
-        let database_query_results_open = active_database_query.is_some_and(|(_, state)| {
-            crate::app::database::database_query_results_visible(state)
-        });
+        let database_query_modal_open =
+            active_database_query.is_some_and(|(_, state)| state.review.is_some());
+        let database_query_results_open = active_database_query
+            .is_some_and(|(_, state)| crate::app::database::database_query_results_visible(state));
         let database_query_results_h = if database_query_results_open {
             active_database_query.map_or(0.0, |(_, state)| {
                 crate::app::database::database_query_results_height(
@@ -357,8 +407,7 @@ impl Renderer {
             self.last_cursor_for_popups = editor.cursor;
         }
 
-        let tab_bar_visual_h =
-            crate::render_view::ide_tab_bar_height(show_welcome, is_ide_mode, s);
+        let tab_bar_visual_h = crate::render_view::ide_tab_bar_height(show_welcome, is_ide_mode, s);
         let tab_bar_h = crate::render_view::editor_content_top_inset(
             show_welcome,
             is_ide_mode,
@@ -368,6 +417,18 @@ impl Renderer {
         let editor_height =
             editor_view_height(real_height, tab_bar_h, editor_bottom_h, is_ide_mode, s);
         let editor_scroll_height = editor_height;
+
+        if !markdown_read_active
+            && self.resolve_markdown_edit_scroll_transition(
+                markdown,
+                editor,
+                scroll_y_state,
+                current_sticky_lines,
+                editor_height,
+            )
+        {
+            scroll_y = scroll_y_state.current;
+        }
 
         let target_minimap_w = 119.0 * s;
 
@@ -398,6 +459,7 @@ impl Renderer {
         let cache_start = telemetry_frame_start.map(|_| Instant::now());
         if !markdown_read_active {
             self.update_cache(editor, scroll_x, scroll_y, is_resizing);
+            markdown.remember_displayed_edit_geometry(editor.version, self.line_height);
         }
         if let Some(cache_start) = cache_start {
             telemetry_root_phases[1] = cache_start.elapsed().as_secs_f32();
@@ -438,8 +500,7 @@ impl Renderer {
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
             self.gl.active_texture(glow::TEXTURE1);
-            self.gl
-                .bind_texture(glow::TEXTURE_2D, self.color_texture);
+            self.gl.bind_texture(glow::TEXTURE_2D, self.color_texture);
             self.gl.active_texture(glow::TEXTURE0);
             self.gl.clear_color(
                 crate::renderer::EDITOR_SURFACE_BG[0],
@@ -449,7 +510,6 @@ impl Renderer {
             );
             self.gl.clear(glow::COLOR_BUFFER_BIT);
         }
-
 
         let active_api_route = tabs.get(active_tab).and_then(|tab| match &tab.kind {
             crate::app::EditorTabKind::ApiClient(meta, state) if !state.auth_view => {
@@ -670,7 +730,9 @@ impl Renderer {
                 s,
             );
             self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
-            if show_fps { self.draw_fps_overlay(self.minimap_width); }
+            if show_fps {
+                self.draw_fps_overlay(self.minimap_width);
+            }
             self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
@@ -689,11 +751,8 @@ impl Renderer {
 
         // IDE с пустыми вкладками — показываем cowsay экран вместо редактора.
         // Открытая нижняя панель завершает empty frame через штатный bottom chrome.
-        let empty_ide_bottom_chrome = empty_ide_should_continue_bottom_chrome(
-            is_ide_mode,
-            tabs.is_empty(),
-            panel_bottom_h,
-        );
+        let empty_ide_bottom_chrome =
+            empty_ide_should_continue_bottom_chrome(is_ide_mode, tabs.is_empty(), panel_bottom_h);
         if is_ide_mode && tabs.is_empty() {
             return self.draw_empty_ide_frame(
                 ide_panel,
@@ -731,7 +790,8 @@ impl Renderer {
             let stage_start = telemetry_frame_start.map(|_| Instant::now());
             self.draw_markdown_read(
                 markdown,
-                editor.version,
+                editor,
+                scroll_y_state,
                 spans,
                 search_results,
                 search_current_idx,
@@ -1580,3 +1640,6 @@ impl Renderer {
         (wants_pointer, target_sticky_lines)
     }
 }
+
+#[cfg(test)]
+include!("markdown_scroll_transition_review_tests.rs");

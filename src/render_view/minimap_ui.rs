@@ -155,17 +155,7 @@ impl Renderer {
         if physical_line_count == 0 {
             return 0..0;
         }
-        let fold_checksum = editor.folded_lines.iter().fold(0u64, |acc, &line| {
-            let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
-            let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
-            let end_hash = (fold_end as u64).rotate_left(32);
-            acc ^ line_hash ^ end_hash
-        });
-        let mapping_ready = self.phys_to_visual_editor_version == editor.version
-            && self.phys_to_visual_line_count == physical_line_count
-            && self.phys_to_visual_fold_count == editor.folded_lines.len()
-            && self.phys_to_visual_fold_checksum == fold_checksum
-            && self.phys_to_visual.len() == physical_line_count;
+        let mapping_ready = self.editor_visual_line_map_is_valid(editor);
         let total_visual_lines = if mapping_ready {
             self.phys_to_visual
                 .last()

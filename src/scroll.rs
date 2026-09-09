@@ -6,6 +6,13 @@ pub struct ScrollState {
     pub anim_speed: f32,
     pub is_dragging: bool,
     pub drag_offset: f32,
+    deferred_current_rebase: Option<DeferredCurrentRebase>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct DeferredCurrentRebase {
+    destination_current: f32,
+    applied: bool,
 }
 
 impl ScrollState {
@@ -17,6 +24,7 @@ impl ScrollState {
             anim_speed,
             is_dragging: false,
             drag_offset: 0.0,
+            deferred_current_rebase: None,
         }
     }
 
@@ -27,6 +35,7 @@ impl ScrollState {
         if !dt.is_finite() || dt <= 0.0 {
             return false;
         }
+        let rebased = self.apply_deferred_current_rebase();
         let diff = self.target - self.current;
         let abs_diff = diff.abs();
         if abs_diff > 0.0 {
@@ -48,7 +57,7 @@ impl ScrollState {
             }
             return true;
         }
-        false
+        rebased
     }
 
     pub fn is_settled(&self) -> bool {
@@ -97,11 +106,164 @@ impl ScrollState {
         }
     }
 
+    /// Schedules a current-only coordinate rebase for the next physics tick or
+    /// transition resolve. The public `current` remains in the origin surface
+    /// until one of those two events, so an immediate inverse mode toggle can
+    /// still cancel the transition without decoding origin pixels as destination
+    /// pixels.
+    pub(crate) fn defer_current_rebase_preserving_target(&mut self, new_current: f32) -> bool {
+        if !new_current.is_finite() || !self.current.is_finite() || !self.target.is_finite() {
+            return false;
+        }
+        self.deferred_current_rebase = Some(DeferredCurrentRebase {
+            destination_current: new_current,
+            applied: false,
+        });
+        self.end_drag();
+        true
+    }
+
+    fn apply_deferred_current_rebase(&mut self) -> bool {
+        let Some(mut deferred) = self.deferred_current_rebase else {
+            return false;
+        };
+        if deferred.applied {
+            return false;
+        }
+        self.current = deferred.destination_current;
+        deferred.applied = true;
+        self.deferred_current_rebase = Some(deferred);
+        self.end_drag();
+        true
+    }
+
+    pub(crate) fn complete_deferred_current_rebase(&mut self) -> bool {
+        let Some(deferred) = self.deferred_current_rebase else {
+            return false;
+        };
+        if !deferred.applied {
+            self.current = deferred.destination_current;
+        }
+        self.deferred_current_rebase = None;
+        self.end_drag();
+        true
+    }
+
+    pub(crate) fn deferred_current_rebase_applied(&self) -> Option<bool> {
+        self.deferred_current_rebase
+            .map(|deferred| deferred.applied)
+    }
+
+    /// Reprojects a current that already consumed its deferred rebase while
+    /// keeping the applied ownership marker alive for the destination surface.
+    ///
+    /// Absolute destination navigation already owns `target`, so callers can
+    /// preserve it. Otherwise the same coordinate delta is applied to target
+    /// so unfinished physical motion remains unchanged.
+    pub(crate) fn reproject_applied_deferred_current(
+        &mut self,
+        new_current: f32,
+        preserve_destination_target: bool,
+    ) -> bool {
+        let Some(mut deferred) = self.deferred_current_rebase else {
+            return false;
+        };
+        if !deferred.applied
+            || !new_current.is_finite()
+            || !self.current.is_finite()
+            || !self.target.is_finite()
+        {
+            return false;
+        }
+
+        if !preserve_destination_target {
+            let delta = new_current - self.current;
+            let new_target = self.target + delta;
+            if !delta.is_finite() || !new_target.is_finite() {
+                return false;
+            }
+            self.target = new_target;
+        }
+
+        self.current = new_current;
+        deferred.destination_current = new_current;
+        self.deferred_current_rebase = Some(deferred);
+        self.end_drag();
+        true
+    }
+
+    /// Cancels an unapplied destination-current rebase while translating the
+    /// absolute destination target back into the origin coordinate system by
+    /// the same local delta. Used only when the user reverses the mode toggle
+    /// before a destination frame/tick has consumed the rebase.
+    pub(crate) fn cancel_unapplied_deferred_current_rebase(&mut self) -> bool {
+        let Some(deferred) = self.deferred_current_rebase else {
+            return false;
+        };
+        if deferred.applied || !self.target.is_finite() || !self.current.is_finite() {
+            return false;
+        }
+        let reverse_delta = self.current - deferred.destination_current;
+        let origin_target = self.target + reverse_delta;
+        if !reverse_delta.is_finite() || !origin_target.is_finite() {
+            return false;
+        }
+        self.target = origin_target;
+        self.deferred_current_rebase = None;
+        self.end_drag();
+        true
+    }
+
+    pub(crate) fn clear_deferred_current_rebase(&mut self) {
+        self.deferred_current_rebase = None;
+    }
+
+    /// Rebases the scroll coordinate system without changing the unfinished motion.
+    ///
+    /// The same delta is applied to `current` and `target`; velocity and animation
+    /// speed are preserved. A scrollbar drag belongs to the old surface geometry,
+    /// so only that pointer capture is released.
+    pub(crate) fn rebase_current_preserving_motion(&mut self, new_current: f32) -> bool {
+        if !new_current.is_finite() || !self.current.is_finite() || !self.target.is_finite() {
+            return false;
+        }
+        let delta = new_current - self.current;
+        let new_target = self.target + delta;
+        if !delta.is_finite() || !new_target.is_finite() {
+            return false;
+        }
+        self.current = new_current;
+        self.target = new_target;
+        self.deferred_current_rebase = None;
+        self.end_drag();
+        true
+    }
+
+    /// Rebases only the current position after an absolute destination target was
+    /// already selected in the new coordinate system.
+    pub(crate) fn rebase_current_preserving_target(&mut self, new_current: f32) -> bool {
+        if !new_current.is_finite() || !self.target.is_finite() {
+            return false;
+        }
+        self.current = new_current;
+        self.deferred_current_rebase = None;
+        self.end_drag();
+        true
+    }
+
     pub fn stop_anim(&mut self) {
         self.sanitize_non_finite();
+        let applied_rebase = self
+            .deferred_current_rebase
+            .filter(|deferred| deferred.applied);
         self.target = self.current.round();
         self.current = self.target;
         self.velocity = 0.0;
+        // Stopping cancels motion, but an already-applied deferred rebase is
+        // still the ownership marker for `current` until the destination
+        // transition resolves. An unapplied rebase is ordinary pending motion
+        // and is intentionally cancelled by the stop.
+        self.deferred_current_rebase = applied_rebase;
     }
 
     pub fn jump_to(&mut self, target: f32) {
@@ -111,6 +273,7 @@ impl ScrollState {
         self.current = target;
         self.target = target;
         self.velocity = 0.0;
+        self.deferred_current_rebase = None;
         self.is_dragging = false;
         self.drag_offset = 0.0;
     }
@@ -134,6 +297,7 @@ impl ScrollState {
         self.current = 0.0;
         self.target = 0.0;
         self.velocity = 0.0;
+        self.deferred_current_rebase = None;
         self.is_dragging = false;
         self.drag_offset = 0.0;
     }
@@ -158,6 +322,13 @@ impl ScrollState {
         }
         if !self.drag_offset.is_finite() {
             self.drag_offset = 0.0;
+            changed = true;
+        }
+        if self
+            .deferred_current_rebase
+            .is_some_and(|deferred| !deferred.destination_current.is_finite())
+        {
+            self.deferred_current_rebase = None;
             changed = true;
         }
         if changed {
@@ -248,6 +419,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rebase_preserves_remaining_motion_velocity_and_speed() {
+        let mut scroll = ScrollState::new(7.0);
+        scroll.current = 120.5;
+        scroll.target = 181.25;
+        scroll.velocity = -42.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 9.0;
+
+        assert!(scroll.rebase_current_preserving_motion(512.75));
+
+        assert_eq!(scroll.current, 512.75);
+        assert_eq!(scroll.target - scroll.current, 60.75);
+        assert_eq!(scroll.velocity, -42.0);
+        assert_eq!(scroll.anim_speed, 7.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+    }
+
+    #[test]
+    fn rebase_rejects_non_finite_coordinates_without_mutation() {
+        let mut scroll = ScrollState::new(7.0);
+        scroll.current = 12.0;
+        scroll.target = 30.0;
+        scroll.velocity = 4.0;
+
+        assert!(!scroll.rebase_current_preserving_motion(f32::NAN));
+        assert_eq!(scroll.current, 12.0);
+        assert_eq!(scroll.target, 30.0);
+        assert_eq!(scroll.velocity, 4.0);
+    }
+
+    #[test]
     fn ending_drag_preserves_scroll_position_and_clears_pointer_offset() {
         let mut scroll = ScrollState::new(7.0);
         scroll.current = 12.0;
@@ -328,6 +531,33 @@ mod tests {
         assert!(scroll.update(0.016));
         assert!(!scroll.is_dragging);
         assert_eq!(scroll.drag_offset, 0.0);
+    }
+
+    #[test]
+    fn stop_anim_preserves_applied_rebase_ownership_but_cancels_unapplied_rebase() {
+        let mut scroll = ScrollState::new(7.0);
+        scroll.current = 100.0;
+        scroll.target = 180.0;
+
+        assert!(scroll.defer_current_rebase_preserving_target(50.0));
+        scroll.stop_anim();
+        assert_eq!(scroll.deferred_current_rebase_applied(), None);
+
+        scroll.current = 100.0;
+        scroll.target = 180.0;
+        assert!(scroll.defer_current_rebase_preserving_target(50.0));
+        assert!(scroll.apply_deferred_current_rebase());
+        assert_eq!(scroll.deferred_current_rebase_applied(), Some(true));
+
+        scroll.stop_anim();
+        assert_eq!(scroll.current, 50.0);
+        assert_eq!(scroll.target, 50.0);
+        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.deferred_current_rebase_applied(), Some(true));
+        assert!(scroll.complete_deferred_current_rebase());
+        assert_eq!(scroll.deferred_current_rebase_applied(), None);
+        assert_eq!(scroll.current, 50.0);
+        assert_eq!(scroll.target, 50.0);
     }
 
     #[test]

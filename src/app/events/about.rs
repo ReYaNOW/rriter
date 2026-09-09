@@ -275,11 +275,10 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let markdown_read = app.markdown_mode() == crate::app::MarkdownMode::Read;
-    if !markdown_read && app.scroll_y.update(dt) {
-        needs_redraw = true;
-    }
-
-    if markdown_read && app.markdown.update_read_scroll(dt) {
+    if app.scroll_y.update(dt) {
+        if markdown_read {
+            app.markdown.on_shared_vertical_scroll_changed();
+        }
         needs_redraw = true;
     }
 
@@ -922,13 +921,15 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             app.is_ide_mode,
             s,
         );
-        let max_scroll_y = app
-            .renderer
-            .as_mut()
-            .unwrap()
-            .get_max_scroll(&app.editor, visible_h);
-        app.scroll_y.clamp_target(0.0, max_scroll_y);
-        app.scroll_y.clamp_current(0.0, max_scroll_y);
+        if app.markdown.shared_vertical_scroll_uses_editor_bounds() {
+            let max_scroll_y = app
+                .renderer
+                .as_mut()
+                .unwrap()
+                .get_max_scroll(&app.editor, visible_h);
+            app.scroll_y.clamp_target(0.0, max_scroll_y);
+            app.scroll_y.clamp_current(0.0, max_scroll_y);
+        }
 
         let max_scroll_x = app.renderer.as_ref().unwrap().max_scroll_x;
         app.scroll_x.clamp_target(0.0, max_scroll_x);
@@ -1590,5 +1591,20 @@ mod lsp_action_merge_tests {
         assert_eq!(lsp_action_selection_after_prepend(4, 2, 3), 5);
         assert_eq!(lsp_action_selection_after_prepend(4, 99, 2), 5);
         assert_eq!(lsp_action_selection_after_prepend(0, 0, 3), 0);
+    }
+}
+
+#[cfg(test)]
+mod markdown_shared_scroll_tick_tests {
+    #[test]
+    fn main_vertical_scroll_is_ticked_once_and_drives_continuous_polling() {
+        let source = include_str!("about.rs");
+        let update_call = ["if app.scroll_y.", "update(dt)"].concat();
+        assert_eq!(source.matches(&update_call).count(), 1);
+        let legacy_update = ["update_read_scroll", "(dt)"].concat();
+        assert!(!source.contains(&legacy_update));
+        assert!(source.contains(
+            "let scroll_animating = !app.scroll_y.is_settled() || !app.scroll_x.is_settled();"
+        ));
     }
 }

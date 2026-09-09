@@ -1,6 +1,7 @@
 use std::ops::Range;
 
 use super::{App, EditorTabKind};
+use crate::render_view::markdown_read::MarkdownSourceAnchor;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum MarkdownMode {
@@ -8,6 +9,8 @@ pub enum MarkdownMode {
     Edit,
     Read,
 }
+
+include!("markdown_scroll_transition.rs");
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MarkdownReadWheelResult {
@@ -17,36 +20,49 @@ pub(crate) enum MarkdownReadWheelResult {
 }
 
 pub(crate) fn scroll_markdown_read(
-    read_scroll: &mut crate::scroll::ScrollState,
-    read_max_scroll: f32,
+    scroll: &mut crate::scroll::ScrollState,
+    read_max_scroll: Option<f32>,
     dy: f32,
 ) {
-    read_scroll.anim_speed = 7.0;
-    read_scroll.scroll_by(dy);
-    read_scroll.clamp_target(0.0, read_max_scroll);
+    scroll.anim_speed = 7.0;
+    scroll.scroll_by(dy);
+    if let Some(max_scroll) = read_max_scroll {
+        scroll.clamp_target(0.0, max_scroll);
+    }
 }
 
 pub(crate) fn handle_markdown_read_wheel(
     mode: MarkdownMode,
     hovered: Option<crate::ui_system::UiId>,
-    read_scroll: &mut crate::scroll::ScrollState,
-    read_max_scroll: f32,
+    allow_stale_editor_surface: bool,
+    scroll: &mut crate::scroll::ScrollState,
+    read_max_scroll: Option<f32>,
     dy: f32,
 ) -> MarkdownReadWheelResult {
     if mode != MarkdownMode::Read {
         return MarkdownReadWheelResult::NotRead;
     }
-    if !matches!(
+    let read_surface = matches!(
         hovered,
         Some(
             crate::ui_system::UiId::MarkdownReadBody
                 | crate::ui_system::UiId::MarkdownReadScrollbar
                 | crate::ui_system::UiId::MarkdownCodeCopy(_)
         )
-    ) {
+    );
+    let stale_editor_surface = allow_stale_editor_surface
+        && matches!(
+            hovered,
+            Some(
+                crate::ui_system::UiId::EditorTextBody
+                    | crate::ui_system::UiId::EditorScrollbarY
+                    | crate::ui_system::UiId::EditorMinimap
+            )
+        );
+    if !read_surface && !stale_editor_surface {
         return MarkdownReadWheelResult::Blocked;
     }
-    scroll_markdown_read(read_scroll, read_max_scroll, dy);
+    scroll_markdown_read(scroll, read_max_scroll, dy);
     MarkdownReadWheelResult::Scrolled
 }
 
@@ -56,7 +72,6 @@ pub(crate) fn is_markdown_extension(extension: &str) -> bool {
 
 pub struct MarkdownTabState {
     pub mode: MarkdownMode,
-    pub read_scroll_y: crate::scroll::ScrollState,
     pub(crate) read_model: Option<crate::languages::markdown::MarkdownDocument>,
     pub(crate) read_source: String,
     pub(crate) read_model_version: Option<u64>,
@@ -67,6 +82,15 @@ pub struct MarkdownTabState {
     semantic_refresh_count: usize,
     pub(crate) read_layout: crate::render_view::markdown_read::MarkdownReadLayoutCache,
     pub(crate) read_max_scroll: f32,
+    pub(crate) read_scroll_bounds_valid: bool,
+    pub(crate) scroll_transition: Option<MarkdownScrollTransition>,
+    pub(crate) scroll_carry: Option<MarkdownScrollCarry>,
+    pub(crate) scroll_navigation_revision: u64,
+    pub(crate) scroll_target_navigation_revision: Option<u64>,
+    pub(crate) scroll_target_navigation: Option<MarkdownAbsoluteScrollTargetNavigation>,
+    pub(crate) deferred_current_geometry: Option<MarkdownDeferredCurrentGeometry>,
+    pub(crate) last_read_geometry: Option<MarkdownReadDisplayedGeometry>,
+    pub(crate) last_edit_geometry: Option<MarkdownEditDisplayedGeometry>,
     pub(crate) read_selection_anchor: Option<usize>,
     pub(crate) read_selection_cursor: Option<usize>,
     pub(crate) read_selecting: bool,
@@ -78,7 +102,6 @@ impl Default for MarkdownTabState {
     fn default() -> Self {
         Self {
             mode: MarkdownMode::Edit,
-            read_scroll_y: crate::scroll::ScrollState::new(15.0),
             read_model: None,
             read_source: String::new(),
             read_model_version: None,
@@ -89,6 +112,15 @@ impl Default for MarkdownTabState {
             semantic_refresh_count: 0,
             read_layout: crate::render_view::markdown_read::MarkdownReadLayoutCache::default(),
             read_max_scroll: 0.0,
+            read_scroll_bounds_valid: false,
+            scroll_transition: None,
+            scroll_carry: None,
+            scroll_navigation_revision: 0,
+            scroll_target_navigation_revision: None,
+            scroll_target_navigation: None,
+            deferred_current_geometry: None,
+            last_read_geometry: None,
+            last_edit_geometry: None,
             read_selection_anchor: None,
             read_selection_cursor: None,
             read_selecting: false,
@@ -145,7 +177,18 @@ impl MarkdownTabState {
             self.read_parser = None;
         }
         self.read_layout.invalidate();
-        self.read_max_scroll = 0.0;
+        self.invalidate_read_scroll_bounds();
+        self.scroll_carry = self
+            .scroll_carry
+            .take()
+            .filter(|carry| carry.version == version);
+        if self
+            .scroll_transition
+            .as_ref()
+            .is_some_and(|transition| transition.version != version)
+        {
+            self.scroll_transition = None;
+        }
         self.read_model.is_some()
     }
 
@@ -210,14 +253,6 @@ impl MarkdownTabState {
         let changed = self.code_copy_hover_valid || self.copied_code_block.is_some();
         self.code_copy_hover_valid = false;
         self.copied_code_block = None;
-        changed
-    }
-
-    pub(crate) fn update_read_scroll(&mut self, dt: f32) -> bool {
-        let changed = self.read_scroll_y.update(dt);
-        if changed {
-            self.copied_code_block = None;
-        }
         changed
     }
 
@@ -311,17 +346,79 @@ impl App {
         if !self.active_document_is_markdown() || self.markdown.mode == mode {
             return;
         }
+
+        let from = self.markdown.mode;
+        let reverse_policy = self
+            .markdown
+            .scroll_transition
+            .as_ref()
+            .filter(|transition| transition.from == mode && transition.to == from)
+            .and_then(|transition| {
+                self.markdown
+                    .transition_navigation_policy(transition, self.editor.version)
+            });
+        let reverse_unresolved = match reverse_policy {
+            Some(MarkdownPendingNavigationPolicy::PreserveMotion) => true,
+            Some(MarkdownPendingNavigationPolicy::PreserveDestinationTarget) => {
+                self.scroll_y.cancel_unapplied_deferred_current_rebase()
+            }
+            None => false,
+        };
+        if reverse_unresolved {
+            self.markdown.cancel_stale_scroll_transition();
+            self.scroll_y.end_drag();
+            self.markdown.mode = mode;
+            self.markdown.clear_code_copy_transient();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
+        // A deferred current rebase can be consumed by the single physics tick
+        // before the destination surface is ever drawn. In that phase `current`
+        // belongs to the prepared destination geometry, not to the last displayed
+        // frame. Capture through that exact geometry before clearing the old
+        // transition so an immediate inverse toggle never decodes destination
+        // pixels with stale origin metrics.
+        let deferred_current_geometry = (self.scroll_y.deferred_current_rebase_applied()
+            == Some(true))
+        .then_some(self.markdown.deferred_current_geometry)
+        .flatten();
+        let origin_scroll_y = self.scroll_y.current;
+        let (anchor, origin_read_width, origin_sticky_lines) =
+            self.capture_markdown_scroll_anchor(from, mode, deferred_current_geometry);
+        if deferred_current_geometry.is_some() {
+            self.scroll_y.clear_deferred_current_rebase();
+            self.markdown.deferred_current_geometry = None;
+            self.markdown.scroll_target_navigation_revision = None;
+            self.markdown.scroll_target_navigation = None;
+        }
+        self.markdown.scroll_transition = None;
+        self.scroll_y.end_drag();
+        self.markdown.scroll_transition = Some(MarkdownScrollTransition {
+            from,
+            to: mode,
+            version: self.editor.version,
+            origin_scroll_y,
+            origin_sticky_lines,
+            origin_navigation_revision: self.markdown.scroll_navigation_revision(),
+            origin_read_width,
+            anchor,
+        });
+
         self.markdown.clear_code_copy_transient();
         if mode == MarkdownMode::Read {
             self.close_autocomplete();
             self.lsp_actions_menu = None;
             self.pending_fix_all_id = None;
+            self.markdown.invalidate_read_scroll_bounds();
         }
-        if mode == MarkdownMode::Read
-            && self.markdown.needs_read_model_refresh(self.editor.version)
+        if mode == MarkdownMode::Read && self.markdown.needs_read_model_refresh(self.editor.version)
         {
             let source = self.editor.get_full_text();
-            self.markdown.refresh_read_model(self.editor.version, source);
+            self.markdown
+                .refresh_read_model(self.editor.version, source);
         }
         self.markdown.mode = mode;
         if let Some(window) = self.window.as_ref() {
@@ -344,7 +441,8 @@ impl App {
             return false;
         }
         let source = self.editor.get_full_text();
-        self.markdown.refresh_read_model(self.editor.version, source);
+        self.markdown
+            .refresh_read_model(self.editor.version, source);
         true
     }
 
@@ -364,7 +462,14 @@ impl App {
             let Some(renderer) = self.renderer.as_mut() else {
                 return false;
             };
-            renderer.markdown_read_source_byte_at(markdown, version, frame, x, y)
+            renderer.markdown_read_source_byte_at(
+                markdown,
+                version,
+                frame,
+                self.scroll_y.current,
+                x,
+                y,
+            )
         };
         let Some(byte) = byte else {
             return false;
@@ -391,7 +496,14 @@ impl App {
             let Some(renderer) = self.renderer.as_mut() else {
                 return false;
             };
-            renderer.markdown_read_source_byte_at(markdown, version, frame, x, y)
+            renderer.markdown_read_source_byte_at(
+                markdown,
+                version,
+                frame,
+                self.scroll_y.current,
+                x,
+                y,
+            )
         };
         let Some(byte) = byte else {
             return false;
@@ -443,6 +555,7 @@ impl App {
                 &self.markdown,
                 self.editor.version,
                 frame,
+                self.scroll_y.current,
                 x,
                 y,
             )
@@ -588,66 +701,50 @@ mod tests {
     }
 
     #[test]
-    fn markdown_read_wheel_scrolls_preview_and_blocks_hidden_source_path() {
-        let mut read_scroll = crate::scroll::ScrollState::new(15.0);
-        read_scroll.jump_to(40.0);
-        let mut source_x = crate::scroll::ScrollState::new(15.0);
-        let mut source_y = crate::scroll::ScrollState::new(15.0);
-        source_x.jump_to(37.0);
-        source_y.jump_to(213.0);
-        let source_before = (
-            source_x.current,
-            source_x.target,
-            source_y.current,
-            source_y.target,
-        );
+    fn markdown_read_wheel_routes_to_shared_scroll_and_blocks_other_targets() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.jump_to(40.0);
 
         assert_eq!(
             handle_markdown_read_wheel(
                 MarkdownMode::Read,
                 Some(crate::ui_system::UiId::MarkdownReadBody),
-                &mut read_scroll,
-                500.0,
+                false,
+                &mut scroll,
+                Some(500.0),
                 80.0,
             ),
             MarkdownReadWheelResult::Scrolled
         );
-        assert!(read_scroll.target > 40.0);
-        let before_scrollbar_wheel = read_scroll.target;
+        assert!(scroll.target > 40.0);
+        let before_scrollbar_wheel = scroll.target;
         assert_eq!(
             handle_markdown_read_wheel(
                 MarkdownMode::Read,
                 Some(crate::ui_system::UiId::MarkdownReadScrollbar),
-                &mut read_scroll,
-                500.0,
+                false,
+                &mut scroll,
+                Some(500.0),
                 80.0,
             ),
             MarkdownReadWheelResult::Scrolled
         );
-        assert!(read_scroll.target > before_scrollbar_wheel);
-        let before_copy_button_wheel = read_scroll.target;
+        assert!(scroll.target > before_scrollbar_wheel);
+        let before_copy_button_wheel = scroll.target;
         assert_eq!(
             handle_markdown_read_wheel(
                 MarkdownMode::Read,
                 Some(crate::ui_system::UiId::MarkdownCodeCopy(123)),
-                &mut read_scroll,
-                500.0,
+                false,
+                &mut scroll,
+                Some(500.0),
                 80.0,
             ),
             MarkdownReadWheelResult::Scrolled
         );
-        assert!(read_scroll.target > before_copy_button_wheel);
-        assert_eq!(
-            (
-                source_x.current,
-                source_x.target,
-                source_y.current,
-                source_y.target,
-            ),
-            source_before
-        );
+        assert!(scroll.target > before_copy_button_wheel);
 
-        let read_before = (read_scroll.current, read_scroll.target);
+        let read_before = (scroll.current, scroll.target);
         for hovered in [
             None,
             Some(crate::ui_system::UiId::EditorTab(0)),
@@ -657,23 +754,80 @@ mod tests {
                 handle_markdown_read_wheel(
                     MarkdownMode::Read,
                     hovered,
-                    &mut read_scroll,
-                    500.0,
+                    false,
+                    &mut scroll,
+                    Some(500.0),
                     80.0,
                 ),
                 MarkdownReadWheelResult::Blocked
             );
         }
-        assert_eq!((read_scroll.current, read_scroll.target), read_before);
+        assert_eq!((scroll.current, scroll.target), read_before);
+    }
+
+    #[test]
+    fn markdown_read_wheel_does_not_clamp_to_zero_while_bounds_are_unknown() {
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 240.0;
+        scroll.target = 300.0;
+
         assert_eq!(
-            (
-                source_x.current,
-                source_x.target,
-                source_y.current,
-                source_y.target,
+            handle_markdown_read_wheel(
+                MarkdownMode::Read,
+                Some(crate::ui_system::UiId::MarkdownReadBody),
+                false,
+                &mut scroll,
+                None,
+                36.0,
             ),
-            source_before
+            MarkdownReadWheelResult::Scrolled
         );
+        assert_eq!(scroll.current, 240.0);
+        assert_eq!(scroll.target, 336.0);
+        assert_eq!(scroll.anim_speed, 7.0);
+    }
+
+    #[test]
+    fn markdown_mode_api_ends_thumb_drag_but_preserves_vertical_inertia() {
+        let Some(mut app) = markdown_source_app("# one\n\ntwo\n") else {
+            return;
+        };
+        app.scroll_y.current = 80.0;
+        app.scroll_y.target = 150.0;
+        app.scroll_y.velocity = 27.0;
+        app.scroll_y.anim_speed = 7.0;
+        app.scroll_y.is_dragging = true;
+        app.scroll_y.drag_offset = 6.0;
+
+        app.set_markdown_mode(MarkdownMode::Read);
+
+        assert_eq!(app.markdown_mode(), MarkdownMode::Read);
+        assert_eq!(app.scroll_y.current, 80.0);
+        assert_eq!(app.scroll_y.target, 150.0);
+        assert_eq!(app.scroll_y.velocity, 27.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
+        assert!(!app.scroll_y.is_dragging);
+        assert_eq!(app.scroll_y.drag_offset, 0.0);
+        assert!(app.markdown.scroll_transition.is_some());
+    }
+
+    #[test]
+    fn markdown_mode_noop_does_not_touch_shared_scroll_or_pending_state() {
+        let Some(mut app) = markdown_source_app("# one\n") else {
+            return;
+        };
+        app.scroll_y.current = 21.5;
+        app.scroll_y.target = 84.0;
+        app.scroll_y.velocity = -11.0;
+        app.scroll_y.anim_speed = 7.0;
+
+        app.set_markdown_mode(MarkdownMode::Edit);
+
+        assert_eq!(app.scroll_y.current, 21.5);
+        assert_eq!(app.scroll_y.target, 84.0);
+        assert_eq!(app.scroll_y.velocity, -11.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
+        assert!(app.markdown.scroll_transition.is_none());
     }
 
     #[test]
@@ -683,8 +837,9 @@ mod tests {
             handle_markdown_read_wheel(
                 MarkdownMode::Edit,
                 Some(crate::ui_system::UiId::MarkdownReadBody),
+                false,
                 &mut read_scroll,
-                500.0,
+                Some(500.0),
                 80.0,
             ),
             MarkdownReadWheelResult::NotRead
@@ -692,7 +847,7 @@ mod tests {
     }
 
     #[test]
-    fn markdown_read_round_trip_preserves_source_state_and_edit_scroll() {
+    fn markdown_unresolved_round_trip_preserves_shared_scroll_motion_and_source_state() {
         let Some(mut app) = test_app() else {
             return;
         };
@@ -702,29 +857,45 @@ mod tests {
         app.editor = editor_with("# Заголовок 😀\n\nТекст **strong**.\n");
         app.editor.cursor = "# Заголовок".len();
         app.editor.selection_anchor = Some(0);
-        app.scroll_y.jump_to(213.0);
+        app.scroll_y.current = 213.0;
+        app.scroll_y.target = 287.0;
+        app.scroll_y.velocity = 31.0;
+        app.scroll_y.anim_speed = 7.0;
         app.scroll_x.jump_to(37.0);
-        app.markdown.read_scroll_y.jump_to(51.0);
 
         let source = app.editor.get_full_text();
         let version = app.editor.version;
         let dirty = app.editor.is_dirty();
         let cursor = app.editor.cursor;
         let selection = app.editor.selection_anchor;
-        let source_scroll = (
-            app.scroll_x.current,
-            app.scroll_x.target,
+        let scroll_before = (
             app.scroll_y.current,
             app.scroll_y.target,
+            app.scroll_y.velocity,
+            app.scroll_y.anim_speed,
+            app.scroll_x.current,
+            app.scroll_x.target,
         );
 
         app.set_markdown_mode(MarkdownMode::Read);
         assert_eq!(app.markdown_mode(), MarkdownMode::Read);
         assert!(app.markdown.read_document(version).is_some());
-        assert_eq!(app.markdown.read_scroll_y.current, 51.0);
+        assert!(app.markdown.scroll_transition.is_some());
+        assert_eq!(
+            (
+                app.scroll_y.current,
+                app.scroll_y.target,
+                app.scroll_y.velocity,
+                app.scroll_y.anim_speed,
+                app.scroll_x.current,
+                app.scroll_x.target,
+            ),
+            scroll_before
+        );
 
         app.toggle_markdown_mode();
         assert_eq!(app.markdown_mode(), MarkdownMode::Edit);
+        assert!(app.markdown.scroll_transition.is_none());
         assert_eq!(app.editor.get_full_text(), source);
         assert_eq!(app.editor.version, version);
         assert_eq!(app.editor.is_dirty(), dirty);
@@ -732,17 +903,19 @@ mod tests {
         assert_eq!(app.editor.selection_anchor, selection);
         assert_eq!(
             (
-                app.scroll_x.current,
-                app.scroll_x.target,
                 app.scroll_y.current,
                 app.scroll_y.target,
+                app.scroll_y.velocity,
+                app.scroll_y.anim_speed,
+                app.scroll_x.current,
+                app.scroll_x.target,
             ),
-            source_scroll
+            scroll_before
         );
     }
 
     #[test]
-    fn markdown_mode_and_read_scroll_are_independent_between_tabs() {
+    fn markdown_mode_pending_and_shared_scroll_are_independent_between_tabs() {
         let Some(mut app) = test_app() else {
             return;
         };
@@ -756,26 +929,30 @@ mod tests {
         app.sync_active_tab();
 
         app.set_markdown_mode(MarkdownMode::Read);
-        app.markdown.read_scroll_y.jump_to(91.0);
+        app.scroll_y.jump_to(91.0);
+        assert!(app.markdown.scroll_transition.is_some());
         app.sync_active_tab();
 
         app.active_tab = 1;
         app.sync_active_tab();
         assert_eq!(app.markdown_mode(), MarkdownMode::Edit);
-        assert_eq!(app.markdown.read_scroll_y.current, 0.0);
-        app.markdown.read_scroll_y.jump_to(17.0);
+        assert_eq!(app.scroll_y.current, 0.0);
+        assert!(app.markdown.scroll_transition.is_none());
+        app.scroll_y.jump_to(17.0);
         app.sync_active_tab();
 
         app.active_tab = 0;
         app.sync_active_tab();
         assert_eq!(app.markdown_mode(), MarkdownMode::Read);
-        assert_eq!(app.markdown.read_scroll_y.current, 91.0);
+        assert_eq!(app.scroll_y.current, 91.0);
+        assert!(app.markdown.scroll_transition.is_some());
         app.sync_active_tab();
 
         app.active_tab = 1;
         app.sync_active_tab();
         assert_eq!(app.markdown_mode(), MarkdownMode::Edit);
-        assert_eq!(app.markdown.read_scroll_y.current, 17.0);
+        assert_eq!(app.scroll_y.current, 17.0);
+        assert!(app.markdown.scroll_transition.is_none());
     }
 
     #[test]
@@ -846,7 +1023,10 @@ mod tests {
         assert!(app.ide_panel.api.focused.is_none());
         assert_eq!(app.ide_panel.api.route_filter, "new filter");
         assert!(app.ide_panel.is_open(crate::app::PanelId::ApiClient));
-        assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden_source);
+        assert_eq!(
+            (app.editor.cursor, app.editor.selection_anchor),
+            hidden_source
+        );
         assert_eq!(app.markdown.read_selection_range(), Some(1..6));
         assert!(app.markdown.read_selecting);
         assert!(app.editor_has_input_focus());
@@ -854,14 +1034,18 @@ mod tests {
 
     #[test]
     fn markdown_reader_reverse_selection_is_independent_from_hidden_editor_selection() {
-        let Some(mut app) = markdown_source_app("# Heading\n\nText **strong** with `code λ`.\n") else {
+        let Some(mut app) = markdown_source_app("# Heading\n\nText **strong** with `code λ`.\n")
+        else {
             return;
         };
         app.editor.cursor = 7;
         app.editor.selection_anchor = Some(2);
         let source = app.editor.get_full_text();
         let hidden = (app.editor.cursor, app.editor.selection_anchor);
-        assert!(app.markdown.refresh_read_model(app.editor.version, source.clone()));
+        assert!(
+            app.markdown
+                .refresh_read_model(app.editor.version, source.clone())
+        );
         app.markdown.read_layout =
             crate::render_view::markdown_read::build_test_markdown_read_layout(&source, 500.0);
 
@@ -870,7 +1054,10 @@ mod tests {
         app.markdown.finish_read_selection();
 
         assert_eq!(app.markdown.read_selection_range(), Some(0..source.len()));
-        let copied = app.markdown.selected_read_text().expect("reader selection text");
+        let copied = app
+            .markdown
+            .selected_read_text()
+            .expect("reader selection text");
         assert!(copied.contains("Heading"));
         assert!(copied.contains("Text strong with code λ."));
         assert!(!copied.contains("**"));
@@ -937,18 +1124,22 @@ mod tests {
     }
 
     #[test]
-    fn markdown_code_copy_scroll_change_drops_check_without_losing_pointer_validity() {
+    fn markdown_code_copy_shared_scroll_change_drops_check_without_losing_pointer_validity() {
         let mut state = MarkdownTabState::default();
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
         state.code_copy_hover_valid = true;
         state.copied_code_block = Some(10);
-        state.read_scroll_y.animate_to(120.0);
+        scroll.animate_to(120.0);
 
-        assert!(state.update_read_scroll(1.0 / 60.0));
+        assert!(scroll.update(1.0 / 60.0));
+        state.on_shared_vertical_scroll_changed();
         assert_eq!(state.copied_code_block, None);
         assert!(state.code_copy_hover_valid);
 
-        state.read_scroll_y.animate_to(0.0);
-        assert!(state.update_read_scroll(1.0 / 60.0));
+        state.copied_code_block = Some(10);
+        scroll.animate_to(0.0);
+        assert!(scroll.update(1.0 / 60.0));
+        state.on_shared_vertical_scroll_changed();
         assert_eq!(state.copied_code_block, None);
         assert!(state.code_copy_hover_valid);
     }
@@ -1014,7 +1205,8 @@ mod tests {
         app.set_markdown_mode(MarkdownMode::Read);
         app.markdown.read_layout =
             crate::render_view::markdown_read::build_test_markdown_read_layout(&source, 320.0);
-        app.markdown.read_max_scroll = app.markdown.read_layout.content_height();
+        app.markdown
+            .set_read_scroll_bounds(app.markdown.read_layout.content_height());
 
         let first = source.find("needle").expect("first match");
         let last = source.rfind("needle").expect("last match");
@@ -1024,12 +1216,12 @@ mod tests {
         ];
         app.search_current_idx = Some(0);
         app.jump_to_search_result();
-        let first_target = app.markdown.read_scroll_y.target;
+        let first_target = app.scroll_y.target;
         assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
 
         app.search_current_idx = Some(1);
         app.jump_to_search_result();
-        let last_target = app.markdown.read_scroll_y.target;
+        let last_target = app.scroll_y.target;
         assert!(last_target > first_target);
         assert_eq!((app.editor.cursor, app.editor.selection_anchor), hidden);
     }
@@ -1289,5 +1481,4 @@ mod tests {
         assert_eq!(app.pending_fix_all_id, None);
         assert!(app.readonly_notice_until.is_some());
     }
-
 }

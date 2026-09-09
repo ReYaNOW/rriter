@@ -1,8 +1,8 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
+pub(crate) use markdown::{MarkdownAbsoluteScrollTarget, is_markdown_extension};
 pub use markdown::{MarkdownMode, MarkdownTabState};
-pub(crate) use markdown::is_markdown_extension;
 mod app_state;
 mod autocomplete;
 pub mod automation;
@@ -286,3 +286,10 @@ include!("app/app_window_external_methods.rs");
 
 #[cfg(test)]
 mod app_behavior_tests;
+
+#[cfg(test)]
+pub(crate) use app_behavior_tests::{
+    editor_with as reviewer_stage2_editor_with, test_app as reviewer_stage2_test_app,
+};
+#[cfg(test)]
+pub(crate) use markdown::scroll_markdown_read as reviewer_stage2_scroll_read;

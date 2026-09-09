@@ -1588,6 +1588,10 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::StickyLine(target_byte, slot_index) => {
+                if self.active_document_is_markdown() {
+                    self.markdown
+                        .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+                }
                 self.editor.cursor = target_byte;
                 self.editor.selection_anchor = None;
                 let database_query_tab = self.active_tab_is_database_query();
@@ -1652,6 +1656,10 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorScrollbarY => {
+                if self.active_document_is_markdown() {
+                    self.markdown
+                        .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+                }
                 let database_query_tab = self.active_tab_is_database_query();
                 let metrics = self.editor_interaction_metrics();
                 if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
@@ -1712,6 +1720,10 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorMinimap => {
+                if self.active_document_is_markdown() {
+                    self.markdown
+                        .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+                }
                 self.scroll_y.is_dragging = true;
                 let database_query_tab = self.active_tab_is_database_query();
                 let metrics = self.editor_interaction_metrics();

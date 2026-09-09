@@ -787,10 +787,12 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
-* `src/app/markdown.rs` -> per-tab Markdown Read/Edit state, lazy incremental semantic parser cache, central mode API, and Markdown state regressions.
+* `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
+* `src/app/markdown_scroll_transition.rs` -> `markdown.rs` include chunk for shared vertical `ScrollState` mode rebasing, cold-layout pending transitions, source-anchor carry-over, and transition physics regressions; it must not become a second scroll owner.
+* `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.
 * `src/app/automation_database.rs` -> PGO-only semantic Database Tools workload: fixture endpoint parsing, in-memory secretless PostgreSQL connection seeding, production DB waits/actions, table/query scrolling, diagnostics, and regression tests.
 * `src/app/automation_dart.rs` -> PGO-only Dart setup/waits: disables external Dart SDK/LSP work for deterministic training while requiring current tree-sitter syntax closing hints, with diagnostics and regression tests.
-* `src/app/automation_markdown.rs` -> PGO-only Markdown Edit/Read workload: semantic mode/readiness steps, production preview scrolling, deterministic incremental scenario chunk, and focused regressions.
+* `src/app/automation_markdown.rs` -> PGO-only Markdown Edit/Read workload: semantic mode/readiness steps, production shared vertical scrolling, deterministic incremental scenario chunk, and focused regressions.
 * `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
 * `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
 * `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
@@ -890,7 +892,9 @@ Rendering:
 * `src/render_view/api_client_panel/*`, `src/render_view/api_client_tab/*` -> API client panel/tab renderer chunks.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract controls and locked contract block helpers.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
-* `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, preview scroll geometry, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_scroll.rs` -> `markdown_read.rs` include chunk for source-backed Read/Edit viewport anchors, indexed Reader source-line geometry, and fold-aware editor source projection; it owns geometry only, not scroll physics or mode switching. Hot path.
+* `src/render_view/markdown_scroll_review_tests.rs` -> focused stage-1 source/viewport geometry regressions kept outside the hot include chunk so reviewer coverage does not push production geometry past the source-file size limit.
 * `src/render_view/markdown_read_interaction.rs` -> `markdown_read.rs` include chunk for Reader visual/source mapping, mouse hit-testing, selection/copy, search target/highlight geometry, and focused large-layout interaction regressions. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.

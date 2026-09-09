@@ -161,6 +161,71 @@ pub(crate) fn editor_max_scroll_for_lines(
     (raw_max / line_height).ceil() * line_height
 }
 
+#[inline]
+pub(crate) fn editor_fold_checksum(editor: &Editor) -> u64 {
+    editor.folded_lines.iter().fold(0u64, |acc, &line| {
+        let fold_end = editor.foldable_lines.get(&line).copied().unwrap_or(line);
+        let line_hash = (line as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let end_hash = (fold_end as u64).rotate_left(32);
+        acc ^ line_hash ^ end_hash
+    })
+}
+
+pub(crate) fn rebuild_editor_visual_line_map(editor: &Editor, out: &mut Vec<usize>) -> usize {
+    out.clear();
+    out.resize(editor.line_offsets.len(), 0);
+
+    let mut visible_lines_count = 0usize;
+    let mut phys_line = 0usize;
+    while phys_line < editor.line_offsets.len() {
+        out[phys_line] = visible_lines_count;
+        let is_folded = editor.folded_lines.contains(&phys_line)
+            && editor.foldable_lines.contains_key(&phys_line);
+        visible_lines_count = visible_lines_count.saturating_add(1);
+        if is_folded
+            && let Some(&fold_end) = editor.foldable_lines.get(&phys_line)
+        {
+            while phys_line < fold_end {
+                phys_line += 1;
+                if phys_line < out.len() {
+                    out[phys_line] = visible_lines_count.saturating_sub(1);
+                }
+            }
+        }
+        phys_line += 1;
+    }
+
+    visible_lines_count.max(1)
+}
+
+impl Renderer {
+    pub(crate) fn editor_visual_line_map_is_valid(&self, editor: &Editor) -> bool {
+        self.phys_to_visual_editor_version == editor.version
+            && self.phys_to_visual_line_count == editor.line_offsets.len()
+            && self.phys_to_visual_fold_count == editor.folded_lines.len()
+            && self.phys_to_visual_fold_checksum == editor_fold_checksum(editor)
+            && self.phys_to_visual.len() == editor.line_offsets.len()
+    }
+
+    pub(crate) fn ensure_editor_visual_line_map(&mut self, editor: &Editor) -> usize {
+        if !self.editor_visual_line_map_is_valid(editor) {
+            let total_lines = rebuild_editor_visual_line_map(editor, &mut self.phys_to_visual);
+            self.phys_to_visual_editor_version = editor.version;
+            self.phys_to_visual_line_count = editor.line_offsets.len();
+            self.phys_to_visual_fold_count = editor.folded_lines.len();
+            self.phys_to_visual_fold_checksum = editor_fold_checksum(editor);
+            return total_lines;
+        }
+
+        self.phys_to_visual
+            .last()
+            .copied()
+            .map(|line| line + 1)
+            .unwrap_or(1)
+            .max(1)
+    }
+}
+
 #[inline(always)]
 pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
     IDE_STATUS_BAR_HEIGHT * scale

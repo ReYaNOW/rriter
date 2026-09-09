@@ -104,20 +104,7 @@ impl MarkdownReadLayoutCache {
     }
 
     pub(crate) fn source_target_y(&self, source_range: &Range<usize>) -> Option<f32> {
-        if self.blocks.is_empty() {
-            return None;
-        }
-        let idx = self
-            .blocks
-            .partition_point(|block| block.source_range.end <= source_range.start);
-        let start = idx.saturating_sub(2);
-        let end = idx.saturating_add(3).min(self.blocks.len());
-        for block in &self.blocks[start..end] {
-            if ranges_overlap(&block.source_range, source_range) {
-                return Some(block_source_target_y(block, source_range));
-            }
-        }
-        None
+        self.source_anchor_y(source_range)
     }
 
     pub(crate) fn code_block_copy_text(&self, source: &str, block_id: usize) -> Option<String> {
@@ -255,45 +242,6 @@ fn append_selected_table_text(
             out.push_str(&row_text);
             wrote_row = true;
         }
-    }
-}
-
-fn block_source_target_y(block: &ReadBlock, source_range: &Range<usize>) -> f32 {
-    match &block.kind {
-        ReadBlockKind::Text(text) => {
-            for run in &text.styled.runs {
-                let Some(run_source) = run.source_range.as_ref() else {
-                    continue;
-                };
-                let Some(overlap) = source_intersection(run_source, source_range) else {
-                    continue;
-                };
-                let visual = run.range.start + overlap.start.saturating_sub(run_source.start);
-                let line_idx = text
-                    .lines
-                    .partition_point(|line| line.range.end < visual)
-                    .min(text.lines.len().saturating_sub(1));
-                if let Some(line) = text.lines.get(line_idx) {
-                    return (line.y - text.line_height * 0.82).round();
-                }
-            }
-            block.top
-        }
-        ReadBlockKind::Code(code) => code
-            .lines
-            .iter()
-            .find(|line| ranges_overlap(&line.source_range, source_range))
-            .map_or(block.top, |line| {
-                (line.y - code.line_height * 0.82).round()
-            }),
-        ReadBlockKind::Table(table) => {
-            let idx = table
-                .rows
-                .partition_point(|row| row.source_range.end <= source_range.start)
-                .min(table.rows.len().saturating_sub(1));
-            table.rows.get(idx).map_or(block.top, |row| row.y)
-        }
-        ReadBlockKind::Rule { .. } => block.top,
     }
 }
 
@@ -504,6 +452,7 @@ impl Renderer {
         markdown: &MarkdownTabState,
         editor_version: u64,
         frame: (f32, f32, f32, f32),
+        scroll_y: f32,
         mouse_x: f32,
         mouse_y: f32,
     ) -> Option<usize> {
@@ -515,7 +464,7 @@ impl Renderer {
         markdown_read_code_block_at(
             &markdown.read_layout,
             frame,
-            markdown.read_scroll_y.current.round(),
+            scroll_y.round(),
             self.scale_factor,
             mouse_x,
             mouse_y,
@@ -569,6 +518,7 @@ impl Renderer {
         markdown: &MarkdownTabState,
         editor_version: u64,
         frame: (f32, f32, f32, f32),
+        scroll_y: f32,
         mouse_x: f32,
         mouse_y: f32,
     ) -> Option<usize> {
@@ -580,7 +530,7 @@ impl Renderer {
         }
 
         let (frame_x, frame_y, _, frame_h) = frame;
-        let scroll_y = markdown.read_scroll_y.current.round();
+        let scroll_y = scroll_y.round();
         let doc_y = (mouse_y.clamp(frame_y, frame_y + frame_h) - frame_y + scroll_y)
             .clamp(0.0, markdown.read_layout.content_height.max(0.0));
         let block_idx = nearest_block_index(&markdown.read_layout.blocks, doc_y)?;
@@ -988,17 +938,14 @@ pub(crate) fn build_test_markdown_read_layout(
     let mut builder = LayoutBuilder::new(source, width, 1.0, |_, _| 8.0);
     builder.append_blocks(&document.blocks, 0.0, 0, None);
     let (blocks, content_height) = builder.finish();
-    MarkdownReadLayoutCache {
-        key: Some(LayoutKey {
-            version: 1,
-            width_bits: width.to_bits(),
-            scale_bits: 1.0f32.to_bits(),
-            font_size_bits: 16.0f32.to_bits(),
-        }),
+    let mut cache = MarkdownReadLayoutCache::default();
+    cache.replace_layout(
+        LayoutKey::new(1, width, 1.0, 16.0),
         blocks,
         content_height,
-        rebuild_count: 1,
-    }
+        source.len(),
+    );
+    cache
 }
 
 #[cfg(test)]
@@ -1886,6 +1833,7 @@ mod interaction_tests {
                 let top = idx as f32 * 12.0;
                 ReadBlock {
                     source_range: idx..idx + 1,
+                    parent_source_ranges: Vec::new(),
                     top,
                     bottom: top + 8.0,
                     kind: ReadBlockKind::Rule {

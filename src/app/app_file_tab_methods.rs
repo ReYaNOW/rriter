@@ -103,7 +103,8 @@ impl App {
         if idx >= self.tabs.len() {
             return false;
         }
-        let Some(path) = tab_effective_path(&self.tabs, idx, self.active_tab, self.file_path.as_ref())
+        let Some(path) =
+            tab_effective_path(&self.tabs, idx, self.active_tab, self.file_path.as_ref())
         else {
             return false;
         };
@@ -113,24 +114,22 @@ impl App {
             .as_ref()
             .map(|renderer| renderer.scale_factor)
             .unwrap_or(1.0);
-        let (menu_x, menu_y) =
-            crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
+        let (menu_x, menu_y) = crate::app::file_tree::file_tree_context_menu_anchor(mx, my, scale);
         self.ide_panel.database.context_menu = None;
-        self.ide_panel.file_tree_context_menu =
-            Some(crate::app::file_tree::FileTreeContextMenu {
-                x: menu_x,
-                y: menu_y,
-                target_dir: target_path.parent().map(Path::to_path_buf),
-                target_path: Some(target_path),
-                target_is_dir: false,
-                entries: vec![
-                    crate::app::file_tree::FileTreeMenuAction::ShowInExplorer,
-                    crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
-                    crate::app::file_tree::FileTreeMenuAction::CopyTargetAbsolutePath,
-                    crate::app::file_tree::FileTreeMenuAction::CopyTargetRelativePath,
-                ],
-                opened_at: std::time::Instant::now(),
-            });
+        self.ide_panel.file_tree_context_menu = Some(crate::app::file_tree::FileTreeContextMenu {
+            x: menu_x,
+            y: menu_y,
+            target_dir: target_path.parent().map(Path::to_path_buf),
+            target_path: Some(target_path),
+            target_is_dir: false,
+            entries: vec![
+                crate::app::file_tree::FileTreeMenuAction::ShowInExplorer,
+                crate::app::file_tree::FileTreeMenuAction::OpenContainedFolder,
+                crate::app::file_tree::FileTreeMenuAction::CopyTargetAbsolutePath,
+                crate::app::file_tree::FileTreeMenuAction::CopyTargetRelativePath,
+            ],
+            opened_at: std::time::Instant::now(),
+        });
         true
     }
 
@@ -440,15 +439,9 @@ impl App {
         }
         self.tabs.iter().enumerate().any(|(i, tab)| {
             i != self.active_tab
-                && tab
-                    .file_path
-                    .as_ref()
-                    .is_some_and(|p| {
-                        crate::platform::paths_equal(
-                            &self.abs_path_for_workspace(p),
-                            &abs_path,
-                        )
-                    })
+                && tab.file_path.as_ref().is_some_and(|p| {
+                    crate::platform::paths_equal(&self.abs_path_for_workspace(p), &abs_path)
+                })
         })
     }
 
@@ -504,6 +497,17 @@ impl App {
     }
 
     fn scroll_cursor_near_center(&mut self, center_ratio: f32, snap: bool) {
+        if self.active_document_is_markdown() {
+            if snap {
+                self.markdown
+                    .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+            } else {
+                if !self.prepare_markdown_absolute_scroll_target_navigation() {
+                    return;
+                }
+                self.markdown.mark_absolute_scroll_target_navigation();
+            }
+        }
         let show_welcome = self.show_welcome;
         let is_ide_mode = self.is_ide_mode;
         let database_query = self.active_tab_is_database_query();
@@ -581,8 +585,7 @@ impl App {
             && !self.active_tab_is_api_client()
             && !self.search_focused
             && !(self.show_settings && self.settings_ignore_focused)
-            && !(self.ide_panel.is_open(PanelId::ApiClient)
-                && self.ide_panel.api.focused.is_some())
+            && !(self.ide_panel.is_open(PanelId::ApiClient) && self.ide_panel.api.focused.is_some())
             && !(self.ide_panel.is_open(PanelId::Terminal)
                 && (self.ide_panel.terminal_focused || self.ide_panel.term_search_focused))
             && !(self.ide_panel.is_open(PanelId::Git) && self.ide_panel.git.message_focused)
@@ -591,8 +594,7 @@ impl App {
             && !(self.ide_panel.is_open(PanelId::LspServers)
                 && (self.ide_panel.lsp_logs_focused.is_some()
                     || self.ide_panel.lsp_log_filter_focused))
-            && !(self.ide_panel.is_open(PanelId::Explorer)
-                && self.ide_panel.file_tree_focused)
+            && !(self.ide_panel.is_open(PanelId::Explorer) && self.ide_panel.file_tree_focused)
     }
 
     pub(crate) fn focus_document_text_surface(&mut self) {
@@ -631,10 +633,7 @@ impl App {
         saved
     }
 
-    pub(crate) fn autosave_after_editor_focus_change(
-        &mut self,
-        editor_was_focused: bool,
-    ) -> bool {
+    pub(crate) fn autosave_after_editor_focus_change(&mut self, editor_was_focused: bool) -> bool {
         editor_was_focused
             && !self.editor_has_input_focus()
             && self.autosave_current_file_if_dirty()
@@ -704,10 +703,7 @@ impl App {
         let source_path = self.ctrl_definition.source_path.as_ref()?;
         let source_range = self.ctrl_definition.source_range?;
         if matches!(self.file_extension.as_str(), "py" | "pyi")
-            && crate::platform::paths_equal(
-                &self.abs_path_for_workspace(&target.path),
-                source_path,
-            )
+            && crate::platform::paths_equal(&self.abs_path_for_workspace(&target.path), source_path)
         {
             let text = self.editor.get_full_text();
             let target_offset = crate::lsp::lsp_pos_to_offset(&text, target.line, target.col);
@@ -800,20 +796,16 @@ impl App {
             if let Some(&(sx, sy, ex, ey)) = self.ide_panel.term_search_results.get(idx) {
                 let terminal_viewport = self.renderer.as_ref().map(|r| {
                     let s = r.scale_factor;
-                    let char_h = r.line_height
-                        * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-                    let (_, content_y, _, content_h, _) =
-                        crate::app::mouse::app_panel_scroll_rect(
-                            self,
-                            crate::app::PanelId::Terminal,
-                            s,
-                        );
-                    let (_, term_content_h) =
-                        crate::render_view::terminal_ui::terminal_body_rect(
-                            content_y,
-                            content_h,
-                            s,
-                        );
+                    let char_h =
+                        r.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+                    let (_, content_y, _, content_h, _) = crate::app::mouse::app_panel_scroll_rect(
+                        self,
+                        crate::app::PanelId::Terminal,
+                        s,
+                    );
+                    let (_, term_content_h) = crate::render_view::terminal_ui::terminal_body_rect(
+                        content_y, content_h, s,
+                    );
                     (char_h, term_content_h, s)
                 });
                 if let Some(term) = self
@@ -920,13 +912,18 @@ impl App {
         let database_query = self.active_tab_is_database_query();
         if let Some(idx) = self.search_current_idx {
             if let Some(&(start, end)) = self.search_results.get(idx) {
+                if self.active_document_is_markdown()
+                    && !self.prepare_markdown_absolute_scroll_target_navigation()
+                {
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                    return;
+                }
                 if self.markdown_mode() == crate::app::MarkdownMode::Read
                     && self.active_document_is_markdown()
                 {
-                    let target_y = self
-                        .markdown
-                        .read_layout
-                        .source_target_y(&(start..end));
+                    let target_y = self.markdown.read_layout.source_target_y(&(start..end));
                     if let Some(target_y) = target_y {
                         let visible_h = if let Some(r) = self.renderer.as_ref() {
                             let wh = self
@@ -956,15 +953,26 @@ impl App {
                         } else {
                             600.0
                         };
-                        let target = (target_y - visible_h / 2.0)
-                            .clamp(0.0, self.markdown.read_max_scroll)
+                        let target = (target_y - visible_h / 2.0).max(0.0);
+                        let target = self
+                            .markdown
+                            .read_scroll_bounds()
+                            .map_or(target, |max_scroll| target.min(max_scroll))
                             .round();
-                        self.markdown.read_scroll_y.animate_to(target);
+                        self.markdown
+                            .mark_absolute_source_scroll_target_navigation(start..end, 0.5);
+                        self.scroll_y.animate_to(target);
+                        self.markdown
+                            .remember_pending_absolute_scroll_target_y(target);
                     }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
                     return;
+                }
+                if self.active_document_is_markdown() {
+                    self.markdown
+                        .mark_absolute_source_scroll_target_navigation(start..end, 0.5);
                 }
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
@@ -1007,12 +1015,13 @@ impl App {
                     let max_s = r.get_max_scroll(&self.editor, visible_h);
                     self.scroll_y.clamp_target(0.0, max_s);
                     self.scroll_y.target = self.scroll_y.target.round();
+                    self.markdown
+                        .remember_pending_absolute_scroll_target_y(self.scroll_y.target);
                     self.scroll_y.anim_speed = 10.0;
                 }
             }
         }
     }
-
 }
 
 fn normalize_tab_drag_after_close(

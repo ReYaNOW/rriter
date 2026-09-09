@@ -82,7 +82,11 @@ pub(super) fn prepare_read_scroll(app: &mut App) -> Result<bool, String> {
     if app.markdown_mode() != MarkdownMode::Read {
         return Err("Markdown Read scroll requested outside Read mode".to_string());
     }
-    if app.markdown.read_max_scroll <= 0.0 {
+    if app
+        .markdown
+        .read_scroll_bounds()
+        .is_none_or(|max_scroll| max_scroll <= 0.0)
+    {
         request_redraw(app);
         return Ok(false);
     }
@@ -93,13 +97,15 @@ pub(super) fn scroll_read(app: &mut App, direction: f32) -> Result<(), String> {
     if app.markdown_mode() != MarkdownMode::Read {
         return Err("Markdown Read scroll requested outside Read mode".to_string());
     }
-    let max_scroll = app.markdown.read_max_scroll;
+    let Some(max_scroll) = app.markdown.read_scroll_bounds() else {
+        return Err("Markdown Read scroll range is unavailable".to_string());
+    };
     if max_scroll <= 0.0 {
         return Err("Markdown Read scroll range is unavailable".to_string());
     }
     crate::app::markdown::scroll_markdown_read(
-        &mut app.markdown.read_scroll_y,
-        max_scroll,
+        &mut app.scroll_y,
+        Some(max_scroll),
         36.0 * direction,
     );
     request_redraw(app);
@@ -397,11 +403,11 @@ mod tests {
         );
         assert_eq!(prepare_read_scroll(&mut app), Ok(false));
 
-        app.markdown.read_max_scroll = 200.0;
+        app.markdown.set_read_scroll_bounds(200.0);
         assert_eq!(prepare_read_scroll(&mut app), Ok(true));
-        assert_eq!(app.markdown.read_scroll_y.target, 0.0);
+        assert_eq!(app.scroll_y.target, 0.0);
         assert_eq!(scroll_read(&mut app, 1.0), Ok(()));
-        assert_eq!(app.markdown.read_scroll_y.target, 36.0);
-        assert_eq!(app.markdown.read_scroll_y.anim_speed, 7.0);
+        assert_eq!(app.scroll_y.target, 36.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
     }
 }

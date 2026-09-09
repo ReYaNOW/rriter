@@ -724,7 +724,7 @@ impl ApplicationHandler for App {
                     &self.tabs,
                     self.active_tab,
                     self.scroll_x.current,
-                    self.scroll_y.current,
+                    &mut self.scroll_y,
                     &mut self.markdown,
                     blink_alpha,
                     self.show_fps,

@@ -108,11 +108,14 @@ fn stop_api_tab_scroll_anims(state: &mut crate::app::api_client::ApiClientTabSta
     stop_scroll_anim(&mut state.response_scroll_x);
 }
 
-pub(crate) fn stop_click_scroll_anims(app: &mut App) {
+pub(crate) fn stop_click_scroll_anims(app: &mut App, preserve_main_vertical: bool) {
     stop_scroll_anim(&mut app.settings_scroll);
     stop_scroll_anim(&mut app.tab_scroll);
     stop_scroll_anim(&mut app.ide_panel.terminal_tab_scroll);
-    stop_scroll_anim(&mut app.scroll_y);
+    if !preserve_main_vertical {
+        stop_scroll_anim(&mut app.scroll_y);
+        app.markdown.settle_pending_target_navigation_as_motion();
+    }
     stop_scroll_anim(&mut app.scroll_x);
     stop_scroll_anim(&mut app.autocomplete_scroll);
     stop_scroll_anim(&mut app.settings_ide_scroll);
@@ -192,6 +195,25 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App) {
             stop_scroll_anim(&mut popup.scroll);
         }
     });
+}
+
+fn project_search_help_captures_pressed_click(app: &App) -> bool {
+    app.ide_panel.project_search.help_open
+}
+
+fn database_ddl_captures_left_click(app: &App) -> Option<(f32, f32, f32, f32)> {
+    app.ide_panel
+        .database
+        .ddl_hover
+        .try_borrow()
+        .ok()
+        .and_then(|ddl| ddl.as_ref().and_then(|state| state.rect))
+}
+
+fn preserve_main_vertical_scroll_for_click(app: &App, mx: f32, my: f32) -> bool {
+    !project_search_help_captures_pressed_click(app)
+        && database_ddl_captures_left_click(app).is_none()
+        && app.ui_registry.find_at(mx, my) == Some(crate::ui_system::UiId::MarkdownModeToggle)
 }
 
 fn autocomplete_scroll_click_target(
@@ -365,14 +387,18 @@ impl App {
         button: winit::event::MouseButton,
     ) {
         let editor_was_focused = self.editor_has_input_focus();
+        #[cfg(not(test))]
         self.handle_main_mouse_input_inner(event_loop, state, button);
+        #[cfg(test)]
+        self.handle_main_mouse_input_inner(Some(event_loop), state, button);
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn handle_main_mouse_input_inner(
         &mut self,
-        _event_loop: &ActiveEventLoop,
+        #[cfg(not(test))] _event_loop: &ActiveEventLoop,
+        #[cfg(test)] _event_loop: Option<&ActiveEventLoop>,
         state: ElementState,
         button: winit::event::MouseButton,
     ) {
@@ -388,7 +414,8 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
         }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
-            stop_click_scroll_anims(self);
+            let preserve_main_vertical = preserve_main_vertical_scroll_for_click(self, mx, my);
+            stop_click_scroll_anims(self, preserve_main_vertical);
             if self.ide_panel.database.dialog.is_some() {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.suppress_database_dialog_tooltip_after_click();
@@ -461,14 +488,7 @@ impl App {
         }
 
         if button == winit::event::MouseButton::Left {
-            let ddl_rect = self
-                .ide_panel
-                .database
-                .ddl_hover
-                .try_borrow()
-                .ok()
-                .and_then(|ddl| ddl.as_ref().and_then(|state| state.rect));
-            if let Some(rect) = ddl_rect {
+            if let Some(rect) = database_ddl_captures_left_click(self) {
                 let inside =
                     mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3;
                 if state == ElementState::Pressed {
@@ -538,7 +558,7 @@ impl App {
             return;
         }
 
-        if state == ElementState::Pressed && self.ide_panel.project_search.help_open {
+        if state == ElementState::Pressed && project_search_help_captures_pressed_click(self) {
             if button == winit::event::MouseButton::Left {
                 match self.ui_registry.find_overlay_at(mx, my) {
                     Some(crate::ui_system::UiId::ProjectSearchHelp) => {
@@ -1586,11 +1606,8 @@ impl App {
                         && drag.start_idx < self.ide_panel.terminals.len()
                     {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let (panel_x, _, panel_w, _, _) = super::app_panel_scroll_rect(
-                            self,
-                            crate::app::PanelId::Terminal,
-                            s,
-                        );
+                        let (panel_x, _, panel_w, _, _) =
+                            super::app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
                         let mut title = String::new();
                         let mut widths = Vec::with_capacity(self.ide_panel.terminals.len());
                         for terminal in &self.ide_panel.terminals {
@@ -1607,10 +1624,8 @@ impl App {
                                 ),
                             );
                         }
-                        let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(
-                            panel_w,
-                            s,
-                        );
+                        let add_size =
+                            crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, s);
                         let max_scroll =
                             crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
                                 panel_w,
@@ -1624,11 +1639,9 @@ impl App {
                             max_scroll,
                             s,
                         );
-                        if let Some(placement) = crate::app::tab_drag_placement(
-                            start_cx,
-                            &widths,
-                            Some(&drag),
-                        ) {
+                        if let Some(placement) =
+                            crate::app::tab_drag_placement(start_cx, &widths, Some(&drag))
+                        {
                             let new_idx = placement.destination;
                             if new_idx != drag.start_idx {
                                 let active = crate::app::active_index_after_move(
@@ -1682,34 +1695,37 @@ impl App {
                                 }
                             }
                         }
-                        // Clamp scroll_y к новому max_scroll после изменения высоты панелей
-                        let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-                        let s = self.renderer.as_ref().unwrap().scale_factor;
-                        let tab_bar_h = crate::render_view::editor_content_top_inset(
-                            self.show_welcome,
-                            self.is_ide_mode,
-                            self.active_tab_is_database_query(),
-                            s,
-                        );
-                        let editor_bottom_h = if self.is_ide_mode {
-                            self.ide_panel.editor_reserved_bottom_height(s)
-                        } else {
-                            0.0
-                        };
-                        let visible_h = crate::render_view::editor_view_height(
-                            wh,
-                            tab_bar_h,
-                            editor_bottom_h,
-                            self.is_ide_mode,
-                            s,
-                        );
-                        let max_scroll = self
-                            .renderer
-                            .as_mut()
-                            .unwrap()
-                            .get_max_scroll(&self.editor, visible_h);
-                        self.scroll_y.clamp_target(0.0, max_scroll);
-                        self.scroll_y.clamp_current(0.0, max_scroll);
+                        // Edit bounds are not valid for the shared Read coordinate system,
+                        // including a pending Read -> Edit rebase before the first Edit frame.
+                        if self.markdown.shared_vertical_scroll_uses_editor_bounds() {
+                            let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                            let s = self.renderer.as_ref().unwrap().scale_factor;
+                            let tab_bar_h = crate::render_view::editor_content_top_inset(
+                                self.show_welcome,
+                                self.is_ide_mode,
+                                self.active_tab_is_database_query(),
+                                s,
+                            );
+                            let editor_bottom_h = if self.is_ide_mode {
+                                self.ide_panel.editor_reserved_bottom_height(s)
+                            } else {
+                                0.0
+                            };
+                            let visible_h = crate::render_view::editor_view_height(
+                                wh,
+                                tab_bar_h,
+                                editor_bottom_h,
+                                self.is_ide_mode,
+                                s,
+                            );
+                            let max_scroll = self
+                                .renderer
+                                .as_mut()
+                                .unwrap()
+                                .get_max_scroll(&self.editor, visible_h);
+                            self.scroll_y.clamp_target(0.0, max_scroll);
+                            self.scroll_y.clamp_current(0.0, max_scroll);
+                        }
                     } else {
                         // DnD завершён — определяем новую группу по позиции и сортируем
                         let wh = self.window.as_ref().unwrap().inner_size().height as f32;
@@ -1823,6 +1839,103 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_mode_toggle_target_preserves_only_main_vertical_click_stop() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            return;
+        };
+        app.scroll_y.current = 40.0;
+        app.scroll_y.target = 140.0;
+        app.scroll_y.velocity = 22.0;
+        app.scroll_y.anim_speed = 7.0;
+        app.scroll_x.current = 8.0;
+        app.scroll_x.target = 28.0;
+        app.scroll_x.velocity = 6.0;
+
+        stop_click_scroll_anims(&mut app, true);
+
+        assert_eq!(app.scroll_y.current, 40.0);
+        assert_eq!(app.scroll_y.target, 140.0);
+        assert_eq!(app.scroll_y.velocity, 22.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
+        assert_eq!(app.scroll_x.current, 8.0);
+        assert_eq!(app.scroll_x.target, 8.0);
+        assert_eq!(app.scroll_x.velocity, 0.0);
+
+        stop_click_scroll_anims(&mut app, false);
+        assert_eq!(app.scroll_y.current, 40.0);
+        assert_eq!(app.scroll_y.target, 40.0);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+    }
+
+    #[test]
+    fn markdown_mode_toggle_click_stop_then_action_preserves_inertia() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            return;
+        };
+        app.show_welcome = false;
+        app.file_path = Some(std::path::PathBuf::from("/tmp/readme.md"));
+        app.file_extension = "md".to_string();
+        app.editor = crate::app::app_behavior_tests::editor_with("# title\n\nbody\n");
+        app.scroll_y.current = 64.0;
+        app.scroll_y.target = 144.0;
+        app.scroll_y.velocity = 35.0;
+        app.scroll_y.anim_speed = 7.0;
+        app.ui_registry.register_blocker(
+            crate::ui_system::UiId::MarkdownModeToggle,
+            10.0,
+            10.0,
+            80.0,
+            30.0,
+            20.0,
+            20.0,
+        );
+
+        let preserve = preserve_main_vertical_scroll_for_click(&app, 20.0, 20.0);
+        stop_click_scroll_anims(&mut app, preserve);
+        app.handle_ui_click(crate::ui_system::UiId::MarkdownModeToggle);
+
+        assert_eq!(app.markdown_mode(), crate::app::MarkdownMode::Read);
+        assert_eq!(app.scroll_y.current, 64.0);
+        assert_eq!(app.scroll_y.target, 144.0);
+        assert_eq!(app.scroll_y.velocity, 35.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
+        assert!(app.markdown.scroll_transition.is_some());
+    }
+
+    #[test]
+    fn markdown_mode_toggle_click_exception_uses_topmost_registry_target() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            return;
+        };
+        app.ui_registry.register_blocker(
+            crate::ui_system::UiId::MarkdownModeToggle,
+            10.0,
+            10.0,
+            80.0,
+            30.0,
+            20.0,
+            20.0,
+        );
+        assert!(preserve_main_vertical_scroll_for_click(&app, 20.0, 20.0));
+
+        app.ui_registry.mark_overlay_start();
+        app.ui_registry.register_blocker(
+            crate::ui_system::UiId::BottomPanelBody,
+            0.0,
+            0.0,
+            200.0,
+            100.0,
+            20.0,
+            20.0,
+        );
+        assert_eq!(
+            app.ui_registry.find_overlay_at(20.0, 20.0),
+            Some(crate::ui_system::UiId::BottomPanelBody)
+        );
+        assert!(!preserve_main_vertical_scroll_for_click(&app, 20.0, 20.0));
+    }
 
     #[test]
     fn markdown_reader_left_release_finishes_before_ui_dispatch_and_preserves_range() {
@@ -1954,7 +2067,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn mouse_lsp_action_route_delegates_to_central_action_path() {
         let source = include_str!("input.rs");
@@ -1972,5 +2084,244 @@ mod tests {
         assert!(!route.contains("LspActionItem::"));
         assert!(!route.contains("request_fix_all"));
         assert!(!route.contains("request_organize_imports"));
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod reviewer_stage2_modal_tests {
+    use super::*;
+
+    #[test]
+    fn reviewer_stage2_modal_dismiss_click_on_dimmed_toggle_does_not_get_exception() {
+        let (_context, mut app) = crate::render_view::reviewer_stage2_integration::fixture(
+            "# doc\n\ntext\n",
+            1000.0,
+            1.0,
+        );
+        app.scroll_y.current = 64.0;
+        app.scroll_y.target = 144.0;
+        app.scroll_y.velocity = 35.0;
+        app.is_ide_mode = true;
+        app.ide_panel.project_search.help_open = true;
+        let renderer = app.renderer.as_mut().unwrap();
+        renderer.height = 800.0;
+        renderer.draw_status_bar(
+            &app.editor,
+            Some((
+                app.file_path.as_ref().unwrap(),
+                crate::platform::TextEncoding::Utf8,
+            )),
+            crate::app::MarkdownMode::Edit,
+            None,
+            &mut app.ui_registry,
+            1.0,
+            -1.0,
+            -1.0,
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let (x, y, w, h) = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownModeToggle)
+            .expect("real status-bar toggle");
+        let (mx, my) = (x + w * 0.5, y + h * 0.5);
+        let _close_button_hovered = renderer.draw_project_search_help_overlay(
+            &app.ide_panel,
+            &mut app.ui_registry,
+            mx,
+            my,
+            1.0,
+        );
+        renderer.flush();
+        // The native input router consumes this click in the help_open branch,
+        // dismisses the modal, and returns without dispatching the toggle.
+        assert_eq!(app.ui_registry.find_overlay_at(mx, my), None);
+        let preserve = preserve_main_vertical_scroll_for_click(&app, mx, my);
+        stop_click_scroll_anims(&mut app, preserve);
+        println!(
+            "MODAL_DISMISS top={:?} overlay={:?} preserve={preserve} current={} target={} velocity={}",
+            app.ui_registry.find_at(mx, my),
+            app.ui_registry.find_overlay_at(mx, my),
+            app.scroll_y.current,
+            app.scroll_y.target,
+            app.scroll_y.velocity
+        );
+        assert!(
+            !preserve,
+            "a modal-dismiss click is not a mode-toggle action"
+        );
+        assert_eq!(app.scroll_y.target, app.scroll_y.current);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+    }
+    #[test]
+    fn reviewer_stage2_v2_ddl_dismiss_real_pressed_route_does_not_preserve_toggle_motion() {
+        let (_context, mut app) = crate::render_view::reviewer_stage2_integration::fixture(
+            "# doc\n\ntext\n",
+            1000.0,
+            1.0,
+        );
+        app.is_ide_mode = true;
+        app.scroll_y.current = 64.0;
+        app.scroll_y.target = 144.0;
+        app.scroll_y.velocity = 35.0;
+        *app.ide_panel.database.ddl_hover.borrow_mut() =
+            Some(crate::app::database::DatabaseDdlHoverState {
+                connection_id: crate::app::database::DatabaseConnectionId(1),
+                database_name: "test".to_string(),
+                table_name: "example".to_string(),
+                popup: HoverPopup {
+                    text: "CREATE TABLE example (id integer);".to_string(),
+                    spans: Vec::new(),
+                    line_kinds: vec![crate::lsp::HoverLineKindPublic::Code],
+                    inline_code_ranges: Vec::new(),
+                    byte_offset: 0,
+                    anchor_x: 400.0,
+                    anchor_y: 90.0,
+                    offset_x: None,
+                    offset_y: None,
+                    anim_progress: 1.0,
+                    scroll: crate::scroll::ScrollState::new(15.0),
+                    layout_cache: None,
+                },
+                rect: None,
+                max_scroll: 0.0,
+                selection_anchor: None,
+                selection_cursor: None,
+                selecting: false,
+            });
+        let renderer = app.renderer.as_mut().unwrap();
+        renderer.height = 800.0;
+        renderer.draw_status_bar(
+            &app.editor,
+            Some((
+                app.file_path.as_ref().unwrap(),
+                crate::platform::TextEncoding::Utf8,
+            )),
+            crate::app::MarkdownMode::Edit,
+            None,
+            &mut app.ui_registry,
+            1.0,
+            -1.0,
+            -1.0,
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let (x, y, w, h) = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownModeToggle)
+            .unwrap();
+        let (mx, my) = (x + w * 0.5, y + h * 0.5);
+        assert!(renderer.draw_database_overlays(
+            1.0,
+            &app.ide_panel,
+            &app.editor,
+            &mut app.ui_registry,
+            mx,
+            my,
+            1.0
+        ));
+        renderer.flush();
+        let popup_rect = app
+            .ide_panel
+            .database
+            .ddl_hover
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .rect
+            .unwrap();
+        assert!(!crate::ui_system::point_in_rect(mx, my, popup_rect));
+        assert_eq!(
+            app.ui_registry.find_at(mx, my),
+            Some(crate::ui_system::UiId::MarkdownModeToggle)
+        );
+        renderer.last_mouse_x = mx;
+        renderer.last_mouse_y = my;
+        let preserve = preserve_main_vertical_scroll_for_click(&app, mx, my);
+        // The test-only optional event-loop argument supplies no native loop;
+        // the complete production input body and actual popup dismissal run.
+        app.handle_main_mouse_input_inner(
+            None,
+            ElementState::Pressed,
+            winit::event::MouseButton::Left,
+        );
+        assert!(app.ide_panel.database.ddl_hover.borrow().is_none());
+        assert_eq!(app.markdown.mode, crate::app::MarkdownMode::Edit);
+        assert!(app.markdown.scroll_transition.is_none());
+        println!(
+            "DDL_REAL_PRESS preserve={preserve} popup={popup_rect:?} mode={:?} current={} target={} velocity={}",
+            app.markdown.mode, app.scroll_y.current, app.scroll_y.target, app.scroll_y.velocity
+        );
+        assert_eq!(
+            app.scroll_y.target, 64.0,
+            "the consumed popup-dismiss click never toggled mode and must use ordinary click-stop"
+        );
+        assert_eq!(app.scroll_y.velocity, 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reviewer_stage2_v3_actual_toggle_pressed_route_preserves_both_directions() {
+        let (_context, mut app) = crate::render_view::reviewer_stage2_integration::fixture(
+            "# doc\n\ntext\n",
+            1000.0,
+            1.0,
+        );
+        app.scroll_y.current = 64.25;
+        app.scroll_y.target = 144.25;
+        app.scroll_y.velocity = 35.0;
+        app.scroll_y.anim_speed = 7.0;
+        let renderer = app.renderer.as_mut().unwrap();
+        renderer.height = 800.0;
+        renderer.draw_status_bar(
+            &app.editor,
+            Some((
+                app.file_path.as_ref().unwrap(),
+                crate::platform::TextEncoding::Utf8,
+            )),
+            crate::app::MarkdownMode::Edit,
+            None,
+            &mut app.ui_registry,
+            1.0,
+            -1.0,
+            -1.0,
+            0.0,
+            None,
+            None,
+            None,
+        );
+        let (x, y, w, h) = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownModeToggle)
+            .unwrap();
+        renderer.last_mouse_x = x + w * 0.5;
+        renderer.last_mouse_y = y + h * 0.5;
+        renderer.flush();
+        app.handle_main_mouse_input_inner(
+            None,
+            ElementState::Pressed,
+            winit::event::MouseButton::Left,
+        );
+        assert_eq!(app.markdown.mode, crate::app::MarkdownMode::Read);
+        assert!(app.markdown.scroll_transition.is_some());
+        assert_eq!(app.scroll_y.current, 64.25);
+        assert_eq!(app.scroll_y.target, 144.25);
+        assert_eq!(app.scroll_y.velocity, 35.0);
+        app.handle_main_mouse_input_inner(
+            None,
+            ElementState::Pressed,
+            winit::event::MouseButton::Left,
+        );
+        assert_eq!(app.markdown.mode, crate::app::MarkdownMode::Edit);
+        assert!(app.markdown.scroll_transition.is_none());
+        assert_eq!(app.scroll_y.current, 64.25);
+        assert_eq!(app.scroll_y.target, 144.25);
+        assert_eq!(app.scroll_y.velocity, 35.0);
+        assert_eq!(app.scroll_y.anim_speed, 7.0);
+        println!("ACTUAL_TOGGLE_PRESSED_ROUTES current=64.25 target=144.25 velocity=35 speed=7");
     }
 }

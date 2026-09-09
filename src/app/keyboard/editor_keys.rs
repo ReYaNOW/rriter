@@ -132,9 +132,7 @@ fn markdown_editor_key_action(
     }
 
     match physical_key {
-        PhysicalKey::Code(KeyCode::KeyC) if primary => {
-            Some(MarkdownEditorKeyAction::CopySelection)
-        }
+        PhysicalKey::Code(KeyCode::KeyC) if primary => Some(MarkdownEditorKeyAction::CopySelection),
         PhysicalKey::Code(KeyCode::ArrowUp) => Some(MarkdownEditorKeyAction::ScrollLines(-1)),
         PhysicalKey::Code(KeyCode::ArrowDown) => Some(MarkdownEditorKeyAction::ScrollLines(1)),
         PhysicalKey::Code(KeyCode::PageUp) => Some(MarkdownEditorKeyAction::ScrollPages(-1)),
@@ -142,7 +140,9 @@ fn markdown_editor_key_action(
         PhysicalKey::Code(KeyCode::Home) => Some(MarkdownEditorKeyAction::ScrollStart),
         PhysicalKey::Code(KeyCode::End) => Some(MarkdownEditorKeyAction::ScrollEnd),
         PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight)
-        | PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyW) if primary => {
+        | PhysicalKey::Code(KeyCode::KeyA | KeyCode::KeyW)
+            if primary =>
+        {
             Some(MarkdownEditorKeyAction::Consume)
         }
         PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight) => {
@@ -316,9 +316,7 @@ impl App {
         if text.is_empty() || self.show_welcome {
             return;
         }
-        if self.active_tab_is_git_diff()
-            || self.markdown_mode() == crate::app::MarkdownMode::Read
-        {
+        if self.active_tab_is_git_diff() || self.markdown_mode() == crate::app::MarkdownMode::Read {
             self.show_readonly_notice();
             return;
         }
@@ -438,8 +436,8 @@ impl App {
                         .map(|renderer| renderer.line_height.round().max(1.0))
                         .unwrap_or(24.0);
                     crate::app::markdown::scroll_markdown_read(
-                        &mut self.markdown.read_scroll_y,
-                        self.markdown.read_max_scroll,
+                        &mut self.scroll_y,
+                        self.markdown.read_scroll_bounds(),
                         line_step * f32::from(direction),
                     );
                     if let Some(window) = self.window.as_ref() {
@@ -455,8 +453,8 @@ impl App {
                         .unwrap_or(600.0)
                         * 0.8;
                     crate::app::markdown::scroll_markdown_read(
-                        &mut self.markdown.read_scroll_y,
-                        self.markdown.read_max_scroll,
+                        &mut self.scroll_y,
+                        self.markdown.read_scroll_bounds(),
                         page * f32::from(direction),
                     );
                     if let Some(window) = self.window.as_ref() {
@@ -464,15 +462,24 @@ impl App {
                     }
                 }
                 MarkdownEditorKeyAction::ScrollStart => {
-                    self.markdown.read_scroll_y.animate_to(0.0);
+                    if self.prepare_markdown_absolute_scroll_target_navigation() {
+                        self.markdown.mark_absolute_scroll_start_navigation();
+                        self.scroll_y.animate_to(0.0);
+                        self.markdown.remember_pending_absolute_scroll_target_y(0.0);
+                    }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
                 }
                 MarkdownEditorKeyAction::ScrollEnd => {
-                    self.markdown
-                        .read_scroll_y
-                        .animate_to(self.markdown.read_max_scroll);
+                    if self.prepare_markdown_absolute_scroll_target_navigation()
+                        && let Some(max_scroll) = self.markdown.read_scroll_bounds()
+                    {
+                        self.markdown.mark_absolute_scroll_end_navigation();
+                        self.scroll_y.animate_to(max_scroll);
+                        self.markdown
+                            .remember_pending_absolute_scroll_target_y(max_scroll);
+                    }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
@@ -1018,6 +1025,10 @@ impl App {
         }
 
         if cursor_moved && !is_edit {
+            if self.active_document_is_markdown() {
+                self.markdown
+                    .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+            }
             self.close_autocomplete();
             self.lsp_actions_menu = None;
         }
@@ -1343,31 +1354,56 @@ mod tests {
     fn markdown_read_navigation_never_routes_to_source_cursor() {
         assert_eq!(
             markdown_editor_key_action(
-                true, true, PhysicalKey::Code(KeyCode::ArrowUp), false, false, false
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::ArrowUp),
+                false,
+                false,
+                false
             ),
             Some(MarkdownEditorKeyAction::ScrollLines(-1))
         );
         assert_eq!(
             markdown_editor_key_action(
-                true, true, PhysicalKey::Code(KeyCode::PageDown), false, false, false
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::PageDown),
+                false,
+                false,
+                false
             ),
             Some(MarkdownEditorKeyAction::ScrollPages(1))
         );
         assert_eq!(
             markdown_editor_key_action(
-                true, true, PhysicalKey::Code(KeyCode::Home), false, false, false
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::Home),
+                false,
+                false,
+                false
             ),
             Some(MarkdownEditorKeyAction::ScrollStart)
         );
         assert_eq!(
             markdown_editor_key_action(
-                true, true, PhysicalKey::Code(KeyCode::End), false, false, false
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::End),
+                false,
+                false,
+                false
             ),
             Some(MarkdownEditorKeyAction::ScrollEnd)
         );
         assert_eq!(
             markdown_editor_key_action(
-                true, true, PhysicalKey::Code(KeyCode::ArrowLeft), false, false, false
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::ArrowLeft),
+                false,
+                false,
+                false
             ),
             Some(MarkdownEditorKeyAction::Consume)
         );
@@ -1397,7 +1433,12 @@ mod tests {
         assert_eq!(app.markdown_mode(), crate::app::MarkdownMode::Edit);
         assert_eq!(
             markdown_editor_key_action(
-                true, false, PhysicalKey::Code(KeyCode::KeyA), false, false, true
+                true,
+                false,
+                PhysicalKey::Code(KeyCode::KeyA),
+                false,
+                false,
+                true
             ),
             None
         );
