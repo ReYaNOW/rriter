@@ -306,16 +306,17 @@ fn markdown_read_code_block_at(
     (mouse_x >= left && mouse_x <= right).then_some(block.source_range.start)
 }
 
-fn nearest_baseline_index<T>(
+fn line_box_index<T>(
     items: &[T],
     y: f32,
-    baseline: impl Fn(&T) -> f32,
+    top: impl Fn(&T) -> f32,
+    bottom: impl Fn(&T) -> f32,
 ) -> Option<usize> {
     if items.is_empty() {
         return None;
     }
     let idx = items
-        .partition_point(|item| baseline(item) < y)
+        .partition_point(|item| bottom(item) <= y)
         .min(items.len());
     if idx == 0 {
         return Some(0);
@@ -323,12 +324,35 @@ fn nearest_baseline_index<T>(
     if idx == items.len() {
         return Some(items.len() - 1);
     }
+    if y >= top(&items[idx]) {
+        return Some(idx);
+    }
     let before = idx - 1;
-    if y - baseline(&items[before]) <= baseline(&items[idx]) - y {
+    if y - bottom(&items[before]) <= top(&items[idx]) - y {
         Some(before)
     } else {
         Some(idx)
     }
+}
+
+fn uniform_line_box_index(
+    line_count: usize,
+    first_top: f32,
+    line_height: f32,
+    y: f32,
+) -> Option<usize> {
+    if line_count == 0 || !line_height.is_finite() || line_height <= 0.0 {
+        return None;
+    }
+    let idx = ((y - first_top) / line_height).floor() as isize;
+    Some(idx.clamp(0, line_count.saturating_sub(1) as isize) as usize)
+}
+
+fn source_highlight_vertical_bounds(line_top: f32, line_height: f32) -> (f32, f32) {
+    (
+        (line_top.round() + 2.0).round(),
+        line_height.round().max(1.0),
+    )
 }
 
 fn styled_source_boundary(styled: &StyledText, visual: usize) -> Option<usize> {
@@ -538,7 +562,8 @@ impl Renderer {
 
         match &block.kind {
             ReadBlockKind::Text(text) => {
-                let line_idx = nearest_baseline_index(&text.lines, doc_y, |line| line.y)?;
+                let line_idx =
+                    line_box_index(&text.lines, doc_y, |line| line.top, |line| line.bottom)?;
                 let line = &text.lines[line_idx];
                 let local_x = mouse_x - (frame_x + text.x);
                 let visual = self.styled_visual_offset_at_x(
@@ -547,12 +572,14 @@ impl Renderer {
                     local_x,
                     text.scale,
                     text.mono,
+                    text.heading_level.map(|_| text.scale),
                 );
                 styled_source_boundary(&text.styled, visual)
                     .or_else(|| Some(block.source_range.start))
             }
             ReadBlockKind::Code(code) => {
-                let line_idx = nearest_baseline_index(&code.lines, doc_y, |line| line.y)?;
+                let line_idx =
+                    line_box_index(&code.lines, doc_y, |line| line.top, |line| line.bottom)?;
                 let line = &code.lines[line_idx];
                 let pad = code_block_padding(self.scale_factor);
                 let local_x = mouse_x - (frame_x + code.x + pad);
@@ -583,11 +610,12 @@ impl Renderer {
                 if cell.lines.is_empty() {
                     return Some(row.source_range.start);
                 }
-                let line_idx = ((doc_y - row.y - table.cell_padding)
-                    / table.line_height.max(1.0))
-                    .floor()
-                    .max(0.0) as usize;
-                let line_idx = line_idx.min(cell.lines.len().saturating_sub(1));
+                let line_idx = uniform_line_box_index(
+                    cell.lines.len(),
+                    row.y + table.cell_padding,
+                    table.line_height,
+                    doc_y,
+                )?;
                 let range = &cell.lines[line_idx];
                 let measured = self.measure_styled_fragment(&cell.styled, range, 0.82);
                 let cell_x = frame_x + table.x + col as f32 * table.cell_width;
@@ -606,6 +634,7 @@ impl Renderer {
                     mouse_x - tx,
                     0.82,
                     false,
+                    None,
                 );
                 styled_source_boundary(&cell.styled, visual)
                     .or_else(|| Some(row.source_range.start))
@@ -621,20 +650,26 @@ impl Renderer {
         target_x: f32,
         text_scale: f32,
         mono: bool,
+        final_size_scale: Option<f32>,
     ) -> usize {
         let Some(text) = styled.text.get(range.clone()) else {
             return range.start;
         };
         let layout_scale = self.scale_factor;
+        let advance_scale = if final_size_scale.is_some() {
+            1.0
+        } else {
+            text_scale
+        };
         visual_byte_at_x(text, range.start, target_x, |byte, ch| {
             let mut advance = |c: char, use_mono: bool| {
-                self.markdown_read_char_advance(c, use_mono)
+                self.markdown_read_char_advance(c, use_mono, final_size_scale)
             };
             styled_char_metrics(
                 styled,
                 byte,
                 ch,
-                text_scale,
+                advance_scale,
                 layout_scale,
                 mono,
                 &mut advance,
@@ -663,13 +698,16 @@ impl Renderer {
         range: &Range<usize>,
         mut x: f32,
         y: f32,
+        line_top: f32,
         scale: f32,
         bold: bool,
         line_height: f32,
         highlights: ReadHighlights<'_>,
+        final_size_scale: Option<f32>,
     ) {
         let pad = inline_code_padding_x(self.scale_factor);
         let has_highlights = !highlights.is_empty();
+        let pixel_size = final_size_scale.map(|scale| self.final_text_pixel_size(scale));
         let visible_runs = visible_styled_run_range(&styled.runs, range);
         for run in &styled.runs[visible_runs] {
             let start = run.range.start.max(range.start);
@@ -692,7 +730,13 @@ impl Renderer {
             } else {
                 0.0
             };
-            let text_width = if inline_code {
+            let text_width = if let Some(pixel_size) = pixel_size {
+                if inline_code {
+                    self.measure_mono_width_at_pixel_size(text, pixel_size)
+                } else {
+                    self.measure_ui_width_at_pixel_size(text, pixel_size)
+                }
+            } else if inline_code {
                 self.measure_mono_width_pixel_snapped(text, scale)
             } else {
                 self.measure_ui_width(text, scale)
@@ -723,15 +767,26 @@ impl Renderer {
                             start,
                             end,
                             x,
-                            y,
+                            line_top,
                             scale,
                             false,
                             line_height,
                             highlights,
+                            final_size_scale,
                         );
                     }
                     StyledRunPaintLayer::Glyphs => {
-                        if inline_code {
+                        if let Some(pixel_size) = pixel_size {
+                            if inline_code {
+                                self.draw_string_mono_at_pixel_size(
+                                    text, text_x, y, color, pixel_size, bold,
+                                );
+                            } else {
+                                self.draw_string_at_pixel_size_weighted(
+                                    text, text_x, y, color, pixel_size, bold,
+                                );
+                            }
+                        } else if inline_code {
                             self.draw_string_mono_scaled_pixel_snapped(
                                 text,
                                 text_x,
@@ -773,11 +828,12 @@ impl Renderer {
         start: usize,
         end: usize,
         mut x: f32,
-        baseline_y: f32,
+        line_top: f32,
         text_scale: f32,
         mono: bool,
         line_height: f32,
         highlights: ReadHighlights<'_>,
+        final_size_scale: Option<f32>,
     ) -> f32 {
         if highlights.is_empty() {
             return 0.0;
@@ -785,20 +841,25 @@ impl Renderer {
         let Some(text) = styled.text.get(start..end) else {
             return 0.0;
         };
-        let top = (baseline_y - line_height * 0.82).round();
+        let (top, highlight_height) = source_highlight_vertical_bounds(line_top, line_height);
         let start_x = x;
         let mut byte = start;
+        let advance_scale = if final_size_scale.is_some() {
+            1.0
+        } else {
+            text_scale
+        };
         for ch in text.chars() {
             let width = {
                 let scale = self.scale_factor;
                 let mut advance = |c: char, use_mono: bool| {
-                    self.markdown_read_char_advance(c, use_mono)
+                    self.markdown_read_char_advance(c, use_mono, final_size_scale)
                 };
                 styled_char_advance(
                     styled,
                     byte,
                     ch,
-                    text_scale,
+                    advance_scale,
                     scale,
                     mono,
                     &mut advance,
@@ -813,7 +874,7 @@ impl Renderer {
                         x,
                         top,
                         width,
-                        line_height,
+                        highlight_height,
                         highlights,
                     );
                 }
@@ -829,11 +890,12 @@ impl Renderer {
         styled: &StyledText,
         range: &Range<usize>,
         mut x: f32,
-        baseline_y: f32,
+        line_top: f32,
         text_scale: f32,
         mono: bool,
         line_height: f32,
         highlights: ReadHighlights<'_>,
+        final_size_scale: Option<f32>,
     ) {
         if highlights.is_empty() {
             return;
@@ -851,11 +913,12 @@ impl Renderer {
                 start,
                 end,
                 x,
-                baseline_y,
+                line_top,
                 text_scale,
                 mono,
                 line_height,
                 highlights,
+                final_size_scale,
             );
         }
     }
@@ -866,7 +929,7 @@ impl Renderer {
         text: &str,
         source_start: usize,
         mut x: f32,
-        baseline_y: f32,
+        line_top: f32,
         line_height: f32,
         scale: f32,
         highlights: ReadHighlights<'_>,
@@ -874,7 +937,7 @@ impl Renderer {
         if highlights.is_empty() {
             return;
         }
-        let top = (baseline_y - line_height * 0.82).round();
+        let (top, highlight_height) = source_highlight_vertical_bounds(line_top, line_height);
         let mut source_byte = source_start;
         for ch in text.chars() {
             let width = mono_char_pixel_advance(ch, scale, || self.char_advance(ch));
@@ -885,7 +948,7 @@ impl Renderer {
                     x,
                     top,
                     width,
-                    line_height,
+                    highlight_height,
                     highlights,
                 );
             }
@@ -935,7 +998,7 @@ pub(crate) fn build_test_markdown_read_layout(
     let document = crate::languages::markdown::MarkdownParseState::default()
         .parse(source)
         .expect("markdown parse");
-    let mut builder = LayoutBuilder::new(source, width, 1.0, |_, _| 8.0);
+    let mut builder = LayoutBuilder::new(source, width, 1.0, test_layout_text_metrics(1.0), |_, _, _| 8.0);
     builder.append_blocks(&document.blocks, 0.0, 0, None);
     let (blocks, content_height) = builder.finish();
     let mut cache = MarkdownReadLayoutCache::default();
@@ -1851,14 +1914,59 @@ mod interaction_tests {
         assert_eq!(nearest_block_index(&blocks, blocks[19_999].bottom + 100.0), Some(19_999));
 
         let lines = (0..50_000usize)
-            .map(|idx| CodeLine {
-                source_range: idx..idx + 1,
-                y: idx as f32 * 18.0,
+            .map(|idx| {
+                let top = idx as f32 * 18.0;
+                CodeLine {
+                    source_range: idx..idx + 1,
+                    top,
+                    y: top + 15.0,
+                    bottom: top + 18.0,
+                }
             })
             .collect::<Vec<_>>();
-        assert_eq!(nearest_baseline_index(&lines, lines[42_000].y + 1.0, |line| line.y), Some(42_000));
-        assert_eq!(nearest_baseline_index(&lines, -100.0, |line| line.y), Some(0));
-        assert_eq!(nearest_baseline_index(&lines, 1_000_000.0, |line| line.y), Some(lines.len() - 1));
+        assert_eq!(
+            line_box_index(&lines, lines[42_000].top + 1.0, |line| line.top, |line| line.bottom),
+            Some(42_000)
+        );
+        assert_eq!(
+            line_box_index(&lines, -100.0, |line| line.top, |line| line.bottom),
+            Some(0)
+        );
+        assert_eq!(
+            line_box_index(&lines, 1_000_000.0, |line| line.top, |line| line.bottom),
+            Some(lines.len() - 1)
+        );
+    }
+
+    #[test]
+    fn reader_line_box_hit_test_uses_the_visible_line_not_nearest_baseline() {
+        let lines = [
+            CodeLine { source_range: 0..1, top: 10.0, y: 26.0, bottom: 30.0 },
+            CodeLine { source_range: 1..2, top: 30.0, y: 46.0, bottom: 50.0 },
+        ];
+        for y in [10.0, 18.0, 29.99] {
+            assert_eq!(line_box_index(&lines, y, |line| line.top, |line| line.bottom), Some(0), "y={y}");
+        }
+        for y in [30.0, 31.0, 40.0, 49.99] {
+            assert_eq!(line_box_index(&lines, y, |line| line.top, |line| line.bottom), Some(1), "y={y}");
+        }
+
+        let gapped = [
+            CodeLine { source_range: 0..1, top: 10.0, y: 26.0, bottom: 30.0 },
+            CodeLine { source_range: 1..2, top: 34.0, y: 50.0, bottom: 54.0 },
+        ];
+        assert_eq!(line_box_index(&gapped, 31.0, |line| line.top, |line| line.bottom), Some(0));
+        assert_eq!(line_box_index(&gapped, 33.0, |line| line.top, |line| line.bottom), Some(1));
+    }
+
+    #[test]
+    fn table_line_hit_test_uses_uniform_line_boxes_at_boundaries() {
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 19.0), Some(0));
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 20.0), Some(0));
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 37.99), Some(0));
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 38.0), Some(1));
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 56.0), Some(2));
+        assert_eq!(uniform_line_box_index(3, 20.0, 18.0, 100.0), Some(2));
     }
 
 }

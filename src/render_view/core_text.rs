@@ -1593,6 +1593,44 @@ impl Renderer {
         }
     }
 
+    pub(crate) fn draw_string_at_pixel_size_weighted(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        pixel_size: f32,
+        bold: bool,
+    ) {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        for c in text.chars() {
+            if c == '\n' || c == '\r' || c == '\u{FE0F}' || c == '\u{200D}' {
+                continue;
+            }
+            if let Some(glyph) = self.get_ui_glyph_at_size(c, pixel_size) {
+                if let Some((q_x, q_y, q_w, q_h)) =
+                    pixel_stable_glyph_rect(draw_x, baseline_y, glyph, 1.0)
+                {
+                    self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
+                }
+                draw_x += Self::snapped_text_advance(glyph.advance, 1.0);
+            }
+        }
+    }
+
+    pub(crate) fn measure_ui_width_at_pixel_size(
+        &mut self,
+        text: &str,
+        pixel_size: f32,
+    ) -> f32 {
+        text.chars()
+            .filter(|ch| !matches!(*ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}'))
+            .filter_map(|ch| self.get_ui_glyph_at_size(ch, pixel_size))
+            .map(|glyph| Self::snapped_text_advance(glyph.advance, 1.0))
+            .sum()
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_spanned_ui_line_pixel_snapped(
         &mut self,
@@ -1712,10 +1750,51 @@ impl Renderer {
         }
     }
 
+    pub(crate) fn draw_string_mono_at_pixel_size(
+        &mut self,
+        text: &str,
+        x: f32,
+        y: f32,
+        color: [f32; 4],
+        pixel_size: f32,
+        bold: bool,
+    ) {
+        let mut draw_x = x.round();
+        let baseline_y = y.round();
+        for ch in text.chars() {
+            if ch == '\n' || ch == '\r' || ch == '\u{FE0F}' || ch == '\u{200D}' {
+                continue;
+            }
+            let advance =
+                Self::snapped_text_advance(self.char_advance_at_size(ch, pixel_size), 1.0);
+            if !matches!(ch, ' ' | '\t')
+                && let Some(glyph) = self.get_glyph_at_size(ch, pixel_size)
+                && let Some((q_x, q_y, q_w, q_h)) =
+                    pixel_stable_glyph_rect(draw_x, baseline_y, glyph, 1.0)
+            {
+                self.push_weighted_glyph_quad(glyph, q_x, q_y, q_w, q_h, color, bold);
+            }
+            draw_x += advance;
+        }
+    }
+
     pub(crate) fn measure_mono_width_pixel_snapped(&mut self, text: &str, scale: f32) -> f32 {
         text.chars()
             .filter(|ch| !matches!(*ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}'))
             .map(|ch| Self::snapped_text_advance(self.char_advance(ch), scale))
+            .sum()
+    }
+
+    pub(crate) fn measure_mono_width_at_pixel_size(
+        &mut self,
+        text: &str,
+        pixel_size: f32,
+    ) -> f32 {
+        text.chars()
+            .filter(|ch| !matches!(*ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}'))
+            .map(|ch| {
+                Self::snapped_text_advance(self.char_advance_at_size(ch, pixel_size), 1.0)
+            })
             .sum()
     }
 

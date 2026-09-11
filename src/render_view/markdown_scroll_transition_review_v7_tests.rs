@@ -50,16 +50,20 @@ fn reviewer_stage2_v7_second_search_after_tick_and_resize_reprojects_live_curren
     let live_anchor = review_v7_applied_read_anchor_before_new_geometry(&mut app, &source);
     let before_resize_current = app.scroll_y.current;
     let old_geometry = app.markdown.deferred_read_current_geometry().unwrap();
-    assert_eq!(old_geometry.width.round(), 720.0);
+    assert_eq!(
+        old_geometry.width.round(),
+        app.markdown_read_content_width_for(720.0, 1.0).round()
+    );
 
     // Resize after tick, then issue a *new* absolute search before any Read
     // frame. jump_to_search_result calls the production preparation path,
-    // which is allowed to rebuild the one Read layout for width=450.
+    // which is allowed to rebuild the one Read layout for the resized Reader frame.
     app.renderer.as_mut().unwrap().width = 450.0;
     review_v4_search(&mut app, &source, "paragraph038");
+    let resized_width = app.markdown_read_content_width_for(450.0, 1.0);
     assert!(app.markdown.read_layout.is_valid_for_geometry(
         app.editor.version,
-        450.0,
+        resized_width,
         app.renderer.as_ref().unwrap().scale_factor,
         app.renderer.as_ref().unwrap().font_size,
     ));
@@ -93,9 +97,11 @@ fn reviewer_stage2_v7_second_search_after_tick_and_dpi_change_reprojects_live_cu
     app.renderer.as_mut().unwrap().update_scale_factor(1.25);
     review_v4_search(&mut app, &source, "paragraph038");
     let current_geometry = app.renderer.as_ref().unwrap();
+    let current_width =
+        app.markdown_read_content_width_for(current_geometry.width, current_geometry.scale_factor);
     assert!(app.markdown.read_layout.is_valid_for_geometry(
         app.editor.version,
-        current_geometry.width,
+        current_width,
         current_geometry.scale_factor,
         current_geometry.font_size,
     ));

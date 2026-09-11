@@ -264,8 +264,8 @@ pub struct Renderer {
     pub fonts: Vec<FontData>,
     pub ui_fonts: Vec<FontData>,
     pub scale_context: ScaleContext,
-    pub glyphs: HashMap<(char, u8), GlyphInfo>,
-    pub ui_glyphs: HashMap<char, GlyphInfo>,
+    pub glyphs: HashMap<(char, u8, u32), GlyphInfo>,
+    pub ui_glyphs: HashMap<(char, u32), GlyphInfo>,
 
     pub ascii_advances: [f32; 128],
 

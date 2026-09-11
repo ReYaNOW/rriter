@@ -260,6 +260,7 @@ pub(super) fn apply_autocomplete_scroll_drag(
     scroll.is_dragging = true;
 }
 
+#[cfg(test)]
 fn finish_markdown_read_selection_on_left_release(
     markdown: &mut crate::app::markdown::MarkdownTabState,
     state: ElementState,
@@ -278,7 +279,7 @@ fn finish_markdown_read_selection_on_left_release(
 impl App {
     pub(crate) fn cancel_pointer_interactions(&mut self) {
         self.finish_database_table_drag();
-        self.markdown.finish_read_selection();
+        self.finish_markdown_read_selection_gesture();
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         self.is_dragging_search = false;
@@ -394,6 +395,15 @@ impl App {
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
 
+    #[cfg(test)]
+    pub(crate) fn reviewer_markdown_read_mouse_input(
+        &mut self,
+        state: ElementState,
+        button: winit::event::MouseButton,
+    ) {
+        self.handle_main_mouse_input_inner(None, state, button);
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn handle_main_mouse_input_inner(
         &mut self,
@@ -404,14 +414,27 @@ impl App {
     ) {
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
-        let finish_read_selection = state == ElementState::Released
-            && button == winit::event::MouseButton::Left
-            && self.markdown.read_selecting;
-        if finish_read_selection {
+        let left_released =
+            state == ElementState::Released && button == winit::event::MouseButton::Left;
+        let mut finished_markdown_pointer = false;
+        if left_released && self.markdown.read_selecting {
             let _ = self.update_markdown_read_selection_at(mx, my);
+            finished_markdown_pointer |= self.finish_markdown_read_selection_gesture();
         }
-        if finish_markdown_read_selection_on_left_release(&mut self.markdown, state, button) {
-            self.window.as_ref().unwrap().request_redraw();
+        let finished_read_scrollbar_drag = left_released
+            && self.markdown_mode() == crate::app::MarkdownMode::Read
+            && self.scroll_y.is_dragging;
+        if finished_read_scrollbar_drag {
+            self.scroll_y.end_drag();
+            finished_markdown_pointer = true;
+        }
+        if finished_markdown_pointer
+            && let Some(window) = self.window.as_ref()
+        {
+            window.request_redraw();
+        }
+        if finished_read_scrollbar_drag {
+            return;
         }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
             let preserve_main_vertical = preserve_main_vertical_scroll_for_click(self, mx, my);
@@ -1158,6 +1181,18 @@ impl App {
                     }
                 }
                 if let Some(clicked_id) = clicked_id {
+                    if clicked_id == crate::ui_system::UiId::MarkdownReadScrollbar
+                        && button == winit::event::MouseButton::Left
+                    {
+                        if state == ElementState::Pressed {
+                            self.focus_document_text_surface();
+                            let _ = self.begin_markdown_read_scrollbar_drag_at(my);
+                        }
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
                     if clicked_id == crate::ui_system::UiId::MarkdownReadBody
                         && button == winit::event::MouseButton::Left
                     {

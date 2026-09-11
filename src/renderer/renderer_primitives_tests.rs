@@ -861,4 +861,146 @@ mod tests {
         assert_eq!(COLOR_ATLAS_MODE, 10.0);
         assert!(MAX_VERTICES >= 32_768);
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_heading_glyph_cache_uses_final_pixel_sizes_and_survives_repeated_draws() {
+        let source = "# AgjpqyЁЙ `Q`\n## AgjpqyЁЙ `Q`\n### AgjpqyЁЙ `Q`\n#### AgjpqyЁЙ `Q`\n##### AgjpqyЁЙ `Q`\n###### AgjpqyЁЙ `Q`\n";
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(source, 900.0, 1.25);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+
+        let heading_scales = [1.60, 1.42, 1.27, 1.16, 1.07, 1.00];
+        let first_cache_sizes = {
+            let renderer = app.renderer.as_ref().expect("renderer");
+            for scale in heading_scales {
+                let pixel_size = renderer.final_text_pixel_size(scale);
+                for ch in "AgjpqyЁЙ".chars() {
+                    assert!(
+                        renderer.ui_glyphs.contains_key(&(ch, pixel_size.to_bits())),
+                        "missing UI glyph {ch:?} at {pixel_size}px"
+                    );
+                }
+                assert!(
+                    renderer.glyphs.contains_key(&(
+                        'Q',
+                        GLYPH_PRESENTATION_AUTO,
+                        pixel_size.to_bits(),
+                    )),
+                    "missing inline-code glyph at {pixel_size}px"
+                );
+            }
+            (
+                renderer.ui_glyphs.len(),
+                renderer.glyphs.len(),
+                renderer.atlas_x,
+                renderer.atlas_y,
+                renderer.max_row_h,
+                renderer.color_atlas_x,
+                renderer.color_atlas_y,
+                renderer.color_max_row_h,
+            )
+        };
+
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        {
+            let renderer = app.renderer.as_ref().expect("renderer");
+            assert_eq!(
+                (
+                    renderer.ui_glyphs.len(),
+                    renderer.glyphs.len(),
+                    renderer.atlas_x,
+                    renderer.atlas_y,
+                    renderer.max_row_h,
+                    renderer.color_atlas_x,
+                    renderer.color_atlas_y,
+                    renderer.color_max_row_h,
+                ),
+                first_cache_sizes,
+                "a warmed repeated frame must neither rasterize nor upload new heading glyphs"
+            );
+        }
+
+        {
+            let renderer = app.renderer.as_mut().expect("renderer");
+            renderer.update_scale_factor(1.5);
+            assert!(
+                renderer.ui_glyphs.is_empty(),
+                "DPI reset must invalidate every UI glyph size/UV"
+            );
+        }
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        {
+            let renderer = app.renderer.as_ref().expect("renderer");
+            for scale in heading_scales {
+                let pixel_size = renderer.final_text_pixel_size(scale);
+                assert!(renderer.ui_glyphs.contains_key(&('A', pixel_size.to_bits())));
+            }
+        }
+
+        {
+            let renderer = app.renderer.as_mut().expect("renderer");
+            renderer.update_scale_factor(1.25);
+            assert!(renderer.ui_glyphs.is_empty());
+        }
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let renderer = app.renderer.as_ref().expect("renderer");
+        for scale in heading_scales {
+            let pixel_size = renderer.final_text_pixel_size(scale);
+            assert!(renderer.ui_glyphs.contains_key(&('A', pixel_size.to_bits())));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn final_size_heading_draw_keeps_raster_and_quad_one_to_one() {
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture("", 640.0, 1.25);
+        let renderer = app.renderer.as_mut().expect("renderer");
+        let pixel_size = renderer.final_text_pixel_size(1.60);
+        let base = renderer.get_ui_glyph('A').expect("base bundled-font glyph");
+        let heading = renderer
+            .get_ui_glyph_at_size('A', pixel_size)
+            .expect("final-size bundled-font heading glyph");
+        assert!(heading.width > base.width);
+        assert!(heading.height > base.height);
+
+        renderer.vertices.clear();
+        renderer.draw_string_at_pixel_size_weighted(
+            "A",
+            100.0,
+            100.0,
+            [1.0; 4],
+            pixel_size,
+            false,
+        );
+        assert_eq!(renderer.vertices.len(), 6);
+        let min_x = renderer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.pos[0])
+            .fold(f32::INFINITY, f32::min);
+        let max_x = renderer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.pos[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        let min_y = renderer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.pos[1])
+            .fold(f32::INFINITY, f32::min);
+        let max_y = renderer
+            .vertices
+            .iter()
+            .map(|vertex| vertex.pos[1])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert!(((max_x - min_x) - heading.width).abs() < 0.01);
+        assert!(((max_y - min_y) - heading.height).abs() < 0.01);
+        assert_eq!(
+            renderer.measure_ui_width_at_pixel_size("A", pixel_size),
+            Renderer::snapped_text_advance(heading.advance, 1.0)
+        );
+    }
 }

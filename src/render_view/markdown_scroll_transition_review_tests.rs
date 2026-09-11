@@ -175,7 +175,7 @@ pub(crate) mod reviewer_stage2_integration {
         source
     }
 
-    fn read_frame(app: &mut App) {
+    pub(crate) fn read_frame(app: &mut App) {
         app.ui_registry.clear();
         let renderer = app.renderer.as_mut().unwrap();
         renderer.draw_markdown_read(
@@ -675,7 +675,7 @@ pub(crate) mod reviewer_stage2_integration {
 
     // These tests go through the complete root draw, including real chrome and
     // registry replacement. Existing tests above intentionally remain unchanged.
-    fn review_v3_root_frame(app: &mut App) {
+    pub(crate) fn review_v3_root_frame(app: &mut App) {
         app.ui_registry.clear();
         let renderer = app.renderer.as_mut().unwrap();
         let (_, sticky) = renderer.draw(
@@ -734,6 +734,127 @@ pub(crate) mod reviewer_stage2_integration {
         app.scroll_y.jump_to(y);
         review_v3_root_frame(app);
         y
+    }
+
+    #[test]
+    fn reviewer_stage2_status_toggle_is_registered_only_for_markdown_across_width_and_dpi() {
+        let source = "alpha\nbeta\ngamma\n";
+        for width in [320.0, 480.0, 800.0, 1280.0, 1920.0] {
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let (_context, mut app) = fixture(source, width * scale, scale);
+                let renderer = app.renderer.as_mut().unwrap();
+                renderer.height = 420.0 * scale;
+                let markdown_path = std::path::PathBuf::from("/tmp/status-test.markdown");
+                app.ui_registry.clear();
+                renderer.draw_status_bar(
+                    &app.editor,
+                    Some((&markdown_path, crate::platform::TextEncoding::Utf16Le)),
+                    MarkdownMode::Read,
+                    None,
+                    &mut app.ui_registry,
+                    scale,
+                    -1.0,
+                    -1.0,
+                    0.0,
+                    Some("Git operation with a deliberately long label"),
+                    Some(125.5),
+                    Some(0.42),
+                );
+                let toggle = app
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::MarkdownModeToggle)
+                    .expect("320px and wider Markdown status bar keeps compact toggle accessible");
+                let status = app
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::StatusBar)
+                    .expect("status bar blocker");
+                assert!(toggle.0 >= status.0 - 0.5);
+                assert!(toggle.0 + toggle.2 <= status.0 + status.2 + 0.5);
+                assert!(toggle.1 >= status.1 - 0.5);
+                assert!(toggle.1 + toggle.3 <= status.1 + status.3 + 0.5);
+
+                let source_path = std::path::PathBuf::from("/tmp/status-test.py");
+                app.ui_registry.clear();
+                renderer.draw_status_bar(
+                    &app.editor,
+                    Some((&source_path, crate::platform::TextEncoding::Utf16Le)),
+                    MarkdownMode::Read,
+                    None,
+                    &mut app.ui_registry,
+                    scale,
+                    -1.0,
+                    -1.0,
+                    0.0,
+                    None,
+                    None,
+                    None,
+                );
+                assert_eq!(
+                    app.ui_registry
+                        .rect_for(crate::ui_system::UiId::MarkdownModeToggle),
+                    None,
+                    "ordinary source tabs must not acquire a Markdown toggle"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reviewer_stage2_cold_read_width_uses_same_editor_gutter_geometry() {
+        let mut source = String::new();
+        for i in 0..1000 {
+            source.push_str(&format!("line{i:04} alpha beta gamma delta epsilon\n"));
+        }
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let (_context, mut app) = fixture(&source, 980.0 * scale, scale);
+            app.set_markdown_mode(MarkdownMode::Read);
+            assert!(app.prepare_markdown_absolute_scroll_target_navigation());
+
+            let editor_text_x = crate::render_view::editor_left_padding_for(
+                app.editor.line_offsets.len(),
+                false,
+                false,
+                0.0,
+                scale,
+            );
+            let frame_x = crate::render_view::markdown_read::markdown_read_frame_x_for_editor_text(
+                editor_text_x,
+                scale,
+            );
+            let expected_width = (app.renderer.as_ref().unwrap().width - frame_x).max(1.0);
+            let renderer = app.renderer.as_ref().unwrap();
+            assert!(app.markdown.read_layout.is_valid_for_geometry(
+                app.editor.version,
+                expected_width,
+                renderer.scale_factor,
+                renderer.font_size,
+            ));
+
+            app.is_ide_mode = true;
+            app.ide_panel.left_width = 210.0;
+            app.ide_panel.slots[0].open = true;
+            let panel_left_w = app.ide_panel.visible_left_width(scale);
+            let ide_text_x = crate::render_view::editor_left_padding_for(
+                app.editor.line_offsets.len(),
+                false,
+                true,
+                panel_left_w,
+                scale,
+            );
+            let ide_frame_x =
+                crate::render_view::markdown_read::markdown_read_frame_x_for_editor_text(
+                    ide_text_x,
+                    scale,
+                );
+            assert_eq!(
+                app.markdown_read_content_width_for(
+                    app.renderer.as_ref().unwrap().width,
+                    scale,
+                ),
+                (app.renderer.as_ref().unwrap().width - ide_frame_x).max(1.0),
+                "cold width calculation must include the same visible IDE panel gutter"
+            );
+        }
     }
 
     #[test]
@@ -1529,6 +1650,48 @@ pub(crate) mod reviewer_stage2_integration {
         assert_eq!(app.scroll_y.current, stopped);
         assert_eq!(app.scroll_y.target, stopped);
         assert_eq!(app.scroll_y.velocity, 0.0);
+    }
+
+    #[test]
+    fn reviewer_stage2_v1_full_root_reader_body_tracks_editor_origin_at_digit_boundaries() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for line_count in [1usize, 999, 1000, 10_000] {
+                let mut source = String::new();
+                for line in 0..line_count {
+                    if line > 0 {
+                        source.push('\n');
+                    }
+                    source.push_str("reader gutter geometry");
+                }
+                let (_context, mut app) = fixture(&source, 1280.0 * scale, scale);
+                app.renderer.as_mut().unwrap().height = 420.0 * scale;
+                app.set_markdown_mode(MarkdownMode::Read);
+                review_v3_root_frame(&mut app);
+
+                let renderer = app.renderer.as_ref().unwrap();
+                let (body_x, _, body_w, _) = app
+                    .ui_registry
+                    .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+                    .expect("full root draw must register Reader body");
+                let content_inset = (28.0 * scale).round();
+                assert_eq!(
+                    (body_x + content_inset).round(),
+                    renderer.left_padding.round(),
+                    "line_count={line_count} scale={scale}"
+                );
+                assert_eq!(
+                    body_w.round(),
+                    (renderer.width - body_x).max(0.0).round(),
+                    "Reader keeps the original right edge"
+                );
+                assert!(app.markdown.read_layout.is_valid_for_geometry(
+                    app.editor.version,
+                    body_w.max(1.0),
+                    renderer.scale_factor,
+                    renderer.font_size,
+                ));
+            }
+        }
     }
 
     include!("markdown_scroll_transition_review_v6_tests.rs");

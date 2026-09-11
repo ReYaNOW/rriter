@@ -18,6 +18,79 @@ use super::*;
 
 include!("about/about_helpers.rs");
 
+fn update_markdown_read_selection_autoscroll(
+    app: &mut App,
+    dt: f32,
+    shared_scroll_updated: bool,
+) -> bool {
+    if app.markdown_mode() != crate::app::MarkdownMode::Read || !app.markdown.read_selecting {
+        return app.settle_markdown_read_selection_autoscroll();
+    }
+    if app.scroll_y.is_dragging {
+        return app.finish_markdown_read_selection_gesture();
+    }
+    let Some((_, frame_y, _, frame_h)) = app
+        .ui_registry
+        .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+    else {
+        return app.finish_markdown_read_selection_gesture();
+    };
+    let Some(renderer) = app.renderer.as_ref() else {
+        return app.finish_markdown_read_selection_gesture();
+    };
+    let scale = renderer.scale_factor;
+    let mouse_x = renderer.last_mouse_x;
+    let mouse_y = renderer.last_mouse_y;
+    let edge = markdown_read_selection_autoscroll_edge(frame_h, scale);
+    if edge <= 0.0 {
+        return app.settle_markdown_read_selection_autoscroll();
+    }
+
+    let was_autoscrolling = app.markdown.read_selection_autoscrolling;
+    let mut changed = false;
+    if shared_scroll_updated && was_autoscrolling {
+        changed |= app.update_markdown_read_selection_at(mouse_x, mouse_y);
+    }
+
+    let drag_delta =
+        markdown_read_selection_autoscroll_delta(mouse_y, frame_y, frame_y + frame_h, edge);
+    if drag_delta == 0.0 {
+        changed |= app.settle_markdown_read_selection_autoscroll();
+        return changed;
+    }
+
+    // CursorLeft has no fresh Wayland coordinates. Its projected top/bottom position
+    // still needs to update the Reader endpoint even before the first scroll tick moves.
+    changed |= app.update_markdown_read_selection_at(mouse_x, mouse_y);
+
+    let Some(max_scroll) = app.markdown.read_scroll_bounds() else {
+        changed |= app.finish_markdown_read_selection_gesture();
+        return changed;
+    };
+    if max_scroll <= 0.0 {
+        changed |= app.settle_markdown_read_selection_autoscroll();
+        return changed;
+    }
+
+    let speed = drag_autoscroll_speed(drag_delta, drag_delta < 0.0);
+    let old_target = app.scroll_y.target;
+    crate::app::markdown::scroll_markdown_read(
+        &mut app.scroll_y,
+        Some(max_scroll),
+        drag_delta.signum() * speed * dt,
+    );
+    if app.scroll_y.target != old_target {
+        app.markdown.read_selection_autoscrolling = true;
+        changed = true;
+    } else if app.markdown.read_selection_autoscrolling
+        && app.scroll_y.target == app.scroll_y.current
+        && app.scroll_y.velocity == 0.0
+    {
+        app.markdown.read_selection_autoscrolling = false;
+    }
+    changed
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if app.run_ide_on_startup {
@@ -275,10 +348,17 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     }
 
     let markdown_read = app.markdown_mode() == crate::app::MarkdownMode::Read;
+    let mut shared_scroll_updated = false;
     if app.scroll_y.update(dt) {
+        shared_scroll_updated = true;
         if markdown_read {
             app.markdown.on_shared_vertical_scroll_changed();
         }
+        needs_redraw = true;
+    }
+    if markdown_read
+        && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated)
+    {
         needs_redraw = true;
     }
 

@@ -5,6 +5,7 @@ enum AboutWaitPlan {
 }
 
 const DRAG_AUTOSCROLL_EDGE_PX: f32 = 58.0;
+const MARKDOWN_READ_SELECTION_AUTOSCROLL_EDGE_PX: f32 = 24.0;
 const DRAG_AUTOSCROLL_MIN_SPEED: f32 = 360.0;
 const DRAG_AUTOSCROLL_MAX_SPEED: f32 = 7200.0;
 const DRAG_AUTOSCROLL_ACCEL: f32 = 0.40;
@@ -206,6 +207,38 @@ fn drag_autoscroll_delta(pos: f32, start: f32, end: f32, edge: f32) -> f32 {
         pos - end + edge
     } else {
         0.0
+    }
+}
+
+#[inline(always)]
+fn markdown_read_selection_autoscroll_edge(viewport_height: f32, scale: f32) -> f32 {
+    if !viewport_height.is_finite()
+        || !scale.is_finite()
+        || viewport_height <= 0.0
+        || scale <= 0.0
+    {
+        return 0.0;
+    }
+    (MARKDOWN_READ_SELECTION_AUTOSCROLL_EDGE_PX * scale).min(viewport_height * 0.25)
+}
+
+#[inline(always)]
+fn markdown_read_selection_autoscroll_delta(
+    pos: f32,
+    start: f32,
+    end: f32,
+    edge: f32,
+) -> f32 {
+    let delta = drag_autoscroll_delta(pos, start, end, edge);
+    if delta == 0.0 || !edge.is_finite() || edge <= 0.0 {
+        return delta;
+    }
+    if pos < start {
+        delta - edge
+    } else if pos > end {
+        delta + edge
+    } else {
+        delta
     }
 }
 
@@ -418,6 +451,17 @@ fn active_context_menu_opened_at(ide_panel: &crate::app::IdePanelState) -> Optio
 }
 
 #[cfg(test)]
+impl App {
+    pub(crate) fn reviewer_tick_markdown_read_selection_autoscroll(
+        &mut self,
+        dt: f32,
+        shared_scroll_updated: bool,
+    ) -> bool {
+        update_markdown_read_selection_autoscroll(self, dt, shared_scroll_updated)
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -596,6 +640,445 @@ mod tests {
             project_cursor_outside_window_on_leave(799.0, 300.0, 800.0, 600.0);
         assert_eq!(selection_drag_autoscroll_delta(left_exit_y, 100.0, 500.0), 0.0);
         assert_eq!(selection_drag_autoscroll_delta(right_exit_y, 100.0, 500.0), 0.0);
+        assert_eq!(
+            markdown_read_selection_autoscroll_delta(left_exit_y, 100.0, 500.0, 24.0),
+            0.0
+        );
+        assert_eq!(
+            markdown_read_selection_autoscroll_delta(right_exit_y, 100.0, 500.0, 24.0),
+            0.0
+        );
+    }
+
+    #[test]
+    fn markdown_reader_edge_zone_is_dpi_scaled_small_viewport_safe_and_signed() {
+        for (scale, viewport_h, expected) in [
+            (1.0, 400.0, 24.0),
+            (1.5, 400.0, 36.0),
+            (2.0, 400.0, 48.0),
+            (2.0, 80.0, 20.0),
+        ] {
+            let edge = markdown_read_selection_autoscroll_edge(viewport_h, scale);
+            assert!((edge - expected).abs() < f32::EPSILON);
+            assert!(
+                markdown_read_selection_autoscroll_delta(edge * 0.5, 0.0, viewport_h, edge) < 0.0
+            );
+            assert_eq!(
+                markdown_read_selection_autoscroll_delta(edge, 0.0, viewport_h, edge),
+                0.0
+            );
+            assert!(
+                markdown_read_selection_autoscroll_delta(
+                    viewport_h - edge * 0.5,
+                    0.0,
+                    viewport_h,
+                    edge,
+                ) > 0.0
+            );
+            assert_eq!(
+                markdown_read_selection_autoscroll_delta(
+                    viewport_h - edge,
+                    0.0,
+                    viewport_h,
+                    edge,
+                ),
+                0.0
+            );
+
+            let epsilon = 0.01;
+            let top_inside = markdown_read_selection_autoscroll_delta(
+                epsilon,
+                0.0,
+                viewport_h,
+                edge,
+            );
+            let top_outside = markdown_read_selection_autoscroll_delta(
+                -epsilon,
+                0.0,
+                viewport_h,
+                edge,
+            );
+            let bottom_inside = markdown_read_selection_autoscroll_delta(
+                viewport_h - epsilon,
+                0.0,
+                viewport_h,
+                edge,
+            );
+            let bottom_outside = markdown_read_selection_autoscroll_delta(
+                viewport_h + epsilon,
+                0.0,
+                viewport_h,
+                edge,
+            );
+            assert!(top_inside < 0.0 && top_outside < 0.0);
+            assert!(bottom_inside > 0.0 && bottom_outside > 0.0);
+            assert!((top_inside - top_outside).abs() <= epsilon * 2.1);
+            assert!((bottom_inside - bottom_outside).abs() <= epsilon * 2.1);
+        }
+        assert_eq!(markdown_read_selection_autoscroll_edge(0.0, 1.0), 0.0);
+        assert_eq!(markdown_read_selection_autoscroll_edge(100.0, 0.0), 0.0);
+        assert_eq!(markdown_read_selection_autoscroll_edge(f32::NAN, 1.0), 0.0);
+    }
+
+    #[test]
+    fn markdown_reader_scrollbar_thumb_guards_short_zero_and_tiny_viewports() {
+        use crate::render_view::markdown_read::markdown_read_scrollbar_thumb;
+
+        assert!(markdown_read_scrollbar_thumb(10.0, 0.0, 500.0, 0.0, 1.0).is_none());
+        assert!(markdown_read_scrollbar_thumb(10.0, 180.0, 180.0, 0.0, 1.0).is_none());
+        assert!(markdown_read_scrollbar_thumb(10.0, 180.0, 120.0, 0.0, 1.0).is_none());
+        assert!(markdown_read_scrollbar_thumb(10.0, 180.0, 500.0, 0.0, 0.0).is_none());
+
+        let tiny = markdown_read_scrollbar_thumb(7.0, 12.0, 50_000.0, 49_988.0, 1.75)
+            .expect("tiny viewport still has finite scrollbar geometry");
+        assert!(tiny.start.is_finite());
+        assert!(tiny.len.is_finite());
+        assert!(tiny.len > 0.0 && tiny.len <= 12.0);
+        assert!(tiny.start >= 7.0 && tiny.start + tiny.len <= 19.0 + 0.01);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_reader_scrollbar_real_press_drag_and_release_use_shared_geometry() {
+        let mut source = String::new();
+        for i in 0..120 {
+            source.push_str(&format!("paragraph {i:03} alpha beta gamma delta epsilon\n\n"));
+        }
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 900.0, 1.25);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let max_scroll = app.markdown.read_scroll_bounds().expect("reader bounds");
+        assert!(max_scroll > 0.0);
+        app.scroll_y.jump_to((max_scroll * 0.31).round());
+        app.scroll_y.anim_speed = 9.0;
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+
+        let scrollbar = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadScrollbar)
+            .expect("reader scrollbar registry");
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .expect("reader body registry");
+        let thumb = crate::render_view::markdown_read::markdown_read_scrollbar_thumb(
+            body.1,
+            body.3,
+            app.markdown.read_layout.content_height(),
+            app.scroll_y.current.round(),
+            1.25,
+        )
+        .expect("reader thumb");
+        let original_scroll = app.scroll_y.current;
+        let mut expected_revision = app.markdown.scroll_navigation_revision();
+        for fraction in [0.1, 0.5, 0.9] {
+            let press_y = thumb.start + thumb.len * fraction;
+            app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
+            app.renderer.as_mut().unwrap().last_mouse_y = press_y;
+
+            app.reviewer_markdown_read_mouse_input(
+                winit::event::ElementState::Pressed,
+                winit::event::MouseButton::Left,
+            );
+            expected_revision = expected_revision.wrapping_add(1);
+            assert!(app.scroll_y.is_dragging);
+            assert!((app.scroll_y.drag_offset - thumb.len * fraction).abs() < 0.01);
+            assert!((app.scroll_y.current - original_scroll).abs() < 0.02);
+            assert_eq!(app.scroll_y.current, app.scroll_y.target);
+            assert_eq!(app.scroll_y.velocity, 0.0);
+            assert_eq!(app.scroll_y.anim_speed, 9.0);
+            assert_eq!(app.markdown.scroll_navigation_revision(), expected_revision);
+            assert!(app.markdown.scroll_transition.is_none());
+            assert!(app.markdown.scroll_carry.is_none());
+
+            app.reviewer_markdown_read_mouse_input(
+                winit::event::ElementState::Released,
+                winit::event::MouseButton::Left,
+            );
+            assert!(!app.scroll_y.is_dragging);
+        }
+
+        let press_y = thumb.start + thumb.len * 0.3;
+        app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
+        app.renderer.as_mut().unwrap().last_mouse_y = press_y;
+        app.reviewer_markdown_read_mouse_input(
+            winit::event::ElementState::Pressed,
+            winit::event::MouseButton::Left,
+        );
+        assert!(app.scroll_y.is_dragging);
+
+        let drag_y = body.1 + body.3 - 2.0;
+        assert!(app.drag_markdown_read_scrollbar_to(drag_y));
+        assert!(app.scroll_y.is_dragging);
+        assert!(app.scroll_y.current > original_scroll);
+        assert_eq!(app.scroll_y.current, app.scroll_y.target);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+        assert_eq!(app.scroll_y.anim_speed, 9.0);
+
+        // Release coordinates are intentionally outside the scrollbar track. The
+        // captured Reader drag must end before ordinary UI release dispatch.
+        app.renderer.as_mut().unwrap().last_mouse_x = body.0 + 30.0;
+        app.renderer.as_mut().unwrap().last_mouse_y = body.1 + body.3 * 0.5;
+        app.reviewer_markdown_read_mouse_input(
+            winit::event::ElementState::Released,
+            winit::event::MouseButton::Left,
+        );
+        assert!(!app.scroll_y.is_dragging);
+        assert_eq!(app.scroll_y.drag_offset, 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reviewer_stage3_fractional_scroll_thumb_press_preserves_displayed_position() {
+        let source = (0..140)
+            .map(|i| format!("paragraph {i:03} alpha beta gamma delta epsilon\n\n"))
+            .collect::<String>();
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 900.0, 1.25);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let max_scroll = app.markdown.read_scroll_bounds().expect("reader bounds");
+        let fractional_scroll = max_scroll * 0.3137 + 0.37;
+        app.scroll_y.current = fractional_scroll;
+        app.scroll_y.target = (fractional_scroll + 180.0).min(max_scroll);
+        app.scroll_y.velocity = 75.0;
+        app.scroll_y.anim_speed = 9.0;
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+
+        let scrollbar = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadScrollbar)
+            .expect("reader scrollbar registry");
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .expect("reader body registry");
+        let displayed_scroll = app.scroll_y.current.round();
+        let thumb = crate::render_view::markdown_read::markdown_read_scrollbar_thumb(
+            body.1,
+            body.3,
+            app.markdown.read_layout.content_height(),
+            displayed_scroll,
+            1.25,
+        )
+        .expect("reader thumb");
+        let fraction = 0.37;
+        app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
+        app.renderer.as_mut().unwrap().last_mouse_y = thumb.start + thumb.len * fraction;
+
+        app.reviewer_markdown_read_mouse_input(
+            winit::event::ElementState::Pressed,
+            winit::event::MouseButton::Left,
+        );
+
+        assert!(app.scroll_y.is_dragging);
+        assert!((app.scroll_y.current - displayed_scroll).abs() < 0.001);
+        assert_eq!(app.scroll_y.target, app.scroll_y.current);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+        assert_eq!(app.scroll_y.anim_speed, 9.0);
+        assert!((app.scroll_y.drag_offset - thumb.len * fraction).abs() < 0.01);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_reader_scrollbar_track_click_centers_thumb_and_stale_layout_releases_capture() {
+        let source = (0..100)
+            .map(|i| format!("line {i:03} lorem ipsum dolor sit amet\n\n"))
+            .collect::<String>();
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 780.0, 1.0);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .unwrap();
+        let max_scroll = app.markdown.read_scroll_bounds().unwrap();
+        let thumb = crate::render_view::markdown_read::markdown_read_scrollbar_thumb(
+            body.1,
+            body.3,
+            app.markdown.read_layout.content_height(),
+            app.scroll_y.current.round(),
+            1.0,
+        )
+        .unwrap();
+        let press_y = body.1 + body.3 - 1.0;
+        let (expected_offset, expected_target) = crate::scroll::scrollbar_drag_target(
+            press_y,
+            body.1,
+            body.3,
+            thumb,
+            max_scroll,
+            None,
+        )
+        .unwrap();
+        assert!((expected_offset - thumb.len * 0.5).abs() < 0.01);
+
+        assert!(app.begin_markdown_read_scrollbar_drag_at(press_y));
+        assert!(app.scroll_y.is_dragging);
+        assert!((app.scroll_y.drag_offset - expected_offset).abs() < 0.01);
+        assert!((app.scroll_y.current - expected_target).abs() < 0.02);
+
+        app.markdown.read_layout.invalidate();
+        assert!(app.drag_markdown_read_scrollbar_to(body.1 + 10.0));
+        assert!(!app.scroll_y.is_dragging);
+        assert_eq!(app.scroll_y.drag_offset, 0.0);
+        assert!(app.scroll_y.current.is_finite());
+        assert!(app.scroll_y.target.is_finite());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_reader_selection_edge_tick_scrolls_updates_endpoint_and_settles_on_exit() {
+        let mut source = String::new();
+        for i in 0..180 {
+            source.push_str(&format!("paragraph {i:03} alpha beta gamma delta epsilon zeta\n\n"));
+        }
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 860.0, 1.0);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let max_scroll = app.markdown.read_scroll_bounds().unwrap();
+        app.scroll_y.jump_to(max_scroll * 0.35);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .unwrap();
+        let x = body.0 + 120.0;
+        let mid_y = body.1 + body.3 * 0.5;
+        assert!(app.begin_markdown_read_selection_at(x, mid_y));
+        let anchor = app.markdown.read_selection_anchor.unwrap();
+        let hidden_editor = (app.editor.cursor, app.editor.selection_anchor, app.editor.version);
+        let start_scroll = app.scroll_y.current;
+
+        app.renderer.as_mut().unwrap().last_mouse_x = x;
+        app.renderer.as_mut().unwrap().last_mouse_y = body.1 + body.3 - 2.0;
+        let _ = app.update_markdown_read_selection_at(x, body.1 + body.3 - 2.0);
+        let cursor_before_ticks = app.markdown.read_selection_cursor.unwrap();
+        assert!(update_markdown_read_selection_autoscroll(&mut app, 0.016, false));
+        assert!(app.markdown.read_selection_autoscrolling);
+        assert!(app.scroll_y.target > app.scroll_y.current);
+
+        for _ in 0..24 {
+            let moved = app.scroll_y.update(0.016);
+            let _ = update_markdown_read_selection_autoscroll(&mut app, 0.016, moved);
+        }
+        assert!(app.scroll_y.current > start_scroll);
+        assert_eq!(app.markdown.read_selection_anchor, Some(anchor));
+        assert!(app.markdown.read_selection_cursor.unwrap() >= cursor_before_ticks);
+        assert_eq!(
+            (app.editor.cursor, app.editor.selection_anchor, app.editor.version),
+            hidden_editor
+        );
+
+        app.renderer.as_mut().unwrap().last_mouse_y = mid_y;
+        let moved = app.scroll_y.update(0.016);
+        let _ = update_markdown_read_selection_autoscroll(&mut app, 0.016, moved);
+        assert!(!app.markdown.read_selection_autoscrolling);
+        assert_eq!(app.scroll_y.target, app.scroll_y.current);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+        assert!(app.markdown.read_selecting);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_reader_selection_top_edge_reverses_and_short_document_never_scrolls() {
+        let source = (0..160)
+            .map(|i| format!("row {i:03} alpha beta gamma delta\n\n"))
+            .collect::<String>();
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 820.0, 1.5);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let max_scroll = app.markdown.read_scroll_bounds().unwrap();
+        app.scroll_y.jump_to(max_scroll * 0.65);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .unwrap();
+        let x = body.0 + 100.0;
+        assert!(app.begin_markdown_read_selection_at(x, body.1 + body.3 * 0.6));
+        let before = app.scroll_y.current;
+        app.renderer.as_mut().unwrap().last_mouse_x = x;
+        app.renderer.as_mut().unwrap().last_mouse_y = body.1 + 2.0;
+        assert!(update_markdown_read_selection_autoscroll(&mut app, 0.016, false));
+        assert!(app.scroll_y.target < before);
+        assert!(app.markdown.read_selection_autoscrolling);
+        assert!(app.finish_markdown_read_selection_gesture());
+        assert!(!app.markdown.read_selecting);
+        assert!(!app.markdown.read_selection_autoscrolling);
+        assert_eq!(app.scroll_y.target, app.scroll_y.current);
+
+        let (_context, mut short) = crate::render_view::reviewer_stage2_integration::fixture(
+            "one short paragraph\n",
+            820.0,
+            1.0,
+        );
+        short.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut short);
+        let body = short
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .unwrap();
+        assert_eq!(short.markdown.read_scroll_bounds(), Some(0.0));
+        assert!(short.begin_markdown_read_selection_at(body.0 + 80.0, body.1 + 20.0));
+        short.renderer.as_mut().unwrap().last_mouse_x = body.0 + 80.0;
+        short.renderer.as_mut().unwrap().last_mouse_y = body.1 + body.3 - 1.0;
+        let _ = update_markdown_read_selection_autoscroll(&mut short, 0.016, false);
+        assert_eq!(short.scroll_y.current, 0.0);
+        assert_eq!(short.scroll_y.target, 0.0);
+        assert!(!short.markdown.read_selection_autoscrolling);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reviewer_stage3_autoscroll_settles_without_redraw_loop_at_bottom_bound() {
+        let source = (0..160)
+            .map(|i| format!("row {i:03} alpha beta gamma delta\n\n"))
+            .collect::<String>();
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 820.0, 1.0);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let max_scroll = app.markdown.read_scroll_bounds().expect("reader bounds");
+        app.scroll_y.jump_to(max_scroll);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .expect("reader body registry");
+        let x = body.0 + 100.0;
+        let y = body.1 + body.3 - 1.0;
+        assert!(app.begin_markdown_read_selection_at(x, y));
+        app.renderer.as_mut().unwrap().last_mouse_x = x;
+        app.renderer.as_mut().unwrap().last_mouse_y = y;
+        app.markdown.read_selection_autoscrolling = true;
+
+        assert!(!update_markdown_read_selection_autoscroll(
+            &mut app, 0.016, false,
+        ));
+        assert!(!app.markdown.read_selection_autoscrolling);
+        assert_eq!(app.scroll_y.current, max_scroll);
+        assert_eq!(app.scroll_y.target, max_scroll);
+        assert_eq!(app.scroll_y.velocity, 0.0);
+        assert!(!update_markdown_read_selection_autoscroll(
+            &mut app, 0.016, false,
+        ));
+    }
+
+    #[test]
+    fn markdown_reader_drag_route_precedes_generic_editor_scrollbar_drag_branch() {
+        let cursor = include_str!("../../mouse/cursor.rs");
+        let reader_drag = cursor
+            .find("self.drag_markdown_read_scrollbar_to(py)")
+            .expect("Reader scrollbar drag route");
+        let generic_drag = cursor
+            .find("else if self.scroll_y.is_dragging")
+            .expect("generic Editor/minimap drag route");
+        assert!(reader_drag < generic_drag);
     }
 
     #[test]

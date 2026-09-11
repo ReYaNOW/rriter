@@ -832,31 +832,125 @@ mod tests {
     }
 
     #[test]
-    fn markdown_status_narrow_layout_stays_inside_bar_without_overlap() {
-        let bar = crate::ui_system::UiClipRect::new(48.0, 700.0, 312.0, 28.0);
-        let layout = status_language_layout(bar, 70.0, Some(112.0), 1.0);
-        let mode = layout.mode_rect.expect("markdown mode button");
-        assert!(mode.w > 0.0 && mode.h > 0.0);
-        assert_rect_inside(mode, bar);
-        assert!(mode.x + mode.w <= layout.language_x - 8.0 + 0.5);
-        assert!(!status_diagnostics_fit(layout, mode.x + 1.0, 1.0));
+    fn markdown_status_layout_places_single_toggle_before_line_across_digit_boundaries() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for mode in [crate::app::MarkdownMode::Read, crate::app::MarkdownMode::Edit] {
+                for line_count in [1usize, 999, 1000, 10000] {
+                    let bar = crate::ui_system::UiClipRect::new(
+                        48.0 * scale,
+                        700.0 * scale,
+                        900.0 * scale,
+                        30.0 * scale,
+                    );
+                    let line_digits = line_count.to_string().len().max(2) as f32;
+                    let mode_width = match mode {
+                        crate::app::MarkdownMode::Read => 92.0,
+                        crate::app::MarkdownMode::Edit => 128.0,
+                    };
+                    let layout = status_markdown_layout(
+                        bar,
+                        StatusMarkdownWidths {
+                            language: 72.0 * scale,
+                            encoding: Some(48.0 * scale),
+                            mode_full: mode_width * scale,
+                            mode_compact: 14.0 * scale,
+                            line: (48.0 + line_digits * 10.0) * scale,
+                            character: 76.0 * scale,
+                            selected: Some(104.0 * scale),
+                        },
+                        scale,
+                    );
+                    let mode_rect = layout.mode_rect.expect("markdown mode button");
+                    let line_x = layout.line_x.expect("position group");
+                    assert_rect_inside(mode_rect, bar);
+                    assert!(!layout.compact_mode, "wide bar must keep full mode label");
+                    assert!(layout.show_selected);
+                    assert_eq!(
+                        (line_x - (mode_rect.x + mode_rect.w)).round(),
+                        (8.0 * scale).round(),
+                        "mode={mode:?} line_count={line_count}",
+                    );
+                    assert!(layout.encoding_x.unwrap() > line_x);
+                    assert!(layout.language_x.unwrap() > layout.encoding_x.unwrap());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn markdown_status_narrow_layout_compacts_then_drops_optional_items_without_overlap() {
+        for width in [320.0, 480.0, 800.0, 1280.0, 1920.0] {
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let bar = crate::ui_system::UiClipRect::new(
+                    48.0 * scale,
+                    700.0 * scale,
+                    (width * scale - 48.0 * scale).max(1.0),
+                    30.0 * scale,
+                );
+                let layout = status_markdown_layout(
+                    bar,
+                    StatusMarkdownWidths {
+                        language: 94.0 * scale,
+                        encoding: Some(72.0 * scale),
+                        mode_full: 126.0 * scale,
+                        mode_compact: 14.0 * scale,
+                        line: 70.0 * scale,
+                        character: 80.0 * scale,
+                        selected: Some(122.0 * scale),
+                    },
+                    scale,
+                );
+                let line_x = layout.line_x.expect("320px and wider must retain position group");
+                if let Some(mode) = layout.mode_rect {
+                    assert_rect_inside(mode, bar);
+                    assert!(mode.x + mode.w <= line_x - (8.0 * scale).round() + 0.5);
+                    assert!(mode.w >= 14.0 * scale);
+                }
+                if let (Some(encoding_x), Some(language_x)) =
+                    (layout.encoding_x, layout.language_x)
+                {
+                    assert!(encoding_x < language_x);
+                }
+                assert!(layout.group_left >= bar.x + (10.0 * scale).round() - 0.5);
+            }
+        }
+    }
+
+    #[test]
+    fn markdown_status_too_narrow_for_compact_mode_has_no_toggle_hitbox() {
+        let bar = crate::ui_system::UiClipRect::new(48.0, 700.0, 120.0, 30.0);
+        let layout = status_markdown_layout(
+            bar,
+            StatusMarkdownWidths {
+                language: 90.0,
+                encoding: Some(70.0),
+                mode_full: 120.0,
+                mode_compact: 18.0,
+                line: 62.0,
+                character: 70.0,
+                selected: Some(100.0),
+            },
+            1.0,
+        );
+        assert!(layout.mode_rect.is_none());
+        assert!(layout.line_x.is_none());
 
         let mut registry = crate::ui_system::UiRegistry::new();
-        let mx = mode.x + mode.w * 0.5;
-        let my = mode.y + mode.h * 0.5;
-        assert!(registry.register_rect_clipped(
-            crate::ui_system::UiId::MarkdownModeToggle,
-            mode.x,
-            mode.y,
-            mode.w,
-            mode.h,
-            bar,
-            mx,
-            my,
-        ));
+        if let Some(mode) = layout.mode_rect {
+            registry.register_rect_clipped(
+                crate::ui_system::UiId::MarkdownModeToggle,
+                mode.x,
+                mode.y,
+                mode.w,
+                mode.h,
+                bar,
+                mode.x + 1.0,
+                mode.y + 1.0,
+            );
+        }
         assert_eq!(
-            registry.find_at(mx, my),
-            Some(crate::ui_system::UiId::MarkdownModeToggle)
+            registry.rect_for(crate::ui_system::UiId::MarkdownModeToggle),
+            None
         );
     }
 

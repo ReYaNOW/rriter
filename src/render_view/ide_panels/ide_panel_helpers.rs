@@ -44,7 +44,28 @@ fn dialog_button_text_baseline(btn_y: f32, btn_h: f32, scale: f32) -> f32 {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct StatusLanguageLayout {
     language_x: f32,
+    group_left: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StatusMarkdownWidths {
+    language: f32,
+    encoding: Option<f32>,
+    mode_full: f32,
+    mode_compact: f32,
+    line: f32,
+    character: f32,
+    selected: Option<f32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct StatusMarkdownLayout {
+    language_x: Option<f32>,
+    encoding_x: Option<f32>,
     mode_rect: Option<crate::ui_system::UiClipRect>,
+    compact_mode: bool,
+    line_x: Option<f32>,
+    show_selected: bool,
     group_left: f32,
 }
 
@@ -65,27 +86,203 @@ fn markdown_status_mode_label(mode: crate::app::MarkdownMode) -> &'static str {
 fn status_language_layout(
     bar: crate::ui_system::UiClipRect,
     language_w: f32,
-    mode_text_w: Option<f32>,
     scale: f32,
 ) -> StatusLanguageLayout {
     let pad = (10.0 * scale).round();
-    let gap = (8.0 * scale).round();
     let language_x = (bar.x + bar.w - pad - language_w)
         .max(bar.x + pad)
         .round();
-    let mode_rect = mode_text_w.and_then(|text_w| {
-        let desired_w = (text_w + 16.0 * scale).round();
-        let x = (language_x - gap - desired_w).max(bar.x + pad).round();
-        let available_w = (language_x - gap - x).max(0.0).round();
-        let w = desired_w.min(available_w);
-        let h = (bar.h - 6.0 * scale).max(1.0).round();
-        let y = (bar.y + (bar.h - h) * 0.5).round();
-        (w > 1.0).then_some(crate::ui_system::UiClipRect::new(x, y, w, h))
-    });
     StatusLanguageLayout {
         language_x,
-        group_left: mode_rect.map_or(language_x, |rect| rect.x),
+        group_left: language_x,
+    }
+}
+
+fn status_markdown_layout(
+    bar: crate::ui_system::UiClipRect,
+    widths: StatusMarkdownWidths,
+    scale: f32,
+) -> StatusMarkdownLayout {
+    let pad = (10.0 * scale).round();
+    let item_gap = (14.0 * scale).round();
+    let trailing_gap = (22.0 * scale).round();
+    let mode_gap = (8.0 * scale).round();
+    let full_mode_w = (widths.mode_full + 16.0 * scale).round();
+    let compact_mode_w = (widths.mode_compact + 12.0 * scale).round();
+    let inner_left = (bar.x + pad).round();
+    let inner_right = (bar.x + bar.w - pad).max(inner_left).round();
+    let available = (inner_right - inner_left).max(0.0);
+
+    let mut compact_mode = false;
+    let mut show_mode = true;
+    let mut show_selected = widths.selected.is_some();
+    let mut show_encoding = widths.encoding.is_some();
+    let mut show_language = widths.language > 0.0;
+    let mut show_position = true;
+
+    let total_width = |compact_mode: bool,
+                       show_mode: bool,
+                       show_selected: bool,
+                       show_encoding: bool,
+                       show_language: bool,
+                       show_position: bool| {
+        if !show_position {
+            return 0.0;
+        }
+        let mut total = widths.line + item_gap + widths.character;
+        if show_selected {
+            total += item_gap + widths.selected.unwrap_or(0.0);
+        }
+        if show_mode {
+            total += mode_gap
+                + if compact_mode {
+                    compact_mode_w
+                } else {
+                    full_mode_w
+                };
+        }
+        let mut trailing = 0.0;
+        if show_encoding {
+            trailing += widths.encoding.unwrap_or(0.0);
+        }
+        if show_language {
+            if trailing > 0.0 {
+                trailing += item_gap;
+            }
+            trailing += widths.language;
+        }
+        if trailing > 0.0 {
+            total += trailing_gap + trailing;
+        }
+        total
+    };
+
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        compact_mode = true;
+    }
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        show_selected = false;
+    }
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        show_encoding = false;
+    }
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        show_language = false;
+    }
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        show_mode = false;
+    }
+    if total_width(
+        compact_mode,
+        show_mode,
+        show_selected,
+        show_encoding,
+        show_language,
+        show_position,
+    ) > available
+    {
+        show_position = false;
+    }
+
+    let mut cursor = inner_right;
+    let language_x = show_language.then(|| {
+        let x = (cursor - widths.language).round();
+        cursor = x;
+        x
+    });
+    let encoding_x = if show_encoding {
+        if language_x.is_some() {
+            cursor -= item_gap;
+        }
+        let x = (cursor - widths.encoding.unwrap_or(0.0)).round();
+        cursor = x;
+        Some(x)
+    } else {
+        None
+    };
+    if show_position && (language_x.is_some() || encoding_x.is_some()) {
+        cursor -= trailing_gap;
+    }
+
+    let position_w = widths.line
+        + item_gap
+        + widths.character
+        + if show_selected {
+            item_gap + widths.selected.unwrap_or(0.0)
+        } else {
+            0.0
+        };
+    let line_x = show_position.then(|| (cursor - position_w).round());
+    let mode_rect = if show_mode {
+        line_x.map(|line_x| {
+            let w = if compact_mode {
+                compact_mode_w
+            } else {
+                full_mode_w
+            };
+            let h = (bar.h - 6.0 * scale).max(1.0).round();
+            let x = (line_x - mode_gap - w).round();
+            let y = (bar.y + (bar.h - h) * 0.5).round();
+            crate::ui_system::UiClipRect::new(x, y, w, h)
+        })
+    } else {
+        None
+    };
+    let group_left = mode_rect
+        .map(|rect| rect.x)
+        .or(line_x)
+        .or(encoding_x)
+        .or(language_x)
+        .unwrap_or(inner_right);
+
+    StatusMarkdownLayout {
+        language_x,
+        encoding_x,
         mode_rect,
+        compact_mode,
+        line_x,
+        show_selected,
+        group_left,
     }
 }
 
@@ -104,14 +301,9 @@ impl Renderer {
         &mut self,
         language: &str,
         encoding: Option<crate::platform::TextEncoding>,
-        markdown_mode: Option<crate::app::MarkdownMode>,
         layout: StatusLanguageLayout,
         left_limit: f32,
-        ui_registry: &mut crate::ui_system::UiRegistry,
-        bar: crate::ui_system::UiClipRect,
         scale: f32,
-        mx: f32,
-        my: f32,
         text_y: f32,
         text_scale: f32,
     ) -> f32 {
@@ -123,7 +315,43 @@ impl Renderer {
             text_scale,
         );
 
-        if let (Some(mode), Some(rect)) = (markdown_mode, layout.mode_rect) {
+        let encoding_layout = encoding
+            .and_then(crate::platform::TextEncoding::status_label)
+            .map(|label| {
+                let width = self.measure_ui_width(label, text_scale).round();
+                (label, layout.group_left - 14.0 * scale - width)
+            })
+            .filter(|(_, x)| *x > left_limit + 8.0 * scale);
+        if let Some((label, x)) = encoding_layout {
+            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+            x
+        } else {
+            layout.group_left
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn draw_status_markdown_right_group(
+        &mut self,
+        language: &str,
+        encoding_label: Option<&str>,
+        mode: crate::app::MarkdownMode,
+        layout: StatusMarkdownLayout,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        bar: crate::ui_system::UiClipRect,
+        scale: f32,
+        mx: f32,
+        my: f32,
+        text_y: f32,
+        text_scale: f32,
+    ) {
+        if let Some(x) = layout.language_x {
+            self.draw_string_scaled(language, x, text_y, self.theme.fg, text_scale);
+        }
+        if let (Some(label), Some(x)) = (encoding_label, layout.encoding_x) {
+            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
+        }
+        if let Some(rect) = layout.mode_rect {
             let hovered = ui_registry.register_rect_clipped(
                 crate::ui_system::UiId::MarkdownModeToggle,
                 rect.x,
@@ -143,37 +371,16 @@ impl Renderer {
                 5.0 * scale,
                 [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], alpha],
             );
-            let label = markdown_status_mode_label(mode);
-            let mode_scale = 0.82;
-            let full_label_w = self.measure_ui_width(label, mode_scale).round();
-            let (visible_label, label_w) = if full_label_w + 12.0 * scale <= rect.w {
-                (label, full_label_w)
+            let visible_label = if layout.compact_mode {
+                "↔"
             } else {
-                let short = "↔";
-                (short, self.measure_ui_width(short, mode_scale).round())
+                markdown_status_mode_label(mode)
             };
+            let mode_scale = 0.82;
+            let label_w = self.measure_ui_width(visible_label, mode_scale).round();
+            debug_assert!(label_w <= rect.w + 0.5);
             let label_x = (rect.x + (rect.w - label_w) * 0.5).round();
-            self.draw_string_scaled(
-                visible_label,
-                label_x,
-                text_y,
-                self.theme.fg,
-                mode_scale,
-            );
-        }
-
-        let encoding_layout = encoding
-            .and_then(crate::platform::TextEncoding::status_label)
-            .map(|label| {
-                let width = self.measure_ui_width(label, text_scale).round();
-                (label, layout.group_left - 14.0 * scale - width)
-            })
-            .filter(|(_, x)| *x > left_limit + 8.0 * scale);
-        if let Some((label, x)) = encoding_layout {
-            self.draw_string_scaled(label, x, text_y, self.theme.fg, text_scale);
-            x
-        } else {
-            layout.group_left
+            self.draw_string_scaled(visible_label, label_x, text_y, self.theme.fg, mode_scale);
         }
     }
 }

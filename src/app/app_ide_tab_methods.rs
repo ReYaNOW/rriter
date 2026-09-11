@@ -794,6 +794,7 @@ impl App {
             return;
         }
 
+        self.cancel_pointer_interactions();
         let previous_tab = self.active_tab;
         self.save_active_database_query();
         self.commit_api_focus();

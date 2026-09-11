@@ -42,12 +42,12 @@ struct ReadSourceLine {
     y: f32,
 }
 
-fn text_line_top(text: &TextBlock, line: &TextLine) -> f32 {
-    (line.y - text.line_height * 0.82).round()
+fn text_line_top(_text: &TextBlock, line: &TextLine) -> f32 {
+    line.top
 }
 
-fn code_line_top(code: &CodeBlock, line: &CodeLine) -> f32 {
-    (line.y - code.line_height * 0.82).round()
+fn code_line_top(_code: &CodeBlock, line: &CodeLine) -> f32 {
+    line.top
 }
 
 fn append_styled_line_source_entries(
@@ -174,7 +174,7 @@ fn build_read_source_indices(
                         block_scope,
                         &mut source_lines,
                     );
-                    push_anchor_line(&mut anchors, preferred, top, top + text.line_height);
+                    push_anchor_line(&mut anchors, preferred, line.top, line.bottom);
                 }
             }
             ReadBlockKind::Code(code) => {
@@ -183,8 +183,8 @@ fn build_read_source_indices(
                     push_anchor_line(
                         &mut anchors,
                         line.source_range.clone(),
-                        top,
-                        top + code.line_height,
+                        line.top,
+                        line.bottom,
                     );
                     source_lines.push(ReadSourceLine {
                         source_range: line.source_range.clone(),
@@ -949,7 +949,7 @@ mod markdown_scroll_tests {
             TextStyle::default().with(TextStyle::RAW),
             Some(0..source.len()),
         );
-        let mut builder = LayoutBuilder::new(source, width, scale, |_, _| 8.0 * scale);
+        let mut builder = LayoutBuilder::new(source, width, scale, test_layout_text_metrics(scale), |_, _, _| 8.0 * scale);
         builder.append_text(styled, 0.82, 0.0, 0, None, None, true, 0..source.len());
         let (blocks, content_height) = builder.finish();
         let mut cache = MarkdownReadLayoutCache::default();
@@ -966,7 +966,7 @@ mod markdown_scroll_tests {
         let document = crate::languages::markdown::MarkdownParseState::default()
             .parse(source)
             .expect("markdown parse");
-        let mut builder = LayoutBuilder::new(source, width, scale, |_, _| 8.0 * scale);
+        let mut builder = LayoutBuilder::new(source, width, scale, test_layout_text_metrics(scale), |_, _, _| 8.0 * scale);
         builder.append_blocks(&document.blocks, 0.0, 0, None);
         let (blocks, content_height) = builder.finish();
         let mut cache = MarkdownReadLayoutCache::default();

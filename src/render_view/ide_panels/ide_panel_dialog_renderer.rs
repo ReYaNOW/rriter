@@ -253,11 +253,62 @@ impl Renderer {
         let language = language_display_name_for_ext(ext);
         let language_w = self.measure_ui_width(language, text_scale).round();
         let status_markdown_mode = markdown_status_mode_for_ext(ext, markdown_mode);
-        let mode_text_w = status_markdown_mode
-            .map(markdown_status_mode_label)
-            .map(|label| self.measure_ui_width(label, 0.82).round());
+        let status_encoding = editor_file.map(|(_, encoding)| encoding);
+        let encoding_label = status_encoding.and_then(crate::platform::TextEncoding::status_label);
+        let encoding_w = encoding_label.map(|label| self.measure_ui_width(label, text_scale).round());
         let bar_rect = crate::ui_system::UiClipRect::new(bar_x, bar_y, bar_w, bar_h);
-        let language_layout = status_language_layout(bar_rect, language_w, mode_text_w, s);
+        let (line, character) = cursor_line_and_character(editor);
+        const ZERO_SAMPLE: &str = "00000000000000000000";
+        let position_item_gap = 14.0 * s;
+        let digit_gap = 4.0 * s;
+        let line_digits = line.to_string();
+        let char_digits = character.to_string();
+        let line_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..line_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let char_digits_w = self
+            .measure_mono_width(
+                &ZERO_SAMPLE[..char_digits.len().max(2).min(ZERO_SAMPLE.len())],
+                text_scale,
+            )
+            .round();
+        let line_label_w = self.measure_ui_width("Стр", text_scale).round();
+        let char_label_w = self.measure_ui_width("Сим", text_scale).round();
+        let line_block_w = line_label_w + digit_gap + line_digits_w;
+        let char_block_w = char_label_w + digit_gap + char_digits_w;
+        let selected_count = selected_char_count(editor);
+        let selected_count_digits = selected_count.map(|count| count.to_string());
+        let selected_block_w = selected_count_digits.as_ref().map(|digits| {
+            self.measure_ui_width("(", text_scale).round()
+                + self
+                    .measure_mono_width(
+                        &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
+                        text_scale,
+                    )
+                    .round()
+                + self.measure_ui_width(" выделено)", text_scale).round()
+        });
+        let markdown_layout = status_markdown_mode.map(|mode| {
+            status_markdown_layout(
+                bar_rect,
+                StatusMarkdownWidths {
+                    language: language_w,
+                    encoding: encoding_w,
+                    mode_full: self.measure_ui_width(markdown_status_mode_label(mode), 0.82).round(),
+                    mode_compact: self.measure_ui_width("↔", 0.82).round(),
+                    line: line_block_w,
+                    character: char_block_w,
+                    selected: selected_block_w,
+                },
+                s,
+            )
+        });
+        let language_layout = status_markdown_mode
+            .is_none()
+            .then(|| status_language_layout(bar_rect, language_w, s));
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
         let error_w = self.measure_ui_width(&scratch, text_scale).round();
@@ -267,8 +318,10 @@ impl Renderer {
         let diagnostics_w =
             icon_sz + icon_gap + error_w + item_gap + icon_sz + icon_gap + warning_w + pad_x;
         let diagnostics_right = diag_x + diagnostics_w;
-        let show_diagnostics =
-            status_diagnostics_fit(language_layout, diagnostics_right, s);
+        let show_diagnostics = markdown_layout.map_or_else(
+            || status_diagnostics_fit(language_layout.expect("non-Markdown status layout"), diagnostics_right, s),
+            |layout| layout.group_left > diagnostics_right + 8.0 * s,
+        );
         let diagnostics_hovered = if show_diagnostics {
             let hovered = ui_registry.register_rect(
                 crate::ui_system::UiId::StatusDiagnostics,
@@ -325,63 +378,49 @@ impl Renderer {
         } else {
             bar_x + pad_x
         };
-        let position_group_right = self.draw_status_language_group(
-            language,
-            editor_file.map(|(_, encoding)| encoding),
-            status_markdown_mode,
-            language_layout,
-            left_status_limit,
-            ui_registry,
-            bar_rect,
-            s,
-            mx,
-            my,
-            text_y,
-            text_scale,
-        );
-        let (line, character) = cursor_line_and_character(editor);
-        const ZERO_SAMPLE: &str = "00000000000000000000";
-        let item_gap = 14.0 * s;
-        let digit_gap = 4.0 * s;
-        let line_digits = line.to_string();
-        let char_digits = character.to_string();
-        let line_digits_w = self
-            .measure_mono_width(
-                &ZERO_SAMPLE[..line_digits.len().max(2).min(ZERO_SAMPLE.len())],
-                text_scale,
-            )
-            .round();
-        let char_digits_w = self
-            .measure_mono_width(
-                &ZERO_SAMPLE[..char_digits.len().max(2).min(ZERO_SAMPLE.len())],
-                text_scale,
-            )
-            .round();
-        let line_label_w = self.measure_ui_width("Стр", text_scale).round();
-        let char_label_w = self.measure_ui_width("Сим", text_scale).round();
-        let line_block_w = line_label_w + digit_gap + line_digits_w;
-        let char_block_w = char_label_w + digit_gap + char_digits_w;
-        let selected_count = selected_char_count(editor);
-        let selected_count_digits = selected_count.map(|count| count.to_string());
-        let selected_block_w = selected_count_digits
-            .as_ref()
-            .map(|digits| {
-                self.measure_ui_width("(", text_scale).round()
-                    + self
-                        .measure_mono_width(
-                            &ZERO_SAMPLE[..digits.len().max(2).min(ZERO_SAMPLE.len())],
-                            text_scale,
-                        )
-                        .round()
-                    + self.measure_ui_width(" выделено)", text_scale).round()
-            })
-            .unwrap_or(0.0);
         let pos_color = self.theme.fg;
-        let mut group_w = line_block_w + item_gap + char_block_w;
-        if selected_block_w > 0.0 {
-            group_w += item_gap + selected_block_w;
-        }
-        let line_x = position_group_right - 22.0 * s - group_w;
+        let (line_x, show_selected, progress_anchor_x) = if let (Some(mode), Some(layout)) =
+            (status_markdown_mode, markdown_layout)
+        {
+            self.draw_status_markdown_right_group(
+                language,
+                encoding_label,
+                mode,
+                layout,
+                ui_registry,
+                bar_rect,
+                s,
+                mx,
+                my,
+                text_y,
+                text_scale,
+            );
+            (
+                layout.line_x,
+                layout.show_selected,
+                layout.line_x.map(|_| layout.group_left),
+            )
+        } else {
+            let position_group_right = self.draw_status_language_group(
+                language,
+                status_encoding,
+                language_layout.expect("non-Markdown status layout"),
+                left_status_limit,
+                s,
+                text_y,
+                text_scale,
+            );
+            let mut group_w = line_block_w + position_item_gap + char_block_w;
+            if let Some(selected_w) = selected_block_w {
+                group_w += position_item_gap + selected_w;
+            }
+            let raw_line_x = position_group_right - 22.0 * s - group_w;
+            (
+                (raw_line_x > left_status_limit + 8.0 * s).then_some(raw_line_x),
+                true,
+                Some(raw_line_x),
+            )
+        };
         if let Some(label) = progress_label {
             let label_w = self.measure_ui_width(label, 0.82).round();
             let progress_gap = 8.0 * s;
@@ -410,8 +449,8 @@ impl Renderer {
             };
             let elapsed_gap = if elapsed_w > 0.0 { 7.0 * s } else { 0.0 };
             let progress_w = label_w + elapsed_gap + elapsed_w + progress_gap + track_w;
-            let progress_x = line_x - 18.0 * s - progress_w;
-            if progress_x > left_status_limit + 8.0 * s {
+            let progress_x = progress_anchor_x.map(|x| x - 18.0 * s - progress_w);
+            if let Some(progress_x) = progress_x.filter(|x| *x > left_status_limit + 8.0 * s) {
                 let elapsed_x = progress_x + label_w + elapsed_gap;
                 let track_x = elapsed_x + elapsed_w + progress_gap;
                 let track_y = bar_y + (bar_h - track_h) / 2.0;
@@ -462,7 +501,7 @@ impl Renderer {
                 }
             }
         }
-        if line_x > left_status_limit + 8.0 * s {
+        if let Some(line_x) = line_x {
             self.draw_string_scaled("Стр", line_x, text_y, pos_color, text_scale);
             self.draw_string_mono_scaled(
                 &line_digits,
@@ -471,7 +510,7 @@ impl Renderer {
                 pos_color,
                 text_scale,
             );
-            let char_x = line_x + line_block_w + item_gap;
+            let char_x = line_x + line_block_w + position_item_gap;
             self.draw_string_scaled("Сим", char_x, text_y, pos_color, text_scale);
             self.draw_string_mono_scaled(
                 &char_digits,
@@ -480,8 +519,8 @@ impl Renderer {
                 pos_color,
                 text_scale,
             );
-            if let Some(digits) = selected_count_digits.as_deref() {
-                let selected_x = char_x + char_block_w + item_gap;
+            if show_selected && let Some(digits) = selected_count_digits.as_deref() {
+                let selected_x = char_x + char_block_w + position_item_gap;
                 self.draw_string_scaled("(", selected_x, text_y, pos_color, text_scale);
                 let digit_x = selected_x + self.measure_ui_width("(", text_scale).round();
                 self.draw_string_mono_scaled(digits, digit_x, text_y, pos_color, text_scale);

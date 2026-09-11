@@ -38,6 +38,29 @@ pub static TELEMETRY_ENABLED: AtomicBool = AtomicBool::new(false);
 pub(crate) const EDITOR_BOTTOM_MIN_VISIBLE_LINES: f32 = 5.0;
 pub(crate) const IDE_STATUS_BAR_HEIGHT: f32 = 30.0;
 
+#[inline]
+pub(crate) fn editor_left_padding_for(
+    line_count: usize,
+    active_tab_is_git_diff: bool,
+    is_ide_mode: bool,
+    panel_left_w: f32,
+    scale: f32,
+) -> f32 {
+    let sidebar_w = if is_ide_mode { 48.0 * scale } else { 0.0 };
+    let digits = line_count.to_string().len().max(3);
+    let gutter_extra = if active_tab_is_git_diff {
+        12.0 * scale
+    } else {
+        8.0 * scale
+    };
+    (30.0 * scale
+        + digits as f32 * 10.0 * scale
+        + gutter_extra
+        + sidebar_w
+        + panel_left_w)
+        .round()
+}
+
 pub(crate) fn ide_tab_bar_height(show_welcome: bool, is_ide_mode: bool, scale: f32) -> f32 {
     if show_welcome || !is_ide_mode {
         0.0
@@ -787,6 +810,25 @@ mod tests {
         assert_eq!(editor_content_top_inset(false, true, true, 1.5), 126.0);
         assert_eq!(editor_content_top_inset(true, true, true, 1.0), 0.0);
         assert_eq!(editor_content_top_inset(false, false, true, 1.0), 0.0);
+    }
+
+    #[test]
+    fn editor_left_padding_tracks_line_digits_panel_and_fractional_scale() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            let closed_999 = editor_left_padding_for(999, false, true, 0.0, scale);
+            let closed_1000 = editor_left_padding_for(1000, false, true, 0.0, scale);
+            assert_eq!(
+                closed_1000 - closed_999,
+                (10.0 * scale).round(),
+                "line-number digit boundary must move the shared text origin"
+            );
+
+            let open = editor_left_padding_for(1000, false, true, 240.0 * scale, scale);
+            assert_eq!(open - closed_1000, (240.0 * scale).round());
+
+            let git = editor_left_padding_for(1000, true, true, 0.0, scale);
+            assert_eq!(git - closed_1000, (4.0 * scale).round());
+        }
     }
 }
 use glow::HasContext;

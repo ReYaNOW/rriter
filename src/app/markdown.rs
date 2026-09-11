@@ -94,6 +94,7 @@ pub struct MarkdownTabState {
     pub(crate) read_selection_anchor: Option<usize>,
     pub(crate) read_selection_cursor: Option<usize>,
     pub(crate) read_selecting: bool,
+    pub(crate) read_selection_autoscrolling: bool,
     pub(crate) copied_code_block: Option<usize>,
     pub(crate) code_copy_hover_valid: bool,
 }
@@ -124,6 +125,7 @@ impl Default for MarkdownTabState {
             read_selection_anchor: None,
             read_selection_cursor: None,
             read_selecting: false,
+            read_selection_autoscrolling: false,
             copied_code_block: None,
             code_copy_hover_valid: false,
         }
@@ -216,22 +218,58 @@ impl MarkdownTabState {
         self.read_selection_anchor = Some(byte);
         self.read_selection_cursor = Some(byte);
         self.read_selecting = true;
+        self.read_selection_autoscrolling = false;
     }
 
-    pub(crate) fn update_read_selection(&mut self, byte: usize) {
-        if self.read_selecting {
-            self.read_selection_cursor = Some(byte.min(self.read_source.len()));
+    pub(crate) fn update_read_selection(&mut self, byte: usize) -> bool {
+        if !self.read_selecting {
+            return false;
         }
+        let byte = byte.min(self.read_source.len());
+        let changed = self.read_selection_cursor != Some(byte);
+        self.read_selection_cursor = Some(byte);
+        changed
+    }
+
+    pub(crate) fn settle_read_selection_autoscroll(
+        &mut self,
+        scroll: &mut crate::scroll::ScrollState,
+    ) -> bool {
+        if !self.read_selection_autoscrolling {
+            return false;
+        }
+        self.read_selection_autoscrolling = false;
+        if !scroll.current.is_finite() {
+            let changed = !scroll.is_settled();
+            scroll.reset();
+            return changed;
+        }
+        let changed = scroll.target != scroll.current || scroll.velocity != 0.0;
+        scroll.target = scroll.current;
+        scroll.velocity = 0.0;
+        changed
+    }
+
+    pub(crate) fn finish_read_selection_gesture(
+        &mut self,
+        scroll: &mut crate::scroll::ScrollState,
+    ) -> bool {
+        let was_selecting = self.read_selecting;
+        let changed = self.settle_read_selection_autoscroll(scroll);
+        self.finish_read_selection();
+        was_selecting || changed
     }
 
     pub(crate) fn finish_read_selection(&mut self) {
         self.read_selecting = false;
+        self.read_selection_autoscrolling = false;
     }
 
     pub(crate) fn clear_read_selection(&mut self) {
         self.read_selection_anchor = None;
         self.read_selection_cursor = None;
         self.read_selecting = false;
+        self.read_selection_autoscrolling = false;
     }
 
     pub(crate) fn mark_code_copy_hover_valid(&mut self) -> bool {
@@ -347,6 +385,7 @@ impl App {
             return;
         }
 
+        self.finish_markdown_read_selection_gesture();
         let from = self.markdown.mode;
         let reverse_policy = self
             .markdown
@@ -440,6 +479,7 @@ impl App {
         {
             return false;
         }
+        self.finish_markdown_read_selection_gesture();
         let source = self.editor.get_full_text();
         self.markdown
             .refresh_read_model(self.editor.version, source);
@@ -508,7 +548,118 @@ impl App {
         let Some(byte) = byte else {
             return false;
         };
-        self.markdown.update_read_selection(byte);
+        self.markdown.update_read_selection(byte)
+    }
+
+    pub(crate) fn settle_markdown_read_selection_autoscroll(&mut self) -> bool {
+        self.markdown
+            .settle_read_selection_autoscroll(&mut self.scroll_y)
+    }
+
+    pub(crate) fn finish_markdown_read_selection_gesture(&mut self) -> bool {
+        self.markdown
+            .finish_read_selection_gesture(&mut self.scroll_y)
+    }
+
+    fn markdown_read_scrollbar_geometry(
+        &self,
+    ) -> Option<(crate::scroll::ScrollbarThumb, f32, f32, f32)> {
+        if self.markdown_mode() != MarkdownMode::Read
+            || self.markdown.read_document(self.editor.version).is_none()
+        {
+            return None;
+        }
+        let frame = self
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)?;
+        let renderer = self.renderer.as_ref()?;
+        let content_width = frame.2.max(1.0);
+        if !self.markdown.read_layout.is_valid_for_geometry(
+            self.editor.version,
+            content_width,
+            renderer.scale_factor,
+            renderer.font_size,
+        ) {
+            return None;
+        }
+        let stored_max_scroll = self.markdown.read_scroll_bounds()?;
+        let content_height = self.markdown.read_layout.content_height();
+        let max_scroll = (content_height - frame.3).max(0.0);
+        if !max_scroll.is_finite()
+            || max_scroll <= 0.0
+            || (stored_max_scroll - max_scroll).abs() > 0.01
+        {
+            return None;
+        }
+        let thumb = crate::render_view::markdown_read::markdown_read_scrollbar_thumb(
+            frame.1,
+            frame.3,
+            content_height,
+            self.scroll_y.current.round(),
+            renderer.scale_factor,
+        )?;
+        Some((thumb, max_scroll, frame.1, frame.3))
+    }
+
+    pub(crate) fn begin_markdown_read_scrollbar_drag_at(&mut self, pointer_y: f32) -> bool {
+        let Some((thumb, max_scroll, track_y, track_h)) = self.markdown_read_scrollbar_geometry()
+        else {
+            return false;
+        };
+        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+            pointer_y,
+            track_y,
+            track_h,
+            thumb,
+            max_scroll,
+            None,
+        ) else {
+            return false;
+        };
+
+        self.finish_markdown_read_selection_gesture();
+        self.markdown
+            .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
+        let changed = self.scroll_y.current != target;
+        self.scroll_y.jump_to(target);
+        self.scroll_y.drag_offset = drag_offset;
+        self.scroll_y.is_dragging = true;
+        if changed {
+            self.markdown.on_shared_vertical_scroll_changed();
+        }
+        true
+    }
+
+    pub(crate) fn drag_markdown_read_scrollbar_to(&mut self, pointer_y: f32) -> bool {
+        if self.markdown_mode() != MarkdownMode::Read || !self.scroll_y.is_dragging {
+            return false;
+        }
+        let Some((thumb, max_scroll, track_y, track_h)) = self.markdown_read_scrollbar_geometry()
+        else {
+            self.scroll_y.end_drag();
+            return true;
+        };
+        let drag_offset = self.scroll_y.drag_offset;
+        let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+            pointer_y,
+            track_y,
+            track_h,
+            thumb,
+            max_scroll,
+            Some(drag_offset),
+        ) else {
+            self.scroll_y.end_drag();
+            return true;
+        };
+        if self.scroll_y.current != target
+            || self.scroll_y.target != target
+            || self.scroll_y.velocity != 0.0
+        {
+            self.scroll_y.jump_to(target);
+            self.markdown.on_shared_vertical_scroll_changed();
+        }
+        self.scroll_y.drag_offset = drag_offset;
+        self.scroll_y.is_dragging = true;
         true
     }
 

@@ -668,6 +668,13 @@ impl App {
             return;
         }
 
+        if self.markdown_mode() == crate::app::MarkdownMode::Read && self.scroll_y.is_dragging {
+            let _ = self.drag_markdown_read_scrollbar_to(py);
+            clear_hover_popup(self.renderer.as_mut());
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+
         if self.markdown.read_selecting {
             let _ = self.update_markdown_read_selection_at(px, py);
             clear_hover_popup(self.renderer.as_mut());

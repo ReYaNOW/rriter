@@ -67,6 +67,92 @@ const GLYPH_PRESENTATION_EMOJI: u8 = 2;
 const GLYPH_PRESENTATION_TERMINAL: u8 = 3;
 
 #[inline(always)]
+pub(crate) fn final_text_pixel_size(font_size: f32, scale: f32) -> f32 {
+    (font_size * scale).round().max(1.0)
+}
+
+#[inline(always)]
+fn glyph_size_key(pixel_size: f32) -> u32 {
+    pixel_size.to_bits()
+}
+
+fn rasterize_font_data_glyph(
+    font_data: &mut FontData,
+    scale_context: &mut ScaleContext,
+    c: char,
+    pixel_size: f32,
+    prefer_color: bool,
+    allow_missing_whitespace: bool,
+) -> Option<(swash::scale::image::Image, f32)> {
+    font_data.ensure_loaded();
+    let data = font_data.data_slice();
+    if data.is_empty() {
+        return None;
+    }
+    let font_ref = FontRef::from_index(data, font_data.index as usize)?;
+    let glyph_id = font_ref.charmap().map(c);
+    if glyph_id == 0 && !allow_missing_whitespace {
+        return None;
+    }
+
+    let head = font_ref.metrics(&[]);
+    let glyph_advance =
+        (font_ref.glyph_metrics(&[]).advance_width(glyph_id) as f32 * pixel_size)
+            / head.units_per_em as f32;
+    let mut scaler = scale_context
+        .builder(font_ref)
+        .size(pixel_size)
+        .hint(true)
+        .build();
+    let image = Render::new(&[
+        Source::ColorOutline(0),
+        Source::ColorBitmap(StrikeWith::BestFit),
+        Source::Outline,
+    ])
+    .render(&mut scaler, glyph_id)?;
+    ((image.data.len() > 0 || c.is_whitespace())
+        && accept_rendered_glyph_content(prefer_color, image.content))
+    .then_some((image, glyph_advance))
+}
+
+fn rasterize_font_glyph(
+    fonts: &mut [FontData],
+    scale_context: &mut ScaleContext,
+    c: char,
+    pixel_size: f32,
+    prefer_color: bool,
+) -> Option<(swash::scale::image::Image, f32)> {
+    if prefer_color {
+        for (idx, font_data) in fonts.iter_mut().enumerate().rev() {
+            if let Some(rendered) = rasterize_font_data_glyph(
+                font_data,
+                scale_context,
+                c,
+                pixel_size,
+                true,
+                c.is_whitespace() && idx == 0,
+            ) {
+                return Some(rendered);
+            }
+        }
+    } else {
+        for (idx, font_data) in fonts.iter_mut().enumerate() {
+            if let Some(rendered) = rasterize_font_data_glyph(
+                font_data,
+                scale_context,
+                c,
+                pixel_size,
+                false,
+                c.is_whitespace() && idx == 0,
+            ) {
+                return Some(rendered);
+            }
+        }
+    }
+    None
+}
+
+#[inline(always)]
 fn braille_dot_mask(c: char) -> Option<u8> {
     let u = c as u32;
     if (0x2800..=0x28FF).contains(&u) {
@@ -116,6 +202,11 @@ fn draw_braille_dot(data: &mut [u8], width: usize, height: usize, cx: f32, cy: f
 
 impl Renderer {
     #[inline(always)]
+    pub(crate) fn final_text_pixel_size(&self, scale: f32) -> f32 {
+        final_text_pixel_size(self.font_size, scale)
+    }
+
+    #[inline(always)]
     fn mono_cell_advance(&self) -> f32 {
         let advance = self.ascii_advances[b'A' as usize];
         if advance > 0.0 {
@@ -125,10 +216,67 @@ impl Renderer {
         }
     }
 
+    #[inline(always)]
+    fn mono_cell_advance_at_size(&self, pixel_size: f32) -> f32 {
+        if self.font_size > 0.0 {
+            self.mono_cell_advance() * pixel_size / self.font_size
+        } else {
+            pixel_size * 0.6
+        }
+    }
+
+    fn upload_rasterized_glyph(
+        &mut self,
+        image: swash::scale::image::Image,
+        glyph_advance: f32,
+        offset_y_adjust: f32,
+        force_empty_bitmap: bool,
+    ) -> Option<GlyphInfo> {
+        let w = image.placement.width as i32;
+        let h = image.placement.height as i32;
+        if force_empty_bitmap || w <= 0 || h <= 0 {
+            return Some(GlyphInfo {
+                u: 0.0,
+                v: 0.0,
+                uw: 0.0,
+                vh: 0.0,
+                width: 0.0,
+                height: 0.0,
+                offset_x: 0.0,
+                offset_y: 0.0,
+                advance: glyph_advance,
+                is_emoji: 0.0,
+            });
+        }
+
+        let is_color = image.content == Content::Color;
+        let entry = if is_color {
+            self.upload_color_rgba(w, h, &image.data)?
+        } else {
+            self.upload_alpha_atlas(w, h, &image.data)?
+        };
+        Some(GlyphInfo {
+            u: entry.u,
+            v: entry.v,
+            uw: entry.uw,
+            vh: entry.vh,
+            width: w as f32,
+            height: h as f32,
+            offset_x: image.placement.left as f32,
+            offset_y: image.placement.top as f32 - offset_y_adjust,
+            advance: glyph_advance,
+            is_emoji: if is_color { COLOR_ATLAS_MODE } else { 0.0 },
+        })
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn get_custom_braille_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+    fn get_custom_braille_glyph_at_size(
+        &mut self,
+        c: char,
+        pixel_size: f32,
+    ) -> Option<GlyphInfo> {
         let mask = braille_dot_mask(c)?;
-        let advance = self.mono_cell_advance().round().max(6.0);
+        let advance = self.mono_cell_advance_at_size(pixel_size).round().max(6.0);
 
         if mask == 0 {
             return Some(GlyphInfo {
@@ -146,12 +294,12 @@ impl Renderer {
         }
 
         let w = advance as i32;
-        let h = (self.font_size * 0.88).round().max(10.0) as i32;
+        let h = (pixel_size * 0.88).round().max(10.0) as i32;
 
         let width = w as usize;
         let height = h as usize;
         let mut alpha = vec![0u8; width * height];
-        let radius = (self.font_size * 0.075).max(1.1);
+        let radius = (pixel_size * 0.075).max(1.1);
         let col_gap = (w as f32 * 0.34).max(radius * 2.35);
         let x0 = w as f32 * 0.5 - col_gap * 0.5;
         let x1 = w as f32 * 0.5 + col_gap * 0.5;
@@ -187,13 +335,13 @@ impl Renderer {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+    fn get_custom_svg_glyph_at_size(&mut self, c: char, pixel_size: f32) -> Option<GlyphInfo> {
         let svg_str = custom_svg_glyph_source(c)?;
 
         let opt = resvg::usvg::Options::default();
         let tree = resvg::usvg::Tree::from_data(svg_str.as_bytes(), &opt).ok()?;
 
-        let target_size = (self.font_size * 1.05).round().max(10.0);
+        let target_size = (pixel_size * 1.05).round().max(10.0);
         let w = target_size as i32;
         let h = target_size as i32;
 
@@ -230,8 +378,18 @@ impl Renderer {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    pub fn get_custom_svg_glyph(&mut self, c: char) -> Option<GlyphInfo> {
+        self.get_custom_svg_glyph_at_size(c, self.font_size)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn get_glyph(&mut self, c: char) -> Option<GlyphInfo> {
         self.get_glyph_for_color_preference(c, None)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn get_glyph_at_size(&mut self, c: char, pixel_size: f32) -> Option<GlyphInfo> {
+        self.get_glyph_for_color_preference_at_size(c, None, pixel_size)
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -240,77 +398,51 @@ impl Renderer {
         c: char,
         prefer_color: Option<bool>,
     ) -> Option<GlyphInfo> {
+        self.get_glyph_for_color_preference_at_size(c, prefer_color, self.font_size)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn get_glyph_for_color_preference_at_size(
+        &mut self,
+        c: char,
+        prefer_color: Option<bool>,
+        pixel_size: f32,
+    ) -> Option<GlyphInfo> {
+        let pixel_size = if pixel_size.is_finite() && pixel_size > 0.0 {
+            pixel_size
+        } else {
+            self.font_size.max(1.0)
+        };
         let strict_text = prefer_color == Some(false);
         let cache_presentation = match prefer_color {
             Some(false) => GLYPH_PRESENTATION_TEXT,
             Some(true) => GLYPH_PRESENTATION_EMOJI,
             None => GLYPH_PRESENTATION_AUTO,
         };
-        let cache_key = (c, cache_presentation);
+        let cache_key = (c, cache_presentation, glyph_size_key(pixel_size));
         if let Some(g) = self.glyphs.get(&cache_key) {
             return Some(*g);
         }
         if c == '\n' || c == '\t' || c == '\r' {
             return None;
         }
-        if custom_svg_glyph_source(c).is_some() {
-            if let Some(info) = self.get_custom_svg_glyph(c) {
-                self.glyphs.insert(cache_key, info);
-                return Some(info);
-            }
+        if custom_svg_glyph_source(c).is_some()
+            && let Some(info) = self.get_custom_svg_glyph_at_size(c, pixel_size)
+        {
+            self.glyphs.insert(cache_key, info);
+            return Some(info);
         }
 
-        let mut rendered_image = None;
-        let mut glyph_advance = 0.0;
-        let prefer_color = prefer_color.unwrap_or_else(|| default_emoji_presentation(c));
-
-        let indices: Vec<usize> = if prefer_color {
-            (0..self.fonts.len()).rev().collect()
-        } else {
-            (0..self.fonts.len()).collect()
-        };
-
-        for idx in indices {
-            self.fonts[idx].ensure_loaded();
-            let font_data = &self.fonts[idx];
-            let data = font_data.data_slice();
-            if data.is_empty() {
-                continue;
-            }
-            if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
-                let glyph_id = font_ref.charmap().map(c);
-                if glyph_id != 0 || (c.is_whitespace() && idx == 0) {
-                    let head = font_ref.metrics(&[]);
-                    glyph_advance = (font_ref.glyph_metrics(&[]).advance_width(glyph_id) as f32
-                        * self.font_size)
-                        / head.units_per_em as f32;
-
-                    let mut scaler = self
-                        .scale_context
-                        .builder(font_ref)
-                        .size(self.font_size)
-                        .hint(true)
-                        .build();
-                    if let Some(img) = Render::new(&[
-                        Source::ColorOutline(0),
-                        Source::ColorBitmap(StrikeWith::BestFit),
-                        Source::Outline,
-                    ])
-                    .render(&mut scaler, glyph_id)
-                    {
-                        if (img.data.len() > 0 || c.is_whitespace())
-                            && accept_rendered_glyph_content(prefer_color, img.content)
-                        {
-                            rendered_image = Some(img);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if rendered_image.is_none() {
-            if let Some(info) = self.get_custom_braille_glyph(c) {
+        let use_color = prefer_color.unwrap_or_else(|| default_emoji_presentation(c));
+        let rendered = rasterize_font_glyph(
+            &mut self.fonts,
+            &mut self.scale_context,
+            c,
+            pixel_size,
+            use_color,
+        );
+        let Some((image, glyph_advance)) = rendered else {
+            if let Some(info) = self.get_custom_braille_glyph_at_size(c, pixel_size) {
                 self.glyphs.insert(cache_key, info);
                 return Some(info);
             }
@@ -318,57 +450,33 @@ impl Renderer {
                 return None;
             }
             if c != '□' {
-                let fallback = self.get_glyph_for_color_preference('□', Some(false));
+                let fallback =
+                    self.get_glyph_for_color_preference_at_size('□', Some(false), pixel_size);
                 if let Some(info) = fallback {
                     self.glyphs.insert(cache_key, info);
                 }
                 return fallback;
             }
             return None;
-        }
-
-        let img = rendered_image.unwrap();
-        let w = img.placement.width as i32;
-        let h = img.placement.height as i32;
-
-        if c.is_whitespace() || w <= 0 || h <= 0 {
-            let info = GlyphInfo {
-                u: 0.0,
-                v: 0.0,
-                uw: 0.0,
-                vh: 0.0,
-                width: 0.0,
-                height: 0.0,
-                offset_x: 0.0,
-                offset_y: 0.0,
-                advance: glyph_advance,
-                is_emoji: 0.0,
-            };
-            self.glyphs.insert(cache_key, info);
-            return Some(info);
-        }
-
-        let is_color = img.content == Content::Color;
-        let entry = if is_color {
-            self.upload_color_rgba(w, h, &img.data)?
-        } else {
-            self.upload_alpha_atlas(w, h, &img.data)?
         };
 
-        let info = GlyphInfo {
-            u: entry.u,
-            v: entry.v,
-            uw: entry.uw,
-            vh: entry.vh,
-            width: w as f32,
-            height: h as f32,
-            offset_x: img.placement.left as f32,
-            offset_y: img.placement.top as f32,
-            advance: glyph_advance,
-            is_emoji: if is_color { COLOR_ATLAS_MODE } else { 0.0 },
-        };
+        let info =
+            self.upload_rasterized_glyph(image, glyph_advance, 0.0, c.is_whitespace())?;
         self.glyphs.insert(cache_key, info);
         Some(info)
+    }
+
+    pub(crate) fn char_advance_at_size(&mut self, c: char, pixel_size: f32) -> f32 {
+        if c == '\n' {
+            return 0.0;
+        }
+        if c == '\t' {
+            return self
+                .get_glyph_at_size(' ', pixel_size)
+                .map_or(pixel_size * 2.4, |glyph| glyph.advance * 4.0);
+        }
+        self.get_glyph_at_size(c, pixel_size)
+            .map_or(pixel_size * 0.6, |glyph| glyph.advance)
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -386,7 +494,7 @@ impl Renderer {
                 None => GLYPH_PRESENTATION_TERMINAL,
             }
         };
-        let cache_key = (c, cache_presentation);
+        let cache_key = (c, cache_presentation, glyph_size_key(self.font_size));
         if let Some(g) = self.glyphs.get(&cache_key) {
             return Some(*g);
         }
@@ -421,123 +529,70 @@ impl Renderer {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn get_ui_glyph(&mut self, c: char) -> Option<GlyphInfo> {
-        if let Some(g) = self.ui_glyphs.get(&c) {
+        self.get_ui_glyph_at_size(c, self.font_size)
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    pub(crate) fn get_ui_glyph_at_size(
+        &mut self,
+        c: char,
+        pixel_size: f32,
+    ) -> Option<GlyphInfo> {
+        let pixel_size = if pixel_size.is_finite() && pixel_size > 0.0 {
+            pixel_size
+        } else {
+            self.font_size.max(1.0)
+        };
+        let cache_key = (c, glyph_size_key(pixel_size));
+        if let Some(g) = self.ui_glyphs.get(&cache_key) {
             return Some(*g);
         }
         if c == '\n' || c == '\t' || c == '\r' {
             return None;
         }
-        if custom_svg_glyph_source(c).is_some() {
-            if let Some(info) = self.get_custom_svg_glyph(c) {
-                self.ui_glyphs.insert(c, info);
-                return Some(info);
-            }
+        if custom_svg_glyph_source(c).is_some()
+            && let Some(info) = self.get_custom_svg_glyph_at_size(c, pixel_size)
+        {
+            self.ui_glyphs.insert(cache_key, info);
+            return Some(info);
         }
 
-        let mut rendered_image = None;
-        let mut glyph_advance = 0.0;
         let prefer_color = default_emoji_presentation(c);
-        let indices: Vec<usize> = if prefer_color {
-            (0..self.ui_fonts.len()).rev().collect()
-        } else {
-            (0..self.ui_fonts.len()).collect()
-        };
-
-        for idx in indices {
-            self.ui_fonts[idx].ensure_loaded();
-            let font_data = &self.ui_fonts[idx];
-            let data = font_data.data_slice();
-            if data.is_empty() {
-                continue;
-            }
-            if let Some(font_ref) = FontRef::from_index(data, font_data.index as usize) {
-                let glyph_id = font_ref.charmap().map(c);
-                if glyph_id != 0 || (c.is_whitespace() && idx == 0) {
-                    let head = font_ref.metrics(&[]);
-                    glyph_advance = (font_ref.glyph_metrics(&[]).advance_width(glyph_id) as f32
-                        * self.font_size)
-                        / head.units_per_em as f32;
-
-                    let mut scaler = self
-                        .scale_context
-                        .builder(font_ref)
-                        .size(self.font_size)
-                        .hint(true)
-                        .build();
-                    if let Some(img) = Render::new(&[
-                        Source::ColorOutline(0),
-                        Source::ColorBitmap(StrikeWith::BestFit),
-                        Source::Outline,
-                    ])
-                    .render(&mut scaler, glyph_id)
-                    {
-                        if (img.data.len() > 0 || c.is_whitespace())
-                            && accept_rendered_glyph_content(prefer_color, img.content)
-                        {
-                            rendered_image = Some(img);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        if rendered_image.is_none() {
-            if let Some(info) = self.get_custom_braille_glyph(c) {
-                self.ui_glyphs.insert(c, info);
+        let rendered = rasterize_font_glyph(
+            &mut self.ui_fonts,
+            &mut self.scale_context,
+            c,
+            pixel_size,
+            prefer_color,
+        );
+        let Some((image, glyph_advance)) = rendered else {
+            if let Some(info) = self.get_custom_braille_glyph_at_size(c, pixel_size) {
+                self.ui_glyphs.insert(cache_key, info);
                 return Some(info);
             }
             if c != '□' {
-                let fallback = self.get_ui_glyph('□');
+                let fallback = self.get_ui_glyph_at_size('□', pixel_size);
                 if let Some(info) = fallback {
-                    self.ui_glyphs.insert(c, info);
+                    self.ui_glyphs.insert(cache_key, info);
                 }
                 return fallback;
             }
             return None;
-        }
+        };
 
-        let img = rendered_image.unwrap();
-        let w = img.placement.width as i32;
-        let h = img.placement.height as i32;
-
-        if c.is_whitespace() || w <= 0 || h <= 0 {
-            let info = GlyphInfo {
-                u: 0.0,
-                v: 0.0,
-                uw: 0.0,
-                vh: 0.0,
-                width: 0.0,
-                height: 0.0,
-                offset_x: 0.0,
-                offset_y: 0.0,
-                advance: glyph_advance,
-                is_emoji: 0.0,
-            };
-            self.ui_glyphs.insert(c, info);
-            return Some(info);
-        }
-
-        let is_color = img.content == Content::Color;
-        let entry = if is_color {
-            self.upload_color_rgba(w, h, &img.data)?
+        let ratio = if self.font_size > 0.0 {
+            pixel_size / self.font_size
         } else {
-            self.upload_alpha_atlas(w, h, &img.data)?
+            1.0
         };
-
-        let info = GlyphInfo {
-            u: entry.u,
-            v: entry.v,
-            uw: entry.uw,
-            vh: entry.vh,
-            width: w as f32,
-            height: h as f32,
-            offset_x: img.placement.left as f32,
-            offset_y: img.placement.top as f32 - self.scale_factor.round().max(1.0),
-            advance: glyph_advance,
-            is_emoji: if is_color { COLOR_ATLAS_MODE } else { 0.0 },
-        };
-        self.ui_glyphs.insert(c, info);
+        let baseline_nudge = (self.scale_factor * ratio).round().max(1.0);
+        let info = self.upload_rasterized_glyph(
+            image,
+            glyph_advance,
+            baseline_nudge,
+            c.is_whitespace(),
+        )?;
+        self.ui_glyphs.insert(cache_key, info);
         Some(info)
     }
 

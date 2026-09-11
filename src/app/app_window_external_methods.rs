@@ -130,6 +130,7 @@ impl App {
             return;
         }
 
+        self.cancel_pointer_interactions();
         if self.is_ide_mode && !self.tabs.is_empty() {
             self.prepare_all_database_tabs_close();
         }

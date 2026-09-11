@@ -23,6 +23,12 @@ const LIST_INDENT: f32 = 26.0;
 const OVERSCAN: f32 = 96.0;
 const READ_SCROLLBAR_W: f32 = 9.0;
 
+#[inline]
+pub(crate) fn markdown_read_frame_x_for_editor_text(editor_text_x: f32, scale: f32) -> f32 {
+    let content_inset = (CONTENT_PAD * scale).round();
+    (editor_text_x.round() - content_inset).max(0.0)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct LayoutKey {
     version: u64,
@@ -184,7 +190,9 @@ impl StyledText {
 #[derive(Clone, Debug)]
 struct TextLine {
     range: Range<usize>,
+    top: f32,
     y: f32,
+    bottom: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -210,7 +218,9 @@ struct TextBlock {
 #[derive(Clone, Debug)]
 struct CodeLine {
     source_range: Range<usize>,
+    top: f32,
     y: f32,
+    bottom: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -272,22 +282,59 @@ struct ReadBlock {
     kind: ReadBlockKind,
 }
 
-struct LayoutBuilder<'a, F: FnMut(char, bool) -> f32> {
+#[derive(Clone, Copy)]
+struct LayoutTextMetrics {
+    font_size: f32,
+    line_height: f32,
+    baseline_offset: f32,
+}
+
+impl LayoutTextMetrics {
+    fn heading_baseline_offset(self, text_scale: f32, line_height: f32) -> f32 {
+        if self.font_size <= 0.0 {
+            return (line_height * 0.82).round();
+        }
+        let pixel_size = crate::renderer::final_text_pixel_size(self.font_size, text_scale);
+        let ratio = pixel_size / self.font_size;
+        let scaled_editor_line_height = self.line_height * ratio;
+        let extra_leading = (line_height - scaled_editor_line_height) * 0.5;
+        (self.baseline_offset * ratio + extra_leading).round()
+    }
+}
+
+#[cfg(test)]
+fn test_layout_text_metrics(scale: f32) -> LayoutTextMetrics {
+    LayoutTextMetrics {
+        font_size: 18.0 * scale,
+        line_height: (26.0 * scale).round(),
+        baseline_offset: (19.0 * scale).round(),
+    }
+}
+
+struct LayoutBuilder<'a, F: FnMut(char, bool, Option<f32>) -> f32> {
     source: &'a str,
     width: f32,
     scale: f32,
+    text_metrics: LayoutTextMetrics,
     y: f32,
     blocks: Vec<ReadBlock>,
     source_scope_stack: Vec<Range<usize>>,
     advance: F,
 }
 
-impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
-    fn new(source: &'a str, width: f32, scale: f32, advance: F) -> Self {
+impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
+    fn new(
+        source: &'a str,
+        width: f32,
+        scale: f32,
+        text_metrics: LayoutTextMetrics,
+        advance: F,
+    ) -> Self {
         Self {
             source,
             width: width.max(1.0),
             scale,
+            text_metrics,
             y: (18.0 * scale).round(),
             blocks: Vec::new(),
             source_scope_stack: Vec::new(),
@@ -542,15 +589,23 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
             * text_scale.max(0.75))
         .round()
         .max(1.0);
+        let final_size_scale = heading_level.map(|_| text_scale);
+        let advance_scale = if final_size_scale.is_some() {
+            1.0
+        } else {
+            text_scale
+        };
         let mut advance = |offset: usize, ch: char| {
+            let mut glyph_advance =
+                |c: char, use_mono: bool| (self.advance)(c, use_mono, final_size_scale);
             styled_char_advance(
                 &styled,
                 offset,
                 ch,
-                text_scale,
+                advance_scale,
                 self.scale,
                 mono,
-                &mut self.advance,
+                &mut glyph_advance,
             )
         };
         let ranges = crate::render_view::core_text::wrapped_text_ranges_with_offsets(
@@ -565,11 +620,20 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         };
         self.y += top_margin;
         let top = self.y;
+        let baseline_offset = if heading_level.is_some() {
+            self.text_metrics
+                .heading_baseline_offset(text_scale, line_h)
+        } else {
+            (line_h * 0.82).round()
+        };
         let mut lines = Vec::with_capacity(ranges.len());
         for (idx, (start, end)) in ranges.into_iter().enumerate() {
+            let line_top = (self.y + line_h * idx as f32).round();
             lines.push(TextLine {
                 range: start..end,
-                y: (self.y + line_h * (idx as f32 + 0.82)).round(),
+                top: line_top,
+                y: (line_top + baseline_offset).round(),
+                bottom: (line_top + line_h).round(),
             });
         }
         let line_count = lines.len().max(1) as f32;
@@ -632,7 +696,9 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                 let end = start + visible.len();
                 lines.push(CodeLine {
                     source_range: start..end,
+                    top: y.round(),
                     y: (y + line_h * 0.82).round(),
+                    bottom: (y + line_h).round(),
                 });
                 y += line_h;
                 local += part.len();
@@ -640,7 +706,9 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
             if text.is_empty() {
                 lines.push(CodeLine {
                     source_range: range.start..range.start,
+                    top: y.round(),
                     y: (y + line_h * 0.82).round(),
+                    bottom: (y + line_h).round(),
                 });
                 y += line_h;
             }
@@ -648,7 +716,9 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
         if lines.is_empty() {
             lines.push(CodeLine {
                 source_range: source_range.start..source_range.start,
+                top: y.round(),
                 y: (y + line_h * 0.82).round(),
+                bottom: (y + line_h).round(),
             });
             y += line_h;
         }
@@ -724,6 +794,8 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                 });
                 let max_text_w = (cell_w - pad * 2.0).max(8.0);
                 let mut advance = |offset: usize, ch: char| {
+                    let mut glyph_advance =
+                        |c: char, use_mono: bool| (self.advance)(c, use_mono, None);
                     styled_char_advance(
                         &styled,
                         offset,
@@ -731,7 +803,7 @@ impl<'a, F: FnMut(char, bool) -> f32> LayoutBuilder<'a, F> {
                         0.82,
                         self.scale,
                         false,
-                        &mut self.advance,
+                        &mut glyph_advance,
                     )
                 };
                 let lines = crate::render_view::core_text::wrapped_text_ranges_with_offsets(
@@ -925,6 +997,26 @@ fn markdown_read_scrollbar_width(max_scroll: f32, scale: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+pub(crate) fn markdown_read_scrollbar_thumb(
+    track_y: f32,
+    viewport_height: f32,
+    content_height: f32,
+    displayed_scroll_y: f32,
+    scale: f32,
+) -> Option<crate::scroll::ScrollbarThumb> {
+    if !scale.is_finite() || scale <= 0.0 {
+        return None;
+    }
+    crate::scroll::scrollbar_thumb(
+        track_y,
+        viewport_height,
+        viewport_height,
+        content_height,
+        displayed_scroll_y,
+        20.0 * scale,
+    )
 }
 
 fn register_markdown_read_text_surface(
@@ -1127,8 +1219,21 @@ fn faded(color: [f32; 4], alpha: f32) -> [f32; 4] {
 
 impl Renderer {
     #[inline]
-    fn markdown_read_char_advance(&mut self, ch: char, mono: bool) -> f32 {
-        if mono {
+    fn markdown_read_char_advance(
+        &mut self,
+        ch: char,
+        mono: bool,
+        final_size_scale: Option<f32>,
+    ) -> f32 {
+        if let Some(scale) = final_size_scale {
+            let pixel_size = self.final_text_pixel_size(scale);
+            if mono {
+                self.char_advance_at_size(ch, pixel_size)
+            } else {
+                self.get_ui_glyph_at_size(ch, pixel_size)
+                    .map_or(0.0, |glyph| glyph.advance)
+            }
+        } else if mono {
             self.char_advance(ch)
         } else {
             self.get_ui_glyph(ch).map_or(0.0, |glyph| glyph.advance)
@@ -1157,8 +1262,16 @@ impl Renderer {
             };
             let source = markdown.read_source.as_str();
             let scale = self.scale_factor;
-            let mut advance = |ch: char, mono: bool| self.markdown_read_char_advance(ch, mono);
-            let mut builder = LayoutBuilder::new(source, content_width, scale, &mut advance);
+            let text_metrics = LayoutTextMetrics {
+                font_size: self.font_size,
+                line_height: self.line_height,
+                baseline_offset: self.baseline_offset,
+            };
+            let mut advance = |ch: char, mono: bool, final_size_scale: Option<f32>| {
+                self.markdown_read_char_advance(ch, mono, final_size_scale)
+            };
+            let mut builder =
+                LayoutBuilder::new(source, content_width, scale, text_metrics, &mut advance);
             builder.append_blocks(&document.blocks, 0.0, 0, None);
             let (blocks, content_height) = builder.finish();
             (blocks, content_height, source.len())
@@ -1187,6 +1300,8 @@ impl Renderer {
         let editor_version = editor.version;
 
         if markdown.read_document(editor_version).is_none() {
+            markdown.finish_read_selection_gesture(scroll);
+            scroll.end_drag();
             ui_registry.register_blocker(
                 crate::ui_system::UiId::MarkdownReadBody,
                 x,
@@ -1208,12 +1323,24 @@ impl Renderer {
         }
 
         let content_w = w.max(1.0);
+        let layout_was_valid = markdown.read_layout.is_valid_for_geometry(
+            editor_version,
+            content_w,
+            self.scale_factor,
+            self.font_size,
+        );
+        if !layout_was_valid {
+            markdown.finish_read_selection_gesture(scroll);
+            scroll.end_drag();
+        }
         if !self.prepare_markdown_read_layout_preserving_current_ownership(
             markdown,
             scroll,
             editor_version,
             content_w,
         ) {
+            markdown.finish_read_selection_gesture(scroll);
+            scroll.end_drag();
             markdown.cancel_stale_scroll_transition();
             markdown.invalidate_read_scroll_bounds();
             return;
@@ -1221,6 +1348,9 @@ impl Renderer {
 
         let max_scroll = (markdown.read_layout.content_height() - h).max(0.0);
         markdown.set_read_scroll_bounds(max_scroll);
+        if max_scroll <= 0.0 {
+            scroll.end_drag();
+        }
         if let Some(transition) = markdown.pending_transition_for(MarkdownMode::Read) {
             if !markdown.pending_transition_is_valid(&transition, editor_version) {
                 markdown.cancel_stale_scroll_transition();
@@ -1345,19 +1475,22 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        if scrollbar_w > 0.0 {
+        if scrollbar_w > 0.0
+            && let Some(thumb) = markdown_read_scrollbar_thumb(
+                y,
+                h,
+                markdown.read_layout.content_height(),
+                scroll_y,
+                self.scale_factor,
+            )
+        {
             let bar_w = scrollbar_w;
             let track_x = (x + w - bar_w).round();
-            let thumb_h = (h / markdown.read_layout.content_height.max(h) * h)
-                .max(20.0 * self.scale_factor)
-                .min(h);
-            let ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-            let thumb_y = y + ratio * (h - thumb_h);
             self.push_rounded_rect(
                 track_x + self.scale_factor,
-                thumb_y,
+                thumb.start,
                 (bar_w - 2.0 * self.scale_factor).max(2.0),
-                thumb_h,
+                thumb.len,
                 (bar_w * 0.4).max(2.0),
                 faded(self.theme.fg, 0.45),
             );
@@ -1412,6 +1545,7 @@ impl Renderer {
                         &line.range,
                         frame_x + text.x,
                         line.y + offset_y,
+                        line.top + offset_y,
                         highlights,
                     );
                 }
@@ -1456,7 +1590,7 @@ impl Renderer {
                         slice,
                         line.source_range.start,
                         left + pad,
-                        line.y + offset_y,
+                        line.top + offset_y,
                         code.line_height,
                         1.0,
                         highlights,
@@ -1527,20 +1661,20 @@ impl Renderer {
                                 }
                                 _ => cell_x + cell_padding,
                             };
-                            let baseline = (row_y
-                                + cell_padding
-                                + line_idx as f32 * line_height
-                                + baseline_offset)
-                                .round();
+                            let line_top =
+                                (row_y + cell_padding + line_idx as f32 * line_height).round();
+                            let baseline = (line_top + baseline_offset).round();
                             self.draw_styled_fragment(
                                 &cell.styled,
                                 range,
                                 tx,
                                 baseline,
+                                line_top,
                                 0.82,
                                 false,
                                 line_height,
                                 highlights,
+                                None,
                             );
                         }
                     }
@@ -1626,6 +1760,7 @@ impl Renderer {
         range: &Range<usize>,
         x: f32,
         y: f32,
+        line_top: f32,
         highlights: ReadHighlights<'_>,
     ) {
         let force_bold = block.heading_level.is_some();
@@ -1634,11 +1769,12 @@ impl Renderer {
                 &block.styled,
                 range,
                 x,
-                y,
+                line_top,
                 block.scale,
                 true,
                 block.line_height,
                 highlights,
+                None,
             );
             let text = block.styled.text.get(range.clone()).unwrap_or("");
             self.draw_string_mono_scaled_pixel_snapped(
@@ -1656,10 +1792,12 @@ impl Renderer {
             range,
             x,
             y,
+            line_top,
             block.scale,
             force_bold,
             block.line_height,
             highlights,
+            block.heading_level.map(|_| block.scale),
         );
     }
 
@@ -1708,6 +1846,17 @@ include!("markdown_read_interaction.rs");
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reader_frame_origin_makes_top_level_content_match_editor_text_x() {
+        for scale in [1.0, 1.25, 1.5, 2.0] {
+            for editor_text_x in [68.0, 107.0, 348.0, 721.0] {
+                let frame_x = markdown_read_frame_x_for_editor_text(editor_text_x, scale);
+                let reader_text_x = frame_x + (CONTENT_PAD * scale).round();
+                assert_eq!(reader_text_x, editor_text_x.round());
+            }
+        }
+    }
     use crate::languages::markdown::MarkdownParseState;
 
     fn parse(source: &str) -> MarkdownDocument {
@@ -1720,10 +1869,16 @@ mod tests {
         source: &str,
         width: f32,
         scale: f32,
-        advance: impl FnMut(char, bool) -> f32,
+        mut advance: impl FnMut(char, bool) -> f32,
     ) -> MarkdownReadLayoutCache {
         let doc = parse(source);
-        let mut builder = LayoutBuilder::new(source, width, scale, advance);
+        let mut builder = LayoutBuilder::new(
+            source,
+            width,
+            scale,
+            test_layout_text_metrics(scale),
+            |ch, mono, _| advance(ch, mono),
+        );
         builder.append_blocks(&doc.blocks, 0.0, 0, None);
         let (blocks, content_height) = builder.finish();
         let mut cache = MarkdownReadLayoutCache::default();
@@ -1812,21 +1967,47 @@ mod tests {
                     ReadBlockKind::Text(text) => {
                         for line in &text.lines {
                             assert_eq!(
+                                line.top.fract(),
+                                0.0,
+                                "scale {scale}: text top {}",
+                                line.top
+                            );
+                            assert_eq!(
                                 line.y.fract(),
                                 0.0,
                                 "scale {scale}: text baseline {}",
                                 line.y
                             );
+                            assert_eq!(
+                                line.bottom.fract(),
+                                0.0,
+                                "scale {scale}: text bottom {}",
+                                line.bottom
+                            );
+                            assert!(line.top <= line.y && line.y <= line.bottom);
                         }
                     }
                     ReadBlockKind::Code(code) => {
                         for line in &code.lines {
+                            assert_eq!(
+                                line.top.fract(),
+                                0.0,
+                                "scale {scale}: code top {}",
+                                line.top
+                            );
                             assert_eq!(
                                 line.y.fract(),
                                 0.0,
                                 "scale {scale}: code baseline {}",
                                 line.y
                             );
+                            assert_eq!(
+                                line.bottom.fract(),
+                                0.0,
+                                "scale {scale}: code bottom {}",
+                                line.bottom
+                            );
+                            assert!(line.top <= line.y && line.y <= line.bottom);
                         }
                     }
                     ReadBlockKind::Table(table) => {
@@ -2136,5 +2317,78 @@ mod tests {
         assert!(cache.source_lines.is_empty());
         assert!(cache.source_prefix_max_end.is_empty());
         assert_eq!(cache.rebuild_count(), 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn reader_text_ink_is_centered_in_editor_style_selection_bounds_across_dpi() {
+        let source = "# AgjpqyЁЙ `Q`\n## AgjpqyЁЙ `Q`\n### AgjpqyЁЙ `Q`\n#### AgjpqyЁЙ `Q`\n##### AgjpqyЁЙ `Q`\n###### AgjpqyЁЙ `Q`\n\nAgjpqyЁЙ body\n";
+        for dpi in [1.0, 1.25, 1.5, 1.75, 2.0] {
+            let (_context, mut app) =
+                crate::render_view::reviewer_stage2_integration::fixture(source, 900.0, dpi);
+            app.set_markdown_mode(MarkdownMode::Read);
+            crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+
+            let samples = app
+                .markdown
+                .read_layout
+                .blocks
+                .iter()
+                .filter_map(|block| match &block.kind {
+                    ReadBlockKind::Text(text) => text.lines.first().map(|line| {
+                        (
+                            text.heading_level,
+                            text.scale,
+                            text.line_height,
+                            line.top,
+                            line.y,
+                        )
+                    }),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(samples.len(), 7, "dpi={dpi}");
+
+            let renderer = app.renderer.as_mut().expect("renderer");
+            for (heading_level, text_scale, line_height, line_top, baseline) in samples {
+                let final_size = heading_level.map(|_| renderer.final_text_pixel_size(text_scale));
+                let glyph_scale = if final_size.is_some() {
+                    1.0
+                } else {
+                    text_scale
+                };
+                let mut ink_top = f32::INFINITY;
+                let mut ink_bottom = f32::NEG_INFINITY;
+                for ch in "AgjpqyЁЙ".chars() {
+                    let glyph = if let Some(pixel_size) = final_size {
+                        renderer.get_ui_glyph_at_size(ch, pixel_size)
+                    } else {
+                        renderer.get_ui_glyph(ch)
+                    }
+                    .expect("bundled-font representative glyph");
+                    let (_, y, _, h) =
+                        crate::renderer::glyph_quad_rect(0.0, baseline, glyph, glyph_scale);
+                    ink_top = ink_top.min(y);
+                    ink_bottom = ink_bottom.max(y + h);
+                }
+
+                let (selection_top, selection_height) =
+                    source_highlight_vertical_bounds(line_top, line_height);
+                let selection_center = selection_top + selection_height * 0.5;
+                let ink_center = (ink_top + ink_bottom) * 0.5;
+                assert!(
+                    (selection_center - ink_center).abs() <= 2.5,
+                    "dpi={dpi} heading={heading_level:?} line=[{line_top},{}] baseline={baseline} selection_center={selection_center} ink=[{ink_top},{ink_bottom}]",
+                    line_top + line_height,
+                );
+
+                if heading_level.is_some() {
+                    assert!(
+                        baseline - line_top < (line_height * 0.82).round(),
+                        "heading baseline must use final font metrics rather than 0.82 of enlarged line box"
+                    );
+                }
+            }
+        }
     }
 }

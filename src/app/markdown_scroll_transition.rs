@@ -633,17 +633,32 @@ impl MarkdownTabState {
 }
 
 impl App {
-    fn markdown_read_content_width_for(&self, renderer_width: f32, scale: f32) -> f32 {
+    pub(crate) fn markdown_read_content_width_for(
+        &self,
+        renderer_width: f32,
+        scale: f32,
+    ) -> f32 {
         let panel_left_w = if self.is_ide_mode {
             self.ide_panel.visible_left_width(scale)
         } else {
             0.0
         };
-        let content_x = if self.is_ide_mode {
-            (48.0 * scale + panel_left_w).round() + 1.0
-        } else {
-            0.0
-        };
+        let active_tab_is_git_diff = self
+            .tabs
+            .get(self.active_tab)
+            .is_some_and(|tab| tab.kind.is_git_diff());
+        let editor_text_x = crate::render_view::editor_left_padding_for(
+            self.editor.line_offsets.len(),
+            active_tab_is_git_diff,
+            self.is_ide_mode,
+            panel_left_w,
+            scale,
+        );
+        let content_x =
+            crate::render_view::markdown_read::markdown_read_frame_x_for_editor_text(
+                editor_text_x,
+                scale,
+            );
         (renderer_width - content_x).max(1.0)
     }
 
@@ -660,6 +675,7 @@ impl App {
         let mode = self.markdown.mode;
         if mode == MarkdownMode::Read && self.markdown.needs_read_model_refresh(self.editor.version)
         {
+            self.finish_markdown_read_selection_gesture();
             let source = self.editor.get_full_text();
             if !self
                 .markdown

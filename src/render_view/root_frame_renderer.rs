@@ -437,18 +437,16 @@ impl Renderer {
             self.visual_lines.clear();
         }
 
-        let sidebar_w = if is_ide_mode { 48.0 * s } else { 0.0 };
-        let digits = editor.line_offsets.len().to_string().len().max(3);
         let active_tab_is_git_diff_for_layout = tabs
             .get(active_tab)
             .is_some_and(|tab| tab.kind.is_git_diff());
-        let gutter_extra = if active_tab_is_git_diff_for_layout {
-            12.0 * s
-        } else {
-            8.0 * s
-        };
-        let target_padding =
-            (30.0 * s + digits as f32 * 10.0 * s + gutter_extra + sidebar_w + panel_left_w).round();
+        let target_padding = editor_left_padding_for(
+            editor.line_offsets.len(),
+            active_tab_is_git_diff_for_layout,
+            is_ide_mode,
+            panel_left_w,
+            s,
+        );
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
             self.visual_lines.clear();
@@ -782,11 +780,10 @@ impl Renderer {
             } else {
                 0.0
             };
-            let content_x = if is_ide_mode {
-                gutter_x.round() + 1.0
-            } else {
-                0.0
-            };
+            let content_x = markdown_read::markdown_read_frame_x_for_editor_text(
+                self.left_padding,
+                s,
+            );
             let stage_start = telemetry_frame_start.map(|_| Instant::now());
             self.draw_markdown_read(
                 markdown,

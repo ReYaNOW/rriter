@@ -431,7 +431,8 @@ mod reviewer_stage1_v3_regressions {
                 let document = crate::languages::markdown::MarkdownParseState::default()
                     .parse(source)
                     .expect("parse");
-                let mut builder = LayoutBuilder::new(source, width, scale, |_, _| 8.0 * scale);
+                let mut builder =
+                    LayoutBuilder::new(source, width, scale, test_layout_text_metrics(scale), |_, _, _| 8.0 * scale);
                 builder.append_blocks(&document.blocks, 0.0, 0, None);
                 let (blocks, height) = builder.finish();
                 let mut cache = MarkdownReadLayoutCache::default();
@@ -771,5 +772,236 @@ mod reviewer_stage1_v4_regressions {
             actual, expected,
             "tail fallback follows the actual final wrapped line, not a hard-coded coordinate"
         );
+    }
+}
+
+// Independent Reader stage-1 review: real layout, draw vertices and source hit-test.
+#[cfg(all(test, target_os = "linux"))]
+mod reader_stage1_review_v1 {
+    use super::*;
+    use crate::render_view::reviewer_stage2_integration::{fixture, read_frame};
+
+    #[test]
+    fn reviewer_reader_v1_real_wrapped_rows_hit_their_own_source_at_fractional_scroll() {
+        let source = format!("# {}\n\n{}\n\n```rust\nalpha\nbeta\ngamma\n```\n",
+            "Abcdefghijk ".repeat(20), "Абвгдежзий ".repeat(30));
+        for dpi in [1.0, 1.25, 1.5, 2.0] {
+            let (_context, mut app) = fixture(&source, 280.0, dpi);
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            let blocks = app.markdown.read_layout.blocks.clone();
+            let editor_before = (app.editor.cursor, app.editor.selection_anchor, app.editor.version);
+            let mut checked = 0;
+            for block in &blocks {
+                let lines: Vec<_> = match &block.kind {
+                    ReadBlockKind::Text(text) => text.lines.iter().filter_map(|line| {
+                        let start = styled_source_boundary(&text.styled, line.range.start)?;
+                        let end = styled_source_boundary(&text.styled, line.range.end)?;
+                        (start < end).then_some((line.top, line.bottom, text.x, start..end))
+                    }).collect(),
+                    ReadBlockKind::Code(code) => code.lines.iter().map(|line|
+                        (line.top, line.bottom, code.x + code_block_padding(dpi), line.source_range.clone())
+                    ).collect(),
+                    _ => Vec::new(),
+                };
+                for (top, bottom, x, expected) in lines {
+                    let scroll = (top - 11.25).max(0.0);
+                    for doc_y in [top + 0.25, (top + bottom) * 0.5, bottom - 0.25] {
+                        let frame = (37.0, 53.0, 280.0, 180.0);
+                        let actual = app.renderer.as_mut().unwrap().markdown_read_source_byte_at(
+                            &app.markdown, app.editor.version, frame, scroll,
+                            frame.0 + x + 0.1, frame.1 + doc_y - scroll.round(),
+                        ).unwrap();
+                        assert!(expected.contains(&actual),
+                            "dpi={dpi} box=[{top},{bottom}] y={doc_y} expected={expected:?} actual={actual}");
+                        checked += 1;
+                    }
+                }
+            }
+            assert!(checked > 60);
+            assert_eq!(editor_before, (app.editor.cursor, app.editor.selection_anchor, app.editor.version));
+            println!("REAL_ROWS dpi={dpi} checked={checked} no_editor_mutation=true");
+        }
+    }
+
+    #[test]
+    fn reviewer_reader_v1_heading_mixed_run_x_matches_actual_draw_cells() {
+        let source = "# Abc `xyz` [Qrs](hidden-url)\n\n";
+        for dpi in [1.0, 1.25, 1.5, 2.0] {
+            let (_context, mut app) = fixture(source, 900.0, dpi);
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            let block = app.markdown.read_layout.blocks[0].clone();
+            let ReadBlockKind::Text(text) = &block.kind else { panic!("heading"); };
+            let line = &text.lines[0];
+            let renderer = app.renderer.as_mut().unwrap();
+            let size = renderer.final_text_pixel_size(text.scale);
+            let mut x = text.x;
+            for run in &text.styled.runs {
+                let contents = &text.styled.text[run.range.clone()];
+                let mono = run.style.contains(TextStyle::CODE);
+                let pad = if mono { inline_code_padding_x(dpi) } else { 0.0 };
+                x += pad;
+                for (offset, ch) in contents.char_indices() {
+                    let advance = if mono {
+                        renderer.measure_mono_width_at_pixel_size(&ch.to_string(), size)
+                    } else {
+                        renderer.measure_ui_width_at_pixel_size(&ch.to_string(), size)
+                    };
+                    if advance > 0.0 {
+                        let expected = run.source_range.as_ref().unwrap().start + offset;
+                        let left = renderer.markdown_read_source_byte_at(&app.markdown,
+                            app.editor.version, (0.0, 0.0, 900.0, 180.0), 0.0,
+                            x + advance * 0.25, (line.top + line.bottom) * 0.5).unwrap();
+                        let right = renderer.markdown_read_source_byte_at(&app.markdown,
+                            app.editor.version, (0.0, 0.0, 900.0, 180.0), 0.0,
+                            x + advance * 0.75, (line.top + line.bottom) * 0.5).unwrap();
+                        assert_eq!(left, expected, "dpi={dpi} {ch:?} left");
+                        // At the end of a run the next visible run may own the source boundary.
+                        if offset + ch.len_utf8() < contents.len() {
+                            assert_eq!(right, expected + ch.len_utf8(), "dpi={dpi} {ch:?} right");
+                        }
+                    }
+                    x += advance;
+                }
+                x += pad;
+            }
+            println!("MIXED_HEADING dpi={dpi} final_size={size} right={x}");
+        }
+    }
+
+    fn actual_ink(renderer: &mut Renderer, sample: &str, baseline: f32,
+        text_scale: f32, mono: bool, heading: bool) -> (f32, f32) {
+        let mut lo = f32::INFINITY;
+        let mut hi = f32::NEG_INFINITY;
+        for ch in sample.chars() {
+            let glyph = if heading {
+                renderer.get_ui_glyph_at_size(ch, renderer.final_text_pixel_size(text_scale))
+            } else if mono { renderer.get_glyph(ch) } else { renderer.get_ui_glyph(ch) }.unwrap();
+            let scale = if heading { 1.0 } else { text_scale };
+            let (_, y, _, h) = crate::renderer::glyph_quad_rect(0.0, baseline, glyph, scale);
+            lo = lo.min(y.round());
+            hi = hi.max((y + h).round());
+        }
+        (lo, hi)
+    }
+
+    fn actual_editor_selection_center_delta(renderer: &mut Renderer, sample: &str, dpi: f32) -> f32 {
+        let editor = crate::app::reviewer_stage2_editor_with(sample);
+        renderer.update_cache(&editor, 0.0, 0.0, false);
+        renderer.vertices.clear();
+        let mut registry = crate::ui_system::UiRegistry::new();
+        renderer.draw_editor_visible_text(
+            &editor, &[], &[], None, sample, "", &[], sample.len(), sample.len(),
+            None, 0, sample.len(), 0.0, 0.0, 900.0, 0.0, false, true, false,
+            dpi, 0, renderer.visual_lines.len(), &mut registry, None, None, &[], &[],
+        );
+        let bounds = |color| {
+            let ys: Vec<_> = renderer.vertices.iter().filter(|v| v.color == color)
+                .map(|v| v.pos[1]).collect();
+            assert!(!ys.is_empty(), "actual Editor draw must emit glyph and selection vertices");
+            (ys.iter().copied().fold(f32::INFINITY, f32::min),
+             ys.iter().copied().fold(f32::NEG_INFINITY, f32::max))
+        };
+        let ink = bounds(renderer.theme.fg);
+        let selection = bounds(renderer.theme.sel);
+        let delta = (selection.0 + selection.1 - ink.0 - ink.1) * 0.5;
+        println!("EDITOR_REFERENCE dpi={dpi} selection={selection:?} ink={ink:?} delta={delta}");
+        delta
+    }
+
+    #[test]
+    fn reviewer_reader_v1_all_block_selection_seating_uses_real_vertices() {
+        let sample = "AgjpqyЁЙ";
+        let source = format!("# {sample}\n\n## {sample}\n\n### {sample}\n\n#### {sample}\n\n##### {sample}\n\n###### {sample}\n\n{sample}\n\n> {sample}\n\n- {sample}\n\n```text\n{sample}\n```\n\n| {sample} |\n| --- |\n| {sample} |\n");
+        let mut failures = Vec::new();
+        for dpi in [1.0, 1.25, 1.5, 1.75, 2.0] {
+            let (_context, mut app) = fixture(&source, 900.0, dpi);
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            let blocks = app.markdown.read_layout.blocks.clone();
+            let renderer = app.renderer.as_mut().unwrap();
+            // The user explicitly accepts normal Editor seating. A universal
+            // 2.5px ink-center limit would reject that reference at high DPI.
+            // Retain the agent's heading limit; body/code/table may be no worse
+            // than the actual Editor output for the same representative text.
+            let editor_delta = actual_editor_selection_center_delta(renderer, sample, dpi);
+            for block in &blocks {
+                let samples: Vec<_> = match &block.kind {
+                    ReadBlockKind::Text(text) => text.lines.iter().map(|line|
+                        (format!("text{:?}", text.heading_level), line.top, line.y,
+                         text.line_height, text.scale, text.mono, text.heading_level.is_some())
+                    ).collect(),
+                    ReadBlockKind::Code(code) => code.lines.iter().map(|line|
+                        ("code".to_string(), line.top, line.y, code.line_height, 1.0, true, false)
+                    ).collect(),
+                    ReadBlockKind::Table(table) => table.rows.iter().map(|row| {
+                        let top = row.y + table.cell_padding;
+                        ("table".to_string(), top, (top + (table.line_height * 0.82).round()).round(),
+                         table.line_height, 0.82, false, false)
+                    }).collect(),
+                    _ => Vec::new(),
+                };
+                renderer.vertices.clear();
+                let selected = block.source_range.clone();
+                renderer.draw_markdown_block(block, &source, &[], 0.0, 0.0, 0.0, 900.0,
+                    0.0, f32::MAX, ReadHighlights {
+                        selection: Some(&selected), search_results: &[], search_current_idx: None,
+                    });
+                let selection_vertices: Vec<_> = renderer.vertices.iter()
+                    .filter(|v| v.color == renderer.theme.sel).map(|v| v.pos[1]).collect();
+                assert!(!selection_vertices.is_empty());
+                for (kind, top, baseline, height, scale, mono, heading) in samples {
+                    let (selection_top, selection_h) = source_highlight_vertical_bounds(top, height);
+                    assert!(selection_vertices.contains(&selection_top));
+                    assert!(selection_vertices.contains(&(selection_top + selection_h)));
+                    let (ink_top, ink_bottom) = actual_ink(renderer, sample, baseline, scale, mono, heading);
+                    let delta = selection_top + selection_h * 0.5 - (ink_top + ink_bottom) * 0.5;
+                    println!("SEATING dpi={dpi} kind={kind} line=[{top},{}] baseline={baseline} selection=[{selection_top},{}] ink=[{ink_top},{ink_bottom}] delta={delta}", top + height, selection_top + selection_h);
+                    let limit = if heading { 2.5 } else { editor_delta.abs().max(2.5) };
+                    if delta.abs() > limit {
+                        failures.push(format!("dpi={dpi} kind={kind} delta={delta} limit={limit}"));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "Reader seating exceeds heading/actual Editor reference: {failures:?}");
+    }
+
+    #[test]
+    fn reviewer_reader_v1_wrapped_table_hit_test_matches_rounded_draw_origin() {
+        let source = format!("| A | B | C |\n| --- | :---: | ---: |\n| {} | {} | {} |\n",
+            "Agjpqy ".repeat(12), "Agjpqy ".repeat(12), "Agjpqy ".repeat(12));
+        for dpi in [1.0, 1.25, 1.5, 2.0] {
+            let (_context, mut app) = fixture(&source, 360.0, dpi);
+            app.set_markdown_mode(MarkdownMode::Read);
+            read_frame(&mut app);
+            let blocks = app.markdown.read_layout.blocks.clone();
+            let renderer = app.renderer.as_mut().unwrap();
+            for block in &blocks {
+                let ReadBlockKind::Table(table) = &block.kind else { continue; };
+                for row in &table.rows {
+                    for (col, cell) in row.cells.iter().enumerate() {
+                        for (line_idx, range) in cell.lines.iter().enumerate() {
+                            let width = renderer.measure_styled_fragment(&cell.styled, range, 0.82);
+                            let cell_x = 37.0 + table.x + col as f32 * table.cell_width;
+                            let x = match cell.alignment {
+                                MarkdownTableAlignment::Center => cell_x + (table.cell_width - width) * 0.5,
+                                MarkdownTableAlignment::Right => cell_x + table.cell_width - table.cell_padding - width,
+                                _ => cell_x + table.cell_padding,
+                            };
+                            let top = row.y + table.cell_padding + line_idx as f32 * table.line_height;
+                            let scroll = (top - 11.25).max(0.0);
+                            let expected = styled_source_boundary(&cell.styled, range.start).unwrap();
+                            let actual = renderer.markdown_read_source_byte_at(&app.markdown,
+                                app.editor.version, (37.0, 53.0, 360.0, 180.0), scroll,
+                                x.round() + 0.1, 53.0 + top + 1.0 - scroll.round()).unwrap();
+                            assert_eq!(actual, expected,
+                                "dpi={dpi} col={col} line={line_idx} x={x} width={width}");
+                        }
+                    }
+                }
+            }
+        }
     }
 }

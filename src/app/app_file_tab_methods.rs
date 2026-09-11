@@ -214,6 +214,9 @@ impl App {
         if idx >= self.tabs.len() {
             return;
         }
+        if idx == self.active_tab && self.tabs.len() > 1 {
+            self.cancel_pointer_interactions();
+        }
 
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
 

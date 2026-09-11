@@ -455,6 +455,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if self.markdown_mode() == crate::app::MarkdownMode::Read {
+                    self.finish_markdown_read_selection_gesture();
+                    self.scroll_y.end_drag();
+                }
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.update_scale_factor(scale_factor as f32);
                     renderer.last_editor_version_for_scroll_x = u64::MAX;
@@ -476,6 +480,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Resized(size) => {
+                if self.markdown_mode() == crate::app::MarkdownMode::Read {
+                    self.finish_markdown_read_selection_gesture();
+                    self.scroll_y.end_drag();
+                }
                 if size.width == 0 || size.height == 0 {
                     self.render_suspended = true;
                     self.last_frame = Instant::now();
@@ -531,12 +539,18 @@ impl ApplicationHandler for App {
                 {
                     window.request_redraw();
                 }
-                if about::selection_drag_active_on_cursor_leave(
-                    self.is_dragging,
-                    self.show_settings,
-                    self.ide_panel.is_dragging_terminal,
-                    self.last_click_ui_id,
-                ) {
+                let markdown_read_selection = self.markdown_mode()
+                    == crate::app::MarkdownMode::Read
+                    && self.markdown.read_selecting
+                    && !self.show_settings;
+                if markdown_read_selection
+                    || about::selection_drag_active_on_cursor_leave(
+                        self.is_dragging,
+                        self.show_settings,
+                        self.ide_panel.is_dragging_terminal,
+                        self.last_click_ui_id,
+                    )
+                {
                     let window_size = self.window.as_ref().map(|window| window.inner_size());
                     if let (Some(size), Some(renderer)) = (window_size, self.renderer.as_mut()) {
                         // Wayland CursorLeft carries no new outside position, so project the last
