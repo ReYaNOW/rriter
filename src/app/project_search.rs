@@ -416,11 +416,7 @@ impl ProjectSearchState {
             ProjectSearchQueryScrollAxis::Horizontal => &mut self.query_scroll_x,
             ProjectSearchQueryScrollAxis::Vertical => &mut self.query_scroll_y,
         };
-        scroll.jump_to(target);
-        scroll.drag_offset = drag_offset;
-        scroll.anim_speed = 15.0;
-        scroll.is_dragging = true;
-        true
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
     }
 
     pub(crate) fn drag_query_scrollbar_to(
@@ -451,11 +447,7 @@ impl ProjectSearchState {
         if (scroll.target - target).abs() < 0.5 {
             return false;
         }
-        scroll.jump_to(target);
-        scroll.drag_offset = drag_offset;
-        scroll.anim_speed = 15.0;
-        scroll.is_dragging = true;
-        true
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
     }
 
     pub fn max_scroll(&self, list_h: f32, scale: f32) -> f32 {
@@ -2140,8 +2132,20 @@ mod tests {
             1.0,
         ));
         assert!(state.query_scroll_y.target > 0.0);
-        assert_eq!(state.query_scroll_y.current, state.query_scroll_y.target);
+        assert_eq!(state.query_scroll_y.current, 0.0);
+        assert_ne!(state.query_scroll_y.current, state.query_scroll_y.target);
         assert!(state.query_scroll_y.is_dragging);
+        let y_offset = state.query_scroll_y.drag_offset;
+        let y_target = state.query_scroll_y.target;
+        assert!(state.drag_query_scrollbar_to(
+            rect,
+            ProjectSearchQueryScrollAxis::Vertical,
+            viewport.vertical_track.y + viewport.vertical_track.h * 0.6,
+            1.0,
+        ));
+        assert_eq!(state.query_scroll_y.current, 0.0);
+        assert_ne!(state.query_scroll_y.target, y_target);
+        assert_eq!(state.query_scroll_y.drag_offset, y_offset);
 
         assert!(state.start_query_scrollbar_drag(
             rect,
@@ -2150,7 +2154,8 @@ mod tests {
             1.0,
         ));
         assert!(state.query_scroll_x.target > 0.0);
-        assert_eq!(state.query_scroll_x.current, state.query_scroll_x.target);
+        assert_eq!(state.query_scroll_x.current, 0.0);
+        assert_ne!(state.query_scroll_x.current, state.query_scroll_x.target);
         assert!(state.query_scroll_x.is_dragging);
     }
 

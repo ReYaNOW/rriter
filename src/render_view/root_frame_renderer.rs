@@ -397,10 +397,10 @@ impl Renderer {
         let is_ui_disabled = is_ide_mode && ide_panel.terminal_focused;
 
         self.update_popup_mouse_move_gate();
+        let popup_scroll_changed = self.update_popup_scroll_snapshot(scroll_x, scroll_y);
         if self.last_editor_version_for_typing != editor.version
             || self.last_cursor_for_popups != editor.cursor
-            || (self.last_scroll_y - scroll_y).abs() > 0.1
-            || (self.last_scroll_x - scroll_x).abs() > 0.1
+            || popup_scroll_changed
         {
             self.suppress_popups_until_next_mouse_move();
             self.last_editor_version_for_typing = editor.version;
@@ -617,19 +617,24 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
-            wants_pointer |= self.draw_ide_context_overlays(
-                ide_panel,
-                ui_registry,
-                mx,
-                my,
-                blink_alpha,
-                panel_left_w,
-                s,
-            );
-            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
             if show_fps {
                 self.draw_fps_overlay(self.minimap_width);
             }
+            wants_pointer |= self.draw_root_ide_final_overlays(
+                ide_panel,
+                editor,
+                ui_registry,
+                true,
+                panel_left_w,
+                panel_bottom_h,
+                s,
+                mx,
+                my,
+                ui_mx,
+                ui_my,
+                blink_alpha,
+                modal_overlay_open,
+            );
             self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
@@ -718,19 +723,24 @@ impl Renderer {
             if let Some((path, tx, ty)) = tab_tooltip {
                 self.draw_tab_tooltip(&path, tx, ty, s);
             }
-            wants_pointer |= self.draw_ide_context_overlays(
-                ide_panel,
-                ui_registry,
-                mx,
-                my,
-                blink_alpha,
-                panel_left_w,
-                s,
-            );
-            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
             if show_fps {
                 self.draw_fps_overlay(self.minimap_width);
             }
+            wants_pointer |= self.draw_root_ide_final_overlays(
+                ide_panel,
+                editor,
+                ui_registry,
+                true,
+                panel_left_w,
+                panel_bottom_h,
+                s,
+                mx,
+                my,
+                ui_mx,
+                ui_my,
+                blink_alpha,
+                modal_overlay_open,
+            );
             self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
@@ -974,14 +984,16 @@ impl Renderer {
         let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
         let minimap_w = self.minimap_width;
-        let minimap_x = self.width - minimap_w;
-        let scrollbar_x = minimap_x - scrollbar_width;
+        let editor_right =
+            editor_vertical_overlay_bounds(self.width, minimap_w, scrollbar_width);
+        let minimap_x = editor_right.visual_right;
+        let scrollbar_x = editor_right.interaction_right;
 
         ui_registry.register_text_input(
             crate::ui_system::UiId::EditorTextBody,
             self.left_padding,
             tab_bar_h,
-            scrollbar_x - self.left_padding,
+            editor_right.interaction_width_from(self.left_padding),
             editor_scroll_height,
             ui_mx,
             ui_my,
@@ -1002,7 +1014,7 @@ impl Renderer {
             self.push_rect(
                 self.left_padding,
                 cursor_line_y - self.baseline_offset + 2.0,
-                scrollbar_x - self.left_padding,
+                editor_right.visual_width_from(self.left_padding),
                 self.line_height,
                 [0.9, 0.9, 0.9, 0.12],
             );
@@ -1020,7 +1032,7 @@ impl Renderer {
 
         let editor_clip_x = self.left_padding.round().max(0.0);
         let editor_clip_y = tab_bar_h.round().max(0.0);
-        let editor_clip_w = (scrollbar_x - editor_clip_x).round().max(0.0);
+        let editor_clip_w = editor_right.visual_clip_width_from(editor_clip_x);
         let editor_clip_h = editor_height.round().max(0.0);
         if editor_clip_w > 0.0 && editor_clip_h > 0.0 {
             if let Some(pre_editor_start) = pre_editor_start {
@@ -1053,7 +1065,8 @@ impl Renderer {
                 sel_end,
                 render_scroll_x,
                 render_scroll_y,
-                scrollbar_x,
+                editor_right.interaction_right,
+                editor_right.visual_right,
                 blink_alpha,
                 dialog_window_open,
                 editor_cursor_blocked,

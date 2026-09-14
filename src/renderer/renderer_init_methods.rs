@@ -104,6 +104,16 @@ impl Renderer {
     }
 
     #[inline(always)]
+    pub(crate) fn update_popup_scroll_snapshot(&mut self, scroll_x: f32, scroll_y: f32) -> bool {
+        update_popup_scroll_snapshot(
+            &mut self.last_popup_scroll_x,
+            &mut self.last_popup_scroll_y,
+            scroll_x,
+            scroll_y,
+        )
+    }
+
+    #[inline(always)]
     pub fn suppress_popups_until_next_mouse_move(&mut self) {
         self.hide_popups_until_mouse_move = true;
         self.last_known_mouse = (self.last_mouse_x, self.last_mouse_y);
@@ -576,6 +586,8 @@ impl Renderer {
                 last_frame_time: None,
                 last_scroll_y: 0.0,
                 last_scroll_x: 0.0,
+                last_popup_scroll_y: 0.0,
+                last_popup_scroll_x: 0.0,
                 max_scroll_x: 0.0,
                 max_tab_scroll_x: 0.0,
                 max_terminal_tab_scroll_x: 0.0,
@@ -623,6 +635,8 @@ impl Renderer {
                 git_graph_tooltip_stable_w: 0.0,
                 git_graph_tooltip_seen_copied: None,
                 git_graph_tooltip_visible_copied: None,
+                git_logs_layout_cache: GitLogsLayoutCache::default(),
+                git_logs_selecting: false,
                 git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,

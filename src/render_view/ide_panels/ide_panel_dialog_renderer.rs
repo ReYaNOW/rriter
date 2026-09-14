@@ -12,24 +12,21 @@ pub(crate) fn intersect_scissor_boxes(first: [i32; 4], second: [i32; 4]) -> [i32
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn one_line_ui_advance(&mut self, ch: char, text_scale: f32) -> f32 {
+        self.get_ui_glyph(ch)
+            .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
+            .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0))
+    }
+
     pub(crate) fn one_line_cursor_from_x(
         &mut self,
         text: &str,
         x_offset: f32,
         text_scale: f32,
     ) -> usize {
-        let mut current_x = 0.0;
-        for (byte_idx, ch) in text.char_indices() {
-            let advance = self
-                .get_ui_glyph(ch)
-                .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
-                .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0));
-            if x_offset <= current_x + advance * 0.5 {
-                return byte_idx;
-            }
-            current_x = (current_x + advance).round();
-        }
-        text.len()
+        crate::app::single_line_input::single_line_hit_index(text, x_offset, |ch| {
+            self.one_line_ui_advance(ch, text_scale)
+        })
     }
 
     pub(crate) fn one_line_scroll_for_cursor(
@@ -731,14 +728,16 @@ impl Renderer {
         horizontal_padding: f32,
     ) {
         let s = self.scale_factor;
-        let x = input_x.round();
+        let horizontal = crate::app::single_line_input::single_line_text_geometry(
+            input_x,
+            input_w,
+            horizontal_padding,
+            right_inset,
+        );
         let y = input_y.round();
-        let w = input_w.round().max(1.0);
         let h = input_h.round().max(1.0);
-        let pad_x = horizontal_padding.round().clamp(0.0, w * 0.5);
-        let right_inset = right_inset.round().clamp(0.0, w - 1.0);
-        let content_w = (w - pad_x * 2.0 - right_inset).max(1.0);
-        let text_start_x = x + pad_x;
+        let content_w = horizontal.content_w;
+        let text_start_x = horizontal.text_start_x;
         let text_y = Self::tree_row_text_y(y, h, s);
 
         self.flush();
@@ -782,10 +781,7 @@ impl Renderer {
                     cursor_draw_x = current_x;
                 }
                 let char_to_render = if masked { '•' } else if c == '\n' { '↵' } else { c };
-                let adv = self
-                    .get_ui_glyph(char_to_render)
-                    .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
-                    .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0));
+                let adv = self.one_line_ui_advance(char_to_render, text_scale);
 
                 if byte_idx >= sel_start && byte_idx < sel_end {
                     self.push_rect(current_x, selection_y, adv, selection_h, self.theme.sel);
@@ -815,7 +811,7 @@ impl Renderer {
                 self.push_rect(
                     cursor_draw_x.round(),
                     selection_y,
-                    (1.5 * s).round().max(1.0),
+                    crate::app::single_line_input::single_line_caret_width(s),
                     selection_h,
                     color,
                 );

@@ -16,6 +16,72 @@ use tokio_postgres::types::ToSql;
 pub const DATABASE_TABLE_DISCONNECTED_MESSAGE: &str = "Подключение к базе данных не установлено. Откройте панель «Базы данных» и обновите подключение.";
 pub const DATABASE_SQL_PREVIEW_LINE_HEIGHT: f32 = 26.0;
 
+#[derive(Clone, Copy, Debug)]
+struct DatabaseMultilineLineLayout {
+    start: usize,
+    end: usize,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatabaseMultilineLayoutCache {
+    valid: bool,
+    text_len: usize,
+    scale_bits: u32,
+    precise_metrics: bool,
+    max_line_width: f32,
+    lines: Vec<DatabaseMultilineLineLayout>,
+}
+
+impl DatabaseMultilineLayoutCache {
+    pub(crate) fn ensure(
+        &mut self,
+        text: &str,
+        scale: f32,
+        precise_metrics: bool,
+        mut measure_line: impl FnMut(&str) -> f32,
+    ) -> bool {
+        let scale_bits = scale.to_bits();
+        if self.valid
+            && self.text_len == text.len()
+            && self.scale_bits == scale_bits
+            && self.precise_metrics == precise_metrics
+        {
+            return false;
+        }
+
+        self.lines.clear();
+        self.max_line_width = 0.0;
+        for (start, line) in database_multiline_lines(text) {
+            self.max_line_width = self.max_line_width.max(measure_line(line));
+            self.lines.push(DatabaseMultilineLineLayout {
+                start,
+                end: start.saturating_add(line.len()),
+            });
+        }
+        self.text_len = text.len();
+        self.scale_bits = scale_bits;
+        self.precise_metrics = precise_metrics;
+        self.valid = true;
+        true
+    }
+
+    pub(crate) fn invalidate(&mut self) {
+        self.valid = false;
+    }
+
+    pub(crate) fn line_count(&self) -> usize {
+        self.lines.len()
+    }
+
+    pub(crate) fn max_line_width(&self) -> f32 {
+        self.max_line_width
+    }
+
+    pub(crate) fn line_range(&self, index: usize) -> Option<(usize, usize)> {
+        self.lines.get(index).map(|line| (line.start, line.end))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum DatabaseTableModal {
     SqlPreview {
@@ -1060,6 +1126,54 @@ mod tests {
             database_multiline_lines("Ж\r\nnext").collect::<Vec<_>>(),
             vec![(0, "Ж"), (4, "next")]
         );
+    }
+
+    #[test]
+    fn multiline_layout_cache_reuses_metrics_and_rebuilds_on_invalidation_or_scale_change() {
+        let mut cache = DatabaseMultilineLayoutCache::default();
+        let mut measured = 0usize;
+        let text = "aa\nbbbb\n";
+
+        assert!(cache.ensure(text, 1.25, true, |line| {
+            measured += 1;
+            line.len() as f32 * 3.0
+        }));
+        assert_eq!(measured, 3);
+        assert_eq!(cache.line_count(), 3);
+        assert_eq!(cache.max_line_width(), 12.0);
+        assert_eq!(cache.line_range(0), Some((0, 2)));
+        assert_eq!(cache.line_range(1), Some((3, 7)));
+        assert_eq!(cache.line_range(2), Some((8, 8)));
+
+        assert!(!cache.ensure(text, 1.25, true, |_| {
+            measured += 1;
+            999.0
+        }));
+        assert_eq!(measured, 3, "scroll-only reuse must not remeasure lines");
+
+        cache.invalidate();
+        assert!(cache.ensure("zz\nyyyy\n", 1.25, true, |line| {
+            measured += 1;
+            line.len() as f32 * 2.0
+        }));
+        assert_eq!(measured, 6, "same-length text edit must rebuild after invalidation");
+
+        assert!(cache.ensure("zz\nyyyy\n", 1.5, true, |line| {
+            measured += 1;
+            line.len() as f32 * 2.0
+        }));
+        assert_eq!(measured, 9, "scale change must rebuild cached measurements");
+
+        assert!(cache.ensure("zz\nyyyy\n", 1.5, false, |line| {
+            measured += 1;
+            line.len() as f32
+        }));
+        assert_eq!(measured, 12, "fallback metrics must have a distinct cache identity");
+        assert!(cache.ensure("zz\nyyyy\n", 1.5, true, |line| {
+            measured += 1;
+            line.len() as f32 * 2.0
+        }));
+        assert_eq!(measured, 15, "precise renderer metrics must replace fallback widths");
     }
 
     #[test]

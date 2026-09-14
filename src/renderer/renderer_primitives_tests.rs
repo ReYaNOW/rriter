@@ -713,6 +713,47 @@ mod tests {
     }
 
     #[test]
+    fn popup_scroll_snapshot_does_not_rearm_gate_without_new_scroll() {
+        let mut last_x = 0.0;
+        let mut last_y = 0.0;
+        let mut hide_popups = false;
+
+        if update_popup_scroll_snapshot(&mut last_x, &mut last_y, 0.0, 24.0) {
+            hide_popups = true;
+        }
+        assert!(hide_popups);
+
+        // Simulate real mouse motion clearing the popup gate. Same root scroll on the
+        // next frame must not immediately arm it again.
+        hide_popups = false;
+        if update_popup_scroll_snapshot(&mut last_x, &mut last_y, 0.0, 24.0) {
+            hide_popups = true;
+        }
+        assert!(!hide_popups);
+        assert_eq!((last_x, last_y), (0.0, 24.0));
+    }
+
+    #[test]
+    fn popup_scroll_snapshot_keeps_existing_point_one_threshold() {
+        let mut last_x = 10.0;
+        let mut last_y = 20.0;
+
+        assert!(!update_popup_scroll_snapshot(
+            &mut last_x,
+            &mut last_y,
+            10.099,
+            20.0
+        ));
+        assert!(update_popup_scroll_snapshot(
+            &mut last_x,
+            &mut last_y,
+            10.099,
+            20.101
+        ));
+        assert_eq!((last_x, last_y), (10.099, 20.101));
+    }
+
+    #[test]
     fn emoji_presentation_property_keeps_terminal_symbols_text_first() {
         assert!(!default_emoji_presentation('✔'));
         assert!(!default_emoji_presentation('✓'));

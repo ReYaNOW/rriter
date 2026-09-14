@@ -157,6 +157,15 @@ pub(crate) fn python_call_argument<'a>(text: &'a str, marker: &str) -> Option<&'
     None
 }
 
+pub(crate) fn line_comment_marker(lang_id: &str) -> Option<&'static str> {
+    match lang_id {
+        "py" | "bash" | "toml" | "make" => Some("#"),
+        "rs" | "go" | "js" | "ts" | "tsx" | "java" | "cs" | "dart" | "c" | "cpp" => Some("//"),
+        "sql" => Some("--"),
+        _ => None,
+    }
+}
+
 pub(crate) fn decode_python_string_literal(text: &str) -> Option<String> {
     let text = text.trim();
     let quote_at = text.find(['\'', '"'])?;
@@ -277,5 +286,38 @@ mod shared_language_regression_tests {
             ),
             Some("default_factory=lambda: fn(1, 2)")
         );
+    }
+
+    #[test]
+    fn line_comment_marker_uses_normalized_language_ids() {
+        for lang in ["py", "bash", "toml", "make"] {
+            assert_eq!(line_comment_marker(lang), Some("#"), "lang {lang}");
+        }
+        for lang in [
+            "rs", "go", "js", "ts", "tsx", "java", "cs", "dart", "c", "cpp",
+        ] {
+            assert_eq!(line_comment_marker(lang), Some("//"), "lang {lang}");
+        }
+        assert_eq!(line_comment_marker("sql"), Some("--"));
+        for lang in ["json", "html", "css", "regex", "md", "", "unknown"] {
+            assert_eq!(line_comment_marker(lang), None, "lang {lang}");
+        }
+    }
+
+    #[test]
+    fn line_comment_marker_reuses_highlighter_extension_normalization() {
+        for (ext, marker) in [
+            ("pyi", Some("#")),
+            ("sh", Some("#")),
+            ("jsx", Some("//")),
+            ("hpp", Some("//")),
+            ("sql", Some("--")),
+            ("markdown", None),
+            ("json", None),
+            ("txt", None),
+        ] {
+            let lang_id = crate::highlighter::tree_sitter_lang_name_for_ext(ext);
+            assert_eq!(line_comment_marker(lang_id), marker, "extension {ext}");
+        }
     }
 }

@@ -285,6 +285,7 @@ impl App {
                             );
                         state.results = result_sets;
                         state.messages = messages;
+                        state.result_view.invalidate_review_message_layout();
                         state.result_view.active_result = 0;
                         state.result_view.reset_scroll();
                         state.last_duration_ms = duration_ms;
@@ -543,6 +544,7 @@ impl App {
                         state.running_started_unix_ms = 0;
                         state.error = Some(message.clone());
                         state.messages.clear();
+                        state.result_view.invalidate_review_message_layout();
                         state.diagnostic = diagnostic;
                         state.diagnostic_editor_version = diagnostic_editor_version;
                         state.editor_diagnostics =

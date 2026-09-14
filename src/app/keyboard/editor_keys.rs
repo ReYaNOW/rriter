@@ -74,6 +74,18 @@ fn key_text_for_editor_insert<'a>(
     }
 }
 
+fn editor_line_comment_marker(
+    file_extension: &str,
+    physical_key: PhysicalKey,
+    primary: bool,
+) -> Option<&'static str> {
+    if !primary || physical_key != PhysicalKey::Code(KeyCode::Slash) {
+        return None;
+    }
+    let lang_id = crate::highlighter::tree_sitter_lang_name_for_ext(file_extension);
+    crate::languages::line_comment_marker(lang_id)
+}
+
 pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
     match text {
         "(" => ("()", true),
@@ -389,6 +401,7 @@ impl App {
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                             .load(std::sync::atomic::Ordering::Relaxed),
+                        ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
                         tool_paths: self.tool_paths.clone(),
                         dart_settings: self.dart_settings.clone(),
                     });
@@ -550,6 +563,8 @@ impl App {
         let mut ty_completion_trigger: Option<&'static str> = None;
         let mut force_close_autocomplete = false;
         let is_git_diff_tab = self.active_tab_is_git_diff();
+        let line_comment_marker =
+            editor_line_comment_marker(&self.file_extension, physical_key, ctrl);
 
         if is_git_diff_tab {
             let text_insert = crate::platform::text_input_modifiers_allowed(self.modifiers)
@@ -574,7 +589,8 @@ impl App {
                 && matches!(
                     physical_key,
                     PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV)
-                ));
+                ))
+                || line_comment_marker.is_some();
             if text_insert || edit_key {
                 self.show_readonly_notice();
                 return;
@@ -868,6 +884,15 @@ impl App {
                     .shift_insert(self.editor.cursor - ins_len, ins_len, Some("    "));
                 cursor_moved = true;
                 is_edit = true;
+            }
+            PhysicalKey::Code(KeyCode::Slash) if ctrl => {
+                if let Some(marker) = line_comment_marker
+                    && self.editor.toggle_line_comment(marker)
+                {
+                    cursor_moved = true;
+                    is_edit = true;
+                    force_close_autocomplete = true;
+                }
             }
             PhysicalKey::Code(KeyCode::Space) if ctrl => {
                 if self.file_extension == "dart" {
@@ -1300,6 +1325,87 @@ mod tests {
         assert_eq!(paired_editor_insert_text("'"), ("''", true));
         assert_eq!(paired_editor_insert_text("\""), ("\"\"", true));
         assert_eq!(paired_editor_insert_text("x"), ("x", false));
+    }
+
+    #[test]
+    fn line_comment_shortcut_uses_primary_modifier_and_normalized_language() {
+        for (extension, expected) in [
+            ("py", Some("#")),
+            ("pyi", Some("#")),
+            ("sh", Some("#")),
+            ("jsx", Some("//")),
+            ("hpp", Some("//")),
+            ("sql", Some("--")),
+            ("json", None),
+            ("md", None),
+            ("txt", None),
+        ] {
+            assert_eq!(
+                editor_line_comment_marker(extension, PhysicalKey::Code(KeyCode::Slash), true,),
+                expected,
+                "extension {extension}"
+            );
+        }
+        assert_eq!(
+            editor_line_comment_marker("rs", PhysicalKey::Code(KeyCode::Slash), false),
+            None
+        );
+        assert_eq!(
+            editor_line_comment_marker("rs", PhysicalKey::Code(KeyCode::KeyC), true),
+            None
+        );
+        assert_eq!(
+            key_text_for_editor_insert(
+                PhysicalKey::Code(KeyCode::Slash),
+                Some("/"),
+                Some("/"),
+                false,
+            ),
+            Some("/")
+        );
+
+        let mut unsupported = crate::editor::Editor::new(32);
+        unsupported.set_clean_text("value\n");
+        unsupported.cursor = 2;
+        let unsupported_before = unsupported.get_full_text();
+        let unsupported_version = unsupported.version;
+        let unsupported_history = unsupported.history.len();
+        if let Some(marker) = editor_line_comment_marker(
+            "json",
+            PhysicalKey::Code(KeyCode::Slash),
+            true,
+        ) {
+            unsupported.toggle_line_comment(marker);
+        }
+        assert_eq!(unsupported.get_full_text(), unsupported_before);
+        assert_eq!(unsupported.version, unsupported_version);
+        assert_eq!(unsupported.history.len(), unsupported_history);
+
+        let mut sql = crate::editor::Editor::new(32);
+        sql.set_clean_text("select 1;\n");
+        let marker = editor_line_comment_marker(
+            "sql",
+            PhysicalKey::Code(KeyCode::Slash),
+            true,
+        )
+        .expect("SQL line marker");
+        assert!(sql.toggle_line_comment(marker));
+        assert_eq!(sql.get_full_text(), "--select 1;\n");
+    }
+
+    #[test]
+    fn markdown_read_primary_slash_is_ignored_without_readonly_notice() {
+        assert_eq!(
+            markdown_editor_key_action(
+                true,
+                true,
+                PhysicalKey::Code(KeyCode::Slash),
+                true,
+                false,
+                false,
+            ),
+            None
+        );
     }
 
     #[test]

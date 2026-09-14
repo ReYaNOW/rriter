@@ -88,6 +88,20 @@ mod tests {
         assert!(jump.1 > 0.0);
         assert!(jump.1 <= 800.0);
 
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 18.0;
+        scroll.target = 18.0;
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            jump.1.round(),
+            jump.0,
+        ));
+        assert_eq!(scroll.current, 18.0);
+        assert_eq!(scroll.target, jump.1.round());
+        assert_ne!(scroll.current, scroll.target);
+        assert_eq!(scroll.drag_offset, jump.0);
+        assert_eq!(scroll.anim_speed, 15.0);
+
         assert!(scrollbar_x_click_target(120.0, 100.0, 400.0, 0.0, 0.0, 1.0).is_none());
     }
 
@@ -117,6 +131,25 @@ mod tests {
             0.0,
         ));
         assert!(!repeated_ui_click(true, elapsed, 5.0, 0.0));
+    }
+
+    #[test]
+    fn settings_ctrl_wheel_adjust_clicks_use_quarter_steps_and_clamp() {
+        let Some(mut app) = crate::app::reviewer_stage2_test_app() else {
+            return;
+        };
+        assert_eq!(app.ctrl_wheel_multiplier, 2.0);
+        app.handle_ui_click(UiId::SettingsEditorCtrlWheelAdjust(1));
+        assert_eq!(app.ctrl_wheel_multiplier, 2.25);
+        app.handle_ui_click(UiId::SettingsEditorCtrlWheelAdjust(-1));
+        assert_eq!(app.ctrl_wheel_multiplier, 2.0);
+
+        app.ctrl_wheel_multiplier = crate::CTRL_WHEEL_MULTIPLIER_MIN;
+        app.handle_ui_click(UiId::SettingsEditorCtrlWheelAdjust(-1));
+        assert_eq!(app.ctrl_wheel_multiplier, crate::CTRL_WHEEL_MULTIPLIER_MIN);
+        app.ctrl_wheel_multiplier = crate::CTRL_WHEEL_MULTIPLIER_MAX;
+        app.handle_ui_click(UiId::SettingsEditorCtrlWheelAdjust(1));
+        assert_eq!(app.ctrl_wheel_multiplier, crate::CTRL_WHEEL_MULTIPLIER_MAX);
     }
 
     #[test]
@@ -369,6 +402,7 @@ impl App {
             | UiId::ApiOutputSchemaTab(_)
             | UiId::ApiOutputStatusTab(_, _)
             | UiId::ApiOutputSchemaMenu(_)
+            | UiId::ApiOutputSchemaMenuScrollY(_)
             | UiId::ApiOutputSchemaMenuItem(_, _)
             | UiId::ApiOutputSchemaBody(_)
             | UiId::ApiOutputSchemaFold(_, _)
@@ -402,6 +436,8 @@ impl App {
             | UiId::ApiMockPythonPickUvPath
             | UiId::ApiMockPythonPickCustomPath
             | UiId::ApiMockPythonVersionOption(_)
+            | UiId::ApiMockPythonVersionsScrollY
+            | UiId::ApiMockPythonInstallLogScrollY
             | UiId::ApiMockPythonUvPathInput
             | UiId::ApiMockPythonVersionInput
             | UiId::ApiMockPythonCustomPathInput
@@ -480,12 +516,9 @@ impl App {
                     crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
                 }
             }
-            UiId::TerminalScrollY => {
-                let active = self.ide_panel.active_terminal;
-                if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                    term.scroll_y.is_dragging = true;
-                }
-            }
+            // Terminal scrollbar drag state is initialized in mouse/input.rs, where
+            // the inverted 0=bottom geometry is available.
+            UiId::TerminalScrollY => {}
             UiId::TerminalTab(idx) => {
                 self.select_terminal_tab_from_user(idx);
             }
@@ -625,6 +658,19 @@ impl App {
                 self.settings_tab = idx;
                 self.window.as_ref().unwrap().request_redraw();
             }
+            UiId::SettingsEditorCtrlWheelAdjust(delta) => {
+                let next = crate::normalize_ctrl_wheel_multiplier(
+                    self.ctrl_wheel_multiplier
+                        + delta as f32 * crate::CTRL_WHEEL_MULTIPLIER_STEP,
+                );
+                if next != self.ctrl_wheel_multiplier {
+                    self.ctrl_wheel_multiplier = next;
+                    self.save_current_config();
+                }
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+            }
             UiId::SettingsDatabaseAdjust(setting, delta) => {
                 self.adjust_database_setting(setting, delta as i32);
                 self.window.as_ref().unwrap().request_redraw();
@@ -702,22 +748,17 @@ impl App {
                                 self.settings_anim_progress,
                             );
                         let pad_x = 12.0 * s;
-                        let widths = self
-                            .ide_ignore_patterns
-                            .iter()
-                            .map(|pattern| {
+                        let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
+                            layout,
+                            self.ide_workspaces.len(),
+                            self.ide_ignore_patterns.iter().map(|pattern| {
                                 self.renderer
                                     .as_mut()
                                     .unwrap()
                                     .measure_ui_width(pattern, 0.88)
                                     + pad_x * 2.0
                                     + 22.0 * s
-                            })
-                            .collect::<Vec<_>>();
-                        let max_scroll = crate::render_view::settings_ui::settings_ide_max_scroll(
-                            layout,
-                            self.ide_workspaces.len(),
-                            widths,
+                            }),
                             s,
                         );
                         crate::app::mouse::begin_scrollbar_drag(
@@ -1281,6 +1322,9 @@ impl App {
             }
             UiId::GitLogsClear => {
                 self.ide_panel.git.clear_git_logs();
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.reset_git_logs_layout();
+                }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -1295,7 +1339,8 @@ impl App {
             UiId::GitGraphResize
             | UiId::GitGraphScroll
             | UiId::GitGraphCommit(_, _)
-            | UiId::GitLogsBody => {
+            | UiId::GitLogsBody
+            | UiId::GitLogsScroll => {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
@@ -1794,10 +1839,9 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::EditorScrollbarX => {
-                self.scroll_x.is_dragging = true;
                 let database_query_tab = self.active_tab_is_database_query();
                 let metrics = self.editor_interaction_metrics();
-                if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
+                let started = if let (Some((wh, s, panel_bottom_h, query_results_h)), Some(r)) =
                     (metrics, self.renderer.as_mut())
                 {
                     let mx = r.last_mouse_x;
@@ -1819,18 +1863,25 @@ impl App {
                     let scrollbar_w = if max_y > 0.0 { 10.0 * s } else { 0.0 };
                     let track_x = r.left_padding;
                     let track_w = r.width - r.minimap_width - scrollbar_w - track_x;
-                    if let Some((drag_offset, target)) = scrollbar_x_click_target(
+                    scrollbar_x_click_target(
                         mx,
                         track_x,
                         track_w,
                         self.scroll_x.current,
                         r.max_scroll_x,
                         s,
-                    ) {
-                        self.scroll_x.drag_offset = drag_offset;
-                        self.scroll_x.target = target.round();
-                        self.scroll_x.current = self.scroll_x.target;
-                    }
+                    )
+                } else {
+                    None
+                };
+                if let Some((drag_offset, target)) = started {
+                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                        &mut self.scroll_x,
+                        target.round(),
+                        drag_offset,
+                    );
+                } else {
+                    self.scroll_x.end_drag();
                 }
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
@@ -1959,14 +2010,13 @@ impl App {
                         Some((drag_offset, target))
                     });
                 if let Some((drag_offset, target)) = started {
-                    let scroll = &mut self.ide_panel.lsp_scroll_y;
-                    scroll.current = target;
-                    scroll.target = target;
-                    scroll.velocity = 0.0;
-                    scroll.drag_offset = drag_offset;
-                    scroll.is_dragging = true;
+                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                        &mut self.ide_panel.lsp_scroll_y,
+                        target,
+                        drag_offset,
+                    );
                 } else {
-                    self.ide_panel.lsp_scroll_y.is_dragging = true;
+                    self.ide_panel.lsp_scroll_y.end_drag();
                 }
             }
             UiId::LspScrollX => {
@@ -2012,13 +2062,17 @@ impl App {
                                 None,
                             )
                         {
-                            scroll.current = target;
-                            scroll.target = target;
-                            scroll.velocity = 0.0;
-                            scroll.drag_offset = drag_offset;
+                            let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                scroll,
+                                target,
+                                drag_offset,
+                            );
+                        } else {
+                            scroll.end_drag();
                         }
+                    } else {
+                        scroll.end_drag();
                     }
-                    scroll.is_dragging = true;
                 }
             }
             UiId::LspLogScrollX(server_idx) => {
@@ -2061,13 +2115,17 @@ impl App {
                                 None,
                             )
                         {
-                            scroll.current = target;
-                            scroll.target = target;
-                            scroll.velocity = 0.0;
-                            scroll.drag_offset = drag_offset;
+                            let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                scroll,
+                                target,
+                                drag_offset,
+                            );
+                        } else {
+                            scroll.end_drag();
                         }
+                    } else {
+                        scroll.end_drag();
                     }
-                    scroll.is_dragging = true;
                 }
             }
             UiId::LspLogsFilterInput(server_idx) => {

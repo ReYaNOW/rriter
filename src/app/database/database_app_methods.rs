@@ -98,9 +98,9 @@ impl App {
         let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
             return false;
         };
-        dialog.scroll.jump_to(target);
-        dialog.scroll.drag_offset = drag_offset;
-        dialog.scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(
+            &mut dialog.scroll, target, drag_offset,
+        );
         true
     }
 
@@ -128,9 +128,9 @@ impl App {
         let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
             return false;
         };
-        dialog.scroll.jump_to(target);
-        dialog.scroll.drag_offset = drag_offset;
-        dialog.scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(
+            &mut dialog.scroll, target, drag_offset,
+        );
         true
     }
 
@@ -147,8 +147,11 @@ impl App {
         let input = self.ide_panel.database.dialog.as_ref()?.input(field);
         let s = renderer.scale_factor;
         let text_scale = 0.82;
-        let eye_size = if field.is_secret() { (28.0 * s).round() } else { 0.0 };
-        let visible_width = (rect.2 - 16.0 * s - eye_size).max(1.0);
+        let right_inset = if field.is_secret() { rect.3.round() } else { 0.0 };
+        let padding = (8.0 * s).round();
+        let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+            rect.0, rect.2, padding, right_inset,
+        );
         let secret = field.is_secret()
             && !self
                 .ide_panel
@@ -156,28 +159,27 @@ impl App {
                 .dialog
                 .as_ref()
                 .is_some_and(|dialog| dialog.secret_is_revealed(field));
-        let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+        let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(s);
+        let cursor_geometry = crate::app::single_line_input::single_line_cursor_geometry(
             input.text(),
             input.cursor,
-            visible_width,
+            text_geometry.content_w,
+            0.0,
+            edge_pad,
+            edge_pad,
             |ch| {
                 let rendered = if secret { '•' } else { ch };
-                renderer
-                    .get_ui_glyph(rendered)
-                    .map(|glyph| glyph.advance * text_scale)
-                    .unwrap_or(10.0 * text_scale)
+                renderer.one_line_ui_advance(rendered, text_scale)
             },
         );
-        let x_offset = (mouse_x - rect.0 - 8.0 * s + scroll_x).max(0.0);
-        Some(crate::app::file_tree::file_tree_name_input_hit_index(
+        let x_offset =
+            (mouse_x - text_geometry.text_start_x + cursor_geometry.scroll_x).max(0.0);
+        Some(crate::app::single_line_input::single_line_hit_index(
             input.text(),
             x_offset,
             |ch| {
                 let rendered = if secret { '•' } else { ch };
-                renderer
-                    .get_ui_glyph(rendered)
-                    .map(|glyph| glyph.advance * text_scale)
-                    .unwrap_or(10.0 * text_scale)
+                renderer.one_line_ui_advance(rendered, text_scale)
             },
         ))
     }
@@ -1563,6 +1565,35 @@ mod round3_database_console_tests {
         assert!(database_dialog_scrollbar_hit(track, 764.0, 220.0));
         assert!(!database_dialog_scrollbar_hit(track, 300.0, 220.0));
         assert!(!database_dialog_scrollbar_hit(track, 764.0, 360.0));
+    }
+
+    #[test]
+    fn database_dialog_scrollbar_drag_sets_target_without_teleporting_current() {
+        let track = crate::ui_system::UiClipRect::new(760.0, 100.0, 8.0, 240.0);
+        let max_scroll = 480.0;
+        let current = 160.0;
+        let thumb = crate::scroll::scrollbar_thumb(
+            track.y, track.h, track.h, track.h + max_scroll, current, 28.0,
+        )
+        .expect("dialog thumb");
+        let pointer = thumb.start + 6.0;
+        let (offset, _) = crate::scroll::scrollbar_drag_target(
+            pointer, track.y, track.h, thumb, max_scroll, None,
+        )
+        .expect("dialog drag starts");
+        let (_, target) = crate::scroll::scrollbar_drag_target(
+            pointer + 30.0, track.y, track.h, thumb, max_scroll, Some(offset),
+        )
+        .expect("dialog drag moves");
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll, target, offset,
+        ));
+        assert_eq!(scroll.current, current);
+        assert_eq!(scroll.target, target);
+        assert_eq!(scroll.drag_offset, offset);
     }
 
     #[test]

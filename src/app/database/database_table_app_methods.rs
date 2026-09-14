@@ -122,6 +122,24 @@ fn database_filter_completion_words(
         .collect()
 }
 
+pub(crate) fn database_table_input_padding(ui_scale: f32, cell_editor: bool) -> f32 {
+    if cell_editor {
+        (8.0 * ui_scale).round()
+    } else {
+        (10.0 * ui_scale).round()
+    }
+}
+
+pub(crate) fn database_table_input_text_geometry(
+    input_x: f32,
+    input_w: f32,
+    ui_scale: f32,
+    cell_editor: bool,
+) -> crate::app::single_line_input::SingleLineTextGeometry {
+    let padding = database_table_input_padding(ui_scale, cell_editor);
+    crate::app::single_line_input::single_line_text_geometry(input_x, input_w, padding, 0.0)
+}
+
 impl App {
     pub(crate) fn show_active_database_table_filter_completion(
         &mut self,
@@ -167,40 +185,35 @@ impl App {
             DatabaseTableInputTarget::Cell => unreachable!(),
         };
         let anchor = self.ui_registry.rect_for(input_id).map(|rect| {
-            let scale = crate::app::database::DATABASE_TABLE_INPUT_TEXT_SCALE;
+            let text_scale = crate::app::database::DATABASE_TABLE_INPUT_TEXT_SCALE;
             let ui_scale = self
                 .renderer
                 .as_ref()
                 .map_or(1.0, |renderer| renderer.scale_factor);
-            let padding = 10.0 * ui_scale;
-            let visible_w = (rect.2 - padding * 2.0).max(1.0);
-            let (scroll_x, prefix_w) = self.renderer.as_mut().map_or((0.0, 0.0), |renderer| {
-                let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+            let text_geometry =
+                database_table_input_text_geometry(rect.0, rect.2, ui_scale, false);
+            let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(ui_scale);
+            let cursor_geometry = self.renderer.as_mut().map(|renderer| {
+                crate::app::single_line_input::single_line_cursor_geometry(
                     &text,
                     cursor,
-                    visible_w,
-                    |ch| {
-                        renderer
-                            .get_ui_glyph(ch)
-                            .map(|glyph| Renderer::snapped_text_advance(glyph.advance, scale))
-                            .unwrap_or_else(|| (8.0 * scale).round().max(1.0))
-                    },
-                );
-                let prefix_w = text.get(..cursor).map_or(0.0, |prefix| {
-                    prefix
-                        .chars()
-                        .map(|ch| {
-                            renderer
-                                .get_ui_glyph(ch)
-                                .map(|glyph| Renderer::snapped_text_advance(glyph.advance, scale))
-                                .unwrap_or_else(|| (8.0 * scale).round().max(1.0))
-                        })
-                        .sum::<f32>()
-                });
-                (scroll_x, prefix_w)
+                    text_geometry.content_w,
+                    0.0,
+                    edge_pad,
+                    edge_pad,
+                    |ch| renderer.one_line_ui_advance(ch, text_scale),
+                )
             });
+            let (scroll_x, cursor_x) = cursor_geometry
+                .map(|geometry| (geometry.scroll_x, geometry.cursor_x))
+                .unwrap_or((0.0, 0.0));
             (
-                (rect.0 + padding + prefix_w - scroll_x).round(),
+                crate::app::single_line_input::single_line_rendered_x(
+                    text_geometry,
+                    cursor_x,
+                    scroll_x,
+                )
+                .round(),
                 (rect.1 + rect.3).round(),
             )
         });
@@ -1217,5 +1230,65 @@ mod database_table_app_tests {
         );
         assert_eq!(context.replace_range, 5..7);
         assert_eq!(context.prefix, "Us");
+    }
+
+    #[test]
+    fn filter_completion_anchor_uses_scrolled_visible_cursor_and_shared_padding() {
+        for (target, text) in [
+            (
+                DatabaseTableInputTarget::Where,
+                "customer_name ILIKE '%длинный фильтр%' AND status = active",
+            ),
+            (
+                DatabaseTableInputTarget::OrderBy,
+                "customer_name DESC, created_at DESC, id ASC",
+            ),
+        ] {
+            for scale in [1.25_f32, 1.75_f32] {
+                let rect_x = 31.4;
+                let rect_w = (112.0 * scale).round();
+                let text_geometry =
+                    database_table_input_text_geometry(rect_x, rect_w, scale, false);
+                let expected_padding = (10.0 * scale).round();
+                assert_eq!(database_table_input_padding(scale, false), expected_padding);
+                assert_eq!(text_geometry.text_start_x, rect_x.round() + expected_padding);
+                assert_eq!(
+                    text_geometry.content_w,
+                    (rect_w.round() - expected_padding * 2.0).max(1.0)
+                );
+
+                let advance = |ch: char| {
+                    let base = if ch.is_ascii() { 7.2 } else { 9.4 };
+                    (base * scale).round().max(1.0)
+                };
+                let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(scale);
+                let cursor_geometry = crate::app::single_line_input::single_line_cursor_geometry(
+                    text,
+                    text.len(),
+                    text_geometry.content_w,
+                    0.0,
+                    edge_pad,
+                    edge_pad,
+                    advance,
+                );
+                assert!(cursor_geometry.scroll_x > 0.0, "target={target:?} scale={scale}");
+
+                let anchor_x = crate::app::single_line_input::single_line_rendered_x(
+                    text_geometry,
+                    cursor_geometry.cursor_x,
+                    cursor_geometry.scroll_x,
+                )
+                .round();
+                let unclipped_logical_x =
+                    (text_geometry.text_start_x + cursor_geometry.cursor_x).round();
+                let clip_right = text_geometry.text_start_x + text_geometry.content_w;
+                let caret_w = crate::app::single_line_input::single_line_caret_width(scale);
+
+                assert!(unclipped_logical_x > clip_right, "target={target:?} scale={scale}");
+                assert!(anchor_x < unclipped_logical_x, "target={target:?} scale={scale}");
+                assert!(anchor_x >= text_geometry.text_start_x, "target={target:?} scale={scale}");
+                assert!(anchor_x + caret_w < clip_right, "target={target:?} scale={scale}");
+            }
+        }
     }
 }

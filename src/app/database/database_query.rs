@@ -211,6 +211,180 @@ pub fn database_query_results_height(
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatabaseQueryHistoryLayoutEntry {
+    pub(crate) history_index: usize,
+    pub(crate) offset_y: f32,
+    pub(crate) height: f32,
+    pub(crate) preview_lines: usize,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatabaseQueryHistoryLayoutCache {
+    valid: bool,
+    revision: u64,
+    history_len: usize,
+    connection_id: Option<DatabaseConnectionId>,
+    database_name: String,
+    scale_bits: u32,
+    content_height: f32,
+    entries: Vec<DatabaseQueryHistoryLayoutEntry>,
+    #[cfg(test)]
+    rebuild_count: usize,
+}
+
+impl DatabaseQueryHistoryLayoutCache {
+    fn matches(
+        &self,
+        revision: u64,
+        history_len: usize,
+        meta: &DatabaseQueryTabMeta,
+        scale: f32,
+    ) -> bool {
+        self.valid
+            && self.revision == revision
+            && self.history_len == history_len
+            && self.connection_id == Some(meta.connection_id)
+            && self.database_name == meta.database_name
+            && self.scale_bits == scale.max(0.0).to_bits()
+    }
+
+    fn rebuild(
+        &mut self,
+        revision: u64,
+        history: &[DatabaseQueryHistoryEntry],
+        meta: &DatabaseQueryTabMeta,
+        scale: f32,
+    ) {
+        let scale = scale.max(0.0);
+        self.entries.clear();
+        let mut offset_y = 0.0;
+        for (history_index, entry) in history.iter().enumerate().rev() {
+            if entry.connection_id != meta.connection_id
+                || entry.database_name != meta.database_name
+            {
+                continue;
+            }
+            let (preview_lines, truncated) = database_query_history_preview_metrics(&entry.sql);
+            let height = database_query_history_entry_height_from_metrics(
+                preview_lines,
+                truncated,
+                scale,
+            );
+            self.entries.push(DatabaseQueryHistoryLayoutEntry {
+                history_index,
+                offset_y,
+                height,
+                preview_lines,
+                truncated,
+            });
+            offset_y += height;
+        }
+        self.valid = true;
+        self.revision = revision;
+        self.history_len = history.len();
+        self.connection_id = Some(meta.connection_id);
+        self.database_name.clear();
+        self.database_name.push_str(&meta.database_name);
+        self.scale_bits = scale.to_bits();
+        self.content_height = offset_y;
+        #[cfg(test)]
+        {
+            self.rebuild_count = self.rebuild_count.saturating_add(1);
+        }
+    }
+
+    pub(crate) fn content_height(&self) -> f32 {
+        self.content_height
+    }
+
+    pub(crate) fn entries(&self) -> &[DatabaseQueryHistoryLayoutEntry] {
+        &self.entries
+    }
+
+    pub(crate) fn visible_range(
+        &self,
+        scroll_y: f32,
+        viewport_height: f32,
+    ) -> std::ops::Range<usize> {
+        let top = scroll_y.max(0.0);
+        let bottom = top + viewport_height.max(0.0);
+        let start = self
+            .entries
+            .partition_point(|entry| entry.offset_y + entry.height <= top);
+        let end = start
+            + self.entries[start..]
+                .partition_point(|entry| entry.offset_y < bottom);
+        start..end
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatabaseQueryReviewMessageLayoutItem {
+    pub(crate) text: String,
+    pub(crate) color: [f32; 4],
+    pub(crate) ranges: Vec<(usize, usize)>,
+    pub(crate) offset_y: f32,
+}
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DatabaseQueryReviewMessageLayoutCache {
+    valid: bool,
+    revision: u64,
+    message_count: usize,
+    max_text_width_bits: u32,
+    scale_bits: u32,
+    line_height: f32,
+    item_gap: f32,
+    total_height: f32,
+    items: Vec<DatabaseQueryReviewMessageLayoutItem>,
+}
+
+impl DatabaseQueryReviewMessageLayoutCache {
+    pub(crate) fn matches(
+        &self,
+        revision: u64,
+        message_count: usize,
+        max_text_width: f32,
+        scale: f32,
+    ) -> bool {
+        self.valid
+            && self.revision == revision
+            && self.message_count == message_count
+            && self.max_text_width_bits == max_text_width.max(0.0).to_bits()
+            && self.scale_bits == scale.max(0.0).to_bits()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn replace(
+        &mut self,
+        revision: u64,
+        message_count: usize,
+        max_text_width: f32,
+        scale: f32,
+        line_height: f32,
+        item_gap: f32,
+        total_height: f32,
+        items: Vec<DatabaseQueryReviewMessageLayoutItem>,
+    ) {
+        self.valid = true;
+        self.revision = revision;
+        self.message_count = message_count;
+        self.max_text_width_bits = max_text_width.max(0.0).to_bits();
+        self.scale_bits = scale.max(0.0).to_bits();
+        self.line_height = line_height;
+        self.item_gap = item_gap;
+        self.total_height = total_height;
+        self.items = items;
+    }
+
+    pub(crate) fn line_height(&self) -> f32 { self.line_height }
+    pub(crate) fn item_gap(&self) -> f32 { self.item_gap }
+    pub(crate) fn total_height(&self) -> f32 { self.total_height }
+    pub(crate) fn items(&self) -> &[DatabaseQueryReviewMessageLayoutItem] { &self.items }
+}
+
 #[derive(Clone, Debug)]
 pub struct DatabaseQueryResultViewState {
     pub active_result: usize,
@@ -224,6 +398,11 @@ pub struct DatabaseQueryResultViewState {
     pub column_resize: Option<(usize, f32, f32)>,
     pub selected_row: Option<usize>,
     pub selected_column: Option<usize>,
+    history_layout_revision: u64,
+    history_layout_cache: std::cell::RefCell<DatabaseQueryHistoryLayoutCache>,
+    review_message_layout_revision: u64,
+    pub(crate) review_message_layout_cache:
+        std::cell::RefCell<DatabaseQueryReviewMessageLayoutCache>,
 }
 
 impl Default for DatabaseQueryResultViewState {
@@ -240,6 +419,14 @@ impl Default for DatabaseQueryResultViewState {
             column_resize: None,
             selected_row: None,
             selected_column: None,
+            history_layout_revision: 0,
+            history_layout_cache: std::cell::RefCell::new(
+                DatabaseQueryHistoryLayoutCache::default(),
+            ),
+            review_message_layout_revision: 0,
+            review_message_layout_cache: std::cell::RefCell::new(
+                DatabaseQueryReviewMessageLayoutCache::default(),
+            ),
         }
     }
 }
@@ -275,28 +462,76 @@ impl DatabaseQueryResultViewState {
         self.review_message_scroll_y.reset();
         self.review_message_max_scroll.set(0.0);
     }
+
+    pub(crate) fn invalidate_history_layout(&mut self) {
+        self.history_layout_revision = self.history_layout_revision.wrapping_add(1);
+    }
+
+    pub(crate) fn invalidate_review_message_layout(&mut self) {
+        self.review_message_layout_revision =
+            self.review_message_layout_revision.wrapping_add(1);
+        self.review_message_max_scroll.set(0.0);
+    }
+
+    pub(crate) fn review_message_layout_revision(&self) -> u64 {
+        self.review_message_layout_revision
+    }
+
+    pub(crate) fn history_layout<'a>(
+        &'a self,
+        meta: &DatabaseQueryTabMeta,
+        history: &[DatabaseQueryHistoryEntry],
+        scale: f32,
+    ) -> std::cell::Ref<'a, DatabaseQueryHistoryLayoutCache> {
+        let needs_rebuild = {
+            let cache = self.history_layout_cache.borrow();
+            !cache.matches(self.history_layout_revision, history.len(), meta, scale)
+        };
+        if needs_rebuild {
+            self.history_layout_cache.borrow_mut().rebuild(
+                self.history_layout_revision,
+                history,
+                meta,
+                scale,
+            );
+        }
+        self.history_layout_cache.borrow()
+    }
+}
+
+fn database_query_history_preview_metrics(sql: &str) -> (usize, bool) {
+    let mut lines = sql.lines();
+    let preview_lines = lines.by_ref().take(20).count().max(1);
+    (preview_lines, lines.next().is_some())
+}
+
+fn database_query_history_entry_height_from_metrics(
+    preview_lines: usize,
+    truncated: bool,
+    scale: f32,
+) -> f32 {
+    let height = 30.0
+        + preview_lines as f32 * 20.0
+        + if truncated { 18.0 } else { 0.0 };
+    (height * scale.max(0.0)).round()
 }
 
 pub fn database_query_history_preview_lines(sql: &str) -> usize {
-    sql.lines().take(20).count().max(1)
+    database_query_history_preview_metrics(sql).0
 }
 
 pub fn database_query_history_is_truncated(sql: &str) -> bool {
-    sql.lines().nth(20).is_some()
+    database_query_history_preview_metrics(sql).1
 }
 
 pub fn database_query_history_entry_height(sql: &str) -> f32 {
-    let lines = database_query_history_preview_lines(sql) as f32;
-    30.0 + lines * 20.0
-        + if database_query_history_is_truncated(sql) {
-            18.0
-        } else {
-            0.0
-        }
+    let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
+    30.0 + preview_lines as f32 * 20.0 + if truncated { 18.0 } else { 0.0 }
 }
 
 pub fn database_query_history_entry_height_px(sql: &str, scale: f32) -> f32 {
-    (database_query_history_entry_height(sql) * scale.max(0.0)).round()
+    let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
+    database_query_history_entry_height_from_metrics(preview_lines, truncated, scale)
 }
 
 pub fn database_query_history_entry_bytes(entry: &DatabaseQueryHistoryEntry) -> usize {
@@ -351,13 +586,10 @@ pub fn database_query_scroll_limits(
     scale: f32,
 ) -> (f32, f32) {
     if state.history_open {
-        let content_height = database_query_history_content_height(
-            history.iter().filter(|entry| {
-                entry.connection_id == meta.connection_id
-                    && entry.database_name == meta.database_name
-            }),
-            scale,
-        );
+        let content_height = state
+            .result_view
+            .history_layout(meta, history, scale)
+            .content_height();
         return (0.0, (content_height - viewport_height).max(0.0));
     }
     if let Some(result) = state.results.get(state.result_view.active_result) {
@@ -2271,6 +2503,99 @@ SELECT 2;  ";
                 .map(|entry| database_query_history_entry_height(&entry.sql) * scale)
                 .sum::<f32>()
         );
+    }
+
+    #[test]
+    fn history_layout_cache_reuses_scroll_only_work_and_invalidates_sources() {
+        let meta = DatabaseQueryTabMeta {
+            connection_id: DatabaseConnectionId(7),
+            database_name: "postgres".to_string(),
+            console_id: super::super::SqlConsoleId(1),
+            title: "SQL".to_string(),
+        };
+        let mut state = DatabaseQueryTabState {
+            history_open: true,
+            ..DatabaseQueryTabState::default()
+        };
+        let mut history = vec![
+            DatabaseQueryHistoryEntry {
+                connection_id: meta.connection_id,
+                database_name: meta.database_name.clone(),
+                sql: "select 1".to_string(),
+                ..DatabaseQueryHistoryEntry::default()
+            },
+            DatabaseQueryHistoryEntry {
+                connection_id: meta.connection_id,
+                database_name: meta.database_name.clone(),
+                sql: "select 2\nfrom t".to_string(),
+                ..DatabaseQueryHistoryEntry::default()
+            },
+        ];
+
+        let first = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
+        let second = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
+        assert_eq!(first, second);
+        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 1);
+
+        history.push(DatabaseQueryHistoryEntry {
+            connection_id: meta.connection_id,
+            database_name: meta.database_name.clone(),
+            sql: "select 3".to_string(),
+            ..DatabaseQueryHistoryEntry::default()
+        });
+        state.result_view.invalidate_history_layout();
+        let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
+        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 2);
+
+        history.remove(0);
+        state.result_view.invalidate_history_layout();
+        let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
+        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 3);
+
+        let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.25);
+        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 4);
+        let other_meta = DatabaseQueryTabMeta {
+            database_name: "template1".to_string(),
+            ..meta.clone()
+        };
+        let _ = database_query_scroll_limits(&other_meta, &state, &history, 300.0, 20.0, 1.25);
+        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 5);
+    }
+
+    #[test]
+    fn history_layout_cache_seeks_visible_entries_and_preserves_selection_mapping() {
+        let meta = DatabaseQueryTabMeta {
+            connection_id: DatabaseConnectionId(9),
+            database_name: "app".to_string(),
+            console_id: super::super::SqlConsoleId(2),
+            title: "SQL".to_string(),
+        };
+        let mut history = (0..5)
+            .map(|index| DatabaseQueryHistoryEntry {
+                connection_id: meta.connection_id,
+                database_name: meta.database_name.clone(),
+                sql: format!("select {index}"),
+                started_unix_ms: index,
+                ..DatabaseQueryHistoryEntry::default()
+            })
+            .collect::<Vec<_>>();
+        history.insert(2, DatabaseQueryHistoryEntry {
+            connection_id: meta.connection_id,
+            database_name: "other".to_string(),
+            sql: "select 'other'".to_string(),
+            started_unix_ms: 99,
+            ..DatabaseQueryHistoryEntry::default()
+        });
+        let state = DatabaseQueryTabState::default();
+        let layout = state.result_view.history_layout(&meta, &history, 1.0);
+        assert_eq!(layout.entries().len(), 5);
+        assert_eq!(layout.content_height(), 250.0);
+        assert_eq!(layout.visible_range(0.0, 49.0), 0..1);
+        assert_eq!(layout.visible_range(50.0, 50.0), 1..2);
+        assert_eq!(layout.visible_range(75.0, 1.0), 1..2);
+        assert_eq!(layout.visible_range(200.0, 50.0), 4..5);
+        assert_eq!(history[layout.entries()[0].history_index].started_unix_ms, 4);
+        assert_eq!(history[layout.entries()[1].history_index].started_unix_ms, 3);
     }
 
     #[test]

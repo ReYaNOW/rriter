@@ -489,13 +489,8 @@ impl Renderer {
         let grid_h = (h - tabs_h - summary_h).max(0.0);
         let scrollbar = (10.0 * s).round().max(10.0);
         if state.history_open {
-            let content_h = crate::app::database::database_query_history_content_height(
-                history.iter().filter(|entry| {
-                    entry.connection_id == meta.connection_id
-                        && entry.database_name == meta.database_name
-                }),
-                s,
-            );
+            let history_layout = state.result_view.history_layout(meta, history, s);
+            let content_h = history_layout.content_height();
             let layout = crate::app::database::database_grid_layout(
                 x, grid_y, w, grid_h, 0.0, scrollbar, 0.0, 0.0, content_h,
             );
@@ -515,8 +510,8 @@ impl Renderer {
                 layout.body_rect.w,
                 layout.body_rect.h,
                 s,
-                meta,
                 history,
+                &history_layout,
                 state.history_selected,
                 state.result_view.scroll_y.current.clamp(0.0, max_y),
                 state.result_view.scroll_y.is_settled(),
@@ -601,8 +596,8 @@ impl Renderer {
         w: f32,
         h: f32,
         s: f32,
-        meta: &crate::app::database::DatabaseQueryTabMeta,
         history: &[crate::app::database::DatabaseQueryHistoryEntry],
+        history_layout: &crate::app::database::DatabaseQueryHistoryLayoutCache,
         history_selected: usize,
         scroll_y: f32,
         hover_settled: bool,
@@ -616,8 +611,6 @@ impl Renderer {
         let h = h.round();
         let padding = (10.0 * s).round();
         let clip = UiClipRect::new(x, y, w, h);
-        let mut content_y = 0.0f32;
-        let mut matching = 0usize;
         self.flush();
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
@@ -628,20 +621,13 @@ impl Renderer {
                 h.round().max(0.0) as i32,
             );
         }
-        for (visible_index, entry) in history
-            .iter()
-            .rev()
-            .filter(|entry| {
-                entry.connection_id == meta.connection_id
-                    && entry.database_name == meta.database_name
-            })
-            .enumerate()
-        {
-            matching += 1;
-            let entry_h =
-                crate::app::database::database_query_history_entry_height_px(&entry.sql, s);
-            let row_y = (y + content_y - scroll_y).round();
-            content_y += entry_h;
+        for visible_index in history_layout.visible_range(scroll_y, h) {
+            let layout_entry = &history_layout.entries()[visible_index];
+            let Some(entry) = history.get(layout_entry.history_index) else {
+                continue;
+            };
+            let entry_h = layout_entry.height;
+            let row_y = (y + layout_entry.offset_y - scroll_y).round();
             if row_y + entry_h <= y || row_y >= y + h {
                 continue;
             }
@@ -710,7 +696,7 @@ impl Renderer {
                 let mut byte_offset = 0usize;
                 let mut line_y = row_y + (43.0 * s).round();
                 let mut drew_line = false;
-                for raw_line in entry.sql.split_inclusive('\n').take(20) {
+                for raw_line in entry.sql.split_inclusive('\n').take(layout_entry.preview_lines) {
                     drew_line = true;
                     let line = raw_line.trim_end_matches(&['\r', '\n'][..]);
                     self.draw_database_sql_line(
@@ -734,7 +720,7 @@ impl Renderer {
                         x + w - padding,
                     );
                 }
-                if crate::app::database::database_query_history_is_truncated(&entry.sql) {
+                if layout_entry.truncated {
                     self.draw_string_scaled_pixel_snapped(
                         "…",
                         x + padding,
@@ -747,7 +733,7 @@ impl Renderer {
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
-        if matching == 0 {
+        if history_layout.entries().is_empty() {
             self.draw_string_scaled_pixel_snapped(
                 "История запросов для этой базы пуста",
                 x + (14.0 * s).round(),
@@ -1222,23 +1208,18 @@ impl Renderer {
             my,
         );
 
-        let items = database_query_review_message_items(state);
         let pad = (10.0 * s).round();
-        let line_h = (20.0 * s).round().max(16.0);
-        let item_gap = (8.0 * s).round();
         let max_text_w = (w - pad * 2.0 - scrollbar_w).max(40.0);
-        let mut layouts = Vec::with_capacity(items.len());
-        let mut total_h = pad;
-        for (text, color) in items {
-            let ranges = crate::render_view::core_text::wrapped_text_ranges(
-                &text,
-                max_text_w,
-                |ch| self.char_advance(ch) * 0.72,
-            );
-            total_h += ranges.len() as f32 * line_h + item_gap;
-            layouts.push((text, color, ranges));
-        }
-        total_h += pad;
+        ensure_database_query_review_message_layout(
+            state,
+            max_text_w,
+            s,
+            |ch| self.char_advance(ch),
+        );
+        let message_layout = state.result_view.review_message_layout_cache.borrow();
+        let line_h = message_layout.line_height();
+        let item_gap = message_layout.item_gap();
+        let total_h = message_layout.total_height();
         let max_scroll = (total_h - body_h).max(0.0);
         state.result_view.review_message_max_scroll.set(max_scroll);
         let scroll_y = state
@@ -1259,21 +1240,41 @@ impl Renderer {
                 body_h.round().max(0.0) as i32,
             );
         }
-        let mut draw_y = (body_y + pad - scroll_y).round();
-        for (text, color, ranges) in layouts {
-            for (start, end) in ranges {
+        let items = message_layout.items();
+        let visible_bottom = scroll_y + body_h;
+        let first_item = items.partition_point(|item| {
+            item.offset_y + item.ranges.len() as f32 * line_h + item_gap <= scroll_y
+        });
+        for item in &items[first_item..] {
+            if item.offset_y >= visible_bottom {
+                break;
+            }
+            let first_line = if scroll_y > item.offset_y {
+                ((scroll_y - item.offset_y) / line_h).floor() as usize
+            } else {
+                0
+            }
+            .min(item.ranges.len());
+            let last_line = if visible_bottom > item.offset_y {
+                ((visible_bottom - item.offset_y) / line_h).ceil() as usize
+            } else {
+                0
+            }
+            .min(item.ranges.len());
+            for line_index in first_line..last_line {
+                let (start, end) = item.ranges[line_index];
+                let draw_y =
+                    (body_y + item.offset_y + line_index as f32 * line_h - scroll_y).round();
                 if draw_y + line_h >= body_y && draw_y <= body_y + body_h {
                     self.draw_string_scaled_pixel_snapped(
-                        &text[start..end],
+                        &item.text[start..end],
                         x + pad,
                         Self::tree_row_text_y(draw_y, line_h, s),
-                        color,
+                        item.color,
                         0.72,
                     );
                 }
-                draw_y = (draw_y + line_h).round();
             }
-            draw_y = (draw_y + item_gap).round();
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
@@ -1315,6 +1316,57 @@ impl Renderer {
             }
         }
     }
+}
+
+fn ensure_database_query_review_message_layout(
+    state: &crate::app::database::DatabaseQueryTabState,
+    max_text_width: f32,
+    scale: f32,
+    mut char_advance: impl FnMut(char) -> f32,
+) -> bool {
+    let revision = state.result_view.review_message_layout_revision();
+    let source_count = state.messages.len();
+    let needs_rebuild = {
+        let cache = state.result_view.review_message_layout_cache.borrow();
+        !cache.matches(revision, source_count, max_text_width, scale)
+    };
+    if !needs_rebuild {
+        return false;
+    }
+
+    let line_height = (20.0 * scale).round().max(16.0);
+    let item_gap = (8.0 * scale).round();
+    let pad = (10.0 * scale).round();
+    let source_items = database_query_review_message_items(state);
+    let mut items = Vec::with_capacity(source_items.len());
+    let mut total_height = pad;
+    for (text, color) in source_items {
+        let ranges = crate::render_view::core_text::wrapped_text_ranges(
+            &text,
+            max_text_width,
+            |ch| char_advance(ch) * 0.72,
+        );
+        let offset_y = total_height;
+        total_height += ranges.len() as f32 * line_height + item_gap;
+        items.push(crate::app::database::DatabaseQueryReviewMessageLayoutItem {
+            text,
+            color,
+            ranges,
+            offset_y,
+        });
+    }
+    total_height += pad;
+    state.result_view.review_message_layout_cache.borrow_mut().replace(
+        revision,
+        source_count,
+        max_text_width,
+        scale,
+        line_height,
+        item_gap,
+        total_height,
+        items,
+    );
+    true
 }
 
 fn database_query_review_message_items(
@@ -1621,6 +1673,83 @@ mod tests {
         cache.clear();
         assert!(cache.entries.is_empty());
         assert_eq!(cache.retained_bytes, 0);
+    }
+
+    #[test]
+    fn review_message_layout_reuses_scroll_only_work_and_invalidates_inputs() {
+        let mut state = crate::app::database::DatabaseQueryTabState {
+            messages: vec![crate::app::database::DatabaseQueryMessage {
+                severity: "NOTICE".to_string(),
+                message: "row changed".to_string(),
+                detail: Some("detail".to_string()),
+                hint: Some("hint".to_string()),
+            }],
+            ..crate::app::database::DatabaseQueryTabState::default()
+        };
+        assert!(ensure_database_query_review_message_layout(
+            &state, 160.0, 1.0, |_| 8.0
+        ));
+        assert!(!ensure_database_query_review_message_layout(
+            &state, 160.0, 1.0, |_| 8.0
+        ));
+        assert!(ensure_database_query_review_message_layout(
+            &state, 120.0, 1.0, |_| 8.0
+        ));
+        assert!(ensure_database_query_review_message_layout(
+            &state, 120.0, 1.25, |_| 8.0
+        ));
+
+        state.messages[0].detail = Some("changed detail".to_string());
+        state.result_view.invalidate_review_message_layout();
+        assert!(ensure_database_query_review_message_layout(
+            &state, 120.0, 1.25, |_| 8.0
+        ));
+        assert!(!ensure_database_query_review_message_layout(
+            &state, 120.0, 1.25, |_| 8.0
+        ));
+        state.messages.clear();
+        assert!(ensure_database_query_review_message_layout(
+            &state, 120.0, 1.25, |_| 8.0
+        ));
+    }
+
+    #[test]
+    fn review_message_layout_height_and_visible_seek_share_rounded_geometry() {
+        let state = crate::app::database::DatabaseQueryTabState {
+            messages: (0..8)
+                .map(|index| crate::app::database::DatabaseQueryMessage {
+                    severity: "NOTICE".to_string(),
+                    message: format!("message {index} with enough text to wrap"),
+                    ..crate::app::database::DatabaseQueryMessage::default()
+                })
+                .collect(),
+            ..crate::app::database::DatabaseQueryTabState::default()
+        };
+        let scale = 1.25;
+        assert!(ensure_database_query_review_message_layout(
+            &state, 110.0, scale, |_| 8.0
+        ));
+        let cache = state.result_view.review_message_layout_cache.borrow();
+        let line_h = (20.0_f32 * scale).round().max(16.0);
+        let item_gap = (8.0_f32 * scale).round();
+        let pad = (10.0_f32 * scale).round();
+        let expected = pad
+            + cache
+                .items()
+                .iter()
+                .map(|item| item.ranges.len() as f32 * line_h + item_gap)
+                .sum::<f32>()
+            + pad;
+        assert_eq!(cache.line_height(), line_h);
+        assert_eq!(cache.item_gap(), item_gap);
+        assert_eq!(cache.total_height(), expected);
+        assert!(cache.items().iter().all(|item| item.offset_y.round() == item.offset_y));
+
+        let scroll_y = cache.items()[3].offset_y;
+        let first_item = cache.items().partition_point(|item| {
+            item.offset_y + item.ranges.len() as f32 * line_h + item_gap <= scroll_y
+        });
+        assert_eq!(first_item, 3);
     }
 
     #[test]

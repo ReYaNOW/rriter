@@ -1015,7 +1015,7 @@ pub(super) fn scroll_query_result(app: &mut App, direction: f32) -> Result<(), S
         .rect_for(UiId::DatabaseQueryResultBody)
         .ok_or_else(|| format!("PGO query result viewport is not rendered; {}", diagnostics(app)))?;
     let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-    let history = app.ide_panel.database.persisted.query_history.clone();
+    let history = &app.ide_panel.database.persisted.query_history;
     let Some(active_tab) = app.tabs.get_mut(app.active_tab) else {
         return Err(format!("PGO query tab disappeared; {}", diagnostics(app)));
     };
@@ -1028,7 +1028,7 @@ pub(super) fn scroll_query_result(app: &mut App, direction: f32) -> Result<(), S
     let (_, max_y) = database_query_scroll_limits(
         meta,
         state,
-        &history,
+        history,
         viewport.2.max(1.0),
         viewport.3.max(1.0),
         scale,

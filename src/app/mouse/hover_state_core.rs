@@ -760,5 +760,27 @@ mod scrollbar_tests {
         .unwrap();
         assert!((offset - pointer_offset).abs() < 0.001);
         assert!((target - current).abs() < 0.001);
+
+        let (_, moved_target) = hover_popup_scrollbar_drag_target(
+            rect,
+            max_scroll,
+            current,
+            rect.1 + rect.3 * 0.8,
+            1.0,
+            Some(offset),
+        )
+        .unwrap();
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = current;
+        scroll.target = current;
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            moved_target,
+            offset,
+        ));
+        assert_eq!(scroll.current, current);
+        assert_eq!(scroll.target, moved_target);
+        assert_ne!(scroll.current, scroll.target);
+        assert_eq!(scroll.drag_offset, offset);
     }
 }

@@ -652,4 +652,154 @@ mod round3_editor_regressions {
         assert_eq!(editor.get_full_text(), before);
         assert_eq!(editor.version, version);
     }
+
+    #[test]
+    fn line_comment_toggle_single_line_is_one_replace_history_step() {
+        let mut editor = Editor::new(64);
+        editor.set_clean_text("  value();\nnext\n");
+        let original_cursor = "  val".len();
+        editor.cursor = original_cursor;
+        let version = editor.version;
+
+        assert!(editor.toggle_line_comment("//"));
+        assert_eq!(editor.get_full_text(), "  //value();\nnext\n");
+        assert_eq!(editor.cursor, original_cursor + 2);
+        assert!(editor.selection_anchor.is_none());
+        assert_eq!(editor.version, next_editor_version(version));
+        assert_eq!(editor.history.len(), 1);
+        assert!(matches!(
+            editor.history.back().map(|step| &step.op),
+            Some(EditOp::Replace { .. })
+        ));
+
+        assert!(matches!(editor.undo(), Some(UndoRedoDelta::Replace(..))));
+        assert_eq!(editor.get_full_text(), "  value();\nnext\n");
+        assert_eq!(editor.cursor, original_cursor);
+        assert!(editor.selection_anchor.is_none());
+
+        assert!(matches!(editor.redo(), Some(UndoRedoDelta::Replace(..))));
+        assert_eq!(editor.get_full_text(), "  //value();\nnext\n");
+        assert_eq!(editor.cursor, original_cursor + 2);
+    }
+
+    #[test]
+    fn line_comment_toggle_selection_trailing_line_rule_and_direction() {
+        fn run(reverse: bool) {
+            let mut editor = Editor::new(32);
+            editor.set_clean_text("a\nb\nc\n");
+            let trailing_line_start = editor.line_offsets[2];
+            if reverse {
+                editor.selection_anchor = Some(trailing_line_start);
+                editor.cursor = 0;
+            } else {
+                editor.selection_anchor = Some(0);
+                editor.cursor = trailing_line_start;
+            }
+
+            assert!(editor.toggle_line_comment("//"));
+            assert_eq!(editor.get_full_text(), "//a\n//b\nc\n");
+            let anchor = editor.selection_anchor.expect("selection anchor");
+            if reverse {
+                assert!(anchor > editor.cursor);
+            } else {
+                assert!(anchor < editor.cursor);
+            }
+
+            assert!(editor.toggle_line_comment("//"));
+            assert_eq!(editor.get_full_text(), "a\nb\nc\n");
+            let anchor = editor.selection_anchor.expect("selection anchor");
+            if reverse {
+                assert!(anchor > editor.cursor);
+            } else {
+                assert!(anchor < editor.cursor);
+            }
+        }
+
+        run(false);
+        run(true);
+
+        let mut includes_next = Editor::new(32);
+        includes_next.set_clean_text("a\nb\nc\n");
+        includes_next.selection_anchor = Some(0);
+        includes_next.cursor = includes_next.line_offsets[2] + 1;
+        assert!(includes_next.toggle_line_comment("//"));
+        assert_eq!(includes_next.get_full_text(), "//a\n//b\n//c\n");
+    }
+
+    #[test]
+    fn line_comment_toggle_mixed_block_blank_indent_and_utf8() {
+        let original = "  //готово\n\tновое\n   \nemoji 😀 // tail\n";
+        let mut editor = Editor::new(original.len() + 32);
+        editor.set_clean_text(original);
+        editor.selection_anchor = Some(0);
+        editor.cursor = editor.len();
+
+        assert!(editor.toggle_line_comment("//"));
+        assert_eq!(
+            editor.get_full_text(),
+            "  ////готово\n\t//новое\n   \n//emoji 😀 // tail\n"
+        );
+        assert!(editor.get_full_text().is_char_boundary(editor.cursor));
+        assert!(
+            editor
+                .selection_anchor
+                .is_some_and(|anchor| editor.get_full_text().is_char_boundary(anchor))
+        );
+
+        assert!(editor.toggle_line_comment("//"));
+        assert_eq!(editor.get_full_text(), original);
+    }
+
+    #[test]
+    fn line_comment_toggle_preserves_crlf_tabs_and_ignores_late_marker() {
+        let mut editor = Editor::new(64);
+        editor.set_clean_text("\tone // later\r\n  two\r\n");
+        editor.selection_anchor = Some(0);
+        editor.cursor = editor.len();
+
+        assert!(editor.toggle_line_comment("#"));
+        assert_eq!(editor.get_full_text(), "\t#one // later\r\n  #two\r\n");
+        assert!(editor.toggle_line_comment("#"));
+        assert_eq!(editor.get_full_text(), "\tone // later\r\n  two\r\n");
+
+        let mut late_marker = Editor::new(32);
+        late_marker.set_clean_text("value // later\n");
+        late_marker.cursor = 0;
+        assert!(late_marker.toggle_line_comment("//"));
+        assert_eq!(late_marker.get_full_text(), "//value // later\n");
+    }
+
+    #[test]
+    fn line_comment_toggle_cursor_mapping_handles_marker_boundaries() {
+        for (cursor, expected) in [(0usize, 0usize), (2, 4), (4, 6)] {
+            let mut editor = Editor::new(32);
+            editor.set_clean_text("  value\n");
+            editor.cursor = cursor;
+            assert!(editor.toggle_line_comment("//"));
+            assert_eq!(editor.cursor, expected, "cursor {cursor}");
+        }
+
+        let mut inside_marker = Editor::new(32);
+        inside_marker.set_clean_text("//value\n");
+        inside_marker.cursor = 1;
+        assert!(inside_marker.toggle_line_comment("//"));
+        assert_eq!(inside_marker.get_full_text(), "value\n");
+        assert_eq!(inside_marker.cursor, 0);
+    }
+
+    #[test]
+    fn line_comment_toggle_whitespace_only_is_true_noop() {
+        let mut editor = Editor::new(32);
+        editor.set_clean_text("   \n\t\n");
+        editor.selection_anchor = Some(0);
+        editor.cursor = editor.len();
+        let before = editor.get_full_text();
+        let version = editor.version;
+        let history_len = editor.history.len();
+
+        assert!(!editor.toggle_line_comment("//"));
+        assert_eq!(editor.get_full_text(), before);
+        assert_eq!(editor.version, version);
+        assert_eq!(editor.history.len(), history_len);
+    }
 }

@@ -3,6 +3,8 @@ use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
 use winit::event_loop::ActiveEventLoop;
 
+const SCROLLBAR_DRAG_ANIM_SPEED: f32 = 15.0;
+
 fn panel_scroll_rect(
     is_top: bool,
     scale: f32,
@@ -133,6 +135,7 @@ pub(crate) fn begin_scrollbar_drag(
         scroll.current,
         min_thumb_len,
     ) else {
+        scroll.end_drag();
         return false;
     };
     let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
@@ -143,9 +146,24 @@ pub(crate) fn begin_scrollbar_drag(
         max_scroll,
         None,
     ) else {
+        scroll.end_drag();
         return false;
     };
-    scroll.jump_to(target);
+    apply_scrollbar_drag_target(scroll, target, drag_offset)
+}
+
+#[inline(always)]
+pub(crate) fn apply_scrollbar_drag_target(
+    scroll: &mut crate::scroll::ScrollState,
+    target: f32,
+    drag_offset: f32,
+) -> bool {
+    if !target.is_finite() || !drag_offset.is_finite() {
+        scroll.end_drag();
+        return false;
+    }
+    scroll.set_target(target);
+    scroll.anim_speed = SCROLLBAR_DRAG_ANIM_SPEED;
     scroll.drag_offset = drag_offset;
     scroll.is_dragging = true;
     true
@@ -185,10 +203,7 @@ pub(crate) fn update_scrollbar_drag(
         scroll.end_drag();
         return false;
     };
-    scroll.jump_to(target);
-    scroll.drag_offset = drag_offset;
-    scroll.is_dragging = true;
-    true
+    apply_scrollbar_drag_target(scroll, target, drag_offset)
 }
 
 fn explorer_scrollbar_layout(
@@ -337,8 +352,8 @@ pub use hover_state_core::{hover_source_line_y_band, is_in_hover_popup_or_bridge
 #[cfg(test)]
 mod panel_geometry_tests {
     use super::{
-        begin_scrollbar_drag, ide_root_resize_cursor, ide_root_resize_hover_enabled,
-        panel_scroll_rect, update_scrollbar_drag,
+        apply_scrollbar_drag_target, begin_scrollbar_drag, ide_root_resize_cursor,
+        ide_root_resize_hover_enabled, panel_scroll_rect, update_scrollbar_drag,
     };
 
     #[test]
@@ -388,7 +403,46 @@ mod panel_geometry_tests {
     }
 
     #[test]
-    fn shared_scrollbar_drag_preserves_pointer_offset_across_moves() {
+    fn begin_scrollbar_drag_preserves_current_inside_thumb() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.jump_to(100.0);
+        assert!(begin_scrollbar_drag(
+            &mut scroll,
+            75.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
+        assert_eq!(scroll.current, 100.0);
+        assert_eq!(scroll.target, 100.0);
+        assert_eq!(scroll.drag_offset, 35.0);
+        assert!(scroll.is_dragging);
+        assert_eq!(scroll.anim_speed, 15.0);
+    }
+
+    #[test]
+    fn track_click_sets_target_without_teleporting_current() {
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(100.0);
+
+        assert!(begin_scrollbar_drag(
+            &mut scroll,
+            180.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
+
+        assert_eq!(scroll.current, 100.0);
+        assert_eq!(scroll.target, 300.0);
+        assert_eq!(scroll.drag_offset, 40.0);
+        assert_eq!(scroll.anim_speed, 15.0);
+    }
+
+    #[test]
+    fn update_scrollbar_drag_preserves_pointer_offset_and_only_moves_target() {
         let mut scroll = crate::scroll::ScrollState::new(15.0);
         scroll.jump_to(100.0);
         assert!(begin_scrollbar_drag(
@@ -400,7 +454,7 @@ mod panel_geometry_tests {
             20.0
         ));
         let offset = scroll.drag_offset;
-        assert!(offset > 0.0);
+
         assert!(update_scrollbar_drag(
             &mut scroll,
             95.0,
@@ -411,6 +465,91 @@ mod panel_geometry_tests {
         ));
         assert_eq!(scroll.drag_offset, offset);
         assert!(scroll.is_dragging);
+        assert_eq!(scroll.current, 100.0);
+        assert_eq!(scroll.target, 150.0);
+        assert_ne!(scroll.current, scroll.target);
+    }
+
+    #[test]
+    fn scroll_update_advances_current_toward_drag_target() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.jump_to(100.0);
+        assert!(begin_scrollbar_drag(
+            &mut scroll,
+            75.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
+        assert!(update_scrollbar_drag(
+            &mut scroll,
+            95.0,
+            0.0,
+            200.0,
+            300.0,
+            20.0
+        ));
+
+        assert!(scroll.update(0.016));
+        assert!(scroll.current > 100.0);
+        assert!(scroll.current < scroll.target);
+        assert_eq!(scroll.target, 150.0);
+        assert!(scroll.is_dragging);
+    }
+
+    #[test]
+    fn end_drag_clears_capture_without_snapping_current() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.current = 112.0;
+        scroll.target = 150.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 35.0;
+
+        scroll.end_drag();
+
+        assert_eq!(scroll.current, 112.0);
+        assert_eq!(scroll.target, 150.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+    }
+
+    #[test]
+    fn invalid_scrollbar_geometry_clears_drag_without_moving_scroll() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.current = 100.0;
+        scroll.target = 180.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 9.0;
+
+        assert!(!begin_scrollbar_drag(
+            &mut scroll,
+            75.0,
+            0.0,
+            200.0,
+            0.0,
+            20.0
+        ));
+
+        assert_eq!(scroll.current, 100.0);
+        assert_eq!(scroll.target, 180.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
+    }
+
+    #[test]
+    fn apply_scrollbar_drag_target_rejects_non_finite_inputs() {
+        let mut scroll = crate::scroll::ScrollState::new(15.0);
+        scroll.current = 100.0;
+        scroll.target = 120.0;
+        scroll.is_dragging = true;
+        scroll.drag_offset = 8.0;
+
+        assert!(!apply_scrollbar_drag_target(&mut scroll, f32::NAN, 8.0));
+        assert_eq!(scroll.current, 100.0);
+        assert_eq!(scroll.target, 120.0);
+        assert!(!scroll.is_dragging);
+        assert_eq!(scroll.drag_offset, 0.0);
     }
 
     #[test]

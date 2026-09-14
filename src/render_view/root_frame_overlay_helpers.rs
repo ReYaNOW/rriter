@@ -1,3 +1,8 @@
+#[inline(always)]
+fn editor_horizontal_track_color(bg: [f32; 4]) -> [f32; 4] {
+    [bg[0], bg[1], bg[2], 1.0]
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     fn draw_ide_context_overlays(
@@ -62,6 +67,63 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
+    fn draw_root_ide_final_overlays(
+        &mut self,
+        ide_panel: &crate::app::IdePanelState,
+        editor: &crate::editor::Editor,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        is_ide_mode: bool,
+        panel_left_w: f32,
+        panel_bottom_h: f32,
+        s: f32,
+        mx: f32,
+        my: f32,
+        ui_mx: f32,
+        ui_my: f32,
+        blink_alpha: f32,
+        modal_overlay_open: bool,
+    ) -> bool {
+        if !is_ide_mode {
+            self.reset_git_file_tooltip_overlay();
+            return false;
+        }
+
+        let mouse_in_blocking_bottom_panel = panel_bottom_h > 0.0
+            && ide_panel.bottom_panel_blocks_editor_hover()
+            && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
+            && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
+        let overlay_mx = if mouse_in_blocking_bottom_panel {
+            -1.0
+        } else {
+            mx
+        };
+        let overlay_my = if mouse_in_blocking_bottom_panel {
+            -1.0
+        } else {
+            my
+        };
+        let mut wants_pointer = self.draw_ide_context_overlays(
+            ide_panel,
+            ui_registry,
+            overlay_mx,
+            overlay_my,
+            blink_alpha,
+            panel_left_w,
+            s,
+        );
+
+        if modal_overlay_open {
+            self.reset_git_file_tooltip_overlay();
+        } else {
+            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
+        }
+
+        wants_pointer |=
+            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
+        wants_pointer
+    }
+
+    #[allow(clippy::too_many_arguments)]
     fn draw_empty_ide_frame(
         &mut self,
         ide_panel: &crate::app::IdePanelState,
@@ -80,13 +142,13 @@ impl Renderer {
     ) -> (bool, Vec<(usize, usize)>) {
         self.draw_empty_ide(panel_left_w);
 
+        let (ui_mx, ui_my) = if modal_overlay_open {
+            (-1.0, -1.0)
+        } else {
+            (mx, my)
+        };
+        let is_ui_disabled = ide_panel.terminal_focused;
         if continue_bottom_chrome {
-            let (ui_mx, ui_my) = if modal_overlay_open {
-                (-1.0, -1.0)
-            } else {
-                (mx, my)
-            };
-            let is_ui_disabled = ide_panel.terminal_focused;
             self.draw_ide_bottom_panel(
                 ide_panel,
                 lsp,
@@ -116,30 +178,24 @@ impl Renderer {
             );
         }
 
-        if self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha) {
-            self.flush();
-            return (ui_registry.wants_pointer(), Vec::new());
-        }
-        if should_draw_empty_ide_file_tree_overlay(
+        let wants_pointer = self.draw_root_ide_final_overlays(
+            ide_panel,
+            editor,
+            ui_registry,
             true,
-            true,
-            crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel),
-        ) || crate::render_view::ide_panels::git_dropdown_overlay_active_for_panel(ide_panel)
-        {
-            let wants_pointer = self.draw_ide_context_overlays(
-                ide_panel,
-                ui_registry,
-                mx,
-                my,
-                blink_alpha,
-                panel_left_w,
-                s,
-            );
-            self.flush();
-            return (wants_pointer | ui_registry.wants_pointer(), Vec::new());
-        }
+            panel_left_w,
+            panel_bottom_h,
+            s,
+            mx,
+            my,
+            ui_mx,
+            ui_my,
+            blink_alpha,
+            modal_overlay_open,
+        );
+        self.flush();
+
         if continue_bottom_chrome {
-            self.flush();
             self.register_root_resize_blockers(
                 ide_panel,
                 ui_registry,
@@ -148,13 +204,12 @@ impl Renderer {
                 my,
                 panel_left_w,
                 panel_bottom_h,
-                ide_panel.terminal_focused,
+                is_ui_disabled,
                 modal_overlay_open,
                 self.height,
             );
-            return (ui_registry.wants_pointer(), Vec::new());
         }
-        (false, Vec::new())
+        (wants_pointer | ui_registry.wants_pointer(), Vec::new())
     }
 
     fn draw_ide_welcome_bounce(
@@ -243,7 +298,7 @@ impl Renderer {
             track_y_bg,
             track_w,
             track_h_bg,
-            [self.theme.bg[0], self.theme.bg[1], self.theme.bg[2], 1.0],
+            editor_horizontal_track_color(self.theme.bg),
         );
 
         let thumb_w = (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s).min(track_w.max(0.0));
@@ -555,32 +610,21 @@ impl Renderer {
             self.draw_tab_tooltip(&path, tx, ty, s);
         }
 
-        let mouse_in_blocking_bottom_panel = is_ide_mode
-            && panel_bottom_h > 0.0
-            && ide_panel.bottom_panel_blocks_editor_hover()
-            && my >= ide_bottom_panel_y(self.height, panel_bottom_h, s)
-            && my <= ide_bottom_panel_y(self.height, panel_bottom_h, s) + panel_bottom_h;
-
-        if is_ide_mode {
-            let overlay_mx = if mouse_in_blocking_bottom_panel { -1.0 } else { mx };
-            let overlay_my = if mouse_in_blocking_bottom_panel { -1.0 } else { my };
-            wants_pointer |= self.draw_ide_context_overlays(
-                ide_panel,
-                ui_registry,
-                overlay_mx,
-                overlay_my,
-                blink_alpha,
-                panel_left_w,
-                s,
-            );
-            self.draw_ide_modal_overlays(s, ide_panel, editor, ui_registry, mx, my, blink_alpha);
-        }
-
-        if is_ide_mode {
-            self.draw_git_file_tooltip_overlay(s, ide_panel, ui_registry, ui_mx, ui_my);
-        } else {
-            self.reset_git_file_tooltip_overlay();
-        }
+        wants_pointer |= self.draw_root_ide_final_overlays(
+            ide_panel,
+            editor,
+            ui_registry,
+            is_ide_mode,
+            panel_left_w,
+            panel_bottom_h,
+            s,
+            mx,
+            my,
+            ui_mx,
+            ui_my,
+            blink_alpha,
+            modal_overlay_open,
+        );
 
         if show_readonly_notice {
             self.draw_readonly_notice(tab_bar_h, s);
@@ -780,5 +824,16 @@ impl Renderer {
                 }
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod horizontal_scrollbar_contract_tests {
+    use super::editor_horizontal_track_color;
+
+    #[test]
+    fn editor_horizontal_scrollbar_track_remains_opaque() {
+        let color = editor_horizontal_track_color([0.1, 0.2, 0.3, 0.25]);
+        assert_eq!(color, [0.1, 0.2, 0.3, 1.0]);
     }
 }

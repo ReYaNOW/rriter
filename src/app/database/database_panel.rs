@@ -1,7 +1,8 @@
 use super::{
     DatabaseConnectionColor, DatabaseConnectionConfig, DatabaseConnectionId, DatabaseGeneration,
     DatabaseJobId, DatabasePersistedState, DatabaseSecretBundle, DatabaseSettings,
-    DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode, SshConnectionConfig, SshJumpHostConfig,
+    DatabaseMultilineLayoutCache, DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode,
+    SshConnectionConfig, SshJumpHostConfig,
 };
 use crate::app::mouse::HoverPopup;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -1093,6 +1094,7 @@ pub struct DatabasePanelState {
     pub host_key_prompt: Option<DatabaseHostKeyPrompt>,
     pub host_key_policy_override: Option<super::SshHostKeyPolicy>,
     pub table_modal: Option<DatabaseTableModal>,
+    pub(crate) table_modal_layout_cache: RefCell<DatabaseMultilineLayoutCache>,
     pub table_modal_input_dragging: bool,
     pub ddl_hover: RefCell<Option<DatabaseDdlHoverState>>,
     pub pending_job: Option<DatabasePendingJob>,
@@ -1115,6 +1117,15 @@ pub struct DatabasePanelState {
     pub open_table_keys: FxHashSet<(DatabaseConnectionId, String, String)>,
     pub open_table_ids: FxHashSet<super::DatabaseTabId>,
     pub open_console_keys: FxHashMap<(DatabaseConnectionId, String), Vec<u64>>,
+}
+
+pub(crate) fn database_tree_row_height(scale: f32) -> f32 {
+    if !scale.is_finite() || scale <= 0.0 {
+        return 0.0;
+    }
+    (crate::render_view::tree_ui::TREE_ROW_H * scale)
+        .round()
+        .max(1.0)
 }
 
 impl Default for DatabasePanelState {
@@ -1166,6 +1177,7 @@ impl DatabasePanelState {
             host_key_prompt: None,
             host_key_policy_override: None,
             table_modal: None,
+            table_modal_layout_cache: RefCell::new(DatabaseMultilineLayoutCache::default()),
             table_modal_input_dragging: false,
             ddl_hover: RefCell::new(None),
             pending_job: None,
@@ -1540,7 +1552,7 @@ impl DatabasePanelState {
         }
         let toolbar_h = 34.0 * scale;
         let viewport_h = (panel_height - toolbar_h).max(0.0);
-        let row_h = crate::render_view::tree_ui::TREE_ROW_H * scale;
+        let row_h = database_tree_row_height(scale);
         (self.visible_tree_row_count() as f32 * row_h - viewport_h).max(0.0)
     }
 

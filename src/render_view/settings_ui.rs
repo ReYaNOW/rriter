@@ -225,6 +225,7 @@ impl Renderer {
         dart_tool_state: &crate::app::tool_installer::DartToolState,
         dart_lsp_status: Option<crate::lsp::LspServerStatus>,
         database_settings: &crate::app::database::DatabaseSettings,
+        ctrl_wheel_multiplier: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> u8 {
         if anim_progress <= 0.0 {
@@ -1056,6 +1057,14 @@ impl Renderer {
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
+            content_y += 42.0 * s;
+            self.draw_editor_ctrl_wheel_setting(
+                content_x,
+                content_available_w,
+                content_y,
+                ctrl_wheel_multiplier,
+                ui_registry,
+            );
         } else if active_tab == 3 {
             self.draw_string_scaled(
                 "Тема: Dracula (По умолчанию)",
@@ -1550,5 +1559,39 @@ mod settings_ui_tests {
             .expect("scrollbar should be visible");
         assert_eq!(thumb.start, 150.0);
         assert_eq!(thumb.len, 100.0);
+    }
+
+    #[test]
+    fn settings_scrollbar_drag_uses_shared_target_only_motion() {
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 300.0;
+        scroll.target = 300.0;
+        let thumb = settings_scrollbar_thumb(50.0, 300.0, 600.0, scroll.current, 1.0)
+            .expect("scrollbar should be visible");
+        let pointer = thumb.start + thumb.len * 0.25;
+
+        assert!(crate::app::mouse::begin_scrollbar_drag(
+            &mut scroll,
+            pointer,
+            50.0,
+            300.0,
+            600.0,
+            40.0,
+        ));
+        assert_eq!(scroll.current, 300.0);
+        let drag_offset = scroll.drag_offset;
+        let first_target = scroll.target;
+
+        assert!(crate::app::mouse::update_scrollbar_drag(
+            &mut scroll,
+            pointer + 80.0,
+            50.0,
+            300.0,
+            600.0,
+            40.0,
+        ));
+        assert_eq!(scroll.current, 300.0);
+        assert_ne!(scroll.target, first_target);
+        assert_eq!(scroll.drag_offset, drag_offset);
     }
 }

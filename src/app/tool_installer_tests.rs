@@ -576,14 +576,21 @@ echo 'installed fake ruff'
 }
 
 #[test]
-fn tool_log_scrollbar_supports_click_drag_and_release() {
+fn tool_log_scrollbar_supports_smooth_click_drag_and_release() {
     let mut installer = ToolInstaller::default();
     assert!(installer.begin_log_scroll_drag(50.0, 0.0, 100.0, 100.0, 500.0, 20.0));
     assert!(installer.log_scroll_is_dragging());
+    assert_eq!(installer.log_scroll.current, 0.0);
+    assert!(installer.log_scroll.target > 0.0);
+    let first_target = installer.log_scroll.target;
     assert!(installer.drag_log_scroll(90.0, 0.0, 100.0, 100.0, 500.0, 20.0));
-    assert!(installer.log_scroll_y() > 0.0);
+    assert_eq!(installer.log_scroll.current, 0.0);
+    assert!(installer.log_scroll.target > first_target);
+    let release_target = installer.log_scroll.target;
     installer.end_log_scroll_drag();
     assert!(!installer.log_scroll_is_dragging());
+    assert_eq!(installer.log_scroll.current, 0.0);
+    assert_eq!(installer.log_scroll.target, release_target);
 }
 
 #[test]

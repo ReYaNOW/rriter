@@ -55,6 +55,255 @@ impl crate::app::App {
         }
     }
 
+    pub(crate) fn start_api_output_schema_menu_scroll_drag(&mut self, route_idx: usize) -> bool {
+        let id = crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx);
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let pointer_y = self
+            .renderer
+            .as_ref()
+            .map_or(rect.1, |renderer| renderer.last_mouse_y);
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let Some((meta, state)) = self.active_api_tab() else {
+            return false;
+        };
+        if state.route_idx != Some(route_idx)
+            || !state.output_schema_menu_open
+            || state.output_doc_view != crate::app::api_client::ApiOutputDocView::Example
+        {
+            return false;
+        }
+        let spec_id = meta.spec_id;
+        let example_count = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .map(|route| {
+                crate::app::api_client::api_route_output_example_count(
+                    route,
+                    state.output_status_idx,
+                )
+            })
+            .unwrap_or(0)
+            .max(1);
+        let current = state.output_schema_menu_scroll.current;
+        let Some((drag_offset, target)) =
+            crate::app::api_client::api_output_schema_menu_scrollbar_drag_target(
+                rect,
+                example_count,
+                current,
+                pointer_y,
+                scale,
+                None,
+            )
+        else {
+            return false;
+        };
+        let Some((_, state)) = self.active_api_tab_mut_for(spec_id) else {
+            return false;
+        };
+        crate::app::mouse::apply_scrollbar_drag_target(
+            &mut state.output_schema_menu_scroll,
+            target,
+            drag_offset,
+        )
+    }
+
+    pub(crate) fn update_api_output_schema_menu_scroll_drag(&mut self, pointer_y: f32) -> bool {
+        let Some((meta, state)) = self.active_api_tab() else {
+            return false;
+        };
+        if !state.output_schema_menu_scroll.is_dragging {
+            return false;
+        }
+        let Some(route_idx) = state.route_idx else {
+            return false;
+        };
+        let spec_id = meta.spec_id;
+        let id = crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx);
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                state.output_schema_menu_scroll.end_drag();
+            }
+            return false;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let example_count = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| model.routes.get(route_idx))
+            .map(|route| {
+                crate::app::api_client::api_route_output_example_count(
+                    route,
+                    state.output_status_idx,
+                )
+            })
+            .unwrap_or(0)
+            .max(1);
+        let current = state.output_schema_menu_scroll.current;
+        let drag_offset = state.output_schema_menu_scroll.drag_offset;
+        let Some((drag_offset, target)) =
+            crate::app::api_client::api_output_schema_menu_scrollbar_drag_target(
+                rect,
+                example_count,
+                current,
+                pointer_y,
+                scale,
+                Some(drag_offset),
+            )
+        else {
+            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
+                state.output_schema_menu_scroll.end_drag();
+            }
+            return false;
+        };
+        let Some((_, state)) = self.active_api_tab_mut_for(spec_id) else {
+            return false;
+        };
+        crate::app::mouse::apply_scrollbar_drag_target(
+            &mut state.output_schema_menu_scroll,
+            target,
+            drag_offset,
+        )
+    }
+
+    pub(crate) fn start_api_python_runtime_scroll_drag(
+        &mut self,
+        id: crate::ui_system::UiId,
+    ) -> bool {
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            return false;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let pointer_y = self
+            .renderer
+            .as_ref()
+            .map_or(rect.1, |renderer| renderer.last_mouse_y);
+        let (scroll, max_scroll) = match id {
+            crate::ui_system::UiId::ApiMockPythonVersionsScrollY
+                if self.ide_panel.api.mock_python_version_picker_open =>
+            {
+                let max_scroll = crate::app::api_client::api_python_version_list_max_scroll(
+                    self.ide_panel.api.mock_python_versions.len(),
+                    rect.3 + 12.0 * scale,
+                    scale,
+                );
+                (
+                    &mut self.ide_panel.api.mock_python_versions_scroll,
+                    max_scroll,
+                )
+            }
+            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY
+                if crate::app::api_client::api_python_install_log_visible(&self.ide_panel.api) =>
+            {
+                let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
+                    self.ide_panel.api.mock_python_install_log.len(),
+                    rect.3 + 12.0 * scale,
+                    scale,
+                );
+                (
+                    &mut self.ide_panel.api.mock_python_install_log_scroll,
+                    max_scroll,
+                )
+            }
+            _ => return false,
+        };
+        let Some((drag_offset, target)) = crate::app::api_client::api_python_scrollbar_drag_target(
+            (rect.0, rect.1 - 6.0 * scale, rect.2, rect.3 + 12.0 * scale),
+            scroll.current,
+            max_scroll,
+            pointer_y,
+            scale,
+            None,
+        ) else {
+            return false;
+        };
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
+    }
+
+    pub(crate) fn update_api_python_runtime_scroll_drag(&mut self, pointer_y: f32) -> bool {
+        let id = if self.ide_panel.api.mock_python_versions_scroll.is_dragging {
+            crate::ui_system::UiId::ApiMockPythonVersionsScrollY
+        } else if self
+            .ide_panel
+            .api
+            .mock_python_install_log_scroll
+            .is_dragging
+        {
+            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY
+        } else {
+            return false;
+        };
+        let Some(rect) = self.ui_registry.rect_for(id) else {
+            match id {
+                crate::ui_system::UiId::ApiMockPythonVersionsScrollY => {
+                    self.ide_panel.api.mock_python_versions_scroll.end_drag();
+                }
+                crate::ui_system::UiId::ApiMockPythonInstallLogScrollY => {
+                    self.ide_panel.api.mock_python_install_log_scroll.end_drag();
+                }
+                _ => {}
+            }
+            return false;
+        };
+        let scale = self
+            .renderer
+            .as_ref()
+            .map_or(1.0, |renderer| renderer.scale_factor);
+        let source_rect = (rect.0, rect.1 - 6.0 * scale, rect.2, rect.3 + 12.0 * scale);
+        let (scroll, max_scroll) = match id {
+            crate::ui_system::UiId::ApiMockPythonVersionsScrollY => {
+                let max_scroll = crate::app::api_client::api_python_version_list_max_scroll(
+                    self.ide_panel.api.mock_python_versions.len(),
+                    source_rect.3,
+                    scale,
+                );
+                (
+                    &mut self.ide_panel.api.mock_python_versions_scroll,
+                    max_scroll,
+                )
+            }
+            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY => {
+                let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
+                    self.ide_panel.api.mock_python_install_log.len(),
+                    source_rect.3,
+                    scale,
+                );
+                (
+                    &mut self.ide_panel.api.mock_python_install_log_scroll,
+                    max_scroll,
+                )
+            }
+            _ => return false,
+        };
+        let Some((drag_offset, target)) = crate::app::api_client::api_python_scrollbar_drag_target(
+            source_rect,
+            scroll.current,
+            max_scroll,
+            pointer_y,
+            scale,
+            Some(scroll.drag_offset),
+        ) else {
+            scroll.end_drag();
+            return false;
+        };
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
+    }
+
     pub fn handle_api_client_click(
         &mut self,
         id: crate::ui_system::UiId,
@@ -158,9 +407,9 @@ impl crate::app::App {
                         )
                     {
                         let scroll = &mut self.ide_panel.api.mock_server_log_scroll;
-                        scroll.jump_to(target);
-                        scroll.drag_offset = drag_offset;
-                        scroll.is_dragging = true;
+                        crate::app::mouse::apply_scrollbar_drag_target(
+                            scroll, target, drag_offset,
+                        );
                     }
                 }
             }
@@ -233,11 +482,9 @@ impl crate::app::App {
                         None,
                     ) {
                         let scroll = &mut self.ide_panel.api.mock_guide_scroll;
-                        scroll.current = target;
-                        scroll.target = target;
-                        scroll.velocity = 0.0;
-                        scroll.drag_offset = drag_offset;
-                        scroll.is_dragging = true;
+                        crate::app::mouse::apply_scrollbar_drag_target(
+                            scroll, target, drag_offset,
+                        );
                     }
                 }
             }
@@ -302,6 +549,10 @@ impl crate::app::App {
                 } else {
                     self.trigger_api_python_version_list();
                 }
+            }
+            crate::ui_system::UiId::ApiMockPythonVersionsScrollY
+            | crate::ui_system::UiId::ApiMockPythonInstallLogScrollY => {
+                self.start_api_python_runtime_scroll_drag(id);
             }
             crate::ui_system::UiId::ApiMockPythonVersionOption(idx) => {
                 self.commit_api_focus();
@@ -990,6 +1241,9 @@ impl crate::app::App {
                         state.output_schema_menu_open = false;
                     }
                 }
+            }
+            crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx) => {
+                self.start_api_output_schema_menu_scroll_drag(route_idx);
             }
             crate::ui_system::UiId::ApiOutputSchemaMenuItem(route_idx, media_idx) => {
                 let Some((meta, state)) = self.active_api_tab() else {

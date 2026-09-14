@@ -395,6 +395,7 @@ impl Renderer {
             scroll_x,
             render_scroll_y,
             x + w,
+            x + w,
             if focused { blink_alpha } else { 0.0 },
             false,
             !focused,
@@ -647,5 +648,64 @@ impl Renderer {
                 .map(|g| Self::snapped_text_advance(g.advance, API_BODY_TEXT_SCALE))
                 .unwrap_or(8.0);
         }
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod stage5_embedded_editor_boundary_tests {
+    use super::*;
+    use crate::render_view::reviewer_stage2_integration::fixture;
+
+    fn has_caret_rect(renderer: &Renderer) -> bool {
+        renderer
+            .vertices
+            .iter()
+            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.theme.fg)
+    }
+
+    #[test]
+    fn api_python_embedded_editor_keeps_one_shared_right_edge() {
+        let (_context, mut app) = fixture("", 400.0, 1.0);
+        let renderer = app.renderer.as_mut().expect("production Renderer");
+        let source = "                        ";
+        let mut editor = crate::app::reviewer_stage2_editor_with(source);
+        editor.cursor = editor.len();
+        let mut registry = crate::ui_system::UiRegistry::new();
+
+        renderer.vertices.clear();
+        renderer.draw_embedded_python_editor(
+            &editor,
+            &[],
+            40.0,
+            40.0,
+            24.0,
+            0.0,
+            0.0,
+            true,
+            1.0,
+            &mut registry,
+        );
+        assert!(
+            !has_caret_rect(renderer),
+            "embedded API editor caret must remain clipped by its existing right edge"
+        );
+
+        renderer.vertices.clear();
+        renderer.draw_embedded_python_editor(
+            &editor,
+            &[],
+            40.0,
+            40.0,
+            320.0,
+            0.0,
+            0.0,
+            true,
+            1.0,
+            &mut registry,
+        );
+        assert!(
+            has_caret_rect(renderer),
+            "fixture must render caret once same embedded-editor right edge contains it"
+        );
     }
 }

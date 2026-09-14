@@ -1113,6 +1113,7 @@ impl ApplicationHandler for App {
                             .find(|server| server.name == "dart")
                             .map(|server| server.status),
                         self.ide_panel.database.settings(),
+                        self.ctrl_wheel_multiplier,
                         &mut self.ui_registry,
                     );
                     if settings_cursor_mode == 1 {

@@ -22,6 +22,22 @@ struct DatabaseSettingsControlLayout {
     button_w: f32,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct DatabaseSettingsVerticalLayout {
+    first_row_y: f32,
+    row_step: f32,
+    control_h: f32,
+}
+
+fn database_settings_vertical_layout(content_y: f32, scale: f32) -> DatabaseSettingsVerticalLayout {
+    let content_y = content_y.round();
+    DatabaseSettingsVerticalLayout {
+        first_row_y: content_y + (34.0 * scale).round(),
+        row_step: (DATABASE_SETTINGS_ROW_HEIGHT * scale).round().max(1.0),
+        control_h: (30.0 * scale).round().max(1.0),
+    }
+}
+
 fn database_settings_control_layout(
     content_x: f32,
     content_w: f32,
@@ -117,12 +133,13 @@ impl Renderer {
         settings: &DatabaseSettings,
         content_x: f32,
         content_w: f32,
-        mut content_y: f32,
+        content_y: f32,
         ui_registry: &mut UiRegistry,
     ) {
         let s = self.scale_factor;
         let content_x = content_x.round();
-        content_y = content_y.round();
+        let content_y = content_y.round();
+        let vertical = database_settings_vertical_layout(content_y, s);
         self.draw_string_scaled_pixel_snapped(
             "Все ограничения применяются к PostgreSQL и SQL-консолям без перезапуска RRiter.",
             content_x,
@@ -130,16 +147,15 @@ impl Renderer {
             [0.55, 0.57, 0.65, 1.0],
             0.82,
         );
-        content_y += 34.0 * s;
         let controls = database_settings_control_layout(content_x, content_w, s);
+        let mut label_scratch = String::new();
 
         for (index, row) in database_settings_rows(settings).iter().enumerate() {
-            let row_y = content_y.round();
-            let mut label_scratch = String::new();
+            let row_y = vertical.first_row_y + index as f32 * vertical.row_step;
             self.draw_tree_label_clipped(
                 row.label,
                 content_x,
-                Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
+                Self::tree_row_text_y(row_y, vertical.control_h, s),
                 controls.label_w,
                 [0.82, 0.82, 0.86, 1.0],
                 0.86,
@@ -156,7 +172,7 @@ impl Renderer {
                 minus_x,
                 row_y,
                 button_w,
-                30.0 * s,
+                vertical.control_h,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );
@@ -165,7 +181,7 @@ impl Renderer {
                 plus_x,
                 row_y,
                 button_w,
-                30.0 * s,
+                vertical.control_h,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );
@@ -174,7 +190,7 @@ impl Renderer {
                 x: minus_x,
                 y: row_y,
                 w: button_w,
-                h: 30.0 * s,
+                h: vertical.control_h,
                 text: "−",
                 icon: None,
                 text_scale: 0.82,
@@ -192,7 +208,7 @@ impl Renderer {
                 value_x,
                 row_y,
                 value_box_w,
-                30.0 * s,
+                vertical.control_h,
                 5.0 * s,
                 [0.20, 0.21, 0.26, 1.0],
             );
@@ -200,7 +216,7 @@ impl Renderer {
             self.draw_string_scaled_pixel_snapped(
                 &row.value,
                 (value_x + (value_box_w - value_w) * 0.5).round(),
-                Self::tree_row_text_y(row_y, (30.0 * s).round(), s),
+                Self::tree_row_text_y(row_y, vertical.control_h, s),
                 [0.92, 0.92, 0.95, 1.0],
                 0.78,
             );
@@ -209,7 +225,7 @@ impl Renderer {
                 x: plus_x,
                 y: row_y,
                 w: button_w,
-                h: 30.0 * s,
+                h: vertical.control_h,
                 text: "+",
                 icon: None,
                 text_scale: 0.82,
@@ -222,7 +238,6 @@ impl Renderer {
                 s,
                 false,
             );
-            content_y += DATABASE_SETTINGS_ROW_HEIGHT * s;
         }
     }
 }
@@ -300,6 +315,37 @@ mod tests {
             assert!(layout.minus_x >= 50.0);
             assert!(layout.plus_x + layout.button_w <= 50.0 + width + 0.001);
             assert!(layout.value_w >= 1.0);
+        }
+    }
+
+    #[test]
+    fn database_settings_rows_and_controls_keep_constant_pixel_stride() {
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 1.33] {
+            let vertical = database_settings_vertical_layout(17.4, scale);
+            assert_eq!(vertical.first_row_y, vertical.first_row_y.round());
+            assert_eq!(vertical.row_step, vertical.row_step.round());
+            assert_eq!(vertical.control_h, vertical.control_h.round());
+            assert_eq!(
+                vertical.row_step,
+                (DATABASE_SETTINGS_ROW_HEIGHT * scale).round().max(1.0)
+            );
+
+            let rows = (0..DATABASE_SETTINGS_ROW_COUNT)
+                .map(|index| vertical.first_row_y + index as f32 * vertical.row_step)
+                .collect::<Vec<_>>();
+            for pair in rows.windows(2) {
+                assert_eq!(pair[1] - pair[0], vertical.row_step, "scale={scale}");
+            }
+
+            for width in [120.0_f32, 220.0, 520.0] {
+                let content_x = 50.0;
+                let controls = database_settings_control_layout(content_x, width, scale);
+                let minus_x = controls.minus_x.round();
+                let plus_x = controls.plus_x.round();
+                let button_w = controls.button_w.round().max(1.0);
+                assert!(minus_x >= content_x - 0.5);
+                assert!(plus_x + button_w <= content_x + width + 1.0);
+            }
         }
     }
 }

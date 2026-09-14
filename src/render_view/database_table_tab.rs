@@ -173,16 +173,19 @@ impl Renderer {
                 my,
             );
             let text_scale = 0.84;
-            let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+            let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+                text_x, text_w, 0.0, 0.0,
+            );
+            let scroll_x = crate::app::single_line_input::single_line_cursor_geometry(
                 message,
                 state.unavailable_text.cursor,
-                text_w,
-                |ch| {
-                    self.get_ui_glyph(ch)
-                        .map(|glyph| Renderer::snapped_text_advance(glyph.advance, text_scale))
-                        .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-                },
-            );
+                text_geometry.content_w,
+                0.0,
+                0.0,
+                0.0,
+                |ch| self.one_line_ui_advance(ch, text_scale),
+            )
+            .scroll_x;
             self.draw_one_line_selectable_text(
                 message,
                 state.unavailable_text.cursor,
@@ -583,6 +586,8 @@ impl Renderer {
         self.push_rect(x, y, body_w, header_h, [0.125, 0.13, 0.16, 1.0]);
 
         let visible_columns = database_visible_columns(metadata, &state.grid, data_w / s);
+        let first_visible_column_x =
+            database_column_start_x(metadata, &state.grid, visible_columns.start);
         let scroll_x = (state.grid.scroll_x.current * s).round();
         let header_baseline = Self::tree_row_text_y(y, header_h, s).round();
         let mut scratch = String::new();
@@ -612,11 +617,13 @@ impl Renderer {
                 layout.header_rect.h.round().max(0.0) as i32,
             );
         }
+        let mut column_x = first_visible_column_x;
         for column_index in visible_columns.clone() {
             let column = &metadata.columns[column_index];
-            let (column_x, column_w) = database_column_geometry(metadata, &state.grid, column_index);
+            let column_w = state.grid.column_width(&column.name);
             let draw_x = (data_x + column_x * s - scroll_x).round();
             let draw_w = (column_w * s).round().max(1.0);
+            column_x += column_w;
             if draw_x + draw_w < data_x || draw_x > data_x + data_w {
                 continue;
             }
@@ -668,6 +675,7 @@ impl Renderer {
         let page_base = state.grid.view.current_page.saturating_mul(state.grid.view.limit);
         let scroll_y = (state.grid.scroll_y.current * s).round();
         let mut editor_popup: Option<(f32, f32, f32, usize)> = None;
+        let mut cell_display_scratch = std::mem::take(&mut self.scratch_buffer);
 
         self.flush();
         unsafe {
@@ -701,11 +709,13 @@ impl Renderer {
             };
             self.push_rect(data_x, row_y, data_w, row_h, bg);
             let row_baseline = Self::tree_row_text_y(row_y, row_h, s).round();
+            let mut column_x = first_visible_column_x;
             for column_index in visible_columns.clone() {
-                let Some(cell) = row.cells.get(column_index) else { continue; };
-                let (column_x, column_w) = database_column_geometry(metadata, &state.grid, column_index);
+                let column_w = state.grid.column_width(&metadata.columns[column_index].name);
                 let draw_x = (data_x + column_x * s - scroll_x).round();
                 let draw_w = (column_w * s).round().max(1.0);
+                column_x += column_w;
+                let Some(cell) = row.cells.get(column_index) else { continue; };
                 if state.grid.selection.contains_cell(row.absolute_index, column_index) {
                     self.push_rect(draw_x, row_y, draw_w, row_h, [0.42, 0.25, 0.63, 0.48]);
                 }
@@ -722,8 +732,9 @@ impl Renderer {
                     mx,
                     my,
                 );
+                let display_text = cell.value.display_text_into(&mut cell_display_scratch);
                 self.draw_tree_label_clipped(
-                    &cell.value.display_text(),
+                    display_text,
                     draw_x + (7.0 * s).round(),
                     row_baseline,
                     (draw_w - 14.0 * s).max(4.0),
@@ -764,6 +775,7 @@ impl Renderer {
                 }
             }
         }
+        self.scratch_buffer = cell_display_scratch;
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
 
@@ -777,10 +789,12 @@ impl Renderer {
                 rows_h.round().max(0.0) as i32,
             );
         }
+        let mut column_x = first_visible_column_x;
         for column_index in visible_columns.clone() {
-            let (column_x, column_w) = database_column_geometry(metadata, &state.grid, column_index);
+            let column_w = state.grid.column_width(&metadata.columns[column_index].name);
             let divider_x = (data_x + (column_x + column_w) * s - scroll_x - 1.0).round();
             self.push_rect(divider_x, rows_y, 1.0, rows_h, [0.52, 0.55, 0.62, 0.20]);
+            column_x += column_w;
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
@@ -1181,19 +1195,19 @@ fn draw_database_table_input(
     ui.register_text_input(id, x, y, w, h, mx, my);
     let cell_editor = id == UiId::DatabaseTableCellEditor;
     let text_scale = crate::app::database::DATABASE_TABLE_INPUT_TEXT_SCALE;
-    let padding = if cell_editor { (8.0 * s).round() } else { (10.0 * s).round() };
-    let visible_width = (w - padding * 2.0).max(1.0);
-    let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+    let padding = crate::app::database_table_input_padding(s, cell_editor);
+    let text_geometry = crate::app::database_table_input_text_geometry(x, w, s, cell_editor);
+    let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(s);
+    let scroll_x = crate::app::single_line_input::single_line_cursor_geometry(
         input.text(),
         input.cursor,
-        visible_width,
-        |ch| {
-            renderer
-                .get_ui_glyph(ch)
-                .map(|glyph| Renderer::snapped_text_advance(glyph.advance, text_scale))
-                .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-        },
-    );
+        text_geometry.content_w,
+        0.0,
+        edge_pad,
+        edge_pad,
+        |ch| renderer.one_line_ui_advance(ch, text_scale),
+    )
+    .scroll_x;
     renderer.draw_one_line_input_with_chrome(
         input.text(),
         input.cursor,
@@ -1635,16 +1649,15 @@ fn database_column_header(
     format!("{}{}{}", column.name, if column.primary_key { " 🔑" } else { "" }, sort)
 }
 
-fn database_column_geometry(
+fn database_column_start_x(
     metadata: &crate::app::database::DatabaseTableMetadata,
     grid: &crate::app::database::DatabaseTableGridState,
     column_index: usize,
-) -> (f32, f32) {
-    let x = metadata.columns[..column_index]
+) -> f32 {
+    metadata.columns[..column_index.min(metadata.columns.len())]
         .iter()
         .map(|column| grid.column_width(&column.name))
-        .sum();
-    (x, grid.column_width(&metadata.columns[column_index].name))
+        .sum()
 }
 
 fn database_visible_columns(
@@ -1744,6 +1757,38 @@ fn database_table_scrollbar_rects(
 #[cfg(test)]
 mod database_table_renderer_tests {
     use super::*;
+
+    fn test_column(ordinal: usize, name: &str) -> crate::app::database::DatabaseColumnInfo {
+        crate::app::database::DatabaseColumnInfo {
+            ordinal,
+            name: name.to_string(),
+            type_name: "text".to_string(),
+            type_oid: 25,
+            type_kind: crate::app::database::DatabaseTypeKind::Other,
+            nullable: true,
+            default_expression: None,
+            identity: false,
+            generated: false,
+            primary_key: false,
+            enum_values: Vec::new(),
+        }
+    }
+
+    fn test_metadata(names: &[&str]) -> crate::app::database::DatabaseTableMetadata {
+        crate::app::database::DatabaseTableMetadata {
+            database_name: "db".to_string(),
+            table_name: "items".to_string(),
+            columns: names
+                .iter()
+                .enumerate()
+                .map(|(index, name)| test_column(index + 1, name))
+                .collect(),
+            primary_key_columns: Vec::new(),
+            editable: true,
+            read_only_reason: None,
+            notices: Vec::new(),
+        }
+    }
 
     #[test]
     fn bug_22_enum_popup_can_reach_options_after_the_first_ten() {
@@ -1978,5 +2023,88 @@ mod database_table_renderer_tests {
             },
         );
         assert_eq!(database_table_page_status(&state), "501–600 из 2000");
+    }
+
+    #[test]
+    fn table_column_incremental_geometry_matches_resized_width_prefixes() {
+        let metadata = test_metadata(&["a", "b", "c", "d"]);
+        let mut state = crate::app::database::DatabaseTableTabState::default();
+        for (name, width) in [("a", 80.0), ("b", 123.0), ("c", 251.0), ("d", 95.0)] {
+            state.grid.set_column_width(name, width);
+        }
+
+        for first in 0..metadata.columns.len() {
+            let expected_start = metadata.columns[..first]
+                .iter()
+                .map(|column| state.grid.column_width(&column.name))
+                .sum::<f32>();
+            let mut x = database_column_start_x(&metadata, &state.grid, first);
+            assert_eq!(x, expected_start);
+            for (index, column) in metadata.columns[first..].iter().enumerate() {
+                let absolute_index = first + index;
+                let expected_x = metadata.columns[..absolute_index]
+                    .iter()
+                    .map(|entry| state.grid.column_width(&entry.name))
+                    .sum::<f32>();
+                assert_eq!(x, expected_x);
+                x += state.grid.column_width(&column.name);
+            }
+        }
+
+        state.grid.set_column_width("b", 333.0);
+        assert_eq!(database_column_start_x(&metadata, &state.grid, 2), 413.0);
+    }
+
+    #[test]
+    fn table_visibility_ranges_exclude_far_offscreen_cells_from_formatting_path() {
+        let metadata = test_metadata(&["a", "b", "c", "d", "e"]);
+        let mut state = crate::app::database::DatabaseTableTabState::default();
+        state.grid.view.limit = 10;
+        state.grid.scroll_x.current = 160.0;
+        state.grid.scroll_y.current = crate::app::database::DATABASE_GRID_ROW_HEIGHT * 3.0;
+        state.grid.chunks.insert(
+            0,
+            crate::app::database::DatabaseTableChunk {
+                generation: crate::app::database::DatabaseGeneration(1),
+                chunk_index: 0,
+                rows: (0..10)
+                    .map(|absolute_index| crate::app::database::DatabaseGridRow {
+                        absolute_index,
+                        cells: (0..metadata.columns.len())
+                            .map(|column| crate::app::database::DatabaseGridCell::new(
+                                crate::app::database::DatabaseCellValue::Text(format!(
+                                    "r{absolute_index}c{column}"
+                                )),
+                            ))
+                            .collect(),
+                        xmin: None,
+                        state: crate::app::database::DatabaseRowState::Clean,
+                    })
+                    .collect(),
+                estimated_bytes: 0,
+            },
+        );
+
+        let visible_rows = crate::app::database::database_grid_visible_row_range(
+            state.grid.scroll_y.current,
+            crate::app::database::DATABASE_GRID_ROW_HEIGHT,
+            crate::app::database::DATABASE_GRID_ROW_HEIGHT * 2.0,
+            state.grid.logical_row_count(),
+        );
+        let visible_columns = database_visible_columns(&metadata, &state.grid, 150.0);
+        assert!(!visible_rows.contains(&0));
+        assert!(!visible_columns.contains(&4));
+
+        let mut formatted = 0;
+        let mut scratch = String::new();
+        for relative in visible_rows {
+            let Some(row) = state.grid.row(relative) else { continue; };
+            for column in visible_columns.clone() {
+                let _ = row.cells[column].value.display_text_into(&mut scratch);
+                formatted += 1;
+            }
+        }
+        assert!(formatted > 0);
+        assert!(formatted < 10 * metadata.columns.len());
     }
 }

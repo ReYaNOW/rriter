@@ -785,9 +785,9 @@ mod tests {
             assert!(app.scroll_y.is_dragging);
             assert!((app.scroll_y.drag_offset - thumb.len * fraction).abs() < 0.01);
             assert!((app.scroll_y.current - original_scroll).abs() < 0.02);
-            assert_eq!(app.scroll_y.current, app.scroll_y.target);
+            assert!((app.scroll_y.target - app.scroll_y.current).abs() < 0.02);
             assert_eq!(app.scroll_y.velocity, 0.0);
-            assert_eq!(app.scroll_y.anim_speed, 9.0);
+            assert_eq!(app.scroll_y.anim_speed, 15.0);
             assert_eq!(app.markdown.scroll_navigation_revision(), expected_revision);
             assert!(app.markdown.scroll_transition.is_none());
             assert!(app.markdown.scroll_carry.is_none());
@@ -811,10 +811,10 @@ mod tests {
         let drag_y = body.1 + body.3 - 2.0;
         assert!(app.drag_markdown_read_scrollbar_to(drag_y));
         assert!(app.scroll_y.is_dragging);
-        assert!(app.scroll_y.current > original_scroll);
-        assert_eq!(app.scroll_y.current, app.scroll_y.target);
+        assert!((app.scroll_y.current - original_scroll).abs() < 0.02);
+        assert!(app.scroll_y.target > app.scroll_y.current);
         assert_eq!(app.scroll_y.velocity, 0.0);
-        assert_eq!(app.scroll_y.anim_speed, 9.0);
+        assert_eq!(app.scroll_y.anim_speed, 15.0);
 
         // Release coordinates are intentionally outside the scrollbar track. The
         // captured Reader drag must end before ordinary UI release dispatch.
@@ -874,9 +874,9 @@ mod tests {
 
         assert!(app.scroll_y.is_dragging);
         assert!((app.scroll_y.current - displayed_scroll).abs() < 0.001);
-        assert_eq!(app.scroll_y.target, app.scroll_y.current);
+        assert!((app.scroll_y.target - app.scroll_y.current).abs() < 0.01);
         assert_eq!(app.scroll_y.velocity, 0.0);
-        assert_eq!(app.scroll_y.anim_speed, 9.0);
+        assert_eq!(app.scroll_y.anim_speed, 15.0);
         assert!((app.scroll_y.drag_offset - thumb.len * fraction).abs() < 0.01);
     }
 
@@ -915,10 +915,12 @@ mod tests {
         .unwrap();
         assert!((expected_offset - thumb.len * 0.5).abs() < 0.01);
 
+        let current_before_press = app.scroll_y.current;
         assert!(app.begin_markdown_read_scrollbar_drag_at(press_y));
         assert!(app.scroll_y.is_dragging);
         assert!((app.scroll_y.drag_offset - expected_offset).abs() < 0.01);
-        assert!((app.scroll_y.current - expected_target).abs() < 0.02);
+        assert_eq!(app.scroll_y.current, current_before_press);
+        assert!((app.scroll_y.target - expected_target).abs() < 0.02);
 
         app.markdown.read_layout.invalidate();
         assert!(app.drag_markdown_read_scrollbar_to(body.1 + 10.0));

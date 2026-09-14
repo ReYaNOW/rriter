@@ -17,6 +17,21 @@ pub(crate) const PRIMARY_ATLAS_INTERNAL_FORMAT: u32 = glow::R8;
 pub(crate) const PRIMARY_ATLAS_UPLOAD_FORMAT: u32 = glow::RED;
 pub(crate) const COLOR_ATLAS_MODE: f32 = 10.0;
 const POPUP_MOUSE_MOVE_EPS: f32 = 0.5;
+const POPUP_SCROLL_CHANGE_EPS: f32 = 0.1;
+
+#[inline(always)]
+fn update_popup_scroll_snapshot(
+    last_x: &mut f32,
+    last_y: &mut f32,
+    scroll_x: f32,
+    scroll_y: f32,
+) -> bool {
+    let changed = (scroll_x - *last_x).abs() > POPUP_SCROLL_CHANGE_EPS
+        || (scroll_y - *last_y).abs() > POPUP_SCROLL_CHANGE_EPS;
+    *last_x = scroll_x;
+    *last_y = scroll_y;
+    changed
+}
 
 #[inline(always)]
 fn popup_waiting_for_mouse_move(hide: bool, last_known: (f32, f32), x: f32, y: f32) -> bool {
@@ -250,6 +265,64 @@ pub struct IconAtlasEntry {
     pub color: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GitLogsLayoutMetrics {
+    pub(crate) rows_rect: (f32, f32, f32, f32),
+    pub(crate) text_rect: (f32, f32, f32, f32),
+    pub(crate) track_rect: (f32, f32, f32, f32),
+    pub(crate) row_h: f32,
+    pub(crate) text_scale: f32,
+    pub(crate) content_h: f32,
+    pub(crate) max_scroll: f32,
+    pub(crate) render_scroll: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct GitLogVisualRow {
+    pub(crate) line: crate::app::git_panel::GitLogDisplayLineId,
+    pub(crate) byte_start: usize,
+    pub(crate) byte_end: usize,
+    pub(crate) width: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GitLogCachedLine {
+    pub(crate) id: crate::app::git_panel::GitLogDisplayLineId,
+    pub(crate) row_count: usize,
+}
+
+pub(crate) struct GitLogsLayoutCache {
+    pub(crate) snapshot: Option<crate::app::git_panel::GitLogBufferSnapshot>,
+    pub(crate) wrap_width: f32,
+    pub(crate) scale_factor: f32,
+    pub(crate) text_scale: f32,
+    pub(crate) rows: std::collections::VecDeque<GitLogVisualRow>,
+    pub(crate) lines: std::collections::VecDeque<GitLogCachedLine>,
+    pub(crate) metrics: Option<GitLogsLayoutMetrics>,
+    #[cfg(test)]
+    pub(crate) full_reflow_count: u64,
+    #[cfg(test)]
+    pub(crate) measured_line_count: u64,
+}
+
+impl Default for GitLogsLayoutCache {
+    fn default() -> Self {
+        Self {
+            snapshot: None,
+            wrap_width: -1.0,
+            scale_factor: -1.0,
+            text_scale: -1.0,
+            rows: std::collections::VecDeque::new(),
+            lines: std::collections::VecDeque::new(),
+            metrics: None,
+            #[cfg(test)]
+            full_reflow_count: 0,
+            #[cfg(test)]
+            measured_line_count: 0,
+        }
+    }
+}
+
 pub struct Renderer {
     pub gl: glow::Context,
     pub graphics_diagnostics: GraphicsDiagnostics,
@@ -295,6 +368,8 @@ pub struct Renderer {
 
     pub last_scroll_y: f32,
     pub last_scroll_x: f32,
+    pub(crate) last_popup_scroll_y: f32,
+    pub(crate) last_popup_scroll_x: f32,
     pub max_scroll_x: f32,
     pub max_tab_scroll_x: f32,
     pub max_terminal_tab_scroll_x: f32,
@@ -347,6 +422,8 @@ pub struct Renderer {
     pub(crate) git_graph_tooltip_stable_w: f32,
     pub(crate) git_graph_tooltip_seen_copied: Option<(usize, usize)>,
     pub(crate) git_graph_tooltip_visible_copied: Option<(usize, usize)>,
+    pub(crate) git_logs_layout_cache: GitLogsLayoutCache,
+    pub(crate) git_logs_selecting: bool,
     pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,

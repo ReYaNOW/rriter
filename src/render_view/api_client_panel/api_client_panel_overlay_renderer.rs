@@ -569,7 +569,9 @@ impl Renderer {
         self.draw_wrapped_api_panel_text(&status, box_x + pad, box_y + 250.0 * s, content_w, s, 0.76);
         if crate::app::api_client::api_python_install_log_visible(api) {
             let log_rect = crate::app::api_client::api_python_install_log_rect(layout, s);
-            self.draw_api_python_install_log(api, log_rect.0, log_rect.1, log_rect.2, log_rect.3, s);
+            self.draw_api_python_install_log(
+                api, log_rect.0, log_rect.1, log_rect.2, log_rect.3, s, ui_registry, mx, my,
+            );
         }
         let btn_gap = 10.0 * s;
         let btn_y = box_y + box_h - 64.0 * s;
@@ -867,10 +869,15 @@ impl Renderer {
                 scroll_y,
                 max_scroll,
                 s,
+                ui_registry,
+                crate::ui_system::UiId::ApiMockPythonVersionsScrollY,
+                mx,
+                my,
             );
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_api_python_install_log(
         &mut self,
         api: &crate::app::api_client::ApiClientState,
@@ -879,6 +886,9 @@ impl Renderer {
         w: f32,
         h: f32,
         s: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        mx: f32,
+        my: f32,
     ) {
         self.push_rounded_rect(x, y, w, h, 5.0 * s, [0.08, 0.09, 0.12, 1.0]);
         let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
@@ -919,7 +929,19 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        self.draw_api_python_vertical_scrollbar(x, y, w, h, scroll_y, max_scroll, s);
+        self.draw_api_python_vertical_scrollbar(
+            x,
+            y,
+            w,
+            h,
+            scroll_y,
+            max_scroll,
+            s,
+            ui_registry,
+            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY,
+            mx,
+            my,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -932,20 +954,30 @@ impl Renderer {
         scroll_y: f32,
         max_scroll: f32,
         s: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        id: crate::ui_system::UiId,
+        mx: f32,
+        my: f32,
     ) {
-        let Some((track_h, thumb_h)) = crate::app::api_client::api_python_scrollbar_metrics(
-            h,
-            max_scroll,
-            s,
-        ) else {
+        let rect = (x, y, w, h);
+        let Some((track_y, track_h, thumb)) =
+            crate::app::api_client::api_python_scrollbar_thumb(rect, scroll_y, max_scroll, s)
+        else {
             return;
         };
         let track_w = 4.0 * s;
         let track_x = x + w - track_w - 4.0 * s;
-        let track_y = y + 6.0 * s;
-        let thumb_y = track_y + (track_h - thumb_h) * (scroll_y / max_scroll).clamp(0.0, 1.0);
         self.push_rounded_rect(track_x, track_y, track_w, track_h, track_w * 0.5, [1.0, 1.0, 1.0, 0.08]);
-        self.push_rounded_rect(track_x, thumb_y, track_w, thumb_h, track_w * 0.5, [1.0, 1.0, 1.0, 0.36]);
+        self.push_rounded_rect(track_x, thumb.start, track_w, thumb.len, track_w * 0.5, [1.0, 1.0, 1.0, 0.36]);
+        ui_registry.register_rect(
+            id,
+            x + w - 12.0 * s,
+            track_y,
+            12.0 * s,
+            track_h,
+            mx,
+            my,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]

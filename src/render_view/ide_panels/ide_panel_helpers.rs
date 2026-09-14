@@ -1194,15 +1194,15 @@ fn database_connection_dialog_layout(
     );
     let s = modal.scale;
     let footer = database_dialog_footer_layout(modal.y, modal.h, s);
-    let form_top = modal.y + DATABASE_DIALOG_FORM_TOP * s;
-    let form_bottom = footer.form_bottom.max(form_top);
+    let form_top = (modal.y + DATABASE_DIALOG_FORM_TOP * s).round();
+    let form_bottom = footer.form_bottom.round().max(form_top);
     let form_clip = crate::ui_system::UiClipRect::new(
-        modal.x,
+        modal.x.round(),
         form_top,
-        modal.w,
-        (form_bottom - form_top).max(0.0),
+        modal.w.round(),
+        (form_bottom - form_top).max(0.0).round(),
     );
-    let row_h = DATABASE_DIALOG_ROW_H * s;
+    let row_h = (DATABASE_DIALOG_ROW_H * s).round().max(1.0);
     let content_height = visible_rows as f32 * row_h;
     let max_scroll = (content_height - form_clip.h).max(0.0);
     let scrollbar_track = (max_scroll > 0.0 && form_clip.h > 2.0 * DATABASE_DIALOG_SCROLLBAR_MARGIN * s)
@@ -1246,7 +1246,8 @@ fn database_dialog_field_layout(
     has_eye: bool,
 ) -> DatabaseDialogFieldLayout {
     let s = layout.modal.scale;
-    let row_y = layout.form_clip.y + row as f32 * layout.row_h - scroll_y;
+    let render_scroll_y = scroll_y.round();
+    let row_y = (layout.form_clip.y + row as f32 * layout.row_h - render_scroll_y).round();
     let field_h = (28.0 * s).max(1.0).round();
     let field_y = (row_y + 4.0 * s).round();
     let desired_remember_w = if has_remember { 132.0 * s } else { 0.0 };
@@ -1297,6 +1298,18 @@ fn database_dialog_field_layout(
         eye_hit,
         eye_visual,
     }
+}
+
+fn database_dialog_form_scissor(
+    viewport_h: f32,
+    form_clip: crate::ui_system::UiClipRect,
+) -> (i32, i32, i32, i32) {
+    (
+        form_clip.x.max(0.0).round() as i32,
+        (viewport_h - form_clip.y - form_clip.h).max(0.0).round() as i32,
+        form_clip.w.max(0.0).round() as i32,
+        form_clip.h.max(0.0).round() as i32,
+    )
 }
 
 fn database_connection_dialog_scrollbar_thumb(

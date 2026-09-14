@@ -456,21 +456,11 @@ mod tests {
         let rect = (100.0, 200.0, 14.0, 120.0);
         let line_count = 30;
         let current = 180.0;
-        let thumb = api_mock_server_log_scrollbar_thumb(
-            rect,
-            line_count,
-            current,
-            1.0,
-        )
-        .expect("scrollbar thumb");
+        let thumb = api_mock_server_log_scrollbar_thumb(rect, line_count, current, 1.0)
+            .expect("scrollbar thumb");
         let pointer = thumb.start + 5.0;
         let (offset, target) = api_mock_server_log_scrollbar_drag_target(
-            rect,
-            line_count,
-            current,
-            pointer,
-            1.0,
-            None,
+            rect, line_count, current, pointer, 1.0, None,
         )
         .expect("drag starts");
         assert_eq!(offset, 5.0);
@@ -486,6 +476,20 @@ mod tests {
         )
         .expect("drag continues");
         assert!(moved > target);
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            moved,
+            offset
+        ));
+        assert_eq!(scroll.current, current);
+        assert_eq!(scroll.target, moved);
+        assert!(scroll.is_dragging);
+        scroll.update(1.0 / 60.0);
+        assert!(scroll.current > current);
+        assert!(scroll.current < moved);
     }
 
     #[test]
@@ -515,15 +519,9 @@ mod tests {
         )
         .expect("scrollbar thumb");
         let pointer = thumb.start + 7.0;
-        let (offset, initial_target) = api_text_scrollbar_x_drag_target(
-            rect,
-            current,
-            max_scroll,
-            pointer,
-            1.0,
-            None,
-        )
-        .expect("drag starts");
+        let (offset, initial_target) =
+            api_text_scrollbar_x_drag_target(rect, current, max_scroll, pointer, 1.0, None)
+                .expect("drag starts");
         assert_eq!(offset, 7.0);
         assert_eq!(initial_target, current);
 
@@ -537,6 +535,16 @@ mod tests {
         )
         .expect("drag continues");
         assert!(moved_target > initial_target);
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            moved_target,
+            offset
+        ));
+        assert_eq!(scroll.current, current);
+        assert_eq!(scroll.target, moved_target);
     }
 
     #[test]
@@ -554,15 +562,9 @@ mod tests {
         )
         .expect("scrollbar thumb");
         let pointer = thumb.start + 7.0;
-        let (offset, initial_target) = api_text_scrollbar_y_drag_target(
-            rect,
-            current,
-            max_scroll,
-            pointer,
-            1.0,
-            None,
-        )
-        .expect("drag starts");
+        let (offset, initial_target) =
+            api_text_scrollbar_y_drag_target(rect, current, max_scroll, pointer, 1.0, None)
+                .expect("drag starts");
         assert_eq!(offset, 7.0);
         assert_eq!(initial_target, current);
 
@@ -576,6 +578,103 @@ mod tests {
         )
         .expect("drag continues");
         assert!(moved_target > initial_target);
+
+        for target in [moved_target, moved_target + 25.0] {
+            let mut scroll = crate::scroll::ScrollState::new(7.0);
+            scroll.jump_to(current);
+            assert!(crate::app::mouse::apply_scrollbar_drag_target(
+                &mut scroll,
+                target,
+                offset
+            ));
+            assert_eq!(scroll.current, current);
+            assert_eq!(scroll.target, target);
+            assert_eq!(scroll.drag_offset, offset);
+        }
+    }
+
+    #[test]
+    fn api_output_menu_scrollbar_drag_is_target_only_and_preserves_offset() {
+        let scale = 1.0;
+        let example_count = 10;
+        let (visible_h, max_scroll) = api_output_schema_menu_scroll_metrics(example_count, scale);
+        assert_eq!(max_scroll, 120.0);
+        let rect = (400.0, 200.0, 12.0, 180.0);
+        let current = max_scroll * 0.5;
+        let thumb = crate::scroll::scrollbar_thumb(
+            rect.1,
+            rect.3,
+            visible_h,
+            visible_h + max_scroll,
+            current,
+            22.0 * scale,
+        )
+        .expect("menu thumb");
+        let pointer = thumb.start + 6.0;
+        let (offset, initial_target) = api_output_schema_menu_scrollbar_drag_target(
+            rect,
+            example_count,
+            current,
+            pointer,
+            scale,
+            None,
+        )
+        .expect("menu drag starts");
+        assert!((initial_target - current).abs() < 0.0001);
+
+        let (_, moved_target) = api_output_schema_menu_scrollbar_drag_target(
+            rect,
+            example_count,
+            current,
+            pointer + 24.0,
+            scale,
+            Some(offset),
+        )
+        .expect("menu drag moves");
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            moved_target,
+            offset
+        ));
+        assert_eq!(scroll.current, current);
+        assert!(scroll.target > current);
+        assert_eq!(scroll.drag_offset, offset);
+    }
+
+    #[test]
+    fn api_python_scrollbar_drag_matches_render_geometry_and_is_target_only() {
+        let rect = (100.0, 50.0, 320.0, 158.0);
+        let max_scroll = api_python_version_list_max_scroll(20, rect.3, 1.0);
+        let current = max_scroll * 0.5;
+        let (_, _, thumb) =
+            api_python_scrollbar_thumb(rect, current, max_scroll, 1.0).expect("python thumb");
+        let pointer = thumb.start + 5.0;
+        let (offset, initial_target) =
+            api_python_scrollbar_drag_target(rect, current, max_scroll, pointer, 1.0, None)
+                .expect("python drag starts");
+        assert_eq!(initial_target, current);
+        let (_, moved_target) = api_python_scrollbar_drag_target(
+            rect,
+            current,
+            max_scroll,
+            pointer + 20.0,
+            1.0,
+            Some(offset),
+        )
+        .expect("python drag moves");
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            moved_target,
+            offset
+        ));
+        assert_eq!(scroll.current, current);
+        assert!(scroll.target > current);
+        assert!(api_python_scrollbar_drag_target(rect, 0.0, 0.0, pointer, 1.0, None).is_none());
     }
 
     #[test]

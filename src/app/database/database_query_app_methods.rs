@@ -409,6 +409,7 @@ impl App {
                         .to_string(),
                 );
                 state.messages.clear();
+                state.result_view.invalidate_review_message_layout();
                 state.result_view.active_result = state.results.len();
                 state.result_view.reset_scroll();
             }
@@ -699,6 +700,11 @@ impl App {
             limit,
             crate::app::database::MAX_SQL_HISTORY_BYTES,
         );
+        for tab in &mut self.tabs {
+            if let EditorTabKind::DatabaseQuery(_, state) = &mut tab.kind {
+                state.result_view.invalidate_history_layout();
+            }
+        }
         self.save_database_panel_state();
     }
 
@@ -787,11 +793,7 @@ impl App {
             return;
         };
         let scroll = &mut state.result_view.review_message_scroll_y;
-        scroll.current = target;
-        scroll.target = target;
-        scroll.velocity = 0.0;
-        scroll.drag_offset = drag_offset;
-        scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
     }
 
     pub(crate) fn start_database_query_result_resize(&mut self) {
@@ -972,11 +974,7 @@ impl App {
         } else {
             &mut state.result_view.scroll_y
         };
-        scroll.current = target;
-        scroll.target = target;
-        scroll.velocity = 0.0;
-        scroll.drag_offset = drag_offset;
-        scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
     }
 
     pub(crate) fn update_database_query_scroll_drag(
@@ -1028,7 +1026,7 @@ impl App {
             ) else {
                 return false;
             };
-            let Some((_, target)) = crate::scroll::scrollbar_drag_target(
+            let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
                 mouse_y,
                 track_y,
                 track_h,
@@ -1042,9 +1040,7 @@ impl App {
                 return false;
             };
             let scroll = &mut state.result_view.review_message_scroll_y;
-            scroll.current = target;
-            scroll.target = target;
-            scroll.velocity = 0.0;
+            crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
             return true;
         }
         let body_rect = self
@@ -1140,9 +1136,8 @@ impl App {
         } else {
             &mut state.result_view.scroll_y
         };
-        scroll.current = target;
-        scroll.target = target;
-        scroll.velocity = 0.0;
+        let drag_offset = scroll.drag_offset;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         true
     }
 
@@ -1357,6 +1352,57 @@ mod database_query_app_method_tests {
         assert!(text.is_char_boundary(offset));
         let public_start = text.find("public").expect("public");
         assert!(offset < public_start);
+    }
+
+    #[test]
+    fn query_result_and_review_scrollbar_drag_are_target_only() {
+        for (track_start, track_len, viewport, max_scroll, min_thumb) in [
+            (10.0, 220.0, 220.0, 540.0, 28.0),
+            (20.0, 320.0, 320.0, 900.0, 36.0),
+        ] {
+            let current = max_scroll * 0.4;
+            let thumb = crate::scroll::scrollbar_thumb(
+                track_start,
+                track_len,
+                viewport,
+                viewport + max_scroll,
+                current,
+                min_thumb,
+            )
+            .expect("query thumb");
+            let pointer = thumb.start + 5.0;
+            let (offset, _) = crate::scroll::scrollbar_drag_target(
+                pointer,
+                track_start,
+                track_len,
+                thumb,
+                max_scroll,
+                None,
+            )
+            .expect("query drag starts");
+            let (_, target) = crate::scroll::scrollbar_drag_target(
+                pointer + 30.0,
+                track_start,
+                track_len,
+                thumb,
+                max_scroll,
+                Some(offset),
+            )
+            .expect("query drag moves");
+            let mut scroll = crate::scroll::ScrollState::new(7.0);
+            scroll.jump_to(current);
+            assert!(crate::app::mouse::apply_scrollbar_drag_target(
+                &mut scroll,
+                target,
+                offset
+            ));
+            assert_eq!(scroll.current, current);
+            assert_eq!(scroll.target, target);
+            scroll.end_drag();
+            assert!(!scroll.is_dragging);
+            assert_eq!(scroll.current, current);
+            assert_eq!(scroll.target, target);
+        }
     }
 
     #[test]

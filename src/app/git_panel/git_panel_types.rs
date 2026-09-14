@@ -282,9 +282,7 @@ pub(crate) fn apply_git_graph_scroll_drag(
     target: f32,
     drag_offset: f32,
 ) {
-    scroll.jump_to(target);
-    scroll.drag_offset = drag_offset;
-    scroll.is_dragging = true;
+    let _ = crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
 }
 
 pub(crate) fn git_graph_scroll_drag_target(
@@ -313,6 +311,300 @@ pub(crate) fn git_graph_scroll_drag_target(
     });
     let ratio = (pointer_y - rows_y - 4.0 * scale - offset) / (track_h - thumb_h).max(1.0);
     Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
+}
+
+pub(crate) fn git_logs_max_scroll_from_content_height(
+    content_h: f32,
+    view_h: f32,
+    scale: f32,
+) -> f32 {
+    let rows_h = (view_h - GIT_LOG_TOOLBAR_H * scale).max(0.0);
+    (content_h - rows_h).max(0.0)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) struct GitLogLineId {
+    pub(crate) epoch: u64,
+    pub(crate) sequence: u64,
+}
+
+impl GitLogLineId {
+    fn ordinal(self) -> u128 {
+        (u128::from(self.epoch) << 64) | u128::from(self.sequence)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum GitLogDisplayLineId {
+    TruncationMarker,
+    Line(GitLogLineId),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GitLogTextPoint {
+    pub(crate) line: GitLogDisplayLineId,
+    pub(crate) byte: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GitLogSelection {
+    pub(crate) anchor: GitLogTextPoint,
+    pub(crate) cursor: GitLogTextPoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GitLogSelectionRange {
+    pub(crate) start: GitLogTextPoint,
+    pub(crate) end: GitLogTextPoint,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct GitLogBufferSnapshot {
+    pub(crate) revision: u64,
+    pub(crate) first_stored_line: Option<GitLogLineId>,
+    pub(crate) last_stored_line: Option<GitLogLineId>,
+    pub(crate) stored_line_count: usize,
+    pub(crate) display_line_count: usize,
+    pub(crate) truncated: bool,
+}
+
+#[derive(Clone, Debug)]
+struct GitLogEntry {
+    id: GitLogLineId,
+    line: GitLogLine,
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct GitLogDisplayLineRef<'a> {
+    id: GitLogDisplayLineId,
+    line: GitLogLineRef<'a>,
+}
+
+impl GitLogKind {
+    pub(crate) fn display_prefix(self) -> &'static str {
+        match self {
+            Self::Stdout => "> ",
+            Self::Stderr => "! ",
+            _ => "",
+        }
+    }
+}
+
+impl<'a> GitLogDisplayLineRef<'a> {
+    pub(crate) fn id(self) -> GitLogDisplayLineId {
+        self.id
+    }
+
+    pub(crate) fn line(self) -> GitLogLineRef<'a> {
+        self.line
+    }
+
+    pub(crate) fn byte_len(self) -> usize {
+        let mut len = 0usize;
+        self.visit_text_pieces(|piece| len = len.saturating_add(piece.len()));
+        len
+    }
+
+    pub(crate) fn is_char_boundary(self, byte: usize) -> bool {
+        let mut offset = 0usize;
+        let mut valid = false;
+        self.visit_text_pieces(|piece| {
+            let end = offset.saturating_add(piece.len());
+            if byte >= offset && byte <= end && piece.is_char_boundary(byte.saturating_sub(offset))
+            {
+                valid = true;
+            }
+            offset = end;
+        });
+        valid && byte <= offset
+    }
+
+    fn visit_text_pieces(self, mut visit: impl FnMut(&str)) {
+        match self.line {
+            GitLogLineRef::TruncationMarker => visit(GIT_LOG_TRUNCATION_MARKER),
+            GitLogLineRef::Line(line) => {
+                let prefix = line.kind.display_prefix();
+                if !prefix.is_empty() {
+                    visit(prefix);
+                }
+                for span in &line.spans {
+                    visit(&span.text);
+                }
+            }
+        }
+    }
+
+    fn push_range(self, start: usize, end: usize, out: &mut String) -> bool {
+        if start > end
+            || end > self.byte_len()
+            || !self.is_char_boundary(start)
+            || !self.is_char_boundary(end)
+        {
+            return false;
+        }
+        let mut offset = 0usize;
+        let mut valid = true;
+        self.visit_text_pieces(|piece| {
+            let piece_start = offset;
+            let piece_end = piece_start.saturating_add(piece.len());
+            if start < piece_end && end > piece_start {
+                let local_start = start.saturating_sub(piece_start);
+                let local_end = end.min(piece_end).saturating_sub(piece_start);
+                if let Some(slice) = piece.get(local_start..local_end) {
+                    out.push_str(slice);
+                } else {
+                    valid = false;
+                }
+            }
+            offset = piece_end;
+        });
+        valid
+    }
+}
+
+impl GitLogBuffer {
+    fn allocate_line_id(&mut self) -> GitLogLineId {
+        let id = GitLogLineId {
+            epoch: self.next_line_epoch,
+            sequence: self.next_line_sequence,
+        };
+        if self.next_line_sequence == u64::MAX {
+            self.next_line_epoch = self.next_line_epoch.wrapping_add(1);
+            self.next_line_sequence = 0;
+        } else {
+            self.next_line_sequence += 1;
+        }
+        id
+    }
+
+    fn bump_revision(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub(crate) fn snapshot(&self) -> GitLogBufferSnapshot {
+        GitLogBufferSnapshot {
+            revision: self.revision,
+            first_stored_line: self.lines.front().map(|entry| entry.id),
+            last_stored_line: self.lines.back().map(|entry| entry.id),
+            stored_line_count: self.lines.len(),
+            display_line_count: self.line_count(),
+            truncated: self.truncated,
+        }
+    }
+
+    pub(crate) fn display_line_at(&self, index: usize) -> Option<GitLogDisplayLineRef<'_>> {
+        if self.truncated && index == 0 {
+            return Some(GitLogDisplayLineRef {
+                id: GitLogDisplayLineId::TruncationMarker,
+                line: GitLogLineRef::TruncationMarker,
+            });
+        }
+        let stored_index = index.checked_sub(usize::from(self.truncated))?;
+        let entry = self.lines.get(stored_index)?;
+        Some(GitLogDisplayLineRef {
+            id: GitLogDisplayLineId::Line(entry.id),
+            line: GitLogLineRef::Line(&entry.line),
+        })
+    }
+
+    pub(crate) fn display_line_index(&self, id: GitLogDisplayLineId) -> Option<usize> {
+        match id {
+            GitLogDisplayLineId::TruncationMarker => self.truncated.then_some(0),
+            GitLogDisplayLineId::Line(id) => {
+                let first = self.lines.front()?.id;
+                let distance = id.ordinal().checked_sub(first.ordinal())?;
+                let stored_index = usize::try_from(distance).ok()?;
+                self.lines
+                    .get(stored_index)
+                    .filter(|entry| entry.id == id)
+                    .map(|_| stored_index + usize::from(self.truncated))
+            }
+        }
+    }
+
+    pub(crate) fn point_is_valid(&self, point: GitLogTextPoint) -> bool {
+        let Some(index) = self.display_line_index(point.line) else {
+            return false;
+        };
+        self.display_line_at(index)
+            .is_some_and(|line| line.is_char_boundary(point.byte))
+    }
+
+    pub(crate) fn normalize_selection(
+        &self,
+        selection: GitLogSelection,
+    ) -> Option<GitLogSelectionRange> {
+        if !self.point_is_valid(selection.anchor) || !self.point_is_valid(selection.cursor) {
+            return None;
+        }
+        let anchor_index = self.display_line_index(selection.anchor.line)?;
+        let cursor_index = self.display_line_index(selection.cursor.line)?;
+        let forward = anchor_index < cursor_index
+            || (anchor_index == cursor_index && selection.anchor.byte <= selection.cursor.byte);
+        let (start, end) = if forward {
+            (selection.anchor, selection.cursor)
+        } else {
+            (selection.cursor, selection.anchor)
+        };
+        Some(GitLogSelectionRange { start, end })
+    }
+
+    pub(crate) fn copy_selection(&self, selection: GitLogSelection) -> Option<String> {
+        let range = self.normalize_selection(selection)?;
+        if range.start == range.end {
+            return None;
+        }
+        let start_index = self.display_line_index(range.start.line)?;
+        let end_index = self.display_line_index(range.end.line)?;
+        let mut text = String::new();
+        for index in start_index..=end_index {
+            let line = self.display_line_at(index)?;
+            let start = if index == start_index {
+                range.start.byte
+            } else {
+                0
+            };
+            let end = if index == end_index {
+                range.end.byte
+            } else {
+                line.byte_len()
+            };
+            if !line.push_range(start, end, &mut text) {
+                return None;
+            }
+            if index != end_index {
+                text.push('\n');
+            }
+        }
+        Some(text)
+    }
+
+    pub(crate) fn set_selection(
+        &mut self,
+        anchor: GitLogTextPoint,
+        cursor: GitLogTextPoint,
+    ) -> bool {
+        let selection = GitLogSelection { anchor, cursor };
+        if self.normalize_selection(selection).is_none() {
+            self.selection = None;
+            return false;
+        }
+        self.selection = Some(selection);
+        true
+    }
+
+    pub(crate) fn selection(&self) -> Option<GitLogSelection> {
+        self.selection
+    }
+
+    fn prune_selection(&mut self) {
+        if self
+            .selection
+            .is_some_and(|selection| self.normalize_selection(selection).is_none())
+        {
+            self.selection = None;
+        }
+    }
 }
 
 pub struct GitPanelState {
@@ -350,6 +642,7 @@ pub struct GitPanelState {
     pub graph_scroll: crate::scroll::ScrollState,
     pub logs_scroll: crate::scroll::ScrollState,
     pub logs_follow_tail: bool,
+    logs_copy_owner: bool,
     pub(crate) git_logs: GitLogBuffer,
     pub graph_pending: bool,
     pub graph_snapshot: Vec<GitGraphCommit>,
@@ -450,6 +743,7 @@ impl Default for GitPanelState {
             graph_scroll: crate::scroll::ScrollState::new(15.0),
             logs_scroll: crate::scroll::ScrollState::new(15.0),
             logs_follow_tail: true,
+            logs_copy_owner: false,
             git_logs: GitLogBuffer::default(),
             graph_pending: false,
             graph_snapshot: Vec::new(),
@@ -540,6 +834,7 @@ impl GitPanelState {
         } else {
             GitBottomPane::Graph
         };
+        self.revoke_git_logs_copy_owner();
     }
 
     pub fn toggle_logs_pane(&mut self) {
@@ -548,6 +843,7 @@ impl GitPanelState {
         } else {
             GitBottomPane::Logs
         };
+        self.revoke_git_logs_copy_owner();
     }
 
     pub fn open_logs_for_failure(&mut self) {
@@ -555,6 +851,7 @@ impl GitPanelState {
         self.bottom_pane = GitBottomPane::Logs;
         if !was_logs_open {
             self.logs_follow_tail = true;
+            self.revoke_git_logs_copy_owner();
         }
         if self.graph_height_ratio < 0.50 {
             self.graph_height_ratio = 0.50;
@@ -565,6 +862,28 @@ impl GitPanelState {
         self.git_logs.clear();
         self.logs_scroll.reset();
         self.logs_follow_tail = true;
+        self.revoke_git_logs_copy_owner();
+    }
+
+    pub(crate) fn claim_git_logs_copy_owner(&mut self) {
+        self.logs_copy_owner = true;
+    }
+
+    pub(crate) fn revoke_git_logs_copy_owner(&mut self) {
+        self.logs_copy_owner = false;
+    }
+
+    pub(crate) fn owns_git_logs_copy(&self) -> bool {
+        self.logs_copy_owner
+    }
+
+    pub(crate) fn copy_owned_git_logs_selection(&self) -> Option<String> {
+        if !self.owns_git_logs_copy() || !self.logs_open() {
+            return None;
+        }
+        self.git_logs
+            .selection()
+            .and_then(|selection| self.git_logs.copy_selection(selection))
     }
 
     #[cfg(test)]
@@ -573,11 +892,15 @@ impl GitPanelState {
             .append(GitLogLine::plain(GitLogKind::Info, text.to_string()));
     }
 
+    pub(crate) fn refresh_git_logs_follow_tail(&mut self, max_scroll: f32) {
+        self.logs_follow_tail = self.logs_scroll.target >= (max_scroll - 1.0).max(0.0);
+    }
+
     pub(crate) fn scroll_git_logs_by(&mut self, delta: f32, max_scroll: f32) {
         self.logs_scroll.anim_speed = 7.0;
         self.logs_scroll.scroll_by(delta);
         self.logs_scroll.clamp_target(0.0, max_scroll);
-        self.logs_follow_tail = self.logs_scroll.target >= (max_scroll - 1.0).max(0.0);
+        self.refresh_git_logs_follow_tail(max_scroll);
     }
 
     pub(crate) fn update_git_logs_scroll(&mut self, dt: f32, max_scroll: f32) -> bool {
@@ -939,4 +1262,321 @@ enum GitAction {
     Pull {
         repo_root: PathBuf,
     },
+}
+
+#[cfg(test)]
+mod git_log_document_tests {
+    use super::*;
+
+    fn point_at(logs: &GitLogBuffer, line_index: usize, byte: usize) -> GitLogTextPoint {
+        GitLogTextPoint {
+            line: logs.display_line_at(line_index).unwrap().id(),
+            byte,
+        }
+    }
+
+    fn info_line(text: impl Into<String>) -> GitLogLine {
+        GitLogLine::plain(GitLogKind::Info, text)
+    }
+
+    #[test]
+    fn git_log_selection_normalizes_forward_and_reverse_identically() {
+        let mut logs = GitLogBuffer::default();
+        logs.append(info_line("abcdef"));
+        let start = point_at(&logs, 0, 1);
+        let end = point_at(&logs, 0, 5);
+        let forward = logs
+            .normalize_selection(GitLogSelection {
+                anchor: start,
+                cursor: end,
+            })
+            .unwrap();
+        let reverse = logs
+            .normalize_selection(GitLogSelection {
+                anchor: end,
+                cursor: start,
+            })
+            .unwrap();
+        assert_eq!(forward, reverse);
+        assert_eq!(
+            logs.copy_selection(GitLogSelection {
+                anchor: start,
+                cursor: end
+            })
+            .as_deref(),
+            Some("bcde")
+        );
+        assert_eq!(
+            logs.copy_selection(GitLogSelection {
+                anchor: end,
+                cursor: start
+            })
+            .as_deref(),
+            Some("bcde")
+        );
+    }
+
+    #[test]
+    fn git_log_copy_preserves_semantic_span_text_without_ansi_metadata() {
+        let mut logs = GitLogBuffer::default();
+        logs.append(GitLogLine {
+            kind: GitLogKind::Stdout,
+            spans: vec![
+                GitLogSpan {
+                    text: "red".to_string(),
+                    ansi_fg: Some(1),
+                },
+                GitLogSpan {
+                    text: "blue".to_string(),
+                    ansi_fg: Some(4),
+                },
+            ],
+        });
+        let line = logs.display_line_at(0).unwrap();
+        let start = GitLogTextPoint {
+            line: line.id(),
+            byte: 0,
+        };
+        let end = GitLogTextPoint {
+            line: line.id(),
+            byte: line.byte_len(),
+        };
+        assert_eq!(
+            logs.copy_selection(GitLogSelection {
+                anchor: start,
+                cursor: end
+            })
+            .as_deref(),
+            Some("> redblue")
+        );
+    }
+
+    #[test]
+    fn git_log_copy_uses_only_logical_newlines() {
+        let mut logs = GitLogBuffer::default();
+        logs.append(info_line("abcdef"));
+        logs.append(info_line("ghijkl"));
+
+        let one_line = GitLogSelection {
+            anchor: point_at(&logs, 0, 1),
+            cursor: point_at(&logs, 0, 5),
+        };
+        assert_eq!(logs.copy_selection(one_line).as_deref(), Some("bcde"));
+        assert!(!logs.copy_selection(one_line).unwrap().contains('\n'));
+
+        let two_lines = GitLogSelection {
+            anchor: point_at(&logs, 0, 2),
+            cursor: point_at(&logs, 1, 2),
+        };
+        assert_eq!(logs.copy_selection(two_lines).as_deref(), Some("cdef\ngh"));
+    }
+
+    #[test]
+    fn git_log_points_are_utf8_safe_for_cyrillic_and_emoji() {
+        let mut logs = GitLogBuffer::default();
+        let text = "Привет🙂мир";
+        logs.append(info_line(text));
+        let line_id = logs.display_line_at(0).unwrap().id();
+        let emoji_start = text.find('🙂').unwrap();
+        let after_emoji = emoji_start + '🙂'.len_utf8();
+        let start = GitLogTextPoint {
+            line: line_id,
+            byte: "Пр".len(),
+        };
+        let end = GitLogTextPoint {
+            line: line_id,
+            byte: after_emoji,
+        };
+        assert!(logs.point_is_valid(start));
+        assert!(logs.point_is_valid(end));
+        assert!(!logs.point_is_valid(GitLogTextPoint {
+            line: line_id,
+            byte: emoji_start + 1,
+        }));
+        assert_eq!(
+            logs.copy_selection(GitLogSelection {
+                anchor: start,
+                cursor: end
+            })
+            .as_deref(),
+            Some("ивет🙂")
+        );
+    }
+
+    #[test]
+    fn git_log_display_prefix_policy_is_explicit_and_selectable() {
+        assert_eq!(GitLogKind::Stdout.display_prefix(), "> ");
+        assert_eq!(GitLogKind::Stderr.display_prefix(), "! ");
+        assert_eq!(GitLogKind::Header.display_prefix(), "");
+
+        let mut logs = GitLogBuffer::default();
+        logs.append(GitLogLine::plain(GitLogKind::Stderr, "failed"));
+        let line = logs.display_line_at(0).unwrap();
+        assert_eq!(line.byte_len(), "! failed".len());
+        let selection = GitLogSelection {
+            anchor: GitLogTextPoint {
+                line: line.id(),
+                byte: 0,
+            },
+            cursor: GitLogTextPoint {
+                line: line.id(),
+                byte: line.byte_len(),
+            },
+        };
+        assert_eq!(logs.copy_selection(selection).as_deref(), Some("! failed"));
+    }
+
+    #[test]
+    fn git_log_clear_and_front_eviction_invalidate_selection() {
+        let mut logs = GitLogBuffer::default();
+        logs.append(info_line("selected"));
+        let anchor = point_at(&logs, 0, 0);
+        let cursor = point_at(&logs, 0, 4);
+        assert!(logs.set_selection(anchor, cursor));
+        logs.clear();
+        assert_eq!(logs.selection(), None);
+
+        logs.append(info_line("old"));
+        let anchor = point_at(&logs, 0, 0);
+        let cursor = point_at(&logs, 0, 1);
+        assert!(logs.set_selection(anchor, cursor));
+        let chunk = "x".repeat(900 * 1024);
+        logs.append(info_line(chunk.clone()));
+        logs.append(info_line(chunk.clone()));
+        logs.append(info_line(chunk));
+        assert!(logs.snapshot().truncated);
+        assert_eq!(logs.selection(), None);
+    }
+
+    #[test]
+    fn git_log_snapshot_distinguishes_append_eviction_clear_and_truncation_marker() {
+        let mut logs = GitLogBuffer::default();
+        let empty = logs.snapshot();
+        logs.append(info_line("first"));
+        let first = logs.snapshot();
+        logs.append(info_line("second"));
+        let appended = logs.snapshot();
+        assert_ne!(empty.revision, first.revision);
+        assert_ne!(first.revision, appended.revision);
+        assert_eq!(first.first_stored_line, appended.first_stored_line);
+        assert_ne!(first.last_stored_line, appended.last_stored_line);
+        assert!(!appended.truncated);
+
+        let chunk = "x".repeat(900 * 1024);
+        logs.append(info_line(chunk.clone()));
+        logs.append(info_line(chunk.clone()));
+        logs.append(info_line(chunk));
+        let evicted = logs.snapshot();
+        assert!(evicted.truncated);
+        assert_ne!(appended.first_stored_line, evicted.first_stored_line);
+        assert_eq!(evicted.display_line_count, evicted.stored_line_count + 1);
+        assert!(matches!(
+            logs.display_line_at(0).map(|line| line.id()),
+            Some(GitLogDisplayLineId::TruncationMarker)
+        ));
+
+        logs.clear();
+        let cleared = logs.snapshot();
+        assert_ne!(evicted.revision, cleared.revision);
+        assert_eq!(cleared.stored_line_count, 0);
+        assert_eq!(cleared.display_line_count, 0);
+        assert!(!cleared.truncated);
+    }
+
+    #[test]
+    fn git_log_line_identity_sequence_wrap_advances_epoch() {
+        let mut logs = GitLogBuffer::default();
+        logs.next_line_epoch = 7;
+        logs.next_line_sequence = u64::MAX;
+        logs.append(info_line("last-in-epoch"));
+        logs.append(info_line("first-in-next"));
+        assert_eq!(
+            logs.display_line_at(0).unwrap().id(),
+            GitLogDisplayLineId::Line(GitLogLineId {
+                epoch: 7,
+                sequence: u64::MAX,
+            })
+        );
+        assert_eq!(
+            logs.display_line_at(1).unwrap().id(),
+            GitLogDisplayLineId::Line(GitLogLineId {
+                epoch: 8,
+                sequence: 0,
+            })
+        );
+    }
+
+    #[test]
+    fn git_log_copy_owner_gates_selection_and_does_not_resurrect_after_logs_reopen() {
+        let mut state = GitPanelState::default();
+        state.toggle_logs_pane();
+        state.seed_git_log_for_test("selected");
+        let line = state.git_logs.display_line_at(0).unwrap();
+        assert!(state.git_logs.set_selection(
+            GitLogTextPoint {
+                line: line.id(),
+                byte: 0,
+            },
+            GitLogTextPoint {
+                line: line.id(),
+                byte: line.byte_len(),
+            },
+        ));
+
+        assert!(!state.owns_git_logs_copy());
+        assert_eq!(state.copy_owned_git_logs_selection(), None);
+
+        state.claim_git_logs_copy_owner();
+        assert_eq!(
+            state.copy_owned_git_logs_selection().as_deref(),
+            Some("selected")
+        );
+
+        state.toggle_logs_pane();
+        assert!(!state.owns_git_logs_copy());
+        state.toggle_logs_pane();
+        assert!(!state.owns_git_logs_copy());
+        assert_eq!(state.copy_owned_git_logs_selection(), None);
+    }
+
+    #[test]
+    fn git_log_follow_tail_accepts_measured_visual_max_scroll() {
+        let measured_content_h = 420.0;
+        let max_scroll = git_logs_max_scroll_from_content_height(measured_content_h, 180.0, 1.0);
+        assert_eq!(max_scroll, 270.0);
+
+        let mut state = GitPanelState::default();
+        state.logs_follow_tail = true;
+        assert!(state.update_git_logs_scroll(0.016, max_scroll));
+        assert_eq!(state.logs_scroll.target, max_scroll);
+        state.scroll_git_logs_by(-80.0, max_scroll);
+        assert!(!state.logs_follow_tail);
+        let held_target = state.logs_scroll.target;
+        state.update_git_logs_scroll(0.016, max_scroll + 200.0);
+        assert_eq!(state.logs_scroll.target, held_target);
+    }
+
+    #[test]
+    fn git_log_truncation_marker_is_safe_selectable_display_text() {
+        let mut logs = GitLogBuffer::default();
+        let chunk = "x".repeat(1100 * 1024);
+        logs.append(info_line(chunk.clone()));
+        logs.append(info_line(chunk));
+        assert!(logs.snapshot().truncated);
+        let marker = logs.display_line_at(0).unwrap();
+        let selection = GitLogSelection {
+            anchor: GitLogTextPoint {
+                line: marker.id(),
+                byte: 0,
+            },
+            cursor: GitLogTextPoint {
+                line: marker.id(),
+                byte: marker.byte_len(),
+            },
+        };
+        assert_eq!(
+            logs.copy_selection(selection).as_deref(),
+            Some(GIT_LOG_TRUNCATION_MARKER)
+        );
+    }
 }

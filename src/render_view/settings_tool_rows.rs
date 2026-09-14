@@ -1,5 +1,41 @@
 use crate::renderer::Renderer;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct EditorCtrlWheelLayout {
+    label_w: f32,
+    decrement_x: f32,
+    value_x: f32,
+    value_w: f32,
+    increment_x: f32,
+    button_size: f32,
+}
+
+fn editor_ctrl_wheel_layout(content_x: f32, content_w: f32, scale: f32) -> EditorCtrlWheelLayout {
+    let content_w = content_w.max(1.0);
+    let gap = (8.0 * scale).min(content_w * 0.04).max(0.0);
+    let available = (content_w - gap * 2.0).max(0.0);
+    let button_size = (30.0 * scale).min(available * 0.22).max(0.0);
+    let value_w = (76.0 * scale)
+        .min((available - button_size * 2.0).max(0.0));
+    let controls_w = button_size * 2.0 + value_w + gap * 2.0;
+    let decrement_x = content_x + (content_w - controls_w).max(0.0);
+    let value_x = decrement_x + button_size + gap;
+    let increment_x = value_x + value_w + gap;
+    EditorCtrlWheelLayout {
+        label_w: (decrement_x - content_x - 12.0 * scale).max(0.0),
+        decrement_x,
+        value_x,
+        value_w,
+        increment_x,
+        button_size,
+    }
+}
+
+fn ctrl_wheel_multiplier_label(value: f32) -> String {
+    let quarters = (crate::normalize_ctrl_wheel_multiplier(value) * 4.0).round() as u8;
+    format!("{}.{:02}x", quarters / 4, (quarters % 4) * 25)
+}
+
 fn tool_row_units(kind: crate::platform::ToolKind, stacked_actions: bool) -> f32 {
     if kind == crate::platform::ToolKind::Dart {
         if stacked_actions { 183.0 } else { 148.0 }
@@ -91,6 +127,93 @@ fn tool_status_color(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn draw_editor_ctrl_wheel_setting(
+        &mut self,
+        content_x: f32,
+        content_w: f32,
+        row_y: f32,
+        multiplier: f32,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+    ) {
+        let scale = self.scale_factor;
+        let row_y = row_y.round();
+        let row_h = (30.0 * scale).round().max(1.0);
+        let layout = editor_ctrl_wheel_layout(content_x, content_w, scale);
+        let mut label_scratch = String::new();
+        self.draw_tree_label_clipped(
+            "Ускорение Ctrl + колесо",
+            content_x.round(),
+            Self::tree_row_text_y(row_y, row_h, scale),
+            layout.label_w,
+            [0.82, 0.82, 0.86, 1.0],
+            0.86,
+            &mut label_scratch,
+        );
+
+        let button_size = layout.button_size.round().max(1.0);
+        let button_y = (row_y + (row_h - button_size) * 0.5).round();
+        let icon_size = (18.0 * scale).min(button_size * 0.72).max(1.0);
+        let decrement = crate::widgets::IconButton {
+            x: layout.decrement_x.round(),
+            y: button_y,
+            size: button_size,
+            icon: Some(crate::widgets::IconType::Down),
+            is_active: false,
+            icon_size: Some(icon_size),
+            active_square_width: None,
+            custom_color: None,
+        };
+        let increment = crate::widgets::IconButton {
+            x: layout.increment_x.round(),
+            y: button_y,
+            size: button_size,
+            icon: Some(crate::widgets::IconType::Up),
+            is_active: false,
+            icon_size: Some(icon_size),
+            active_square_width: None,
+            custom_color: None,
+        };
+        let value_x = layout.value_x.round();
+        let value_w = layout.value_w.round().max(1.0);
+        self.push_rounded_rect(
+            value_x,
+            row_y,
+            value_w,
+            row_h,
+            5.0 * scale,
+            [0.20, 0.21, 0.26, 1.0],
+        );
+        let value = ctrl_wheel_multiplier_label(multiplier);
+        let text_w = self.measure_ui_width(&value, 0.78);
+        self.draw_string_scaled_pixel_snapped(
+            &value,
+            (value_x + (value_w - text_w) * 0.5).round(),
+            Self::tree_row_text_y(row_y, row_h, scale),
+            [0.92, 0.92, 0.95, 1.0],
+            0.78,
+        );
+        let mx = self.last_mouse_x;
+        let my = self.last_mouse_y;
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(-1),
+            &decrement,
+            self,
+            mx,
+            my,
+            scale,
+            false,
+        );
+        ui_registry.register_icon_button(
+            crate::ui_system::UiId::SettingsEditorCtrlWheelAdjust(1),
+            &increment,
+            self,
+            mx,
+            my,
+            scale,
+            false,
+        );
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_settings_tool_row(
         &mut self,
@@ -430,7 +553,32 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use super::tool_row_units;
+    use super::{ctrl_wheel_multiplier_label, editor_ctrl_wheel_layout, tool_row_units};
+
+    #[test]
+    fn editor_ctrl_wheel_controls_fit_normal_and_narrow_widths() {
+        for (width, scale) in [(620.0, 1.0), (180.0, 1.25), (120.0, 1.75)] {
+            let layout = editor_ctrl_wheel_layout(50.0, width, scale);
+            assert!(layout.label_w >= 0.0);
+            assert!(layout.decrement_x >= 50.0);
+            assert!(layout.value_x >= layout.decrement_x + layout.button_size);
+            assert!(layout.increment_x >= layout.value_x + layout.value_w);
+            assert!(layout.increment_x + layout.button_size <= 50.0 + width + 0.001);
+        }
+    }
+
+    #[test]
+    fn ctrl_wheel_multiplier_labels_are_exact_for_every_quarter_step() {
+        let expected = [
+            "1.25x", "1.50x", "1.75x", "2.00x", "2.25x", "2.50x", "2.75x", "3.00x",
+            "3.25x", "3.50x", "3.75x", "4.00x", "4.25x", "4.50x", "4.75x", "5.00x",
+        ];
+        for (index, label) in expected.into_iter().enumerate() {
+            let value = crate::CTRL_WHEEL_MULTIPLIER_MIN
+                + index as f32 * crate::CTRL_WHEEL_MULTIPLIER_STEP;
+            assert_eq!(ctrl_wheel_multiplier_label(value), label);
+        }
+    }
 
     #[test]
     fn dart_row_reserves_two_control_lines() {

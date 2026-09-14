@@ -5,6 +5,7 @@ use super::{
 };
 use crate::scroll::ScrollState;
 use std::collections::{BTreeMap, VecDeque};
+use std::fmt::Write as _;
 
 pub const DATABASE_GRID_ROW_HEIGHT: f32 = 38.0;
 pub const DATABASE_GRID_HEADER_HEIGHT: f32 = 40.0;
@@ -210,25 +211,28 @@ pub enum DatabaseCellValue {
 
 impl DatabaseCellValue {
     pub fn display_text(&self) -> String {
+        let mut scratch = String::new();
+        self.display_text_into(&mut scratch).to_owned()
+    }
+
+    pub(crate) fn display_text_into<'a>(&'a self, scratch: &'a mut String) -> &'a str {
         match self {
-            Self::Null => "<NULL>".to_string(),
-            Self::Default => "<default>".to_string(),
+            Self::Null => "<NULL>",
+            Self::Default => "<default>",
             Self::Text(value) | Self::Enum(value) | Self::DateTime(value) => {
-                truncate_display(value)
+                truncate_display(value, scratch)
             }
-            Self::Boolean(value) => value.to_string(),
+            Self::Boolean(false) => "false",
+            Self::Boolean(true) => "true",
             Self::ByteaPreview(preview) => {
+                scratch.clear();
+                let _ = write!(scratch, "<bytea {} bytes: ", preview.total_bytes);
+                scratch.push_str(&preview.hex_preview);
                 if preview.truncated {
-                    format!(
-                        "<bytea {} bytes: {}…>",
-                        preview.total_bytes, preview.hex_preview
-                    )
-                } else {
-                    format!(
-                        "<bytea {} bytes: {}>",
-                        preview.total_bytes, preview.hex_preview
-                    )
+                    scratch.push('…');
                 }
+                scratch.push('>');
+                scratch.as_str()
             }
         }
     }
@@ -252,15 +256,18 @@ impl DatabaseCellValue {
     }
 }
 
-fn truncate_display(value: &str) -> String {
+fn truncate_display<'a>(value: &'a str, scratch: &'a mut String) -> &'a str {
     if value.len() <= MAX_DISPLAY_CELL_BYTES {
-        return value.to_string();
+        return value;
     }
     let mut end = MAX_DISPLAY_CELL_BYTES;
     while end > 0 && !value.is_char_boundary(end) {
         end -= 1;
     }
-    format!("{}… <{} bytes>", &value[..end], value.len())
+    scratch.clear();
+    scratch.push_str(&value[..end]);
+    let _ = write!(scratch, "… <{} bytes>", value.len());
+    scratch.as_str()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -733,26 +740,63 @@ impl DatabaseTableGridState {
     }
 
     pub fn row(&self, absolute_index: usize) -> Option<&DatabaseGridRow> {
-        self.chunks
-            .values()
-            .flat_map(|chunk| &chunk.rows)
-            .chain(self.added_rows.iter())
-            .find(|row| row.absolute_index == absolute_index)
-    }
-
-    pub fn row_mut(&mut self, absolute_index: usize) -> Option<&mut DatabaseGridRow> {
-        for chunk in self.chunks.values_mut() {
+        if let Some((chunk_index, row_offset)) = self.server_row_location(absolute_index)
+            && let Some(chunk) = self.chunks.get(&chunk_index)
+        {
             if let Some(row) = chunk
                 .rows
-                .iter_mut()
+                .get(row_offset)
+                .filter(|row| row.absolute_index == absolute_index)
+            {
+                return Some(row);
+            }
+            if let Some(row) = chunk
+                .rows
+                .iter()
                 .find(|row| row.absolute_index == absolute_index)
             {
                 return Some(row);
             }
         }
         self.added_rows
+            .iter()
+            .find(|row| row.absolute_index == absolute_index)
+    }
+
+    pub fn row_mut(&mut self, absolute_index: usize) -> Option<&mut DatabaseGridRow> {
+        if let Some((chunk_index, row_offset)) = self.server_row_location(absolute_index)
+            && let Some(chunk) = self.chunks.get_mut(&chunk_index)
+        {
+            if chunk
+                .rows
+                .get(row_offset)
+                .is_some_and(|row| row.absolute_index == absolute_index)
+            {
+                return chunk.rows.get_mut(row_offset);
+            }
+            if let Some(row_offset) = chunk
+                .rows
+                .iter()
+                .position(|row| row.absolute_index == absolute_index)
+            {
+                return chunk.rows.get_mut(row_offset);
+            }
+        }
+        self.added_rows
             .iter_mut()
             .find(|row| row.absolute_index == absolute_index)
+    }
+
+    fn server_row_location(&self, absolute_index: usize) -> Option<(usize, usize)> {
+        let page_base = self.view.current_page.saturating_mul(self.view.limit);
+        let relative = absolute_index.checked_sub(page_base)?;
+        if relative >= self.view.limit {
+            return None;
+        }
+        Some((
+            relative / super::DATABASE_CHUNK_SIZE,
+            relative % super::DATABASE_CHUNK_SIZE,
+        ))
     }
 
     pub fn visible_row_range(&self) -> std::ops::Range<usize> {
@@ -1172,6 +1216,17 @@ mod tests {
         })
     }
 
+    fn clean_row(absolute_index: usize) -> DatabaseGridRow {
+        DatabaseGridRow {
+            absolute_index,
+            cells: vec![DatabaseGridCell::new(DatabaseCellValue::Text(
+                absolute_index.to_string(),
+            ))],
+            xmin: None,
+            state: DatabaseRowState::Clean,
+        }
+    }
+
     #[test]
     fn null_default_boolean_and_enum_tokens_are_typed() {
         assert_eq!(
@@ -1470,6 +1525,157 @@ mod tests {
         assert_eq!(preview.total_bytes, 70_000);
         assert!(preview.truncated);
         assert_eq!(preview.hex_preview.len(), MAX_BYTEA_PREVIEW_BYTES * 2);
+    }
+
+    #[test]
+    fn cell_display_borrows_common_values_and_reuses_format_scratch() {
+        let mut scratch = String::with_capacity(128);
+        scratch.push_str("sentinel");
+        let text = DatabaseCellValue::Text("hello".to_string());
+        let text_ptr = match &text {
+            DatabaseCellValue::Text(value) => value.as_ptr(),
+            _ => unreachable!(),
+        };
+        {
+            let rendered = text.display_text_into(&mut scratch);
+            assert_eq!(rendered, "hello");
+            assert_eq!(rendered.as_ptr(), text_ptr);
+        }
+        assert_eq!(scratch, "sentinel");
+
+        let enum_value = DatabaseCellValue::Enum("ready".to_string());
+        assert_eq!(enum_value.display_text_into(&mut scratch), "ready");
+        assert_eq!(scratch, "sentinel");
+        let datetime = DatabaseCellValue::DateTime("2026-09-12 01:10:00".to_string());
+        assert_eq!(
+            datetime.display_text_into(&mut scratch),
+            "2026-09-12 01:10:00"
+        );
+        assert_eq!(scratch, "sentinel");
+
+        for (value, expected) in [
+            (DatabaseCellValue::Null, "<NULL>"),
+            (DatabaseCellValue::Default, "<default>"),
+            (DatabaseCellValue::Boolean(false), "false"),
+            (DatabaseCellValue::Boolean(true), "true"),
+        ] {
+            assert_eq!(value.display_text_into(&mut scratch), expected);
+            assert_eq!(scratch, "sentinel");
+        }
+
+        scratch.clear();
+        let capacity = scratch.capacity();
+        let bytea = DatabaseCellValue::ByteaPreview(DatabaseByteaPreview {
+            total_bytes: 3,
+            hex_preview: "010203".to_string(),
+            truncated: false,
+        });
+        assert_eq!(
+            bytea.display_text_into(&mut scratch),
+            "<bytea 3 bytes: 010203>"
+        );
+        assert_eq!(scratch.capacity(), capacity);
+    }
+
+    #[test]
+    fn cell_display_truncation_keeps_utf8_boundary_and_byte_suffix() {
+        let mut value = "a".repeat(MAX_DISPLAY_CELL_BYTES - 1);
+        value.push('Ж');
+        let cell = DatabaseCellValue::Text(value);
+        let mut scratch = String::with_capacity(MAX_DISPLAY_CELL_BYTES + 32);
+        let capacity = scratch.capacity();
+        let rendered = cell.display_text_into(&mut scratch);
+        let suffix = format!("… <{} bytes>", MAX_DISPLAY_CELL_BYTES + 1);
+        let prefix = rendered.strip_suffix(&suffix).expect("truncation suffix");
+        assert_eq!(prefix.len(), MAX_DISPLAY_CELL_BYTES - 1);
+        assert!(prefix.bytes().all(|byte| byte == b'a'));
+        assert_eq!(scratch.capacity(), capacity);
+    }
+
+    #[test]
+    fn row_lookup_uses_expected_page_chunk_and_handles_boundaries() {
+        let mut grid = grid();
+        grid.view.limit = 250;
+        grid.view.current_page = 2;
+        for (chunk_index, start, end) in [(0, 500, 600), (1, 600, 700), (2, 700, 725)] {
+            grid.chunks.insert(
+                chunk_index,
+                DatabaseTableChunk {
+                    generation: DatabaseGeneration(1),
+                    chunk_index,
+                    rows: (start..end).map(clean_row).collect(),
+                    estimated_bytes: 0,
+                },
+            );
+        }
+
+        for absolute_index in [500, 550, 599, 600, 699, 700, 724] {
+            assert_eq!(
+                grid.row(absolute_index).map(|row| row.absolute_index),
+                Some(absolute_index)
+            );
+        }
+        assert!(grid.row(499).is_none());
+        assert!(grid.row(725).is_none());
+        grid.chunks.remove(&1);
+        assert!(grid.row(600).is_none());
+
+        grid.added_rows.push(DatabaseGridRow {
+            absolute_index: usize::MAX,
+            cells: Vec::new(),
+            xmin: None,
+            state: DatabaseRowState::Added,
+        });
+        assert_eq!(
+            grid.row(usize::MAX).map(|row| row.state),
+            Some(DatabaseRowState::Added)
+        );
+    }
+
+    #[test]
+    fn row_lookup_preserves_sparse_chunk_fallback_and_mutation() {
+        let mut grid = grid();
+        grid.view.limit = 100;
+        grid.chunks.insert(
+            0,
+            DatabaseTableChunk {
+                generation: DatabaseGeneration(1),
+                chunk_index: 0,
+                rows: vec![clean_row(10), clean_row(42)],
+                estimated_bytes: 0,
+            },
+        );
+        assert_eq!(grid.row(42).map(|row| row.absolute_index), Some(42));
+        grid.row_mut(42).expect("sparse row").state = DatabaseRowState::Deleted;
+        assert_eq!(
+            grid.row(42).map(|row| row.state),
+            Some(DatabaseRowState::Deleted)
+        );
+    }
+
+    #[test]
+    fn row_lookup_returns_none_after_chunk_eviction() {
+        let mut grid = grid();
+        grid.view.limit = 1_200;
+        grid.viewport_height = DATABASE_GRID_ROW_HEIGHT * 2.0;
+        for chunk_index in 0..10 {
+            let absolute_index = chunk_index * super::super::DATABASE_CHUNK_SIZE;
+            let row = clean_row(absolute_index);
+            grid.insert_chunk(DatabaseTableChunk {
+                generation: DatabaseGeneration(1),
+                chunk_index,
+                estimated_bytes: row.estimated_bytes(),
+                rows: vec![row],
+            });
+        }
+        assert!(grid.chunks.contains_key(&0), "visible chunk stays protected");
+        let evicted = (1..10)
+            .find(|chunk_index| !grid.chunks.contains_key(chunk_index))
+            .expect("one non-visible chunk should be evicted");
+        assert!(
+            grid.row(evicted * super::super::DATABASE_CHUNK_SIZE)
+                .is_none()
+        );
     }
 
     #[test]

@@ -99,6 +99,7 @@ pub(crate) fn test_app() -> Option<App> {
         last_action: now,
         last_blink_state: true,
         modifiers: winit::keyboard::ModifiersState::empty(),
+        ctrl_wheel_multiplier: crate::CTRL_WHEEL_MULTIPLIER_DEFAULT,
         is_dragging: false,
         is_editor_drag_pending: false,
         is_focused: true,

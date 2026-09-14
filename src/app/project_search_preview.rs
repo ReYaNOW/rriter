@@ -180,11 +180,7 @@ impl ProjectSearchState {
         else {
             return false;
         };
-        self.scroll.jump_to(target);
-        self.scroll.drag_offset = drag_offset;
-        self.scroll.anim_speed = 15.0;
-        self.scroll.is_dragging = true;
-        true
+        crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll, target, drag_offset)
     }
 
     pub fn drag_scrollbar_to(
@@ -206,11 +202,7 @@ impl ProjectSearchState {
             return false;
         }
         let drag_offset = self.scroll.drag_offset;
-        self.scroll.jump_to(target);
-        self.scroll.drag_offset = drag_offset;
-        self.scroll.anim_speed = 15.0;
-        self.scroll.is_dragging = true;
-        true
+        crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll, target, drag_offset)
     }
 }
 
@@ -623,8 +615,16 @@ mod tests {
                 h: 120.0,
             },
         };
+        let current = state.scroll.current;
         assert!(state.start_scrollbar_drag(&layout, 130.0, 1.0));
-        assert_eq!(state.scroll.current, state.scroll.target);
+        assert_eq!(state.scroll.current, current);
+        assert_ne!(state.scroll.current, state.scroll.target);
         assert!(state.scroll.is_dragging);
+        let offset = state.scroll.drag_offset;
+        let target = state.scroll.target;
+        assert!(state.drag_scrollbar_to(&layout, 90.0, 1.0));
+        assert_eq!(state.scroll.current, current);
+        assert_ne!(state.scroll.target, target);
+        assert_eq!(state.scroll.drag_offset, offset);
     }
 }

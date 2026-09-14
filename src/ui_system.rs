@@ -41,6 +41,7 @@ pub enum UiId {
 
     // Settings tabs
     SettingsTab(usize),
+    SettingsEditorCtrlWheelAdjust(i8),
     SettingsDatabaseAdjust(usize, i8),
 
     // Settings IDE
@@ -142,6 +143,7 @@ pub enum UiId {
     ApiOutputSchemaTab(usize),
     ApiOutputStatusTab(usize, usize),
     ApiOutputSchemaMenu(usize),
+    ApiOutputSchemaMenuScrollY(usize),
     ApiOutputSchemaMenuItem(usize, usize),
     ApiOutputSchemaBody(usize),
     ApiOutputSchemaFold(usize, usize),
@@ -176,6 +178,8 @@ pub enum UiId {
     ApiMockPythonPickUvPath,
     ApiMockPythonPickCustomPath,
     ApiMockPythonVersionOption(usize),
+    ApiMockPythonVersionsScrollY,
+    ApiMockPythonInstallLogScrollY,
     ApiMockPythonUvPathInput,
     ApiMockPythonVersionInput,
     ApiMockPythonCustomPathInput,
@@ -350,6 +354,7 @@ pub enum UiId {
     GitLogsToggle,
     GitLogsClear,
     GitLogsBody,
+    GitLogsScroll,
     GitGraphWorkspace(usize),
     GitGraphResize,
     GitGraphScroll,

@@ -1,8 +1,27 @@
 use super::*;
 
-fn wheel_delta(delta: MouseScrollDelta, line_height: f32) -> (f32, f32) {
+#[inline(always)]
+fn ctrl_wheel_line_multiplier(
+    modifiers: winit::keyboard::ModifiersState,
+    configured: f32,
+) -> f32 {
+    if modifiers.control_key() {
+        configured
+    } else {
+        1.0
+    }
+}
+
+fn wheel_delta(
+    delta: MouseScrollDelta,
+    line_height: f32,
+    line_multiplier: f32,
+) -> (f32, f32) {
     match delta {
-        MouseScrollDelta::LineDelta(x, y) => (-x * 4.0 * line_height, -y * 4.0 * line_height),
+        MouseScrollDelta::LineDelta(x, y) => (
+            -x * 4.0 * line_height * line_multiplier,
+            -y * 4.0 * line_height * line_multiplier,
+        ),
         MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
     }
 }
@@ -76,9 +95,11 @@ impl App {
         let lh = self.renderer.as_ref().unwrap().line_height;
         let s = self.renderer.as_ref().unwrap().scale_factor;
         let shift = self.modifiers.shift_key();
+        let line_multiplier =
+            ctrl_wheel_line_multiplier(self.modifiers, self.ctrl_wheel_multiplier);
 
         // Единая дельта как эталон для всех скролл-панелей в редакторе
-        let (dx, dy) = wheel_delta(delta, lh);
+        let (dx, dy) = wheel_delta(delta, lh, line_multiplier);
         let mx = self.renderer.as_ref().unwrap().last_mouse_x;
         let my = self.renderer.as_ref().unwrap().last_mouse_y;
         if self.show_settings && self.tool_installer.is_log_open() {
@@ -418,14 +439,15 @@ impl App {
                         return;
                     }
                 } else if self.ide_panel.git.logs_open() {
-                    let logs_y = list_y + changes_h + divider_h;
-                    if crate::ui_system::point_in_rect(mx, my, (cx, logs_y, cw, bottom_h)) {
-                        let max_scroll = crate::app::git_panel::git_logs_max_scroll(
-                            self.ide_panel.git.git_logs.line_count(),
-                            bottom_h,
-                            s,
-                        );
-                        self.ide_panel.git.scroll_git_logs_by(dy, max_scroll);
+                    if let Some(metrics) = self
+                        .renderer
+                        .as_ref()
+                        .and_then(|renderer| renderer.git_logs_layout_metrics())
+                        && crate::ui_system::point_in_rect(mx, my, metrics.rows_rect)
+                    {
+                        self.ide_panel
+                            .git
+                            .scroll_git_logs_by(dy, metrics.max_scroll);
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
@@ -833,12 +855,12 @@ impl App {
             if over_viewport {
                 let viewport_w = viewport.map_or(window_w, |rect| rect.2).max(1.0);
                 let viewport_h = viewport.map_or(results_h.max(1.0), |rect| rect.3.max(1.0));
-                let history = self.ide_panel.database.persisted.query_history.clone();
+                let history = &self.ide_panel.database.persisted.query_history;
                 if let Some(crate::app::EditorTabKind::DatabaseQuery(meta, state)) =
                     self.tabs.get_mut(self.active_tab).map(|tab| &mut tab.kind)
                 {
                     let (max_x, max_y) = crate::app::database::database_query_scroll_limits(
-                        meta, state, &history, viewport_w, viewport_h, s,
+                        meta, state, history, viewport_w, viewport_h, s,
                     );
                     if shift {
                         state.result_view.scroll_x.anim_speed = 7.0;
@@ -934,6 +956,7 @@ impl App {
             }
             let api_inner_scroll = hovered_id.and_then(|id| {
                 if let crate::ui_system::UiId::ApiOutputSchemaMenu(route_idx)
+                | crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx)
                 | crate::ui_system::UiId::ApiOutputSchemaMenuItem(route_idx, _) = id
                 {
                     let (meta, state) = self.active_api_tab()?;
@@ -959,8 +982,8 @@ impl App {
                         })
                         .unwrap_or(0)
                         .max(1);
-                    let row_h = 30.0 * s;
-                    let max_scroll = (example_count as f32 * row_h - row_h * 6.0).max(0.0);
+                    let (_, max_scroll) =
+                        crate::app::api_client::api_output_schema_menu_scroll_metrics(example_count, s);
                     return Some((meta.spec_id, route_idx, id, None, -max_scroll - 1.0));
                 }
                 let rect_id = match id {
@@ -1371,16 +1394,45 @@ mod tests {
     #[test]
     fn wheel_delta_handles_line_and_pixel_units() {
         assert_eq!(
-            wheel_delta(MouseScrollDelta::LineDelta(2.0, -3.0), 10.0),
+            wheel_delta(MouseScrollDelta::LineDelta(2.0, -3.0), 10.0, 1.0),
             (-80.0, 120.0)
+        );
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(2.0, -3.0), 10.0, 2.0),
+            (-160.0, 240.0)
         );
         assert_eq!(
             wheel_delta(
                 MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(12.5, -8.0)),
                 10.0,
+                5.0,
             ),
             (-12.5, 8.0)
         );
+    }
+
+    #[test]
+    fn ctrl_wheel_multiplier_uses_physical_control_only() {
+        use winit::keyboard::ModifiersState;
+        assert_eq!(ctrl_wheel_line_multiplier(ModifiersState::empty(), 3.25), 1.0);
+        assert_eq!(ctrl_wheel_line_multiplier(ModifiersState::SUPER, 3.25), 1.0);
+        assert_eq!(ctrl_wheel_line_multiplier(ModifiersState::CONTROL, 3.25), 3.25);
+        assert_eq!(
+            ctrl_wheel_line_multiplier(ModifiersState::CONTROL | ModifiersState::SHIFT, 3.25),
+            3.25
+        );
+    }
+
+    #[test]
+    fn line_multiplier_is_applied_once_before_representative_routes() {
+        let (_, dy) = wheel_delta(MouseScrollDelta::LineDelta(0.0, -1.0), 10.0, 2.5);
+        assert_eq!(dy, 100.0);
+        let mut editor = crate::scroll::ScrollState::new(15.0);
+        editor.scroll_by(dy);
+        assert_eq!(editor.target, 100.0);
+        let mut nested = crate::scroll::ScrollState::new(15.0);
+        scroll_database_dialog_form(&mut nested, dy, 500.0, true);
+        assert_eq!(nested.target, 100.0);
     }
 
     #[test]

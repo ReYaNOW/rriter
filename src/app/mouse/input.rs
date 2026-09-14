@@ -89,6 +89,34 @@ fn autocomplete_item_index_at(
     (idx < total_items).then_some(idx)
 }
 
+fn git_logs_copy_owner_survives_left_press(target: Option<crate::ui_system::UiId>) -> bool {
+    matches!(
+        target,
+        Some(crate::ui_system::UiId::GitLogsBody | crate::ui_system::UiId::GitLogsScroll)
+    )
+}
+
+fn update_git_logs_copy_owner_on_left_press(
+    git: &mut crate::app::git_panel::GitPanelState,
+    target: Option<crate::ui_system::UiId>,
+) {
+    if !git_logs_copy_owner_survives_left_press(target) {
+        git.revoke_git_logs_copy_owner();
+    }
+}
+
+fn begin_git_logs_text_selection(
+    app: &mut App,
+    point: crate::app::git_panel::GitLogTextPoint,
+) -> bool {
+    app.focus_document_text_surface();
+    let selected = app.ide_panel.git.git_logs.set_selection(point, point);
+    if selected {
+        app.ide_panel.git.claim_git_logs_copy_owner();
+    }
+    selected
+}
+
 fn stop_scroll_anim(scroll: &mut crate::scroll::ScrollState) {
     if !scroll.is_dragging {
         scroll.stop_anim();
@@ -254,10 +282,7 @@ pub(super) fn apply_autocomplete_scroll_drag(
     target: f32,
     drag_offset: f32,
 ) {
-    scroll.jump_to(target);
-    scroll.drag_offset = drag_offset;
-    scroll.anim_speed = 15.0;
-    scroll.is_dragging = true;
+    let _ = crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
 }
 
 #[cfg(test)]
@@ -300,6 +325,12 @@ impl App {
             dialog.dragging_field = None;
             dialog.scroll.end_drag();
         }
+        if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
+            && let Some(state) = ddl.as_mut()
+        {
+            state.selecting = false;
+            state.popup.scroll.end_drag();
+        }
         self.ide_panel.database.table_modal_input_dragging = false;
 
         self.scroll_y.end_drag();
@@ -315,9 +346,11 @@ impl App {
         self.ide_panel.lsp_scroll_y.end_drag();
         self.ide_panel.api.mock_guide_scroll.end_drag();
         self.ide_panel.api.mock_server_log_scroll.end_drag();
+        self.ide_panel.api.mock_python_versions_scroll.end_drag();
         self.ide_panel.api.mock_python_install_log_scroll.end_drag();
         self.ide_panel.problems_scroll.end_drag();
         self.ide_panel.git.graph_scroll.end_drag();
+        self.ide_panel.git.logs_scroll.end_drag();
         for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {
             scroll.end_drag();
         }
@@ -369,6 +402,7 @@ impl App {
         self.tool_installer.end_log_scroll_drag();
         if let Some(renderer) = self.renderer.as_mut() {
             renderer.git_graph_tooltip_selecting = false;
+            renderer.git_logs_selecting = false;
         }
         crate::app::mouse::HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
@@ -436,7 +470,25 @@ impl App {
         if finished_read_scrollbar_drag {
             return;
         }
+        let finished_git_logs_pointer = left_released
+            && (self.ide_panel.git.logs_scroll.is_dragging
+                || self
+                    .renderer
+                    .as_ref()
+                    .is_some_and(|renderer| renderer.git_logs_selecting));
+        if finished_git_logs_pointer {
+            self.ide_panel.git.logs_scroll.end_drag();
+            if let Some(renderer) = self.renderer.as_mut() {
+                renderer.git_logs_selecting = false;
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
         if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+            let clicked_id = self.ui_registry.find_at(mx, my);
+            update_git_logs_copy_owner_on_left_press(&mut self.ide_panel.git, clicked_id);
             let preserve_main_vertical = preserve_main_vertical_scroll_for_click(self, mx, my);
             stop_click_scroll_anims(self, preserve_main_vertical);
             if self.ide_panel.database.dialog.is_some() {
@@ -448,9 +500,7 @@ impl App {
                     return;
                 }
             }
-            if self
-                .ui_registry
-                .find_at(mx, my)
+            if clicked_id
                 .and_then(crate::app::project_search_app::project_search_field_for_ui_id)
                 .is_none()
             {
@@ -516,19 +566,42 @@ impl App {
                     mx >= rect.0 && mx <= rect.0 + rect.2 && my >= rect.1 && my <= rect.1 + rect.3;
                 if state == ElementState::Pressed {
                     if inside {
+                        let clicked_id = self.ui_registry.find_at(mx, my);
+                        let scale = self
+                            .renderer
+                            .as_ref()
+                            .map_or(1.0, |renderer| renderer.scale_factor);
                         if let Ok(mut ddl) = self.ide_panel.database.ddl_hover.try_borrow_mut()
                             && let Some(ddl) = ddl.as_mut()
                         {
-                            let byte = crate::app::mouse::hover_popup_byte_at(
-                                self.renderer.as_mut().unwrap(),
-                                &ddl.popup,
-                                rect,
-                                mx,
-                                my,
-                            );
-                            ddl.selection_anchor = Some(byte);
-                            ddl.selection_cursor = Some(byte);
-                            ddl.selecting = true;
+                            if clicked_id == Some(crate::ui_system::UiId::DatabaseDdlScroll) {
+                                if let Some((drag_offset, target)) =
+                                    crate::app::mouse::hover_popup_scrollbar_drag_target(
+                                        rect,
+                                        ddl.max_scroll,
+                                        ddl.popup.scroll.current,
+                                        my,
+                                        scale,
+                                        None,
+                                    )
+                                {
+                                    crate::app::mouse::apply_scrollbar_drag_target(
+                                        &mut ddl.popup.scroll, target, drag_offset,
+                                    );
+                                    ddl.selecting = false;
+                                }
+                            } else {
+                                let byte = crate::app::mouse::hover_popup_byte_at(
+                                    self.renderer.as_mut().unwrap(),
+                                    &ddl.popup,
+                                    rect,
+                                    mx,
+                                    my,
+                                );
+                                ddl.selection_anchor = Some(byte);
+                                ddl.selection_cursor = Some(byte);
+                                ddl.selecting = true;
+                            }
                         }
                     } else {
                         *self.ide_panel.database.ddl_hover.borrow_mut() = None;
@@ -543,6 +616,7 @@ impl App {
                         && let Some(ddl) = ddl.as_mut()
                     {
                         ddl.selecting = false;
+                        ddl.popup.scroll.end_drag();
                     }
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
@@ -770,10 +844,11 @@ impl App {
                                     None,
                                 )
                             {
-                                popup.scroll.jump_to(target);
-                                popup.scroll.drag_offset = drag_offset;
-                                popup.scroll.anim_speed = 15.0;
-                                popup.scroll.is_dragging = true;
+                                let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                    &mut popup.scroll,
+                                    target,
+                                    drag_offset,
+                                );
                             }
                         }
                         self.window.as_ref().unwrap().request_redraw();
@@ -1023,28 +1098,25 @@ impl App {
                             20.0 * s,
                         )
                     {
+                        if my < layout.list_y || my > layout.list_y + layout.track_h {
+                            return;
+                        }
                         let max_scroll = (layout.total_h - layout.track_h).max(0.0);
-                        let drag_offset = if my >= thumb.start && my <= thumb.start + thumb.len {
-                            my - thumb.start
-                        } else if my >= layout.list_y && my <= layout.list_y + layout.track_h {
-                            let Some((offset, target)) = crate::scroll::scrollbar_drag_target(
-                                my,
-                                layout.list_y,
-                                layout.track_h,
-                                thumb,
-                                max_scroll,
-                                None,
-                            ) else {
-                                return;
-                            };
-                            self.ide_panel.problems_scroll.jump_to(target);
-                            offset
-                        } else {
+                        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+                            my,
+                            layout.list_y,
+                            layout.track_h,
+                            thumb,
+                            max_scroll,
+                            None,
+                        ) else {
                             return;
                         };
-                        self.ide_panel.problems_scroll.anim_speed = 15.0;
-                        self.ide_panel.problems_scroll.drag_offset = drag_offset;
-                        self.ide_panel.problems_scroll.is_dragging = true;
+                        let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                            &mut self.ide_panel.problems_scroll,
+                            target,
+                            drag_offset,
+                        );
                         self.window.as_ref().unwrap().request_redraw();
                         return;
                     }
@@ -1288,10 +1360,11 @@ impl App {
                                             None,
                                         )
                                     {
-                                        popup.scroll.jump_to(target);
-                                        popup.scroll.drag_offset = drag_offset;
-                                        popup.scroll.anim_speed = 15.0;
-                                        popup.scroll.is_dragging = true;
+                                        let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                            &mut popup.scroll,
+                                            target,
+                                            drag_offset,
+                                        );
                                     }
                                 }
                             }
@@ -1366,9 +1439,53 @@ impl App {
                                     None,
                                 )
                         {
-                            self.ide_panel.explorer_scroll.jump_to(target);
-                            self.ide_panel.explorer_scroll.drag_offset = drag_offset;
-                            self.ide_panel.explorer_scroll.is_dragging = true;
+                            let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                &mut self.ide_panel.explorer_scroll,
+                                target,
+                                drag_offset,
+                            );
+                        }
+                        self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::GitLogsScroll {
+                        if state == ElementState::Pressed
+                            && button == winit::event::MouseButton::Left
+                            && let Some(metrics) = self
+                                .renderer
+                                .as_ref()
+                                .and_then(|renderer| renderer.git_logs_layout_metrics())
+                        {
+                            let (_, track_y, _, track_h) = metrics.track_rect;
+                            let min_thumb_len = 10.0 * self.renderer.as_ref().unwrap().scale_factor;
+                            if crate::app::mouse::begin_scrollbar_drag(
+                                &mut self.ide_panel.git.logs_scroll,
+                                my,
+                                track_y,
+                                track_h,
+                                metrics.max_scroll,
+                                min_thumb_len,
+                            ) {
+                                self.ide_panel
+                                    .git
+                                    .refresh_git_logs_follow_tail(metrics.max_scroll);
+                            }
+                        }
+                        self.handle_ui_click(clicked_id);
+                    } else if clicked_id == crate::ui_system::UiId::GitLogsBody
+                        && button == winit::event::MouseButton::Left
+                    {
+                        if state == ElementState::Pressed {
+                            let point = {
+                                let logs = &self.ide_panel.git.git_logs;
+                                self.renderer
+                                    .as_mut()
+                                    .and_then(|renderer| renderer.git_logs_text_point_at(logs, mx, my))
+                            };
+                            if let Some(point) = point {
+                                let selected = begin_git_logs_text_selection(self, point);
+                                if let Some(renderer) = self.renderer.as_mut() {
+                                    renderer.git_logs_selecting = selected;
+                                }
+                            }
                         }
                         self.handle_ui_click(clicked_id);
                     } else if clicked_id == crate::ui_system::UiId::GitGraphScroll {
@@ -1414,11 +1531,11 @@ impl App {
                                     my, layout, None,
                                 )
                         {
-                            term.scroll_y.drag_offset = drag_offset;
-                            term.scroll_y.current = target;
-                            term.scroll_y.target = target;
-                            term.scroll_y.velocity = 0.0;
-                            term.scroll_y.is_dragging = true;
+                            let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                                &mut term.scroll_y,
+                                target,
+                                drag_offset,
+                            );
                         }
                         self.handle_ui_click(clicked_id);
                     } else {
@@ -1875,6 +1992,92 @@ impl App {
 mod tests {
     use super::*;
 
+    fn git_state_with_owned_selection() -> crate::app::git_panel::GitPanelState {
+        let mut git = crate::app::git_panel::GitPanelState::default();
+        git.toggle_logs_pane();
+        git.seed_git_log_for_test("selected");
+        let line = git.git_logs.display_line_at(0).unwrap();
+        assert!(git.git_logs.set_selection(
+            crate::app::git_panel::GitLogTextPoint {
+                line: line.id(),
+                byte: 0,
+            },
+            crate::app::git_panel::GitLogTextPoint {
+                line: line.id(),
+                byte: line.byte_len(),
+            },
+        ));
+        git.claim_git_logs_copy_owner();
+        git
+    }
+
+    #[test]
+    fn git_logs_text_selection_handoff_clears_prior_text_focus_and_claims_owner() {
+        let mut app = crate::app::app_behavior_tests::test_app().unwrap();
+        app.ide_panel.open(crate::app::PanelId::Git);
+        app.ide_panel.git.toggle_logs_pane();
+        app.ide_panel.git.seed_git_log_for_test("selected");
+        app.ide_panel.git.message_focused = true;
+        app.show_search = true;
+        app.search_focused = true;
+        let line = app.ide_panel.git.git_logs.display_line_at(0).unwrap();
+        let point = crate::app::git_panel::GitLogTextPoint {
+            line: line.id(),
+            byte: 0,
+        };
+
+        assert!(begin_git_logs_text_selection(&mut app, point));
+
+        assert!(!app.ide_panel.git.message_focused);
+        assert!(!app.search_focused);
+        assert!(app.ide_panel.git.owns_git_logs_copy());
+        assert!(app.ide_panel.git.git_logs.selection().is_some());
+    }
+
+    #[test]
+    fn git_logs_copy_owner_persists_without_new_left_press_and_inside_console() {
+        let mut git = git_state_with_owned_selection();
+        assert_eq!(
+            git.copy_owned_git_logs_selection().as_deref(),
+            Some("selected")
+        );
+
+        // Mouse release/move do not run the left-press ownership transition.
+        assert_eq!(
+            git.copy_owned_git_logs_selection().as_deref(),
+            Some("selected")
+        );
+
+        update_git_logs_copy_owner_on_left_press(
+            &mut git,
+            Some(crate::ui_system::UiId::GitLogsScroll),
+        );
+        assert!(git.owns_git_logs_copy());
+        update_git_logs_copy_owner_on_left_press(
+            &mut git,
+            Some(crate::ui_system::UiId::GitLogsBody),
+        );
+        assert!(git.owns_git_logs_copy());
+    }
+
+    #[test]
+    fn git_logs_copy_owner_is_revoked_by_other_copy_capable_focus_targets() {
+        for target in [
+            crate::ui_system::UiId::GitMessageInput,
+            crate::ui_system::UiId::EditorTextBody,
+            crate::ui_system::UiId::ApiBodyInput(0),
+            crate::ui_system::UiId::LspLogArea(0),
+        ] {
+            let mut git = git_state_with_owned_selection();
+            update_git_logs_copy_owner_on_left_press(&mut git, Some(target));
+            assert!(
+                !git.owns_git_logs_copy(),
+                "target {target:?} must revoke stale VCS copy ownership"
+            );
+            assert_eq!(git.copy_owned_git_logs_selection(), None);
+        }
+    }
+
     #[test]
     fn markdown_mode_toggle_target_preserves_only_main_vertical_click_stop() {
         let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
@@ -2068,17 +2271,49 @@ mod tests {
     }
 
     #[test]
-    fn autocomplete_scroll_drag_updates_rendered_position_immediately() {
+    fn autocomplete_scroll_drag_updates_target_without_teleporting_current() {
         let mut scroll = crate::scroll::ScrollState::new(7.0);
         scroll.current = 12.0;
         scroll.target = 20.0;
         scroll.velocity = 9.0;
         apply_autocomplete_scroll_drag(&mut scroll, 144.0, 8.0);
-        assert_eq!(scroll.current, 144.0);
+        assert_eq!(scroll.current, 12.0);
         assert_eq!(scroll.target, 144.0);
-        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.velocity, 9.0);
         assert_eq!(scroll.drag_offset, 8.0);
         assert!(scroll.is_dragging);
+        assert_eq!(scroll.anim_speed, 15.0);
+    }
+
+    #[test]
+    fn click_stop_then_drag_cleanup_clears_old_motion_without_snapping_destination() {
+        let Some(mut app) = crate::app::app_behavior_tests::test_app() else {
+            return;
+        };
+        app.scroll_x.current = 12.0;
+        app.scroll_x.target = 72.0;
+        app.scroll_x.velocity = 14.0;
+        app.scroll_x.anim_speed = 7.0;
+
+        stop_click_scroll_anims(&mut app, false);
+        assert_eq!(app.scroll_x.current, 12.0);
+        assert_eq!(app.scroll_x.target, 12.0);
+        assert_eq!(app.scroll_x.velocity, 0.0);
+
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut app.scroll_x,
+            144.0,
+            9.0,
+        ));
+        assert_eq!(app.scroll_x.current, 12.0);
+        assert_eq!(app.scroll_x.target, 144.0);
+        assert_eq!(app.scroll_x.velocity, 0.0);
+
+        app.cancel_pointer_interactions();
+        assert!(!app.scroll_x.is_dragging);
+        assert_eq!(app.scroll_x.drag_offset, 0.0);
+        assert_eq!(app.scroll_x.current, 12.0);
+        assert_eq!(app.scroll_x.target, 144.0);
     }
 
     #[test]

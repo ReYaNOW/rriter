@@ -148,11 +148,11 @@ fn ui_handlers_state_only_branches_work_without_window() {
 
     app.handle_ui_click(crate::ui_system::UiId::LspScrollY);
     app.handle_ui_click(crate::ui_system::UiId::LspScrollX);
-    assert!(app.ide_panel.lsp_scroll_y.is_dragging);
+    assert!(!app.ide_panel.lsp_scroll_y.is_dragging);
     assert!(app.ide_panel.lsp_scroll_x.is_dragging);
 
     app.handle_ui_click(crate::ui_system::UiId::EditorScrollbarX);
-    assert!(app.scroll_x.is_dragging);
+    assert!(!app.scroll_x.is_dragging);
 
     app.ide_panel.lsp_servers = vec![crate::lsp::LspServerInfo {
         name: "ruff",
@@ -165,13 +165,13 @@ fn ui_handlers_state_only_branches_work_without_window() {
         app.ide_panel
             .lsp_logs_scroll_y
             .get("ruff")
-            .is_some_and(|scroll| scroll.is_dragging)
+            .is_some_and(|scroll| !scroll.is_dragging)
     );
     assert!(
         app.ide_panel
             .lsp_logs_scroll_x
             .get("ruff")
-            .is_some_and(|scroll| scroll.is_dragging)
+            .is_some_and(|scroll| !scroll.is_dragging)
     );
 
     app.ide_panel

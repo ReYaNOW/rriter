@@ -109,8 +109,16 @@ pub(crate) fn one_line_input_max_scroll_x(
     text_scale: f32,
     trailing_pad: f32,
 ) -> f32 {
-    let text_w = renderer.measure_ui_width(text, text_scale);
-    (text_w - visible_w + trailing_pad).max(0.0)
+    crate::app::single_line_input::single_line_cursor_geometry(
+        text,
+        text.len(),
+        visible_w,
+        0.0,
+        0.0,
+        trailing_pad,
+        |ch| renderer.one_line_ui_advance(ch, text_scale),
+    )
+    .max_scroll
 }
 
 pub(crate) fn sync_one_line_input_scroll_target(
@@ -123,17 +131,16 @@ pub(crate) fn sync_one_line_input_scroll_target(
     immediate: bool,
 ) {
     let text = editor.get_full_text();
-    let cursor = editor.cursor.min(text.len());
-    let cursor_x = renderer.measure_ui_width(&text[..cursor], text_scale);
-    let max_scroll =
-        one_line_input_max_scroll_x(renderer, &text, visible_w, text_scale, edge_pad * 2.0);
-    let mut target = scroll.target;
-    if cursor_x - target > visible_w {
-        target = cursor_x - visible_w + edge_pad;
-    } else if cursor_x < target {
-        target = cursor_x;
-    }
-    scroll.target = target.clamp(0.0, max_scroll);
+    let geometry = crate::app::single_line_input::single_line_cursor_geometry(
+        &text,
+        editor.cursor,
+        visible_w,
+        scroll.target,
+        edge_pad,
+        edge_pad * 2.0,
+        |ch| renderer.one_line_ui_advance(ch, text_scale),
+    );
+    scroll.target = geometry.scroll_x;
     if immediate {
         scroll.current = scroll.target;
         scroll.velocity = 0.0;

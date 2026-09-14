@@ -747,6 +747,7 @@ impl IdePanelState {
         }
         if !self.is_open(PanelId::Git) {
             self.git.message_focused = false;
+            self.git.revoke_git_logs_copy_owner();
         }
         if !self.is_open(PanelId::Terminal) {
             self.terminal_focused = false;
@@ -1050,11 +1051,11 @@ pub struct App {
 
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
-
     pub last_frame: Instant,
     pub last_action: Instant,
     pub last_blink_state: bool,
     pub modifiers: ModifiersState,
+    pub ctrl_wheel_multiplier: f32,
     pub is_dragging: bool,
     pub is_editor_drag_pending: bool,
     pub is_focused: bool,
@@ -1320,6 +1321,23 @@ mod tests {
         panels.file_tree_focused = true;
         panels.open(PanelId::Git);
         assert!(!panels.file_tree_focused);
+    }
+
+    #[test]
+    fn closing_git_panel_revokes_vcs_copy_owner_before_reopen() {
+        let mut panels = IdePanelState::default();
+        panels.open(PanelId::Git);
+        panels.git.toggle_logs_pane();
+        panels.git.claim_git_logs_copy_owner();
+        assert!(panels.git.owns_git_logs_copy());
+
+        panels.toggle(PanelId::Git);
+        assert!(!panels.is_open(PanelId::Git));
+        assert!(!panels.git.owns_git_logs_copy());
+
+        panels.open(PanelId::Git);
+        assert!(panels.is_open(PanelId::Git));
+        assert!(!panels.git.owns_git_logs_copy());
     }
 
     #[test]

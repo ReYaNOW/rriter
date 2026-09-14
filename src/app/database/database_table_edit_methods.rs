@@ -71,39 +71,25 @@ impl App {
             .ui_registry
             .rect_for(crate::ui_system::UiId::DatabaseTableUnavailableText)?;
         let renderer = self.renderer.as_mut()?;
-        let text_scale = 0.76;
-        let visible_width = rect.2.max(1.0);
-        let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+        let text_scale = 0.84;
+        let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+            rect.0, rect.2, 0.0, 0.0,
+        );
+        let cursor_geometry = crate::app::single_line_input::single_line_cursor_geometry(
             &text,
             cursor,
-            visible_width,
-            |ch| {
-                renderer
-                    .get_ui_glyph(ch)
-                    .map(|glyph| {
-                        crate::renderer::Renderer::snapped_text_advance(
-                            glyph.advance,
-                            text_scale,
-                        )
-                    })
-                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-            },
+            text_geometry.content_w,
+            0.0,
+            0.0,
+            0.0,
+            |ch| renderer.one_line_ui_advance(ch, text_scale),
         );
-        let x_offset = (mouse_x - rect.0 + scroll_x).max(0.0);
-        Some(crate::app::file_tree::file_tree_name_input_hit_index(
+        let x_offset =
+            (mouse_x - text_geometry.text_start_x + cursor_geometry.scroll_x).max(0.0);
+        Some(crate::app::single_line_input::single_line_hit_index(
             &text,
             x_offset,
-            |ch| {
-                renderer
-                    .get_ui_glyph(ch)
-                    .map(|glyph| {
-                        crate::renderer::Renderer::snapped_text_advance(
-                            glyph.advance,
-                            text_scale,
-                        )
-                    })
-                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-            },
+            |ch| renderer.one_line_ui_advance(ch, text_scale),
         ))
     }
 
@@ -151,33 +137,31 @@ impl App {
         let renderer = self.renderer.as_mut()?;
         let scale = renderer.scale_factor;
         let text_scale = crate::app::database::DATABASE_TABLE_INPUT_TEXT_SCALE;
-        let padding = if target == DatabaseTableInputTarget::Cell {
-            (8.0 * scale).round()
-        } else {
-            (10.0 * scale).round()
-        };
-        let visible_width = (rect.2 - padding * 2.0).max(1.0);
-        let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+        let text_geometry = crate::app::database_table_input_text_geometry(
+            rect.0,
+            rect.2,
+            scale,
+            target == DatabaseTableInputTarget::Cell,
+        );
+        let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(scale);
+        let cursor_geometry = crate::app::single_line_input::single_line_cursor_geometry(
             &text,
             cursor,
-            visible_width,
-            |ch| {
-                renderer
-                    .get_ui_glyph(ch)
-                    .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, text_scale))
-                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-            },
+            text_geometry.content_w,
+            0.0,
+            edge_pad,
+            edge_pad,
+            |ch| renderer.one_line_ui_advance(ch, text_scale),
         );
-        let x_offset = (mouse_x - rect.0 - padding + scroll_x).max(0.0);
-        Some(crate::app::file_tree::file_tree_name_input_hit_index(
+        let x_offset = crate::app::single_line_input::single_line_hit_offset(
+            text_geometry,
+            mouse_x,
+            cursor_geometry.scroll_x,
+        );
+        Some(crate::app::single_line_input::single_line_hit_index(
             &text,
             x_offset,
-            |ch| {
-                renderer
-                    .get_ui_glyph(ch)
-                    .map(|glyph| crate::renderer::Renderer::snapped_text_advance(glyph.advance, text_scale))
-                    .unwrap_or_else(|| (8.0 * text_scale).round().max(1.0))
-            },
+            |ch| renderer.one_line_ui_advance(ch, text_scale),
         ))
     }
 
@@ -229,38 +213,26 @@ impl App {
         match snapshot {
             ModalInputSnapshot::SingleLine { text, cursor } => {
                 let text_scale = 0.82;
-                let visible_width = (rect.2 - 16.0 * scale).max(1.0);
-                let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+                let padding = (8.0 * scale).round();
+                let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+                    rect.0, rect.2, padding, 0.0,
+                );
+                let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(scale);
+                let cursor_geometry = crate::app::single_line_input::single_line_cursor_geometry(
                     &text,
                     cursor,
-                    visible_width,
-                    |ch| {
-                        renderer
-                            .get_ui_glyph(ch)
-                            .map(|glyph| {
-                                crate::renderer::Renderer::snapped_text_advance(
-                                    glyph.advance,
-                                    text_scale,
-                                )
-                            })
-                            .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0))
-                    },
+                    text_geometry.content_w,
+                    0.0,
+                    edge_pad,
+                    edge_pad,
+                    |ch| renderer.one_line_ui_advance(ch, text_scale),
                 );
-                let x_offset = (mouse_x - rect.0 - 8.0 * scale + scroll_x).max(0.0);
-                Some(crate::app::file_tree::file_tree_name_input_hit_index(
+                let x_offset =
+                    (mouse_x - text_geometry.text_start_x + cursor_geometry.scroll_x).max(0.0);
+                Some(crate::app::single_line_input::single_line_hit_index(
                     &text,
                     x_offset,
-                    |ch| {
-                        renderer
-                            .get_ui_glyph(ch)
-                            .map(|glyph| {
-                                crate::renderer::Renderer::snapped_text_advance(
-                                    glyph.advance,
-                                    text_scale,
-                                )
-                            })
-                            .unwrap_or_else(|| (10.0 * text_scale).round().max(1.0))
-                    },
+                    |ch| renderer.one_line_ui_advance(ch, text_scale),
                 ))
             }
             ModalInputSnapshot::CodeText {
@@ -474,6 +446,7 @@ impl App {
             _ => DatabaseCellEditorKind::Inline,
         };
         if kind == DatabaseCellEditorKind::Multiline {
+            self.ide_panel.database.table_modal_layout_cache.get_mut().invalidate();
             self.ide_panel.database.table_modal = Some(DatabaseTableModal::MultilineEditor {
                 tab_id,
                 position,
@@ -648,6 +621,11 @@ impl App {
             Ok(plan) => {
                 let text = crate::app::database::format_database_sql(&plan.preview)
                     .unwrap_or(plan.preview);
+                self.ide_panel
+                    .database
+                    .table_modal_layout_cache
+                    .get_mut()
+                    .invalidate();
                 self.ide_panel.database.table_modal = Some(DatabaseTableModal::SqlPreview {
                     tab_id,
                     spans: crate::highlighter::highlight_sql_text(&text),
@@ -1017,7 +995,7 @@ impl App {
             };
             let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
             let content_h = state.grid.logical_row_count() as f32 * row_h;
-            let Some((_, target)) = database_table_scroll_drag_target(
+            let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse_y,
                 rect_y,
                 rect_h,
@@ -1030,9 +1008,9 @@ impl App {
             ) else {
                 return DatabaseDragUpdate::None;
             };
-            state.grid.scroll_y.target = target;
-            state.grid.scroll_y.current = target;
-            state.grid.scroll_y.velocity = 0.0;
+            crate::app::mouse::apply_scrollbar_drag_target(
+                &mut state.grid.scroll_y, target, drag_offset,
+            );
             return DatabaseDragUpdate::Table(tab_id);
         }
         if state.grid.scroll_x.is_dragging {
@@ -1043,7 +1021,7 @@ impl App {
                 .metadata
                 .as_ref()
                 .map_or(0.0, |metadata| state.grid.content_width(metadata) * scale);
-            let Some((_, target)) = database_table_scroll_drag_target(
+            let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse_x,
                 rect_x,
                 rect_w,
@@ -1056,9 +1034,9 @@ impl App {
             ) else {
                 return DatabaseDragUpdate::None;
             };
-            state.grid.scroll_x.target = target;
-            state.grid.scroll_x.current = target;
-            state.grid.scroll_x.velocity = 0.0;
+            crate::app::mouse::apply_scrollbar_drag_target(
+                &mut state.grid.scroll_x, target, drag_offset,
+            );
             return DatabaseDragUpdate::Table(tab_id);
         }
         DatabaseDragUpdate::None
@@ -1167,6 +1145,11 @@ impl App {
                             input.insert("\n", crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
                             *error = None;
                         }
+                        self.ide_panel
+                            .database
+                            .table_modal_layout_cache
+                            .get_mut()
+                            .invalidate();
                     } else {
                         self.activate_database_table_modal_action(0);
                     }
@@ -1176,6 +1159,13 @@ impl App {
                         self.ide_panel.database.table_modal,
                         Some(DatabaseTableModal::MultilineEditor { .. })
                     );
+                    let invalidate_multiline_layout = multiline
+                        && database_multiline_edit_may_change_text(
+                            physical_key,
+                            key_event.logical_key.to_text(),
+                            primary,
+                            text_input_allowed,
+                        );
                     if let Some(input) = database_table_modal_input_mut(
                         &mut self.ide_panel.database.table_modal,
                     ) {
@@ -1195,6 +1185,13 @@ impl App {
                             },
                             multiline,
                         );
+                    }
+                    if invalidate_multiline_layout {
+                        self.ide_panel
+                            .database
+                            .table_modal_layout_cache
+                            .get_mut()
+                            .invalidate();
                     }
                 }
             }
@@ -1532,23 +1529,24 @@ impl App {
         let horizontal_rect = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
-        let Some((text, current_x, current_y, _, _, _, _)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_ref()
-            .and_then(database_text_modal_scroll_snapshot)
-        else {
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
+            database_text_modal_scroll_snapshot(
+                modal,
+                &self.ide_panel.database.table_modal_layout_cache,
+                scale,
+                self.renderer.as_mut(),
+            )
+        }) else {
             return;
         };
-        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
-            &text,
+            snapshot.line_count,
+            snapshot.max_line_width,
             input_rect,
             horizontal_rect,
             vertical_rect,
             scale,
-            self.renderer.as_mut(),
         );
         let (rect, pointer, viewport, max_scroll, current, min_thumb) = if horizontal {
             (
@@ -1556,7 +1554,7 @@ impl App {
                 mouse.0,
                 viewport_w,
                 max_x,
-                current_x,
+                snapshot.current_x,
                 (36.0 * scale).round(),
             )
         } else {
@@ -1565,7 +1563,7 @@ impl App {
                 mouse.1,
                 viewport_h,
                 max_y,
-                current_y,
+                snapshot.current_y,
                 (28.0 * scale).round(),
             )
         };
@@ -1602,11 +1600,7 @@ impl App {
             return;
         };
         let scroll = if horizontal { scroll_x } else { scroll_y };
-        scroll.current = target;
-        scroll.target = target;
-        scroll.velocity = 0.0;
-        scroll.drag_offset = drag_offset;
-        scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
     }
 
     fn update_database_sql_preview_scroll_drag(
@@ -1623,25 +1617,26 @@ impl App {
         let horizontal_rect = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
-        let Some((text, current_x, current_y, dragging_x, dragging_y, offset_x, offset_y)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_ref()
-            .and_then(database_text_modal_scroll_snapshot)
-        else {
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
+            database_text_modal_scroll_snapshot(
+                modal,
+                &self.ide_panel.database.table_modal_layout_cache,
+                scale,
+                self.renderer.as_mut(),
+            )
+        }) else {
             return false;
         };
-        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
-            &text,
+            snapshot.line_count,
+            snapshot.max_line_width,
             input_rect,
             horizontal_rect,
             vertical_rect,
             scale,
-            self.renderer.as_mut(),
         );
-        let target = if dragging_y {
+        let target = if snapshot.dragging_y {
             let Some((_, track_y, _, track_h)) = vertical_rect else {
                 return false;
             };
@@ -1650,7 +1645,7 @@ impl App {
                 track_h,
                 viewport_h,
                 viewport_h + max_y,
-                current_y,
+                snapshot.current_y,
                 (28.0 * scale).round(),
             ) else {
                 return false;
@@ -1661,10 +1656,10 @@ impl App {
                 track_h,
                 thumb,
                 max_y,
-                Some(offset_y),
+                Some(snapshot.offset_y),
             )
             .map(|(_, target)| (false, target))
-        } else if dragging_x {
+        } else if snapshot.dragging_x {
             let Some((track_x, _, track_w, _)) = horizontal_rect else {
                 return false;
             };
@@ -1673,7 +1668,7 @@ impl App {
                 track_w,
                 viewport_w,
                 viewport_w + max_x,
-                current_x,
+                snapshot.current_x,
                 (36.0 * scale).round(),
             ) else {
                 return false;
@@ -1684,7 +1679,7 @@ impl App {
                 track_w,
                 thumb,
                 max_x,
-                Some(offset_x),
+                Some(snapshot.offset_x),
             )
             .map(|(_, target)| (true, target))
         } else {
@@ -1703,9 +1698,8 @@ impl App {
             return false;
         };
         let scroll = if horizontal { scroll_x } else { scroll_y };
-        scroll.current = target;
-        scroll.target = target;
-        scroll.velocity = 0.0;
+        let drag_offset = scroll.drag_offset;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         true
     }
 
@@ -1727,23 +1721,24 @@ impl App {
         let horizontal_rect = self
             .ui_registry
             .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
-        let Some((text, _, _, _, _, _, _)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_ref()
-            .and_then(database_text_modal_scroll_snapshot)
-        else {
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
+            database_text_modal_scroll_snapshot(
+                modal,
+                &self.ide_panel.database.table_modal_layout_cache,
+                scale,
+                self.renderer.as_mut(),
+            )
+        }) else {
             return false;
         };
-        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let (_, _, max_x, max_y) = database_sql_preview_scroll_metrics(
-            &text,
+            snapshot.line_count,
+            snapshot.max_line_width,
             Some(input_rect),
             horizontal_rect,
             vertical_rect,
             scale,
-            self.renderer.as_mut(),
         );
         let Some((scroll_x, scroll_y)) = self
             .ide_panel
@@ -1786,7 +1781,7 @@ impl App {
                 .metadata
                 .as_ref()
                 .map_or(0.0, |metadata| state.grid.content_width(metadata) * scale);
-            let Some((offset, _)) = database_table_scroll_drag_target(
+            let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse.0,
                 track_x,
                 track_w,
@@ -1797,13 +1792,14 @@ impl App {
                 None,
                 scale,
             ) else { return; };
-            state.grid.scroll_x.is_dragging = true;
-            state.grid.scroll_x.drag_offset = offset;
+            crate::app::mouse::apply_scrollbar_drag_target(
+                &mut state.grid.scroll_x, target, drag_offset,
+            );
         } else {
             let Some((_, track_y, _, track_h)) = vertical_rect else { return; };
             let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
             let content_h = state.grid.logical_row_count() as f32 * row_h;
-            let Some((offset, _)) = database_table_scroll_drag_target(
+            let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse.1,
                 track_y,
                 track_h,
@@ -1814,8 +1810,9 @@ impl App {
                 None,
                 scale,
             ) else { return; };
-            state.grid.scroll_y.is_dragging = true;
-            state.grid.scroll_y.drag_offset = offset;
+            crate::app::mouse::apply_scrollbar_drag_target(
+                &mut state.grid.scroll_y, target, drag_offset,
+            );
         }
     }
 
@@ -1897,40 +1894,62 @@ impl App {
 }
 
 
+#[derive(Clone, Copy, Debug)]
+struct DatabaseTextModalScrollSnapshot {
+    current_x: f32,
+    current_y: f32,
+    dragging_x: bool,
+    dragging_y: bool,
+    offset_x: f32,
+    offset_y: f32,
+    line_count: usize,
+    max_line_width: f32,
+}
+
 fn database_text_modal_scroll_snapshot(
     modal: &DatabaseTableModal,
-) -> Option<(String, f32, f32, bool, bool, f32, f32)> {
-    match modal {
+    layout_cache: &std::cell::RefCell<crate::app::database::DatabaseMultilineLayoutCache>,
+    scale: f32,
+    renderer: Option<&mut crate::renderer::Renderer>,
+) -> Option<DatabaseTextModalScrollSnapshot> {
+    let (text, scroll_x, scroll_y) = match modal {
         DatabaseTableModal::SqlPreview {
             text,
             scroll_x,
             scroll_y,
             ..
-        } => Some((
-            text.clone(),
-            scroll_x.current,
-            scroll_y.current,
-            scroll_x.is_dragging,
-            scroll_y.is_dragging,
-            scroll_x.drag_offset,
-            scroll_y.drag_offset,
-        )),
+        } => (text.as_str(), scroll_x, scroll_y),
         DatabaseTableModal::MultilineEditor {
             input,
             scroll_x,
             scroll_y,
             ..
-        } => Some((
-            input.text().to_string(),
-            scroll_x.current,
-            scroll_y.current,
-            scroll_x.is_dragging,
-            scroll_y.is_dragging,
-            scroll_x.drag_offset,
-            scroll_y.drag_offset,
-        )),
-        _ => None,
+        } => (input.text(), scroll_x, scroll_y),
+        _ => return None,
+    };
+
+    let mut layout_cache = layout_cache.borrow_mut();
+    if let Some(renderer) = renderer {
+        layout_cache.ensure(text, scale, true, |line| {
+            line.chars().map(|ch| renderer.char_advance(ch)).sum()
+        });
+    } else {
+        let fallback_advance = (9.0 * scale).round().max(1.0);
+        layout_cache.ensure(text, scale, false, |line| {
+            line.chars().count() as f32 * fallback_advance
+        });
     }
+
+    Some(DatabaseTextModalScrollSnapshot {
+        current_x: scroll_x.current,
+        current_y: scroll_y.current,
+        dragging_x: scroll_x.is_dragging,
+        dragging_y: scroll_y.is_dragging,
+        offset_x: scroll_x.drag_offset,
+        offset_y: scroll_y.drag_offset,
+        line_count: layout_cache.line_count(),
+        max_line_width: layout_cache.max_line_width(),
+    })
 }
 
 fn database_text_modal_scrolls_mut(
@@ -1949,12 +1968,12 @@ fn database_text_modal_scrolls_mut(
 
 
 fn database_sql_preview_scroll_metrics(
-    text: &str,
+    line_count: usize,
+    max_line_width: f32,
     input_rect: Option<(f32, f32, f32, f32)>,
     horizontal_rect: Option<(f32, f32, f32, f32)>,
     vertical_rect: Option<(f32, f32, f32, f32)>,
     scale: f32,
-    renderer: Option<&mut crate::renderer::Renderer>,
 ) -> (f32, f32, f32, f32) {
     let viewport_w = horizontal_rect
         .map(|rect| rect.2)
@@ -1969,19 +1988,8 @@ fn database_sql_preview_scroll_metrics(
     let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * scale)
         .round()
         .max(1.0);
-    let content_h = crate::app::database::database_multiline_line_count(text) as f32 * line_h;
-    let content_w = renderer.map_or_else(
-        || {
-            crate::app::database::database_multiline_lines(text)
-                .map(|(_, line)| line.chars().count() as f32 * (9.0 * scale).round())
-                .fold(0.0_f32, f32::max)
-        },
-        |renderer| {
-            crate::app::database::database_multiline_lines(text)
-                .map(|(_, line)| line.chars().map(|ch| renderer.char_advance(ch)).sum())
-                .fold(0.0_f32, f32::max)
-        },
-    ) + (18.0 * scale).round();
+    let content_h = line_count as f32 * line_h;
+    let content_w = max_line_width + (18.0 * scale).round();
     (
         viewport_w,
         viewport_h,
@@ -2109,6 +2117,24 @@ fn database_table_modal_input_mut(
         DatabaseTableModal::CustomLimit { input, .. }
         | DatabaseTableModal::MultilineEditor { input, .. } => Some(input),
         _ => None,
+    }
+}
+
+fn database_multiline_edit_may_change_text(
+    physical_key: winit::keyboard::PhysicalKey,
+    logical_text: Option<&str>,
+    primary: bool,
+    text_input_allowed: bool,
+) -> bool {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    match physical_key {
+        PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)
+            if primary =>
+        {
+            true
+        }
+        PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete) => true,
+        _ => text_input_allowed && logical_text.is_some_and(|text| !text.is_empty()),
     }
 }
 
@@ -2307,14 +2333,66 @@ mod database_table_edit_method_tests {
     #[test]
     fn multiline_scroll_metrics_count_the_trailing_empty_line() {
         let (_, _, _, max_y) = database_sql_preview_scroll_metrics(
-            "a\n",
+            2,
+            9.0,
             Some((0.0, 0.0, 100.0, 26.0)),
             None,
             None,
             1.0,
-            None,
         );
         assert_eq!(max_y, 26.0);
+    }
+
+    #[test]
+    fn multiline_layout_invalidation_only_tracks_edit_capable_keys() {
+        use winit::keyboard::{KeyCode, PhysicalKey};
+
+        for key in [
+            KeyCode::ArrowLeft,
+            KeyCode::ArrowRight,
+            KeyCode::ArrowUp,
+            KeyCode::ArrowDown,
+            KeyCode::Home,
+            KeyCode::End,
+        ] {
+            assert!(!database_multiline_edit_may_change_text(
+                PhysicalKey::Code(key),
+                None,
+                false,
+                false,
+            ));
+        }
+        assert!(!database_multiline_edit_may_change_text(
+            PhysicalKey::Code(KeyCode::KeyC),
+            None,
+            true,
+            false,
+        ));
+        for key in [
+            KeyCode::Backspace,
+            KeyCode::Delete,
+        ] {
+            assert!(database_multiline_edit_may_change_text(
+                PhysicalKey::Code(key),
+                None,
+                false,
+                false,
+            ));
+        }
+        for key in [KeyCode::KeyX, KeyCode::KeyV, KeyCode::KeyZ, KeyCode::KeyY] {
+            assert!(database_multiline_edit_may_change_text(
+                PhysicalKey::Code(key),
+                None,
+                true,
+                false,
+            ));
+        }
+        assert!(database_multiline_edit_may_change_text(
+            PhysicalKey::Code(KeyCode::KeyA),
+            Some("Ж"),
+            false,
+            true,
+        ));
     }
 
     #[test]
@@ -2354,6 +2432,67 @@ mod database_table_edit_method_tests {
         .expect("scrollbar drag continues");
         assert!(target > current);
         assert_eq!(target, 200.0);
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.jump_to(current);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            target,
+            offset
+        ));
+        assert_eq!(scroll.current, current);
+        assert_eq!(scroll.target, target);
+        assert_eq!(scroll.drag_offset, offset);
+        scroll.update(1.0 / 60.0);
+        assert!(scroll.current > current);
+        assert!(scroll.current < target);
+    }
+
+    #[test]
+    fn database_modal_scrollbar_drag_is_target_only_for_both_axes() {
+        for (track_start, track_len, viewport, max_scroll, pointer_delta) in [
+            (20.0, 240.0, 180.0, 420.0, 28.0),
+            (40.0, 360.0, 280.0, 760.0, 44.0),
+        ] {
+            let current = max_scroll * 0.35;
+            let thumb = crate::scroll::scrollbar_thumb(
+                track_start,
+                track_len,
+                viewport,
+                viewport + max_scroll,
+                current,
+                28.0,
+            )
+            .expect("modal thumb");
+            let pointer = thumb.start + 6.0;
+            let (offset, _) = crate::scroll::scrollbar_drag_target(
+                pointer,
+                track_start,
+                track_len,
+                thumb,
+                max_scroll,
+                None,
+            )
+            .expect("modal drag starts");
+            let (_, target) = crate::scroll::scrollbar_drag_target(
+                pointer + pointer_delta,
+                track_start,
+                track_len,
+                thumb,
+                max_scroll,
+                Some(offset),
+            )
+            .expect("modal drag moves");
+            let mut scroll = crate::scroll::ScrollState::new(7.0);
+            scroll.jump_to(current);
+            assert!(crate::app::mouse::apply_scrollbar_drag_target(
+                &mut scroll,
+                target,
+                offset
+            ));
+            assert_eq!(scroll.current, current);
+            assert!(scroll.target > current);
+        }
     }
     #[test]
     fn multiline_modal_reuses_shared_undo_and_redo_shortcuts() {

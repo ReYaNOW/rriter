@@ -230,7 +230,7 @@ impl Renderer {
             );
         }
 
-        let row_h = crate::render_view::tree_ui::TREE_ROW_H * s;
+        let row_h = crate::app::database::database_tree_row_height(s);
         let scroll = database.scroll.current.round();
         let hover_settled = database.scroll.is_settled();
         let content_clip = crate::ui_system::UiClipRect::new(
@@ -242,7 +242,7 @@ impl Renderer {
         let mut logical_row = 0usize;
         let mut label_scratch = String::new();
         for (connection_idx, connection) in database.connections.iter().enumerate() {
-            let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
+            let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
             if row_y + row_h >= content_y && row_y <= content_y + content_h {
                 let selected = database.selected_connection == Some(connection.config.id);
                 let hovered = hover_settled
@@ -356,13 +356,13 @@ impl Renderer {
                         self,
                         hint,
                         panel_x + 34.0 * s,
-                        content_y + logical_row as f32 * row_h - scroll,
+                        database_tree_row_y(content_y, logical_row, row_h, scroll),
                         s,
                     );
                     logical_row += 1;
                 }
                 for (database_idx, database_node) in connection.databases.iter().enumerate() {
-                    let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
+                    let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
                     if row_y + row_h >= content_y && row_y <= content_y + content_h {
                         let selected = database
                             .selected_database
@@ -428,13 +428,13 @@ impl Renderer {
                                 self,
                                 "Загрузка таблиц…",
                                 panel_x + 58.0 * s,
-                                content_y + logical_row as f32 * row_h - scroll,
+                                database_tree_row_y(content_y, logical_row, row_h, scroll),
                                 s,
                             );
                             logical_row += 1;
                         }
                         for (table_idx, table) in database_node.tables.iter().enumerate() {
-                            let row_y = (content_y + logical_row as f32 * row_h - scroll).round();
+                            let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
                             if row_y + row_h >= content_y && row_y <= content_y + content_h {
                                 let hovered = hover_settled
                                     && ui_registry.register_rect_clipped(
@@ -543,7 +543,15 @@ impl Renderer {
             drew = true;
         }
         if let Some(modal) = database.table_modal.as_ref() {
-            self.draw_database_table_modal(s, modal, ui_registry, mx, my, blink_alpha);
+            self.draw_database_table_modal(
+                s,
+                modal,
+                &database.table_modal_layout_cache,
+                ui_registry,
+                mx,
+                my,
+                blink_alpha,
+            );
             drew = true;
         } else if let Some(dialog) = database.dialog.as_ref() {
             self.draw_database_connection_dialog(s, dialog, ui_registry, mx, my, blink_alpha);
@@ -609,6 +617,14 @@ impl Renderer {
             );
             state.rect = Some((x, y, w, h));
             state.max_scroll = max_scroll;
+            if max_scroll > 0.0
+                && let Some((sx, sy, sw, sh)) =
+                    ui_registry.rect_for(crate::ui_system::UiId::HoverPopupScroll)
+            {
+                ui_registry.register_rect(
+                    crate::ui_system::UiId::DatabaseDdlScroll, sx, sy, sw, sh, mx, my,
+                );
+            }
             drew = true;
         }
         drew
@@ -676,14 +692,12 @@ impl Renderer {
         let scroll_y = dialog.scroll.current.clamp(0.0, layout.max_scroll);
         let mut hovered_tooltip = None;
         self.flush();
+        let (scissor_x, scissor_y, scissor_w, scissor_h) =
+            database_dialog_form_scissor(self.height, form_clip);
         unsafe {
             self.gl.enable(glow::SCISSOR_TEST);
-            self.gl.scissor(
-                form_clip.x.max(0.0) as i32,
-                (self.height - form_clip.y - form_clip.h).max(0.0) as i32,
-                form_clip.w.max(0.0) as i32,
-                form_clip.h.max(0.0) as i32,
-            );
+            self.gl
+                .scissor(scissor_x, scissor_y, scissor_w, scissor_h);
         }
         for (row, field) in dialog.visible_fields().enumerate() {
             let remember = database_remember_control(field, dialog);
@@ -767,23 +781,27 @@ impl Renderer {
             let input = dialog.input(field);
             let secret_masked = field.is_secret() && !dialog.secret_is_revealed(field);
             let eye_slot_w = field_layout.eye_hit.map_or(0.0, |rect| rect.w);
-            let visible_width = (field_layout.input.w - 16.0 * s - eye_slot_w).max(1.0);
-            let scroll_x = crate::app::file_tree::file_tree_name_input_scroll_x(
+            let padding = (8.0 * s).round();
+            let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+                field_layout.input.x,
+                field_layout.input.w,
+                padding,
+                eye_slot_w,
+            );
+            let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(s);
+            let scroll_x = crate::app::single_line_input::single_line_cursor_geometry(
                 input.text(),
                 input.cursor,
-                visible_width,
+                text_geometry.content_w,
+                0.0,
+                edge_pad,
+                edge_pad,
                 |ch| {
                     let rendered = if secret_masked { '•' } else { ch };
-                    self.get_ui_glyph(rendered)
-                        .map(|glyph| {
-                            Self::snapped_text_advance(
-                                glyph.advance,
-                                DATABASE_DIALOG_FIELD_TEXT_SCALE,
-                            )
-                        })
-                        .unwrap_or(8.0)
+                    self.one_line_ui_advance(rendered, DATABASE_DIALOG_FIELD_TEXT_SCALE)
                 },
-            );
+            )
+            .scroll_x;
             self.draw_one_line_dialog_input(
                 input.text(),
                 input.cursor,
@@ -1049,8 +1067,12 @@ fn database_tree_icon_y(row_y: f32, row_h: f32, icon_size: f32) -> f32 {
     (row_y + (row_h - icon_size) * 0.5).round()
 }
 
+fn database_tree_row_y(content_y: f32, logical_row: usize, row_h: f32, scroll: f32) -> f32 {
+    (content_y + logical_row as f32 * row_h - scroll).round()
+}
+
 fn draw_database_hint(renderer: &mut Renderer, text: &str, x: f32, y: f32, s: f32) {
-    let row_h = (crate::render_view::tree_ui::TREE_ROW_H * s).round();
+    let row_h = crate::app::database::database_tree_row_height(s);
     renderer.draw_string_scaled_pixel_snapped(
         text,
         x.round(),
@@ -1377,6 +1399,17 @@ mod database_dialog_layout_tests {
         let source = include_str!("ide_panel_database_renderer.rs");
         assert!(source.contains("let hover_settled = database.scroll.is_settled();"));
         assert!(source.contains("if hover_settled"));
+    }
+
+    #[test]
+    fn database_ddl_scrollbar_rebinds_generic_popup_hitbox_to_ddl_state() {
+        let source = include_str!("ide_panel_database_renderer.rs");
+        assert!(source.contains(
+            "ui_registry.rect_for(crate::ui_system::UiId::HoverPopupScroll)"
+        ));
+        assert!(source.contains(
+            "crate::ui_system::UiId::DatabaseDdlScroll, sx, sy, sw, sh, mx, my"
+        ));
     }
 
     #[test]

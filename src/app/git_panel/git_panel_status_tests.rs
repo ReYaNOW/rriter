@@ -1044,7 +1044,7 @@ mod tests {
     }
 
     #[test]
-    fn git_graph_drag_updates_rendered_scroll_immediately() {
+    fn git_graph_drag_updates_target_without_teleporting_current() {
         let mut scroll = crate::scroll::ScrollState::new(15.0);
         scroll.current = 12.0;
         scroll.target = 12.0;
@@ -1052,11 +1052,13 @@ mod tests {
 
         apply_git_graph_scroll_drag(&mut scroll, 240.0, 7.0);
 
-        assert_eq!(scroll.current, 240.0);
+        assert_eq!(scroll.current, 12.0);
         assert_eq!(scroll.target, 240.0);
-        assert_eq!(scroll.velocity, 0.0);
+        assert_eq!(scroll.velocity, 9.0);
         assert_eq!(scroll.drag_offset, 7.0);
         assert!(scroll.is_dragging);
+        assert_eq!(scroll.anim_speed, 15.0);
+        assert!(git_graph_near_load_more(scroll.target, 240.0, 1.0));
     }
 
     fn graph_commit(oid: &str, parents: &[&str]) -> GitGraphCommit {

@@ -865,15 +865,29 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
         winit::event::MouseButton::Left,
     );
     assert!(app.scroll_y.is_dragging);
+    let current_before_drag_move = app.scroll_y.current;
     assert!(app.drag_markdown_read_scrollbar_to(body.1 + body.3 * 0.72));
+    assert_eq!(app.scroll_y.current, current_before_drag_move);
+    assert_ne!(app.scroll_y.current, app.scroll_y.target);
+    let release_target = app.scroll_y.target;
     app.reviewer_markdown_read_mouse_input(
         winit::event::ElementState::Released,
         winit::event::MouseButton::Left,
     );
     assert!(!app.scroll_y.is_dragging);
-    assert_eq!(app.scroll_y.current, app.scroll_y.target);
+    assert_eq!(app.scroll_y.current, current_before_drag_move);
+    assert_eq!(app.scroll_y.target, release_target);
     assert_eq!(app.scroll_y.velocity, 0.0);
-    assert_eq!(app.scroll_y.anim_speed, 7.0);
+    assert_eq!(app.scroll_y.anim_speed, 15.0);
+    let distance_before_tick = (release_target - app.scroll_y.current).abs();
+    assert!(app.scroll_y.update(0.016));
+    assert!((release_target - app.scroll_y.current).abs() < distance_before_tick);
+    for _ in 0..240 {
+        if !app.scroll_y.update(0.016) {
+            break;
+        }
+    }
+    assert!((app.scroll_y.current - release_target).abs() < 0.01);
     review_v3_root_frame(&mut app);
 
     let before_resize_anchor = app
@@ -905,6 +919,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
     assert!(residual > 1.0);
     app.scroll_y.target = app.scroll_y.current + residual;
     app.scroll_y.velocity = 13.0;
+    app.scroll_y.anim_speed = 7.0;
     let stable_read_anchor = app
         .markdown
         .read_layout

@@ -505,11 +505,13 @@ impl ToolInstaller {
         ) else {
             return false;
         };
-        self.log_scroll.target = target;
-        self.log_scroll.current = target;
-        self.log_scroll.velocity = 0.0;
-        self.log_scroll.drag_offset = drag_offset;
-        self.log_scroll.is_dragging = true;
+        if !crate::app::mouse::apply_scrollbar_drag_target(
+            &mut self.log_scroll,
+            target,
+            drag_offset,
+        ) {
+            return false;
+        }
         self.follow_log = false;
         true
     }
@@ -548,9 +550,14 @@ impl ToolInstaller {
         ) else {
             return false;
         };
-        self.log_scroll.target = target;
-        self.log_scroll.current = target;
-        self.log_scroll.velocity = 0.0;
+        let drag_offset = self.log_scroll.drag_offset;
+        if !crate::app::mouse::apply_scrollbar_drag_target(
+            &mut self.log_scroll,
+            target,
+            drag_offset,
+        ) {
+            return false;
+        }
         self.follow_log = false;
         true
     }

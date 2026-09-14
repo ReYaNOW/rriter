@@ -872,18 +872,34 @@ mod reader_stage1_review_v1 {
 
     fn actual_ink(renderer: &mut Renderer, sample: &str, baseline: f32,
         text_scale: f32, mono: bool, heading: bool) -> (f32, f32) {
-        let mut lo = f32::INFINITY;
-        let mut hi = f32::NEG_INFINITY;
-        for ch in sample.chars() {
-            let glyph = if heading {
-                renderer.get_ui_glyph_at_size(ch, renderer.final_text_pixel_size(text_scale))
-            } else if mono { renderer.get_glyph(ch) } else { renderer.get_ui_glyph(ch) }.unwrap();
-            let scale = if heading { 1.0 } else { text_scale };
-            let (_, y, _, h) = crate::renderer::glyph_quad_rect(0.0, baseline, glyph, scale);
-            lo = lo.min(y.round());
-            hi = hi.max((y + h).round());
+        // Use the same pixel-snapped production draw path as Reader instead of
+        // reconstructing glyph quads from metrics. That keeps this reviewer
+        // regression stable across rasterizer/CPU rounding differences.
+        renderer.vertices.clear();
+        let color = [0.25, 0.5, 0.75, 1.0];
+        if heading {
+            let pixel_size = renderer.final_text_pixel_size(text_scale);
+            if mono {
+                renderer.draw_string_mono_at_pixel_size(
+                    sample, 0.0, baseline, color, pixel_size, true,
+                );
+            } else {
+                renderer.draw_string_at_pixel_size_weighted(
+                    sample, 0.0, baseline, color, pixel_size, true,
+                );
+            }
+        } else if mono {
+            renderer.draw_string_mono_scaled_pixel_snapped(
+                sample, 0.0, baseline, color, text_scale, false,
+            );
+        } else {
+            renderer.draw_string_scaled_pixel_snapped_weighted(
+                sample, 0.0, baseline, color, text_scale, false,
+            );
         }
-        (lo, hi)
+        let mut ys = renderer.vertices.iter().map(|vertex| vertex.pos[1]);
+        let first = ys.next().expect("actual Reader draw must emit glyph vertices");
+        ys.fold((first, first), |(lo, hi), y| (lo.min(y), hi.max(y)))
     }
 
     fn actual_editor_selection_center_delta(renderer: &mut Renderer, sample: &str, dpi: f32) -> f32 {
@@ -893,7 +909,7 @@ mod reader_stage1_review_v1 {
         let mut registry = crate::ui_system::UiRegistry::new();
         renderer.draw_editor_visible_text(
             &editor, &[], &[], None, sample, "", &[], sample.len(), sample.len(),
-            None, 0, sample.len(), 0.0, 0.0, 900.0, 0.0, false, true, false,
+            None, 0, sample.len(), 0.0, 0.0, 900.0, 900.0, 0.0, false, true, false,
             dpi, 0, renderer.visual_lines.len(), &mut registry, None, None, &[], &[],
         );
         let bounds = |color| {

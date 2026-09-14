@@ -1455,6 +1455,41 @@ pub(crate) fn api_python_version_list_rect(
     )
 }
 
+pub(crate) fn api_output_schema_menu_scroll_metrics(
+    example_count: usize,
+    scale: f32,
+) -> (f32, f32) {
+    let row_h = 30.0 * scale;
+    let top_pad = 6.0 * scale;
+    let bottom_pad = 4.0 * scale;
+    let visible_h = (top_pad + example_count as f32 * row_h + bottom_pad)
+        .min(top_pad + row_h * 6.0 + bottom_pad);
+    let content_h = top_pad + example_count as f32 * row_h + bottom_pad;
+    (visible_h, (content_h - visible_h).max(0.0))
+}
+
+pub(crate) fn api_output_schema_menu_scrollbar_drag_target(
+    track_rect: (f32, f32, f32, f32),
+    example_count: usize,
+    current: f32,
+    pointer_y: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let (visible_h, max_scroll) = api_output_schema_menu_scroll_metrics(example_count, scale);
+    let thumb = crate::scroll::scrollbar_thumb(
+        track_rect.1,
+        track_rect.3,
+        visible_h,
+        visible_h + max_scroll,
+        current,
+        22.0 * scale,
+    )?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_y, track_rect.1, track_rect.3, thumb, max_scroll, drag_offset,
+    )
+}
+
 pub(crate) fn api_python_version_list_max_scroll(
     count: usize,
     visible_h: f32,
@@ -1485,6 +1520,34 @@ pub(crate) fn api_python_scrollbar_metrics(
     let min_thumb_h = (18.0 * scale).min(track_h);
     let thumb_h = desired_thumb_h.clamp(min_thumb_h, track_h);
     Some((track_h, thumb_h))
+}
+
+pub(crate) fn api_python_scrollbar_thumb(
+    rect: (f32, f32, f32, f32),
+    current: f32,
+    max_scroll: f32,
+    scale: f32,
+) -> Option<(f32, f32, crate::scroll::ScrollbarThumb)> {
+    let (track_h, _) = api_python_scrollbar_metrics(rect.3, max_scroll, scale)?;
+    let track_y = rect.1 + 6.0 * scale;
+    let thumb = crate::scroll::scrollbar_thumb(
+        track_y, track_h, track_h, track_h + max_scroll, current, 18.0 * scale,
+    )?;
+    Some((track_y, track_h, thumb))
+}
+
+pub(crate) fn api_python_scrollbar_drag_target(
+    rect: (f32, f32, f32, f32),
+    current: f32,
+    max_scroll: f32,
+    pointer_y: f32,
+    scale: f32,
+    drag_offset: Option<f32>,
+) -> Option<(f32, f32)> {
+    let (track_y, track_h, thumb) = api_python_scrollbar_thumb(rect, current, max_scroll, scale)?;
+    crate::scroll::scrollbar_drag_target(
+        pointer_y, track_y, track_h, thumb, max_scroll, drag_offset,
+    )
 }
 
 pub(crate) fn api_python_install_log_visible(api: &ApiClientState) -> bool {

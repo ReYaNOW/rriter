@@ -620,10 +620,11 @@ impl App {
         self.finish_markdown_read_selection_gesture();
         self.markdown
             .mark_absolute_scroll_navigation_with_scroll(&mut self.scroll_y);
-        let changed = self.scroll_y.current != target;
-        self.scroll_y.jump_to(target);
-        self.scroll_y.drag_offset = drag_offset;
-        self.scroll_y.is_dragging = true;
+        let changed = self.scroll_y.target != target;
+        if !crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll_y, target, drag_offset)
+        {
+            return false;
+        }
         if changed {
             self.markdown.on_shared_vertical_scroll_changed();
         }
@@ -651,15 +652,14 @@ impl App {
             self.scroll_y.end_drag();
             return true;
         };
-        if self.scroll_y.current != target
-            || self.scroll_y.target != target
-            || self.scroll_y.velocity != 0.0
+        let changed = self.scroll_y.target != target;
+        if !crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll_y, target, drag_offset)
         {
-            self.scroll_y.jump_to(target);
+            return false;
+        }
+        if changed {
             self.markdown.on_shared_vertical_scroll_changed();
         }
-        self.scroll_y.drag_offset = drag_offset;
-        self.scroll_y.is_dragging = true;
         true
     }
 

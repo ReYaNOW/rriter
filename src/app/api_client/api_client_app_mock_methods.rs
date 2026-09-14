@@ -99,6 +99,8 @@ impl crate::app::App {
                 | crate::ui_system::UiId::ApiMockPythonPickUvPath
                 | crate::ui_system::UiId::ApiMockPythonPickCustomPath
                 | crate::ui_system::UiId::ApiMockPythonVersionOption(_)
+                | crate::ui_system::UiId::ApiMockPythonVersionsScrollY
+                | crate::ui_system::UiId::ApiMockPythonInstallLogScrollY
                 | crate::ui_system::UiId::ApiMockPythonUvPathInput
                 | crate::ui_system::UiId::ApiMockPythonVersionInput
                 | crate::ui_system::UiId::ApiMockPythonCustomPathInput

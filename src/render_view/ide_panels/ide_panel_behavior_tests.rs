@@ -559,6 +559,67 @@ mod tests {
     }
 
     #[test]
+    fn database_tree_rows_keep_one_rounded_pixel_stride_at_fractional_scales() {
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 1.33] {
+            let row_h = crate::app::database::database_tree_row_height(scale);
+            assert_eq!(
+                row_h,
+                (crate::render_view::tree_ui::TREE_ROW_H * scale)
+                    .round()
+                    .max(1.0)
+            );
+            assert_eq!(row_h, row_h.round());
+
+            let rows = (0..6)
+                .map(|row| database_tree_row_y(37.4, row, row_h, 19.6))
+                .collect::<Vec<_>>();
+            for pair in rows.windows(2) {
+                assert_eq!(pair[1] - pair[0], row_h, "scale={scale}");
+            }
+        }
+    }
+
+    #[test]
+    fn database_tree_max_scroll_uses_the_same_rounded_stride_as_renderer() {
+        use crate::app::database::{
+            DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode,
+            DatabaseDatabaseNode, DatabasePanelState, DatabaseTableInfo,
+        };
+
+        let mut panel = DatabasePanelState::default();
+        let mut connection = DatabaseConnectionNode::new(DatabaseConnectionConfig {
+            id: DatabaseConnectionId(1),
+            display_name: "Main".to_string(),
+            username: "postgres".to_string(),
+            ..DatabaseConnectionConfig::default()
+        });
+        connection.expanded = true;
+        let mut database = DatabaseDatabaseNode::new("main".to_string());
+        database.expanded = true;
+        database.tables = vec![
+            DatabaseTableInfo {
+                name: "a".to_string(),
+                partitioned: false,
+            },
+            DatabaseTableInfo {
+                name: "b".to_string(),
+                partitioned: false,
+            },
+        ];
+        connection.databases.push(database);
+        panel.connections.push(connection);
+        assert_eq!(panel.visible_tree_row_count(), 4);
+
+        let panel_h = 160.0;
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 1.33] {
+            let row_h = crate::app::database::database_tree_row_height(scale);
+            let viewport_h = (panel_h - 34.0 * scale).max(0.0);
+            let expected = (4.0 * row_h - viewport_h).max(0.0);
+            assert_eq!(panel.max_tree_scroll(panel_h, scale), expected, "scale={scale}");
+        }
+    }
+
+    #[test]
     fn bastion_form_on_short_window_has_shared_positive_max_scroll() {
         let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
         assert!(layout.max_scroll > 0.0);
@@ -620,6 +681,116 @@ mod tests {
         );
         assert_eq!(before.input.y, before.label.y);
         assert_eq!(before.input.y, before.eye_hit.unwrap().y);
+    }
+
+    #[test]
+    fn connection_dialog_rows_clip_focus_and_scissor_share_pixel_geometry() {
+        use crate::app::database::{DatabaseConnectionColor, DatabaseConnectionDialog};
+        use crate::ui_system::{UiId, UiRegistry};
+
+        for scale in [1.0_f32, 1.25, 1.5, 1.75, 1.33] {
+            let viewport_w = 2000.0;
+            let viewport_h = 1800.0;
+            let layout = database_connection_dialog_layout(viewport_w, viewport_h, scale, 20);
+            assert_eq!(layout.row_h, layout.row_h.round());
+            assert_eq!(layout.form_clip.x, layout.form_clip.x.round());
+            assert_eq!(layout.form_clip.y, layout.form_clip.y.round());
+            assert_eq!(layout.form_clip.w, layout.form_clip.w.round());
+            assert_eq!(layout.form_clip.h, layout.form_clip.h.round());
+            assert_eq!(
+                layout.max_scroll,
+                (layout.content_height - layout.form_clip.h).max(0.0)
+            );
+
+            let first = database_dialog_field_layout(&layout, 0, 0.0, false, false);
+            let middle = database_dialog_field_layout(&layout, 10, 0.0, false, false);
+            let next = database_dialog_field_layout(&layout, 11, 0.0, false, false);
+            assert_eq!(next.input.y - middle.input.y, layout.row_h, "scale={scale}");
+            assert_eq!(middle.input.y - first.input.y, 10.0 * layout.row_h, "scale={scale}");
+
+            let mut dialog = DatabaseConnectionDialog::new(DatabaseConnectionColor::Blue);
+            dialog.ensure_row_visible(19, layout.row_h, layout.form_clip.h, layout.max_scroll);
+            let focused = database_dialog_field_layout(
+                &layout,
+                19,
+                dialog.scroll.target,
+                false,
+                false,
+            );
+            assert!(focused.row_visible);
+            assert_rect_inside(focused.input, layout.form_clip);
+
+            let expected_clipped = layout.form_clip.intersect_rect(focused.input).unwrap();
+            let mut registry = UiRegistry::new();
+            registry.register_text_input_clipped(
+                UiId::DatabaseDialogField(crate::app::database::DatabaseFormField::JumpConfigAlias),
+                focused.input.x,
+                focused.input.y,
+                focused.input.w,
+                focused.input.h,
+                layout.form_clip,
+                f32::NEG_INFINITY,
+                f32::NEG_INFINITY,
+            );
+            let registered = registry
+                .rect_for(UiId::DatabaseDialogField(
+                    crate::app::database::DatabaseFormField::JumpConfigAlias,
+                ))
+                .unwrap();
+            assert_eq!(
+                registered,
+                (
+                    expected_clipped.x,
+                    expected_clipped.y,
+                    expected_clipped.w,
+                    expected_clipped.h,
+                )
+            );
+
+            let scissor = database_dialog_form_scissor(viewport_h, layout.form_clip);
+            assert_eq!(scissor.0, layout.form_clip.x as i32);
+            assert_eq!(scissor.2, layout.form_clip.w as i32);
+            assert_eq!(scissor.3, layout.form_clip.h as i32);
+            assert_eq!(
+                scissor.1,
+                (viewport_h - layout.form_clip.y - layout.form_clip.h).round() as i32
+            );
+        }
+    }
+
+    #[test]
+    fn long_secret_field_keeps_caret_left_of_eye_slot_after_fractional_y_snap() {
+        let scale = 1.75_f32;
+        let layout = database_connection_dialog_layout(2000.0, 1800.0, scale, 20);
+        let field = database_dialog_field_layout(&layout, 12, 71.4, false, true);
+        let eye = field.eye_hit.unwrap();
+        let padding = (8.0 * layout.modal.scale).round();
+        let text_geometry = crate::app::single_line_input::single_line_text_geometry(
+            field.input.x,
+            field.input.w,
+            padding,
+            eye.w,
+        );
+        let text = "секрет-界-very-long-value-0123456789".repeat(24);
+        let edge_pad = crate::app::single_line_input::single_line_cursor_edge_pad(
+            layout.modal.scale,
+        );
+        let caret_w = crate::app::single_line_input::single_line_caret_width(layout.modal.scale);
+        let cursor = crate::app::single_line_input::single_line_cursor_geometry(
+            &text,
+            text.len(),
+            text_geometry.content_w,
+            0.0,
+            edge_pad,
+            edge_pad,
+            |_| (9.0 * layout.modal.scale).round().max(1.0),
+        );
+        assert!(cursor.scroll_x > 0.0);
+        let visible_cursor_x = cursor.cursor_x - cursor.scroll_x;
+        assert!(visible_cursor_x + caret_w < text_geometry.content_w);
+        assert!(text_geometry.text_start_x + text_geometry.content_w <= eye.x + 0.001);
+        assert_eq!(field.input.y, field.input.y.round());
+        assert_eq!(eye.y, field.input.y);
     }
 
     #[test]
@@ -740,11 +911,16 @@ mod tests {
     }
 
     #[test]
-    fn all_git_dropdowns_render_only_from_the_late_context_overlay_path() {
+    fn all_git_dropdowns_render_only_from_the_shared_final_overlay_path() {
         let workspace = include_str!("ide_panel_git_workspace_renderer.rs");
         let side = include_str!("ide_panel_side_renderer.rs");
         let root = include_str!("../root_frame_renderer.rs");
         let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
+        let final_overlay = source_between(
+            root_overlays,
+            "fn draw_root_ide_final_overlays",
+            "fn draw_empty_ide_frame",
+        );
         let shared_finish = source_between(
             root_overlays,
             "fn finish_root_overlays_and_telemetry",
@@ -772,15 +948,139 @@ mod tests {
         assert!(overlay.contains("UiId::GitFetch"));
         assert!(overlay.contains("UiId::GitPull"));
 
-        assert!(root_overlays.contains("self.draw_git_dropdown_overlays("));
-        assert_eq!(root.matches("draw_file_tree_overlays(").count(), 0);
-        assert_eq!(root.matches("draw_ide_context_overlays(").count(), 2);
+        assert_eq!(root.matches("self.draw_ide_context_overlays(").count(), 0);
+        assert_eq!(root.matches("self.draw_ide_modal_overlays(").count(), 0);
         assert_eq!(
-            shared_finish
+            root.matches("self.draw_root_ide_final_overlays(").count(),
+            2
+        );
+        assert_eq!(
+            final_overlay
                 .matches("self.draw_ide_context_overlays(")
                 .count(),
             1
         );
+        assert!(shared_finish.contains("self.draw_root_ide_final_overlays("));
+    }
+
+    #[test]
+    fn git_tooltip_final_overlay_is_shared_by_all_git_compatible_root_paths() {
+        let root = include_str!("../root_frame_renderer.rs");
+        let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
+        let final_overlay = source_between(
+            root_overlays,
+            "fn draw_root_ide_final_overlays",
+            "fn draw_empty_ide_frame",
+        );
+        let empty_frame = source_between(
+            root_overlays,
+            "fn draw_empty_ide_frame",
+            "fn draw_ide_welcome_bounce",
+        );
+        let markdown_path = source_between(
+            root,
+            "if markdown_read_active {",
+            "editor.ensure_indent_cache_updated();",
+        );
+        let api_path = source_between(
+            root,
+            "&& let Some(crate::app::EditorTabKind::ApiClient(tab_meta, tab_state))",
+            "&& let Some(crate::app::EditorTabKind::DatabaseTable(tab_meta, tab_state))",
+        );
+        let database_path = source_between(
+            root,
+            "&& let Some(crate::app::EditorTabKind::DatabaseTable(tab_meta, tab_state))",
+            "// IDE с пустыми вкладками",
+        );
+
+        assert_eq!(
+            root_overlays
+                .matches("self.draw_git_file_tooltip_overlay(")
+                .count(),
+            1
+        );
+        assert!(final_overlay.contains("self.draw_git_file_tooltip_overlay("));
+        assert!(empty_frame.contains("self.draw_root_ide_final_overlays("));
+        assert!(markdown_path.contains("self.finish_root_overlays_and_telemetry("));
+        assert!(api_path.contains("self.draw_root_ide_final_overlays("));
+        assert!(database_path.contains("self.draw_root_ide_final_overlays("));
+        assert_eq!(
+            root.matches("self.finish_root_overlays_and_telemetry(")
+                .count(),
+            2,
+            "Markdown Read and normal editor must share final telemetry/overlay finish",
+        );
+    }
+
+    #[test]
+    fn git_tooltip_modal_policy_resets_before_modal_draw_and_recovers_on_close() {
+        let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
+        let final_overlay = source_between(
+            root_overlays,
+            "fn draw_root_ide_final_overlays",
+            "fn draw_empty_ide_frame",
+        );
+        let modal_branch = final_overlay
+            .find("if modal_overlay_open")
+            .expect("explicit modal policy exists");
+        let reset = final_overlay[modal_branch..]
+            .find("self.reset_git_file_tooltip_overlay();")
+            .expect("modal resets tooltip")
+            + modal_branch;
+        let draw_tooltip = final_overlay[modal_branch..]
+            .find("self.draw_git_file_tooltip_overlay(")
+            .expect("non-modal path draws tooltip")
+            + modal_branch;
+        let draw_modal = final_overlay
+            .find("self.draw_ide_modal_overlays(")
+            .expect("modal pass exists");
+
+        assert!(final_overlay[modal_branch..draw_modal].contains("} else {"));
+        assert!(reset < draw_modal);
+        assert!(draw_tooltip < draw_modal);
+    }
+
+    #[test]
+    fn git_tooltip_lifecycle_resets_resize_and_target_selection_state() {
+        let tooltip = include_str!("ide_panel_git_tooltip_renderer.rs");
+        let overlay = source_between(
+            tooltip,
+            "pub(crate) fn draw_git_file_tooltip_overlay",
+            "pub(crate) fn reset_git_file_tooltip_overlay",
+        );
+        let reset = source_between(
+            tooltip,
+            "pub(crate) fn reset_git_file_tooltip_overlay",
+            "fn push_git_graph_vertical_segment",
+        );
+        let graph = &tooltip[tooltip
+            .find("fn draw_git_graph_tooltip(")
+            .expect("graph tooltip renderer exists")..];
+
+        assert!(overlay.contains("ide_panel.is_resizing_left"));
+        assert!(overlay.contains("ide_panel.is_resizing_bottom"));
+        assert!(overlay.contains("ide_panel.git.graph_resizing"));
+        assert!(overlay.contains("self.reset_git_file_tooltip_overlay();"));
+        assert!(reset.contains("self.git_graph_tooltip = None;"));
+        assert!(reset.contains("self.git_graph_tooltip_hover = None;"));
+        assert!(reset.contains("self.clear_git_graph_tooltip_selection();"));
+        assert!(graph.contains("if target_changed {"));
+        assert!(graph.contains("self.clear_git_graph_tooltip_selection();"));
+    }
+
+    #[test]
+    fn popup_gate_uses_root_scroll_snapshot_not_editor_layout_scroll_fields() {
+        let root = include_str!("../root_frame_renderer.rs");
+        let gate = source_between(
+            root,
+            "self.update_popup_mouse_move_gate();",
+            "let tab_bar_visual_h",
+        );
+
+        assert!(gate.contains("self.update_popup_scroll_snapshot(scroll_x, scroll_y)"));
+        assert!(gate.contains("|| popup_scroll_changed"));
+        assert!(!gate.contains("self.last_scroll_y"));
+        assert!(!gate.contains("self.last_scroll_x"));
     }
 
     #[test]

@@ -1129,6 +1129,155 @@ impl Editor {
         (start, len, old_text)
     }
 
+    pub(crate) fn toggle_line_comment(&mut self, marker: &str) -> bool {
+        if marker.is_empty()
+            || marker.contains('\n')
+            || marker.contains('\r')
+            || self.line_offsets.is_empty()
+        {
+            return false;
+        }
+
+        let text_len = self.len();
+        let cursor_before = self.cursor;
+        if cursor_before > text_len || !self.is_char_boundary(cursor_before) {
+            return false;
+        }
+        let selection_anchor_before = self.selection_anchor;
+        if let Some(anchor) = selection_anchor_before
+            && (anchor > text_len || !self.is_char_boundary(anchor))
+        {
+            return false;
+        }
+        let selection_anchor = selection_anchor_before.filter(|&anchor| anchor != cursor_before);
+
+        let (selection_start, selection_end) = selection_anchor
+            .map(|anchor| (anchor.min(cursor_before), anchor.max(cursor_before)))
+            .unwrap_or((cursor_before, cursor_before));
+        let start_line = self
+            .line_offsets
+            .partition_point(|&offset| offset <= selection_start)
+            .saturating_sub(1);
+        let end_probe = if selection_anchor.is_some() {
+            selection_end.saturating_sub(1)
+        } else {
+            selection_end
+        };
+        let end_line = self
+            .line_offsets
+            .partition_point(|&offset| offset <= end_probe)
+            .saturating_sub(1);
+        let Some(&block_start) = self.line_offsets.get(start_line) else {
+            return false;
+        };
+        let block_end = self
+            .line_offsets
+            .get(end_line.saturating_add(1))
+            .copied()
+            .unwrap_or(text_len)
+            .min(text_len);
+        let mut original_bytes = Vec::with_capacity(block_end - block_start);
+        for offset in block_start..block_end {
+            original_bytes.push(self.byte_at(offset));
+        }
+        let Ok(original) = String::from_utf8(original_bytes) else {
+            return false;
+        };
+
+        let line_layout = |segment: &str| {
+            let bytes = segment.as_bytes();
+            let mut content_end = bytes.len();
+            if segment.ends_with('\n') {
+                content_end -= 1;
+                if content_end > 0 && bytes[content_end - 1] == b'\r' {
+                    content_end -= 1;
+                }
+            }
+            let indent_len = bytes[..content_end]
+                .iter()
+                .take_while(|&&byte| matches!(byte, b' ' | b'\t'))
+                .count();
+            (indent_len, content_end)
+        };
+
+        let mut relevant_lines = 0usize;
+        let mut all_commented = true;
+        for segment in original.split_inclusive('\n') {
+            let (indent_len, content_end) = line_layout(segment);
+            if indent_len < content_end {
+                relevant_lines += 1;
+                all_commented &= segment[indent_len..content_end].starts_with(marker);
+            }
+        }
+        if relevant_lines == 0 {
+            return false;
+        }
+
+        let uncomment = all_commented;
+        let extra = if uncomment {
+            0
+        } else {
+            marker.len().saturating_mul(relevant_lines)
+        };
+        let mut replacement = String::with_capacity(original.len().saturating_add(extra));
+        let mut offset_edits = Vec::with_capacity(relevant_lines);
+        let mut relative_line_start = 0usize;
+        for segment in original.split_inclusive('\n') {
+            let (indent_len, content_end) = line_layout(segment);
+            let relevant = indent_len < content_end;
+            let marker_offset = block_start + relative_line_start + indent_len;
+
+            if relevant && uncomment {
+                replacement.push_str(&segment[..indent_len]);
+                replacement.push_str(&segment[indent_len + marker.len()..]);
+                offset_edits.push((marker_offset, marker.len(), 0usize));
+            } else if relevant {
+                replacement.push_str(&segment[..indent_len]);
+                replacement.push_str(marker);
+                replacement.push_str(&segment[indent_len..]);
+                offset_edits.push((marker_offset, 0usize, marker.len()));
+            } else {
+                replacement.push_str(segment);
+            }
+            relative_line_start += segment.len();
+        }
+
+        let map_offset = |offset: usize| -> usize {
+            let mut delta = 0isize;
+            for &(edit_start, old_len, new_len) in &offset_edits {
+                if offset < edit_start {
+                    break;
+                }
+                if old_len == 0 {
+                    delta += new_len as isize;
+                    continue;
+                }
+                if offset == edit_start {
+                    break;
+                }
+                let edit_end = edit_start.saturating_add(old_len);
+                if offset < edit_end {
+                    return (edit_start as isize + delta).max(0) as usize;
+                }
+                delta += new_len as isize - old_len as isize;
+            }
+            (offset as isize + delta).max(0) as usize
+        };
+        let cursor_after = map_offset(cursor_before);
+        let selection_anchor_after = selection_anchor.map(map_offset);
+
+        let _ = self.replace_range(block_start, block_end, &replacement);
+        self.cursor = self.valid_cursor(cursor_after);
+        self.selection_anchor = selection_anchor_after.map(|anchor| self.valid_cursor(anchor));
+        if let Some(step) = self.history.back_mut()
+            && let EditOp::Replace { offset, .. } = &step.op
+            && *offset == block_start
+        {
+            step.cursor_after = self.cursor;
+        }
+        true
+    }
+
     pub fn insert_str(&mut self, s: &str) -> (Option<(usize, usize)>, usize) {
         if s.is_empty() {
             return (None, 0);

@@ -1346,6 +1346,18 @@ mod tests {
         .unwrap();
         assert!((top_target - layout.max_scroll).abs() < 0.001);
         assert!(bottom_target.abs() < 0.001);
+
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 260.0;
+        scroll.target = 260.0;
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(
+            &mut scroll,
+            top_target,
+            0.0,
+        ));
+        assert_eq!(scroll.current, 260.0);
+        assert_eq!(scroll.target, layout.max_scroll);
+        assert_ne!(scroll.current, scroll.target);
     }
 
     #[test]

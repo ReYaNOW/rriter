@@ -897,9 +897,7 @@ impl crate::app::App {
         ) else {
             return false;
         };
-        scroll.jump_to(target);
-        scroll.drag_offset = drag_offset;
-        scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         true
     }
 
@@ -961,9 +959,7 @@ impl crate::app::App {
                 scroll.end_drag();
                 return false;
             };
-            scroll.jump_to(target);
-            scroll.drag_offset = drag_offset;
-            scroll.is_dragging = true;
+            crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         }
         true
     }
@@ -1022,9 +1018,7 @@ impl crate::app::App {
         ) else {
             return false;
         };
-        scroll.jump_to(target);
-        scroll.drag_offset = drag_offset;
-        scroll.is_dragging = true;
+        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         true
     }
 
@@ -1086,9 +1080,7 @@ impl crate::app::App {
                 scroll.end_drag();
                 return false;
             };
-            scroll.jump_to(target);
-            scroll.drag_offset = drag_offset;
-            scroll.is_dragging = true;
+            crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         }
         true
     }

@@ -341,7 +341,8 @@ impl Renderer {
         sel_end: usize,
         render_scroll_x: f32,
         render_scroll_y: f32,
-        scrollbar_x: f32,
+        interaction_right: f32,
+        visual_right: f32,
         blink_alpha: f32,
         dialog_window_open: bool,
         editor_cursor_blocked: bool,
@@ -534,7 +535,7 @@ impl Renderer {
                     self.push_rect(
                         self.left_padding,
                         y - self.baseline_offset,
-                        (scrollbar_x - self.left_padding).max(0.0),
+                        (visual_right - self.left_padding).max(0.0),
                         self.line_height,
                         color,
                     );
@@ -808,7 +809,7 @@ impl Renderer {
                     v_line_info.is_folded,
                     is_last_visual_segment,
                 )
-                && let Some(hint_x) = closing_hint_screen_x(x, render_scroll_x, scrollbar_x, s)
+                && let Some(hint_x) = closing_hint_screen_x(x, render_scroll_x, interaction_right, s)
             {
                 self.draw_string_mono_scaled(
                     &hint.label,
@@ -964,7 +965,7 @@ impl Renderer {
             {
                 if cy > -self.line_height
                     && cy < self.height + self.line_height
-                    && cx_screen < scrollbar_x
+                    && cx_screen < interaction_right
                     && cx_screen >= self.left_padding
                 {
                     self.push_rect(
@@ -1048,5 +1049,174 @@ mod closing_hint_tests {
             let _ = closing_hint_screen_x(80.0, 0.0, 300.0, 1.0);
         }
         assert_eq!(prepared.as_ptr(), pointer);
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod stage5_overlay_boundary_tests {
+    use super::*;
+    use crate::render_view::{
+        editor_max_scroll_for_lines, editor_vertical_overlay_bounds,
+        reviewer_stage2_integration::fixture,
+    };
+    use std::sync::Arc;
+
+    fn draw_text_layer(
+        renderer: &mut Renderer,
+        editor: &Editor,
+        interaction_right: f32,
+        visual_right: f32,
+        blink_alpha: f32,
+        diff_line_kinds: Option<&[crate::app::git_diff::DiffLineKind]>,
+        closing_hints: &[crate::languages::dart::ClosingHint],
+    ) {
+        renderer.update_cache(editor, 0.0, 0.0, false);
+        renderer.vertices.clear();
+        let (first, second) = editor.text_parts();
+        let mut registry = crate::ui_system::UiRegistry::new();
+        renderer.draw_editor_visible_text(
+            editor,
+            &[],
+            &[],
+            None,
+            first,
+            second,
+            editor.get_cached_indent_levels(),
+            first.len(),
+            editor.len(),
+            None,
+            editor.cursor,
+            editor.cursor,
+            0.0,
+            0.0,
+            interaction_right,
+            visual_right,
+            blink_alpha,
+            false,
+            false,
+            false,
+            renderer.scale_factor,
+            0,
+            renderer.visual_lines.len(),
+            &mut registry,
+            None,
+            diff_line_kinds,
+            &[],
+            closing_hints,
+        );
+    }
+
+    fn has_solid_fg_rect(renderer: &Renderer) -> bool {
+        renderer
+            .vertices
+            .iter()
+            .any(|vertex| vertex.mode == 2.0 && vertex.color == renderer.theme.fg)
+    }
+
+    #[test]
+    fn stage5_text_layer_keeps_interaction_clip_before_visual_overlay_extent() {
+        let mut source = "                        ".to_string();
+        let cursor = source.len();
+        for _ in 0..24 {
+            source.push_str("\nrow");
+        }
+        let (_context, mut app) = fixture(&source, 900.0, 1.0);
+        let renderer = app.renderer.as_mut().expect("production Renderer");
+        let mut editor = crate::app::reviewer_stage2_editor_with(&source);
+        editor.cursor = cursor;
+        renderer.update_cache(&editor, 0.0, 0.0, false);
+        let (first, second) = editor.text_parts();
+        let cursor_x = renderer.left_padding
+            + renderer.measure_width(first, second, 0, editor.cursor);
+        let minimap_width = 80.0;
+        let scrollbar_width = 10.0;
+        let bounds = editor_vertical_overlay_bounds(
+            cursor_x + 4.0 + minimap_width,
+            minimap_width,
+            scrollbar_width,
+        );
+        assert!(bounds.interaction_right < bounds.visual_right);
+        assert!(cursor_x >= bounds.interaction_right && cursor_x < bounds.visual_right);
+        assert!(
+            editor_max_scroll_for_lines(renderer.visual_lines.len(), renderer.line_height, 60.0)
+                > 0.0,
+            "fixture must have a visible normal-editor vertical scrollbar"
+        );
+
+        let mut diff = vec![
+            crate::app::git_diff::DiffLineKind::Context;
+            editor.line_offsets.len().max(1)
+        ];
+        diff[0] = crate::app::git_diff::DiffLineKind::Added;
+        draw_text_layer(
+            renderer,
+            &editor,
+            bounds.interaction_right,
+            bounds.visual_right,
+            1.0,
+            Some(&diff),
+            &[],
+        );
+
+        assert!(
+            !has_solid_fg_rect(renderer),
+            "caret inside transparent scrollbar track must stay clipped at interaction_right"
+        );
+        let diff_color = [0.18, 0.82, 0.34, 0.26];
+        let diff_right = renderer
+            .vertices
+            .iter()
+            .filter(|vertex| vertex.color == diff_color)
+            .map(|vertex| vertex.pos[0])
+            .fold(f32::NEG_INFINITY, f32::max);
+        assert_eq!(
+            diff_right,
+            bounds.visual_right.round(),
+            "visual-only diff background must still extend under scrollbar overlay"
+        );
+
+        let hint_source = "abc";
+        let mut hint_editor = crate::app::reviewer_stage2_editor_with(hint_source);
+        hint_editor.cursor = 0;
+        renderer.update_cache(&hint_editor, 0.0, 0.0, false);
+        let (first, second) = hint_editor.text_parts();
+        let line_end_x = renderer.left_padding
+            + renderer.measure_width(first, second, 0, hint_editor.len());
+        let hint_x = (line_end_x + 10.0 * renderer.scale_factor).round();
+        let hint_bounds = editor_vertical_overlay_bounds(
+            hint_x + 4.0 + minimap_width,
+            minimap_width,
+            scrollbar_width,
+        );
+        assert!(
+            hint_x >= hint_bounds.interaction_right && hint_x < hint_bounds.visual_right,
+            "fixture hint must land inside overlay track"
+        );
+        let hints = [crate::languages::dart::ClosingHint {
+            revision: hint_editor.version,
+            line: 0,
+            anchor_byte: hint_editor.len(),
+            label: Arc::<str>::from("if"),
+            source: crate::languages::dart::ClosingHintSource::SyntaxTree,
+        }];
+        draw_text_layer(
+            renderer,
+            &hint_editor,
+            hint_bounds.interaction_right,
+            hint_bounds.visual_right,
+            0.0,
+            None,
+            &hints,
+        );
+        let hint_color = [
+            renderer.theme.fg[0],
+            renderer.theme.fg[1],
+            renderer.theme.fg[2],
+            0.42,
+        ];
+        assert!(
+            !renderer.vertices.iter().any(|vertex| vertex.color == hint_color),
+            "Dart closing hint inside scrollbar track must clip at interaction_right"
+        );
     }
 }

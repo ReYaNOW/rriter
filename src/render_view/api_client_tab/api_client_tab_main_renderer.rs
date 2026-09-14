@@ -2548,17 +2548,14 @@ impl Renderer {
                 let row_h = 30.0 * s;
                 let row_inset = 5.0 * s;
                 let row_top_pad = 6.0 * s;
-                let row_bottom_pad = 4.0 * s;
                 let track_w = (4.0 * s).max(3.0);
                 let track_gap = 8.0 * s;
-                let max_menu_h = row_top_pad + row_h * 6.0 + row_bottom_pad;
-                let menu_content_h = row_top_pad + example_count as f32 * row_h + row_bottom_pad;
-                let menu_h = menu_content_h.min(max_menu_h);
+                let (menu_h, max_scroll) =
+                    crate::app::api_client::api_output_schema_menu_scroll_metrics(example_count, s);
                 let anim_h = (menu_h * tab_state.output_schema_menu_anim)
                     .round()
                     .max(1.0);
                 let popup_y = output_menu_y + output_tab_h + 6.0 * s;
-                let max_scroll = (menu_content_h - menu_h).max(0.0);
                 let scrollbar_visible = max_scroll > 0.5;
                 let list_scrolling = tab_state.output_schema_menu_scroll.is_dragging
                     || (tab_state.output_schema_menu_scroll.current
@@ -2673,16 +2670,25 @@ impl Renderer {
                             track_h,
                             [0.52, 0.54, 0.60, 0.36],
                         );
-                        let content_h = menu_h + max_scroll;
-                        let thumb_h = (menu_h / content_h * track_h).max(22.0 * s).min(track_h);
-                        let thumb_y = track_y
-                            + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (track_h - thumb_h);
-                        self.push_rect(
-                            track_x,
-                            thumb_y,
-                            track_w,
-                            thumb_h,
-                            [0.70, 0.72, 0.80, 0.88],
+                        if let Some(thumb) = crate::scroll::scrollbar_thumb(
+                            track_y, track_h, menu_h, menu_h + max_scroll, scroll_y, 22.0 * s,
+                        ) {
+                            self.push_rect(
+                                track_x,
+                                thumb.start,
+                                track_w,
+                                thumb.len,
+                                [0.70, 0.72, 0.80, 0.88],
+                            );
+                        }
+                        ui_registry.register_rect(
+                            crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx),
+                            menu_x + menu_w - track_w - track_gap,
+                            track_y,
+                            track_w + track_gap,
+                            track_h,
+                            mx,
+                            my,
                         );
                     }
                     self.restore_api_tab_clip(tab_clip);

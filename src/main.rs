@@ -24,12 +24,29 @@ use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
+// Bundle warm-up stub: Stage 1 replaces this with the real PDF backend integration.
+use pdfium_render::prelude::{PdfRenderConfig as _, Pdfium as _};
 #[cfg(target_os = "linux")]
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::keyboard::ModifiersState;
+
+pub(crate) const CTRL_WHEEL_MULTIPLIER_DEFAULT: f32 = 2.0;
+pub(crate) const CTRL_WHEEL_MULTIPLIER_MIN: f32 = 1.25;
+pub(crate) const CTRL_WHEEL_MULTIPLIER_MAX: f32 = 5.0;
+pub(crate) const CTRL_WHEEL_MULTIPLIER_STEP: f32 = 0.25;
+
+pub(crate) fn normalize_ctrl_wheel_multiplier(value: f32) -> f32 {
+    if !value.is_finite() {
+        return CTRL_WHEEL_MULTIPLIER_DEFAULT;
+    }
+    let clamped = value.clamp(CTRL_WHEEL_MULTIPLIER_MIN, CTRL_WHEEL_MULTIPLIER_MAX);
+    let steps = ((clamped - CTRL_WHEEL_MULTIPLIER_MIN) / CTRL_WHEEL_MULTIPLIER_STEP).round();
+    (CTRL_WHEEL_MULTIPLIER_MIN + steps * CTRL_WHEEL_MULTIPLIER_STEP)
+        .clamp(CTRL_WHEEL_MULTIPLIER_MIN, CTRL_WHEEL_MULTIPLIER_MAX)
+}
 
 pub struct Config {
     pub window_width: f64,
@@ -38,6 +55,7 @@ pub struct Config {
     pub ide_workspaces: Vec<std::path::PathBuf>,
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
+    pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
 }
@@ -51,6 +69,7 @@ impl Default for Config {
             ide_workspaces: Vec::new(),
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
+            ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
         }
@@ -597,6 +616,7 @@ fn format_config_content(config: &Config) -> String {
         "ide_workspaces": workspaces,
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
+        "ctrl_wheel_multiplier": normalize_ctrl_wheel_multiplier(config.ctrl_wheel_multiplier),
         "tool_paths": tool_paths,
         "dart": {
             "enabled": config.dart_settings.enabled,
@@ -683,6 +703,14 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .and_then(serde_json::Value::as_bool)
     {
         config.enable_telemetry = value;
+    }
+    if let Some(value) = value
+        .get("ctrl_wheel_multiplier")
+        .and_then(serde_json::Value::as_f64)
+    {
+        config.ctrl_wheel_multiplier = normalize_ctrl_wheel_multiplier(
+            value.clamp(f32::MIN as f64, f32::MAX as f64) as f32,
+        );
     }
     if let Some(values) = value
         .get("tool_paths")
@@ -1405,6 +1433,7 @@ mod tests {
         defaults.ide_workspaces = vec![PathBuf::from("/keep")];
         defaults.ide_ignore_patterns = vec!["old".to_string()];
         defaults.enable_telemetry = true;
+        defaults.ctrl_wheel_multiplier = 3.25;
 
         let parsed = parse_config_content(
             r#"{
@@ -1413,7 +1442,8 @@ mod tests {
   "maximized": false,
   "ide_workspaces": "",
   "ide_ignore_patterns": "target||.git",
-  "enable_telemetry": false
+  "enable_telemetry": false,
+  "ctrl_wheel_multiplier": "fast"
 }"#,
             defaults,
         );
@@ -1424,9 +1454,38 @@ mod tests {
         assert_eq!(parsed.ide_workspaces, vec![PathBuf::from("/keep")]);
         assert_eq!(parsed.ide_ignore_patterns, vec!["target", "", ".git"]);
         assert!(!parsed.enable_telemetry);
+        assert_eq!(parsed.ctrl_wheel_multiplier, 3.25);
 
         let invalid_json = parse_config_content("not json", Config::default());
         assert_eq!(invalid_json.window_width, Config::default().window_width);
+    }
+
+    #[test]
+    fn ctrl_wheel_multiplier_config_defaults_normalizes_and_roundtrips() {
+        assert_eq!(Config::default().ctrl_wheel_multiplier, 2.0);
+        assert_eq!(
+            parse_config_content(r#"{"window_width": 900}"#, Config::default())
+                .ctrl_wheel_multiplier,
+            2.0
+        );
+        assert_eq!(
+            parse_config_content(r#"{"ctrl_wheel_multiplier": 0.5}"#, Config::default())
+                .ctrl_wheel_multiplier,
+            1.25
+        );
+        assert_eq!(
+            parse_config_content(r#"{"ctrl_wheel_multiplier": 9.0}"#, Config::default())
+                .ctrl_wheel_multiplier,
+            5.0
+        );
+        assert_eq!(normalize_ctrl_wheel_multiplier(2.13), 2.25);
+
+        let mut config = Config::default();
+        config.ctrl_wheel_multiplier = 3.25;
+        let formatted = format_config_content(&config);
+        let reparsed = parse_config_content(&formatted, Config::default());
+        assert_eq!(reparsed.ctrl_wheel_multiplier, 3.25);
+        assert!(formatted.contains("\"ctrl_wheel_multiplier\": 3.25"));
     }
 
     #[test]
@@ -2204,6 +2263,7 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         last_action: Instant::now(),
         last_blink_state: true,
         modifiers: ModifiersState::empty(),
+        ctrl_wheel_multiplier: config.ctrl_wheel_multiplier,
         is_dragging: false,
         is_editor_drag_pending: false,
         is_focused: true,

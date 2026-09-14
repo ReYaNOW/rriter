@@ -184,6 +184,42 @@ pub(crate) fn editor_max_scroll_for_lines(
     (raw_max / line_height).ceil() * line_height
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct EditorVerticalOverlayBounds {
+    pub(crate) interaction_right: f32,
+    pub(crate) visual_right: f32,
+}
+
+impl EditorVerticalOverlayBounds {
+    #[inline(always)]
+    pub(crate) fn interaction_width_from(self, left: f32) -> f32 {
+        (self.interaction_right - left).max(0.0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn visual_width_from(self, left: f32) -> f32 {
+        (self.visual_right - left).max(0.0)
+    }
+
+    #[inline(always)]
+    pub(crate) fn visual_clip_width_from(self, clip_left: f32) -> f32 {
+        (self.visual_right - clip_left).round().max(0.0)
+    }
+}
+
+#[inline(always)]
+pub(crate) fn editor_vertical_overlay_bounds(
+    width: f32,
+    minimap_width: f32,
+    scrollbar_width: f32,
+) -> EditorVerticalOverlayBounds {
+    let visual_right = width - minimap_width;
+    EditorVerticalOverlayBounds {
+        interaction_right: visual_right - scrollbar_width,
+        visual_right,
+    }
+}
+
 #[inline]
 pub(crate) fn editor_fold_checksum(editor: &Editor) -> u64 {
     editor.folded_lines.iter().fold(0u64, |acc, &line| {
@@ -597,6 +633,119 @@ mod tests {
         assert_eq!(editor_bottom_blank_lines(30.0, 10.0), 0.0);
         assert_eq!(editor_max_scroll_for_lines(100, 10.0, 30.0), 970.0);
         assert_eq!(editor_max_scroll_for_lines(100, 0.0, 400.0), 0.0);
+    }
+
+    #[test]
+    fn editor_vertical_overlay_separates_interaction_and_visual_right() {
+        let bounds = editor_vertical_overlay_bounds(1600.0, 120.0, 10.0);
+        assert_eq!(bounds.interaction_right, 1470.0);
+        assert_eq!(bounds.visual_right, 1480.0);
+        assert_eq!(bounds.interaction_width_from(80.0), 1390.0);
+        assert_eq!(bounds.visual_width_from(80.0), 1400.0);
+    }
+
+    #[test]
+    fn editor_vertical_overlay_track_width_stays_between_content_and_minimap() {
+        let scrollbar_width = 12.5;
+        let bounds = editor_vertical_overlay_bounds(1440.0, 125.0, scrollbar_width);
+        assert_eq!(bounds.visual_right - bounds.interaction_right, scrollbar_width);
+        assert_eq!(bounds.visual_right, 1315.0);
+    }
+
+    #[test]
+    fn editor_vertical_overlay_collapses_when_scrollbar_hidden() {
+        let bounds = editor_vertical_overlay_bounds(1280.0, 100.0, 0.0);
+        assert_eq!(bounds.interaction_right, bounds.visual_right);
+        assert_eq!(bounds.visual_clip_width_from(64.0), 1116.0);
+    }
+
+    #[test]
+    fn editor_vertical_overlay_without_minimap_ends_at_viewport_right() {
+        let bounds = editor_vertical_overlay_bounds(1280.0, 0.0, 10.0);
+        assert_eq!(bounds.visual_right, 1280.0);
+        assert_eq!(bounds.interaction_right, 1270.0);
+    }
+
+    #[test]
+    fn editor_vertical_overlay_preserves_marker_and_ruler_track_geometry() {
+        let scale = 1.25_f32;
+        let width = 1600.0;
+        let minimap_width = 119.0 * scale;
+        let scrollbar_width = 10.0 * scale;
+        let bounds = editor_vertical_overlay_bounds(width, minimap_width, scrollbar_width);
+        let legacy_scrollbar_x = width - minimap_width - scrollbar_width;
+
+        assert_eq!(bounds.interaction_right, legacy_scrollbar_x);
+        assert_eq!(
+            bounds.interaction_right + 1.0 * scale,
+            legacy_scrollbar_x + 1.0 * scale
+        );
+        assert_eq!(
+            bounds.interaction_right + scrollbar_width - 4.0 * scale,
+            legacy_scrollbar_x + scrollbar_width - 4.0 * scale
+        );
+
+        let ruler_width = (4.0 * scale).max(2.0);
+        assert_eq!(
+            bounds.interaction_right - ruler_width,
+            width - minimap_width - scrollbar_width - ruler_width
+        );
+    }
+
+    #[test]
+    fn editor_vertical_overlay_fractional_clip_snaps_without_seam() {
+        for scale in [1.25_f32, 1.5, 1.75] {
+            let bounds =
+                editor_vertical_overlay_bounds(1377.0, 119.0 * scale, 10.0 * scale);
+            let clip_left = (73.0 * scale).round().max(0.0);
+            let clip_right = clip_left + bounds.visual_clip_width_from(clip_left);
+            assert!(
+                (clip_right - bounds.visual_right).abs() <= 0.5 + f32::EPSILON,
+                "scale={scale} clip_right={clip_right} visual_right={}",
+                bounds.visual_right
+            );
+        }
+    }
+
+    #[test]
+    fn editor_vertical_overlay_narrow_viewport_widths_never_go_negative() {
+        let bounds = editor_vertical_overlay_bounds(96.0, 120.0, 12.0);
+        assert_eq!(bounds.interaction_width_from(80.0), 0.0);
+        assert_eq!(bounds.visual_width_from(80.0), 0.0);
+        assert_eq!(bounds.visual_clip_width_from(80.0), 0.0);
+    }
+
+    #[test]
+    fn editor_vertical_scrollbar_track_is_not_owned_by_editor_text_body() {
+        let bounds = editor_vertical_overlay_bounds(800.0, 100.0, 10.0);
+        let left = 60.0;
+        let pointer_x = bounds.interaction_right + 5.0;
+        let pointer_y = 100.0;
+        let mut registry = crate::ui_system::UiRegistry::new();
+
+        registry.register_text_input(
+            crate::ui_system::UiId::EditorTextBody,
+            left,
+            0.0,
+            bounds.interaction_width_from(left),
+            400.0,
+            pointer_x,
+            pointer_y,
+        );
+        registry.register_rect(
+            crate::ui_system::UiId::EditorScrollbarY,
+            bounds.interaction_right,
+            0.0,
+            bounds.visual_right - bounds.interaction_right,
+            400.0,
+            pointer_x,
+            pointer_y,
+        );
+
+        assert_eq!(
+            registry.find_at(pointer_x, pointer_y),
+            Some(crate::ui_system::UiId::EditorScrollbarY)
+        );
     }
 
     #[test]

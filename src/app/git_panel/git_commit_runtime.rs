@@ -5,12 +5,6 @@ pub(crate) const GIT_LOG_TRUNCATION_MARKER: &str = "older Git output truncated";
 pub(crate) const GIT_LOG_TOOLBAR_H: f32 = 30.0;
 pub(crate) const GIT_LOG_ROW_H: f32 = 20.0;
 
-pub(crate) fn git_logs_max_scroll(line_count: usize, view_h: f32, scale: f32) -> f32 {
-    let rows_h = (view_h - GIT_LOG_TOOLBAR_H * scale).max(0.0);
-    let total_h = line_count as f32 * GIT_LOG_ROW_H * scale;
-    (total_h - rows_h).max(0.0)
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GitRuntimeStage {
     Commit,
@@ -112,9 +106,13 @@ impl GitLogLine {
 
 #[derive(Clone, Debug)]
 pub(crate) struct GitLogBuffer {
-    lines: VecDeque<GitLogLine>,
+    lines: VecDeque<GitLogEntry>,
     text_bytes: usize,
     truncated: bool,
+    revision: u64,
+    next_line_epoch: u64,
+    next_line_sequence: u64,
+    selection: Option<GitLogSelection>,
 }
 
 impl Default for GitLogBuffer {
@@ -123,6 +121,10 @@ impl Default for GitLogBuffer {
             lines: VecDeque::new(),
             text_bytes: 0,
             truncated: false,
+            revision: 0,
+            next_line_epoch: 0,
+            next_line_sequence: 0,
+            selection: None,
         }
     }
 }
@@ -132,20 +134,25 @@ impl GitLogBuffer {
         self.lines.clear();
         self.text_bytes = 0;
         self.truncated = false;
+        self.selection = None;
+        self.bump_revision();
     }
 
     pub(crate) fn append(&mut self, line: GitLogLine) {
         let bytes = line.text_bytes();
-        self.lines.push_back(line);
+        let id = self.allocate_line_id();
+        self.lines.push_back(GitLogEntry { id, line });
         self.text_bytes = self.text_bytes.saturating_add(bytes);
         while self.text_bytes > GIT_LOG_TEXT_BUDGET_BYTES {
             let Some(oldest) = self.lines.pop_front() else {
                 self.text_bytes = 0;
                 break;
             };
-            self.text_bytes = self.text_bytes.saturating_sub(oldest.text_bytes());
+            self.text_bytes = self.text_bytes.saturating_sub(oldest.line.text_bytes());
             self.truncated = true;
         }
+        self.bump_revision();
+        self.prune_selection();
     }
 
     pub(crate) fn line_count(&self) -> usize {
@@ -153,16 +160,7 @@ impl GitLogBuffer {
     }
 
     pub(crate) fn line_at(&self, index: usize) -> Option<GitLogLineRef<'_>> {
-        if self.truncated {
-            if index == 0 {
-                return Some(GitLogLineRef::TruncationMarker);
-            }
-            self.lines
-                .get(index.saturating_sub(1))
-                .map(GitLogLineRef::Line)
-        } else {
-            self.lines.get(index).map(GitLogLineRef::Line)
-        }
+        self.display_line_at(index).map(GitLogDisplayLineRef::line)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -175,6 +173,7 @@ impl GitLogBuffer {
     }
 }
 
+#[derive(Clone, Copy)]
 pub(crate) enum GitLogLineRef<'a> {
     TruncationMarker,
     Line(&'a GitLogLine),

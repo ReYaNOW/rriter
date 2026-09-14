@@ -433,47 +433,32 @@ pub(crate) fn file_tree_name_input_scroll_x<F>(
     text: &str,
     cursor: usize,
     visible_width: f32,
-    mut char_advance: F,
+    char_advance: F,
 ) -> f32
 where
     F: FnMut(char) -> f32,
 {
-    let mut cursor_total_x = 0.0;
-    let mut total_text_width = 0.0;
-    for (byte_idx, ch) in text.char_indices() {
-        let adv = char_advance(ch);
-        if byte_idx < cursor {
-            cursor_total_x += adv;
-        }
-        total_text_width += adv;
-    }
-
-    if cursor_total_x > visible_width {
-        (cursor_total_x - visible_width)
-            .min(total_text_width - visible_width)
-            .max(0.0)
-    } else {
-        0.0
-    }
+    crate::app::single_line_input::single_line_cursor_geometry(
+        text,
+        cursor,
+        visible_width,
+        0.0,
+        0.0,
+        0.0,
+        char_advance,
+    )
+    .scroll_x
 }
 
 pub(crate) fn file_tree_name_input_hit_index<F>(
     text: &str,
     x_offset: f32,
-    mut char_advance: F,
+    char_advance: F,
 ) -> usize
 where
     F: FnMut(char) -> f32,
 {
-    let mut current_x = 0.0;
-    for (byte_idx, ch) in text.char_indices() {
-        let adv = char_advance(ch);
-        if x_offset <= current_x + adv / 2.0 {
-            return byte_idx;
-        }
-        current_x += adv;
-    }
-    text.len()
+    crate::app::single_line_input::single_line_hit_index(text, x_offset, char_advance)
 }
 
 pub(crate) fn file_tree_row_index_at(

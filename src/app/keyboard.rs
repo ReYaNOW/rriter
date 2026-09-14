@@ -277,6 +277,7 @@ impl App {
         }
 
         if let Some(modal) = self.ide_panel.database.table_modal.as_mut() {
+            let mut invalidate_table_modal_layout = false;
             match modal {
                 crate::app::database::DatabaseTableModal::CustomLimit { input, error, .. } => {
                     let clean = single_line_ime_text(text);
@@ -285,13 +286,19 @@ impl App {
                         *error = None;
                     }
                 }
-                crate::app::database::DatabaseTableModal::MultilineEditor {
-                    input, error, ..
-                } => {
+                crate::app::database::DatabaseTableModal::MultilineEditor { input, error, .. } => {
                     input.insert(text, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
+                    invalidate_table_modal_layout = true;
                     *error = None;
                 }
                 _ => {}
+            }
+            if invalidate_table_modal_layout {
+                self.ide_panel
+                    .database
+                    .table_modal_layout_cache
+                    .get_mut()
+                    .invalidate();
             }
             return true;
         }
