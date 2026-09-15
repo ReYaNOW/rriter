@@ -553,7 +553,7 @@ impl Renderer {
             return None;
         }
 
-        let (frame_x, frame_y, _, frame_h) = frame;
+        let (frame_x, frame_y, frame_w, frame_h) = frame;
         let scroll_y = scroll_y.round();
         let doc_y = (mouse_y.clamp(frame_y, frame_y + frame_h) - frame_y + scroll_y)
             .clamp(0.0, markdown.read_layout.content_height.max(0.0));
@@ -582,7 +582,13 @@ impl Renderer {
                     line_box_index(&code.lines, doc_y, |line| line.top, |line| line.bottom)?;
                 let line = &code.lines[line_idx];
                 let pad = code_block_padding(self.scale_factor);
-                let local_x = mouse_x - (frame_x + code.x + pad);
+                let local_x = mouse_x - (frame_x + code.x + pad)
+                    + code_block_scroll_offset(
+                        markdown.code_scroll_x(block.source_range.start),
+                        code,
+                        frame_w.max(1.0),
+                        self.scale_factor,
+                    );
                 let text = markdown
                     .read_source
                     .get(line.source_range.clone())

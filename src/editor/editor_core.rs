@@ -327,21 +327,26 @@ impl Editor {
         let mut offset = 0;
         let mut max_len = 0;
         let mut current_longest_idx = 0;
-        let mut current_line_start = 0;
+        // Ширина строки в колонках экрана: tab = 4, UTF-8 continuation байты не считаются.
+        let mut cols = 0usize;
         let mut current_line_idx = 0;
 
         let mut process = |bytes: &[u8], mut_offset: &mut usize| {
             for &b in bytes {
                 *mut_offset += 1;
-                if b == b'\n' {
-                    let len = *mut_offset - current_line_start;
-                    if len > max_len {
-                        max_len = len;
-                        current_longest_idx = current_line_idx;
+                match b {
+                    b'\n' => {
+                        if cols > max_len {
+                            max_len = cols;
+                            current_longest_idx = current_line_idx;
+                        }
+                        new_offsets.push(*mut_offset);
+                        current_line_idx += 1;
+                        cols = 0;
                     }
-                    new_offsets.push(*mut_offset);
-                    current_line_start = *mut_offset;
-                    current_line_idx += 1;
+                    b'\t' => cols += 4,
+                    _ if b & 0xC0 == 0x80 => {}
+                    _ => cols += 1,
                 }
             }
         };
@@ -349,8 +354,7 @@ impl Editor {
         process(first.as_bytes(), &mut offset);
         process(second.as_bytes(), &mut offset);
 
-        let len = offset - current_line_start;
-        if len > max_len {
+        if cols > max_len {
             current_longest_idx = current_line_idx;
         }
 

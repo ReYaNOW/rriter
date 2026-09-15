@@ -1,0 +1,209 @@
+# Review package: seating fix (snapshot snap-seat vs working tree)
+Файлы /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-seat/src/render_view/markdown_read.rs и src/render_view/markdown_read.rs различаются
+Файлы /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-seat/src/render_view/markdown_scroll_review_tests.rs и src/render_view/markdown_scroll_review_tests.rs различаются
+
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-seat/src/render_view/markdown_read.rs	2026-09-15 14:48:20.360635242 +0300
++++ src/render_view/markdown_read.rs	2026-09-15 14:53:50.102957602 +0300
+@@ -252,20 +252,21 @@
+ }
+ 
+ #[derive(Clone, Debug)]
+ struct TableBlock {
+     rows: Vec<TableRow>,
+     x: f32,
+     width: f32,
+     cell_width: f32,
+     cell_padding: f32,
+     line_height: f32,
++    baseline_offset: f32,
+     quote_depth: usize,
+ }
+ 
+ #[derive(Clone, Debug)]
+ enum ReadBlockKind {
+     Text(TextBlock),
+     Code(CodeBlock),
+     Table(TableBlock),
+     Rule {
+         x: f32,
+@@ -772,20 +773,24 @@
+             .header
+             .iter()
+             .chain(table.rows.iter())
+             .map(|row| row.cells.len())
+             .max()
+             .unwrap_or(1)
+             .max(1);
+         let cell_w = width / col_count as f32;
+         let pad = (8.0 * self.scale).round();
+         let line_h = (22.0 * self.scale).round().max(1.0);
++        let text_scale = 0.82;
++        let baseline_offset = self
++            .text_metrics
++            .heading_baseline_offset(text_scale, line_h);
+         let mut rows = Vec::new();
+         let mut row_y = self.y;
+         for (is_header, row) in table
+             .header
+             .iter()
+             .map(|row| (true, row))
+             .chain(table.rows.iter().map(|row| (false, row)))
+         {
+             let mut cells = Vec::with_capacity(col_count);
+             let mut max_lines = 1usize;
+@@ -798,21 +803,21 @@
+                     )
+                 });
+                 let max_text_w = (cell_w - pad * 2.0).max(8.0);
+                 let mut advance = |offset: usize, ch: char| {
+                     let mut glyph_advance =
+                         |c: char, use_mono: bool| (self.advance)(c, use_mono, None);
+                     styled_char_advance(
+                         &styled,
+                         offset,
+                         ch,
+-                        0.82,
++                        text_scale,
+                         self.scale,
+                         false,
+                         &mut glyph_advance,
+                     )
+                 };
+                 let lines = crate::render_view::core_text::wrapped_text_ranges_with_offsets(
+                     &styled.text,
+                     max_text_w,
+                     &mut advance,
+                 )
+@@ -851,20 +856,21 @@
+             source_range,
+             top,
+             bottom,
+             ReadBlockKind::Table(TableBlock {
+                 rows,
+                 x,
+                 width,
+                 cell_width: cell_w,
+                 cell_padding: pad,
+                 line_height: line_h,
++                baseline_offset,
+                 quote_depth,
+             }),
+         );
+         self.y = bottom + (BLOCK_GAP * self.scale).round();
+     }
+ }
+ 
+ fn heading_scale(level: u8) -> f32 {
+     match level {
+         1 => 1.60,
+@@ -1605,21 +1611,21 @@
+             ReadBlockKind::Table(table) => {
+                 self.draw_quote_guides(
+                     table.quote_depth,
+                     frame_x,
+                     block.top + offset_y,
+                     block.bottom + offset_y,
+                 );
+                 let cell_w = table.cell_width;
+                 let cell_padding = table.cell_padding;
+                 let line_height = table.line_height;
+-                let baseline_offset = (line_height * 0.82).round();
++                let baseline_offset = table.baseline_offset;
+                 for idx in visible_table_row_range(&table.rows, visible_top, visible_bottom) {
+                     let row = &table.rows[idx];
+                     let row_y = row.y + offset_y;
+                     if row.header {
+                         self.push_rect(
+                             frame_x + table.x,
+                             row_y,
+                             table.width,
+                             row.h,
+                             faded(self.theme.fg, 0.07),
+@@ -2001,21 +2007,21 @@
+                             assert_eq!(
+                                 line.bottom.fract(),
+                                 0.0,
+                                 "scale {scale}: code bottom {}",
+                                 line.bottom
+                             );
+                             assert!(line.top <= line.y && line.y <= line.bottom);
+                         }
+                     }
+                     ReadBlockKind::Table(table) => {
+-                        let baseline_offset = (table.line_height * 0.82).round();
++                        let baseline_offset = table.baseline_offset;
+                         for row in &table.rows {
+                             assert_eq!(row.y.fract(), 0.0, "scale {scale}: row y {}", row.y);
+                             assert_eq!(row.h.fract(), 0.0, "scale {scale}: row h {}", row.h);
+                             for cell in &row.cells {
+                                 for line_idx in 0..cell.lines.len() {
+                                     let baseline = (row.y
+                                         + table.cell_padding
+                                         + line_idx as f32 * table.line_height
+                                         + baseline_offset)
+                                         .round();
+@@ -2381,11 +2387,39 @@
+ 
+                 if heading_level.is_some() {
+                     assert!(
+                         baseline - line_top < (line_height * 0.82).round(),
+                         "heading baseline must use final font metrics rather than 0.82 of enlarged line box"
+                     );
+                 }
+             }
+         }
+     }
++
++    #[test]
++    fn table_baseline_uses_font_metrics_not_line_box_fraction_across_scales() {
++        let source = "| A | B |\n| --- | --- |\n| Agjpqy | x |\n";
++        for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
++            let cache = layout_with_scale_and_advance(source, 600.0, scale, |_, _| 8.0 * scale);
++            let table = cache
++                .blocks
++                .iter()
++                .find_map(|block| match &block.kind {
++                    ReadBlockKind::Table(table) => Some(table),
++                    _ => None,
++                })
++                .expect("table block");
++            let expected =
++                test_layout_text_metrics(scale).heading_baseline_offset(0.82, table.line_height);
++            assert_eq!(
++                table.baseline_offset, expected,
++                "scale {scale}: table baseline must come from font metrics"
++            );
++            if scale == 2.0 {
++                assert!(
++                    table.baseline_offset < (table.line_height * 0.82).round(),
++                    "table baseline must sit above 0.82 of the line box"
++                );
++            }
++        }
++    }
+ }
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-seat/src/render_view/markdown_scroll_review_tests.rs	2026-09-15 00:54:56.747299603 +0300
++++ src/render_view/markdown_scroll_review_tests.rs	2026-09-15 14:52:43.717132402 +0300
+@@ -946,21 +946,21 @@
+                 let samples: Vec<_> = match &block.kind {
+                     ReadBlockKind::Text(text) => text.lines.iter().map(|line|
+                         (format!("text{:?}", text.heading_level), line.top, line.y,
+                          text.line_height, text.scale, text.mono, text.heading_level.is_some())
+                     ).collect(),
+                     ReadBlockKind::Code(code) => code.lines.iter().map(|line|
+                         ("code".to_string(), line.top, line.y, code.line_height, 1.0, true, false)
+                     ).collect(),
+                     ReadBlockKind::Table(table) => table.rows.iter().map(|row| {
+                         let top = row.y + table.cell_padding;
+-                        ("table".to_string(), top, (top + (table.line_height * 0.82).round()).round(),
++                        ("table".to_string(), top, (top + table.baseline_offset).round(),
+                          table.line_height, 0.82, false, false)
+                     }).collect(),
+                     _ => Vec::new(),
+                 };
+                 renderer.vertices.clear();
+                 let selected = block.source_range.clone();
+                 renderer.draw_markdown_block(block, &source, &[], 0.0, 0.0, 0.0, 900.0,
+                     0.0, f32::MAX, ReadHighlights {
+                         selection: Some(&selected), search_results: &[], search_current_idx: None,
+                     }, 0.0, (0.0, 0.0, 900.0, renderer.height));

@@ -140,7 +140,12 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     };
     if app.render_suspended && !automation_running {
         app.last_frame = now;
-        event_loop.set_control_flow(ControlFlow::Wait);
+        app.poll_database_runtime();
+        let database_job_pending = app.ide_panel.database.pending_job.is_some();
+        event_loop.set_control_flow(match suspended_about_wait_plan(now, database_job_pending) {
+            AboutWaitPlan::Wait => ControlFlow::Wait,
+            AboutWaitPlan::WaitUntil(at) => ControlFlow::WaitUntil(at),
+        });
         return;
     }
     if automation_running {
@@ -359,6 +364,9 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
     if markdown_read
         && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated)
     {
+        needs_redraw = true;
+    }
+    if markdown_read && app.markdown.update_code_scroll_x(dt) {
         needs_redraw = true;
     }
 

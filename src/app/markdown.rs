@@ -48,6 +48,7 @@ pub(crate) fn handle_markdown_read_wheel(
             crate::ui_system::UiId::MarkdownReadBody
                 | crate::ui_system::UiId::MarkdownReadScrollbar
                 | crate::ui_system::UiId::MarkdownCodeCopy(_)
+                | crate::ui_system::UiId::MarkdownCodeScrollbarX(_)
         )
     );
     let stale_editor_surface = allow_stale_editor_surface
@@ -97,6 +98,15 @@ pub struct MarkdownTabState {
     pub(crate) read_selection_autoscrolling: bool,
     pub(crate) copied_code_block: Option<usize>,
     pub(crate) code_copy_hover_valid: bool,
+    pub(crate) code_scroll_x: Vec<MarkdownCodeScrollX>,
+    pub(crate) code_scroll_drag: Option<usize>,
+}
+
+// Горизонтальный скролл code block в Reader; хранится только пока активен.
+#[derive(Clone, Debug)]
+pub(crate) struct MarkdownCodeScrollX {
+    pub block_id: usize,
+    pub scroll: crate::scroll::ScrollState,
 }
 
 impl Default for MarkdownTabState {
@@ -128,6 +138,8 @@ impl Default for MarkdownTabState {
             read_selection_autoscrolling: false,
             copied_code_block: None,
             code_copy_hover_valid: false,
+            code_scroll_x: Vec::new(),
+            code_scroll_drag: None,
         }
     }
 }
@@ -406,6 +418,7 @@ impl App {
         if reverse_unresolved {
             self.markdown.cancel_stale_scroll_transition();
             self.scroll_y.end_drag();
+            self.markdown.end_code_scroll_drag();
             self.markdown.mode = mode;
             self.markdown.clear_code_copy_transient();
             if let Some(window) = self.window.as_ref() {
@@ -435,6 +448,7 @@ impl App {
         }
         self.markdown.scroll_transition = None;
         self.scroll_y.end_drag();
+        self.markdown.end_code_scroll_drag();
         self.markdown.scroll_transition = Some(MarkdownScrollTransition {
             from,
             to: mode,
@@ -894,6 +908,19 @@ mod tests {
             MarkdownReadWheelResult::Scrolled
         );
         assert!(scroll.target > before_copy_button_wheel);
+        let before_code_scrollbar_wheel = scroll.target;
+        assert_eq!(
+            handle_markdown_read_wheel(
+                MarkdownMode::Read,
+                Some(crate::ui_system::UiId::MarkdownCodeScrollbarX(123)),
+                false,
+                &mut scroll,
+                Some(500.0),
+                80.0,
+            ),
+            MarkdownReadWheelResult::Scrolled
+        );
+        assert!(scroll.target > before_code_scrollbar_wheel);
 
         let read_before = (scroll.current, scroll.target);
         for hovered in [

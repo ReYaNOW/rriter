@@ -953,7 +953,7 @@ mod reader_stage1_review_v1 {
                     ).collect(),
                     ReadBlockKind::Table(table) => table.rows.iter().map(|row| {
                         let top = row.y + table.cell_padding;
-                        ("table".to_string(), top, (top + (table.line_height * 0.82).round()).round(),
+                        ("table".to_string(), top, (top + table.baseline_offset).round(),
                          table.line_height, 0.82, false, false)
                     }).collect(),
                     _ => Vec::new(),
@@ -963,7 +963,7 @@ mod reader_stage1_review_v1 {
                 renderer.draw_markdown_block(block, &source, &[], 0.0, 0.0, 0.0, 900.0,
                     0.0, f32::MAX, ReadHighlights {
                         selection: Some(&selected), search_results: &[], search_current_idx: None,
-                    });
+                    }, 0.0, (0.0, 0.0, 900.0, renderer.height));
                 let selection_vertices: Vec<_> = renderer.vertices.iter()
                     .filter(|v| v.color == renderer.theme.sel).map(|v| v.pos[1]).collect();
                 assert!(!selection_vertices.is_empty());

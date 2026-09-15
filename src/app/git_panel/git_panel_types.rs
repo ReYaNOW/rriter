@@ -313,6 +313,7 @@ pub(crate) fn git_graph_scroll_drag_target(
     Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
 }
 
+#[cfg(test)]
 pub(crate) fn git_logs_max_scroll_from_content_height(
     content_h: f32,
     view_h: f32,

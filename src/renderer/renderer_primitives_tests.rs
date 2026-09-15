@@ -1045,3 +1045,76 @@ mod tests {
         );
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+mod max_scroll_x_tests {
+    use crate::app::{App, PythonInlayHint};
+    use crate::render_view::reviewer_stage2_integration::fixture;
+    use std::sync::Arc;
+
+    #[test]
+    fn max_scroll_x_counts_inlay_hints_without_version_change() {
+        let (_ctx, mut app) = fixture(&format!("{}\n", "a".repeat(60)), 900.0, 1.0);
+        let r = app.renderer.as_mut().expect("production Renderer");
+        r.minimap_width = 0.0;
+        r.left_padding = 0.0;
+        r.width = (r.char_advance('a') * 60.0).ceil() + 10.0;
+        r.update_max_scroll_x(&app.editor);
+        assert_eq!(r.max_scroll_x, 0.0, "line without hints fits the view");
+
+        let hints = [PythonInlayHint {
+            byte_offset: 10,
+            label: Arc::from(": dict[str, list[int]]"),
+        }];
+        r.sync_current_python_inlay_hints(&hints);
+        r.update_max_scroll_x(&app.editor);
+        assert!(
+            r.max_scroll_x > 0.0,
+            "inlay hint pushes the line past the view with the same editor version"
+        );
+    }
+
+    #[test]
+    fn max_scroll_x_recomputes_when_view_width_changes_without_version_change() {
+        let (_ctx, mut app) = fixture(&format!("{}\n", "a".repeat(80)), 2000.0, 1.0);
+        let r = app.renderer.as_mut().expect("production Renderer");
+        r.minimap_width = 0.0;
+        r.left_padding = 0.0;
+        // Как в кадре: update_cache выставляет last_width = width до пересчёта границы.
+        r.update_cache(&app.editor, 0.0, 0.0, false);
+        r.update_max_scroll_x(&app.editor);
+        assert_eq!(r.max_scroll_x, 0.0);
+
+        r.left_padding = 1990.0;
+        r.update_cache(&app.editor, 0.0, 0.0, false);
+        r.update_max_scroll_x(&app.editor);
+        assert!(r.max_scroll_x > 0.0, "left panel resize must shrink the bound view");
+    }
+
+    #[test]
+    fn typing_past_right_edge_from_zero_bound_scrolls_horizontally() {
+        let (_ctx, mut app) = fixture("abc", 400.0, 1.0);
+        let r = app.renderer.as_mut().expect("production Renderer");
+        r.minimap_width = 0.0;
+        r.left_padding = 0.0;
+        r.update_cache(&app.editor, 0.0, 0.0, false);
+        r.update_max_scroll_x(&app.editor);
+        assert_eq!(r.max_scroll_x, 0.0);
+
+        app.editor.cursor = app.editor.len();
+        let _ = app.editor.insert_str(&"w".repeat(300));
+        let (width, height) = (r.width, r.height);
+        let mut target_y = 0.0;
+        let mut target_x = 0.0;
+        App::ensure_cursor_visible(
+            &mut target_y,
+            &mut target_x,
+            &app.editor,
+            r,
+            width,
+            height,
+            0.0,
+        );
+        assert!(target_x > 0.0, "cursor past right edge must scroll right right after typing");
+    }
+}

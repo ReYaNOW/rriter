@@ -24,8 +24,6 @@ use crate::app::{App, PendingAction};
 use crate::editor::Editor;
 use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
-// Bundle warm-up stub: Stage 1 replaces this with the real PDF backend integration.
-use pdfium_render::prelude::{PdfRenderConfig as _, Pdfium as _};
 #[cfg(target_os = "linux")]
 use std::env;
 use std::path::PathBuf;

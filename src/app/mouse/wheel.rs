@@ -300,7 +300,8 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
-        if clear_hover_popup(self.renderer.as_mut()) {
+        let hover_cleared = clear_hover_popup(self.renderer.as_mut());
+        if hover_cleared && self.markdown_mode() != crate::app::MarkdownMode::Read {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
@@ -1306,6 +1307,9 @@ impl App {
         }
 
         let hovered = self.ui_registry.find_at(mx, my);
+        if self.try_markdown_code_wheel(hovered, mx, my, dx, dy, shift) {
+            return;
+        }
         let read_scroll_bounds = self.markdown.read_scroll_bounds();
         let allow_stale_editor_surface = self
             .markdown

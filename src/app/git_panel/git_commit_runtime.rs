@@ -159,6 +159,7 @@ impl GitLogBuffer {
         self.lines.len() + usize::from(self.truncated)
     }
 
+    #[cfg(test)]
     pub(crate) fn line_at(&self, index: usize) -> Option<GitLogLineRef<'_>> {
         self.display_line_at(index).map(GitLogDisplayLineRef::line)
     }

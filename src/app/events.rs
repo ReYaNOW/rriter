@@ -299,6 +299,30 @@ fn autocomplete_detail_placement(
     2
 }
 
+impl App {
+    /// Правый край поиска: Reader прижимает панель к своему scrollbar, Edit — к minimap.
+    fn search_panel_scrollbar_x_for_mode(
+        &self,
+        window_w: f32,
+        minimap_w: f32,
+        scrollbar_w: f32,
+        s: f32,
+    ) -> f32 {
+        let read_w = (self.markdown_mode() == crate::app::MarkdownMode::Read).then(|| {
+            crate::render_view::markdown_read::markdown_read_scrollbar_width(
+                self.markdown.read_scroll_bounds().unwrap_or(0.0),
+                s,
+            )
+        });
+        crate::render_view::search::search_panel_scrollbar_x(
+            window_w,
+            minimap_w,
+            scrollbar_w,
+            read_w,
+        )
+    }
+}
+
 impl ApplicationHandler for App {
     // Coverage rationale: OS window, GL context, swapchain, and renderer
     // initialization are isolated in the window runtime boundary.
@@ -813,7 +837,8 @@ impl ApplicationHandler for App {
                     .unwrap()
                     .get_max_scroll(&self.editor, window_height);
                 let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
-                let scrollbar_x = window_width - minimap_w - scrollbar_w;
+                let scrollbar_x =
+                    self.search_panel_scrollbar_x_for_mode(window_width, minimap_w, scrollbar_w, s);
 
                 let mut over_search = false;
                 if self.show_search && self.search_anim_y > -10.0 {
@@ -1397,7 +1422,12 @@ impl ApplicationHandler for App {
                     }
 
                     if self.show_search && self.search_anim_y > -10.0 {
-                        let scrollbar_x = window_width - minimap_w - scrollbar_w;
+                        let scrollbar_x = self.search_panel_scrollbar_x_for_mode(
+                            window_width,
+                            minimap_w,
+                            scrollbar_w,
+                            s,
+                        );
                         let geometry =
                             crate::render_view::search::search_panel_geometry(scrollbar_x, s);
                         let search_h = 52.0 * s;

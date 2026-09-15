@@ -334,6 +334,7 @@ impl App {
         self.ide_panel.database.table_modal_input_dragging = false;
 
         self.scroll_y.end_drag();
+        self.markdown.end_code_scroll_drag();
         self.scroll_x.end_drag();
         self.settings_scroll.end_drag();
         self.settings_ide_scroll.end_drag();
@@ -429,6 +430,41 @@ impl App {
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
 
+    /// Window-free part of a sidebar slot click released without drag threshold.
+    pub(crate) fn toggle_sidebar_panel_from_click(&mut self, panel_id: crate::app::PanelId) {
+        let toggled_open = {
+            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == panel_id);
+            slot.map(|s| !s.open).unwrap_or(false)
+        };
+        let toggled_group = {
+            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == panel_id);
+            slot.map(|s| s.group.clone())
+        };
+        self.ide_panel.toggle(panel_id);
+        // При открытии Explorer — запускаем скан файлов
+        if toggled_open && panel_id == crate::app::PanelId::Explorer {
+            self.refresh_file_tree();
+        }
+        if toggled_open && panel_id == crate::app::PanelId::Search {
+            self.ide_panel.project_search.focused =
+                Some(crate::app::project_search::ProjectSearchField::Query);
+        }
+        // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
+        if toggled_open {
+            if let Some(group) = toggled_group {
+                for sl in self.ide_panel.slots.iter_mut() {
+                    if sl.id != panel_id && sl.group == group {
+                        sl.open = false;
+                    }
+                }
+            }
+        }
+        // Restored expanded connections wait for catalog loads started on panel open.
+        if toggled_open && panel_id == crate::app::PanelId::Database {
+            self.reconcile_expanded_database_connections();
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn reviewer_markdown_read_mouse_input(
         &mut self,
@@ -462,12 +498,16 @@ impl App {
             self.scroll_y.end_drag();
             finished_markdown_pointer = true;
         }
+        // Захваченный drag code-скроллбара завершается до UI release dispatch,
+        // даже если курсор уже вне thumb (или режим сменился во время drag).
+        let finished_code_scrollbar_drag = left_released && self.markdown.end_code_scroll_drag();
+        finished_markdown_pointer |= finished_code_scrollbar_drag;
         if finished_markdown_pointer
             && let Some(window) = self.window.as_ref()
         {
             window.request_redraw();
         }
-        if finished_read_scrollbar_drag {
+        if finished_read_scrollbar_drag || finished_code_scrollbar_drag {
             return;
         }
         let finished_git_logs_pointer = left_released
@@ -1253,6 +1293,18 @@ impl App {
                     }
                 }
                 if let Some(clicked_id) = clicked_id {
+                    if let crate::ui_system::UiId::MarkdownCodeScrollbarX(block_id) = clicked_id
+                        && button == winit::event::MouseButton::Left
+                    {
+                        if state == ElementState::Pressed {
+                            self.focus_document_text_surface();
+                            let _ = self.begin_markdown_code_scrollbar_drag_at(block_id, mx);
+                        }
+                        if let Some(window) = self.window.as_ref() {
+                            window.request_redraw();
+                        }
+                        return;
+                    }
                     if clicked_id == crate::ui_system::UiId::MarkdownReadScrollbar
                         && button == winit::event::MouseButton::Left
                     {
@@ -1812,41 +1864,7 @@ impl App {
                 if let Some(drag) = self.ide_panel.drag.take() {
                     if !drag.threshold_passed {
                         // Клик без движения → переключить панель
-                        let toggled_open = {
-                            let slot = self
-                                .ide_panel
-                                .slots
-                                .iter()
-                                .find(|sl| sl.id == drag.panel_id);
-                            slot.map(|s| !s.open).unwrap_or(false)
-                        };
-                        let toggled_group = {
-                            let slot = self
-                                .ide_panel
-                                .slots
-                                .iter()
-                                .find(|sl| sl.id == drag.panel_id);
-                            slot.map(|s| s.group.clone())
-                        };
-                        self.ide_panel.toggle(drag.panel_id);
-                        // При открытии Explorer — запускаем скан файлов
-                        if toggled_open && drag.panel_id == crate::app::PanelId::Explorer {
-                            self.refresh_file_tree();
-                        }
-                        if toggled_open && drag.panel_id == crate::app::PanelId::Search {
-                            self.ide_panel.project_search.focused =
-                                Some(crate::app::project_search::ProjectSearchField::Query);
-                        }
-                        // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
-                        if toggled_open {
-                            if let Some(group) = toggled_group {
-                                for sl in self.ide_panel.slots.iter_mut() {
-                                    if sl.id != drag.panel_id && sl.group == group {
-                                        sl.open = false;
-                                    }
-                                }
-                            }
-                        }
+                        self.toggle_sidebar_panel_from_click(drag.panel_id);
                         // Edit bounds are not valid for the shared Read coordinate system,
                         // including a pending Read -> Edit rebase before the first Edit frame.
                         if self.markdown.shared_vertical_scroll_uses_editor_bounds() {
@@ -1991,6 +2009,86 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sidebar_database_app_with_restored_expansion() -> App {
+        use crate::app::database::{
+            DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode,
+            DatabaseJobId, DatabaseJobOwner, DatabasePendingJob, DatabasePendingJobKind,
+        };
+        let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
+        app.is_ide_mode = true;
+        let mut connection = DatabaseConnectionNode::new(DatabaseConnectionConfig {
+            id: DatabaseConnectionId(1),
+            display_name: "Connection 1".to_string(),
+            username: "postgres".to_string(),
+            ..DatabaseConnectionConfig::default()
+        });
+        connection.expanded = true;
+        app.ide_panel.database.connections.push(connection);
+        // Busy runtime slot: a started load is queued instead of touching the network.
+        app.ide_panel.database.pending_job = Some(DatabasePendingJob {
+            id: DatabaseJobId(900),
+            kind: DatabasePendingJobKind::LoadDdl,
+            owner: DatabaseJobOwner::Connection(DatabaseConnectionId(1)),
+            connection_id: DatabaseConnectionId(1),
+            database_name: None,
+            table_name: None,
+        });
+        app
+    }
+
+    #[test]
+    fn sidebar_click_opening_database_starts_restored_expanded_catalog_load() {
+        use crate::app::PanelId;
+        use crate::app::database::{DatabaseConnectionChildrenState, DatabasePendingJobKind};
+        let mut app = sidebar_database_app_with_restored_expansion();
+        assert!(!app.ide_panel.is_open(PanelId::Database));
+        assert_eq!(
+            app.ide_panel.database.connections[0].children_state(),
+            DatabaseConnectionChildrenState::ExpandedUnloaded
+        );
+
+        app.toggle_sidebar_panel_from_click(PanelId::Database);
+
+        assert!(app.ide_panel.is_open(PanelId::Database));
+        assert_eq!(
+            app.ide_panel.database.connections[0].children_state(),
+            DatabaseConnectionChildrenState::ExpandedLoading
+        );
+        assert_eq!(app.ide_panel.database.queued_commands.len(), 1);
+        assert_eq!(
+            app.ide_panel.database.queued_commands[0].1.kind,
+            DatabasePendingJobKind::LoadDatabases
+        );
+
+        // Closing never starts another load.
+        app.toggle_sidebar_panel_from_click(PanelId::Database);
+        assert!(!app.ide_panel.is_open(PanelId::Database));
+        assert_eq!(app.ide_panel.database.queued_commands.len(), 1);
+    }
+
+    #[test]
+    fn sidebar_click_closing_database_or_opening_explorer_does_not_load_catalog() {
+        use crate::app::PanelId;
+        use crate::app::database::DatabaseConnectionChildrenState;
+        let mut app = sidebar_database_app_with_restored_expansion();
+        app.ide_panel.toggle(PanelId::Database);
+        assert!(app.ide_panel.is_open(PanelId::Database));
+
+        app.toggle_sidebar_panel_from_click(PanelId::Database);
+        assert!(!app.ide_panel.is_open(PanelId::Database));
+        app.ide_panel.toggle(PanelId::Database);
+
+        // Explorer shares the Top group: opening it closes Database without loading.
+        app.toggle_sidebar_panel_from_click(PanelId::Explorer);
+        assert!(app.ide_panel.is_open(PanelId::Explorer));
+        assert!(!app.ide_panel.is_open(PanelId::Database));
+        assert!(app.ide_panel.database.queued_commands.is_empty());
+        assert_eq!(
+            app.ide_panel.database.connections[0].children_state(),
+            DatabaseConnectionChildrenState::ExpandedUnloaded
+        );
+    }
 
     fn git_state_with_owned_selection() -> crate::app::git_panel::GitPanelState {
         let mut git = crate::app::git_panel::GitPanelState::default();

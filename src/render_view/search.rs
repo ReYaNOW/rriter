@@ -28,6 +28,18 @@ pub(crate) fn search_panel_geometry(scrollbar_x: f32, scale: f32) -> SearchPanel
     SearchPanelGeometry { x, w, input_w, close_x, close_size, counter_reserve: counter }
 }
 
+pub(crate) fn search_panel_scrollbar_x(
+    window_w: f32,
+    minimap_w: f32,
+    editor_scrollbar_w: f32,
+    markdown_read_scrollbar_w: Option<f32>,
+) -> f32 {
+    match markdown_read_scrollbar_w {
+        Some(read_w) => window_w - read_w.max(0.0),
+        None => window_w - minimap_w - editor_scrollbar_w,
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -41,12 +53,11 @@ impl Renderer {
         search_results: &[(usize, usize)],
         search_current_idx: Option<usize>,
         blink_alpha: f32,
-        scrollbar_width: f32,
+        scrollbar_x: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> bool {
         let wants_pointer = false;
         let s = self.scale_factor;
-        let scrollbar_x = self.width - self.minimap_width - scrollbar_width;
         let geometry = search_panel_geometry(scrollbar_x, s);
         let search_w = geometry.w;
         let search_h = 52.0 * s;
@@ -255,5 +266,30 @@ impl Renderer {
         );
 
         wants_pointer || ui_registry.wants_pointer()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_panel_scrollbar_x_uses_reader_scrollbar_edge_in_markdown_read() {
+        assert_eq!(search_panel_scrollbar_x(1000.0, 119.0, 10.0, None), 871.0);
+        assert_eq!(search_panel_scrollbar_x(1000.0, 119.0, 10.0, Some(9.0)), 991.0);
+        assert_eq!(search_panel_scrollbar_x(1000.0, 119.0, 10.0, Some(0.0)), 1000.0);
+    }
+
+    #[test]
+    fn markdown_read_root_branch_draws_search_panel() {
+        let source = include_str!("root_frame_renderer.rs");
+        let start = source
+            .find("if markdown_read_active {\n            if let Some(pre_editor_start)")
+            .expect("markdown read root branch");
+        let end = start
+            + source[start..]
+                .find("return (wants_pointer, Vec::new());")
+                .expect("markdown read branch return");
+        assert!(source[start..end].contains("draw_search_panel_if_visible("));
     }
 }

@@ -802,4 +802,17 @@ mod round3_editor_regressions {
         assert_eq!(editor.version, version);
         assert_eq!(editor.history.len(), history_len);
     }
+
+    #[test]
+    fn longest_line_uses_display_columns_not_bytes() {
+        let mut cyrillic = Editor::new(256);
+        cyrillic.set_clean_text(&format!("{}\n{}\n", "ж".repeat(30), "x".repeat(40)));
+        cyrillic.rebuild_line_offsets();
+        assert_eq!(cyrillic.longest_line_idx, 1);
+
+        let mut tabs = Editor::new(256);
+        tabs.set_clean_text(&format!("{}\n{}\n", "y".repeat(40), "\t".repeat(12)));
+        tabs.rebuild_line_offsets();
+        assert_eq!(tabs.longest_line_idx, 1);
+    }
 }

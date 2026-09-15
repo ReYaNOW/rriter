@@ -592,6 +592,8 @@ impl Renderer {
                 max_tab_scroll_x: 0.0,
                 max_terminal_tab_scroll_x: 0.0,
                 last_editor_version_for_scroll_x: u64::MAX,
+                last_view_w_for_scroll_x: -1.0,
+                scroll_x_bounds_inlays_dirty: true,
                 fps: 0.0,
                 frame_count: 0,
                 time_acc: 0.0,

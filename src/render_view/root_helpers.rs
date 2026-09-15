@@ -546,6 +546,7 @@ pub(crate) fn should_suppress_active_line_useless_expression(
         || diagnostic.message.contains("useless-expression")
 }
 
+#[cfg(test)]
 #[inline(always)]
 fn should_draw_empty_ide_file_tree_overlay(
     is_ide_mode: bool,

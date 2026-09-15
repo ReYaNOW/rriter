@@ -412,6 +412,7 @@ impl App {
             *target_scroll_x += cx_screen - visible_right;
         }
 
+        renderer.update_max_scroll_x(editor);
         *target_scroll_x = target_scroll_x.clamp(0.0, renderer.max_scroll_x).round();
     }
 

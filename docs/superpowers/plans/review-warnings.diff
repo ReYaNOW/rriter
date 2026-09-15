@@ -1,0 +1,186 @@
+# Review package: warnings batch
+## git diff HEAD (files unmodified at HEAD before this batch)
+diff --git a/src/app/automation_database.rs b/src/app/automation_database.rs
+index e0182a6..6839c42 100644
+--- a/src/app/automation_database.rs
++++ b/src/app/automation_database.rs
+@@ -112,16 +112,17 @@ impl DatabaseAutomationStep {
+             Self::ScrollTableTimed { duration_secs }
+             | Self::ScrollQueryResultTimed { duration_secs } => {
+                 Duration::from_secs(u64::from(duration_secs) + 5)
+             }
+             _ => Duration::from_secs(12),
+         }
+     }
+ 
++    #[cfg(test)]
+     pub(super) fn is_timed_scroll(self) -> bool {
+         matches!(
+             self,
+             Self::ScrollTableTimed { .. } | Self::ScrollQueryResultTimed { .. }
+         )
+     }
+ }
+ 
+diff --git a/src/app/database/database_query.rs b/src/app/database/database_query.rs
+index 87f7735..4713812 100644
+--- a/src/app/database/database_query.rs
++++ b/src/app/database/database_query.rs
+@@ -511,29 +511,33 @@ fn database_query_history_entry_height_from_metrics(
+     scale: f32,
+ ) -> f32 {
+     let height = 30.0
+         + preview_lines as f32 * 20.0
+         + if truncated { 18.0 } else { 0.0 };
+     (height * scale.max(0.0)).round()
+ }
+ 
++#[cfg(test)]
+ pub fn database_query_history_preview_lines(sql: &str) -> usize {
+     database_query_history_preview_metrics(sql).0
+ }
+ 
++#[cfg(test)]
+ pub fn database_query_history_is_truncated(sql: &str) -> bool {
+     database_query_history_preview_metrics(sql).1
+ }
+ 
++#[cfg(test)]
+ pub fn database_query_history_entry_height(sql: &str) -> f32 {
+     let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
+     30.0 + preview_lines as f32 * 20.0 + if truncated { 18.0 } else { 0.0 }
+ }
+ 
++#[cfg(test)]
+ pub fn database_query_history_entry_height_px(sql: &str, scale: f32) -> f32 {
+     let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
+     database_query_history_entry_height_from_metrics(preview_lines, truncated, scale)
+ }
+ 
+ pub fn database_query_history_entry_bytes(entry: &DatabaseQueryHistoryEntry) -> usize {
+     entry
+         .sql
+@@ -562,16 +566,17 @@ pub fn trim_database_query_history(
+         remove_for_bytes += 1;
+     }
+     let remove = remove_for_count.max(remove_for_bytes);
+     if remove > 0 {
+         history.drain(0..remove);
+     }
+ }
+ 
++#[cfg(test)]
+ pub fn database_query_history_content_height<'a>(
+     entries: impl Iterator<Item = &'a DatabaseQueryHistoryEntry>,
+     scale: f32,
+ ) -> f32 {
+     entries
+         .map(|entry| database_query_history_entry_height_px(&entry.sql, scale))
+         .sum()
+ }
+diff --git a/src/app/git_panel/git_commit_runtime.rs b/src/app/git_panel/git_commit_runtime.rs
+index ea2e078..7b12345 100644
+--- a/src/app/git_panel/git_commit_runtime.rs
++++ b/src/app/git_panel/git_commit_runtime.rs
+@@ -154,16 +154,17 @@ impl GitLogBuffer {
+         self.bump_revision();
+         self.prune_selection();
+     }
+ 
+     pub(crate) fn line_count(&self) -> usize {
+         self.lines.len() + usize::from(self.truncated)
+     }
+ 
++    #[cfg(test)]
+     pub(crate) fn line_at(&self, index: usize) -> Option<GitLogLineRef<'_>> {
+         self.display_line_at(index).map(GitLogDisplayLineRef::line)
+     }
+ 
+     pub(crate) fn is_empty(&self) -> bool {
+         self.lines.is_empty() && !self.truncated
+     }
+ 
+diff --git a/src/app/git_panel/git_panel_types.rs b/src/app/git_panel/git_panel_types.rs
+index a252aba..1934726 100644
+--- a/src/app/git_panel/git_panel_types.rs
++++ b/src/app/git_panel/git_panel_types.rs
+@@ -308,16 +308,17 @@ pub(crate) fn git_graph_scroll_drag_target(
+         } else {
+             thumb_h / 2.0
+         }
+     });
+     let ratio = (pointer_y - rows_y - 4.0 * scale - offset) / (track_h - thumb_h).max(1.0);
+     Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
+ }
+ 
++#[cfg(test)]
+ pub(crate) fn git_logs_max_scroll_from_content_height(
+     content_h: f32,
+     view_h: f32,
+     scale: f32,
+ ) -> f32 {
+     let rows_h = (view_h - GIT_LOG_TOOLBAR_H * scale).max(0.0);
+     (content_h - rows_h).max(0.0)
+ }
+diff --git a/src/render_view/root_helpers.rs b/src/render_view/root_helpers.rs
+index 29c771f..94304f2 100644
+--- a/src/render_view/root_helpers.rs
++++ b/src/render_view/root_helpers.rs
+@@ -541,16 +541,17 @@ pub(crate) fn should_suppress_active_line_useless_expression(
+         .is_some_and(|code| code.eq_ignore_ascii_case("B018") || code == "useless-expression")
+     {
+         return true;
+     }
+     diagnostic.message.contains("Found useless expression")
+         || diagnostic.message.contains("useless-expression")
+ }
+ 
++#[cfg(test)]
+ #[inline(always)]
+ fn should_draw_empty_ide_file_tree_overlay(
+     is_ide_mode: bool,
+     tabs_empty: bool,
+     file_tree_overlay_open: bool,
+ ) -> bool {
+     is_ide_mode && tabs_empty && file_tree_overlay_open
+ }
+
+## markdown_read.rs (snapshot before batch vs now)
+--- docs/superpowers/plans/snap-b-markdown_read.rs.txt	2026-09-15 14:46:45.816110238 +0300
++++ src/render_view/markdown_read.rs	2026-09-15 14:48:20.360635242 +0300
+@@ -1,15 +1,15 @@
+ use std::ops::Range;
+ 
+ use super::core_text::text_char_is_non_rendering_control;
+ use crate::app::{MarkdownMode, MarkdownTabState};
+ use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
+ use crate::languages::markdown::{
+-    MarkdownBlock, MarkdownBlockKind, MarkdownDocument, MarkdownInlineSpan, MarkdownInlineStyle,
++    MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle,
+     MarkdownListKind, MarkdownTableAlignment,
+ };
+ use crate::renderer::{EDITOR_SURFACE_BG, Renderer};
+ use crate::ui_system::UiRegistry;
+ 
+ const BODY_SCALE: f32 = 0.96;
+ const INLINE_CODE_PAD_X: f32 = 4.0;
+ const INLINE_CODE_EXTRA_PAD_Y: f32 = 0.75;
+@@ -1849,17 +1849,17 @@
+         for scale in [1.0, 1.25, 1.5, 2.0] {
+             for editor_text_x in [68.0, 107.0, 348.0, 721.0] {
+                 let frame_x = markdown_read_frame_x_for_editor_text(editor_text_x, scale);
+                 let reader_text_x = frame_x + (CONTENT_PAD * scale).round();
+                 assert_eq!(reader_text_x, editor_text_x.round());
+             }
+         }
+     }
+-    use crate::languages::markdown::MarkdownParseState;
++    use crate::languages::markdown::{MarkdownDocument, MarkdownParseState};
+ 
+     fn parse(source: &str) -> MarkdownDocument {
+         MarkdownParseState::default()
+             .parse(source)
+             .expect("markdown parse")
+     }
+ 
+     fn layout_with_scale_and_advance(

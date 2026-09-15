@@ -855,6 +855,7 @@ Implementation is split through `include!`:
 * `src/render_view/markdown_scroll.rs` -> included scroll-geometry chunk for source-backed viewport anchors, Reader source-line indexing (including wrapped text/table cells), and fold-aware full-editor source projection without cursor mutation.
 * `src/render_view/markdown_scroll_review_tests.rs` -> stage-1 geometry regression include covering hidden/container syntax, half-open source lookup, fractional-scale round trips, and local fallback ownership.
 * `src/render_view/markdown_read_interaction.rs` -> included Reader interaction chunk for cached visual/source mapping, hit-testing, selection/copy, source-backed search targeting through the shared scroll locator, and visible selection/search overlays.
+* `src/render_view/markdown_code_scroll.rs` -> `markdown_read.rs` include chunk for Reader code-block horizontal overflow: layout-width geometry, per-block scroll state projection, nested scissor draw, thumb geometry/registry, App wheel/drag input methods, and focused regressions. Hot path.
 * `src/render_view/api_client_panel/*` and `src/render_view/api_client_tab/*` -> API client renderer chunks.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract toggles and locked class block rendering.
 

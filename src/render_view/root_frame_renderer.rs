@@ -157,11 +157,7 @@ impl Renderer {
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
         let mut scroll_y = scroll_y_state.current;
-        if self.current_python_inlay_hints.as_slice() != python_inlay_hints {
-            self.current_python_inlay_hints.clear();
-            self.current_python_inlay_hints
-                .extend_from_slice(python_inlay_hints);
-        }
+        self.sync_current_python_inlay_hints(python_inlay_hints);
 
         let frame_now = Instant::now();
         let telemetry_frame_start = TELEMETRY_ENABLED.load(Ordering::Relaxed).then(Instant::now);
@@ -466,28 +462,8 @@ impl Renderer {
         let render_scroll_x = scroll_x.round();
         let render_scroll_y = scroll_y.round() - tab_bar_h;
 
-        if !markdown_read_active
-            && (self.last_editor_version_for_scroll_x != editor.version
-                || (self.last_width - self.width).abs() > 0.5)
-        {
-            let longest_idx = editor.longest_line_idx;
-            let start_byte = editor.line_offsets.get(longest_idx).copied().unwrap_or(0);
-            let end_byte = editor
-                .line_offsets
-                .get(longest_idx + 1)
-                .copied()
-                .unwrap_or(editor.len());
-            let (first, second) = editor.text_parts();
-            let longest_width = self.measure_width(first, second, start_byte, end_byte);
-            let view_w = self.width - self.minimap_width - self.left_padding;
-
-            if longest_width > view_w {
-                self.max_scroll_x = longest_width - view_w + 100.0;
-            } else {
-                self.max_scroll_x = 0.0;
-            }
-
-            self.last_editor_version_for_scroll_x = editor.version;
+        if !markdown_read_active {
+            self.update_max_scroll_x(editor);
         }
 
         // С этого момента self.height = real_height на всём протяжении кадра.
@@ -843,6 +819,27 @@ impl Renderer {
             if let Some(start) = chrome_detail_start.replace(Instant::now()) {
                 telemetry_chrome_details[1] = start.elapsed().as_secs_f32();
             }
+            let read_scrollbar_w = markdown_read::markdown_read_scrollbar_width(
+                markdown.read_scroll_bounds().unwrap_or(0.0),
+                s,
+            );
+            wants_pointer |= self.draw_search_panel_if_visible(
+                show_search,
+                search_anim_y,
+                search_editor,
+                search_focused,
+                search_case_sensitive,
+                search_results,
+                search_current_idx,
+                blink_alpha,
+                crate::render_view::search::search_panel_scrollbar_x(
+                    self.width,
+                    self.minimap_width,
+                    0.0,
+                    Some(read_scrollbar_w),
+                ),
+                ui_registry,
+            );
             if let Some(start) = chrome_detail_start.replace(Instant::now()) {
                 telemetry_chrome_details[2] = start.elapsed().as_secs_f32();
             }
@@ -1515,7 +1512,7 @@ impl Renderer {
             search_results,
             search_current_idx,
             blink_alpha,
-            scrollbar_width,
+            search::search_panel_scrollbar_x(self.width, self.minimap_width, scrollbar_width, None),
             ui_registry,
         );
         if let Some(start) = chrome_detail_start.replace(Instant::now()) {

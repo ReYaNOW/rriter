@@ -285,6 +285,55 @@ pub(crate) fn terminal_scrollbar_drag_target(
     Some((offset, layout.max_scroll - scroll_from_top))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TerminalBodyLayer {
+    Background,
+    Glyph,
+}
+
+const TERMINAL_BODY_LAYERS: [TerminalBodyLayer; 2] =
+    [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph];
+
+#[inline(always)]
+fn terminal_range_contains(row: usize, col: usize, bounds: (usize, usize, usize, usize)) -> bool {
+    let (sx, sy, ex, ey) = bounds;
+    let (start_x, start_y, end_x, end_y) =
+        crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
+    if row > start_y && row < end_y {
+        true
+    } else if row == start_y && row == end_y {
+        col >= start_x && col <= end_x
+    } else if row == start_y {
+        col >= start_x
+    } else if row == end_y {
+        col <= end_x
+    } else {
+        false
+    }
+}
+
+#[inline(always)]
+fn terminal_cell_background(
+    cell_bg: u8,
+    ansi: &[[f32; 4]],
+    in_selection: bool,
+    is_search_result: bool,
+    is_active_search: bool,
+    selection: [f32; 4],
+) -> Option<[f32; 4]> {
+    if is_active_search {
+        Some([1.0, 0.6, 0.0, 0.5])
+    } else if in_selection {
+        Some(selection)
+    } else if is_search_result {
+        Some([0.6, 0.6, 0.6, 0.35])
+    } else if cell_bg != 0 && cell_bg < 16 {
+        ansi.get(cell_bg as usize).copied()
+    } else {
+        None
+    }
+}
+
 fn terminal_glyph_anchor(
     c: char,
     glyph: crate::renderer::GlyphInfo,
@@ -589,132 +638,124 @@ impl Renderer {
             let mut row_search_results = std::mem::take(&mut self.terminal_row_search_results);
             let rendered_lines = if presentation_visible { total_lines } else { 0 };
 
-            for i in 0..rendered_lines {
-                let offset_from_bottom = total_lines - 1 - i;
-                let draw_y = term_content_y + term_content_h
-                    - term_pad_bottom
-                    - char_h
-                    - (offset_from_bottom as f32 * char_h)
-                    + scroll_offset;
+            // Все фоны видимых строк рисуются до глифов: иначе фон соседней
+            // ячейки/строки перекрывает выступающую часть иконки или эмодзи.
+            for layer in TERMINAL_BODY_LAYERS {
+                for i in 0..rendered_lines {
+                    let offset_from_bottom = total_lines - 1 - i;
+                    let draw_y = term_content_y + term_content_h
+                        - term_pad_bottom
+                        - char_h
+                        - (offset_from_bottom as f32 * char_h)
+                        + scroll_offset;
 
-                if draw_y + char_h < term_content_y || draw_y > term_content_y + term_content_h {
-                    continue;
-                }
-
-                if self.vertices.len() > 30_000 {
-                    self.flush();
-                }
-
-                let row = if i < scrollback_len {
-                    &grid.scrollback[i]
-                } else {
-                    &grid.lines[i - scrollback_len]
-                };
-
-                row_search_results.clear();
-                if ide_panel.term_show_search {
-                    row_search_results.extend(
-                        ide_panel
-                            .term_search_results
-                            .iter()
-                            .copied()
-                            .enumerate()
-                            .filter(|&(_, (_sx, sy, _ex, ey))| {
-                                let start_y = sy.min(ey);
-                                let end_y = sy.max(ey);
-                                i >= start_y && i <= end_y
-                            }),
-                    );
-                }
-
-                for (c_idx, cell) in row.iter().enumerate() {
-                    if c_idx >= grid.cols {
-                        break;
+                    if draw_y + char_h < term_content_y || draw_y > term_content_y + term_content_h
+                    {
+                        continue;
                     }
-                    let cx = (draw_x + c_idx as f32 * char_w).round();
-                    let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
-                    let cell_w = next_cx - cx;
-                    let mut bg_color = if cell.bg != 0 && cell.bg < 16 {
-                        Some(ansi_colors[cell.bg as usize])
+
+                    if self.vertices.len() > 30_000 {
+                        self.flush();
+                    }
+
+                    let row = if i < scrollback_len {
+                        &grid.scrollback[i]
                     } else {
-                        None
+                        &grid.lines[i - scrollback_len]
                     };
 
-                    let mut in_sel = false;
-                    if let Some((sx, sy, ex, ey)) = grid.selection {
-                        let (start_x, start_y, end_x, end_y) =
-                            crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
-                        in_sel = if i > start_y && i < end_y {
-                            true
-                        } else if i == start_y && i == end_y {
-                            c_idx >= start_x && c_idx <= end_x
-                        } else if i == start_y {
-                            c_idx >= start_x
-                        } else if i == end_y {
-                            c_idx <= end_x
-                        } else {
-                            false
-                        };
-                    }
+                    match layer {
+                        TerminalBodyLayer::Background => {
+                            row_search_results.clear();
+                            if ide_panel.term_show_search {
+                                row_search_results.extend(
+                                    ide_panel
+                                        .term_search_results
+                                        .iter()
+                                        .copied()
+                                        .enumerate()
+                                        .filter(|&(_, (_sx, sy, _ex, ey))| {
+                                            let start_y = sy.min(ey);
+                                            let end_y = sy.max(ey);
+                                            i >= start_y && i <= end_y
+                                        }),
+                                );
+                            }
 
-                    let mut is_search_res = false;
-                    let mut is_active_search = false;
-                    for &(idx, (sx, sy, ex, ey)) in &row_search_results {
-                        let (start_x, start_y, end_x, end_y) =
-                            crate::app::terminal::normalized_selection_bounds(sx, sy, ex, ey);
+                            for (c_idx, cell) in row.iter().enumerate() {
+                                if c_idx >= grid.cols {
+                                    break;
+                                }
+                                let cx = (draw_x + c_idx as f32 * char_w).round();
+                                let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
+                                let cell_w = next_cx - cx;
 
-                        let in_res = if i > start_y && i < end_y {
-                            true
-                        } else if i == start_y && i == end_y {
-                            c_idx >= start_x && c_idx <= end_x
-                        } else if i == start_y {
-                            c_idx >= start_x
-                        } else if i == end_y {
-                            c_idx <= end_x
-                        } else {
-                            false
-                        };
+                                let in_sel = grid
+                                    .selection
+                                    .is_some_and(|sel| terminal_range_contains(i, c_idx, sel));
 
-                        if in_res {
-                            is_search_res = true;
-                            if Some(idx) == ide_panel.term_search_current_idx {
-                                is_active_search = true;
+                                let mut is_search_res = false;
+                                let mut is_active_search = false;
+                                for &(idx, bounds) in &row_search_results {
+                                    if terminal_range_contains(i, c_idx, bounds) {
+                                        is_search_res = true;
+                                        if Some(idx) == ide_panel.term_search_current_idx {
+                                            is_active_search = true;
+                                        }
+                                    }
+                                }
+
+                                if let Some(bg) = terminal_cell_background(
+                                    cell.bg,
+                                    &ansi_colors,
+                                    in_sel,
+                                    is_search_res,
+                                    is_active_search,
+                                    self.theme.sel,
+                                ) {
+                                    self.push_rect(cx, draw_y, cell_w, char_h, bg);
+                                }
                             }
                         }
-                    }
-
-                    if is_active_search {
-                        bg_color = Some([1.0, 0.6, 0.0, 0.5]);
-                    } else if in_sel {
-                        bg_color = Some(self.theme.sel);
-                    } else if is_search_res {
-                        bg_color = Some([0.6, 0.6, 0.6, 0.35]);
-                    }
-
-                    if let Some(bg) = bg_color {
-                        self.push_rect(cx, draw_y, cell_w, char_h, bg);
-                    }
-                    if cell.c != ' ' {
-                        let fg_color = if cell.fg < 16 {
-                            ansi_colors[cell.fg as usize]
-                        } else {
-                            self.theme.fg
-                        };
-                        let prefer_color = match cell.presentation {
-                            crate::app::terminal::CELL_PRESENTATION_TEXT => Some(false),
-                            crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
-                            _ => None,
-                        };
-                        if let Some(g) = self.get_terminal_glyph(cell.c, prefer_color) {
-                            let baseline_y = draw_y + self.baseline_offset * term_scale;
-                            let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
-                                cell.c, g, cx, draw_y, cell_w, char_h, baseline_y, term_scale,
-                            );
-                            let (q_x, q_y, q_w, q_h) =
-                                crate::renderer::glyph_quad_rect(glyph_x, glyph_y, g, glyph_scale);
-                            self.push_quad(
-                                q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, fg_color, g.is_emoji,
-                            );
+                        TerminalBodyLayer::Glyph => {
+                            for (c_idx, cell) in row.iter().enumerate() {
+                                if c_idx >= grid.cols {
+                                    break;
+                                }
+                                if cell.c == ' ' {
+                                    continue;
+                                }
+                                let cx = (draw_x + c_idx as f32 * char_w).round();
+                                let next_cx = (draw_x + (c_idx + 1) as f32 * char_w).round();
+                                let cell_w = next_cx - cx;
+                                let fg_color = if cell.fg < 16 {
+                                    ansi_colors[cell.fg as usize]
+                                } else {
+                                    self.theme.fg
+                                };
+                                let prefer_color = match cell.presentation {
+                                    crate::app::terminal::CELL_PRESENTATION_TEXT => Some(false),
+                                    crate::app::terminal::CELL_PRESENTATION_EMOJI => Some(true),
+                                    _ => None,
+                                };
+                                if let Some(g) = self.get_terminal_glyph(cell.c, prefer_color) {
+                                    let baseline_y = draw_y + self.baseline_offset * term_scale;
+                                    let (glyph_x, glyph_y, glyph_scale) = terminal_glyph_anchor(
+                                        cell.c, g, cx, draw_y, cell_w, char_h, baseline_y,
+                                        term_scale,
+                                    );
+                                    let (q_x, q_y, q_w, q_h) = crate::renderer::glyph_quad_rect(
+                                        glyph_x,
+                                        glyph_y,
+                                        g,
+                                        glyph_scale,
+                                    );
+                                    self.push_quad(
+                                        q_x, q_y, q_w, q_h, g.u, g.v, g.uw, g.vh, fg_color,
+                                        g.is_emoji,
+                                    );
+                                }
+                            }
                         }
                     }
                 }
@@ -1384,6 +1425,47 @@ mod tests {
         assert_eq!(
             registry.find_at(190.0, 50.0),
             Some(crate::ui_system::UiId::TerminalScrollY)
+        );
+    }
+
+    #[test]
+    fn terminal_body_background_layer_precedes_overhanging_glyphs() {
+        let icon = glyph(12.0, 16.0, 0.0, 12.0, 0.0);
+        let (qx, _, qw, _) = crate::renderer::glyph_quad_rect(0.0, 16.0, icon, 1.0);
+        let next_cell_left = 8.0;
+        assert!(qx + qw > next_cell_left, "fixture icon must overhang into next cell");
+        assert_eq!(
+            TERMINAL_BODY_LAYERS,
+            [TerminalBodyLayer::Background, TerminalBodyLayer::Glyph]
+        );
+    }
+
+    #[test]
+    fn terminal_range_contains_matches_multiline_selection_semantics() {
+        // selection from (col 3,row 1) to (col 2,row 3), given reversed on purpose
+        let bounds = (2, 3, 3, 1);
+        assert!(!terminal_range_contains(1, 2, bounds));
+        assert!(terminal_range_contains(1, 3, bounds));
+        assert!(terminal_range_contains(2, 0, bounds));
+        assert!(terminal_range_contains(3, 2, bounds));
+        assert!(!terminal_range_contains(3, 3, bounds));
+        assert!(!terminal_range_contains(4, 0, bounds));
+    }
+
+    #[test]
+    fn terminal_cell_background_priority_is_active_search_selection_match_ansi() {
+        let ansi = [[0.1, 0.1, 0.1, 1.0]; 16];
+        let sel = [0.2, 0.3, 0.4, 1.0];
+        assert_eq!(terminal_cell_background(0, &ansi, false, false, false, sel), None);
+        assert_eq!(terminal_cell_background(3, &ansi, false, false, false, sel), Some(ansi[3]));
+        assert_eq!(terminal_cell_background(3, &ansi, true, true, false, sel), Some(sel));
+        assert_eq!(
+            terminal_cell_background(3, &ansi, false, true, false, sel),
+            Some([0.6, 0.6, 0.6, 0.35])
+        );
+        assert_eq!(
+            terminal_cell_background(3, &ansi, true, true, true, sel),
+            Some([1.0, 0.6, 0.0, 0.5])
         );
     }
 }

@@ -407,6 +407,14 @@ fn compute_about_wait_plan(
     ))
 }
 
+fn suspended_about_wait_plan(now: Instant, database_job_pending: bool) -> AboutWaitPlan {
+    if database_job_pending {
+        AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(100))
+    } else {
+        AboutWaitPlan::Wait
+    }
+}
+
 fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),
@@ -826,6 +834,34 @@ mod tests {
         );
         assert!(!app.scroll_y.is_dragging);
         assert_eq!(app.scroll_y.drag_offset, 0.0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn markdown_reader_wheel_is_not_swallowed_by_hidden_editor_hover_state() {
+        let source = (0..120)
+            .map(|i| format!("paragraph {i:03} alpha beta gamma delta\n\n"))
+            .collect::<String>();
+        let (_context, mut app) =
+            crate::render_view::reviewer_stage2_integration::fixture(&source, 900.0, 1.25);
+        app.set_markdown_mode(crate::app::MarkdownMode::Read);
+        crate::render_view::reviewer_stage2_integration::read_frame(&mut app);
+        let body = app
+            .ui_registry
+            .rect_for(crate::ui_system::UiId::MarkdownReadBody)
+            .expect("reader body");
+        {
+            let renderer = app.renderer.as_mut().unwrap();
+            renderer.last_mouse_x = body.0 + 40.0;
+            renderer.last_mouse_y = body.1 + body.3 * 0.5;
+        }
+        crate::app::mouse::HOVER_STATE.with(|state| state.borrow_mut().byte_offset = Some(0));
+        let before = app.scroll_y.target;
+        app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
+            winit::dpi::PhysicalPosition::new(0.0, -36.0),
+        ));
+        crate::app::mouse::clear_hover_popup(None);
+        assert!(app.scroll_y.target > before, "first reader wheel notch must scroll");
     }
 
     #[cfg(target_os = "linux")]
@@ -1380,5 +1416,31 @@ mod tests {
             ),
             AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(16)),
         );
+    }
+
+    #[test]
+    fn suspended_wait_plan_keeps_waking_only_while_database_job_is_pending() {
+        let now = Instant::now();
+        assert!(matches!(suspended_about_wait_plan(now, false), AboutWaitPlan::Wait));
+        match suspended_about_wait_plan(now, true) {
+            AboutWaitPlan::WaitUntil(at) => {
+                assert_eq!(at, now + std::time::Duration::from_millis(100));
+            }
+            AboutWaitPlan::Wait => panic!("pending database job must keep polling while suspended"),
+        }
+    }
+
+    #[test]
+    fn suspended_about_to_wait_still_polls_database_runtime() {
+        let about = include_str!("../about.rs");
+        let suspended = about
+            .split("if app.render_suspended && !automation_running {")
+            .nth(1)
+            .expect("suspended branch")
+            .split("return;")
+            .next()
+            .expect("suspended branch return");
+        assert!(suspended.contains("app.poll_database_runtime();"));
+        assert!(suspended.contains("suspended_about_wait_plan("));
     }
 }

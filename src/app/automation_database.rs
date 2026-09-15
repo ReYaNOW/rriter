@@ -117,6 +117,7 @@ impl DatabaseAutomationStep {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn is_timed_scroll(self) -> bool {
         matches!(
             self,

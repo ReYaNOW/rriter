@@ -425,7 +425,7 @@ impl Renderer {
         search_results: &[(usize, usize)],
         search_current_idx: Option<usize>,
         blink_alpha: f32,
-        scrollbar_width: f32,
+        scrollbar_x: f32,
         ui_registry: &mut crate::ui_system::UiRegistry,
     ) -> bool {
         if search_anim_y <= -100.0 * self.scale_factor {
@@ -440,7 +440,7 @@ impl Renderer {
             search_results,
             search_current_idx,
             blink_alpha,
-            scrollbar_width,
+            scrollbar_x,
             ui_registry,
         )
     }

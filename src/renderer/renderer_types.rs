@@ -374,6 +374,8 @@ pub struct Renderer {
     pub max_tab_scroll_x: f32,
     pub max_terminal_tab_scroll_x: f32,
     pub last_editor_version_for_scroll_x: u64,
+    pub last_view_w_for_scroll_x: f32,
+    pub scroll_x_bounds_inlays_dirty: bool,
 
     pub last_frame_time: Option<std::time::Instant>,
     pub fps: f32,

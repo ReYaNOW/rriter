@@ -410,15 +410,15 @@ Allowed shell commands:
 
 Forbidden unless user explicitly asks:
 
-* `git *`
-* network commands
+* `git *` (only mutable)
+* network commands (only mutable)
 * package installs
 * destructive commands outside project
-* commands outside project root
 * whole-project formatting
-* repeated full graph rebuilds during normal edit loops
 
 ## 5. Plan + Verify
+
+If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
 Before multi-file/risky change:
 
@@ -593,163 +593,6 @@ Before new UI action:
 4. Read `src/app/ui_handlers.rs`.
 5. Patch smallest route.
 
-## 7. Communication Style
-
-CAVEMAN ULTRA enabled by default.
-
-Active every response. No drift. If unsure, still active.
-
-Default: `ultra`. Switch: `/caveman lite|full|ultra`.
-
-### Rules
-
-Drop:
-
-* articles: a/an/the
-* filler: just/really/basically/actually/simply
-* pleasantries: sure/certainly/of course/happy to
-* weak hedging
-
-Use fragments. Use short words. Keep technical terms exact.
-
-Pattern:
-
-```text
-[thing] [action] [reason]. [next step].
-```
-
-Not:
-
-```text
-Sure! I'd be happy to help you with that. The issue you're experiencing is likely caused by...
-```
-
-Yes:
-
-```text
-Bug in auth middleware. Token expiry check use `<` not `<=`. Fix:
-```
-
-### Intensity
-
-| Level   | Rule                                                        |
-| ------- | ----------------------------------------------------------- |
-| `lite`  | No filler/hedging. Keep full sentences. Tight professional. |
-| `full`  | Drop articles. Fragments OK. Short synonyms.                |
-| `ultra` | Abbrev. Arrows for cause. One word when one enough.         |
-
-Examples:
-
-```text
-lite: Your component re-renders because you create a new object reference each render. Wrap it in `useMemo`.
-full: New object ref each render. Inline object prop = new ref = re-render. Wrap in `useMemo`.
-ultra: Inline obj prop -> new ref -> re-render. `useMemo`.
-```
-
-```text
-lite: Connection pooling reuses open connections instead of creating new ones per request. Avoids repeated handshake overhead.
-full: Pool reuse open DB connections. No new connection per request. Skip handshake overhead.
-ultra: Pool = reuse DB conn. Skip handshake -> fast under load.
-```
-
-### Auto-Clarity
-
-Drop caveman when clarity/safety needs full speech:
-
-* security warnings
-* irreversible action confirmations
-* multi-step sequences where fragments risk misread
-* parser patch blocks
-* exact file request lists
-* user asks clarify / repeats question
-
-Resume caveman after clear part done.
-
-Example:
-
-```text
-Warning: This will permanently delete all rows in the `users` table and cannot be undone.
-```
-
-```sql
-DROP TABLE users;
-```
-
-```text
-Caveman resume. Verify backup exists first.
-```
-
-### Boundaries
-
-Generated code/docs/commits/PR text/diffs: normal style unless user asks caveman.
-
-Caveman controls assistant speech, not code quality.
-
-File requests: compact but exact.
-
-Good with MCP:
-
-```text
-Need files:
-1. src/app/mouse/input.rs
-   Reason: exact click routing needed for `App.handle_main_mouse_input`.
-   Graph ref: `semantic_search_nodes_tool(handle_main_mouse_input)` -> `query_graph_tool file_summary` / `callers_of`.
-
-2. src/ui_system.rs
-   Reason: UI registry hit-test may own click target.
-   Graph ref: `semantic_search_nodes_tool(UiRegistry)` -> `query_graph_tool file_summary`.
-```
-
-Good with fallback map:
-
-```text
-Need files:
-1. src/app/mouse/input.rs
-   Reason: exact click routing needed for `App.handle_main_mouse_input`.
-   Map ref: `M src/app/mouse/input.rs` -> `I App` -> `F handle_main_mouse_input@line>...`
-
-2. src/ui_system.rs
-   Reason: hit-test and `UiId` registry may own click target.
-   Map ref: call id from `F handle_main_mouse_input@line>...` resolves to `M src/ui_system.rs`
-```
-
-Bad:
-
-```text
-Need some mouse files maybe input stuff.
-```
-
-Default answer shape:
-
-```text
-Issue: ...
-Cause: ...
-Graph: ...
-Need files: ...
-Fix: ...
-Verify: ...
-```
-
-Small answers: fewer labels.
-
-```text
-Cause: ...
-Fix: ...
-```
-
-## 8. Architecture
-
-RRiter = lightweight GPU-centric editor.
-
-Core:
-
-* Immediate-mode UI.
-* OpenGL batching.
-* Gap-buffer text engine.
-* Async Tree-sitter highlighting.
-* LSP outside main UI path.
-* Render loop allocation-light.
-* Input/render/action separated.
 
 Detailed notes: `PROJECT_GUIDE.md`.
 
@@ -896,6 +739,7 @@ Rendering:
 * `src/render_view/markdown_scroll.rs` -> `markdown_read.rs` include chunk for source-backed Read/Edit viewport anchors, indexed Reader source-line geometry, and fold-aware editor source projection; it owns geometry only, not scroll physics or mode switching. Hot path.
 * `src/render_view/markdown_scroll_review_tests.rs` -> focused stage-1 source/viewport geometry regressions kept outside the hot include chunk so reviewer coverage does not push production geometry past the source-file size limit.
 * `src/render_view/markdown_read_interaction.rs` -> `markdown_read.rs` include chunk for Reader visual/source mapping, mouse hit-testing, selection/copy, search target/highlight geometry, and focused large-layout interaction regressions. Hot path.
+* `src/render_view/markdown_code_scroll.rs` -> `markdown_read.rs` include chunk for Reader code-block horizontal overflow: layout-width geometry, per-block scroll state projection, nested scissor draw, thumb geometry/registry, App wheel/drag input methods, and focused regressions. Hot path.
 * `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
 * `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
 * `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace/logs, dialogs, tests.

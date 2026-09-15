@@ -171,8 +171,9 @@ fn cursor_position_allows_editor_hover(
 fn should_suppress_editor_hover_for_scroll_drag(
     scroll_y_dragging: bool,
     scroll_x_dragging: bool,
+    markdown_read: bool,
 ) -> bool {
-    scroll_y_dragging || scroll_x_dragging
+    markdown_read || scroll_y_dragging || scroll_x_dragging
 }
 
 fn inline_git_popup_blocks_hover(id: Option<crate::ui_system::UiId>) -> bool {
@@ -740,6 +741,17 @@ impl App {
             return;
         }
 
+        if self.markdown_mode() == crate::app::MarkdownMode::Read
+            && self.markdown.code_scroll_drag.is_some()
+        {
+            let _ = self.drag_markdown_code_scrollbar_to(px);
+            clear_hover_popup(self.renderer.as_mut());
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return;
+        }
+
         if self.markdown_mode() == crate::app::MarkdownMode::Read && self.scroll_y.is_dragging {
             let _ = self.drag_markdown_read_scrollbar_to(py);
             clear_hover_popup(self.renderer.as_mut());
@@ -970,6 +982,7 @@ impl App {
         let suppress_editor_hover = should_suppress_editor_hover_for_scroll_drag(
             self.scroll_y.is_dragging,
             self.scroll_x.is_dragging,
+            self.markdown_mode() == crate::app::MarkdownMode::Read,
         );
         if suppress_editor_hover {
             clear_hover_popup(self.renderer.as_mut());
@@ -1889,9 +1902,14 @@ mod tests {
 
     #[test]
     fn editor_scrollbar_drag_suppresses_hover_only_while_dragging() {
-        assert!(!should_suppress_editor_hover_for_scroll_drag(false, false));
-        assert!(should_suppress_editor_hover_for_scroll_drag(true, false));
-        assert!(should_suppress_editor_hover_for_scroll_drag(false, true));
-        assert!(should_suppress_editor_hover_for_scroll_drag(true, true));
+        assert!(!should_suppress_editor_hover_for_scroll_drag(false, false, false));
+        assert!(should_suppress_editor_hover_for_scroll_drag(true, false, false));
+        assert!(should_suppress_editor_hover_for_scroll_drag(false, true, false));
+        assert!(should_suppress_editor_hover_for_scroll_drag(true, true, false));
+    }
+
+    #[test]
+    fn markdown_reader_never_arms_hidden_editor_hover() {
+        assert!(should_suppress_editor_hover_for_scroll_drag(false, false, true));
     }
 }

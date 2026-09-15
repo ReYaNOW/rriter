@@ -1,0 +1,905 @@
+RRiter graphics:
+Context: OpenGL 4.1 Core / GPU priority High
+OpenGL: 4.1.0 NVIDIA 615.71.09
+GLSL: 4.10 NVIDIA via Cg compiler
+GPU: NVIDIA Corporation / NVIDIA GeForce RTX 4070/PCIe/SSE2
+Scale factor: 1.33
+[HL TRACE app:reset_clear] ver=2 bytes=40273 lines=854 ext=py priority=true cursor=0 old_spans=1 old_complete=false
+[HL TRACE runtime:reset] req_next=3 ver=2 bytes=40273 lines=854 ext=py priority=true anchor=0 old_spans=0 old_complete=false
+[HL TRACE worker:start] req=3 ver=2 mode=reset batch=1 resets=1 edit_msgs=0 edit_ops=0 bytes=40273 lines=854 ext=py lang=py priority=true skip_full=false anchor=0 edit_range=None invalidate=None queued_ms=0.04
+[HL TRACE app:reset_clear] ver=10 bytes=81820 lines=1039 ext=md priority=false cursor=0 old_spans=0 old_complete=false
+[HL TRACE runtime:reset] req_next=11 ver=10 bytes=81820 lines=1039 ext=md priority=false anchor=0 old_spans=0 old_complete=false
+[HL TRACE runtime:poll_drop] req=3 current_req=12 ver=2 editor_ver=11 current_ver=0 spans=4582 completions=0 complete=false
+[HL TRACE worker:done] req=3 ver=2 bytes=40273 lines=854 lang=py priority_sent=true priority_range=40273 priority_spans=4582 raw_spans=3413 flat_spans=4582 completions=1073 folds=101 errors=0 cache=42 byte_buf_cap=40273 tree=true total_ms=252.98 queued_ms=0.04 keyword_ms=0.02 priority_ms=145.64 parse_ms=5.01 fold_ms=2.64 import_fold_ms=0.09 completion_walk_ms=13.29 query_ms=80.88 injection_ms=4.10 flatten_ms=0.82 shrink_ms=0.00 completions_build_ms=0.13 send_ms=0.01
+[HL TRACE worker:done] req=12 ver=11 bytes=24792 lines=431 lang=py priority_sent=false priority_range=0 priority_spans=0 raw_spans=1342 flat_spans=2267 completions=573 folds=41 errors=0 cache=42 byte_buf_cap=40273 tree=true total_ms=68.77 queued_ms=0.22 keyword_ms=0.01 priority_ms=0.00 parse_ms=2.26 fold_ms=2.50 import_fold_ms=0.04 completion_walk_ms=8.39 query_ms=49.89 injection_ms=4.55 flatten_ms=0.81 shrink_ms=0.00 completions_build_ms=0.08 send_ms=0.00
+[HL TRACE runtime:sync_edit_done] ver=11 bytes=24792 lines=431 ext=py lang=py raw_spans=1342 merged_spans=1342 flat_spans=2267 range=None invalidate=None total_ms=108.27 parse_ms=2.66 query_ms=104.96 merge_ms=0.06 flatten_ms=0.56 shrink_ms=0.00 timeout_ms=150
+[HL TRACE app:reset_clear] ver=12 bytes=81820 lines=1039 ext=md priority=false cursor=0 old_spans=0 old_complete=true
+[HL TRACE runtime:reset] req_next=13 ver=12 bytes=81820 lines=1039 ext=md priority=false anchor=0 old_spans=0 old_complete=true
+[HL TRACE worker:start] req=13 ver=12 mode=reset batch=1 resets=1 edit_msgs=0 edit_ops=0 bytes=81820 lines=1039 ext=md lang=md priority=false skip_full=false anchor=0 edit_range=None invalidate=None queued_ms=0.23
+[HL TRACE worker:done] req=13 ver=12 bytes=81820 lines=1039 lang=md priority_sent=false priority_range=0 priority_spans=0 raw_spans=1609 flat_spans=1837 completions=0 folds=0 errors=0 cache=43 byte_buf_cap=81820 tree=true total_ms=71.37 queued_ms=0.23 keyword_ms=0.00 priority_ms=0.00 parse_ms=16.86 fold_ms=0.00 import_fold_ms=0.00 completion_walk_ms=0.87 query_ms=3.32 injection_ms=49.02 flatten_ms=0.85 shrink_ms=0.00 completions_build_ms=0.00 send_ms=0.00
+[HL TRACE runtime:poll_apply] req=13 ver=12 spans=1837 completions=0 folds=0 errors=0 complete=true tree=true bytes=81820
+[F1 +0ms] begin block=15764 pointer_x=1421.8646 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 918.0, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=503.86462 target=0 current=0
+[F1 +0ms] tick block=15764 dt=0.016 changed=false dragging=true offset=503.86462 target=0 current=0
+[F1 +46ms] move_top px=1423.1719 py=549.76044 drag=Some(15764) mode=Read
+[F1 +46ms] reached code-drag branch px=1423.1719 py=549.76044 drag=Some(15764) mode=Read
+[F1 +46ms] drag block=15764 pointer_x=1423.1719 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=1.8428209 current=0
+[F1 +67ms] move_top px=1424.4791 py=549.76044 drag=Some(15764) mode=Read
+[F1 +67ms] reached code-drag branch px=1424.4791 py=549.76044 drag=Some(15764) mode=Read
+[F1 +68ms] drag block=15764 pointer_x=1424.4791 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=3.6856418 current=1.7938125
+[F1 +76ms] move_top px=1425.7865 py=549.76044 drag=Some(15764) mode=Read
+[F1 +76ms] reached code-drag branch px=1425.7865 py=549.76044 drag=Some(15764) mode=Read
+[F1 +76ms] drag block=15764 pointer_x=1425.7865 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=5.528635 current=2.2564147
+[F1 +84ms] move_top px=1425.7865 py=548.4531 drag=Some(15764) mode=Read
+[F1 +84ms] reached code-drag branch px=1425.7865 py=548.4531 drag=Some(15764) mode=Read
+[F1 +84ms] drag block=15764 pointer_x=1425.7865 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=5.528635 current=2.852723
+[F1 +88ms] move_top px=1427.0938 py=548.4531 drag=Some(15764) mode=Read
+[F1 +89ms] reached code-drag branch px=1427.0938 py=548.4531 drag=Some(15764) mode=Read
+[F1 +89ms] drag block=15764 pointer_x=1427.0938 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=7.3714557 current=3.185525
+[F1 +101ms] tick block=15764 dt=0.00443589 changed=true dragging=true offset=503.86462 target=7.3714557 current=4.3426313
+[F1 +101ms] move_top px=1428.401 py=548.4531 drag=Some(15764) mode=Read
+[F1 +101ms] reached code-drag branch px=1428.401 py=548.4531 drag=Some(15764) mode=Read
+[F1 +101ms] drag block=15764 pointer_x=1428.401 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=503.86462 target=9.214276 current=4.3426313
+[F1 +110ms] end_drag block=15764 before: dragging=true offset=503.86462 target=9.214276 current=5.225936
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +765ms] begin block=15764 pointer_x=1515.9479 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 924.3844, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=591.5635 target=9.000035 current=9.214276
+[F1 +765ms] tick block=15764 dt=0.016 changed=true dragging=true offset=591.5635 target=9.000035 current=9.000035
+[F1 +766ms] end_drag block=15764 before: dragging=true offset=591.5635 target=9.000035 current=9.000035
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +2141ms] begin block=15764 pointer_x=2051.6824 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 924.3844, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=9.000035
+[F1 +2145ms] tick block=15764 dt=0.004593542 changed=true dragging=true offset=563.59845 target=651 current=19.656128
+[F1 +2145ms] move_top px=2052.9844 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2145ms] reached code-drag branch px=2052.9844 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2145ms] drag block=15764 pointer_x=2052.9844 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=19.656128
+[F1 +2149ms] move_top px=2054.2917 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2149ms] reached code-drag branch px=2054.2917 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2149ms] drag block=15764 pointer_x=2054.2917 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=34.164566
+[F1 +2157ms] move_top px=2055.5989 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2157ms] reached code-drag branch px=2055.5989 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2157ms] drag block=15764 pointer_x=2055.5989 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=78.685104
+[F1 +2161ms] move_top px=2056.9063 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2161ms] reached code-drag branch px=2056.9063 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2161ms] drag block=15764 pointer_x=2056.9063 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=105.55519
+[F1 +2165ms] move_top px=2058.2136 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2165ms] reached code-drag branch px=2058.2136 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2165ms] drag block=15764 pointer_x=2058.2136 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=133.83363
+[F1 +2169ms] move_top px=2059.5208 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2170ms] reached code-drag branch px=2059.5208 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2170ms] drag block=15764 pointer_x=2059.5208 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=163.0438
+[F1 +2174ms] move_top px=2060.8281 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2174ms] reached code-drag branch px=2060.8281 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2174ms] drag block=15764 pointer_x=2060.8281 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=193.76735
+[F1 +2174ms] move_top px=2062.1355 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2174ms] reached code-drag branch px=2062.1355 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2174ms] drag block=15764 pointer_x=2062.1355 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=193.76735
+[F1 +2182ms] move_top px=2063.4375 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2182ms] reached code-drag branch px=2063.4375 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2182ms] drag block=15764 pointer_x=2063.4375 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=251.17218
+[F1 +2186ms] move_top px=2064.7449 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2186ms] reached code-drag branch px=2064.7449 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2186ms] drag block=15764 pointer_x=2064.7449 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=280.15472
+[F1 +2191ms] move_top px=2066.052 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2191ms] reached code-drag branch px=2066.052 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2191ms] drag block=15764 pointer_x=2066.052 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=310.40448
+[F1 +2199ms] move_top px=2067.3594 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2199ms] reached code-drag branch px=2067.3594 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2199ms] drag block=15764 pointer_x=2067.3594 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=355.9943
+[F1 +2203ms] move_top px=2068.6667 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2203ms] reached code-drag branch px=2068.6667 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2203ms] drag block=15764 pointer_x=2068.6667 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=379.05908
+[F1 +2207ms] move_top px=2069.9739 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2207ms] reached code-drag branch px=2069.9739 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2207ms] drag block=15764 pointer_x=2069.9739 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=401.10416
+[F1 +2211ms] move_top px=2071.2813 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2211ms] reached code-drag branch px=2071.2813 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2211ms] drag block=15764 pointer_x=2071.2813 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=421.25574
+[F1 +2215ms] move_top px=2072.5886 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2215ms] reached code-drag branch px=2072.5886 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2216ms] drag block=15764 pointer_x=2072.5886 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=440.6207
+[F1 +2220ms] move_top px=2073.8958 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2220ms] reached code-drag branch px=2073.8958 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2220ms] drag block=15764 pointer_x=2073.8958 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=460.0427
+[F1 +2224ms] move_top px=2075.198 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2224ms] reached code-drag branch px=2075.198 py=551.0677 drag=Some(15764) mode=Read
+[F1 +2224ms] drag block=15764 pointer_x=2075.198 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=475.8206
+[F1 +2224ms] move_top px=2075.198 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2225ms] reached code-drag branch px=2075.198 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2225ms] drag block=15764 pointer_x=2075.198 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=475.8206
+[F1 +2232ms] move_top px=2076.5051 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2232ms] reached code-drag branch px=2076.5051 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2232ms] drag block=15764 pointer_x=2076.5051 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=504.03976
+[F1 +2236ms] move_top px=2077.8125 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2236ms] reached code-drag branch px=2077.8125 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2236ms] drag block=15764 pointer_x=2077.8125 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=517.1274
+[F1 +2240ms] move_top px=2079.1199 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2240ms] reached code-drag branch px=2079.1199 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2240ms] drag block=15764 pointer_x=2079.1199 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=529.11926
+[F1 +2244ms] move_top px=2080.427 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2245ms] reached code-drag branch px=2080.427 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2245ms] drag block=15764 pointer_x=2080.427 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=540.1352
+[F1 +2249ms] tick block=15764 dt=0.004191027 changed=true dragging=true offset=563.59845 target=651 current=550.3186
+[F1 +2249ms] move_top px=2081.7344 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2249ms] reached code-drag branch px=2081.7344 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2249ms] drag block=15764 pointer_x=2081.7344 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=550.3186
+[F1 +2253ms] move_top px=2083.0417 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2253ms] reached code-drag branch px=2083.0417 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2253ms] drag block=15764 pointer_x=2083.0417 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=559.62054
+[F1 +2257ms] move_top px=2084.3489 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2257ms] reached code-drag branch px=2084.3489 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2257ms] drag block=15764 pointer_x=2084.3489 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=568.1735
+[F1 +2257ms] move_top px=2085.6511 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2257ms] reached code-drag branch px=2085.6511 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2258ms] drag block=15764 pointer_x=2085.6511 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=568.1735
+[F1 +2262ms] move_top px=2086.9583 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2262ms] reached code-drag branch px=2086.9583 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2262ms] drag block=15764 pointer_x=2086.9583 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=577.2725
+[F1 +2265ms] move_top px=2088.2656 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2265ms] reached code-drag branch px=2088.2656 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2265ms] drag block=15764 pointer_x=2088.2656 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=582.8987
+[F1 +2269ms] move_top px=2089.573 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2269ms] reached code-drag branch px=2089.573 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2270ms] drag block=15764 pointer_x=2089.573 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=589.342
+[F1 +2274ms] move_top px=2090.8801 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2274ms] reached code-drag branch px=2090.8801 py=549.76044 drag=Some(15764) mode=Read
+[F1 +2274ms] drag block=15764 pointer_x=2090.8801 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=595.34436
+[F1 +2274ms] move_top px=2090.8801 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2274ms] reached code-drag branch px=2090.8801 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2274ms] drag block=15764 pointer_x=2090.8801 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=595.34436
+[F1 +2278ms] move_top px=2092.1875 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2278ms] reached code-drag branch px=2092.1875 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2278ms] drag block=15764 pointer_x=2092.1875 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=600.5726
+[F1 +2282ms] move_top px=2093.4949 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2282ms] reached code-drag branch px=2093.4949 py=548.4531 drag=Some(15764) mode=Read
+[F1 +2282ms] drag block=15764 pointer_x=2093.4949 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=605.51526
+[F1 +2286ms] end_drag block=15764 before: dragging=true offset=563.59845 target=651 current=609.928
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +4599ms] begin block=15764 pointer_x=1270.2916 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1379.8031, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=563.59845 target=0 current=651
+[F1 +4599ms] tick block=15764 dt=0.016 changed=true dragging=true offset=563.59845 target=0 current=554.5832
+[F1 +4601ms] end_drag block=15764 before: dragging=true offset=563.59845 target=0 current=554.5832
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +5949ms] begin block=15764 pointer_x=2147.0676 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 918.0, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=563.59845 target=651 current=0
+[F1 +5950ms] tick block=15764 dt=0.016 changed=true dragging=true offset=563.59845 target=651 current=96.416824
+[F1 +5950ms] end_drag block=15764 before: dragging=true offset=563.59845 target=651 current=96.416824
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +6315ms] begin block=15764 pointer_x=2141.8386 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1379.8031, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=762.0355 target=651 current=651
+[F1 +6315ms] tick block=15764 dt=0.016 changed=false dragging=true offset=762.0355 target=651 current=651
+[F1 +6403ms] move_top px=2140.5313 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6403ms] reached code-drag branch px=2140.5313 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6403ms] drag block=15764 pointer_x=2140.5313 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=649.157 current=651
+[F1 +6417ms] tick block=15764 dt=0.008926441 changed=true dragging=true offset=762.0355 target=649.157 current=649.5382
+[F1 +6417ms] move_top px=2139.2292 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6417ms] reached code-drag branch px=2139.2292 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6417ms] drag block=15764 pointer_x=2139.2292 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=647.3216 current=649.5382
+[F1 +6418ms] move_top px=2137.9219 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6418ms] reached code-drag branch px=2137.9219 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6418ms] drag block=15764 pointer_x=2137.9219 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=645.4786 current=649.5382
+[F1 +6421ms] move_top px=2136.6145 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6421ms] reached code-drag branch px=2136.6145 py=549.76044 drag=Some(15764) mode=Read
+[F1 +6421ms] drag block=15764 pointer_x=2136.6145 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=643.6356 current=649.2757
+[F1 +6425ms] move_top px=2136.6145 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6425ms] reached code-drag branch px=2136.6145 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6425ms] drag block=15764 pointer_x=2136.6145 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=643.6356 current=648.9509
+[F1 +6425ms] move_top px=2135.3074 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6425ms] reached code-drag branch px=2135.3074 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6426ms] drag block=15764 pointer_x=2135.3074 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=641.79297 current=648.9509
+[F1 +6429ms] move_top px=2134 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6429ms] reached code-drag branch px=2134 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6429ms] drag block=15764 pointer_x=2134 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=639.94995 current=648.5517
+[F1 +6433ms] move_top px=2132.6926 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6433ms] reached code-drag branch px=2132.6926 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6433ms] drag block=15764 pointer_x=2132.6926 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=638.107 current=648.10925
+[F1 +6433ms] move_top px=2131.3855 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6433ms] reached code-drag branch px=2131.3855 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6433ms] drag block=15764 pointer_x=2131.3855 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=636.26434 current=648.10925
+[F1 +6438ms] move_top px=2130.0781 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6438ms] reached code-drag branch px=2130.0781 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6438ms] drag block=15764 pointer_x=2130.0781 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=634.4213 current=647.44006
+[F1 +6438ms] move_top px=2128.7708 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6438ms] reached code-drag branch px=2128.7708 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6439ms] drag block=15764 pointer_x=2128.7708 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=632.5783 current=647.44006
+[F1 +6439ms] move_top px=2127.4688 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6439ms] reached code-drag branch px=2127.4688 py=551.0677 drag=Some(15764) mode=Read
+[F1 +6439ms] drag block=15764 pointer_x=2127.4688 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=762.0355 target=630.7429 current=647.44006
+[F1 +6443ms] end_drag block=15764 before: dragging=true offset=762.0355 target=630.7429 current=646.8036
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +7284ms] begin block=15764 pointer_x=1448 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1365.6156, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=82.3844 target=631 current=630.7429
+[F1 +7284ms] tick block=15764 dt=0.016 changed=true dragging=true offset=82.3844 target=631 current=631
+[F1 +7362ms] move_top px=1446.6927 py=552.375 drag=Some(15764) mode=Read
+[F1 +7362ms] reached code-drag branch px=1446.6927 py=552.375 drag=Some(15764) mode=Read
+[F1 +7362ms] drag block=15764 pointer_x=1446.6927 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=82.3844 target=629.15717 current=631
+[F1 +7375ms] end_drag block=15764 before: dragging=true offset=82.3844 target=629.15717 current=629.61444
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +8532ms] begin block=15764 pointer_x=1370.9063 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1364.1969, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=6.7093506 target=629.00006 current=629.15717
+[F1 +8532ms] tick block=15764 dt=0.016 changed=true dragging=true offset=6.7093506 target=629.00006 current=629.00006
+[F1 +8534ms] end_drag block=15764 before: dragging=true offset=6.7093506 target=629.00006 current=629.00006
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +9441ms] begin block=15764 pointer_x=1366.9844 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1364.1969, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=2.7874756 target=629.00006 current=629.00006
+[F1 +9442ms] tick block=15764 dt=0.016 changed=false dragging=true offset=2.7874756 target=629.00006 current=629.00006
+[F1 +9475ms] end_drag block=15764 before: dragging=true offset=2.7874756 target=629.00006 current=629.00006
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +10017ms] begin block=15764 pointer_x=1374.8281 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1364.1969, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=10.631226 target=629.00006 current=629.00006
+[F1 +10018ms] tick block=15764 dt=0.016 changed=false dragging=true offset=10.631226 target=629.00006 current=629.00006
+[F1 +10128ms] move_top px=1373.5209 py=556.2917 drag=Some(15764) mode=Read
+[F1 +10128ms] reached code-drag branch px=1373.5209 py=556.2917 drag=Some(15764) mode=Read
+[F1 +10128ms] drag block=15764 pointer_x=1373.5209 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=10.631226 target=627.1573 current=629.00006
+[F1 +10129ms] tick block=15764 dt=0.016 changed=true dragging=true offset=10.631226 target=627.1573 current=628.2214
+[F1 +10130ms] end_drag block=15764 before: dragging=true offset=10.631226 target=627.1573 current=628.2214
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +10596ms] begin block=15764 pointer_x=1297.7344 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 1362.7781, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=563.59845 target=0 current=627.1573
+[F1 +10597ms] tick block=15764 dt=0.016 changed=true dragging=true offset=563.59845 target=0 current=534.2717
+[F1 +10701ms] tick block=15764 dt=0.004179938 changed=true dragging=true offset=563.59845 target=0 current=69.1862
+[F1 +10747ms] move_top px=1299.0416 py=553.6823 drag=Some(15764) mode=Read
+[F1 +10747ms] reached code-drag branch px=1299.0416 py=553.6823 drag=Some(15764) mode=Read
+[F1 +10747ms] drag block=15764 pointer_x=1299.0416 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=563.59845 target=0 current=22.493216
+[F1 +10777ms] end_drag block=15764 before: dragging=true offset=563.59845 target=0 current=10.661556
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+
+[F1 +10974ms] begin block=15764 pointer_x=1299.0416 geom=track_x=918 track_w=1589 view_w=1589 content_w=2240 max_scroll=651 thumb=Some(ScrollbarThumb { start: 918.0, len: 1127.1969 }) result=true drag=Some(15764) dragging=true offset=381.04163 target=0 current=0
+[F1 +10975ms] tick block=15764 dt=0.016 changed=false dragging=true offset=381.04163 target=0 current=0
+[F1 +11066ms] move_top px=1300.349 py=553.6823 drag=Some(15764) mode=Read
+[F1 +11066ms] reached code-drag branch px=1300.349 py=553.6823 drag=Some(15764) mode=Read
+[F1 +11066ms] drag block=15764 pointer_x=1300.349 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=381.04163 target=1.8429929 current=0
+[F1 +11080ms] tick block=15764 dt=0.008213252 changed=true dragging=true offset=381.04163 target=1.8429929 current=1.455233
+[F1 +11080ms] move_top px=1301.651 py=553.6823 drag=Some(15764) mode=Read
+[F1 +11080ms] reached code-drag branch px=1301.651 py=553.6823 drag=Some(15764) mode=Read
+[F1 +11080ms] drag block=15764 pointer_x=1301.651 geom(track_x,track_w,max_scroll)=Some((918.0, 1589.0, 651.0)) miss=None result=true drag=Some(15764) dragging=true offset=381.04163 target=3.678414 current=1.455233
+[F1 +11085ms] end_drag block=15764 before: dragging=true offset=381.04163 target=3.678414 current=1.7137713
+   0: std::backtrace_rs::backtrace::libunwind::trace
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/libunwind.rs:117:9
+   1: std::backtrace_rs::backtrace::trace_unsynchronized::<<std::backtrace::Backtrace>::create::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/../../backtrace/src/backtrace/mod.rs:66:14
+   2: <std::backtrace::Backtrace>::create
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/backtrace.rs:331:13
+   3: <rriter::app::markdown::MarkdownTabState>::end_code_scroll_drag
+             at ./src/render_view/markdown_code_scroll.rs:398:101
+   4: <rriter::app::app_state::App>::sync_active_tab
+             at ./src/app/app_ide_tab_methods.rs:660:23
+   5: <rriter::app::app_state::App>::start_external_changes_check
+             at ./src/app/app_window_external_methods.rs:992:14
+   6: rriter::app::events::about::about_to_wait
+             at ./src/app/events/about.rs:526:17
+   7: <&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0} as core::ops::function::FnMut<(winit::event::Event<()>, &winit::event_loop::ActiveEventLoop)>>::call_mut
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:298:21
+   8: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::single_iteration::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:515:9
+   9: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::poll_events_with_timeout::<&mut &mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:328:14
+  10: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::pump_events::<&mut <winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:226:18
+  11: <winit::platform_impl::linux::wayland::event_loop::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/wayland/event_loop/mod.rs:190:24
+  12: <winit::platform_impl::linux::EventLoop<()>>::run_on_demand::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:820:61
+  13: <winit::platform_impl::linux::EventLoop<()>>::run::<<winit::event_loop::EventLoop<()>>::run_app<rriter::app::app_state::App>::{closure#0}>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/platform_impl/linux/mod.rs:813:14
+  14: <winit::event_loop::EventLoop<()>>::run_app::<rriter::app::app_state::App>
+             at /home/reyan/.local/share/cargo/registry/src/index.crates.io-1949cf8c6b5b557f/winit-0.30.13/src/event_loop.rs:265:25
+  15: rriter::main
+             at ./src/main.rs:2418:36
+  16: <fn() as core::ops::function::FnOnce<()>>::call_once
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/core/src/ops/function.rs:250:5
+  17: std::sys::backtrace::__rust_begin_short_backtrace::<fn(), ()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/sys/backtrace.rs:166:18
+  18: std::rt::lang_start::<()>::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:206:18
+  19: std::panicking::catch_unwind::do_call::<&dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe, i32>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  20: std::panicking::catch_unwind::<i32, &dyn core::ops::function::Fn<(), Output = i32> + core::marker::Sync + core::panic::unwind_safe::RefUnwindSafe>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  21: std::rt::lang_start_internal::{closure#0}
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:175:24
+  22: std::panicking::catch_unwind::do_call::<std::rt::lang_start_internal::{closure#0}, isize>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:581:40
+  23: std::panicking::catch_unwind::<isize, std::rt::lang_start_internal::{closure#0}>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/panicking.rs:544:19
+  24: std::rt::lang_start_internal
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:171:5
+  25: std::rt::lang_start::<()>
+             at /home/reyan/.local/share/rustup/toolchains/nightly-x86_64-unknown-linux-gnu/lib/rustlib/src/rust/library/std/src/rt.rs:205:5
+  26: <unknown>
+  27: __libc_start_main
+  28: _start
+

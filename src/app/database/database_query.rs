@@ -516,19 +516,23 @@ fn database_query_history_entry_height_from_metrics(
     (height * scale.max(0.0)).round()
 }
 
+#[cfg(test)]
 pub fn database_query_history_preview_lines(sql: &str) -> usize {
     database_query_history_preview_metrics(sql).0
 }
 
+#[cfg(test)]
 pub fn database_query_history_is_truncated(sql: &str) -> bool {
     database_query_history_preview_metrics(sql).1
 }
 
+#[cfg(test)]
 pub fn database_query_history_entry_height(sql: &str) -> f32 {
     let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
     30.0 + preview_lines as f32 * 20.0 + if truncated { 18.0 } else { 0.0 }
 }
 
+#[cfg(test)]
 pub fn database_query_history_entry_height_px(sql: &str, scale: f32) -> f32 {
     let (preview_lines, truncated) = database_query_history_preview_metrics(sql);
     database_query_history_entry_height_from_metrics(preview_lines, truncated, scale)
@@ -567,6 +571,7 @@ pub fn trim_database_query_history(
     }
 }
 
+#[cfg(test)]
 pub fn database_query_history_content_height<'a>(
     entries: impl Iterator<Item = &'a DatabaseQueryHistoryEntry>,
     scale: f32,

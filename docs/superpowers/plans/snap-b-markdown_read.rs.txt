@@ -4,7 +4,7 @@ use super::core_text::text_char_is_non_rendering_control;
 use crate::app::{MarkdownMode, MarkdownTabState};
 use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
 use crate::languages::markdown::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle,
+    MarkdownBlock, MarkdownBlockKind, MarkdownDocument, MarkdownInlineSpan, MarkdownInlineStyle,
     MarkdownListKind, MarkdownTableAlignment,
 };
 use crate::renderer::{EDITOR_SURFACE_BG, Renderer};
@@ -259,7 +259,6 @@ struct TableBlock {
     cell_width: f32,
     cell_padding: f32,
     line_height: f32,
-    baseline_offset: f32,
     quote_depth: usize,
 }
 
@@ -780,10 +779,6 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
         let cell_w = width / col_count as f32;
         let pad = (8.0 * self.scale).round();
         let line_h = (22.0 * self.scale).round().max(1.0);
-        let text_scale = 0.82;
-        let baseline_offset = self
-            .text_metrics
-            .heading_baseline_offset(text_scale, line_h);
         let mut rows = Vec::new();
         let mut row_y = self.y;
         for (is_header, row) in table
@@ -810,7 +805,7 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                         &styled,
                         offset,
                         ch,
-                        text_scale,
+                        0.82,
                         self.scale,
                         false,
                         &mut glyph_advance,
@@ -863,7 +858,6 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
                 cell_width: cell_w,
                 cell_padding: pad,
                 line_height: line_h,
-                baseline_offset,
                 quote_depth,
             }),
         );
@@ -1618,7 +1612,7 @@ impl Renderer {
                 let cell_w = table.cell_width;
                 let cell_padding = table.cell_padding;
                 let line_height = table.line_height;
-                let baseline_offset = table.baseline_offset;
+                let baseline_offset = (line_height * 0.82).round();
                 for idx in visible_table_row_range(&table.rows, visible_top, visible_bottom) {
                     let row = &table.rows[idx];
                     let row_y = row.y + offset_y;
@@ -1860,7 +1854,7 @@ mod tests {
             }
         }
     }
-    use crate::languages::markdown::{MarkdownDocument, MarkdownParseState};
+    use crate::languages::markdown::MarkdownParseState;
 
     fn parse(source: &str) -> MarkdownDocument {
         MarkdownParseState::default()
@@ -2014,7 +2008,7 @@ mod tests {
                         }
                     }
                     ReadBlockKind::Table(table) => {
-                        let baseline_offset = table.baseline_offset;
+                        let baseline_offset = (table.line_height * 0.82).round();
                         for row in &table.rows {
                             assert_eq!(row.y.fract(), 0.0, "scale {scale}: row y {}", row.y);
                             assert_eq!(row.h.fract(), 0.0, "scale {scale}: row h {}", row.h);
@@ -2391,34 +2385,6 @@ mod tests {
                         "heading baseline must use final font metrics rather than 0.82 of enlarged line box"
                     );
                 }
-            }
-        }
-    }
-
-    #[test]
-    fn table_baseline_uses_font_metrics_not_line_box_fraction_across_scales() {
-        let source = "| A | B |\n| --- | --- |\n| Agjpqy | x |\n";
-        for scale in [1.0, 1.25, 1.5, 1.75, 2.0] {
-            let cache = layout_with_scale_and_advance(source, 600.0, scale, |_, _| 8.0 * scale);
-            let table = cache
-                .blocks
-                .iter()
-                .find_map(|block| match &block.kind {
-                    ReadBlockKind::Table(table) => Some(table),
-                    _ => None,
-                })
-                .expect("table block");
-            let expected =
-                test_layout_text_metrics(scale).heading_baseline_offset(0.82, table.line_height);
-            assert_eq!(
-                table.baseline_offset, expected,
-                "scale {scale}: table baseline must come from font metrics"
-            );
-            if scale == 2.0 {
-                assert!(
-                    table.baseline_offset < (table.line_height * 0.82).round(),
-                    "table baseline must sit above 0.82 of the line box"
-                );
             }
         }
     }

@@ -1,0 +1,218 @@
+# Review package: F2 (snapshot snap-f2 vs working tree, src/app/mouse/input.rs only)
+
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f2/src/app/mouse/input.rs	2026-09-15 11:14:30.193501146 +0300
++++ src/app/mouse/input.rs	2026-09-15 14:17:51.009277414 +0300
+@@ -423,20 +423,55 @@
+         button: winit::event::MouseButton,
+     ) {
+         let editor_was_focused = self.editor_has_input_focus();
+         #[cfg(not(test))]
+         self.handle_main_mouse_input_inner(event_loop, state, button);
+         #[cfg(test)]
+         self.handle_main_mouse_input_inner(Some(event_loop), state, button);
+         self.autosave_after_editor_focus_change(editor_was_focused);
+     }
+ 
++    /// Window-free part of a sidebar slot click released without drag threshold.
++    pub(crate) fn toggle_sidebar_panel_from_click(&mut self, panel_id: crate::app::PanelId) {
++        let toggled_open = {
++            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == panel_id);
++            slot.map(|s| !s.open).unwrap_or(false)
++        };
++        let toggled_group = {
++            let slot = self.ide_panel.slots.iter().find(|sl| sl.id == panel_id);
++            slot.map(|s| s.group.clone())
++        };
++        self.ide_panel.toggle(panel_id);
++        // При открытии Explorer — запускаем скан файлов
++        if toggled_open && panel_id == crate::app::PanelId::Explorer {
++            self.refresh_file_tree();
++        }
++        if toggled_open && panel_id == crate::app::PanelId::Search {
++            self.ide_panel.project_search.focused =
++                Some(crate::app::project_search::ProjectSearchField::Query);
++        }
++        // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
++        if toggled_open {
++            if let Some(group) = toggled_group {
++                for sl in self.ide_panel.slots.iter_mut() {
++                    if sl.id != panel_id && sl.group == group {
++                        sl.open = false;
++                    }
++                }
++            }
++        }
++        // Restored expanded connections wait for catalog loads started on panel open.
++        if toggled_open && panel_id == crate::app::PanelId::Database {
++            self.reconcile_expanded_database_connections();
++        }
++    }
++
+     #[cfg(test)]
+     pub(crate) fn reviewer_markdown_read_mouse_input(
+         &mut self,
+         state: ElementState,
+         button: winit::event::MouseButton,
+     ) {
+         self.handle_main_mouse_input_inner(None, state, button);
+     }
+ 
+     #[cfg_attr(coverage_nightly, coverage(off))]
+@@ -1822,55 +1857,21 @@
+                                 self.ide_panel.terminals.insert(new_idx, terminal);
+                                 self.ide_panel.active_terminal = active;
+                                 self.reveal_active_terminal_tab_now();
+                             }
+                         }
+                     }
+                 }
+                 if let Some(drag) = self.ide_panel.drag.take() {
+                     if !drag.threshold_passed {
+                         // Клик без движения → переключить панель
+-                        let toggled_open = {
+-                            let slot = self
+-                                .ide_panel
+-                                .slots
+-                                .iter()
+-                                .find(|sl| sl.id == drag.panel_id);
+-                            slot.map(|s| !s.open).unwrap_or(false)
+-                        };
+-                        let toggled_group = {
+-                            let slot = self
+-                                .ide_panel
+-                                .slots
+-                                .iter()
+-                                .find(|sl| sl.id == drag.panel_id);
+-                            slot.map(|s| s.group.clone())
+-                        };
+-                        self.ide_panel.toggle(drag.panel_id);
+-                        // При открытии Explorer — запускаем скан файлов
+-                        if toggled_open && drag.panel_id == crate::app::PanelId::Explorer {
+-                            self.refresh_file_tree();
+-                        }
+-                        if toggled_open && drag.panel_id == crate::app::PanelId::Search {
+-                            self.ide_panel.project_search.focused =
+-                                Some(crate::app::project_search::ProjectSearchField::Query);
+-                        }
+-                        // Взаимоисключение: при открытии кнопки закрываем остальные в той же группе
+-                        if toggled_open {
+-                            if let Some(group) = toggled_group {
+-                                for sl in self.ide_panel.slots.iter_mut() {
+-                                    if sl.id != drag.panel_id && sl.group == group {
+-                                        sl.open = false;
+-                                    }
+-                                }
+-                            }
+-                        }
++                        self.toggle_sidebar_panel_from_click(drag.panel_id);
+                         // Edit bounds are not valid for the shared Read coordinate system,
+                         // including a pending Read -> Edit rebase before the first Edit frame.
+                         if self.markdown.shared_vertical_scroll_uses_editor_bounds() {
+                             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
+                             let s = self.renderer.as_ref().unwrap().scale_factor;
+                             let tab_bar_h = crate::render_view::editor_content_top_inset(
+                                 self.show_welcome,
+                                 self.is_ide_mode,
+                                 self.active_tab_is_database_query(),
+                                 s,
+@@ -2002,20 +2003,100 @@
+             self.last_action = Instant::now();
+         }
+         self.window.as_ref().unwrap().request_redraw();
+     }
+ }
+ 
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
++    fn sidebar_database_app_with_restored_expansion() -> App {
++        use crate::app::database::{
++            DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode,
++            DatabaseJobId, DatabaseJobOwner, DatabasePendingJob, DatabasePendingJobKind,
++        };
++        let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
++        app.is_ide_mode = true;
++        let mut connection = DatabaseConnectionNode::new(DatabaseConnectionConfig {
++            id: DatabaseConnectionId(1),
++            display_name: "Connection 1".to_string(),
++            username: "postgres".to_string(),
++            ..DatabaseConnectionConfig::default()
++        });
++        connection.expanded = true;
++        app.ide_panel.database.connections.push(connection);
++        // Busy runtime slot: a started load is queued instead of touching the network.
++        app.ide_panel.database.pending_job = Some(DatabasePendingJob {
++            id: DatabaseJobId(900),
++            kind: DatabasePendingJobKind::LoadDdl,
++            owner: DatabaseJobOwner::Connection(DatabaseConnectionId(1)),
++            connection_id: DatabaseConnectionId(1),
++            database_name: None,
++            table_name: None,
++        });
++        app
++    }
++
++    #[test]
++    fn sidebar_click_opening_database_starts_restored_expanded_catalog_load() {
++        use crate::app::PanelId;
++        use crate::app::database::{DatabaseConnectionChildrenState, DatabasePendingJobKind};
++        let mut app = sidebar_database_app_with_restored_expansion();
++        assert!(!app.ide_panel.is_open(PanelId::Database));
++        assert_eq!(
++            app.ide_panel.database.connections[0].children_state(),
++            DatabaseConnectionChildrenState::ExpandedUnloaded
++        );
++
++        app.toggle_sidebar_panel_from_click(PanelId::Database);
++
++        assert!(app.ide_panel.is_open(PanelId::Database));
++        assert_eq!(
++            app.ide_panel.database.connections[0].children_state(),
++            DatabaseConnectionChildrenState::ExpandedLoading
++        );
++        assert_eq!(app.ide_panel.database.queued_commands.len(), 1);
++        assert_eq!(
++            app.ide_panel.database.queued_commands[0].1.kind,
++            DatabasePendingJobKind::LoadDatabases
++        );
++
++        // Closing never starts another load.
++        app.toggle_sidebar_panel_from_click(PanelId::Database);
++        assert!(!app.ide_panel.is_open(PanelId::Database));
++        assert_eq!(app.ide_panel.database.queued_commands.len(), 1);
++    }
++
++    #[test]
++    fn sidebar_click_closing_database_or_opening_explorer_does_not_load_catalog() {
++        use crate::app::PanelId;
++        use crate::app::database::DatabaseConnectionChildrenState;
++        let mut app = sidebar_database_app_with_restored_expansion();
++        app.ide_panel.toggle(PanelId::Database);
++        assert!(app.ide_panel.is_open(PanelId::Database));
++
++        app.toggle_sidebar_panel_from_click(PanelId::Database);
++        assert!(!app.ide_panel.is_open(PanelId::Database));
++        app.ide_panel.toggle(PanelId::Database);
++
++        // Explorer shares the Top group: opening it closes Database without loading.
++        app.toggle_sidebar_panel_from_click(PanelId::Explorer);
++        assert!(app.ide_panel.is_open(PanelId::Explorer));
++        assert!(!app.ide_panel.is_open(PanelId::Database));
++        assert!(app.ide_panel.database.queued_commands.is_empty());
++        assert_eq!(
++            app.ide_panel.database.connections[0].children_state(),
++            DatabaseConnectionChildrenState::ExpandedUnloaded
++        );
++    }
++
+     fn git_state_with_owned_selection() -> crate::app::git_panel::GitPanelState {
+         let mut git = crate::app::git_panel::GitPanelState::default();
+         git.toggle_logs_pane();
+         git.seed_git_log_for_test("selected");
+         let line = git.git_logs.display_line_at(0).unwrap();
+         assert!(git.git_logs.set_selection(
+             crate::app::git_panel::GitLogTextPoint {
+                 line: line.id(),
+                 byte: 0,
+             },

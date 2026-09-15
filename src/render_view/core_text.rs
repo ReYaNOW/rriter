@@ -976,6 +976,65 @@ impl Renderer {
             + self.current_inlay_width_until(line_start, byte_offset, include_inlays_at_offset)
     }
 
+    pub(crate) fn sync_current_python_inlay_hints(
+        &mut self,
+        hints: &[crate::app::PythonInlayHint],
+    ) {
+        if self.current_python_inlay_hints.as_slice() != hints {
+            self.current_python_inlay_hints.clear();
+            self.current_python_inlay_hints.extend_from_slice(hints);
+            self.scroll_x_bounds_inlays_dirty = true;
+        }
+    }
+
+    fn line_visual_width(&mut self, editor: &Editor, line: usize) -> f32 {
+        let Some(&start) = editor.line_offsets.get(line) else {
+            return 0.0;
+        };
+        let end = editor.line_offsets.get(line + 1).copied().unwrap_or(editor.len());
+        self.visual_x_for_byte_offset(editor, start, end, true)
+    }
+
+    pub(crate) fn update_max_scroll_x(&mut self, editor: &Editor) {
+        let view_w = self.width - self.minimap_width - self.left_padding;
+        if self.last_editor_version_for_scroll_x == editor.version
+            && (self.last_view_w_for_scroll_x - view_w).abs() <= 0.5
+            && !self.scroll_x_bounds_inlays_dirty
+        {
+            return;
+        }
+        let longest = editor.longest_line_idx;
+        let cursor_line = editor
+            .line_offsets
+            .partition_point(|&offset| offset <= editor.cursor)
+            .saturating_sub(1);
+        let mut content_w = self.line_visual_width(editor, longest);
+        if cursor_line != longest {
+            content_w = content_w.max(self.line_visual_width(editor, cursor_line));
+        }
+        // Хинты отсортированы по byte_offset: одна ширина на строку с хинтами.
+        let mut last_line = usize::MAX;
+        for idx in 0..self.current_python_inlay_hints.len() {
+            let offset = self.current_python_inlay_hints[idx].byte_offset;
+            let line = editor
+                .line_offsets
+                .partition_point(|&o| o <= offset)
+                .saturating_sub(1);
+            if line != last_line && line != longest && line != cursor_line {
+                content_w = content_w.max(self.line_visual_width(editor, line));
+            }
+            last_line = line;
+        }
+        self.max_scroll_x = if content_w > view_w {
+            content_w - view_w + 100.0
+        } else {
+            0.0
+        };
+        self.last_editor_version_for_scroll_x = editor.version;
+        self.last_view_w_for_scroll_x = view_w;
+        self.scroll_x_bounds_inlays_dirty = false;
+    }
+
     pub(crate) fn visual_text_range_contains_x(
         &mut self,
         editor: &Editor,

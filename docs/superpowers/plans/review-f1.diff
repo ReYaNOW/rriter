@@ -1,0 +1,298 @@
+# Review package: F1 fix (snapshot snap-f1 vs working tree; snap-f1 INCLUDED the temporary diagnostics, so their removal appears as deletions)
+
+Файлы /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/app/app_ide_tab_methods.rs и src/app/app_ide_tab_methods.rs различаются
+Файлы /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/app/mouse/cursor.rs и src/app/mouse/cursor.rs различаются
+Файлы /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/render_view/markdown_code_scroll.rs и src/render_view/markdown_code_scroll.rs различаются
+
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/render_view/markdown_code_scroll.rs	2026-09-15 14:23:40.730470231 +0300
++++ src/render_view/markdown_code_scroll.rs	2026-09-15 14:37:00.768636464 +0300
+@@ -1,40 +1,17 @@
+ // Markdown Reader code-block horizontal overflow chunk.
+ // Included by markdown_read.rs so cached layout structs stay private to the parent module.
+ 
+ const CODE_HSCROLLBAR_RESERVE: f32 = 10.0;
+ const CODE_HSCROLLBAR_TRACK_H: f32 = 4.0;
+ const CODE_HSCROLLBAR_HIT_PAD: f32 = 3.0;
+ const CODE_HSCROLLBAR_MIN_THUMB: f32 = 24.0;
+-// TEMP F1 DIAG
+-/// Env read once and cached; logger formats only when enabled. // TEMP F1 DIAG
+-pub(crate) fn f1_diag_enabled() -> bool { // TEMP F1 DIAG
+-    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); // TEMP F1 DIAG
+-    *ON.get_or_init(|| std::env::var_os("RRITER_DEBUG_CODE_SCROLL").is_some_and(|v| !v.is_empty() && v != "0")) // TEMP F1 DIAG
+-} // TEMP F1 DIAG
+-pub(crate) fn f1_diag_log(args: std::fmt::Arguments<'_>) { // TEMP F1 DIAG
+-    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new(); // TEMP F1 DIAG
+-    let ms = START.get_or_init(std::time::Instant::now).elapsed().as_millis(); // TEMP F1 DIAG
+-    eprintln!("[F1 +{ms}ms] {args}"); // TEMP F1 DIAG
+-} // TEMP F1 DIAG
+-macro_rules! f1_diag { // TEMP F1 DIAG
+-    ($($arg:tt)*) => { if f1_diag_enabled() { f1_diag_log(format_args!($($arg)*)) } }; // TEMP F1 DIAG
+-} // TEMP F1 DIAG
+-struct F1State(Option<(bool, f32, f32, f32)>); // TEMP F1 DIAG
+-impl std::fmt::Display for F1State { // TEMP F1 DIAG
+-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { // TEMP F1 DIAG
+-        match self.0 { // TEMP F1 DIAG
+-            Some((dragging, offset, target, current)) => write!(f, "dragging={dragging} offset={offset} target={target} current={current}"), // TEMP F1 DIAG
+-            None => f.write_str("dragging=- offset=- target=- current=- (no entry)"), // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+-    } // TEMP F1 DIAG
+-} // TEMP F1 DIAG
+ 
+ #[derive(Clone, Copy, Debug, PartialEq)]
+ pub(crate) struct CodeScrollGeometry {
+     pub view_x: f32,
+     pub view_w: f32,
+     pub content_w: f32,
+     pub max_scroll: f32,
+     pub track_x: f32,
+     pub track_y: f32,
+     pub track_w: f32,
+@@ -368,41 +345,28 @@
+             }
+         };
+         &mut self.code_scroll_x[idx].scroll
+     }
+ 
+     pub(crate) fn update_code_scroll_x(&mut self, dt: f32) -> bool {
+         let mut changed = false;
+         for entry in &mut self.code_scroll_x {
+             changed |= entry.scroll.update(dt);
+         }
+-        if f1_diag_enabled() && let Some(block_id) = self.code_scroll_drag { // TEMP F1 DIAG
+-            thread_local!(static F1_LAST_TICK: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) }); // TEMP F1 DIAG
+-            let now = std::time::Instant::now(); // TEMP F1 DIAG
+-            if F1_LAST_TICK.with(|last| last.get().is_none_or(|t| now.duration_since(t).as_millis() >= 100)) { // TEMP F1 DIAG
+-                F1_LAST_TICK.with(|last| last.set(Some(now))); // TEMP F1 DIAG
+-                f1_diag_log(format_args!("tick block={block_id} dt={dt} changed={changed} {}", F1State(self.f1_diag_state(block_id)))); // TEMP F1 DIAG
+-            } // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+         self.retain_active_code_scroll_x();
+         changed
+     }
+-    // TEMP F1 DIAG
+-    fn f1_diag_state(&self, block_id: usize) -> Option<(bool, f32, f32, f32)> { // TEMP F1 DIAG
+-        self.code_scroll_x.iter().find(|e| e.block_id == block_id).map(|e| (e.scroll.is_dragging, e.scroll.drag_offset, e.scroll.target, e.scroll.current)) // TEMP F1 DIAG
+-    } // TEMP F1 DIAG
+ 
+     pub(crate) fn end_code_scroll_drag(&mut self) -> bool {
+         let Some(block_id) = self.code_scroll_drag.take() else {
+             return false;
+         };
+-        f1_diag!("end_drag block={block_id} before: {}\n{}", F1State(self.f1_diag_state(block_id)), std::backtrace::Backtrace::force_capture()); // TEMP F1 DIAG
+         if let Some(entry) = self
+             .code_scroll_x
+             .iter_mut()
+             .find(|entry| entry.block_id == block_id)
+         {
+             entry.scroll.end_drag();
+         }
+         self.retain_active_code_scroll_x();
+         true
+     }
+@@ -472,25 +436,20 @@
+             .and_then(|thumb| {
+                 crate::scroll::scrollbar_drag_target(
+                     pointer_x,
+                     g.track_x,
+                     g.track_w,
+                     thumb,
+                     g.max_scroll,
+                     Some(drag_offset),
+                 )
+             });
+-        if target.is_none() && f1_diag_enabled() { // TEMP F1 DIAG
+-            let thumb = code_scroll_thumb(g, offset, scale); // TEMP F1 DIAG
+-            let why = if !state.is_dragging { "not_dragging" } else if thumb.is_none() { "thumb_none" } else { "scrollbar_drag_target_none" }; // TEMP F1 DIAG
+-            f1_diag_log(format_args!("drag_target_none block={block_id} why={why} pointer_x={pointer_x} track_x={} track_w={} view_w={} content_w={} max_scroll={} offset={offset} drag_offset={drag_offset} thumb={thumb:?} current={} target={}", g.track_x, g.track_w, g.view_w, g.content_w, g.max_scroll, state.current, state.target)); // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+         match target {
+             Some((_, target))
+                 if crate::app::mouse::apply_scrollbar_drag_target(state, target, drag_offset) =>
+             {
+                 true
+             }
+             _ => self.end_code_scroll_drag(),
+         }
+     }
+ 
+@@ -581,57 +540,35 @@
+         self.markdown
+             .scroll_code_block_x(block_id, g.max_scroll, delta)
+     }
+ 
+     pub(crate) fn begin_markdown_code_scrollbar_drag_at(
+         &mut self,
+         block_id: usize,
+         pointer_x: f32,
+     ) -> bool {
+         let Some((g, scale)) = self.markdown_code_scroll_geometry_for(block_id) else {
+-            f1_diag!("begin block={block_id} pointer_x={pointer_x} geom=None {} result=false", self.f1_diag_geom_miss(block_id)); // TEMP F1 DIAG
+             self.markdown.end_code_scroll_drag();
+             return false;
+         };
+-        let f1_thumb = f1_diag_enabled().then(|| code_scroll_thumb(&g, clamp_code_scroll_offset(self.markdown.code_scroll_x(block_id), g.max_scroll), scale)).flatten(); // TEMP F1 DIAG
+-        let f1_result = // TEMP F1 DIAG
+         self.markdown
+             .begin_code_scroll_drag(block_id, &g, pointer_x, scale)
+-        ; // TEMP F1 DIAG
+-        f1_diag!("begin block={block_id} pointer_x={pointer_x} geom=track_x={} track_w={} view_w={} content_w={} max_scroll={} thumb={f1_thumb:?} result={f1_result} drag={:?} {}", g.track_x, g.track_w, g.view_w, g.content_w, g.max_scroll, self.markdown.code_scroll_drag, F1State(self.markdown.f1_diag_state(block_id))); // TEMP F1 DIAG
+-        f1_result // TEMP F1 DIAG
+-    }
+-    // TEMP F1 DIAG
+-    fn f1_diag_geom_miss(&self, block_id: usize) -> String { // TEMP F1 DIAG
+-        let renderer = self.renderer.as_ref().map(|r| r.scale_factor); // TEMP F1 DIAG
+-        let layout_ver = self.markdown.read_layout.key.as_ref().map(|k| k.version); // TEMP F1 DIAG
+-        format!("mode={:?} tab_mode={:?} body={:?} renderer_scale={renderer:?} layout_ver={layout_ver:?} editor_ver={} block_found={}", self.markdown_mode(), self.markdown.mode, self.ui_registry.rect_for(crate::ui_system::UiId::MarkdownReadBody), self.editor.version, self.markdown.read_layout.code_block_by_id(block_id).is_some()) // TEMP F1 DIAG
+-    } // TEMP F1 DIAG
++    }
+ 
+     pub(crate) fn drag_markdown_code_scrollbar_to(&mut self, pointer_x: f32) -> bool {
+         let Some(block_id) = self.markdown.code_scroll_drag else {
+-            f1_diag!("drag pointer_x={pointer_x} drag=None result=false"); // TEMP F1 DIAG
+             return false;
+         };
+-        let f1_geom = f1_diag_enabled().then(|| self.markdown_code_scroll_geometry_for(block_id)); // TEMP F1 DIAG
+-        let f1_miss = matches!(f1_geom, Some(None)).then(|| self.f1_diag_geom_miss(block_id)); // TEMP F1 DIAG
+-        let f1_result = // TEMP F1 DIAG
+         match self.markdown_code_scroll_geometry_for(block_id) {
+             Some((g, scale)) => self.markdown.drag_code_scroll_to(&g, pointer_x, scale),
+             None => self.markdown.end_code_scroll_drag(),
+         }
+-        ; // TEMP F1 DIAG
+-        if let Some(f1_geom) = f1_geom { // TEMP F1 DIAG
+-            let f1_geom = f1_geom.map(|(g, _)| (g.track_x, g.track_w, g.max_scroll)); // TEMP F1 DIAG
+-            f1_diag_log(format_args!("drag block={block_id} pointer_x={pointer_x} geom(track_x,track_w,max_scroll)={f1_geom:?} miss={f1_miss:?} result={f1_result} drag={:?} {}", self.markdown.code_scroll_drag, F1State(self.markdown.f1_diag_state(block_id)))); // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+-        f1_result // TEMP F1 DIAG
+     }
+ }
+ 
+ #[cfg(test)]
+ mod markdown_code_scroll_tests {
+     use super::*;
+     use crate::languages::markdown::MarkdownParseState;
+ 
+     fn code_layout(
+         source: &str,
+@@ -1136,22 +1073,42 @@
+         let source = format!("intro\n\n```\n{}\n```\n", "abcdefghij".repeat(40));
+         let (_ctx, mut app) = fixture(&source, 600.0, 1.0);
+         app.set_markdown_mode(crate::app::MarkdownMode::Read);
+         read_frame(&mut app);
+         hold_code_scroll_drag(&mut app.markdown, 7);
+         app.set_markdown_mode(crate::app::MarkdownMode::Edit);
+         assert_code_scroll_drag_ended(&app.markdown);
+     }
+ 
+     #[test]
+-    fn tab_swap_ends_code_scrollbar_drag() {
++    fn tab_switch_ends_code_scrollbar_drag() {
+         let (_ctx, mut app) = fixture("intro\n", 600.0, 1.0);
+         app.is_ide_mode = true;
+         app.open_new_tab();
+-        assert_eq!(app.tabs.len(), 1);
++        app.open_new_tab();
++        assert_eq!((app.tabs.len(), app.active_tab), (2, 1));
+         hold_code_scroll_drag(&mut app.markdown, 7);
+-        // open_new_tab switches tabs through sync_active_tab without a pointer cancel.
++        app.switch_to_tab(0);
++        assert_eq!(app.active_tab, 0);
++        assert_code_scroll_drag_ended(&app.tabs[1].markdown);
++        assert_code_scroll_drag_ended(&app.markdown);
++    }
++
++    #[test]
++    fn external_changes_check_keeps_code_scrollbar_drag() {
++        let (_ctx, mut app) = fixture("intro\n", 600.0, 1.0);
++        app.is_ide_mode = true;
+         app.open_new_tab();
+-        assert_eq!(app.active_tab, 1);
+-        assert_code_scroll_drag_ended(&app.tabs[0].markdown);
++        assert_eq!(app.tabs.len(), 1);
++        hold_code_scroll_drag(&mut app.markdown, 7);
++        // File-watcher path: swap-out/swap-in bookkeeping must not touch a held drag.
++        app.start_external_changes_check();
++        assert_eq!(app.active_tab, 0);
++        assert_eq!(app.markdown.code_scroll_drag, Some(7));
++        assert!(
++            app.markdown
++                .code_scroll_x
++                .iter()
++                .any(|e| e.block_id == 7 && e.scroll.is_dragging)
++        );
+     }
+ }
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/app/mouse/cursor.rs	2026-09-15 14:22:14.139700316 +0300
++++ src/app/mouse/cursor.rs	2026-09-15 14:36:30.898312050 +0300
+@@ -186,23 +186,20 @@
+                 | crate::ui_system::UiId::InlineGitRollbackHunk
+         )
+     )
+ }
+ 
+ impl App {
+     #[cfg_attr(coverage_nightly, coverage(off))]
+     pub fn handle_main_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+         let px = position.x as f32;
+         let py = position.y as f32;
+-        if crate::render_view::markdown_read::f1_diag_enabled() && self.markdown.code_scroll_drag.is_some() { // TEMP F1 DIAG
+-            crate::render_view::markdown_read::f1_diag_log(format_args!("move_top px={px} py={py} drag={:?} mode={:?}", self.markdown.code_scroll_drag, self.markdown_mode())); // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+         {
+             let renderer = self.renderer.as_mut().unwrap();
+             renderer.last_mouse_x = px;
+             renderer.last_mouse_y = py;
+             if renderer.popups_waiting_for_mouse_move_at(px, py) {
+                 return;
+             }
+             renderer.update_popup_mouse_move_gate();
+         }
+ 
+@@ -737,23 +734,20 @@
+             self.window.as_ref().unwrap().request_redraw();
+             return;
+         }
+ 
+         if self.drag_api_route_text_selection_from_last_mouse() {
+             clear_hover_popup(self.renderer.as_mut());
+             self.window.as_ref().unwrap().request_redraw();
+             return;
+         }
+ 
+-        if crate::render_view::markdown_read::f1_diag_enabled() && self.markdown.code_scroll_drag.is_some() { // TEMP F1 DIAG
+-            crate::render_view::markdown_read::f1_diag_log(format_args!("reached code-drag branch px={px} py={py} drag={:?} mode={:?}", self.markdown.code_scroll_drag, self.markdown_mode())); // TEMP F1 DIAG
+-        } // TEMP F1 DIAG
+         if self.markdown_mode() == crate::app::MarkdownMode::Read
+             && self.markdown.code_scroll_drag.is_some()
+         {
+             let _ = self.drag_markdown_code_scrollbar_to(px);
+             clear_hover_popup(self.renderer.as_mut());
+             if let Some(window) = self.window.as_ref() {
+                 window.request_redraw();
+             }
+             return;
+         }
+--- /tmp/claude-1000/-home-reyan-projects-rriter/973197ae-71f2-4933-9084-88294746cdf2/scratchpad/sdd/followup/snap-f1/src/app/app_ide_tab_methods.rs	2026-09-15 11:41:16.142459701 +0300
++++ src/app/app_ide_tab_methods.rs	2026-09-15 14:38:16.325460634 +0300
+@@ -650,21 +650,20 @@
+             &mut self.tabs[ai].closing_hints,
+         );
+         std::mem::swap(&mut self.file_path, &mut self.tabs[ai].file_path);
+         std::mem::swap(&mut self.file_key, &mut self.tabs[ai].file_key);
+         std::mem::swap(
+             &mut self.text_file_format,
+             &mut self.tabs[ai].text_file_format,
+         );
+         std::mem::swap(&mut self.base_title, &mut self.tabs[ai].base_title);
+         std::mem::swap(&mut self.file_extension, &mut self.tabs[ai].file_extension);
+-        self.markdown.end_code_scroll_drag();
+         std::mem::swap(&mut self.markdown, &mut self.tabs[ai].markdown);
+         std::mem::swap(&mut self.scroll_y, &mut self.tabs[ai].scroll_y);
+         std::mem::swap(&mut self.scroll_x, &mut self.tabs[ai].scroll_x);
+         std::mem::swap(&mut self.search_results, &mut self.tabs[ai].search_results);
+         std::mem::swap(
+             &mut self.search_current_idx,
+             &mut self.tabs[ai].search_current_idx,
+         );
+         std::mem::swap(
+             &mut self.last_sent_version,
