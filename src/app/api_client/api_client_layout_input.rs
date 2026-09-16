@@ -4,6 +4,7 @@ pub(crate) const API_PANEL_PERSISTENCE_ERROR_ADVANCE: f32 = 20.0;
 pub(crate) const API_PANEL_UV_ERROR_ADVANCE: f32 = 22.0;
 pub(crate) const API_PANEL_MANUAL_ROUTE_ADVANCE: f32 = 38.0;
 pub(crate) const API_PANEL_SPEC_CARD_ADVANCE: f32 = 122.0;
+pub(crate) const API_PANEL_ROUTES_GAP_ADVANCE: f32 = 6.0;
 pub(crate) const API_PANEL_TREE_ROW_ADVANCE: f32 = 28.0;
 pub(crate) const API_PANEL_FILTER_ADVANCE: f32 = 38.0;
 
@@ -37,7 +38,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     content_h += api.mock.manual_routes.len() as f32 * API_PANEL_MANUAL_ROUTE_ADVANCE * scale;
     content_h += api.specs.len() as f32 * API_PANEL_SPEC_CARD_ADVANCE * scale;
     if let Some(model) = api.selected_model() {
-        content_h += API_PANEL_TREE_ROW_ADVANCE * scale * 2.0;
+        content_h += (API_PANEL_ROUTES_GAP_ADVANCE + API_PANEL_TREE_ROW_ADVANCE * 2.0) * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
             content_h += API_PANEL_FILTER_ADVANCE * scale;
             let filter = api.route_filter.trim();

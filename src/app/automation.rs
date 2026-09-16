@@ -1068,10 +1068,11 @@ impl AutomationController {
                         .renderer
                         .as_ref()
                         .map_or(1.0, |renderer| renderer.scale_factor);
-                    let visible_h = app
-                        .renderer
-                        .as_ref()
-                        .map_or(720.0, |renderer| renderer.height);
+                    let visible_h = if app.renderer.is_some() {
+                        crate::app::mouse::app_panel_scroll_rect(app, PanelId::ApiClient, scale).3
+                    } else {
+                        720.0
+                    };
                     let max_scroll = crate::app::api_client::api_panel_max_scroll(
                         &app.ide_panel.api,
                         visible_h,

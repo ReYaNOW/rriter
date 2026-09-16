@@ -839,7 +839,7 @@ impl Renderer {
         }
 
         if let Some(model) = api.selected_model() {
-            cy += 6.0 * s;
+            cy += crate::app::api_client::API_PANEL_ROUTES_GAP_ADVANCE * s;
             let tree_text_y = |row_y: f32| Renderer::tree_row_text_y(row_y, TREE_ROW_H * s, s);
             let active_route_idx = active_api_route
                 .filter(|(spec_id, _)| *spec_id == model.id)
