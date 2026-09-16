@@ -706,9 +706,8 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .get("ctrl_wheel_multiplier")
         .and_then(serde_json::Value::as_f64)
     {
-        config.ctrl_wheel_multiplier = normalize_ctrl_wheel_multiplier(
-            value.clamp(f32::MIN as f64, f32::MAX as f64) as f32,
-        );
+        config.ctrl_wheel_multiplier =
+            normalize_ctrl_wheel_multiplier(value.clamp(f32::MIN as f64, f32::MAX as f64) as f32);
     }
     if let Some(values) = value
         .get("tool_paths")

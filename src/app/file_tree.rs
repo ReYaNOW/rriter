@@ -450,11 +450,7 @@ where
     .scroll_x
 }
 
-pub(crate) fn file_tree_name_input_hit_index<F>(
-    text: &str,
-    x_offset: f32,
-    char_advance: F,
-) -> usize
+pub(crate) fn file_tree_name_input_hit_index<F>(text: &str, x_offset: f32, char_advance: F) -> usize
 where
     F: FnMut(char) -> f32,
 {

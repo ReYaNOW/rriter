@@ -660,8 +660,7 @@ impl App {
             }
             UiId::SettingsEditorCtrlWheelAdjust(delta) => {
                 let next = crate::normalize_ctrl_wheel_multiplier(
-                    self.ctrl_wheel_multiplier
-                        + delta as f32 * crate::CTRL_WHEEL_MULTIPLIER_STEP,
+                    self.ctrl_wheel_multiplier + delta as f32 * crate::CTRL_WHEEL_MULTIPLIER_STEP,
                 );
                 if next != self.ctrl_wheel_multiplier {
                     self.ctrl_wheel_multiplier = next;

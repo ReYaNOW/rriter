@@ -22,7 +22,10 @@ fn wheel_delta(
             -x * 4.0 * line_height * line_multiplier,
             -y * 4.0 * line_height * line_multiplier,
         ),
-        MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
+        MouseScrollDelta::PixelDelta(pos) => (
+            -(pos.x as f32) * line_multiplier,
+            -(pos.y as f32) * line_multiplier,
+        ),
     }
 }
 
@@ -263,47 +266,43 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
-        let mut consumed_by_diag = false;
-        HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if let Some(rect) = state.diag_rect {
-                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
-                    state.diag_scroll.anim_speed = 7.0;
-                    state.diag_scroll.scroll_by(dy);
-                    let max_scroll = state.diag_max_scroll;
-                    state.diag_scroll.clamp_target(0.0, max_scroll);
-                    consumed_by_diag = true;
-                }
-            }
-        });
-        if consumed_by_diag {
-            self.window.as_ref().unwrap().request_redraw();
-            return;
-        }
-
         let mut consumed_by_hover = false;
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
-            if let Some(rect) = state.rect {
-                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
-                    let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup {
-                        popup.scroll.anim_speed = 7.0;
-                        popup.scroll.scroll_by(dy);
-                        popup.scroll.clamp_target(0.0, max_scroll);
-                        consumed_by_hover = true;
-                    }
+            if state
+                .interaction_rect
+                .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
+            {
+                let in_type = state
+                    .rect
+                    .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect));
+                let max_scroll = state.max_scroll;
+                let diag_max_scroll = state.diag_max_scroll;
+                if in_type && let Some(popup) = state.popup.as_mut() {
+                    popup.scroll.anim_speed = 7.0;
+                    popup.scroll.scroll_by(dy);
+                    popup.scroll.clamp_target(0.0, max_scroll);
+                    consumed_by_hover = true;
+                } else if state.diag_rect.is_some_and(|(x, y, w, h, _, _, _)| {
+                    crate::ui_system::point_in_rect(mx, my, (x, y, w, h))
+                }) {
+                    state.diag_scroll.anim_speed = 7.0;
+                    state.diag_scroll.scroll_by(dy);
+                    state.diag_scroll.clamp_target(0.0, diag_max_scroll);
+                    consumed_by_hover = true;
                 }
             }
         });
         if consumed_by_hover {
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
-        let hover_cleared = clear_hover_popup(self.renderer.as_mut());
-        if hover_cleared && self.markdown_mode() != crate::app::MarkdownMode::Read {
-            self.window.as_ref().unwrap().request_redraw();
-            return;
+        if clear_hover_popup(self.renderer.as_mut()) {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
         }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
@@ -1411,7 +1410,23 @@ mod tests {
                 10.0,
                 5.0,
             ),
-            (-12.5, 8.0)
+            (-62.5, 40.0)
+        );
+    }
+
+    #[test]
+    fn configured_ctrl_multiplier_scales_line_and_pixel_deltas_exactly_once() {
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(1.0, -1.0), 10.0, 5.0),
+            (-200.0, 200.0)
+        );
+        assert_eq!(
+            wheel_delta(
+                MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(12.5, -8.0)),
+                10.0,
+                5.0,
+            ),
+            (-62.5, 40.0)
         );
     }
 

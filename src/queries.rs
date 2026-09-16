@@ -986,8 +986,27 @@ mod tests {
     #[test]
     fn test_all_tree_sitter_queries_are_valid() {
         let languages = [
-            "bash", "rs", "py", "toml", "go", "js", "ts", "tsx", "regex", "java", "cs", "dart",
-            "html", "css", "json", "c", "cpp", "sql", "make", "md", "markdown_inline",
+            "bash",
+            "rs",
+            "py",
+            "toml",
+            "go",
+            "js",
+            "ts",
+            "tsx",
+            "regex",
+            "java",
+            "cs",
+            "dart",
+            "html",
+            "css",
+            "json",
+            "c",
+            "cpp",
+            "sql",
+            "make",
+            "md",
+            "markdown_inline",
         ];
         let mut all_passed = true;
 

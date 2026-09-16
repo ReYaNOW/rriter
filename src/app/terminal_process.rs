@@ -6,8 +6,8 @@ use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -377,7 +377,10 @@ fn bounded_terminal_title(text: &str) -> String {
     title
 }
 
-fn terminal_process_program_name(snapshot: &platform::ProcessSnapshot, shell_title: &str) -> String {
+fn terminal_process_program_name(
+    snapshot: &platform::ProcessSnapshot,
+    shell_title: &str,
+) -> String {
     snapshot
         .executable
         .as_deref()
@@ -401,8 +404,7 @@ struct SshDestination {
 fn ssh_option_takes_value(option: &str) -> bool {
     matches!(
         option,
-        "-B"
-            | "-b"
+        "-B" | "-b"
             | "-c"
             | "-D"
             | "-E"
@@ -496,11 +498,7 @@ fn terminal_title_for_snapshot(
     }
 
     let cwd = snapshot.cwd.as_deref().or(initial_cwd);
-    bounded_terminal_title(&terminal_fallback_title_with_home(
-        cwd,
-        home,
-        &program,
-    ))
+    bounded_terminal_title(&terminal_fallback_title_with_home(cwd, home, &program))
 }
 
 #[cfg(target_os = "linux")]
@@ -563,14 +561,13 @@ fn refresh_terminal_title_cache(
             terminal_process_program_name(snapshot, shell_title) == shell_title
         });
         let initial_observation = last_process_group.is_none();
-        let detected = found.as_ref().map(|snapshot| {
-            terminal_title_for_snapshot(snapshot, initial_cwd, home, shell_title)
-        });
+        let detected = found
+            .as_ref()
+            .map(|snapshot| terminal_title_for_snapshot(snapshot, initial_cwd, home, shell_title));
         let new_is_shell = found.as_ref().is_some_and(|snapshot| {
             terminal_process_program_name(snapshot, shell_title) == shell_title
         });
-        let carry_recent_programmed =
-            initial_observation || (previous_was_shell && !new_is_shell);
+        let carry_recent_programmed = initial_observation || (previous_was_shell && !new_is_shell);
         *last_process_group = Some(process_group);
         *snapshot = found;
         crate::platform::lock_recover(title_cache)
@@ -601,10 +598,7 @@ fn install_terminal_title_refresh(
     shell_title: String,
     initial_cwd: Option<PathBuf>,
     window: Option<Arc<winit::window::Window>>,
-) -> io::Result<(
-    Option<std::sync::mpsc::Sender<()>>,
-    Option<JoinHandle<()>>,
-)> {
+) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
     let (stop_tx, stop_rx) = std::sync::mpsc::channel();
     let worker = crate::platform::spawn_named("rriter-session-title", move || {
         let home = platform::user_home_dir();
@@ -640,18 +634,11 @@ fn install_terminal_title_refresh(
     _shell_title: String,
     _initial_cwd: Option<PathBuf>,
     _window: Option<Arc<winit::window::Window>>,
-) -> io::Result<(
-    Option<std::sync::mpsc::Sender<()>>,
-    Option<JoinHandle<()>>,
-)> {
+) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
     Ok((None, None))
 }
 
-fn advance_terminal_output_batch(
-    parser: &mut Parser,
-    grid: &mut TermGrid,
-    chunks: &[Vec<u8>],
-) {
+fn advance_terminal_output_batch(parser: &mut Parser, grid: &mut TermGrid, chunks: &[Vec<u8>]) {
     for chunk in chunks {
         parser.advance(grid, chunk);
     }
@@ -948,7 +935,6 @@ fn terminal_fallback_title_with_home(
 mod tests {
     use super::*;
 
-
     fn process_snapshot(program: &str, cwd: &str, args: &[&str]) -> platform::ProcessSnapshot {
         platform::ProcessSnapshot {
             process_id: 42,
@@ -1041,10 +1027,7 @@ mod tests {
 
     fn parser_grid() -> (TermGrid, TerminalTitleCache) {
         let cache = Arc::new(Mutex::new(TerminalTitleState::new("fallback".to_string())));
-        (
-            TermGrid::new_with_title_cache(8, 2, cache.clone()),
-            cache,
-        )
+        (TermGrid::new_with_title_cache(8, 2, cache.clone()), cache)
     }
 
     #[test]
@@ -1092,8 +1075,14 @@ mod tests {
 
         assert!(actual.presentation_ready);
         assert!(actual.lines == expected.lines);
-        assert_eq!((actual.cur_x, actual.cur_y), (expected.cur_x, expected.cur_y));
-        assert_eq!((actual.cur_fg, actual.cur_bg), (expected.cur_fg, expected.cur_bg));
+        assert_eq!(
+            (actual.cur_x, actual.cur_y),
+            (expected.cur_x, expected.cur_y)
+        );
+        assert_eq!(
+            (actual.cur_fg, actual.cur_bg),
+            (expected.cur_fg, expected.cur_bg)
+        );
 
         actual.dirty = false;
         advance_terminal_output_batch(&mut parser, &mut actual, &[b"!".to_vec()]);
@@ -1105,11 +1094,7 @@ mod tests {
     fn terminal_stream_end_before_displayable_output_shows_explicit_state_once() {
         let mut grid = TermGrid::new(64, 3);
         let mut parser = Parser::new();
-        advance_terminal_output_batch(
-            &mut parser,
-            &mut grid,
-            &[b"\x1b[?25l\x1b[2J\r\n".to_vec()],
-        );
+        advance_terminal_output_batch(&mut parser, &mut grid, &[b"\x1b[?25l\x1b[2J\r\n".to_vec()]);
         assert!(!grid.presentation_ready);
 
         assert!(finish_terminal_output_stream(&mut parser, &mut grid));
@@ -1184,11 +1169,7 @@ mod tests {
     #[test]
     fn no_osc_ssh_title_uses_process_arguments_not_terminal_text() {
         let home = Path::new("/home/reyan");
-        let direct = process_snapshot(
-            "ssh",
-            "/home/reyan",
-            &["ssh", "reyan@89.169.37.107"],
-        );
+        let direct = process_snapshot("ssh", "/home/reyan", &["ssh", "reyan@89.169.37.107"]);
         assert_eq!(
             terminal_title_for_snapshot(&direct, Some(home), Some(home), "fish"),
             "(reyan) 89.169.37.107"
@@ -1197,7 +1178,16 @@ mod tests {
         let login_option = process_snapshot(
             "ssh",
             "/home/reyan",
-            &["ssh", "-p", "2222", "-i", "/tmp/key", "-l", "reyan", "89.169.37.107"],
+            &[
+                "ssh",
+                "-p",
+                "2222",
+                "-i",
+                "/tmp/key",
+                "-l",
+                "reyan",
+                "89.169.37.107",
+            ],
         );
         assert_eq!(
             terminal_title_for_snapshot(&login_option, Some(home), Some(home), "fish"),
@@ -1239,7 +1229,12 @@ mod tests {
         let htop = process_snapshot("htop", "/home/reyan/projects/car-wash-api", &["htop"]);
         let mut state = TerminalTitleState::new("car-wash-api : fish".to_string());
         state.observe_transition(
-            Some(terminal_title_for_snapshot(&htop, Some(cwd), Some(home), "fish")),
+            Some(terminal_title_for_snapshot(
+                &htop,
+                Some(cwd),
+                Some(home),
+                "fish",
+            )),
             false,
         );
         state.set_programmed("~/projects/car-wash-api: htop - htop".to_string());
@@ -1318,10 +1313,16 @@ mod tests {
         let (mut grid, cache) = parser_grid();
         let mut parser = Parser::new();
         parser.advance(&mut grid, b"\x1b]0;~ : htop\x07");
-        assert_eq!(resolved_title(&crate::platform::lock_recover(&cache)), "~ : htop");
+        assert_eq!(
+            resolved_title(&crate::platform::lock_recover(&cache)),
+            "~ : htop"
+        );
 
         parser.advance(&mut grid, b"\x1b]2;bin : sleep\x1b\\");
-        assert_eq!(resolved_title(&crate::platform::lock_recover(&cache)), "bin : sleep");
+        assert_eq!(
+            resolved_title(&crate::platform::lock_recover(&cache)),
+            "bin : sleep"
+        );
     }
 
     #[test]

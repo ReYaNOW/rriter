@@ -8,9 +8,8 @@ use crate::{
     render_view::{
         search::search_panel_geometry,
         terminal_ui::{
-            clamp_terminal_pty_dimension, terminal_tab_add_size,
+            clamp_terminal_pty_dimension, terminal_search_geometry, terminal_tab_add_size,
             terminal_tab_strip_max_scroll, terminal_tab_width_from_title_width,
-            terminal_search_geometry,
         },
     },
 };
@@ -31,12 +30,8 @@ fn r3_006_terminal_tabs_preserve_natural_width_under_overflow() {
 fn r3_007_terminal_plus_contributes_to_scrollable_content_width() {
     let panel_w = 50.0;
     let tabs_w = terminal_tab_width_from_title_width(100.0, 1.0) * 2.0;
-    let max_scroll = terminal_tab_strip_max_scroll(
-        panel_w,
-        tabs_w,
-        terminal_tab_add_size(panel_w, 1.0),
-        1.0,
-    );
+    let max_scroll =
+        terminal_tab_strip_max_scroll(panel_w, tabs_w, terminal_tab_add_size(panel_w, 1.0), 1.0);
     assert!(max_scroll > tabs_w - panel_w);
 }
 
@@ -1107,8 +1102,7 @@ fn r3_112_terminal_tab_overflow_produces_scroll_range_instead_of_forced_fit() {
             let tab_w = terminal_tab_width_from_title_width(100.0, 1.0);
             let tabs_w = tab_w * count as f32;
             let add_size = terminal_tab_add_size(panel_w as f32, 1.0);
-            let max_scroll =
-                terminal_tab_strip_max_scroll(panel_w as f32, tabs_w, add_size, 1.0);
+            let max_scroll = terminal_tab_strip_max_scroll(panel_w as f32, tabs_w, add_size, 1.0);
             let content_w = 8.0 + tabs_w + 8.0 + add_size + 8.0;
             assert!((max_scroll - (content_w - panel_w as f32).max(0.0)).abs() < 0.001);
         }

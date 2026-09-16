@@ -4,8 +4,8 @@ use super::core_text::text_char_is_non_rendering_control;
 use crate::app::{MarkdownMode, MarkdownTabState};
 use crate::highlighter::{ColorSpan, MARKDOWN_GOLD};
 use crate::languages::markdown::{
-    MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle,
-    MarkdownListKind, MarkdownTableAlignment,
+    MarkdownBlock, MarkdownBlockKind, MarkdownInlineSpan, MarkdownInlineStyle, MarkdownListKind,
+    MarkdownTableAlignment,
 };
 use crate::renderer::{EDITOR_SURFACE_BG, Renderer};
 use crate::ui_system::UiRegistry;
@@ -695,7 +695,8 @@ impl<'a, F: FnMut(char, bool, Option<f32>) -> f32> LayoutBuilder<'a, F> {
             let mut local = 0usize;
             for part in text.split_inclusive('\n') {
                 let visible = part.trim_end_matches(['\r', '\n']);
-                content_width = content_width.max(code_line_pixel_width(visible, &mut self.advance));
+                content_width =
+                    content_width.max(code_line_pixel_width(visible, &mut self.advance));
                 let start = range.start + local;
                 let end = start + visible.len();
                 lines.push(CodeLine {

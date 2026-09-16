@@ -1013,6 +1013,11 @@ impl Renderer {
             6.0 * s,
             (2.0 * s).round().max(1.0),
         );
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            state.borrow_mut().interaction_rect = (frame_surface.outer_rect.2 > 0.0
+                && frame_surface.outer_rect.3 > 0.0)
+                .then_some(frame_surface.outer_rect);
+        });
         let base_fill_color = [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
@@ -1600,6 +1605,16 @@ impl Renderer {
                 (bx, by, box_w, box_h),
                 (popup.anchor_x, popup.anchor_y),
             );
+            let frame_surface = hover_surface_layout(
+                (frame_x, frame_y, frame_w, frame_h),
+                6.0 * s,
+                (2.0 * s).round().max(1.0),
+            );
+            crate::app::mouse::HOVER_STATE.with(|state| {
+                state.borrow_mut().interaction_rect = (frame_surface.outer_rect.2 > 0.0
+                    && frame_surface.outer_rect.3 > 0.0)
+                    .then_some(frame_surface.outer_rect);
+            });
             let fill_color = fade_hover_color(self.theme.minimap_bg, opacity);
             let border_color = fade_hover_color(self.theme.sel, opacity);
             self.push_hover_popup_frame(

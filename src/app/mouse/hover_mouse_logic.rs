@@ -127,6 +127,7 @@ pub fn clear_hover_popup(_renderer: Option<&mut crate::renderer::Renderer>) -> b
         state.timer = 0.0;
         state.byte_offset = None;
         state.rect = None;
+        state.interaction_rect = None;
         state.max_scroll = 0.0;
         state.selection_anchor = None;
         state.selection_cursor = None;

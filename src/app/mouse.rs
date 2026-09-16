@@ -75,8 +75,7 @@ pub(crate) fn ide_root_resize_cursor(
     }
 
     if panel_bottom_h > 0.0 {
-        let resize_y =
-            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, scale);
+        let resize_y = crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, scale);
         if (my - resize_y).abs() < 6.0 * scale && mx >= sidebar_w {
             return Some(winit::window::CursorIcon::NsResize);
         }
@@ -369,8 +368,7 @@ mod panel_geometry_tests {
     fn bottom_splitter_hover_uses_resize_cursor_before_drag() {
         let window_height = 900.0;
         let panel_bottom_h = 180.0;
-        let resize_y =
-            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, 1.0);
+        let resize_y = crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, 1.0);
 
         assert_eq!(
             ide_root_resize_cursor(

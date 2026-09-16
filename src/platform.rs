@@ -25,6 +25,7 @@ mod text_file;
 mod windows;
 #[cfg(test)]
 pub use integration::ManagedToolInstallPlan;
+pub(crate) use integration::user_home_dir;
 pub use integration::{
     SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, async_http_client_builder,
     blocking_http_client_builder, configure_dart_workspace_root, configure_tool_paths,
@@ -32,7 +33,6 @@ pub use integration::{
     refresh_tool_resolutions, resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config,
     user_cache_root,
 };
-pub(crate) use integration::user_home_dir;
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
 
@@ -66,14 +66,14 @@ pub(crate) use integration::{
 };
 #[cfg(all(test, unix))]
 use process::command_for;
+#[cfg(test)]
+pub(crate) use process::process_snapshot;
 pub use process::{
     ManagedChild, ProcessOutputStream, ProcessTree, command_for_executable, command_for_tool,
     resolve_executable, resolve_tool_executable, run_command_output, run_command_output_cancelable,
     run_command_streaming_cancelable,
 };
 pub(crate) use process::{ProcessSnapshot, foreground_process_snapshot};
-#[cfg(test)]
-pub(crate) use process::process_snapshot;
 pub use secret_store::{
     delete_system_user_secret, load_system_user_secret, store_system_user_secret,
 };

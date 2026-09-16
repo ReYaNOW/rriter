@@ -2,11 +2,10 @@ use std::ffi::OsString;
 use std::time::Duration;
 
 use crate::app::database::{
-    DATABASE_GRID_ROW_HEIGHT, DatabaseCellPosition, DatabaseConnectionConfig,
-    DatabaseConnectionId, DatabaseConnectionNode, DatabaseConnectionStatus, DatabasePendingJobKind,
-    DatabaseQueryMode, DatabaseQueryTabState, DatabaseSecretBundle, DatabaseTableModal,
-    DatabaseTableTabState, PostgresTlsMode, SshHostKeyPolicy, database_grid_max_scroll,
-    database_query_scroll_limits,
+    DATABASE_GRID_ROW_HEIGHT, DatabaseCellPosition, DatabaseConnectionConfig, DatabaseConnectionId,
+    DatabaseConnectionNode, DatabaseConnectionStatus, DatabasePendingJobKind, DatabaseQueryMode,
+    DatabaseQueryTabState, DatabaseSecretBundle, DatabaseTableModal, DatabaseTableTabState,
+    PostgresTlsMode, SshHostKeyPolicy, database_grid_max_scroll, database_query_scroll_limits,
 };
 use crate::app::{App, EditorTabKind};
 use crate::ui_system::UiId;
@@ -19,8 +18,7 @@ const PGO_TABLE_NAME: &str = "pgo_items";
 const PGO_EDITED_NAME: &str = "pgo-item-001-pgo-edited";
 const PGO_QUERY_MARKER: &str = "pgo-item-001";
 const PGO_EXPLAIN_MARKER: &str = "Index Scan using pgo_items_pkey";
-const PGO_QUERY: &str =
-    "SELECT id, name, active\nFROM public.pgo_items\nORDER BY id\nLIMIT 64;";
+const PGO_QUERY: &str = "SELECT id, name, active\nFROM public.pgo_items\nORDER BY id\nLIMIT 64;";
 
 const ENV_HOST: &str = "RRITER_PGO_DATABASE_HOST";
 const ENV_PORT: &str = "RRITER_PGO_DATABASE_PORT";
@@ -145,7 +143,8 @@ fn environment_value(
     lookup: &mut impl FnMut(&str) -> Option<OsString>,
     name: &str,
 ) -> Result<String, String> {
-    let value = lookup(name).ok_or_else(|| format!("missing PGO database environment variable {name}"))?;
+    let value =
+        lookup(name).ok_or_else(|| format!("missing PGO database environment variable {name}"))?;
     value
         .into_string()
         .map_err(|_| format!("PGO database environment variable {name} is not valid UTF-8"))
@@ -231,7 +230,12 @@ fn pgo_database_index(app: &App) -> Result<usize, String> {
         .databases
         .iter()
         .position(|database| database.name == PGO_DATABASE_NAME)
-        .ok_or_else(|| format!("PGO database catalog is missing {PGO_DATABASE_NAME}; {}", diagnostics(app)))
+        .ok_or_else(|| {
+            format!(
+                "PGO database catalog is missing {PGO_DATABASE_NAME}; {}",
+                diagnostics(app)
+            )
+        })
 }
 
 fn active_pgo_table_id(app: &App) -> Result<crate::app::database::DatabaseTabId, String> {
@@ -239,13 +243,19 @@ fn active_pgo_table_id(app: &App) -> Result<crate::app::database::DatabaseTabId,
         .active_database_table_tab_id()
         .ok_or_else(|| format!("PGO database table tab is not active; {}", diagnostics(app)))?;
     let Some((meta, _)) = app.database_table_meta_state(tab_id) else {
-        return Err(format!("active PGO database table state is missing; {}", diagnostics(app)));
+        return Err(format!(
+            "active PGO database table state is missing; {}",
+            diagnostics(app)
+        ));
     };
     if meta.connection_id != PGO_CONNECTION_ID
         || meta.database_name != PGO_DATABASE_NAME
         || meta.table_name != PGO_TABLE_NAME
     {
-        return Err(format!("unexpected active database table; {}", diagnostics(app)));
+        return Err(format!(
+            "unexpected active database table; {}",
+            diagnostics(app)
+        ));
     }
     Ok(tab_id)
 }
@@ -258,20 +268,33 @@ fn query_wait_state(state: &DatabaseQueryTabState, marker: &str) -> Result<bool,
         return Ok(false);
     }
     if state.review.is_some() {
-        return Err("read-only PGO database query unexpectedly requires transaction review".to_string());
+        return Err(
+            "read-only PGO database query unexpectedly requires transaction review".to_string(),
+        );
     }
     if state.results.is_empty() {
         return Ok(false);
     }
-    let marker_found = state.results.iter().flat_map(|result| &result.rows).any(|row| {
-        row.iter()
-            .any(|cell| cell.value.as_deref().is_some_and(|value| value.contains(marker)))
-    });
+    let marker_found = state
+        .results
+        .iter()
+        .flat_map(|result| &result.rows)
+        .any(|row| {
+            row.iter().any(|cell| {
+                cell.value
+                    .as_deref()
+                    .is_some_and(|value| value.contains(marker))
+            })
+        });
     if !marker_found {
         return Err(format!(
             "database query completed without expected marker {marker:?}; results={} rows={}",
             state.results.len(),
-            state.results.iter().map(|result| result.rows.len()).sum::<usize>()
+            state
+                .results
+                .iter()
+                .map(|result| result.rows.len())
+                .sum::<usize>()
         ));
     }
     Ok(true)
@@ -290,12 +313,20 @@ fn table_wait_state(state: &DatabaseTableTabState, require_sorted: bool) -> Resu
     let Some(metadata) = state.metadata.as_ref() else {
         return Ok(false);
     };
-    if metadata.columns.iter().map(|column| column.name.as_str()).collect::<Vec<_>>()
+    if metadata
+        .columns
+        .iter()
+        .map(|column| column.name.as_str())
+        .collect::<Vec<_>>()
         != ["id", "name", "active"]
     {
         return Err(format!(
             "unexpected PGO table columns: {:?}",
-            metadata.columns.iter().map(|column| &column.name).collect::<Vec<_>>()
+            metadata
+                .columns
+                .iter()
+                .map(|column| &column.name)
+                .collect::<Vec<_>>()
         ));
     }
     if !metadata.editable {
@@ -350,7 +381,9 @@ pub(super) fn run_step(app: &mut App, step: DatabaseAutomationStep) -> DatabaseS
         S::WaitExplain => wait_query_result(app, PGO_EXPLAIN_MARKER),
         S::AssertIdle => assert_idle(app),
         S::ScrollTableTimed { .. } | S::ScrollQueryResultTimed { .. } => {
-            DatabaseStepResult::Failed("timed database scroll dispatched through wrong path".to_string())
+            DatabaseStepResult::Failed(
+                "timed database scroll dispatched through wrong path".to_string(),
+            )
         }
     }
 }
@@ -388,10 +421,10 @@ fn setup_connection(app: &mut App) -> DatabaseStepResult {
     app.ide_panel.database.selected_connection = Some(PGO_CONNECTION_ID);
     app.ide_panel.database.selected_database = None;
     app.ide_panel.database.selected_table = None;
-    app.ide_panel.database.session_secrets.insert(
-        PGO_CONNECTION_ID,
-        DatabaseSecretBundle::empty(),
-    );
+    app.ide_panel
+        .database
+        .session_secrets
+        .insert(PGO_CONNECTION_ID, DatabaseSecretBundle::empty());
     app.ide_panel.database.global_error = None;
     app.ide_panel.database.notice = None;
     app.ide_panel.database.sync_persisted_connections();
@@ -410,9 +443,16 @@ fn load_catalog(app: &mut App) -> DatabaseStepResult {
         return DatabaseStepResult::Pending;
     }
     app.toggle_database_connection(PGO_CONNECTION_ID);
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadDatabases
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.connection_id == PGO_CONNECTION_ID
+                && job.kind == DatabasePendingJobKind::LoadDatabases
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -467,9 +507,15 @@ fn load_tables(app: &mut App) -> DatabaseStepResult {
         return DatabaseStepResult::Done;
     }
     app.toggle_database_node(PGO_CONNECTION_ID, index);
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadTables
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadTables
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -499,7 +545,11 @@ fn wait_tables(app: &App) -> DatabaseStepResult {
     if database.loading || !database.tables_loaded {
         return DatabaseStepResult::Pending;
     }
-    if database.tables.iter().any(|table| table.name == PGO_TABLE_NAME) {
+    if database
+        .tables
+        .iter()
+        .any(|table| table.name == PGO_TABLE_NAME)
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -520,9 +570,15 @@ fn load_ddl(app: &mut App) -> DatabaseStepResult {
         PGO_TABLE_NAME,
         SshHostKeyPolicy::Strict,
     );
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadDdl
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadDdl
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -543,9 +599,15 @@ fn wait_ddl(app: &App) -> DatabaseStepResult {
     {
         return DatabaseStepResult::Done;
     }
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadDdl
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.connection_id == PGO_CONNECTION_ID && job.kind == DatabasePendingJobKind::LoadDdl
+        })
+    {
         DatabaseStepResult::Pending
     } else {
         DatabaseStepResult::Failed(format!(
@@ -555,9 +617,7 @@ fn wait_ddl(app: &App) -> DatabaseStepResult {
     }
 }
 
-fn dismiss_pgo_ddl_state(
-    panel: &crate::app::database::DatabasePanelState,
-) -> Result<(), String> {
+fn dismiss_pgo_ddl_state(panel: &crate::app::database::DatabasePanelState) -> Result<(), String> {
     {
         let hover = panel.ddl_hover.borrow();
         let Some(ddl) = hover.as_ref() else {
@@ -656,10 +716,7 @@ fn database_idle_check(
 }
 
 fn assert_idle(app: &App) -> DatabaseStepResult {
-    match database_idle_check(
-        &app.ide_panel.database,
-        database_query_review_present(app),
-    ) {
+    match database_idle_check(&app.ide_panel.database, database_query_review_present(app)) {
         Ok(()) => DatabaseStepResult::Done,
         Err(error) => DatabaseStepResult::Failed(format!("{error}; {}", diagnostics(app))),
     }
@@ -721,7 +778,12 @@ fn edit_table_cell(app: &mut App) -> DatabaseStepResult {
     let column_index = app
         .database_table_meta_state(tab_id)
         .and_then(|(_, state)| state.metadata.as_ref())
-        .and_then(|metadata| metadata.columns.iter().position(|column| column.name == "name"));
+        .and_then(|metadata| {
+            metadata
+                .columns
+                .iter()
+                .position(|column| column.name == "name")
+        });
     let Some(column_index) = column_index else {
         return DatabaseStepResult::Failed(format!(
             "PGO table does not expose editable name column; {}",
@@ -751,12 +813,16 @@ fn edit_table_cell(app: &mut App) -> DatabaseStepResult {
     }
     app.handle_main_ime_commit(PGO_EDITED_NAME);
     app.commit_database_table_cell_editor(tab_id, false);
-    let updated = app.database_table_meta_state(tab_id).is_some_and(|(_, state)| {
-        state.grid.dirty()
-            && state.grid.row(0).and_then(|row| row.cells.get(column_index)).is_some_and(|cell| {
-                cell.value.copy_text() == PGO_EDITED_NAME
-            })
-    });
+    let updated = app
+        .database_table_meta_state(tab_id)
+        .is_some_and(|(_, state)| {
+            state.grid.dirty()
+                && state
+                    .grid
+                    .row(0)
+                    .and_then(|row| row.cells.get(column_index))
+                    .is_some_and(|cell| cell.value.copy_text() == PGO_EDITED_NAME)
+        });
     if updated {
         DatabaseStepResult::Done
     } else {
@@ -776,9 +842,16 @@ fn save_table_changes(app: &mut App) -> DatabaseStepResult {
         Err(error) => return DatabaseStepResult::Failed(error),
     };
     app.save_database_table_changes(tab_id, false);
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.kind == DatabasePendingJobKind::BeginTableSave && job.connection_id == PGO_CONNECTION_ID
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.kind == DatabasePendingJobKind::BeginTableSave
+                && job.connection_id == PGO_CONNECTION_ID
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -838,10 +911,16 @@ fn rollback_table_transaction(app: &mut App) -> DatabaseStepResult {
         ));
     }
     app.rollback_database_table_transaction();
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.kind == DatabasePendingJobKind::RollbackTransaction
-            && job.connection_id == PGO_CONNECTION_ID
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.kind == DatabasePendingJobKind::RollbackTransaction
+                && job.connection_id == PGO_CONNECTION_ID
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -881,7 +960,8 @@ fn open_query(app: &mut App) -> DatabaseStepResult {
     app.open_database_query_tab(PGO_CONNECTION_ID, PGO_DATABASE_NAME, true, None);
     match app.active_database_query_meta_state() {
         Some((meta, _))
-            if meta.connection_id == PGO_CONNECTION_ID && meta.database_name == PGO_DATABASE_NAME =>
+            if meta.connection_id == PGO_CONNECTION_ID
+                && meta.database_name == PGO_DATABASE_NAME =>
         {
             DatabaseStepResult::Done
         }
@@ -906,7 +986,10 @@ fn wait_query_completion(app: &App) -> DatabaseStepResult {
         ));
     }
     if let Some(error) = state.error.as_ref() {
-        return DatabaseStepResult::Failed(format!("query completion failed: {error}; {}", diagnostics(app)));
+        return DatabaseStepResult::Failed(format!(
+            "query completion failed: {error}; {}",
+            diagnostics(app)
+        ));
     }
     if !state.completion_loaded {
         return DatabaseStepResult::Pending;
@@ -935,7 +1018,10 @@ fn set_query_text(app: &mut App) -> DatabaseStepResult {
         ));
     };
     if meta.connection_id != PGO_CONNECTION_ID {
-        return DatabaseStepResult::Failed(format!("unexpected database query editor; {}", diagnostics(app)));
+        return DatabaseStepResult::Failed(format!(
+            "unexpected database query editor; {}",
+            diagnostics(app)
+        ));
     }
     app.editor.select_all();
     app.handle_main_ime_commit(PGO_QUERY);
@@ -954,9 +1040,15 @@ fn run_query(app: &mut App, mode: DatabaseQueryMode) -> DatabaseStepResult {
         return DatabaseStepResult::Pending;
     }
     app.run_active_database_query(mode);
-    if app.ide_panel.database.pending_job.as_ref().is_some_and(|job| {
-        job.kind == DatabasePendingJobKind::RunUserSql && job.connection_id == PGO_CONNECTION_ID
-    }) {
+    if app
+        .ide_panel
+        .database
+        .pending_job
+        .as_ref()
+        .is_some_and(|job| {
+            job.kind == DatabasePendingJobKind::RunUserSql && job.connection_id == PGO_CONNECTION_ID
+        })
+    {
         DatabaseStepResult::Done
     } else {
         DatabaseStepResult::Failed(format!(
@@ -974,7 +1066,10 @@ fn wait_query_result(app: &App, marker: &str) -> DatabaseStepResult {
         ));
     };
     if meta.connection_id != PGO_CONNECTION_ID {
-        return DatabaseStepResult::Failed(format!("unexpected database query result; {}", diagnostics(app)));
+        return DatabaseStepResult::Failed(format!(
+            "unexpected database query result; {}",
+            diagnostics(app)
+        ));
     }
     match query_wait_state(state, marker) {
         Ok(true) => DatabaseStepResult::Done,
@@ -1014,14 +1109,25 @@ pub(super) fn scroll_query_result(app: &mut App, direction: f32) -> Result<(), S
     let viewport = app
         .ui_registry
         .rect_for(UiId::DatabaseQueryResultBody)
-        .ok_or_else(|| format!("PGO query result viewport is not rendered; {}", diagnostics(app)))?;
-    let scale = app.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        .ok_or_else(|| {
+            format!(
+                "PGO query result viewport is not rendered; {}",
+                diagnostics(app)
+            )
+        })?;
+    let scale = app
+        .renderer
+        .as_ref()
+        .map_or(1.0, |renderer| renderer.scale_factor);
     let history = &app.ide_panel.database.persisted.query_history;
     let Some(active_tab) = app.tabs.get_mut(app.active_tab) else {
         return Err(format!("PGO query tab disappeared; {}", diagnostics(app)));
     };
     let EditorTabKind::DatabaseQuery(meta, state) = &mut active_tab.kind else {
-        return Err(format!("PGO query result tab is not active; {}", diagnostics(app)));
+        return Err(format!(
+            "PGO query result tab is not active; {}",
+            diagnostics(app)
+        ));
     };
     if meta.connection_id != PGO_CONNECTION_ID {
         return Err("unexpected database query result connection".to_string());
@@ -1183,7 +1289,11 @@ mod tests {
 
         let mut malformed = base.to_vec();
         malformed.push((ENV_PORT, "not-a-port"));
-        assert!(endpoint(&malformed).unwrap_err().contains("invalid PGO database port"));
+        assert!(
+            endpoint(&malformed)
+                .unwrap_err()
+                .contains("invalid PGO database port")
+        );
 
         let mut zero = base.to_vec();
         zero.push((ENV_PORT, "0"));
@@ -1215,9 +1325,11 @@ mod tests {
         assert_eq!(query_wait_state(&state, PGO_QUERY_MARKER), Ok(false));
 
         state.error = Some("fixture failure".to_string());
-        assert!(query_wait_state(&state, PGO_QUERY_MARKER)
-            .unwrap_err()
-            .contains("fixture failure"));
+        assert!(
+            query_wait_state(&state, PGO_QUERY_MARKER)
+                .unwrap_err()
+                .contains("fixture failure")
+        );
 
         state.error = None;
         state.results.push(DatabaseQueryResultSet {
@@ -1345,9 +1457,14 @@ mod tests {
 
     #[test]
     fn database_wait_steps_have_state_based_timeout_budget_and_scroll_steps_are_identified() {
-        assert_eq!(DatabaseAutomationStep::WaitCatalog.timeout(), Duration::from_secs(45));
+        assert_eq!(
+            DatabaseAutomationStep::WaitCatalog.timeout(),
+            Duration::from_secs(45)
+        );
         assert!(DatabaseAutomationStep::ScrollTableTimed { duration_secs: 8 }.is_timed_scroll());
-        assert!(DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs: 8 }.is_timed_scroll());
+        assert!(
+            DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs: 8 }.is_timed_scroll()
+        );
         assert!(!DatabaseAutomationStep::WaitQueryResult.is_timed_scroll());
     }
 }

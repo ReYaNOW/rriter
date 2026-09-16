@@ -502,9 +502,7 @@ impl App {
         // даже если курсор уже вне thumb (или режим сменился во время drag).
         let finished_code_scrollbar_drag = left_released && self.markdown.end_code_scroll_drag();
         finished_markdown_pointer |= finished_code_scrollbar_drag;
-        if finished_markdown_pointer
-            && let Some(window) = self.window.as_ref()
-        {
+        if finished_markdown_pointer && let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
         if finished_read_scrollbar_drag || finished_code_scrollbar_drag {
@@ -626,7 +624,9 @@ impl App {
                                     )
                                 {
                                     crate::app::mouse::apply_scrollbar_drag_target(
-                                        &mut ddl.popup.scroll, target, drag_offset,
+                                        &mut ddl.popup.scroll,
+                                        target,
+                                        drag_offset,
                                     );
                                     ddl.selecting = false;
                                 }
@@ -1528,9 +1528,9 @@ impl App {
                         if state == ElementState::Pressed {
                             let point = {
                                 let logs = &self.ide_panel.git.git_logs;
-                                self.renderer
-                                    .as_mut()
-                                    .and_then(|renderer| renderer.git_logs_text_point_at(logs, mx, my))
+                                self.renderer.as_mut().and_then(|renderer| {
+                                    renderer.git_logs_text_point_at(logs, mx, my)
+                                })
                             };
                             if let Some(point) = point {
                                 let selected = begin_git_logs_text_selection(self, point);
@@ -2012,8 +2012,8 @@ mod tests {
 
     fn sidebar_database_app_with_restored_expansion() -> App {
         use crate::app::database::{
-            DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode,
-            DatabaseJobId, DatabaseJobOwner, DatabasePendingJob, DatabasePendingJobKind,
+            DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode, DatabaseJobId,
+            DatabaseJobOwner, DatabasePendingJob, DatabasePendingJobKind,
         };
         let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
         app.is_ide_mode = true;

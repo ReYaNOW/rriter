@@ -86,6 +86,29 @@ fn editor_line_comment_marker(
     crate::languages::line_comment_marker(lang_id)
 }
 
+fn toggle_editor_line_comment_and_sync_highlighter(
+    editor: &mut crate::editor::Editor,
+    highlighter: &mut crate::highlighter::Highlighter,
+    marker: &str,
+) -> bool {
+    let sync_edits_start = editor.sync_edits.len();
+    if !editor.toggle_line_comment(marker) {
+        return false;
+    }
+
+    for edit in &editor.sync_edits[sync_edits_start..] {
+        match edit {
+            crate::highlighter::SyncEdit::Insert { offset, text } => {
+                highlighter.shift_insert(*offset, text.len(), Some(text));
+            }
+            crate::highlighter::SyncEdit::Delete { offset, len } => {
+                highlighter.shift_delete(*offset, *len);
+            }
+        }
+    }
+    true
+}
+
 pub(crate) fn paired_editor_insert_text(text: &str) -> (&str, bool) {
     match text {
         "(" => ("()", true),
@@ -887,7 +910,11 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::Slash) if ctrl => {
                 if let Some(marker) = line_comment_marker
-                    && self.editor.toggle_line_comment(marker)
+                    && toggle_editor_line_comment_and_sync_highlighter(
+                        &mut self.editor,
+                        &mut self.highlighter,
+                        marker,
+                    )
                 {
                     cursor_moved = true;
                     is_edit = true;
@@ -1391,6 +1418,44 @@ mod tests {
         .expect("SQL line marker");
         assert!(sql.toggle_line_comment(marker));
         assert_eq!(sql.get_full_text(), "--select 1;\n");
+    }
+
+    #[test]
+    fn ctrl_slash_comment_toggle_keeps_highlighter_sync_replica_current() {
+        let source = "fn main() {}\n";
+        let mut editor = crate::editor::Editor::new(64);
+        editor.set_clean_text(source);
+
+        let mut highlighter = crate::highlighter::Highlighter::new();
+        highlighter.reset(1, source.to_string(), "rs".to_string(), 0);
+        assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
+
+        let marker = editor_line_comment_marker("rs", PhysicalKey::Code(KeyCode::Slash), true)
+            .expect("Rust line marker");
+        assert!(toggle_editor_line_comment_and_sync_highlighter(
+            &mut editor,
+            &mut highlighter,
+            marker,
+        ));
+        let edits = std::mem::take(&mut editor.sync_edits);
+        let (line_start_byte, line_end_byte) =
+            sync_edit_line_range(&edits, &editor.line_offsets, editor.len());
+        let (invalidate_start_byte, invalidate_end_byte) =
+            crate::highlighter::sync_edit_invalidation_byte_range(&edits);
+        highlighter.apply_edits(editor.version, edits, line_start_byte, line_end_byte);
+        assert!(highlighter.sync_highlight_after_edit(
+            editor.version,
+            line_start_byte,
+            line_end_byte,
+            invalidate_start_byte,
+            invalidate_end_byte,
+            std::time::Duration::from_millis(50),
+        ));
+
+        assert_eq!(editor.get_full_text(), "//fn main() {}\n");
+        assert!(highlighter.spans.iter().any(|span| {
+            span.start == 0 && span.end >= 2 && span.color == crate::highlighter::DRACULA_COMMENT
+        }));
     }
 
     #[test]

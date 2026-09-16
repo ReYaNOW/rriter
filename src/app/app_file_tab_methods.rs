@@ -914,18 +914,25 @@ impl App {
         let show_welcome = self.show_welcome;
         let is_ide_mode = self.is_ide_mode;
         let database_query = self.active_tab_is_database_query();
+        let is_markdown = self.active_document_is_markdown();
         if let Some(idx) = self.search_current_idx {
             if let Some(&(start, end)) = self.search_results.get(idx) {
-                if self.active_document_is_markdown()
-                    && !self.prepare_markdown_absolute_scroll_target_navigation()
+                if is_markdown && !self.prepare_markdown_absolute_scroll_target_navigation()
                 {
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
                     return;
                 }
+                let central_band_target = if is_markdown
+                    && self.scroll_y.deferred_current_rebase_applied() == Some(true)
+                {
+                    self.scroll_y.current.round()
+                } else {
+                    self.scroll_y.target
+                };
                 if self.markdown_mode() == crate::app::MarkdownMode::Read
-                    && self.active_document_is_markdown()
+                    && is_markdown
                 {
                     let target_y = self.markdown.read_layout.source_target_y(&(start..end));
                     if let Some(target_y) = target_y {
@@ -957,14 +964,23 @@ impl App {
                         } else {
                             600.0
                         };
-                        let target = (target_y - visible_h / 2.0).max(0.0);
-                        let target = self
-                            .markdown
-                            .read_scroll_bounds()
-                            .map_or(target, |max_scroll| target.min(max_scroll))
-                            .round();
-                        self.markdown
-                            .mark_absolute_source_scroll_target_navigation(start..end, 0.5);
+                        let (target, viewport_ratio) = search_anchor_central_band_target(
+                            target_y,
+                            central_band_target,
+                            visible_h,
+                            self.markdown.read_scroll_bounds().unwrap_or(f32::MAX),
+                        );
+                        // The in-band case keeps the current target, so the anchor ratio is
+                        // whatever the current geometry already gives; recording it keeps the
+                        // navigation record on the match the user just jumped to instead of a
+                        // previous one (relative_delta stays 0 either way).
+                        let ratio_for_navigation = viewport_ratio.unwrap_or_else(|| {
+                            ((target_y - target) / visible_h).clamp(0.0, 1.0)
+                        });
+                        self.markdown.mark_absolute_source_scroll_target_navigation(
+                            start..end,
+                            ratio_for_navigation,
+                        );
                         self.scroll_y.animate_to(target);
                         self.markdown
                             .remember_pending_absolute_scroll_target_y(target);
@@ -974,20 +990,14 @@ impl App {
                     }
                     return;
                 }
-                if self.active_document_is_markdown() {
-                    self.markdown
-                        .mark_absolute_source_scroll_target_navigation(start..end, 0.5);
-                }
                 self.editor.cursor = end;
                 self.editor.selection_anchor = Some(start);
                 if let Some(r) = self.renderer.as_mut() {
-                    let phys_line = self
-                        .editor
-                        .line_offsets
-                        .partition_point(|&o| o <= end)
-                        .saturating_sub(1);
-
-                    let line_top_y = phys_line as f32 * r.line_height;
+                    let Some(line_top_y) =
+                        r.markdown_edit_source_y(&self.editor, &(start..end))
+                    else {
+                        return;
+                    };
 
                     let wh = self
                         .window
@@ -1013,19 +1023,62 @@ impl App {
                         self.is_ide_mode,
                         s,
                     );
-                    self.scroll_y
-                        .animate_to((line_top_y - visible_h / 2.0).max(0.0));
-
                     let max_s = r.get_max_scroll(&self.editor, visible_h);
-                    self.scroll_y.clamp_target(0.0, max_s);
-                    self.scroll_y.target = self.scroll_y.target.round();
-                    self.markdown
-                        .remember_pending_absolute_scroll_target_y(self.scroll_y.target);
+                    let (target, viewport_ratio) = search_anchor_central_band_target(
+                        line_top_y,
+                        central_band_target,
+                        visible_h,
+                        max_s,
+                    );
+                    if is_markdown {
+                        // In-band jumps keep the current target, so the anchor ratio is the
+                        // one the current geometry already produces; recording it keeps the
+                        // navigation record on the match the user just jumped to.
+                        let ratio_for_navigation = viewport_ratio.unwrap_or_else(|| {
+                            ((line_top_y - target) / visible_h).clamp(0.0, 1.0)
+                        });
+                        self.markdown.mark_absolute_source_scroll_target_navigation(
+                            start..end,
+                            ratio_for_navigation,
+                        );
+                    }
+                    self.scroll_y.animate_to(target);
+                    if is_markdown {
+                        self.markdown
+                            .remember_pending_absolute_scroll_target_y(target);
+                    }
                     self.scroll_y.anim_speed = 10.0;
                 }
             }
         }
     }
+}
+
+fn search_anchor_central_band_target(
+    anchor_y: f32,
+    current_target: f32,
+    visible_h: f32,
+    max_scroll: f32,
+) -> (f32, Option<f32>) {
+    const CENTRAL_BAND_TOP_RATIO: f32 = 0.35;
+    const CENTRAL_BAND_BOTTOM_RATIO: f32 = 0.65;
+
+    let max_scroll = max_scroll.max(0.0);
+    let current_target = current_target.clamp(0.0, max_scroll);
+    let viewport_y = anchor_y - current_target;
+    let viewport_ratio = if viewport_y < visible_h * CENTRAL_BAND_TOP_RATIO {
+        Some(CENTRAL_BAND_TOP_RATIO)
+    } else if viewport_y > visible_h * CENTRAL_BAND_BOTTOM_RATIO {
+        Some(CENTRAL_BAND_BOTTOM_RATIO)
+    } else {
+        None
+    };
+    let target = viewport_ratio.map_or(current_target, |viewport_ratio| {
+        (anchor_y - visible_h * viewport_ratio)
+            .clamp(0.0, max_scroll)
+            .round()
+    });
+    (target, viewport_ratio)
 }
 
 fn normalize_tab_drag_after_close(

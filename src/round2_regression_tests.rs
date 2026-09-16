@@ -339,11 +339,9 @@ fn r2_056_file_tree_disables_rows_during_inertial_scroll() {
 fn r2_057_terminal_tabs_overflow_into_scrollable_strip() {
     for panel_w in [0.0, 20.0, 50.0, 100.0, 640.0] {
         for tab_count in [0, 1, 2, 20, 200] {
-            let tab_w = crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
-                100.0, 1.0,
-            );
-            let add_size =
-                crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, 1.0);
+            let tab_w =
+                crate::render_view::terminal_ui::terminal_tab_width_from_title_width(100.0, 1.0);
+            let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, 1.0);
             let max_scroll = crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
                 panel_w,
                 tab_w * tab_count as f32,

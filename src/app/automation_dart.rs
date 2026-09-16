@@ -179,9 +179,7 @@ mod tests {
         let mut state = ClosingHintState::default();
         state.replace_syntax(
             revision,
-            (0..count)
-                .map(|line| syntax_hint(revision, line))
-                .collect(),
+            (0..count).map(|line| syntax_hint(revision, line)).collect(),
             settings,
         );
         state
@@ -376,7 +374,10 @@ class PgoNode {
             "minimum_nesting_depth=4",
             "minimum_block_lines=9",
         ] {
-            assert!(diagnostics.contains(marker), "missing {marker}: {diagnostics}");
+            assert!(
+                diagnostics.contains(marker),
+                "missing {marker}: {diagnostics}"
+            );
         }
     }
 }

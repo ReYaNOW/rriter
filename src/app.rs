@@ -1,13 +1,15 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
-pub(crate) use markdown::{MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension};
+pub(crate) use markdown::{
+    MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
+};
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
 mod autocomplete;
 pub mod automation;
-mod automation_database;
 mod automation_dart;
+mod automation_database;
 mod automation_markdown;
 pub(crate) mod context_menu;
 mod dart_settings;

@@ -234,6 +234,7 @@ fn clear_hover_popup_reports_and_resets_thread_local_state() {
         state.definition_request_id = Some(12);
         state.byte_offset = Some(9);
         state.rect = Some((1.0, 2.0, 3.0, 4.0));
+        state.interaction_rect = Some((1.0, 2.0, 2.0, 2.0));
         state.diag_rect = Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0));
         state.max_scroll = 20.0;
         state.selection_anchor = Some(1);
@@ -253,6 +254,7 @@ fn clear_hover_popup_reports_and_resets_thread_local_state() {
         assert!(state.definition_request_id.is_none());
         assert!(state.byte_offset.is_none());
         assert!(state.rect.is_none());
+        assert!(state.interaction_rect.is_none());
         assert!(state.diag_rect.is_none());
         assert_eq!(state.max_scroll, 0.0);
         assert!(state.selection_anchor.is_none());

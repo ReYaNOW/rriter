@@ -267,11 +267,8 @@ impl DatabaseQueryHistoryLayoutCache {
                 continue;
             }
             let (preview_lines, truncated) = database_query_history_preview_metrics(&entry.sql);
-            let height = database_query_history_entry_height_from_metrics(
-                preview_lines,
-                truncated,
-                scale,
-            );
+            let height =
+                database_query_history_entry_height_from_metrics(preview_lines, truncated, scale);
             self.entries.push(DatabaseQueryHistoryLayoutEntry {
                 history_index,
                 offset_y,
@@ -313,9 +310,7 @@ impl DatabaseQueryHistoryLayoutCache {
         let start = self
             .entries
             .partition_point(|entry| entry.offset_y + entry.height <= top);
-        let end = start
-            + self.entries[start..]
-                .partition_point(|entry| entry.offset_y < bottom);
+        let end = start + self.entries[start..].partition_point(|entry| entry.offset_y < bottom);
         start..end
     }
 }
@@ -379,10 +374,18 @@ impl DatabaseQueryReviewMessageLayoutCache {
         self.items = items;
     }
 
-    pub(crate) fn line_height(&self) -> f32 { self.line_height }
-    pub(crate) fn item_gap(&self) -> f32 { self.item_gap }
-    pub(crate) fn total_height(&self) -> f32 { self.total_height }
-    pub(crate) fn items(&self) -> &[DatabaseQueryReviewMessageLayoutItem] { &self.items }
+    pub(crate) fn line_height(&self) -> f32 {
+        self.line_height
+    }
+    pub(crate) fn item_gap(&self) -> f32 {
+        self.item_gap
+    }
+    pub(crate) fn total_height(&self) -> f32 {
+        self.total_height
+    }
+    pub(crate) fn items(&self) -> &[DatabaseQueryReviewMessageLayoutItem] {
+        &self.items
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -468,8 +471,7 @@ impl DatabaseQueryResultViewState {
     }
 
     pub(crate) fn invalidate_review_message_layout(&mut self) {
-        self.review_message_layout_revision =
-            self.review_message_layout_revision.wrapping_add(1);
+        self.review_message_layout_revision = self.review_message_layout_revision.wrapping_add(1);
         self.review_message_max_scroll.set(0.0);
     }
 
@@ -510,9 +512,7 @@ fn database_query_history_entry_height_from_metrics(
     truncated: bool,
     scale: f32,
 ) -> f32 {
-    let height = 30.0
-        + preview_lines as f32 * 20.0
-        + if truncated { 18.0 } else { 0.0 };
+    let height = 30.0 + preview_lines as f32 * 20.0 + if truncated { 18.0 } else { 0.0 };
     (height * scale.max(0.0)).round()
 }
 
@@ -2540,7 +2540,14 @@ SELECT 2;  ";
         let first = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
         let second = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
         assert_eq!(first, second);
-        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 1);
+        assert_eq!(
+            state
+                .result_view
+                .history_layout_cache
+                .borrow()
+                .rebuild_count,
+            1
+        );
 
         history.push(DatabaseQueryHistoryEntry {
             connection_id: meta.connection_id,
@@ -2550,21 +2557,49 @@ SELECT 2;  ";
         });
         state.result_view.invalidate_history_layout();
         let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
-        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 2);
+        assert_eq!(
+            state
+                .result_view
+                .history_layout_cache
+                .borrow()
+                .rebuild_count,
+            2
+        );
 
         history.remove(0);
         state.result_view.invalidate_history_layout();
         let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.0);
-        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 3);
+        assert_eq!(
+            state
+                .result_view
+                .history_layout_cache
+                .borrow()
+                .rebuild_count,
+            3
+        );
 
         let _ = database_query_scroll_limits(&meta, &state, &history, 300.0, 20.0, 1.25);
-        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 4);
+        assert_eq!(
+            state
+                .result_view
+                .history_layout_cache
+                .borrow()
+                .rebuild_count,
+            4
+        );
         let other_meta = DatabaseQueryTabMeta {
             database_name: "template1".to_string(),
             ..meta.clone()
         };
         let _ = database_query_scroll_limits(&other_meta, &state, &history, 300.0, 20.0, 1.25);
-        assert_eq!(state.result_view.history_layout_cache.borrow().rebuild_count, 5);
+        assert_eq!(
+            state
+                .result_view
+                .history_layout_cache
+                .borrow()
+                .rebuild_count,
+            5
+        );
     }
 
     #[test]
@@ -2584,13 +2619,16 @@ SELECT 2;  ";
                 ..DatabaseQueryHistoryEntry::default()
             })
             .collect::<Vec<_>>();
-        history.insert(2, DatabaseQueryHistoryEntry {
-            connection_id: meta.connection_id,
-            database_name: "other".to_string(),
-            sql: "select 'other'".to_string(),
-            started_unix_ms: 99,
-            ..DatabaseQueryHistoryEntry::default()
-        });
+        history.insert(
+            2,
+            DatabaseQueryHistoryEntry {
+                connection_id: meta.connection_id,
+                database_name: "other".to_string(),
+                sql: "select 'other'".to_string(),
+                started_unix_ms: 99,
+                ..DatabaseQueryHistoryEntry::default()
+            },
+        );
         let state = DatabaseQueryTabState::default();
         let layout = state.result_view.history_layout(&meta, &history, 1.0);
         assert_eq!(layout.entries().len(), 5);
@@ -2599,8 +2637,14 @@ SELECT 2;  ";
         assert_eq!(layout.visible_range(50.0, 50.0), 1..2);
         assert_eq!(layout.visible_range(75.0, 1.0), 1..2);
         assert_eq!(layout.visible_range(200.0, 50.0), 4..5);
-        assert_eq!(history[layout.entries()[0].history_index].started_unix_ms, 4);
-        assert_eq!(history[layout.entries()[1].history_index].started_unix_ms, 3);
+        assert_eq!(
+            history[layout.entries()[0].history_index].started_unix_ms,
+            4
+        );
+        assert_eq!(
+            history[layout.entries()[1].history_index].started_unix_ms,
+            3
+        );
     }
 
     #[test]

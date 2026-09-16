@@ -48,10 +48,10 @@ fn terminal_shell_escape_path(path: &Path, out: &mut Vec<u8>) {
                 out.extend_from_slice(&[b'\'', byte, b'\'']);
                 continue;
             }
-            b' ' | b'\t' | b'\\' | b'\'' | b'"' | b'`' | b'$' | b'&' | b';' | b'|'
-            | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'?' | b'!'
-            | b'#' | b'~' | b'^' | b'%' | b'=' => out.push(b'\\'),
-            _ => {},
+            b' ' | b'\t' | b'\\' | b'\'' | b'"' | b'`' | b'$' | b'&' | b';' | b'|' | b'<'
+            | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'?' | b'!' | b'#' | b'~'
+            | b'^' | b'%' | b'=' => out.push(b'\\'),
+            _ => {}
         }
         out.push(byte);
     }
@@ -286,7 +286,9 @@ impl App {
                         *error = None;
                     }
                 }
-                crate::app::database::DatabaseTableModal::MultilineEditor { input, error, .. } => {
+                crate::app::database::DatabaseTableModal::MultilineEditor {
+                    input, error, ..
+                } => {
                     input.insert(text, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
                     invalidate_table_modal_layout = true;
                     *error = None;
@@ -532,9 +534,7 @@ impl App {
                             None
                         }
                     }
-                    PhysicalKey::Code(KeyCode::KeyV) if primary => {
-                        paste
-                    }
+                    PhysicalKey::Code(KeyCode::KeyV) if primary => paste,
                     _ => terminal_key_sequence(
                         key_event.physical_key,
                         key_event.logical_key.to_text(),
@@ -1263,7 +1263,10 @@ mod tests {
     #[test]
     fn terminal_file_list_paste_escapes_shell_syntax_and_keeps_multiple_arguments() {
         for (path, expected) in [
-            ("/home/reyan/My File.txt", b"/home/reyan/My\\ File.txt".as_slice()),
+            (
+                "/home/reyan/My File.txt",
+                b"/home/reyan/My\\ File.txt".as_slice(),
+            ),
             ("/tmp/O'Brien.txt", b"/tmp/O\\'Brien.txt".as_slice()),
             ("/tmp/back\\slash", b"/tmp/back\\\\slash".as_slice()),
             ("/tmp/$HOME;file", b"/tmp/\\$HOME\\;file".as_slice()),
@@ -1281,7 +1284,11 @@ mod tests {
         ];
         assert_eq!(
             terminal_clipboard_paste_bytes(Some(&files), Some("ignored text")),
-            Some("/tmp/файл.txt /home/reyan/My\\ Directory".as_bytes().to_vec())
+            Some(
+                "/tmp/файл.txt /home/reyan/My\\ Directory"
+                    .as_bytes()
+                    .to_vec()
+            )
         );
     }
 

@@ -265,7 +265,9 @@ impl App {
                 )
             {
                 crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut state.popup.scroll, target, drag_offset,
+                    &mut state.popup.scroll,
+                    target,
+                    drag_offset,
                 );
             } else {
                 state.popup.scroll.end_drag();
@@ -570,11 +572,7 @@ impl App {
             let point = {
                 let logs = &self.ide_panel.git.git_logs;
                 self.renderer.as_mut().and_then(|renderer| {
-                    renderer.git_logs_text_point_at(
-                        logs,
-                        position.x as f32,
-                        position.y as f32,
-                    )
+                    renderer.git_logs_text_point_at(logs, position.x as f32, position.y as f32)
                 })
             };
             if let (Some(anchor), Some(point)) = (anchor, point) {
@@ -603,9 +601,7 @@ impl App {
                     )
                 {
                     let scroll = &mut self.ide_panel.api.mock_server_log_scroll;
-                    crate::app::mouse::apply_scrollbar_drag_target(
-                        scroll, target, drag_offset,
-                    );
+                    crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
                 }
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -637,9 +633,7 @@ impl App {
                     Some(self.ide_panel.api.mock_guide_scroll.drag_offset),
                 ) {
                     let scroll = &mut self.ide_panel.api.mock_guide_scroll;
-                    crate::app::mouse::apply_scrollbar_drag_target(
-                        scroll, target, drag_offset,
-                    );
+                    crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
                 } else {
                     self.ide_panel.api.mock_guide_scroll.end_drag();
                 }
@@ -1902,14 +1896,24 @@ mod tests {
 
     #[test]
     fn editor_scrollbar_drag_suppresses_hover_only_while_dragging() {
-        assert!(!should_suppress_editor_hover_for_scroll_drag(false, false, false));
-        assert!(should_suppress_editor_hover_for_scroll_drag(true, false, false));
-        assert!(should_suppress_editor_hover_for_scroll_drag(false, true, false));
-        assert!(should_suppress_editor_hover_for_scroll_drag(true, true, false));
+        assert!(!should_suppress_editor_hover_for_scroll_drag(
+            false, false, false
+        ));
+        assert!(should_suppress_editor_hover_for_scroll_drag(
+            true, false, false
+        ));
+        assert!(should_suppress_editor_hover_for_scroll_drag(
+            false, true, false
+        ));
+        assert!(should_suppress_editor_hover_for_scroll_drag(
+            true, true, false
+        ));
     }
 
     #[test]
     fn markdown_reader_never_arms_hidden_editor_hover() {
-        assert!(should_suppress_editor_hover_for_scroll_drag(false, false, true));
+        assert!(should_suppress_editor_hover_for_scroll_drag(
+            false, false, true
+        ));
     }
 }

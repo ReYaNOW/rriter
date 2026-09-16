@@ -90,12 +90,15 @@ fn gl_context_attempts(
     platform: crate::platform::PlatformKind,
 ) -> impl Iterator<Item = (GlContextPlan, GlContextPriorityRequest)> {
     let priorities = gl_context_priority_requests(platform);
-    gl_context_plans(platform).iter().copied().flat_map(move |plan| {
-        priorities
-            .iter()
-            .copied()
-            .map(move |priority| (plan, priority))
-    })
+    gl_context_plans(platform)
+        .iter()
+        .copied()
+        .flat_map(move |plan| {
+            priorities
+                .iter()
+                .copied()
+                .map(move |priority| (plan, priority))
+        })
 }
 
 fn gpu_priority_label(priority: Priority) -> &'static str {
@@ -261,12 +264,8 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
         .as_raw();
     let (not_current_context, requested_context) =
         create_not_current_context(&gl_config, raw_window_handle)?;
-    let (surface, context) = create_surface_and_context(
-        &gl_config,
-        &window,
-        raw_window_handle,
-        not_current_context,
-    )?;
+    let (surface, context) =
+        create_surface_and_context(&gl_config, &window, raw_window_handle, not_current_context)?;
     let requested_context = format!(
         "{requested_context} / GPU priority {}",
         gpu_priority_label(context.priority())

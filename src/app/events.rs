@@ -1614,15 +1614,7 @@ mod tests {
             winit::window::CursorIcon::Pointer
         );
 
-        assert!(registry.register_blocker(
-            UiId::StatusBar,
-            0.0,
-            0.0,
-            300.0,
-            200.0,
-            10.0,
-            40.0,
-        ));
+        assert!(registry.register_blocker(UiId::StatusBar, 0.0, 0.0, 300.0, 200.0, 10.0, 40.0,));
         assert_eq!(
             markdown_read_cursor_icon(false, false, &registry),
             winit::window::CursorIcon::Default

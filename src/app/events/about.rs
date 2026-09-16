@@ -361,9 +361,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
         needs_redraw = true;
     }
-    if markdown_read
-        && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated)
-    {
+    if markdown_read && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated) {
         needs_redraw = true;
     }
     if markdown_read && app.markdown.update_code_scroll_x(dt) {

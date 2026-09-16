@@ -216,10 +216,11 @@ mod tests {
             Some(AutomationStep::OpenFile(path)) if path == Path::new("README.md")
         ));
         assert!(matches!(steps.get(1), Some(AutomationStep::WaitHighlight)));
-        assert!(steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::ScrollEditorTimed { duration_secs: 6 }
-        )));
+        assert!(
+            steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::ScrollEditorTimed { duration_secs: 6 }))
+        );
 
         let first_source_edit = position(&steps, |step| {
             matches!(
@@ -348,10 +349,11 @@ mod tests {
     #[test]
     fn markdown_scenario_uses_semantic_steps_without_coordinate_clicks() {
         let steps = markdown_scenario_steps();
-        assert!(!steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::JumpMinimap(_)
-        )));
+        assert!(
+            !steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::JumpMinimap(_)))
+        );
         for step in &steps {
             let debug = format!("{step:?}").to_ascii_lowercase();
             assert!(!debug.contains("click"), "coordinate click step: {step:?}");

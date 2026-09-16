@@ -259,6 +259,10 @@ impl Renderer {
         wants_pointer: &mut bool,
         clip_rect: Option<(f32, f32, f32, f32)>,
     ) {
+        crate::app::mouse::HOVER_STATE.with(|state| {
+            state.borrow_mut().interaction_rect = None;
+        });
+
         // --- LSP Diagnostic Tooltip ---
         let hovered_diags_cache_empty =
             crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diagnostic_popup_cache_is_empty());

@@ -1668,7 +1668,10 @@ mod tests {
                 rows: vec![row],
             });
         }
-        assert!(grid.chunks.contains_key(&0), "visible chunk stays protected");
+        assert!(
+            grid.chunks.contains_key(&0),
+            "visible chunk stays protected"
+        );
         let evicted = (1..10)
             .find(|chunk_index| !grid.chunks.contains_key(chunk_index))
             .expect("one non-visible chunk should be evicted");

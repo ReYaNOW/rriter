@@ -264,9 +264,7 @@ fn legacy_bytes_look_binary(bytes: &[u8]) -> bool {
     }
     let raw_controls = bytes
         .iter()
-        .filter(|&&byte| {
-            matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f | 0x7f)
-        })
+        .filter(|&&byte| matches!(byte, 0x01..=0x08 | 0x0b | 0x0c | 0x0e..=0x1f | 0x7f))
         .count();
     raw_controls >= 2 && raw_controls.saturating_mul(20) >= bytes.len().max(1)
 }
@@ -398,8 +396,7 @@ fn mixed_script_word_penalty(text: &str, family: ScriptFamily) -> f32 {
         has_expected = false;
         has_other = false;
     }
-    (mixed_words as f32 * LEGACY_MIXED_SCRIPT_WORD_PENALTY)
-        .min(LEGACY_MAX_MIXED_SCRIPT_PENALTY)
+    (mixed_words as f32 * LEGACY_MIXED_SCRIPT_WORD_PENALTY).min(LEGACY_MAX_MIXED_SCRIPT_PENALTY)
 }
 
 fn latin_diacritic_saturation_penalty(text: &str, family: ScriptFamily) -> f32 {
@@ -443,8 +440,7 @@ fn unusual_intraword_symbol_penalty(text: &str, family: ScriptFamily) -> f32 {
         }
         previous = Some(ch);
     }
-    (unusual as f32 * LEGACY_INTRAWORD_SYMBOL_PENALTY)
-        .min(LEGACY_MAX_INTRAWORD_SYMBOL_PENALTY)
+    (unusual as f32 * LEGACY_INTRAWORD_SYMBOL_PENALTY).min(LEGACY_MAX_INTRAWORD_SYMBOL_PENALTY)
 }
 
 fn is_bad_decoded_char(ch: char) -> bool {
