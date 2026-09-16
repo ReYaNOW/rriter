@@ -11,6 +11,7 @@ Read on demand, not upfront:
 Search (`rg`-first):
 
 * Default: `rg -n` for symbols, strings, error text, file names. Start narrow (exact symbol or distinctive string), widen only if empty.
+* The Bash tool runs **zsh**, not bash. Bash-only syntax fails with `bad substitution` (`${var^^}`, `${!var}`, `mapfile`), and an unmatched glob aborts the whole command with `no matches found` instead of passing the pattern through. Keep commands POSIX-ish, or quote the glob and let the tool expand it.
 * Read only the files/ranges the search points to. Always read exact source before editing.
 * `code-review-graph` MCP is optional: use it when `rg` answers poorly — callers of a widely used function before changing its behavior, test ownership, impact of a multi-file change. Never a mandatory first step.
 * Graph output is an index, not source. Rust `include!`-split files can return false `0` callers; verify with `rg`.
@@ -33,6 +34,7 @@ No speculative features. No broad refactors unless asked.
 * Act, don't ask: find the cause, change code, run checks. Stop only for destructive or out-of-scope actions.
 * Context discipline: search first, then read relevant ranges (offset/limit for large files). Do not read whole large files or guides "just in case".
 * Long command output (builds, tests): redirect to a file (`cmd > /tmp/<task>.log 2>&1`), then `grep`/`tail` it. Never dump full logs into context.
+* While a long build or test run is in flight (`make codex_test`, `make test`, `make fast`, cargo builds): start it in the background and then **go idle**. No polling the log, no peeking at partial output, no "meanwhile" side work, no thinking out loud. Every such check is a full model turn that re-ships the whole context for nothing. Wait for the completion notification, then read the result once with `grep`/`tail`.
 * Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on.
 * Fix at the root: if a shared helper is wrong, fix the helper, not one caller; check sibling code paths that use it.
 * Batch independent searches/reads in one step.
@@ -99,6 +101,8 @@ make codex_test
 ```
 
 Always run `make codex_test` at the end of task if ANY file related to RRiter changed.
+
+Run it in the background and stay silent until it reports. It takes minutes; checking on it costs a full model turn each time and tells you nothing the completion notification will not.
 
 Do not run `make fast` for RRiter unless user explicitly asks.
 
