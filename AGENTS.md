@@ -1,4 +1,4 @@
-RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think about the most performant and non resource-intensive solution. If you are an Agent, always write in the summary after completed task - why your solution is SOTA in performance and most non resource-intensive solution. If not SOTA, make SOTA. But for SOTA ONLY touch code that you have been writen in current task, dont touch otherwise if not asked. Do not tell about SOTA in bugfix tasks.
+RRiter agent rules. Strict mode. Small patches. Fast UI first. Prefer the most performant, least resource-intensive solution for the code you write in the task; do not rework other code for that unless asked. In the final report, mention performance only when a real choice was made (allocation, per-frame work, I/O); no boilerplate justification.
 
 ## 0. Context and search
 
@@ -80,15 +80,9 @@ Forbidden unless user explicitly asks:
 
 ## 4. Plan + Verify
 
-### Parallel Cargo isolation
+### Builds and tests with several agents
 
-When multiple agents run Rust/Cargo commands concurrently:
-
-* Give every agent a unique `CARGO_TARGET_DIR`; never share one target directory between concurrent Cargo processes.
-* Keep each target directory outside another agent's source tree, preferably under `/tmp` with a task-specific name.
-* Set `CARGO_BUILD_JOBS` so the aggregate compiler/linker load fits available CPU and memory; do not let every agent use unrestricted parallelism.
-* Reuse an already configured shared `sccache` when available, but do not install or enable a new cache service just for the task.
-* Run final integrated verification after concurrent agents finish, from the integrated source tree with its normal Cargo target configuration.
+Only one agent builds or tests at a time, in the main checkout where `target/` is warm. Parallel agents only edit; the integrator builds and runs tests once after integration. A fresh worktree starts with an empty `target/`: the first build takes tens of minutes and gigabytes, and concurrent Cargo processes fight for CPU and for one target directory.
 
 If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
