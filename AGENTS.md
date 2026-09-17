@@ -59,7 +59,7 @@ Allowed shell commands:
 * `python3 gen_project_ai_map.py`
 * `make codex_test`
 * `make test TEST_FILTER=<module path>` (focused tests)
-* `rustfmt +nightly <changed .rs files>` — never bare `cargo +nightly fmt`: it reformats unrelated files and the reverts cost more turns than the task
+* No `rustfmt` / `cargo fmt` at all, not even on a single file: the tree is not rustfmt-clean, and rustfmt follows `mod` declarations, so one file drags dozens of untouched files into the diff. Match the surrounding style by hand.
 * `make api-map` if still present
 * `python3 scripts/build_windows.py --self-test`
 * `python3 scripts/build_macos.py --self-test`
