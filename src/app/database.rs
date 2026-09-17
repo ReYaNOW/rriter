@@ -25,8 +25,10 @@ pub use database_grid::{
     DatabaseTableInputTarget, DatabaseTableRefreshPrompt, DatabaseTableReloadAction,
     DatabaseTableReviewState, DatabaseTableReviewSummary, civil_date_from_unix_days,
     database_column_width, database_columns_content_width, database_grid_layout,
-    database_grid_max_scroll, database_grid_viewport, database_grid_visible_row_range,
-    parse_bytea_preview, parse_editor_value, set_database_column_width,
+    database_grid_header_height_px, database_grid_max_scroll, database_grid_row_height_logical,
+    database_grid_row_height_px, database_grid_viewport, database_grid_viewport_from_body_rect,
+    database_grid_visible_row_range, parse_bytea_preview, parse_editor_value,
+    set_database_column_width,
 };
 pub use database_panel::*;
 #[allow(unused_imports)]

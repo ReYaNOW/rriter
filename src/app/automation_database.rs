@@ -2,10 +2,11 @@ use std::ffi::OsString;
 use std::time::Duration;
 
 use crate::app::database::{
-    DATABASE_GRID_ROW_HEIGHT, DatabaseCellPosition, DatabaseConnectionConfig, DatabaseConnectionId,
-    DatabaseConnectionNode, DatabaseConnectionStatus, DatabasePendingJobKind, DatabaseQueryMode,
-    DatabaseQueryTabState, DatabaseSecretBundle, DatabaseTableModal, DatabaseTableTabState,
-    PostgresTlsMode, SshHostKeyPolicy, database_grid_max_scroll, database_query_scroll_limits,
+    DatabaseCellPosition, DatabaseConnectionConfig, DatabaseConnectionId, DatabaseConnectionNode,
+    DatabaseConnectionStatus, DatabasePendingJobKind, DatabaseQueryMode, DatabaseQueryTabState,
+    DatabaseSecretBundle, DatabaseTableModal, DatabaseTableTabState, PostgresTlsMode,
+    SshHostKeyPolicy, database_grid_max_scroll, database_grid_row_height_logical,
+    database_grid_viewport_from_body_rect, database_query_scroll_limits,
 };
 use crate::app::{App, EditorTabKind};
 use crate::ui_system::UiId;
@@ -1080,13 +1081,32 @@ fn wait_query_result(app: &App, marker: &str) -> DatabaseStepResult {
 
 pub(super) fn scroll_table(app: &mut App, direction: f32) -> Result<(), String> {
     let tab_id = active_pgo_table_id(app)?;
+    // The grid viewport is normally filled by wheel input, so refresh it from the
+    // rendered body rect here: automation scrolls before any wheel event.
+    let viewport = app
+        .ui_registry
+        .rect_for(UiId::DatabaseTableGridBody)
+        .ok_or_else(|| {
+            format!(
+                "PGO table viewport is not rendered; {}",
+                diagnostics(app)
+            )
+        })?;
+    let scale = app
+        .renderer
+        .as_ref()
+        .map_or(1.0, |renderer| renderer.scale_factor);
+    let (viewport_width, viewport_height) =
+        database_grid_viewport_from_body_rect(viewport.2, viewport.3, scale);
     let Some((_, state)) = app.database_table_meta_state_mut(tab_id) else {
         return Err(format!("PGO table state disappeared; {}", diagnostics(app)));
     };
+    state.grid.viewport_width = viewport_width;
+    state.grid.viewport_height = viewport_height;
     let row_count = state.grid.logical_row_count();
     let max_scroll = database_grid_max_scroll(
         row_count,
-        DATABASE_GRID_ROW_HEIGHT,
+        database_grid_row_height_logical(scale),
         state.grid.viewport_height,
     );
     if max_scroll <= 0.0 {

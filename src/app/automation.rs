@@ -985,9 +985,8 @@ impl AutomationController {
                         .renderer
                         .as_ref()
                         .map_or(1.0, |renderer| renderer.scale_factor);
-                    let view_h = app.renderer.as_ref().map_or(600.0 * scale, |renderer| {
-                        (renderer.height * 0.55).max(240.0 * scale)
-                    });
+                    let view_h = crate::app::mouse::git_graph_rows_bounds(app, scale)
+                        .map_or(0.0, |(_, rows_h)| rows_h);
                     let max_scroll = crate::app::git_panel::git_graph_max_scroll(
                         app.ide_panel.git.graph_snapshot.len(),
                         view_h,
@@ -2161,10 +2160,14 @@ fn scroll_active_api_tab(app: &mut App, delta: f32) {
         .renderer
         .as_ref()
         .map_or(1.0, |renderer| renderer.scale_factor);
-    let visible_h = app
-        .renderer
-        .as_ref()
-        .map_or(720.0, |renderer| renderer.height);
+    let visible_h = app.renderer.as_ref().map_or(720.0, |renderer| {
+        crate::render_view::api_tab_viewport_height(
+            renderer.height,
+            app.show_welcome,
+            app.is_ide_mode,
+            scale,
+        )
+    });
     let Some((meta, state)) = app.active_api_tab() else {
         return;
     };

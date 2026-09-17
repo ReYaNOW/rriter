@@ -184,9 +184,12 @@ impl App {
                 .rect_for(crate::ui_system::UiId::DatabaseTableGridBody);
             if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
                 if let Some((_, _, width, height)) = grid_rect {
-                    state.grid.viewport_width = (width / s - 54.0).max(0.0);
-                    state.grid.viewport_height =
-                        (height / s - crate::app::database::DATABASE_GRID_HEADER_HEIGHT).max(0.0);
+                    let (viewport_width, viewport_height) =
+                        crate::app::database::database_grid_viewport_from_body_rect(
+                            width, height, s,
+                        );
+                    state.grid.viewport_width = viewport_width;
+                    state.grid.viewport_height = viewport_height;
                 }
                 if shift || dx.abs() > dy.abs() {
                     let amount = if shift { dy } else { dx } / s.max(0.001);
@@ -198,7 +201,7 @@ impl App {
                     state.grid.scroll_x.clamp_target(0.0, max);
                 } else {
                     let max = (state.grid.logical_row_count() as f32
-                        * crate::app::database::DATABASE_GRID_ROW_HEIGHT
+                        * crate::app::database::database_grid_row_height_logical(s)
                         - state.grid.viewport_height)
                         .max(0.0);
                     state.grid.scroll_y.anim_speed = 7.0;
@@ -1258,8 +1261,12 @@ impl App {
                 }
             }
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let status_h = crate::render_view::ide_status_bar_height(s);
-            let visible_h = (wh - tab_bar_h - status_h).max(0.0);
+            let visible_h = crate::render_view::api_tab_viewport_height(
+                wh,
+                self.show_welcome,
+                self.is_ide_mode,
+                s,
+            );
             let max_scroll = self
                 .tabs
                 .get(self.active_tab)

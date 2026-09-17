@@ -80,6 +80,30 @@ pub(crate) fn animated_settings_modal_layout(
     layout
 }
 
+/// Vertical steps of the IDE tab scroll content, in unscaled pixels. The render
+/// code and the scroll model must walk the same steps: the content height is
+/// built from these values, so a change in `draw_settings` that is not mirrored
+/// here would make the scrollbar thumb drift from what is drawn.
+const SETTINGS_IDE_SCROLL_TOP: f32 = 52.0; // clip top, just below the tab pill
+/// `draw_settings` starts the tab content cursor at `inner.y + 40 * s` and
+/// advances it by the tab block step (`46 * s`) before the IDE rows, so the
+/// first IDE row sits this far below the clip top.
+const SETTINGS_IDE_CONTENT_TOP_INSET: f32 = 86.0 - SETTINGS_IDE_SCROLL_TOP;
+const SETTINGS_IDE_SECTION_TITLE_STEP: f32 = 40.0;
+const SETTINGS_IDE_WORKSPACE_ROW_STEP: f32 = 46.0;
+const SETTINGS_IDE_ADD_WORKSPACE_STEP: f32 = 56.0;
+const SETTINGS_IDE_DIVIDER_STEP: f32 = 20.0;
+const SETTINGS_IDE_IGNORE_TITLE_STEP: f32 = 28.0;
+const SETTINGS_IDE_IGNORE_HINT_STEP: f32 = 22.0;
+const SETTINGS_IDE_IGNORE_EXAMPLES_STEP: f32 = 20.0;
+const SETTINGS_IDE_IGNORE_INPUT_H: f32 = 34.0;
+const SETTINGS_IDE_IGNORE_INPUT_GAP: f32 = 16.0;
+const SETTINGS_IDE_CHIP_H: f32 = 28.0;
+const SETTINGS_IDE_CHIP_GAP_X: f32 = 8.0;
+const SETTINGS_IDE_CHIP_GAP_Y: f32 = 8.0;
+/// Air kept under the last chip row when the tab is scrolled to the bottom.
+const SETTINGS_IDE_CONTENT_BOTTOM_PAD: f32 = 24.0;
+
 pub(crate) fn settings_ignore_input_rect(
     layout: SettingsModalLayout,
     scale: f32,
@@ -93,12 +117,26 @@ pub(crate) fn settings_ignore_input_rect(
     let button_w = (110.0 * scale).min((content_available_w * 0.32).max(0.0));
     let effective_gap = add_gap.min((content_available_w - button_w).max(0.0));
     let input_w = (content_available_w - effective_gap - button_w).max(0.0);
-    let input_y = layout.inner.y
-        + (272.0 + workspace_count as f32 * 46.0) * scale
-        - ide_scroll_y.round();
-    crate::ui_system::UiClipRect::new(content_x, input_y, input_w, 34.0 * scale)
+    // Every step the IDE tab render walks from the modal inner top down to the
+    // input row, so hit-testing and drawing share one vertical model.
+    let input_top = (SETTINGS_IDE_CONTENT_TOP_INSET
+        + SETTINGS_IDE_SCROLL_TOP
+        + SETTINGS_IDE_SECTION_TITLE_STEP
+        + workspace_count as f32 * SETTINGS_IDE_WORKSPACE_ROW_STEP
+        + SETTINGS_IDE_ADD_WORKSPACE_STEP
+        + SETTINGS_IDE_DIVIDER_STEP
+        + SETTINGS_IDE_IGNORE_TITLE_STEP
+        + SETTINGS_IDE_IGNORE_HINT_STEP
+        + SETTINGS_IDE_IGNORE_EXAMPLES_STEP)
+        * scale;
+    let input_y = layout.inner.y + input_top - ide_scroll_y.round();
+    crate::ui_system::UiClipRect::new(
+        content_x,
+        input_y,
+        input_w,
+        SETTINGS_IDE_IGNORE_INPUT_H * scale,
+    )
 }
-
 
 pub(crate) fn settings_ide_content_height(
     workspace_count: usize,
@@ -106,11 +144,8 @@ pub(crate) fn settings_ide_content_height(
     max_row_width: f32,
     scale: f32,
 ) -> f32 {
-    let workspace_h = workspace_count as f32 * 46.0 * scale + 126.0 * scale;
-    let chip_h = 28.0 * scale;
-    let chip_gap_y = 8.0 * scale;
-    let chip_gap_x = 8.0 * scale;
     let max_row_w = max_row_width.max(1.0);
+    let chip_gap_x = SETTINGS_IDE_CHIP_GAP_X * scale;
     let mut chip_rows = 1usize;
     let mut row_w = 0.0;
     for width in ignore_chip_widths {
@@ -120,12 +155,28 @@ pub(crate) fn settings_ide_content_height(
         }
         row_w += width + chip_gap_x;
     }
-    let ignore_h = 160.0 * scale + chip_rows as f32 * (chip_h + chip_gap_y);
-    workspace_h + ignore_h
+    // Content below the clip top: the same steps `draw_settings` walks, the
+    // chip rows it wraps, and the air kept under the last row.
+    let fixed = SETTINGS_IDE_CONTENT_TOP_INSET
+        + SETTINGS_IDE_SECTION_TITLE_STEP
+        + SETTINGS_IDE_ADD_WORKSPACE_STEP
+        + SETTINGS_IDE_DIVIDER_STEP
+        + SETTINGS_IDE_IGNORE_TITLE_STEP
+        + SETTINGS_IDE_IGNORE_HINT_STEP
+        + SETTINGS_IDE_IGNORE_EXAMPLES_STEP
+        + SETTINGS_IDE_IGNORE_INPUT_H
+        + SETTINGS_IDE_IGNORE_INPUT_GAP
+        + SETTINGS_IDE_CHIP_H
+        + SETTINGS_IDE_CONTENT_BOTTOM_PAD;
+    let workspaces_h = workspace_count as f32 * SETTINGS_IDE_WORKSPACE_ROW_STEP;
+    // Extra chip rows advance by the row height plus the vertical gap.
+    let extra_chip_rows_h = chip_rows.saturating_sub(1) as f32
+        * (SETTINGS_IDE_CHIP_H + SETTINGS_IDE_CHIP_GAP_Y);
+    (fixed + workspaces_h + extra_chip_rows_h) * scale
 }
 
 pub(crate) fn settings_ide_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
-    (layout.inner.h - 52.0 * scale).max(0.0)
+    (layout.inner.h - SETTINGS_IDE_SCROLL_TOP * scale).max(0.0)
 }
 
 pub(crate) fn settings_faq_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
@@ -385,14 +436,14 @@ impl Renderer {
 
         if active_tab == 0 {
             // ── Scissor для скролла вкладки IDE ──────────────────────────────
-            // Начало scissor = iy + 52.0 * s (ниже пилюли заголовка iy+18..iy+48)
+            // Начало scissor = iy + SETTINGS_IDE_SCROLL_TOP * s (ниже пилюли заголовка iy+18..iy+48)
             let ide_content_area_x = ix + sidebar_w;
             let ide_content_area_w = iw - sidebar_w;
-            let ide_content_area_h = ih - 52.0 * s;
+            let ide_content_area_h = ih - SETTINGS_IDE_SCROLL_TOP * s;
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
-                let scissor_y = self.height - (iy + 52.0 * s + ide_content_area_h);
+                let scissor_y = self.height - (iy + SETTINGS_IDE_SCROLL_TOP * s + ide_content_area_h);
                 self.gl.scissor(
                     ide_content_area_x.round() as i32,
                     scissor_y.round() as i32,
@@ -402,7 +453,7 @@ impl Renderer {
             }
             ui_registry.push_clip(crate::ui_system::UiClipRect::new(
                 ide_content_area_x,
-                iy + 52.0 * s,
+                iy + SETTINGS_IDE_SCROLL_TOP * s,
                 ide_content_area_w,
                 ide_content_area_h,
             ));
@@ -416,7 +467,7 @@ impl Renderer {
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
-            content_y += 40.0 * s;
+            content_y += SETTINGS_IDE_SECTION_TITLE_STEP * s;
 
             for (ws_idx, path) in ide_workspaces.iter().enumerate() {
                 let path_str = path.to_string_lossy();
@@ -474,7 +525,7 @@ impl Renderer {
                     custom_color: None,
                 };
                 btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-                content_y += 46.0 * s;
+                content_y += SETTINGS_IDE_WORKSPACE_ROW_STEP * s;
             }
 
             let add_btn_y_reg = content_y.round();
@@ -498,10 +549,10 @@ impl Renderer {
                 icon_size: 20.0 * s,
             };
             btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            content_y += 56.0 * s;
+            content_y += SETTINGS_IDE_ADD_WORKSPACE_STEP * s;
             // ── Разделитель ───────────────────────────────────────────────
             self.push_rect(content_x, content_y, content_available_w, 1.0, [1.0, 1.0, 1.0, 0.07]);
-            content_y += 20.0 * s;
+            content_y += SETTINGS_IDE_DIVIDER_STEP * s;
 
             // ── Заголовок секции игноров ──────────────────────────────────
             self.draw_string_scaled(
@@ -511,7 +562,7 @@ impl Renderer {
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
-            content_y += 28.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_TITLE_STEP * s;
 
             // Пояснение
             self.draw_string_scaled(
@@ -521,7 +572,7 @@ impl Renderer {
                 [0.45, 0.47, 0.55, 1.0],
                 0.85,
             );
-            content_y += 22.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_HINT_STEP * s;
             self.draw_string_scaled(
                 "Примеры: *.log  temp/  .DS_Store  *.min.js  build  dist",
                 content_x,
@@ -529,7 +580,7 @@ impl Renderer {
                 [0.35, 0.37, 0.44, 1.0],
                 0.82,
             );
-            content_y += 20.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_EXAMPLES_STEP * s;
 
             // ── Поле ввода + кнопка «Добавить» ───────────────────────────
             let content_w = content_available_w;
@@ -537,7 +588,7 @@ impl Renderer {
             let btn_add_w = (110.0 * s).min((content_w * 0.32).max(0.0));
             let effective_gap = add_gap.min((content_w - btn_add_w).max(0.0));
             let input_w = (content_w - effective_gap - btn_add_w).max(0.0);
-            let input_h = 34.0 * s;
+            let input_h = SETTINGS_IDE_IGNORE_INPUT_H * s;
             let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
             ui_registry.register_text_input(
@@ -619,14 +670,14 @@ impl Renderer {
             } else {
                 btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             }
-            content_y += input_h + 16.0 * s;
+            content_y += input_h + SETTINGS_IDE_IGNORE_INPUT_GAP * s;
 
             // ── Чипы пользовательских паттернов ──────────────────────────
-            let chip_h = 28.0 * s;
+            let chip_h = SETTINGS_IDE_CHIP_H * s;
             let chip_r = chip_h / 2.0;
             let pad_x = 12.0 * s;
-            let chip_gap_x = 8.0 * s;
-            let chip_gap_y = 8.0 * s;
+            let chip_gap_x = SETTINGS_IDE_CHIP_GAP_X * s;
+            let chip_gap_y = SETTINGS_IDE_CHIP_GAP_Y * s;
             let max_row_w = content_available_w;
             let mut chip_x = content_x;
 
@@ -727,7 +778,7 @@ impl Renderer {
             );
             let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
             if let Some(thumb) = settings_scrollbar_thumb(
-                iy + 52.0 * s,
+                iy + SETTINGS_IDE_SCROLL_TOP * s,
                 ide_content_area_h,
                 max_scroll,
                 ide_scroll_y,
@@ -746,7 +797,7 @@ impl Renderer {
                 ui_registry.register_rect(
                     crate::ui_system::UiId::SettingsIdeScrollY,
                     sb_x - 5.0 * s,
-                    iy + 52.0 * s,
+                    iy + SETTINGS_IDE_SCROLL_TOP * s,
                     16.0 * s,
                     track_h,
                     self.last_mouse_x,

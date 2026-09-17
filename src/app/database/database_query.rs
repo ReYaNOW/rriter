@@ -602,7 +602,7 @@ pub fn database_query_scroll_limits(
             &state.result_view.column_widths,
             result.columns.iter().map(String::as_str),
         ) * scale;
-        let row_height = super::DATABASE_GRID_ROW_HEIGHT * scale;
+        let row_height = super::database_grid_row_height_px(scale);
         return (
             (content_width - viewport_width).max(0.0),
             super::database_grid_max_scroll(result.rows.len(), row_height, viewport_height),

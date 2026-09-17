@@ -993,7 +993,7 @@ impl App {
             let Some((_, rect_y, _, rect_h)) = vertical_rect else {
                 return DatabaseDragUpdate::None;
             };
-            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let row_h = crate::app::database::database_grid_row_height_px(scale);
             let content_h = state.grid.logical_row_count() as f32 * row_h;
             let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse_y,
@@ -1797,7 +1797,7 @@ impl App {
             );
         } else {
             let Some((_, track_y, _, track_h)) = vertical_rect else { return; };
-            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let row_h = crate::app::database::database_grid_row_height_px(scale);
             let content_h = state.grid.logical_row_count() as f32 * row_h;
             let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse.1,

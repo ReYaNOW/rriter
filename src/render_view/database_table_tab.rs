@@ -550,14 +550,14 @@ impl Renderer {
         my: f32,
         blink_alpha: f32,
     ) {
-        use crate::app::database::{DATABASE_GRID_HEADER_HEIGHT, DATABASE_GRID_ROW_HEIGHT};
+        use crate::app::database::{database_grid_header_height_px, database_grid_row_height_px};
         let x = x.round();
         let y = y.round();
         let w = w.round().max(0.0);
         let h = h.round().max(0.0);
         let track = (SCROLLBAR_W * s).round().max(10.0);
-        let header_h = (DATABASE_GRID_HEADER_HEIGHT * s).round();
-        let row_h = (DATABASE_GRID_ROW_HEIGHT * s).round();
+        let header_h = database_grid_header_height_px(s);
+        let row_h = database_grid_row_height_px(s);
         let gutter_w = (ROW_GUTTER_W * s).round();
         let content_w = (state.grid.content_width(metadata) * s).round();
         let total_rows_h = state.grid.logical_row_count() as f32 * row_h;
@@ -1696,7 +1696,7 @@ fn draw_database_table_scrollbars(
     let (vertical_rect, horizontal_rect) = database_table_scrollbar_rects(layout);
     if let Some(rect) = vertical_rect {
         let total_h = state.grid.logical_row_count() as f32
-            * (crate::app::database::DATABASE_GRID_ROW_HEIGHT * s).round();
+            * crate::app::database::database_grid_row_height_px(s);
         renderer.push_rect(rect.x, rect.y, rect.w, rect.h, track_color);
         ui.register_rect(UiId::DatabaseTableScrollY, rect.x, rect.y, rect.w, rect.h, mx, my);
         if let Some(thumb) = crate::scroll::scrollbar_thumb(

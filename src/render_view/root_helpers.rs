@@ -290,6 +290,21 @@ pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
     IDE_STATUS_BAR_HEIGHT * scale
 }
 
+/// Visible viewport height of the active API Client tab: window minus tab bar and
+/// status bar. Shared by wheel scrolling and automation so both agree on the
+/// scrollable range.
+#[inline(always)]
+pub(crate) fn api_tab_viewport_height(
+    window_height: f32,
+    show_welcome: bool,
+    is_ide_mode: bool,
+    scale: f32,
+) -> f32 {
+    (window_height - ide_tab_bar_height(show_welcome, is_ide_mode, scale)
+        - ide_status_bar_height(scale))
+    .max(0.0)
+}
+
 #[inline(always)]
 pub(crate) fn ide_status_bar_y(window_height: f32, _panel_bottom_h: f32, scale: f32) -> f32 {
     (window_height - ide_status_bar_height(scale)).max(0.0)
