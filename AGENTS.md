@@ -59,7 +59,7 @@ Allowed shell commands:
 * `python3 gen_project_ai_map.py`
 * `make codex_test`
 * `make test TEST_FILTER=<module path>` (focused tests)
-* `cargo +nightly fmt`
+* `rustfmt +nightly <changed .rs files>` — never bare `cargo +nightly fmt`: it reformats unrelated files and the reverts cost more turns than the task
 * `make api-map` if still present
 * `python3 scripts/build_windows.py --self-test`
 * `python3 scripts/build_macos.py --self-test`
