@@ -482,14 +482,8 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                if self.markdown_mode() == crate::app::MarkdownMode::Read {
-                    self.finish_markdown_read_selection_gesture();
-                    self.scroll_y.end_drag();
-                }
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.update_scale_factor(scale_factor as f32);
-                    renderer.last_editor_version_for_scroll_x = u64::MAX;
-                }
+                // The native surface is still resized before the renderer; the rest is
+                // shared with headless `scale` through `handle_main_scale_factor_changed`.
                 if let Some(window) = self.window.as_ref() {
                     let size = window.inner_size();
                     if size.width > 0 && size.height > 0 {
@@ -498,24 +492,13 @@ impl ApplicationHandler for App {
                             NonZeroU32::new(size.width).unwrap(),
                             NonZeroU32::new(size.height).unwrap(),
                         );
-                        self.renderer
-                            .as_mut()
-                            .unwrap()
-                            .resize(size.width, size.height);
                     }
-                    window.request_redraw();
                 }
+                self.handle_main_scale_factor_changed(scale_factor);
             }
             WindowEvent::Resized(size) => {
-                if self.markdown_mode() == crate::app::MarkdownMode::Read {
-                    self.finish_markdown_read_selection_gesture();
-                    self.scroll_y.end_drag();
-                }
-                if size.width == 0 || size.height == 0 {
-                    self.render_suspended = true;
-                    self.last_frame = Instant::now();
-                } else {
-                    self.render_suspended = false;
+                // Same split as `ScaleFactorChanged`: only the native surface stays here.
+                if size.width > 0 && size.height > 0 {
                     let gl_context = self.gl_context.as_ref().unwrap();
                     let gl_surface = self.gl_surface.as_ref().unwrap();
                     gl_surface.resize(
@@ -523,17 +506,8 @@ impl ApplicationHandler for App {
                         NonZeroU32::new(size.width).unwrap(),
                         NonZeroU32::new(size.height).unwrap(),
                     );
-                    self.renderer
-                        .as_mut()
-                        .unwrap()
-                        .resize(size.width, size.height);
-                    self.renderer
-                        .as_mut()
-                        .unwrap()
-                        .last_editor_version_for_scroll_x = u64::MAX;
-                    self.last_resize_time = Some(Instant::now());
-                    self.window.as_ref().unwrap().request_redraw();
                 }
+                self.handle_main_resized(size);
             }
             WindowEvent::ModifiersChanged(mod_state) => {
                 self.modifiers = mod_state.state();

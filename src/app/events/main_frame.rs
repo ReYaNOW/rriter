@@ -8,6 +8,53 @@ pub(crate) struct FrameOutcome {
 }
 
 impl App {
+    /// Body of `WindowEvent::Resized` minus the native GL surface resize, which the window
+    /// branch does first; headless `resize` resizes its pbuffer before calling this.
+    pub(crate) fn handle_main_resized(&mut self, size: winit::dpi::PhysicalSize<u32>) {
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.finish_markdown_read_selection_gesture();
+            self.scroll_y.end_drag();
+        }
+        if size.width == 0 || size.height == 0 {
+            self.render_suspended = true;
+            self.last_frame = Instant::now();
+        } else {
+            self.render_suspended = false;
+            self.renderer
+                .as_mut()
+                .unwrap()
+                .resize(size.width, size.height);
+            self.renderer
+                .as_mut()
+                .unwrap()
+                .last_editor_version_for_scroll_x = u64::MAX;
+            self.last_resize_time = Some(Instant::now());
+            self.window.as_ref().unwrap().request_redraw();
+        }
+    }
+
+    /// Body of `WindowEvent::ScaleFactorChanged` minus the native GL surface resize.
+    pub(crate) fn handle_main_scale_factor_changed(&mut self, scale_factor: f64) {
+        if self.markdown_mode() == crate::app::MarkdownMode::Read {
+            self.finish_markdown_read_selection_gesture();
+            self.scroll_y.end_drag();
+        }
+        if let Some(renderer) = self.renderer.as_mut() {
+            renderer.update_scale_factor(scale_factor as f32);
+            renderer.last_editor_version_for_scroll_x = u64::MAX;
+        }
+        if let Some(window) = self.window.as_ref() {
+            let size = window.inner_size();
+            if size.width > 0 && size.height > 0 {
+                self.renderer
+                    .as_mut()
+                    .unwrap()
+                    .resize(size.width, size.height);
+            }
+            window.request_redraw();
+        }
+    }
+
     pub(crate) fn render_main_frame(&mut self) -> FrameOutcome {
                 let (autocomplete_frame_start, autocomplete_prev_frame) =
                     autocomplete_frame_start(self.autocomplete_active);
