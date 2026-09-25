@@ -1,6 +1,9 @@
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn toggle_git_file_stage(&mut self, workspace_idx: usize, file_idx: usize) {
+        if self.headless_write_blocked() {
+            return;
+        }
         if git_stage_click_locked(&self.ide_panel.git, workspace_idx) {
             return;
         }
@@ -55,6 +58,9 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn toggle_git_folder_stage(&mut self, workspace_idx: usize, row_idx: usize) {
+        if self.headless_write_blocked() {
+            return;
+        }
         if git_stage_click_locked(&self.ide_panel.git, workspace_idx) {
             return;
         }
@@ -149,6 +155,10 @@ impl App {
         }
         self.ide_panel.git.close_commit_menus();
         self.ide_panel.git.message_focused = false;
+        // Refused before the editor is reset, so the typed message survives.
+        if self.headless_write_blocked() {
+            return;
+        }
         let message = self.ide_panel.git.message_editor.get_full_text();
         let trimmed = message.trim();
         if trimmed.is_empty() {
@@ -175,6 +185,10 @@ impl App {
         workspace_idx: usize,
         action: impl FnOnce(PathBuf) -> GitAction,
     ) {
+        // Push, fetch and pull all rewrite refs or the worktree.
+        if self.headless_write_blocked() {
+            return;
+        }
         if self.ide_panel.git.pending {
             return;
         }
@@ -214,6 +228,9 @@ impl App {
     }
 
     pub fn stage_all_git_workspace(&mut self, workspace_idx: usize) {
+        if self.headless_write_blocked() {
+            return;
+        }
         if git_stage_click_locked(&self.ide_panel.git, workspace_idx) {
             return;
         }
@@ -286,6 +303,9 @@ impl App {
     }
 
     pub fn unstage_all_git_workspace(&mut self, workspace_idx: usize) {
+        if self.headless_write_blocked() {
+            return;
+        }
         if git_stage_click_locked(&self.ide_panel.git, workspace_idx) {
             return;
         }
@@ -346,6 +366,10 @@ impl App {
         let Some(dialog) = self.ide_panel.git.confirm_dialog.take() else {
             return;
         };
+        // After take(): the dialog closes, as it does when the rollback itself fails.
+        if self.headless_write_blocked() {
+            return;
+        }
         let files = dialog
             .files
             .into_iter()

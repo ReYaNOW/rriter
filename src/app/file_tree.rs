@@ -598,6 +598,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn undo_file_tree_operation(&mut self) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(entry) = self.ide_panel.file_tree_undo_stack.pop() else {
             return Ok(());
         };
@@ -1148,6 +1149,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn submit_file_tree_create_dialog(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_create_dialog.as_mut() else {
             return;
         };
@@ -1185,6 +1187,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn submit_file_tree_rename_dialog(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_rename_dialog.as_mut() else {
             return;
         };
@@ -1308,6 +1311,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn paste_file_tree_clipboard(&mut self, target_dir: PathBuf) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(clipboard) = self.ide_panel.file_tree_clipboard.clone() else {
             return Ok(());
         };
@@ -1368,6 +1372,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn confirm_file_tree_delete(&mut self) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(dialog) = self.ide_panel.file_tree_delete_dialog.as_mut() else {
             return Ok(());
         };
@@ -1412,6 +1417,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn finish_file_tree_move(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_ref() else {
             return;
         };

@@ -457,10 +457,26 @@ impl App {
         false
     }
 
+    /// Headless without --allow-writes: disk-mutating UI actions are refused with the readonly notice.
+    pub(crate) fn headless_write_blocked(&mut self) -> bool {
+        if crate::platform::editor_writes_allowed(crate::platform::headless_policy()) {
+            return false;
+        }
+        self.show_readonly_notice();
+        true
+    }
+
     fn write_current_text_to_path(&mut self, path: &Path, content: &str) -> bool {
+        if self.headless_write_blocked() {
+            return false;
+        }
         let result = match crate::platform::write_text_file(path, content, self.text_file_format) {
             Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Refused elevation falls through to the plain write-error path below.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+            {
                 crate::platform::write_text_file_elevated(
                     path,
                     content,

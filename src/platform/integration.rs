@@ -1,7 +1,7 @@
 use super::{APP_DIR_NAME, CURRENT_PLATFORM, PlatformKind, resolve_executable};
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, RwLock};
+use std::sync::{LazyLock, OnceLock, RwLock};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagedToolInstallPlan {
@@ -552,7 +552,31 @@ impl SystemProxyConfig {
     }
 }
 
+static APP_ROOT_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Headless profile root: all four app directories live under it, env is ignored.
+/// First call wins; set before any thread starts.
+pub fn set_app_root_override(root: PathBuf) -> Result<(), PathBuf> {
+    APP_ROOT_OVERRIDE.set(root)
+}
+
+pub fn app_root_override() -> Option<&'static Path> {
+    APP_ROOT_OVERRIDE.get().map(PathBuf::as_path)
+}
+
+pub(crate) fn app_paths_for_root(root: &Path) -> AppPaths {
+    AppPaths {
+        config: root.join("config"),
+        data: root.join("data"),
+        cache: root.join("cache"),
+        state: root.join("state"),
+    }
+}
+
 pub fn app_paths() -> AppPaths {
+    if let Some(root) = app_root_override() {
+        return app_paths_for_root(root);
+    }
     app_paths_with(CURRENT_PLATFORM, |name| std::env::var_os(name))
 }
 

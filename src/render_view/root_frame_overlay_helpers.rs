@@ -719,79 +719,83 @@ impl Renderer {
                 }
 
                 if t.last_print.elapsed().as_secs() >= 10 {
-                    let r_avg = if t.render_count > 0 {
-                        (t.render_time / t.render_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    let s_avg = if t.scroll_count > 0 {
-                        (t.scroll_time / t.scroll_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    let ty_avg = if t.type_count > 0 {
-                        (t.type_time / t.type_count as f32) * 1000.0
-                    } else {
-                        0.0
-                    };
-                    println!(
-                        "📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms",
-                        r_avg, s_avg, ty_avg
-                    );
-                    let stage_avg = |time: f32, count: u32| {
-                        if count > 0 { time / count as f32 * 1000.0 } else { 0.0 }
-                    };
-                    println!(
-                        "📊 Frame split: Editor {:.2}ms | Minimap {:.2}ms | Side {:.2}ms | Swap {:.2}ms",
-                        stage_avg(t.editor_time, t.editor_count),
-                        stage_avg(t.minimap_time, t.minimap_count),
-                        stage_avg(t.side_panel_time, t.side_panel_count),
-                        stage_avg(t.swap_time, t.swap_count),
-                    );
-                    println!(
-                        "📊 Root other: {:.2}ms",
-                        stage_avg(t.root_other_time, t.root_other_count),
-                    );
-                    println!(
-                        "📊 Root phases: Prep {:.2}ms | Cache {:.2}ms | Pre-editor {:.2}ms | Overlays {:.2}ms | Chrome {:.2}ms",
-                        stage_avg(t.root_phase_time[0], t.root_phase_count[0]),
-                        stage_avg(t.root_phase_time[1], t.root_phase_count[1]),
-                        stage_avg(t.root_phase_time[2], t.root_phase_count[2]),
-                        stage_avg(t.root_phase_time[3], t.root_phase_count[3]),
-                        stage_avg(t.root_phase_time[4], t.root_phase_count[4]),
-                    );
-                    let measured_frames = t.render_count + t.scroll_count + t.type_count;
-                    println!(
-                        "📊 Flush: Avg {:.3}ms | Max {:.2}ms | Calls/frame {:.1} | Vertices/frame {:.0}",
-                        stage_avg(t.flush_time, t.flush_count),
-                        t.flush_max_time * 1000.0,
-                        t.flush_count as f32 / measured_frames.max(1) as f32,
-                        t.flush_vertices as f32 / measured_frames.max(1) as f32,
-                    );
-                    println!(
-                        "📊 Chrome detail: Tabs {:.2}ms | Sticky-scroll {:.2}ms | Popups {:.2}ms | Bottom-status {:.2}ms | Overlays {:.2}ms | Final-flush {:.2}ms",
-                        stage_avg(t.chrome_detail_time[0], t.chrome_detail_count[0]),
-                        stage_avg(t.chrome_detail_time[1], t.chrome_detail_count[1]),
-                        stage_avg(t.chrome_detail_time[2], t.chrome_detail_count[2]),
-                        stage_avg(t.chrome_detail_time[3], t.chrome_detail_count[3]),
-                        stage_avg(t.chrome_detail_time[4], t.chrome_detail_count[4]),
-                        stage_avg(t.chrome_detail_time[5], t.chrome_detail_count[5]),
-                    );
-                    let present_fps = if t.scroll_present_interval_time > 0.0 {
-                        t.scroll_present_interval_count as f32 / t.scroll_present_interval_time
-                    } else {
-                        0.0
-                    };
-                    println!(
-                        "📊 Scroll present: {:.0} FPS | Avg gap {:.2}ms | Max gap {:.2}ms | Frames {}",
-                        present_fps,
-                        stage_avg(
-                            t.scroll_present_interval_time,
+                    // Headless keeps accumulating (read by take_frame_telemetry) but its
+                    // stdout is the protocol channel, so only the print is skipped.
+                    if !crate::platform::is_headless() {
+                        let r_avg = if t.render_count > 0 {
+                            (t.render_time / t.render_count as f32) * 1000.0
+                        } else {
+                            0.0
+                        };
+                        let s_avg = if t.scroll_count > 0 {
+                            (t.scroll_time / t.scroll_count as f32) * 1000.0
+                        } else {
+                            0.0
+                        };
+                        let ty_avg = if t.type_count > 0 {
+                            (t.type_time / t.type_count as f32) * 1000.0
+                        } else {
+                            0.0
+                        };
+                        println!(
+                            "📊 Telemetry (10s): Idle Render {:.2}ms | Scroll {:.2}ms | Type {:.2}ms",
+                            r_avg, s_avg, ty_avg
+                        );
+                        let stage_avg = |time: f32, count: u32| {
+                            if count > 0 { time / count as f32 * 1000.0 } else { 0.0 }
+                        };
+                        println!(
+                            "📊 Frame split: Editor {:.2}ms | Minimap {:.2}ms | Side {:.2}ms | Swap {:.2}ms",
+                            stage_avg(t.editor_time, t.editor_count),
+                            stage_avg(t.minimap_time, t.minimap_count),
+                            stage_avg(t.side_panel_time, t.side_panel_count),
+                            stage_avg(t.swap_time, t.swap_count),
+                        );
+                        println!(
+                            "📊 Root other: {:.2}ms",
+                            stage_avg(t.root_other_time, t.root_other_count),
+                        );
+                        println!(
+                            "📊 Root phases: Prep {:.2}ms | Cache {:.2}ms | Pre-editor {:.2}ms | Overlays {:.2}ms | Chrome {:.2}ms",
+                            stage_avg(t.root_phase_time[0], t.root_phase_count[0]),
+                            stage_avg(t.root_phase_time[1], t.root_phase_count[1]),
+                            stage_avg(t.root_phase_time[2], t.root_phase_count[2]),
+                            stage_avg(t.root_phase_time[3], t.root_phase_count[3]),
+                            stage_avg(t.root_phase_time[4], t.root_phase_count[4]),
+                        );
+                        let measured_frames = t.render_count + t.scroll_count + t.type_count;
+                        println!(
+                            "📊 Flush: Avg {:.3}ms | Max {:.2}ms | Calls/frame {:.1} | Vertices/frame {:.0}",
+                            stage_avg(t.flush_time, t.flush_count),
+                            t.flush_max_time * 1000.0,
+                            t.flush_count as f32 / measured_frames.max(1) as f32,
+                            t.flush_vertices as f32 / measured_frames.max(1) as f32,
+                        );
+                        println!(
+                            "📊 Chrome detail: Tabs {:.2}ms | Sticky-scroll {:.2}ms | Popups {:.2}ms | Bottom-status {:.2}ms | Overlays {:.2}ms | Final-flush {:.2}ms",
+                            stage_avg(t.chrome_detail_time[0], t.chrome_detail_count[0]),
+                            stage_avg(t.chrome_detail_time[1], t.chrome_detail_count[1]),
+                            stage_avg(t.chrome_detail_time[2], t.chrome_detail_count[2]),
+                            stage_avg(t.chrome_detail_time[3], t.chrome_detail_count[3]),
+                            stage_avg(t.chrome_detail_time[4], t.chrome_detail_count[4]),
+                            stage_avg(t.chrome_detail_time[5], t.chrome_detail_count[5]),
+                        );
+                        let present_fps = if t.scroll_present_interval_time > 0.0 {
+                            t.scroll_present_interval_count as f32 / t.scroll_present_interval_time
+                        } else {
+                            0.0
+                        };
+                        println!(
+                            "📊 Scroll present: {:.0} FPS | Avg gap {:.2}ms | Max gap {:.2}ms | Frames {}",
+                            present_fps,
+                            stage_avg(
+                                t.scroll_present_interval_time,
+                                t.scroll_present_interval_count,
+                            ),
+                            t.max_scroll_present_interval * 1000.0,
                             t.scroll_present_interval_count,
-                        ),
-                        t.max_scroll_present_interval * 1000.0,
-                        t.scroll_present_interval_count,
-                    );
+                        );
+                    }
 
                     t.render_time = 0.0;
                     t.render_count = 0;

@@ -1398,3 +1398,40 @@ fn linux_process_snapshot_reads_current_process_metadata_without_shelling_out() 
     assert!(snapshot.cwd.is_some());
     assert!(!snapshot.args.is_empty());
 }
+
+#[test]
+fn headless_policy_editor_writes_allowed() {
+    assert!(editor_writes_allowed(None));
+    assert!(!editor_writes_allowed(Some(HeadlessPolicy { allow_writes: false })));
+    assert!(editor_writes_allowed(Some(HeadlessPolicy { allow_writes: true })));
+}
+
+#[test]
+fn headless_policy_elevation_allowed() {
+    assert!(elevation_allowed(None));
+    assert!(!elevation_allowed(Some(HeadlessPolicy { allow_writes: true })));
+    assert!(!elevation_allowed(Some(HeadlessPolicy { allow_writes: false })));
+}
+
+#[test]
+fn headless_policy_intercept_external() {
+    let _ = take_external_request();
+    assert!(!intercept_external(None, ExternalRequest::PickFile));
+    assert_eq!(take_external_request(), None);
+
+    let policy = Some(HeadlessPolicy { allow_writes: false });
+    let url = ExternalRequest::OpenUrl("https://example.com".to_string());
+    assert!(intercept_external(policy, url.clone()));
+    assert_eq!(take_external_request(), Some(url));
+    assert_eq!(take_external_request(), None);
+}
+
+#[test]
+fn headless_app_paths_for_root() {
+    let root = PathBuf::from("/tmp/rriter-profile");
+    let paths = app_paths_for_root(&root);
+    assert_eq!(paths.config, root.join("config"));
+    assert_eq!(paths.data, root.join("data"));
+    assert_eq!(paths.cache, root.join("cache"));
+    assert_eq!(paths.state, root.join("state"));
+}
