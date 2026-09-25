@@ -40,6 +40,7 @@ No speculative features. No broad refactors unless asked.
 * Batch independent searches/reads in one step.
 * Edit files directly. Use unified diff only when showing changes; do not use chat parser `Before/After` blocks.
 * Final report: short — root cause (`file:line`), change, verification result (plus the SOTA note from the header when it applies). No essays.
+* Task tracking: rriter tasks go to the Kanri board, never Linear (Linear is Skyhold-only). Use the `kanri-task` skill, or `kanri-add "Title" [--desc ...] [--board RRiter] [--column Backlog|Features|Bugs|Doing|Done] [--top] [--list]` — it writes straight into Kanri's JSON store `~/.local/share/tech.trobonox.kanri/.kanri.dat`, keeps a backup, and refuses to write while Kanri is running (Kanri would overwrite the file on its own save).
 
 ## 3. Allowed Ops
 
