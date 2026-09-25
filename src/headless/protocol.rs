@@ -151,10 +151,7 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             Command::Resize { w, h }
         }
         "scale" => {
-            let scale = parse_f64(args.required("scale")?)?;
-            if !(SCALE_MIN..=SCALE_MAX).contains(&scale) {
-                return Err(format!("scale must be between {SCALE_MIN} and {SCALE_MAX}"));
-            }
+            let scale = parse_scale(args.required("scale")?)?;
             args.finish()?;
             Command::Scale(scale)
         }
@@ -276,12 +273,21 @@ fn path_rest(args: &mut Args) -> Result<PathBuf, String> {
     Ok(PathBuf::from(rest))
 }
 
-fn parse_f64(t: &str) -> Result<f64, String> {
+pub(crate) fn parse_f64(t: &str) -> Result<f64, String> {
     let value: f64 = t.parse().map_err(|_| format!("invalid number '{}'", clip(t)))?;
     if !value.is_finite() {
         return Err("non-finite number".to_string());
     }
     Ok(value)
+}
+
+/// Parses a finite UI scale within `SCALE_MIN..=SCALE_MAX`; shared with the `--scale` CLI option.
+pub(crate) fn parse_scale(t: &str) -> Result<f64, String> {
+    let scale = parse_f64(t)?;
+    if !(SCALE_MIN..=SCALE_MAX).contains(&scale) {
+        return Err(format!("scale must be between {SCALE_MIN} and {SCALE_MAX}"));
+    }
+    Ok(scale)
 }
 
 fn parse_uint<T: std::str::FromStr>(t: &str) -> Result<T, String> {

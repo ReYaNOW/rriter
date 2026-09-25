@@ -37,7 +37,6 @@ pub use integration::{
     resolve_tool_kind, set_app_root_override, system_proxy_config, user_cache_root,
 };
 pub(crate) use integration::app_paths_for_root;
-#[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
 pub use window_host::{HeadlessWindow, WindowHost};
 
