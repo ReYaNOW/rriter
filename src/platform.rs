@@ -21,6 +21,7 @@ mod macos;
 mod process;
 mod secret_store;
 mod text_file;
+pub mod window_host;
 #[cfg(windows)]
 mod windows;
 #[cfg(test)]
@@ -35,6 +36,7 @@ pub use integration::{
 };
 #[cfg(test)]
 pub(crate) type AppPaths = integration::AppPaths;
+pub use window_host::{HeadlessWindow, WindowHost};
 
 #[cfg_attr(test, allow(dead_code))]
 pub fn config_dir() -> PathBuf {

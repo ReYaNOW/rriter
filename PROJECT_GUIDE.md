@@ -1450,6 +1450,7 @@ Root:
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
 * `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
+* `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/text_file.rs` -> centralized UTF/legacy text decoding, format preservation, conservative charset detection, strict re-encoding, and atomic text-save entrypoint.
 * `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.

@@ -2,6 +2,7 @@ use crate::platform::{
     CURRENT_PLATFORM, PlatformKind, ProcessOutputStream, ToolKind, resolve_executable,
     resolve_tool_kind, run_command_output_cancelable, run_command_streaming_cancelable,
 };
+use crate::platform::WindowHost;
 use crate::scroll::ScrollState;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
@@ -13,7 +14,6 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::thread::JoinHandle;
 use std::time::Duration;
-use winit::window::Window;
 
 const UV_INSTALL_URL_UNIX: &str = "https://astral.sh/uv/install.sh";
 const UV_INSTALL_URL_WINDOWS: &str = "https://astral.sh/uv/install.ps1";
@@ -115,7 +115,7 @@ impl DartToolState {
         self.error.as_deref()
     }
 
-    pub(crate) fn refresh(&mut self, workspace: Option<&Path>, window: Option<Arc<Window>>) {
+    pub(crate) fn refresh(&mut self, workspace: Option<&Path>, window: Option<Arc<WindowHost>>) {
         self.cancel_probe();
         crate::platform::configure_dart_workspace_root(workspace.map(Path::to_path_buf));
         let resolution = resolve_tool_kind(ToolKind::Dart);
@@ -333,7 +333,7 @@ fn terminal_install_event(
 #[derive(Clone)]
 struct ToolInstallReporter {
     tx: SyncSender<ToolInstallEvent>,
-    window: Option<Arc<Window>>,
+    window: Option<Arc<WindowHost>>,
     dropped_lines: Arc<AtomicUsize>,
 }
 
@@ -610,7 +610,7 @@ impl ToolInstaller {
     pub(crate) fn start(
         &mut self,
         kind: ToolKind,
-        window: Option<Arc<Window>>,
+        window: Option<Arc<WindowHost>>,
     ) -> Result<(), String> {
         if !kind.supports_managed_install() {
             return Err(format!("{} нельзя установить из RRiter", kind.label()));

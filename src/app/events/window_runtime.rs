@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::platform::WindowHost;
 use crate::renderer::Renderer;
 use glutin::config::{Config, ConfigTemplateBuilder, GlConfig};
 use glutin::context::{
@@ -148,7 +149,7 @@ pub(super) fn dropped_path_kind(path: &std::path::Path) -> Option<DroppedPathKin
 }
 
 struct BootstrappedWindow {
-    window: Arc<Window>,
+    window: Arc<WindowHost>,
     config: Config,
     context: PossiblyCurrentContext,
     surface: Surface<WindowSurface>,
@@ -256,7 +257,9 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
                 .unwrap_or_else(|| panic!("no OpenGL framebuffer configuration is available"))
         })
         .map_err(|error| format!("window/display creation failed: {error}"))?;
-    let window = window.ok_or_else(|| "window backend did not create a window".to_string())?;
+    let window = WindowHost::Native(Arc::new(
+        window.ok_or_else(|| "window backend did not create a window".to_string())?
+    ));
     window.set_ime_allowed(true);
     let raw_window_handle = window
         .window_handle()
@@ -264,8 +267,10 @@ fn bootstrap(app: &App, event_loop: &ActiveEventLoop) -> Result<BootstrappedWind
         .as_raw();
     let (not_current_context, requested_context) =
         create_not_current_context(&gl_config, raw_window_handle)?;
-    let (surface, context) =
-        create_surface_and_context(&gl_config, &window, raw_window_handle, not_current_context)?;
+    let native_window = window.native().ok_or_else(|| "native window is unavailable".to_string())?;
+    let (surface, context) = create_surface_and_context(
+        &gl_config, native_window, raw_window_handle, not_current_context
+    )?;
     let requested_context = format!(
         "{requested_context} / GPU priority {}",
         gpu_priority_label(context.priority())

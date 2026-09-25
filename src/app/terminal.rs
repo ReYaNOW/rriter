@@ -1497,7 +1497,7 @@ fn write_terminal_spawn_error(grid: &mut TermGrid, error: &io::Error) {
 impl Terminal {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn spawn(
-        window: Option<std::sync::Arc<winit::window::Window>>,
+        window: Option<std::sync::Arc<crate::platform::WindowHost>>,
         cwd: Option<&std::path::Path>,
         display_number: u64,
     ) -> Self {

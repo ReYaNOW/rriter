@@ -141,7 +141,7 @@ impl TerminalProcess {
     pub(crate) fn spawn(
         grid: Arc<Mutex<TermGrid>>,
         title_cache: TerminalTitleCache,
-        window: Option<Arc<winit::window::Window>>,
+        window: Option<Arc<crate::platform::WindowHost>>,
         cwd: Option<&Path>,
     ) -> io::Result<(Self, TerminalShellSpec)> {
         let shell = resolve_terminal_shell()?;
@@ -597,7 +597,7 @@ fn install_terminal_title_refresh(
     title_cache: TerminalTitleCache,
     shell_title: String,
     initial_cwd: Option<PathBuf>,
-    window: Option<Arc<winit::window::Window>>,
+    window: Option<Arc<crate::platform::WindowHost>>,
 ) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
     let (stop_tx, stop_rx) = std::sync::mpsc::channel();
     let worker = crate::platform::spawn_named("rriter-session-title", move || {
@@ -633,7 +633,7 @@ fn install_terminal_title_refresh(
     _title_cache: TerminalTitleCache,
     _shell_title: String,
     _initial_cwd: Option<PathBuf>,
-    _window: Option<Arc<winit::window::Window>>,
+    _window: Option<Arc<crate::platform::WindowHost>>,
 ) -> io::Result<(Option<std::sync::mpsc::Sender<()>>, Option<JoinHandle<()>>)> {
     Ok((None, None))
 }
@@ -658,7 +658,7 @@ fn install_terminal_io_threads(
     grid: &Arc<Mutex<TermGrid>>,
     reader: Box<dyn Read + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    window: Option<Arc<winit::window::Window>>,
+    window: Option<Arc<crate::platform::WindowHost>>,
 ) -> io::Result<()> {
     let (reply_tx, reply_rx) = std::sync::mpsc::channel::<Vec<u8>>();
     let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();

@@ -28,7 +28,7 @@ fn render_should_continue_after_present<T, E>(
 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn update_window_title(window: &Window, base_title: &str, is_dirty: bool) {
+    pub fn update_window_title(window: &crate::platform::WindowHost, base_title: &str, is_dirty: bool) {
         let title = if is_dirty {
             format!("{} * — RRiter", base_title)
         } else {
