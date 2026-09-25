@@ -1609,17 +1609,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         needs_redraw = true;
     }
 
-    if app.is_focused {
-        let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
-        if blink_state != app.last_blink_state {
-            app.last_blink_state = blink_state;
-            needs_redraw = true;
-        }
-    }
+    update_cursor_blink(app, now, &mut needs_redraw);
 
     let is_highlighting =
         !app.is_highlighted_once || app.highlighter.has_pending_priority_highlight();
-    let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
+    let idle_blink_enabled = idle_blink_enabled(app);
     let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
     let scroll_animating = !app.scroll_y.is_settled() || !app.scroll_x.is_settled();
     match compute_about_wait_plan(

@@ -20,16 +20,14 @@ mod scroll;
 mod ui_system;
 mod widgets;
 
-use crate::app::{App, PendingAction};
+use crate::app::{App, AppInitOptions};
 use crate::editor::Editor;
-use crate::highlighter::Highlighter;
 use crate::renderer::Theme;
 #[cfg(target_os = "linux")]
 use std::env;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use winit::event_loop::{ControlFlow, EventLoop};
-use winit::keyboard::ModifiersState;
 
 pub(crate) const CTRL_WHEEL_MULTIPLIER_DEFAULT: f32 = 2.0;
 pub(crate) const CTRL_WHEEL_MULTIPLIER_MIN: f32 = 1.25;
@@ -2145,56 +2143,6 @@ fn main() {
     editor.set_original_text();
     editor.sync_edits.clear();
 
-    let faq_text = "# Особенности RRiter
-Автоматическая подсветка синтаксиса для Rust, Python, Bash.
-Молниеносный рендеринг на GPU, плавная кинетическая прокрутка.
-
-# Работа с файлами
-Ctrl + S\tСохранить текущий документ
-Ctrl + O\tОткрыть файл
-Ctrl + Q\tВыйти из редактора (закрыть документ)
-
-# Навигация и поиск
-Ctrl + F\tПоиск по тексту (Нажмите Esc для выхода)
-Ctrl + ← / →\tБыстрый переход по словам
-PgUp / PgDn\tПостраничная прокрутка документа
-Home / End\tПереход в начало / конец текущей строки
-Ctrl + Home\tПереход в самое начало документа
-Ctrl + End\tПереход в самый конец документа
-
-# Редактирование
-Ctrl + W\tУмное выделение (Expand Selection)
-Ctrl + Z\tОтменить последнее действие
-Ctrl + Y\tПовторить отмененное действие
-Ctrl + X\tВырезать выделенный текст
-Ctrl + C\tСкопировать выделенный текст
-Ctrl + V\tВставить текст из буфера обмена
-Ctrl/Cmd + Shift + V\tMarkdown: чтение / редактирование
-Ctrl + A\tВыделить весь текст в документе
-Ctrl + Bksp\tУдалить слово слева от курсора
-Ctrl + Del\tУдалить слово справа от курсора
-
-# Прочее
-F1\tОткрыть настройки редактора
-F8\tПоказать/скрыть счетчик FPS
-
-# Управление мышью
-Зажатие ЛКМ\tПлавное выделение текста
-Двойной клик\tБыстрое выделение одного слова
-Тройной клик\tВыделение всей строки целиком
-Shift + колесо над Python mock\tПрокрутка всей страницы вместо внутреннего окна кода
-Миникарта\tМолниеносная навигация по коду
-
-# IDE-режим и Терминал
-Alt + Q\tОткрыть/сфокусировать терминал
-Alt + Shift + Q\tОткрыть/закрыть терминал
-";
-
-    let mut faq_editor = Editor::new(faq_text.len() + 100);
-    let _ = faq_editor.insert_str(faq_text);
-    faq_editor.cursor = 0;
-    faq_editor.selection_anchor = None;
-
     let mut event_loop_builder = EventLoop::builder();
     #[cfg(target_os = "macos")]
     {
@@ -2222,197 +2170,21 @@ Alt + Shift + Q\tОткрыть/закрыть терминал
         config.enable_telemetry || scroll_bench_idx.is_some() || pgo_train,
         std::sync::atomic::Ordering::Relaxed,
     );
-    let highlighter = Highlighter::new();
-
-    let show_welcome = !has_file_arg && !run_ide_on_startup;
-
-    let file_key = file_path.as_deref().map(crate::platform::PathKey::new);
-    let mut app = App {
-        automation: automation_options.map(crate::app::automation::AutomationController::new),
-        scroll_render_bench: scroll_bench_idx
-            .map(|_| crate::app::ScrollRenderBench::new(scroll_bench_seconds)),
-        pending_key_log: None,
-        gl_config: None,
-        gl_context: None,
-        gl_surface: None,
-        window: None,
-        dialog_window: None,
-        dialog_gl_surface: None,
-        settings_scroll: crate::scroll::ScrollState::new(15.0),
-        tab_scroll: crate::scroll::ScrollState::new(15.0),
-        renderer: None,
-        editor,
-        clipboard: crate::platform::Clipboard::new().ok(),
-        theme: load_dracula(),
-        base_title: title,
+    let options = AppInitOptions {
+        editor: Some(editor),
+        title: Some(title),
+        ext: Some(ext),
         file_path,
-        file_key,
-        text_file_format,
-        file_extension: ext,
-        markdown: Default::default(),
-        highlighter,
-        closing_hint_state: Default::default(),
-        closing_hint_settings: config.dart_settings.closing_hint_settings(),
-        last_sent_version: u64::MAX,
-        scroll_y: crate::scroll::ScrollState::new(15.0),
-        scroll_x: crate::scroll::ScrollState::new(15.0),
-        last_frame: Instant::now(),
-        last_action: Instant::now(),
-        last_blink_state: true,
-        modifiers: ModifiersState::empty(),
-        ctrl_wheel_multiplier: config.ctrl_wheel_multiplier,
-        is_dragging: false,
-        is_editor_drag_pending: false,
-        is_focused: true,
-        render_suspended: false,
-        current_cursor: winit::window::CursorIcon::Default,
-
-        show_fps: false,
-        window_width: config.window_width,
-        window_height: config.window_height,
-
-        last_resize_time: None,
-
-        last_click_time: Instant::now(),
-        click_count: 0,
-        last_click_pos: (0.0, 0.0),
-        last_click_ui_id: None,
-
-        pending_action: PendingAction::None,
-        pending_action_waiting_for_save_as: false,
-        pending_action_ready: false,
-        pending_save_tabs: Vec::new(),
-        open_file_rx: None,
-        save_file_rx: None,
-        api_import_file_rx: None,
-        api_body_file_rx: None,
-        api_openapi_export_rx: None,
-        api_load_rx: Vec::new(),
-        api_request_rx: Vec::new(),
-        api_mock_ty_rx: None,
-
-        show_welcome,
-        recent_files,
-
-        is_ide_mode: false,
-        ide_workspaces: config.ide_workspaces.clone(),
-        ide_ignore_patterns: config.ide_ignore_patterns.clone(),
-        settings_ignore_editor: Editor::new(128),
-        settings_ignore_focused: false,
-        settings_ignore_scroll_x: 0.0,
-        is_dragging_settings_ignore: false,
-        open_folder_rx: None,
-        tool_paths: config.tool_paths.clone(),
-        dart_settings: config.dart_settings.clone(),
-        settings_tool_picker_rx: None,
-        tool_installer: crate::app::tool_installer::ToolInstaller::default(),
-        dart_tool_state: crate::app::tool_installer::DartToolState::default(),
-
-        show_search: false,
-        search_anim_y: -120.0,
-        search_editor: Editor::new(256),
-        search_focused: false,
-        search_case_sensitive: false,
-        search_results: Vec::new(),
-        search_current_idx: None,
-        is_dragging_search: false,
-
-        is_dragging_lsp_log: false,
-
-        faq_editor,
-
-        is_ready: false,
-        is_highlighted_once: false,
-        is_highlight_complete: false,
-        tried_maximize: false,
-        should_maximize: config.maximized,
-
-        autocomplete_active: false,
-        autocomplete_options: Vec::new(),
-        autocomplete_selected_idx: 0,
-        autocomplete_anim_progress: 0.0,
-        autocomplete_scroll: crate::scroll::ScrollState::new(15.0),
-        autocomplete_hovered_idx: None,
-        autocomplete_rect: None,
-        autocomplete_anchor: None,
-        autocomplete_mode: crate::app::AutocompleteMode::TreeSitter,
-        autocomplete_pending_request_id: None,
-        autocomplete_pending_request_mode: None,
-        autocomplete_pending_request_path: None,
-        autocomplete_pending_context_key: None,
-        autocomplete_signature_request_id: None,
-        autocomplete_signature_items: Vec::new(),
-        autocomplete_detail_request_id: None,
-        autocomplete_detail_word: None,
-        autocomplete_detail_request_path: None,
-        autocomplete_detail_context_key: None,
-        autocomplete_detail_popup: None,
-        autocomplete_detail_rect: None,
-        autocomplete_detail_placement: None,
-        autocomplete_detail_max_scroll: 0.0,
-        autocomplete_min_width: 0.0,
-        autocomplete_detail_min_width: 0.0,
-        autocomplete_detail_min_height: 0.0,
-        autocomplete_detail_selection_anchor: None,
-        autocomplete_detail_selection_cursor: None,
-        autocomplete_detail_selecting: false,
-        autocomplete_apply_pending_response: false,
-        autocomplete_cache: None,
-        autocomplete_detail_cache: None,
-
-        current_sticky_lines: Vec::new(),
-        target_sticky_lines: Vec::new(),
-        sticky_anim_progress: 1.0,
-        sticky_anim_is_adding: false,
-
-        show_settings: false,
-        settings_anim_progress: 0.0,
-        settings_y: 10000.0,
-        settings_tab: 0,
-        settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
-
-        ide_panel: crate::app::IdePanelState::default(),
-        database_runtime: None,
-        file_tree_rx: None,
-        file_tree_notify_rx: None,
-        file_tree_watcher_stop_tx: None,
-        file_tree_watched_dirs: Vec::new(),
-        external_changes_rx: None,
-        git_diff_rx: Vec::new(),
-        inline_git_diff_rx: None,
-        inline_git_popup: None,
-        readonly_notice_until: None,
-        lsp: None,
-        lsp_actions_menu: None,
-        pending_fix_all_id: None,
-        ctrl_definition: crate::app::CtrlDefinitionState::default(),
-        python_inlay_hints: Vec::new(),
-        python_inlay_hint_path: None,
-        python_inlay_hint_range: None,
-        python_inlay_hint_version: 0,
-        python_inlay_hint_pending_request_id: None,
-        python_inlay_hint_pending_path: None,
-        python_inlay_hint_pending_range: None,
-        python_inlay_hint_pending_version: 0,
-        python_inlay_hint_cache: rustc_hash::FxHashMap::default(),
-        ui_registry: crate::ui_system::UiRegistry::new(),
-        tabs: Vec::new(),
-        active_tab: 0,
+        text_file_format: Some(text_file_format),
+        recent_files: Some(recent_files),
+        has_file_arg,
         run_ide_on_startup,
+        automation_options,
+        scroll_bench_idx,
+        scroll_bench_seconds: Some(scroll_bench_seconds),
+        headless: false,
     };
-    app.refresh_dart_tool_state();
-
-    app.highlighter.reset(
-        app.editor.version,
-        app.editor.get_full_text(),
-        app.file_extension.clone(),
-        app.editor.cursor,
-    );
-    app.last_sent_version = app.editor.version;
-
-    if show_welcome {
-        app.base_title = "Добро пожаловать".to_string();
-    }
+    let mut app = App::new_from_config(config, options);
 
     if let Err(error) = event_loop.run_app(&mut app) {
         eprintln!(

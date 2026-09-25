@@ -6,6 +6,7 @@ pub(crate) use markdown::{
 };
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
+mod app_bootstrap;
 mod autocomplete;
 pub mod automation;
 mod automation_dart;
@@ -35,6 +36,7 @@ use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_B
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
+pub(crate) use app_bootstrap::AppInitOptions;
 #[cfg(test)]
 pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,

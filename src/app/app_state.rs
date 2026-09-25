@@ -1215,6 +1215,7 @@ pub struct App {
 
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,
+    pub headless_mode: bool,
 }
 
 #[cfg(test)]

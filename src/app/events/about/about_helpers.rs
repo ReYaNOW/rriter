@@ -407,6 +407,20 @@ fn compute_about_wait_plan(
     ))
 }
 
+fn update_cursor_blink(app: &mut App, now: Instant, needs_redraw: &mut bool) {
+    if app.is_focused && !app.headless_mode {
+        let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
+        if blink_state != app.last_blink_state {
+            app.last_blink_state = blink_state;
+            *needs_redraw = true;
+        }
+    }
+}
+
+fn idle_blink_enabled(app: &App) -> bool {
+    app.is_focused && app.dialog_window.is_none() && !app.headless_mode
+}
+
 fn suspended_about_wait_plan(now: Instant, database_job_pending: bool) -> AboutWaitPlan {
     if database_job_pending {
         AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(100))
@@ -472,6 +486,38 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn app_bootstrap_headless_cursor_does_not_blink() {
+        let mut app = crate::app::app_behavior_tests::test_app().unwrap();
+        app.headless_mode = true;
+        app.is_focused = true;
+        app.last_blink_state = true;
+        let now = app.last_action + std::time::Duration::from_millis(501);
+        let mut needs_redraw = false;
+
+        update_cursor_blink(&mut app, now, &mut needs_redraw);
+
+        assert!(app.last_blink_state);
+        assert!(!needs_redraw);
+        let idle_blink = idle_blink_enabled(&app);
+        assert!(!idle_blink);
+        assert_eq!(
+            compute_about_wait_plan(
+                now,
+                app.last_action,
+                false,
+                false,
+                false,
+                false,
+                idle_blink,
+                None,
+                false,
+                false,
+            ),
+            AboutWaitPlan::Wait,
+        );
+    }
 
     #[test]
     fn git_context_menu_open_times_participate_in_animation_redraw_selection() {

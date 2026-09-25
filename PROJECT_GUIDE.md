@@ -1469,6 +1469,7 @@ Entrypoints/state:
 
 * `src/main.rs` -> app startup, config, event loop, GL/window boot.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
 * `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
 * `src/app/markdown_scroll_transition.rs` -> `markdown.rs` include chunk for shared vertical `ScrollState` mode rebasing, cold-layout pending transitions, source-anchor carry-over, and transition physics regressions; it must not become a second scroll owner.
 * `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.
