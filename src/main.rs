@@ -5,6 +5,8 @@
 mod app;
 mod editor;
 // mod generated;
+#[cfg(target_os = "linux")]
+mod headless;
 mod highlighter;
 mod languages;
 mod lsp;
