@@ -2041,6 +2041,15 @@ fn main() {
     if let Some(exit_code) = crate::platform::handle_startup_helper(&startup_args) {
         std::process::exit(exit_code);
     }
+    if startup_args.iter().skip(1).any(|arg| arg == "--headless") {
+        #[cfg(target_os = "linux")]
+        std::process::exit(i32::from(headless::run(&startup_args[1..])));
+        #[cfg(not(target_os = "linux"))]
+        {
+            eprintln!("headless mode is supported on Linux only");
+            std::process::exit(2);
+        }
+    }
     crate::platform::initialize_gui_application();
     prefer_egl_vendor();
 
