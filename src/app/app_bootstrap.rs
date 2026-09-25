@@ -87,11 +87,20 @@ impl AppInitOptions {
 }
 
 impl App {
+    pub(crate) fn untitled_editor() -> Editor {
+        let mut editor = Editor::new(8192);
+        editor.set_original_text();
+        editor.sync_edits.clear();
+        editor
+    }
+}
+
+impl App {
     pub(crate) fn new_from_config(
         config: crate::Config,
         options: AppInitOptions,
     ) -> Self {
-        let editor = options.editor.unwrap_or_else(|| Editor::new(8192));
+        let editor = options.editor.unwrap_or_else(Self::untitled_editor);
         let title = options
             .title
             .unwrap_or_else(|| "Безымянный".to_string());
@@ -325,5 +334,38 @@ mod tests {
         assert!(app.clipboard.is_none());
         assert!(app.show_welcome);
         assert_eq!(app.base_title, "Добро пожаловать");
+        assert!(!app.editor.original_hashes.is_empty());
+    }
+
+    #[test]
+    fn app_bootstrap_headless_cursor_does_not_blink() {
+        let mut app = crate::app::app_behavior_tests::test_app().unwrap();
+        app.headless_mode = true;
+        app.is_focused = true;
+        app.last_blink_state = true;
+        let now = app.last_action + std::time::Duration::from_millis(501);
+        let mut needs_redraw = false;
+
+        crate::app::events::about::update_cursor_blink(&mut app, now, &mut needs_redraw);
+
+        assert!(app.last_blink_state);
+        assert!(!needs_redraw);
+        let idle_blink = crate::app::events::about::idle_blink_enabled(&app);
+        assert!(!idle_blink);
+        assert_eq!(
+            crate::app::events::about::compute_about_wait_plan(
+                now,
+                app.last_action,
+                false,
+                false,
+                false,
+                false,
+                idle_blink,
+                None,
+                false,
+                false,
+            ),
+            crate::app::events::about::AboutWaitPlan::Wait,
+        );
     }
 }

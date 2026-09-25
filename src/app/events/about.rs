@@ -18,6 +18,20 @@ use super::*;
 
 include!("about/about_helpers.rs");
 
+pub(crate) fn update_cursor_blink(app: &mut App, now: Instant, needs_redraw: &mut bool) {
+    if app.is_focused && !app.headless_mode {
+        let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
+        if blink_state != app.last_blink_state {
+            app.last_blink_state = blink_state;
+            *needs_redraw = true;
+        }
+    }
+}
+
+pub(crate) fn idle_blink_enabled(app: &App) -> bool {
+    app.is_focused && app.dialog_window.is_none() && !app.headless_mode
+}
+
 fn update_markdown_read_selection_autoscroll(
     app: &mut App,
     dt: f32,

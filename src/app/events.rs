@@ -9,7 +9,7 @@ use winit::event::{Ime, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
-mod about;
+pub(crate) mod about;
 mod main_frame;
 pub(crate) mod host_loop;
 use host_loop::HostLoop;
