@@ -107,14 +107,16 @@ impl KeyInput {
 ```rust
 pub enum HostLoop<'a> {
     Native(&'a ActiveEventLoop),
-    Headless { exit_requested: &'a AtomicBool },   // читает headless-цикл
+    Headless { exit_requested: &'a AtomicBool, last_control_flow: &'a Cell<ControlFlow> },
 }
 impl HostLoop<'_> {
     pub fn exit(&self);                              // Native → event_loop.exit(); Headless → флаг
-    pub fn set_control_flow(&self, ControlFlow);     // Native → делегирование; Headless → no-op
+    pub fn set_control_flow(&self, ControlFlow);     // Native → делегирование; Headless → запись в last_control_flow
     pub fn native(&self) -> Option<&ActiveEventLoop>; // только show_action_dialog
 }
 ```
+
+`last_control_flow` нужен `settle` (4.5): оконный `about_to_wait` сообщает дедлайн анимации только через `set_control_flow(WaitUntil(t))`, и headless читает его оттуда же, не дублируя логику `compute_about_wait_plan`.
 
 Все функции, принимавшие `&ActiveEventLoop` кроме `bootstrap`/`resume` (glutin требует настоящий цикл) и `ApplicationHandler`-методов, принимают `&HostLoop`: `about::about_to_wait`, `save_state_and_exit`, `show_action_dialog`, `AutomationController::tick/run_step`, `advance_automation`, `handle_main_mouse_input(_inner)`, `handle_main_keyboard_input(_inner)`, `handle_editor_keyboard_input`. `cfg(test)`-ветка `Option<&ActiveEventLoop>` в `mouse/input.rs:480-481` и тестовый вход `reviewer_markdown_read_mouse_input` переводятся на `HostLoop` (тесты передают `HostLoop::headless(&flag)`).
 
@@ -138,16 +140,23 @@ impl OffscreenContext {
 }
 ```
 
+Перед `eglGetPlatformDisplay` модуль читает `eglQueryString(EGL_NO_DISPLAY, EGL_EXTENSIONS)` и требует `EGL_MESA_platform_surfaceless` (расширение `EGL_KHR_surfaceless_context` — про контекст без поверхности, а не про платформу; на машине пользователя NVIDIA EGL отдаёт оба, тесты `reviewer_stage2` на этом и работают). Нет расширения → ошибка с полным списком client extensions. После `MakeCurrent` модуль запоминает строки `GL_RENDERER`, `GL_VERSION`, `GL_VENDOR` — они попадают в команду `info` (4.4), чтобы было видно, NVIDIA это или llvmpipe.
+
 Текущие тесты `reviewer_stage2_integration` используют `platform::offscreen_gl::OffscreenContext` вместо своей копии; их ассерты не меняются. Модуль не собирается на не-Linux; вызывающий код headless на не-Linux печатает «headless mode is supported on Linux only» и выходит с кодом 2.
 
 Использование `dlopen`, а не glutin: glutin 0.32 умеет pbuffer (`create_pbuffer_surface`), но его `Display::new` требует `RawDisplayHandle`, у которого нет surfaceless-варианта; проверенный путь уже есть.
 
 ### 3.5 `App::render_main_frame` — вынос кадра
 
-Ветка `WindowEvent::RedrawRequested` (`events.rs:608-1572`) делится на две функции без изменения порядка операций:
+Ветка `WindowEvent::RedrawRequested` (`events.rs:608-1572`) делится на три части без изменения порядка операций:
 
-- `App::render_main_frame(&mut self) -> FrameOutcome` — всё от `ui_registry.clear()` до конца `Renderer::draw` и пост-обработки (регистрация hover, автокомплит-статистика, `pending_key_log`), кроме презентации. `FrameOutcome { wants_another_frame: bool }` — то, что сейчас приводит к `request_redraw` внутри ветки (`:812, :1545`).
-- Оконная ветка: `render_main_frame()` → `present_main_surface()` → `finish_present` → `record_presented_frame` → `set_control_flow`, как сейчас.
+- `App::render_main_frame(&mut self) -> FrameOutcome` — всё от `ui_registry.clear()` до последнего GL-вызова `Renderer::draw` включительно (то, что сейчас предшествует `present_main_surface()` на `:1506`). `FrameOutcome { wants_another_frame: bool }` — то, что сейчас приводит к `request_redraw` внутри ветки (`:812, :1545`).
+- Презентация — остаётся в оконной ветке: `present_main_surface()` → `finish_present` → `record_presented_frame` → `record_swap_telemetry` → `set_control_flow`.
+- `App::finish_main_frame(&mut self)` — всё, что сейчас идёт после презентации (`:1513-1572`: статистика автокомплита, `pending_key_log`, прочая пост-обработка). Оконная ветка зовёт её после презентации, как сейчас; headless — сразу после `gl.finish()`.
+
+Исполнитель делит ветку по существующим строкам, не переставляя операции; проверка — diff ветки состоит из выноса блоков в функции и трёх вызовов.
+
+`App::new_from_config(config, options) -> App` собирает не только литерал `main.rs:2235-2300`, но и всё, что `main.rs` делает после него до `run_app` (`:2300-2416`: welcome/IDE-режим, загрузка вкладок, `refresh_dart_tool_state`, телеметрия, clipboard). Headless передаёт `options.headless = true`: пропускает `refresh_dart_tool_state`, ставит `clipboard = None` (см. 4.2), не включает телеметрию. Оконный путь передаёт `headless = false` и получает ровно текущее поведение.
 
 Обращения к `window.inner_size()` внутри кадра остаются — через `WindowHost` они отдают размер pbuffer. `window.set_cursor(icon)` (`:1479`) в headless пишет в `HeadlessWindow.cursor_icon` и попадает в `dump`.
 
@@ -161,10 +170,11 @@ impl OffscreenContext {
 
 ```
 rriter --headless [--script FILE] [--size WxH] [--scale S] [--profile DIR | --profile-from-user]
-                  [--hz N | --budget-ms F] [--keep-profile] [FILE_OR_DIR]
+                  [--hz N | --budget-ms F] [--keep-profile] [--allow-writes] [FILE_OR_DIR]
 ```
 
-- `--headless` разбирается в `main.rs` вместе с probe-флагами, до `EventLoop`, после `init_rayon_global_pool`. Ветка зовёт `headless::run(opts) -> ExitCode` и возвращает её код.
+- `--headless` разбирается в `main.rs` первым делом после `handle_startup_helper` — до `init_rayon_global_pool` и любых потоков (нужно для установки корня профиля, 4.2). Ветка зовёт `headless::run(opts) -> ExitCode` и возвращает её код; `init_rayon_global_pool` headless зовёт сам после настройки профиля.
+- `--allow-writes` — разрешить запись открытых файлов на диск (4.2). По умолчанию запрещено.
 - `--script FILE` — команды из файла; без него — stdin. `-` = stdin явно.
 - `--size` по умолчанию `1920x1080`, `--scale` по умолчанию `1.0`. Минимум 320x200, максимум 8192x8192; иначе код выхода 2 с текстом.
 - Позиционный `FILE_OR_DIR`: файл → эквивалент команды `open`, каталог → `workspace`, выполняются до первой команды скрипта. Нет пути — welcome-экран.
@@ -172,19 +182,27 @@ rriter --headless [--script FILE] [--size WxH] [--scale S] [--profile DIR | --pr
 - `--keep-profile` — не удалять временный профиль на выходе (для разбора состояния).
 - Разбор ошибок аргументов — до любого GL: неверное значение → сообщение в stderr, код 2.
 
-Коды выхода: 0 — все команды `ok` или `quit`/EOF; 1 — хотя бы одна команда вернула `err` (только в режиме `--script`; в stdin-режиме код всегда 0 при штатном `quit`/EOF); 2 — ошибка аргументов или платформа не поддерживается; 3 — не удалось создать GL-контекст или `Renderer`.
+Коды выхода: 0 — все команды `ok`, завершение по `quit`/EOF; 1 — хотя бы одна команда вернула `err` (в обоих режимах, stdin и `--script`); 2 — ошибка аргументов или платформа не поддерживается; 3 — не удалось создать GL-контекст или `Renderer`.
 
 ### 4.2 Изоляция профиля — `profile.rs`
 
 Выполняется до `load_config` и до создания `App`:
 
 1. Корень профиля: `--profile DIR` (создаётся, если нет; многоразовый) или временный каталог `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless-<pid>/`, который удаляется на выходе (кроме `--keep-profile`).
-2. `--profile-from-user`: во временный корень копируются `~/.config/RRiter`, `~/.local/share/RRiter`, `~/.local/state/RRiter` (без `cache`); `kdeglobals` копируется в `<root>/config/kdeglobals`, чтобы цвет выделения совпал с живым экземпляром. Несовместимо с `--profile`.
-3. `std::env::set_var` для `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME` → `<root>/{config,data,cache,state}`. Это единственный рычаг, который знает `app_paths_with` (`integration.rs:975-997`); установка происходит в начале `main`, до любых потоков, поэтому гонок с чтением env нет.
-4. `platform::set_headless(true)` — глобальный `AtomicBool` в `src/platform.rs`. Его читают: `pick_file/pick_files/pick_folder/save_file*` (возвращают `None` немедленно и ставят `App`-независимый счётчик `platform::headless_picker_requests()` с видом последнего запроса — попадает в `dump`), `refresh_dart_tool_state` (пропуск пробы `dart --version`), периодическая печать телеметрии (`root_frame_overlay_helpers.rs:721`, пропуск). `persist_state_and_shutdown` headless-цикл сам не вызывает; если до него доходит `about_to_wait` (путь `PendingAction::Quit` → `save_state_and_exit`), запись идёт в изолированный профиль, а `host.exit()` ставит флаг завершения — цикл выходит штатно.
+2. `--profile-from-user`: во временный корень копируются `~/.config/RRiter`, `~/.local/share/RRiter`, `~/.local/state/RRiter` (без `cache`). Несовместимо с `--profile`.
+3. `platform::set_app_root_override(root)` — `OnceLock<PathBuf>` в `src/platform/integration.rs`, который `app_paths_with` (`:938-999`) проверяет первым: при установленном override все четыре каталога — `<root>/{config,data,cache,state}` независимо от env. Env-переменные не трогаются: `edition = "2024"`, `std::env::set_var` там `unsafe`, а `main.rs:894-899` пусть по-прежнему читает настоящий `kdeglobals` пользователя (цвет выделения совпадает с живым экземпляром; копировать его в профиль не нужно). `--profile-from-user` копирует только каталоги `RRiter`. Вызов — до `init_rayon_global_pool`, то есть до первого потока.
+4. `platform::set_headless(HeadlessPolicy { allow_writes })` — глобальный `OnceLock` в `src/platform.rs`, `platform::is_headless()`/`platform::headless_writes_allowed()`. Читают:
+   - `pick_file/pick_files/pick_folder/save_file*` (`platform.rs:1233-1270`): возвращают `None` немедленно и записывают вид запроса в `platform::note_external_request(ExternalRequest::PickFile|PickFiles|PickFolder|SaveFile)` — последний запрос отдаётся в `dump` и сбрасывается при чтении;
+   - `open_url` (`platform.rs:1311`) и `reveal_path` (`platform.rs:1279`): no-op с `note_external_request(OpenUrl(url)|RevealPath(path))` — иначе `xdg-open` откроет браузер или файл-менеджер поверх игры;
+   - `App::write_current_text_to_path` (`app_window_external_methods.rs:456`, единственная точка перед `platform::write_text_file`; вызывающие — `save_current_file`, `save_current_file_as`, `git_diff.rs:1563`): при `is_headless() && !headless_writes_allowed()` возвращает `false` и показывает существующий readonly-notice (`show_readonly_notice`) — тот же путь, что при ошибке записи. `autosave_current_file_if_dirty` идёт через `save_current_file`, гейт его покрывает. Записи состояния профиля (`save_recent_files`, `save_tabs_state`, `save_panel_state`, `save_config`) под гейт не попадают: они внутри профиля и нужны `--profile DIR`;
+   - `refresh_dart_tool_state` — пропуск пробы `dart --version` (в `new_from_config`, 3.5);
+   - периодическая печать телеметрии (`root_frame_overlay_helpers.rs:721`) — пропуск;
+   - мигание курсора (`about.rs:1612-1618`) — отключено, `blink_alpha = 1.0`.
+   `App.clipboard = None` в headless (`new_from_config`): все обращения идут через `set_clipboard_text`/`get_clipboard_text`/`get_clipboard_file_list` (`app_ide_tab_methods.rs:423-435`), которые при `None` тихо ничего не делают — иначе `key ctrl+c` перезапишет системный буфер обмена пользователя во время игры. `dump` отдаёт `"clipboard": "disabled"`.
+   `persist_state_and_shutdown` headless-цикл сам не вызывает; если до него доходит `about_to_wait` (путь `PendingAction::Quit` → `save_state_and_exit`), запись идёт в изолированный профиль, а `host.exit()` ставит флаг завершения — цикл выходит штатно.
 5. `TELEMETRY_ENABLED` в headless не включается из конфига; включается только на время `bench`/`record` (раздел 4.8).
 
-Инкрементальные записи (`save_recent_files`, `save_tabs_state`, `save_panel_state`) остаются включёнными: они пишут внутрь профиля. Это нужно `--profile DIR`, чтобы вкладки и workspace переживали запуск.
+Что headless не изолирует и не обещает: содержимое открытых файлов читается по настоящим путям; LSP-серверы (`ruff`, `ty`) при `open *.py` стартуют как в окне и пишут в свои кэши (`~/.cache/ruff`, `~/.cache/ty`) — это общие кэши инструментов, не состояние RRiter; терминал в профиле с открытой панелью Terminal поднимет PTY с шеллом пользователя.
 
 Выход: `shutdown_background_services()` (LSP, терминалы, installer, API, БД — с существующими таймаутами), затем удаление временного профиля, затем возврат кода.
 
@@ -206,7 +224,7 @@ rriter --headless [--script FILE] [--size WxH] [--scale S] [--profile DIR | --pr
 |---|---|---|
 | `open <path>` | `open_file_in_tab(PathBuf)` тем же путём, что drag&drop файла (`events.rs:544-551`). Не существует / каталог / не читается → `err`. | `ok tabs=<n> active=<i>` |
 | `workspace <dir>` | `apply_selected_workspace_folder` (как drop каталога): включает IDE-режим, watcher, дерево. Не каталог → `err`. | `ok` |
-| `resize WxH` | `OffscreenContext::resize`, `HeadlessWindow.set_size`, `renderer.resize`, затем тот же код, что `WindowEvent::Resized` (`events.rs:506-533`) минус `gl_surface.resize`. Границы как у `--size`. | `ok <w>x<h>` |
+| `resize WxH` | `OffscreenContext::resize` (при ошибке — `err`, размер и контекст прежние), затем `HeadlessWindow.set_size`, `renderer.resize` и тот же код, что `WindowEvent::Resized` (`events.rs:506-533`) минус `gl_surface.resize`. Границы как у `--size`. | `ok <w>x<h>` |
 | `scale S` | `HeadlessWindow.set_scale_factor`, `renderer.update_scale_factor`, как `ScaleFactorChanged` (`events.rs:481-504`). Диапазон 0.5–4.0. | `ok` |
 | `mouse_move x y` | `handle_main_cursor_moved(PhysicalPosition{x,y})`. Координаты — физические пиксели, f64; вне буфера допустимы (как у окна). | `ok` |
 | `click [left\|right\|middle] [down\|up]` | Без `down\|up`: `handle_main_mouse_input(host, Pressed, btn)` → кадр → `(Released, btn)`. Кнопка по умолчанию `left`. | `ok` |
@@ -219,20 +237,21 @@ rriter --headless [--script FILE] [--size WxH] [--scale S] [--profile DIR | --pr
 | `screenshot <out.png>` | Один кадр (без `settle`), readback (4.7), запись PNG. Каталог создаётся. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | JSON состояния (4.6). Без файла — в payload. | `ok <json>` / `ok <abs path>` |
 | `dialog save\|discard\|cancel` | Только при `headless_dialog_open`: вызывает тот же метод, что клик по кнопке. Иначе `err no dialog`. | `ok` |
-| `bench <frames> [action…]` | Раздел 4.8. | `ok <json summary>` |
-| `record <dir> <frames> [action…]` | Раздел 4.8. | `ok <json summary>` |
-| `hz` | Определённая частота монитора и бюджет. | `ok hz=<f> budget_ms=<f> source=<arg\|monitor\|default>` |
+| `bench <frames> [csv=<path>] [action…]` | Раздел 4.8. | `ok <json summary>` |
+| `record <frames> <dir> [action…]` | Раздел 4.8. `dir` — один токен без пробелов. | `ok <json summary>` |
+| `info` | Частота монитора, бюджет, GL-строки, политика. | `ok {"hz":..,"budget_ms":..,"hz_source":"arg\|monitor\|default","gl_renderer":"…","gl_version":"…","gl_vendor":"…","writes_allowed":false,"profile":"<root>"}` |
 | `quit` | Завершение цикла. | `ok` |
 
 Правила:
 
-- После каждой команды ввода (`mouse_move`, `click`, `dblclick`, `wheel`, `key`, `type`, `open`, `workspace`, `resize`, `scale`, `dialog`) выполняется один кадр (4.5, шаг «кадр»), чтобы состояние hover/registry соответствовало следующей команде. Полный `settle` — только по явной команде: команда ввода не должна ждать окончания анимаций скролла.
-- Неизвестная команда → `err unknown command '<name>'`. Неверное число аргументов / нечисловое значение / не-UTF-8 строка (stdin читается как байты, `from_utf8` с ошибкой → `err invalid utf-8`) → `err`. Процесс продолжает работу.
-- `--script`: после `err` выполнение продолжается, итоговый код 1. Это даёт тестам полный список ошибок за один прогон.
+- Кадры после команд: каждое синтезированное событие сопровождается ровно одним `step_frame(force=true)` (4.5). `mouse_move`, `wheel`, `type`, `open`, `workspace`, `resize`, `scale`, `dialog` — одно событие, один кадр; `click` и `key` — два события (press, release), два кадра; `dblclick` — четыре. Полный `settle` — только по явной команде: команда ввода не должна ждать окончания анимаций скролла.
+- Между командами кадры не крутятся и фоновые результаты (LSP, git, watcher, PTY) не обслуживаются: пока цикл ждёт строку из stdin, состояние не меняется. Чтобы фон дошёл до UI, нужны `wait`/`settle`. Это делает `--script`-прогоны воспроизводимыми по числу кадров; воспроизводимость по времени анимаций не обещается (реальные часы).
+- Неизвестная команда → `err unknown command '<name>'`. Неверное число аргументов, нечисловое значение, `NaN`/`inf`, не-UTF-8 строка (stdin читается как байты, `from_utf8` с ошибкой → `err invalid utf-8`) → `err`. Ошибка ввода-вывода (`screenshot` в недоступный каталог, `dump` в файл без прав) → `err io: <текст ошибки>`. Процесс продолжает работу.
+- После `err` выполнение продолжается (и в `--script`, и в stdin), итоговый код 1. Это даёт тестам полный список ошибок за один прогон.
 - EOF stdin или файла → как `quit`.
-- Экранирование: аргументы-пути берутся как остаток строки, начиная с первого непробельного символа после имени команды и предыдущих аргументов; для `type` то же самое, поэтому ведущие пробелы текста передать нельзя (задокументированное ограничение).
+- Разбор аргументов: команда и фиксированные аргументы — токены через пробелы; последний аргумент команд `open`, `workspace`, `screenshot`, `dump`, `type` — остаток строки, начиная с первого непробельного символа после предыдущего токена, поэтому ведущие пробелы текста в `type` передать нельзя (задокументированное ограничение; для них — `key space`). У `record` каталог — обычный токен.
 
-Негативные случаи, обязательные для тестов парсера: пустая строка, только пробелы, `#` комментарий, `click banana`, `mouse_move 10`, `mouse_move a b`, `wheel 0 -3 furlongs`, `resize 10x10` (ниже минимума), `key ctrl+`, `key ctrl+foo`, `type` без аргумента (пустой текст — допустим, `ok`), байты `\xff\xfe` в строке, строка длиной 1 МБ (принимается, `err unknown command`).
+Негативные случаи, обязательные для тестов парсера: пустая строка, только пробелы, `#` комментарий, `click banana`, `mouse_move 10`, `mouse_move a b`, `mouse_move nan 5`, `wheel 0 -3 furlongs`, `resize 10x10` (ниже минимума), `key ctrl+`, `key ctrl+foo`, `type` без аргумента (пустой текст — допустим, `ok`), `record 5` без каталога, байты `\xff\xfe` в строке, строка длиной 1 МБ (принимается, `err unknown command`).
 
 ### 4.5 Кадр и `settle` — `frame.rs`
 
@@ -249,13 +268,13 @@ fn step_frame(app, host) -> FrameStats {
 ```
 
 - `step_frame` не спит: pbuffer без vsync, `set_control_flow` в `HostLoop::headless` — no-op.
-- `settle [ms]`: цикл `step_frame` до состояния «два кадра подряд без `redraw_requested` и `about_to_wait` вернул план `Wait` без `WaitUntil`» либо до истечения `ms`. Между кадрами — `thread::yield_now()`, чтобы фоновые потоки (highlighter, LSP) успевали ответить; если план — `WaitUntil(t)`, спим до `t` (не дольше остатка бюджета). Ответ `settled=false` при тайм-ауте — не ошибка: мигание курсора ставит `WaitUntil`, поэтому в headless мигание отключено флагом `platform::is_headless()` в `about.rs:1612-1618` (курсор всегда видим, `blink_alpha = 1.0`).
+- `settle [ms]`: цикл `step_frame` до состояния «два шага подряд, в которых `take_redraw_request()` вернул `false` и `last_control_flow == Wait`» либо до истечения `ms`. После шага с `last_control_flow == WaitUntil(t)` спим до `t` (не дольше остатка бюджета), после `Poll` — `thread::yield_now()`, после `Wait` без redraw — сон 5 мс, чтобы фоновые потоки (highlighter, LSP) успели прислать результат в mpsc, который следующий `about_to_wait` подберёт. Ответ `settled=false` при тайм-ауте — не ошибка. Мигание курсора в headless отключено (4.2), иначе `WaitUntil` не кончался бы никогда.
 - Команда ввода → `step_frame(force = true)` ровно один раз.
 - Все `Instant`-анимации идут по реальному времени: `wait <ms>` — единственный способ дать им пройти; `record` (4.8) снимает их покадрово.
 
 ### 4.6 Диалог подтверждения и `dump` — `dump.rs`
 
-Диалог: при `headless_dialog_open` после основного кадра вызывается `renderer.draw_dialog_window(&base_title)` в том же буфере — в левом верхнем углу, область 660·s × 260·s; перед ним `renderer.resize(660·s, 260·s)`, после — `renderer.resize(w, h)`, ровно как оконная ветка `events.rs:378-427` делает для второй поверхности, только без `make_current`/`swap_buffers`. Флаг `dialog_window_open` в `Renderer::draw` = `dialog_window.is_some() || headless_dialog_open` — фон затемняется как в окне. Блокировки ввода в `mouse/input.rs:1644`, `cursor.rs:212`, `wheel.rs:768` получают тот же объединённый предикат `App::modal_dialog_open()`. Кнопки в `dump`: `widgets::get_dialog_buttons(0,0,660·s,260·s,s,renderer)` → три прямоугольника с именами `save|discard|cancel`. Команда `dialog <answer>` зовёт `begin_pending_action_save` / `discard_pending_action_changes` / `cancel_pending_action` и снимает `headless_dialog_open`. `Escape` через `key escape` работает тем же путём, что `main_keys.rs:297-310` (условие расширяется предикатом). Клик по координатам кнопки диалога в headless не поддерживается — только команда `dialog` (в окне клик идёт в отдельное окно, здесь — иная система координат).
+Диалог: при `headless_dialog_open` после основного кадра вызывается `renderer.draw_dialog_window(&base_title)` в тот же буфер. Размещение — по центру: `dw = 660·s`, `dh = 260·s`, `ox = ((w − dw)/2).max(0)`, `oy_top = ((h − dh)/2).max(0)`; перед рисованием `renderer.resize_viewport(ox, h − oy_top − dh, dw, dh)` — новый метод рядом с `Renderer::resize` (`renderer_primitives_tests.rs:15-23`), который ставит `width/height = dw/dh` и `gl.viewport(x, y_gl, dw, dh)` (origin GL — нижний левый угол, поэтому `y_gl = h − oy_top − dh`); после — `renderer.resize(w, h)`. Оконная ветка `events.rs:378-427` делает то же для второй поверхности через `resize`, только с `make_current`/`swap_buffers`. Буфер меньше диалога → диалог рисуется от угла и обрезается viewport'ом; `dump` это отражает прямоугольниками. Флаг `dialog_window_open` в `Renderer::draw` = `App::modal_dialog_open()` = `dialog_window.is_some() || headless_dialog_open` — фон затемняется как в окне. Блокировки ввода в `mouse/input.rs:1644`, `cursor.rs:212`, `wheel.rs:768` и мерцание в `about.rs:1622` получают тот же предикат. Кнопки в `dump`: `widgets::get_dialog_buttons(0,0,dw,dh,s,renderer)` → три прямоугольника с именами `save|discard|cancel`, сдвинутые на `(ox, oy_top)` — в координатах снимка. Команда `dialog <answer>` зовёт `begin_pending_action_save` / `discard_pending_action_changes` / `cancel_pending_action`; флаг снимается только внутри общего `close_dialog()` (`app_window_external_methods.rs:111`), который эти методы уже вызывают, — при неудачном сохранении диалог остаётся открытым, как в окне (`:319-322`). `Escape` через `key escape` работает тем же путём, что `main_keys.rs:297-310` (условие расширяется предикатом). Клик по координатам кнопки диалога в headless не поддерживается — только команда `dialog` (в окне клик идёт в отдельное окно с собственными координатами).
 
 `dump` — компактный JSON, сериализация через `serde_json::json!`/`Value` (без `derive` на `App`):
 
@@ -271,7 +290,8 @@ fn step_frame(app, host) -> FrameStats {
                "context_menu": false, "lsp_actions_menu": false, "readonly_notice": false, "inline_git_popup": false},
   "dialog": null | {"action":"Quit|CloseTab|CloseFile|CloseAllTabs|OpenFile", "title":"…",
                     "buttons":[{"name":"save","rect":[x,y,w,h]}, …]},
-  "picker_requested": null | "file|files|folder|save",
+  "external_request": null | {"kind":"pick_file|pick_files|pick_folder|save_file|open_url|reveal_path", "arg":"…"|null},
+  "clipboard": "disabled", "writes_allowed": false,
   "hover": {"ui": "UiId debug string" | null, "popup": true|false},
   "ui": [{"id":"IdeTabExplorer", "kind":"IconButton|Button|TextInput|Rect", "rect":[x,y,w,h], "overlay":false}, …]
 }
@@ -283,13 +303,13 @@ fn step_frame(app, host) -> FrameStats {
 
 ### 4.7 Снимок — `capture.rs`
 
-`gl.read_pixels(0, 0, w, h, RGBA, UNSIGNED_BYTE, PixelPackData::Slice(&mut buf))` в переиспользуемый `Vec<u8>` (ёмкость `w*h*4`, `clear()` между снимками), переворот строк по Y на месте, `image::RgbaImage::from_raw` → `save_with_format(PNG)`. `gl.pixel_store_i32(PACK_ALIGNMENT, 1)` перед чтением. Перед `read_pixels` — `gl.finish()` (уже сделан в `step_frame`). Альфа принудительно 255 (фон непрозрачный, но pbuffer-конфиг может дать alpha 0 там, где ничего не рисовалось).
+`gl.read_pixels(0, 0, w, h, RGBA, UNSIGNED_BYTE, PixelPackData::Slice(Some(&mut buf[..])))` (glow 0.18: `Slice(Option<&mut [u8]>)`) в переиспользуемый `Vec<u8>`, перед чтением `buf.resize(w*h*4, 0)` (длина, не ёмкость: `read_pixels` пишет по длине среза), переворот строк по Y на месте (`swap` половин через `split_at_mut`), `image::RgbaImage::from_raw` над копией или `image::save_buffer` напрямую из среза → PNG. `gl.pixel_store_i32(PACK_ALIGNMENT, 1)` перед чтением. Перед `read_pixels` — `gl.finish()` (уже сделан в `step_frame`). Альфа принудительно 255 (фон непрозрачный, но pbuffer-конфиг может дать alpha 0 там, где ничего не рисовалось).
 
 Подтверждённые ограничения: PNG — sRGB без цветового профиля; размер файла 1920x1080 ≈ 100–300 КБ.
 
 ### 4.8 Замеры — `bench.rs`
 
-Бюджет кадра: `--budget-ms F` или `--hz N` → `1000/N`; иначе частота монитора: `winit::event_loop::EventLoop::builder().build()` → `available_monitors()` → максимум `refresh_rate_millihertz()` по мониторам → `1000/(mHz/1000)`; создание `EventLoop` на Wayland — подключение к композитору без поверхности, окон не создаёт. Если `EventLoop` не создаётся (нет дисплея) или частоты нет — 240 Гц и `source=default`. Определяется лениво при первом `bench`/`record`/`hz`, результат кэшируется. `EventLoop` уничтожается сразу после опроса (winit допускает один `EventLoop` на процесс — headless свой не создаёт, поэтому конфликта нет).
+Бюджет кадра: `--budget-ms F` или `--hz N` → `1000/N`; иначе частота монитора через `platform::probe_display_refresh_hz() -> Option<f64>`: `EventLoop::builder().build()` + `run_app` с одноразовым `ApplicationHandler`, который в `resumed` опрашивает `event_loop.available_monitors()` (в winit 0.30 метод есть только у `ActiveEventLoop`, `event_loop.rs:398`), берёт максимум `refresh_rate_millihertz()` и зовёт `event_loop.exit()`; окно не создаётся, на Wayland это подключение к композитору без поверхности. `run_app` возвращается сразу; `EventLoop` создаётся один раз за процесс (winit это требует), результат кэшируется; headless свой `EventLoop` не создаёт, конфликта нет. Ошибка создания (нет дисплея) или отсутствие частоты — 240 Гц и `hz_source=default`. Вызов ленивый — при первом `bench`/`record`/`info`, в главном потоке.
 
 `bench <frames> [action…]`, `action` ∈ `none` (по умолчанию) | `wheel <dx> <dy>` (LineDelta каждый кадр) | `key <combo>` (нажатие каждый кадр) | `type <text>` (каждый кадр). Каждый кадр: применить action → `step_frame(force=true)` с замерами → записать строку. Замеры на кадр:
 
@@ -307,11 +327,11 @@ fn step_frame(app, host) -> FrameStats {
 
 Для этого `root_helpers.rs` получает `pub fn take_frame_telemetry() -> FrameTelemetry` — снимает и обнуляет накопители `Telemetry` (существующие поля, новых счётчиков в рендерере не появляется); `TELEMETRY_ENABLED` ставится в `true` на время `bench`/`record` и возвращается после. Периодическая печать в stdout под `is_headless()` не выполняется.
 
-Сводка (payload `ok`): `{"frames":N, "budget_ms":4.17, "hz":240, "hz_source":"monitor", "total_ms":{"p50":..,"p95":..,"p99":..,"max":..}, "gpu_ms":{...}|null, "draw_cpu_ms":{...}, "over_budget":k, "worst":[{"frame":i,"total_ms":..,"update_ms":..,"draw_cpu_ms":..,"gpu_ms":..,"root_phase_ms":[..]}×5], "system":{"loadavg_before":[a,b,c],"loadavg_after":[..],"cpus":n,"gpu_util_before":u|null,"gpu_util_after":u|null,"process_cpu_ms":..}, "csv":"<abs path>"}`. CSV со всеми кадрами пишется в `<profile>/bench-<timestamp>.csv` (или рядом с `record`-каталогом). `gpu_util` — `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits` через `platform::run_command_output` с таймаутом 2 с; нет бинарника — `null`. `process_cpu_ms` — utime+stime из `/proc/self/stat` за время бенча.
+Сводка (payload `ok`): `{"frames":N, "budget_ms":4.17, "hz":240, "hz_source":"monitor", "total_ms":{"p50":..,"p95":..,"p99":..,"max":..}, "gpu_ms":{...}|null, "draw_cpu_ms":{...}, "over_budget":k, "worst":[{"frame":i,"total_ms":..,"update_ms":..,"draw_cpu_ms":..,"gpu_ms":..,"root_phase_ms":[..]}×5], "system":{"loadavg_before":[a,b,c],"loadavg_after":[..],"cpus":n,"gpu_util_before":u|null,"gpu_util_after":u|null,"process_cpu_ms":..}, "csv":"<abs path>"}`. CSV со всеми кадрами — `csv=<path>` или по умолчанию `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless/bench-<timestamp>.csv` (не во временном профиле: он удаляется на выходе). `gpu_util` — `nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits` через `platform::run_command_output` с таймаутом 2 с; нет бинарника — `null`. `process_cpu_ms` — utime+stime из `/proc/self/stat` за время бенча.
 
-`record <dir> <frames> [action…]` — то же, плюс на каждый кадр PNG `<dir>/frame-%04d.png` и в CSV колонки `scroll_y`, `sticky_anim_progress`, `search_anim_y`, `tab_scroll` (поля анимаций из аргументов `Renderer::draw`). Сводка дополнительно содержит `"motion":{"scroll_y_deltas":{"min":..,"max":..,"stddev":..},"nonmonotonic_frames":k}` для action `wheel`. Запись PNG — после завершения всех кадров из накопленных буферов (`frames × w × h × 4` байт; при `frames × w × h × 4 > 2 ГиБ` → `err too many frames for size`), чтобы кодирование PNG не попадало в замеры.
+`record <frames> <dir> [action…]` — те же замеры и CSV (`<dir>/frames.csv`), плюс на каждый кадр PNG `<dir>/frame-%04d.png` и колонки `scroll_y`, `sticky_anim_progress`, `search_anim_y`, `tab_scroll` (поля анимаций из аргументов `Renderer::draw`). PNG пишется сразу после каждого кадра из одного переиспользуемого буфера (4.7); время readback и кодирования в `update_ms`/`draw_cpu_ms`/`gpu_ms` не входит, но растягивает реальное время между кадрами — поэтому `record` показывает траекторию анимации, а стоимость кадра меряет `bench`. Лимит `frames ≤ 600`, иначе `err`. Сводка дополнительно содержит `"motion":{"scroll_y_delta_min":..,"scroll_y_delta_max":..,"nonmonotonic_frames":k}` — кадры, где знак дельты `scroll_y` сменился при неизменном направлении action.
 
-Интерпретация (в документации `docs/headless.md`): CPU-фазы — стоимость приложения, если `loadavg` ниже числа ядер; `gpu_ms` под игрой загрязнён — повторить бенч, минимум по прогонам — истинная стоимость; `RRITER_EGL_VENDOR=mesa` даёт CPU-растеризацию без GPU игры, но её `gpu_ms` нерепрезентативен.
+Интерпретация (в документации `docs/headless.md`): pbuffer-кадр сериализован `gl.finish()`, поэтому `total_ms` — стоимость одного кадра без конвейеризации, верхняя оценка для окна с vsync. CPU-фазы — стоимость приложения, если `loadavg` ниже числа ядер; `gpu_ms` под игрой загрязнён — повторить бенч, минимум по прогонам — нижняя оценка стоимости приложения, разброс — внешняя нагрузка; `RRITER_EGL_VENDOR=mesa` даёт CPU-растеризацию без GPU игры, но её `gpu_ms` нерепрезентативен.
 
 ## 5. Обёртка `scripts/rriter-headless`
 
@@ -356,14 +376,16 @@ Python 3, только stdlib, исполняемый. Находит бинар
 |---|---|
 | `src/platform/window_host.rs` | новый: `WindowHost`, `HeadlessWindow` |
 | `src/platform/offscreen_gl.rs` | новый: перенос `OffscreenContext` |
-| `src/platform.rs` | `pub mod` для двух новых, `is_headless()/set_headless()`, `headless_picker_requests`, гейт в `pick_*` |
+| `src/platform.rs` | `pub mod` для двух новых, `set_headless/is_headless/headless_writes_allowed`, `note_external_request/take_external_request`, гейты в `pick_*`, `open_url`, `reveal_path`, `probe_display_refresh_hz` |
+| `src/platform/integration.rs` | `set_app_root_override`, проверка в `app_paths_with` |
+| `src/renderer/renderer_primitives_tests.rs` | `Renderer::resize_viewport` рядом с `resize` |
 | `src/app/keyboard/key_input.rs` | новый: `KeyInput`, `parse_combo` |
 | `src/app/events/host_loop.rs` | новый: `HostLoop` |
 | `src/app/app_state.rs` | тип `window`, поле `headless_dialog_open`, `modal_dialog_open()` |
 | `src/app/events.rs` | `render_main_frame`, `HostLoop` в диспетчере, `id()` |
 | `src/app/events/about.rs` | `&HostLoop`, гейт мигания |
 | `src/app/events/window_runtime.rs` | `WindowHost::Native`, `native()` для surface |
-| `src/app/app_window_external_methods.rs` | `show_action_dialog(host)`, `update_window_title(&WindowHost)` |
+| `src/app/app_window_external_methods.rs` | `show_action_dialog(host)`, `update_window_title(&WindowHost)`, гейт записи в `write_current_text_to_path`, флаг в `close_dialog` |
 | `src/app/mouse/input.rs`, `src/app/keyboard/main_keys.rs`, `src/app/keyboard/editor_keys.rs`, `src/app/keyboard.rs`, `src/app/file_tree_dialog.rs`, `src/app/database/database_table_edit_methods.rs`, `src/app/database/database_app_methods.rs`, `src/app/api_client/api_client_app_request_methods.rs` | `KeyInput`, `HostLoop` |
 | `src/app/automation.rs`, `src/app/terminal_process.rs`, `src/app/tool_installer.rs` | тип окна |
 | `src/render_view/root_helpers.rs`, `root_frame_overlay_helpers.rs` | `take_frame_telemetry`, гейт печати |
