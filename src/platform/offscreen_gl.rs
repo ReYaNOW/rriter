@@ -3,6 +3,9 @@
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr;
+use std::sync::Mutex;
+
+static DISPLAY_USERS: Mutex<usize> = Mutex::new(0);
 
 type Object = *mut c_void;
 type GetProc = unsafe extern "C" fn(*const c_char) -> *const c_void;
@@ -36,6 +39,7 @@ pub struct GlStrings {
 pub struct OffscreenContext {
     _library: Library,
     display: Object,
+    display_initialized: bool,
     config: Object,
     surface: Object,
     context: Object,
@@ -89,14 +93,19 @@ impl OffscreenContext {
             let display = get_display(0x31DD, ptr::null_mut(), ptr::null());
             if display.is_null() { return Err(format!("GetPlatformDisplay: eglGetError=0x{:04X}", get_error())); }
             let mut result = Self {
-                _library: library, display, config: ptr::null_mut(), surface: ptr::null_mut(),
+                _library: library, display, display_initialized: false, config: ptr::null_mut(), surface: ptr::null_mut(),
                 context: ptr::null_mut(), width, height,
                 strings: GlStrings { renderer: String::new(), version: String::new(), vendor: String::new() },
                 get_proc, get_error, create_surface, make_current, destroy_surface, destroy_context, terminate,
             };
             let (mut major, mut minor) = (0, 0);
-            if initialize(display, &mut major, &mut minor) != 1 {
-                return Err(result.error("Initialize"));
+            {
+                let mut users = DISPLAY_USERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                if *users == 0 && initialize(display, &mut major, &mut minor) != 1 {
+                    return Err(result.error("Initialize"));
+                }
+                *users += 1;
+                result.display_initialized = true;
             }
             if bind_api(0x30A2) != 1 { return Err(result.error("ChooseConfig")); }
             let attrs = [0x3033, 1, 0x3040, 8, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3038];
@@ -167,7 +176,11 @@ impl Drop for OffscreenContext {
             (self.make_current)(self.display, ptr::null_mut(), ptr::null_mut(), ptr::null_mut());
             if !self.context.is_null() { (self.destroy_context)(self.display, self.context); }
             if !self.surface.is_null() { (self.destroy_surface)(self.display, self.surface); }
-            (self.terminate)(self.display);
+            if self.display_initialized {
+                let mut users = DISPLAY_USERS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                *users -= 1;
+                if *users == 0 { (self.terminate)(self.display); }
+            }
         }
     }
 }
@@ -213,5 +226,14 @@ mod tests {
         assert!(ctx.resize(u32::MAX, 96).is_err());
         assert_eq!(ctx.size(), (128, 96));
         assert!(!unsafe { ctx.glow().get_parameter_string(glow::VERSION) }.is_empty());
+    }
+
+    #[test]
+    fn offscreen_gl_parallel_contexts_survive_drop() {
+        let ctx_a = OffscreenContext::new(64, 48).expect("first EGL context");
+        let mut ctx_b = OffscreenContext::new(64, 48).expect("second EGL context");
+        drop(ctx_a);
+        ctx_b.resize(96, 64).expect("resize second pbuffer");
+        assert!(!unsafe { ctx_b.glow().get_parameter_string(glow::VERSION) }.is_empty());
     }
 }
