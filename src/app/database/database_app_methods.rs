@@ -201,7 +201,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub(crate) fn handle_database_dialog_keyboard(
         &mut self,
-        key_event: &winit::event::KeyEvent,
+        key_event: &crate::app::keyboard::KeyInput,
     ) -> bool {
         use winit::event::ElementState;
         use winit::keyboard::{KeyCode, PhysicalKey};
@@ -246,7 +246,7 @@ impl App {
                     copy_text = crate::app::single_line_input::handle_single_line_input(
                         dialog.input_mut(field),
                         physical_key,
-                        key_event.logical_key.to_text(),
+                        key_event.logical_text.as_deref(),
                         primary,
                         word,
                         shift,

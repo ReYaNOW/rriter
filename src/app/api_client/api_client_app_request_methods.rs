@@ -504,7 +504,7 @@ impl crate::app::App {
         true
     }
 
-    pub fn handle_api_client_keyboard_input(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+    pub fn handle_api_client_keyboard_input(&mut self, key_event: &crate::app::keyboard::KeyInput) -> bool {
         if !self.api_client_keyboard_surface_visible() {
             self.ide_panel.api.focused = None;
             return false;

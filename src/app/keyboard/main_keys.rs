@@ -172,10 +172,10 @@ fn markdown_global_toggle_action(
 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_main_keyboard_input(
+    pub fn handle_main_key_input(
         &mut self,
         event_loop: &HostLoop,
-        key_event: KeyEvent,
+        key_event: KeyInput,
     ) {
         let editor_was_focused = self.editor_has_input_focus();
         self.handle_main_keyboard_input_inner(event_loop, key_event);
@@ -186,7 +186,7 @@ impl App {
     fn handle_main_keyboard_input_inner(
         &mut self,
         event_loop: &HostLoop,
-        key_event: KeyEvent,
+        key_event: KeyInput,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
@@ -646,7 +646,7 @@ impl App {
                     }
                     _ => {
                         if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                            if let Some(txt) = key_event.logical_key.to_text() {
+                            if let Some(txt) = key_event.logical_text.as_deref() {
                                 let clean_txt = txt.replace('\n', "");
                                 if !clean_txt.is_empty() {
                                     self.settings_ignore_editor.insert_str(&clean_txt);

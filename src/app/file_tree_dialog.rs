@@ -179,7 +179,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_file_tree_modal_keyboard(&mut self, key_event: &winit::event::KeyEvent) -> bool {
+    pub fn handle_file_tree_modal_keyboard(&mut self, key_event: &crate::app::keyboard::KeyInput) -> bool {
         if self
             .ide_panel
             .api
@@ -343,7 +343,7 @@ impl App {
                         copy_text = handle_file_tree_name_editor_input(
                             &mut dialog.editor,
                             key_event.physical_key,
-                            key_event.logical_key.to_text(),
+                            key_event.logical_text.as_deref(),
                             ctrl,
                             word,
                             shift,
@@ -409,7 +409,7 @@ impl App {
                     copy_text = handle_file_tree_name_editor_input(
                         &mut dialog.editor,
                         key_event.physical_key,
-                        key_event.logical_key.to_text(),
+                        key_event.logical_text.as_deref(),
                         ctrl,
                         word,
                         shift,

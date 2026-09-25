@@ -394,7 +394,7 @@ impl App {
     pub fn handle_editor_keyboard_input(
         &mut self,
         event_loop: &HostLoop,
-        key_event: KeyEvent,
+        key_event: KeyInput,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -443,7 +443,7 @@ impl App {
             && key_text_for_editor_insert(
                 physical_key,
                 key_event.text.as_deref(),
-                key_event.logical_key.to_text(),
+                key_event.logical_text.as_deref(),
                 shift,
             )
             .is_some();
@@ -594,7 +594,7 @@ impl App {
                 && key_text_for_editor_insert(
                     physical_key,
                     key_event.text.as_deref(),
-                    key_event.logical_key.to_text(),
+                    key_event.logical_text.as_deref(),
                     shift,
                 )
                 .is_some();
@@ -1019,7 +1019,7 @@ impl App {
                     if let Some(txt) = key_text_for_editor_insert(
                         physical_key,
                         key_event.text.as_deref(),
-                        key_event.logical_key.to_text(),
+                        key_event.logical_text.as_deref(),
                         shift,
                     ) {
                         if txt == "."

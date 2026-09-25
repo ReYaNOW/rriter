@@ -1283,6 +1283,7 @@ Likely files:
 ```text
 src/app/keyboard/main_keys.rs
 src/app/keyboard/editor_keys.rs
+src/app/keyboard/key_input.rs
 src/editor.rs
 ```
 
@@ -1538,6 +1539,7 @@ Input:
 * `src/app/keyboard.rs` -> keyboard router + terminal/search helpers.
 * `src/app/keyboard/main_keys.rs` -> global shortcuts + mode routing.
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
+* `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
 * `src/app/mouse.rs` -> mouse module shell.
 * `src/app/mouse/input.rs` -> click/release/drag start, UI dispatch, panel/tab clicks.
 * `src/app/mouse/cursor.rs` -> mouse move, hover hit-test, drag update.

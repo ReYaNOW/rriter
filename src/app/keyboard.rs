@@ -7,13 +7,15 @@ use std::borrow::Cow;
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use winit::event::{ElementState, KeyEvent};
+use winit::event::ElementState;
 use crate::app::events::host_loop::HostLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
+mod key_input;
 mod main_keys;
 pub(crate) use editor_keys::paired_editor_insert_text;
+pub(crate) use key_input::KeyInput;
 
 #[cfg(target_os = "linux")]
 fn terminal_clipboard_paste_bytes(
@@ -481,7 +483,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyInput) {
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
         let terminal_ctrl = crate::platform::terminal_control_modifier(self.modifiers);
         let terminal_alt = crate::platform::terminal_alt_modifier(self.modifiers);
@@ -537,7 +539,7 @@ impl App {
                     PhysicalKey::Code(KeyCode::KeyV) if primary => paste,
                     _ => terminal_key_sequence(
                         key_event.physical_key,
-                        key_event.logical_key.to_text(),
+                        key_event.logical_text.as_deref(),
                         self.modifiers.shift_key(),
                         terminal_ctrl,
                         terminal_alt,
@@ -559,7 +561,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == winit::event::ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -671,7 +673,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.term_search_editor.insert_str(&clean_txt);
@@ -692,7 +694,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -800,7 +802,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.search_editor.insert_str(&clean_txt);
@@ -821,7 +823,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state != ElementState::Pressed {
             return;
         }
@@ -941,7 +943,7 @@ impl App {
             }
             _ => {
                 if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                    if let Some(text) = key_event.logical_key.to_text() {
+                    if let Some(text) = key_event.logical_text.as_deref() {
                         let text = if field == crate::app::project_search::ProjectSearchField::Query
                         {
                             text.to_string()
@@ -1049,7 +1051,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -1118,7 +1120,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.lsp_log_filter_editor.insert_str(&clean_txt);
@@ -1141,7 +1143,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -1215,7 +1217,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.git.message_editor.insert_str(&clean_txt);
