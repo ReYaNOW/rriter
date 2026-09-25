@@ -87,8 +87,13 @@ impl AppInitOptions {
 }
 
 impl App {
-    pub(crate) fn untitled_editor() -> Editor {
-        let mut editor = Editor::new(8192);
+    pub(crate) fn initial_editor(initial_text: &str) -> Editor {
+        let mut editor = Editor::new(initial_text.len() + 8192);
+        if !initial_text.is_empty() {
+            let _ = editor.insert_str(initial_text);
+            editor.cursor = 0;
+            editor.clear_history();
+        }
         editor.set_original_text();
         editor.sync_edits.clear();
         editor
@@ -100,7 +105,9 @@ impl App {
         config: crate::Config,
         options: AppInitOptions,
     ) -> Self {
-        let editor = options.editor.unwrap_or_else(Self::untitled_editor);
+        let editor = options
+            .editor
+            .unwrap_or_else(|| Self::initial_editor(""));
         let title = options
             .title
             .unwrap_or_else(|| "Безымянный".to_string());
@@ -335,6 +342,15 @@ mod tests {
         assert!(app.show_welcome);
         assert_eq!(app.base_title, "Добро пожаловать");
         assert!(!app.editor.original_hashes.is_empty());
+    }
+
+    #[test]
+    fn app_bootstrap_initial_editor_with_text_is_unmodified() {
+        let editor = App::initial_editor("a\nb\n");
+
+        assert!(!editor.is_dirty());
+        assert_eq!(editor.cursor, 0);
+        assert!(editor.text_equals("a\nb\n"));
     }
 
     #[test]

@@ -2134,12 +2134,7 @@ fn main() {
         }
     }
 
-    let mut editor = App::untitled_editor();
-    if !initial_text.is_empty() {
-        let _ = editor.insert_str(&initial_text);
-        editor.cursor = 0;
-        editor.clear_history();
-    }
+    let mut editor = App::initial_editor(&initial_text);
     let mut event_loop_builder = EventLoop::builder();
     #[cfg(target_os = "macos")]
     {
