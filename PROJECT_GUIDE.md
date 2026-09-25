@@ -1451,6 +1451,7 @@ Root:
 * `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
+* `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/platform/text_file.rs` -> centralized UTF/legacy text decoding, format preservation, conservative charset detection, strict re-encoding, and atomic text-save entrypoint.
 * `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
@@ -1517,6 +1518,7 @@ Entrypoints/state:
 * `src/app/python_completion/*` -> Python completion chunks split by source/module helpers and class/member helpers.
 * `src/app/app_behavior_tests.rs` -> include shell for app/autocomplete behavior tests.
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
+* `src/app/app_behavior_tests/app_behavior_host_cases.rs` -> offscreen host input characterization tests.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
 * `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
 * `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.

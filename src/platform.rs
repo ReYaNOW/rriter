@@ -16,6 +16,8 @@ use winit::window::WindowAttributes;
 
 mod elevated_save;
 mod integration;
+#[cfg(target_os = "linux")]
+pub mod offscreen_gl;
 #[cfg(target_os = "macos")]
 mod macos;
 mod process;

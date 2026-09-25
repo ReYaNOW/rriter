@@ -6,146 +6,10 @@ pub(crate) mod reviewer_stage2_integration {
     use super::*;
     use crate::app::{App, MarkdownMode};
     use crate::render_view::markdown_read::MarkdownSourceAnchor;
-    use std::ffi::{CString, c_char, c_void};
-
-    type EglObject = *mut c_void;
-    type GetProc = unsafe extern "C" fn(*const c_char) -> *const c_void;
-    type MakeCurrent = unsafe extern "C" fn(EglObject, EglObject, EglObject, EglObject) -> u32;
-    type Destroy = unsafe extern "C" fn(EglObject, EglObject) -> u32;
-    type Terminate = unsafe extern "C" fn(EglObject) -> u32;
-
-    pub(crate) struct OffscreenContext {
-        library: EglObject,
-        display: EglObject,
-        surface: EglObject,
-        context: EglObject,
-        get_proc: GetProc,
-        make_current: MakeCurrent,
-        destroy_surface: Destroy,
-        destroy_context: Destroy,
-        terminate: Terminate,
-    }
-
-    impl OffscreenContext {
-        fn new() -> Self {
-            unsafe {
-                let library =
-                    libc::dlopen(c"libEGL.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-                assert!(
-                    !library.is_null(),
-                    "review integration tests require libEGL.so.1"
-                );
-                macro_rules! symbol {
-                    ($name:literal, $ty:ty) => {{
-                        let name = CString::new($name).unwrap();
-                        let ptr = libc::dlsym(library, name.as_ptr());
-                        assert!(!ptr.is_null(), "missing EGL entry {}", $name);
-                        std::mem::transmute::<*mut c_void, $ty>(ptr)
-                    }};
-                }
-                let get_display = symbol!(
-                    "eglGetPlatformDisplay",
-                    unsafe extern "C" fn(u32, EglObject, *const isize) -> EglObject
-                );
-                let initialize = symbol!(
-                    "eglInitialize",
-                    unsafe extern "C" fn(EglObject, *mut i32, *mut i32) -> u32
-                );
-                let bind_api = symbol!("eglBindAPI", unsafe extern "C" fn(u32) -> u32);
-                let choose_config = symbol!(
-                    "eglChooseConfig",
-                    unsafe extern "C" fn(
-                        EglObject,
-                        *const i32,
-                        *mut EglObject,
-                        i32,
-                        *mut i32,
-                    ) -> u32
-                );
-                let create_surface = symbol!(
-                    "eglCreatePbufferSurface",
-                    unsafe extern "C" fn(EglObject, EglObject, *const i32) -> EglObject
-                );
-                let create_context = symbol!(
-                    "eglCreateContext",
-                    unsafe extern "C" fn(EglObject, EglObject, EglObject, *const i32) -> EglObject
-                );
-                let make_current = symbol!("eglMakeCurrent", MakeCurrent);
-                let get_proc = symbol!("eglGetProcAddress", GetProc);
-                let display = get_display(0x31DD, std::ptr::null_mut(), std::ptr::null());
-                assert!(!display.is_null(), "EGL_MESA_platform_surfaceless display");
-                let (mut major, mut minor) = (0, 0);
-                assert_eq!(
-                    initialize(display, &mut major, &mut minor),
-                    1,
-                    "EGL initialization"
-                );
-                assert_eq!(bind_api(0x30A2), 1, "EGL_OPENGL_API");
-                let attrs = [
-                    0x3033, 1, 0x3040, 8, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3038,
-                ];
-                let mut config = std::ptr::null_mut();
-                let mut count = 0;
-                assert_eq!(
-                    choose_config(display, attrs.as_ptr(), &mut config, 1, &mut count),
-                    1
-                );
-                assert_eq!(count, 1, "OpenGL pbuffer config");
-                let surface_attrs = [0x3057, 1000, 0x3056, 800, 0x3038];
-                let surface = create_surface(display, config, surface_attrs.as_ptr());
-                assert!(!surface.is_null(), "offscreen pbuffer");
-                let context_attrs = [0x3098, 3, 0x30FB, 3, 0x30FD, 1, 0x3038];
-                let context = create_context(
-                    display,
-                    config,
-                    std::ptr::null_mut(),
-                    context_attrs.as_ptr(),
-                );
-                assert!(!context.is_null(), "OpenGL 3.3 context");
-                assert_eq!(make_current(display, surface, surface, context), 1);
-                Self {
-                    library,
-                    display,
-                    surface,
-                    context,
-                    get_proc,
-                    make_current,
-                    destroy_surface: symbol!("eglDestroySurface", Destroy),
-                    destroy_context: symbol!("eglDestroyContext", Destroy),
-                    terminate: symbol!("eglTerminate", Terminate),
-                }
-            }
-        }
-
-        fn glow(&self) -> glow::Context {
-            unsafe {
-                glow::Context::from_loader_function(|name| {
-                    let name = CString::new(name).unwrap();
-                    (self.get_proc)(name.as_ptr())
-                })
-            }
-        }
-    }
-
-    impl Drop for OffscreenContext {
-        fn drop(&mut self) {
-            unsafe {
-                (self.make_current)(
-                    self.display,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                );
-                (self.destroy_context)(self.display, self.context);
-                (self.destroy_surface)(self.display, self.surface);
-                (self.terminate)(self.display);
-                libc::dlclose(self.library);
-            }
-        }
-    }
+    use crate::platform::offscreen_gl::OffscreenContext;
 
     pub(crate) fn fixture(source: &str, width: f32, scale: f32) -> (OffscreenContext, App) {
-        let context = OffscreenContext::new();
+        let context = OffscreenContext::new(1000, 800).expect("offscreen EGL context");
         let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
         app.show_welcome = false;
         app.file_path = Some(std::path::PathBuf::from("/tmp/reviewer-stage2.md"));
@@ -156,7 +20,7 @@ pub(crate) mod reviewer_stage2_integration {
             context.glow(),
             scale,
             app.theme.clone(),
-            "review surfaceless".to_string(),
+            context.requested_context(),
         )
         .expect("production Renderer");
         renderer.width = width;
