@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use winit::dpi::PhysicalSize;
-use winit::event_loop::ActiveEventLoop;
+use crate::app::events::host_loop::HostLoop;
 
 use crate::app::api_client::ApiFocus;
 use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
@@ -411,7 +411,7 @@ impl AutomationController {
     pub fn tick(
         &mut self,
         app: &mut App,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         now: Instant,
     ) -> AutomationTick {
         if now.saturating_duration_since(self.started_at) > self.options.timeout {
@@ -506,7 +506,7 @@ impl AutomationController {
     fn run_step(
         &mut self,
         app: &mut App,
-        _event_loop: &ActiveEventLoop,
+        _event_loop: &HostLoop,
         step: &AutomationStep,
         now: Instant,
     ) -> StepResult {
@@ -1645,7 +1645,7 @@ impl App {
     #[inline(never)]
     pub(crate) fn advance_automation(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         now: Instant,
     ) -> Option<AutomationTick> {
         let mut automation = self.automation.take()?;

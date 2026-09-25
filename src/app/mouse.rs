@@ -1,7 +1,7 @@
 use crate::app::App;
 use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
-use winit::event_loop::ActiveEventLoop;
+use crate::app::events::host_loop::HostLoop;
 
 const SCROLLBAR_DRAG_ANIM_SPEED: f32 = 15.0;
 

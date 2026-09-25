@@ -785,7 +785,7 @@ mod tests {
             app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
             app.renderer.as_mut().unwrap().last_mouse_y = press_y;
 
-            app.reviewer_markdown_read_mouse_input(
+            app.handle_main_mouse_input(&host_loop::HostLoop::headless(&host_loop::HeadlessLoopState::default()),
                 winit::event::ElementState::Pressed,
                 winit::event::MouseButton::Left,
             );
@@ -800,7 +800,7 @@ mod tests {
             assert!(app.markdown.scroll_transition.is_none());
             assert!(app.markdown.scroll_carry.is_none());
 
-            app.reviewer_markdown_read_mouse_input(
+            app.handle_main_mouse_input(&host_loop::HostLoop::headless(&host_loop::HeadlessLoopState::default()),
                 winit::event::ElementState::Released,
                 winit::event::MouseButton::Left,
             );
@@ -810,7 +810,7 @@ mod tests {
         let press_y = thumb.start + thumb.len * 0.3;
         app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
         app.renderer.as_mut().unwrap().last_mouse_y = press_y;
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&host_loop::HostLoop::headless(&host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Pressed,
             winit::event::MouseButton::Left,
         );
@@ -828,7 +828,7 @@ mod tests {
         // captured Reader drag must end before ordinary UI release dispatch.
         app.renderer.as_mut().unwrap().last_mouse_x = body.0 + 30.0;
         app.renderer.as_mut().unwrap().last_mouse_y = body.1 + body.3 * 0.5;
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&host_loop::HostLoop::headless(&host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Released,
             winit::event::MouseButton::Left,
         );
@@ -1243,7 +1243,7 @@ mod tests {
         app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
         app.renderer.as_mut().unwrap().last_mouse_y = thumb.start + thumb.len * fraction;
 
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&host_loop::HostLoop::headless(&host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Pressed,
             winit::event::MouseButton::Left,
         );

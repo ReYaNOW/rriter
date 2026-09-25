@@ -963,7 +963,7 @@ mod markdown_code_scroll_gl_tests {
             Some(UiId::MarkdownCodeScrollbarX(block_id))
         );
 
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Pressed,
             winit::event::MouseButton::Left,
         );
@@ -993,7 +993,7 @@ mod markdown_code_scroll_gl_tests {
         let renderer = app.renderer.as_mut().expect("renderer");
         renderer.last_mouse_x = body.0 + 30.0;
         renderer.last_mouse_y = body.1 + body.3 * 0.5;
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Released,
             winit::event::MouseButton::Left,
         );

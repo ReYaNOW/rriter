@@ -776,7 +776,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
     let first_toggle = stage4_status_toggle_rect(&mut app);
     app.renderer.as_mut().unwrap().last_mouse_x = first_toggle.0 + first_toggle.2 * 0.5;
     app.renderer.as_mut().unwrap().last_mouse_y = first_toggle.1 + first_toggle.3 * 0.5;
-    app.reviewer_markdown_read_mouse_input(
+    app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
         winit::event::ElementState::Pressed,
         winit::event::MouseButton::Left,
     );
@@ -860,7 +860,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
     .unwrap();
     app.renderer.as_mut().unwrap().last_mouse_x = scrollbar.0 + scrollbar.2 * 0.5;
     app.renderer.as_mut().unwrap().last_mouse_y = thumb.start + thumb.len * 0.5;
-    app.reviewer_markdown_read_mouse_input(
+    app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
         winit::event::ElementState::Pressed,
         winit::event::MouseButton::Left,
     );
@@ -870,7 +870,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
     assert_eq!(app.scroll_y.current, current_before_drag_move);
     assert_ne!(app.scroll_y.current, app.scroll_y.target);
     let release_target = app.scroll_y.target;
-    app.reviewer_markdown_read_mouse_input(
+    app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
         winit::event::ElementState::Released,
         winit::event::MouseButton::Left,
     );
@@ -927,7 +927,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
         .unwrap();
     app.renderer.as_mut().unwrap().last_mouse_x = resized_toggle.0 + resized_toggle.2 * 0.5;
     app.renderer.as_mut().unwrap().last_mouse_y = resized_toggle.1 + resized_toggle.3 * 0.5;
-    app.reviewer_markdown_read_mouse_input(
+    app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
         winit::event::ElementState::Pressed,
         winit::event::MouseButton::Left,
     );
@@ -953,7 +953,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
     let toggle = stage4_status_toggle_rect(&mut app);
     app.renderer.as_mut().unwrap().last_mouse_x = toggle.0 + toggle.2 * 0.5;
     app.renderer.as_mut().unwrap().last_mouse_y = toggle.1 + toggle.3 * 0.5;
-    app.reviewer_markdown_read_mouse_input(
+    app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
         winit::event::ElementState::Pressed,
         winit::event::MouseButton::Left,
     );
@@ -977,7 +977,7 @@ fn reviewer_stage4_full_gesture_resize_toggle_sequence_preserves_source_and_moti
         let toggle = stage4_status_toggle_rect(&mut app);
         app.renderer.as_mut().unwrap().last_mouse_x = toggle.0 + toggle.2 * 0.5;
         app.renderer.as_mut().unwrap().last_mouse_y = toggle.1 + toggle.3 * 0.5;
-        app.reviewer_markdown_read_mouse_input(
+        app.handle_main_mouse_input(&crate::app::events::host_loop::HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             winit::event::ElementState::Pressed,
             winit::event::MouseButton::Left,
         );

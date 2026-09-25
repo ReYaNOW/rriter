@@ -10,6 +10,8 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
 mod about;
+pub(crate) mod host_loop;
+use host_loop::HostLoop;
 mod window_runtime;
 #[cfg(test)]
 pub(crate) use about::file_watcher_disconnect_message;
@@ -438,9 +440,9 @@ impl ApplicationHandler for App {
         match event {
             WindowEvent::CloseRequested => {
                 if self.has_unsaved_changes() {
-                    self.show_action_dialog(event_loop, PendingAction::Quit);
+                    self.show_action_dialog(&HostLoop::Native(event_loop), PendingAction::Quit);
                 } else {
-                    window_runtime::save_state_and_exit(self, event_loop);
+                    window_runtime::save_state_and_exit(self, &HostLoop::Native(event_loop));
                 }
             }
             WindowEvent::Focused(focused) => {
@@ -554,7 +556,7 @@ impl ApplicationHandler for App {
                 self.handle_main_mouse_wheel(delta);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                self.handle_main_mouse_input(event_loop, state, button);
+                self.handle_main_mouse_input(&HostLoop::Native(event_loop), state, button);
             }
             WindowEvent::CursorMoved { position, .. } => self.handle_main_cursor_moved(position),
             WindowEvent::CursorLeft { .. } => {
@@ -604,7 +606,7 @@ impl ApplicationHandler for App {
             WindowEvent::KeyboardInput {
                 event: key_event, ..
             } => {
-                self.handle_main_keyboard_input(event_loop, key_event);
+                self.handle_main_keyboard_input(&HostLoop::Native(event_loop), key_event);
             }
             WindowEvent::RedrawRequested => {
                 if self.render_suspended {
@@ -1573,7 +1575,7 @@ impl ApplicationHandler for App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        about::about_to_wait(self, event_loop);
+        about::about_to_wait(self, &HostLoop::Native(event_loop));
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

@@ -1,6 +1,7 @@
 #[cfg(all(test, target_os = "linux"))]
 mod host_cases {
     use crate::app::{App, MarkdownMode};
+    use crate::app::events::host_loop::{HeadlessLoopState, HostLoop};
     use crate::platform::offscreen_gl::test_support::offscreen_test_app;
     use crate::ui_system::UiId;
     use winit::dpi::PhysicalPosition;
@@ -53,8 +54,10 @@ mod host_cases {
         let (x, y) = toggle_center(&app);
         assert_eq!(app.markdown_mode(), MarkdownMode::Edit);
         app.handle_main_cursor_moved(PhysicalPosition::new(x as f64, y as f64));
-        app.reviewer_markdown_read_mouse_input(ElementState::Pressed, MouseButton::Left);
-        app.reviewer_markdown_read_mouse_input(ElementState::Released, MouseButton::Left);
+        let loop_state = HeadlessLoopState::default();
+        let host = HostLoop::headless(&loop_state);
+        app.handle_main_mouse_input(&host, ElementState::Pressed, MouseButton::Left);
+        app.handle_main_mouse_input(&host, ElementState::Released, MouseButton::Left);
         assert_ne!(app.markdown_mode(), MarkdownMode::Edit);
         assert_eq!(app.markdown_mode(), MarkdownMode::Read);
     }

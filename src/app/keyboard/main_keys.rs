@@ -174,7 +174,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_keyboard_input(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         key_event: KeyEvent,
     ) {
         let editor_was_focused = self.editor_has_input_focus();
@@ -185,7 +185,7 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn handle_main_keyboard_input_inner(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         key_event: KeyEvent,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);

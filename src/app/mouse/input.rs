@@ -418,15 +418,12 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn handle_main_mouse_input(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         state: ElementState,
         button: winit::event::MouseButton,
     ) {
         let editor_was_focused = self.editor_has_input_focus();
-        #[cfg(not(test))]
         self.handle_main_mouse_input_inner(event_loop, state, button);
-        #[cfg(test)]
-        self.handle_main_mouse_input_inner(Some(event_loop), state, button);
         self.autosave_after_editor_focus_change(editor_was_focused);
     }
 
@@ -465,20 +462,10 @@ impl App {
         }
     }
 
-    #[cfg(test)]
-    pub(crate) fn reviewer_markdown_read_mouse_input(
-        &mut self,
-        state: ElementState,
-        button: winit::event::MouseButton,
-    ) {
-        self.handle_main_mouse_input_inner(None, state, button);
-    }
-
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn handle_main_mouse_input_inner(
         &mut self,
-        #[cfg(not(test))] _event_loop: &ActiveEventLoop,
-        #[cfg(test)] _event_loop: Option<&ActiveEventLoop>,
+        _event_loop: &HostLoop,
         state: ElementState,
         button: winit::event::MouseButton,
     ) {
@@ -2610,10 +2597,9 @@ mod reviewer_stage2_modal_tests {
         renderer.last_mouse_x = mx;
         renderer.last_mouse_y = my;
         let preserve = preserve_main_vertical_scroll_for_click(&app, mx, my);
-        // The test-only optional event-loop argument supplies no native loop;
-        // the complete production input body and actual popup dismissal run.
+        // The complete production input body and actual popup dismissal run.
         app.handle_main_mouse_input_inner(
-            None,
+            &HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             ElementState::Pressed,
             winit::event::MouseButton::Left,
         );
@@ -2670,7 +2656,7 @@ mod reviewer_stage2_modal_tests {
         renderer.last_mouse_y = y + h * 0.5;
         renderer.flush();
         app.handle_main_mouse_input_inner(
-            None,
+            &HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             ElementState::Pressed,
             winit::event::MouseButton::Left,
         );
@@ -2680,7 +2666,7 @@ mod reviewer_stage2_modal_tests {
         assert_eq!(app.scroll_y.target, 144.25);
         assert_eq!(app.scroll_y.velocity, 35.0);
         app.handle_main_mouse_input_inner(
-            None,
+            &HostLoop::headless(&crate::app::events::host_loop::HeadlessLoopState::default()),
             ElementState::Pressed,
             winit::event::MouseButton::Left,
         );

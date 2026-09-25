@@ -38,13 +38,17 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
+    pub fn show_action_dialog(&mut self, host: &crate::app::events::host_loop::HostLoop, action: PendingAction) {
         self.cancel_pointer_interactions();
         self.pending_action = action;
 
         if self.dialog_window.is_some() {
             return;
         }
+
+        let Some(event_loop) = host.native() else {
+            return;
+        };
 
         let attrs = crate::platform::apply_window_attributes(winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")

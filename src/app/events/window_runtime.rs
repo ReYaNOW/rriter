@@ -371,7 +371,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) fn save_state_and_exit(app: &mut App, event_loop: &ActiveEventLoop) {
+pub(super) fn save_state_and_exit(app: &mut App, event_loop: &super::host_loop::HostLoop) {
     persist_state_and_shutdown(app);
     event_loop.exit();
 }

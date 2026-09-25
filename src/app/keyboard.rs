@@ -8,7 +8,7 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use winit::event::{ElementState, KeyEvent};
-use winit::event_loop::ActiveEventLoop;
+use crate::app::events::host_loop::HostLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
