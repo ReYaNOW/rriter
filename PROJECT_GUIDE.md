@@ -1502,6 +1502,7 @@ Entrypoints/state:
 * `src/app/tool_installer.rs` -> cross-platform managed uv/Ruff/Ty bootstrap, isolated install layout, progress/log state, cancellation, validation, and App integration.
 * `src/app/tool_installer_tests.rs` -> managed-install command/layout, rollback, cancellation, log bounding, and platform-plan regression tests.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close, scale-factor and IME routing.
+* `src/app/events/main_frame.rs` -> shared main-frame render and post-present processing for native and headless hosts.
 * `src/app/events/window_runtime.rs` -> platform GL-context plans, window/surface bootstrap, graphics diagnostics, and persisted shutdown.
 * `src/app/events/host_loop.rs` -> native or headless event-loop exit and control-flow adapter.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.

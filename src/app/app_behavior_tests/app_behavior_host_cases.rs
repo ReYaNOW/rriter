@@ -6,6 +6,7 @@ mod host_cases {
     use crate::ui_system::UiId;
     use winit::dpi::PhysicalPosition;
     use winit::event::{ElementState, MouseButton, MouseScrollDelta};
+    use std::collections::HashSet;
 
     fn document_app() -> (crate::platform::offscreen_gl::OffscreenContext, App) {
         let (context, mut app) = offscreen_test_app(1280, 800, 1.0);
@@ -28,6 +29,27 @@ mod host_cases {
         let (x, y, w, h) = app.ui_registry.rect_for(UiId::MarkdownModeToggle)
             .expect("rendered Markdown mode toggle");
         (x + w * 0.5, y + h * 0.5)
+    }
+
+    #[test]
+    fn host_frame_render_main_frame_registers_same_ui() {
+        let (_context, mut app) = document_app();
+        let manual: HashSet<_> = app.ui_registry.element_ids()
+            .map(|id| format!("{id:?}"))
+            .collect();
+        assert!(!manual.is_empty());
+        assert!(manual.contains(&format!("{:?}", UiId::EditorTab(0))));
+        assert!(manual.contains(&format!("{:?}", UiId::StatusBar)));
+
+        let outcome = app.render_main_frame();
+        let rendered: HashSet<_> = app.ui_registry.element_ids()
+            .map(|id| format!("{id:?}"))
+            .collect();
+        assert!(!rendered.is_empty());
+        assert!(manual.is_subset(&rendered), "manual UI ids missing: {:?}", manual.difference(&rendered).collect::<Vec<_>>());
+        app.finish_main_frame(outcome);
+        let outcome = app.render_main_frame();
+        app.finish_main_frame(outcome);
     }
 
     #[test]

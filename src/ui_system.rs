@@ -682,6 +682,11 @@ impl UiRegistry {
         self.overlay_mark = 0;
     }
 
+    #[cfg(test)]
+    pub(crate) fn element_ids(&self) -> impl Iterator<Item = UiId> + '_ {
+        self.elements.iter().map(UiElement::id)
+    }
+
     pub fn push_clip(&mut self, clip: UiClipRect) {
         let clip = match self.clip_stack.last().copied() {
             Some(parent) => parent.intersect_rect(clip),
