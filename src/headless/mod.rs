@@ -270,7 +270,7 @@ impl HeadlessSession {
             }
             Command::Info => Response::Ok(Some(bench::info_json(self).to_string())),
             Command::Bench { frames, csv, action } => bench::bench(self, frames, csv, &action),
-            Command::Record { .. } => not_available("record"),
+            Command::Record { frames, dir, action } => bench::record(self, frames, dir, &action),
         }
     }
 
@@ -332,16 +332,22 @@ impl HeadlessSession {
     fn screenshot(&mut self, path: &Path) -> Response {
         self.step(true);
         let (w, h) = self.gl.size();
+        match self.save_frame(path) {
+            Ok(written) => Response::Ok(Some(format!("{} {w}x{h}", written.display()))),
+            Err(error) => Response::Err(error),
+        }
+    }
+
+    /// Reads the last drawn frame back into the reused buffer and writes it as a PNG.
+    fn save_frame(&mut self, path: &Path) -> Result<PathBuf, String> {
+        let (w, h) = self.gl.size();
         let Some(renderer) = self.app.renderer.as_ref() else {
-            return Response::Err("renderer is unavailable".to_string());
+            return Err("renderer is unavailable".to_string());
         };
         frame::read_frame_rgba(&renderer.gl, w, h, &mut self.frame_buf);
         frame::flip_rows_in_place(&mut self.frame_buf, w as usize, h as usize);
         frame::force_opaque(&mut self.frame_buf);
-        match frame::write_png(path, &self.frame_buf, w, h) {
-            Ok(written) => Response::Ok(Some(format!("{} {w}x{h}", written.display()))),
-            Err(error) => Response::Err(format!("io: {error}")),
-        }
+        frame::write_png(path, &self.frame_buf, w, h).map_err(|error| format!("io: {error}"))
     }
 
     fn dump(&mut self, path: Option<&Path>) -> Response {
@@ -414,8 +420,4 @@ fn mouse_button(button: MouseButtonArg) -> MouseButton {
         MouseButtonArg::Right => MouseButton::Right,
         MouseButtonArg::Middle => MouseButton::Middle,
     }
-}
-
-fn not_available(name: &str) -> Response {
-    Response::Err(format!("'{name}' is not available yet"))
 }

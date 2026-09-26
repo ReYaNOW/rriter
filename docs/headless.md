@@ -76,6 +76,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
 | `bench <frames> [csv=<path>] [action]` | Measure frame cost (see Bench). | `ok <json summary>` |
+| `record <frames> <dir> [action]` | `bench` plus a PNG per frame (see Bench). `dir` is one token. | `ok <json summary>` |
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |
 | `quit` | Stop. EOF does the same. | `ok` |
 
@@ -161,6 +162,15 @@ polluted while a game or another GPU load runs: repeat the bench; the minimum
 over runs is the lower bound of the app's cost, the spread is external load.
 `RRITER_EGL_VENDOR=mesa` renders on the CPU, away from the game's GPU, but its
 `gpu_ms` is not representative.
+
+`record <frames> <dir> [action]` (≤ 600 frames) measures the same way, writes
+`<dir>/frames.csv` with extra `sticky_anim_progress`, `search_anim_y`,
+`tab_scroll` columns and saves every frame as `<dir>/frame-0000.png`, … The
+summary adds `motion`: `scroll_y_delta_min/max` and `nonmonotonic_frames` —
+frames whose `scroll_y` moves against the direction of the first move.
+Readback and PNG encoding stay outside the timings but stretch real time
+between frames, so `record` shows the animation's trajectory; frame cost is
+what `bench` measures.
 
 ## Isolation
 

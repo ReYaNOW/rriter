@@ -373,11 +373,48 @@ mod session_cases {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    fn long_file(dir: &std::path::Path) -> PathBuf {
+        let path = dir.join("long.txt");
+        let text: String = (0..600).map(|i| format!("line {i:04} of a long bench document\n")).collect();
+        std::fs::write(&path, text).expect("write long file");
+        path
+    }
+
     #[test]
-    fn headless_session_unported_commands_report_not_available() {
+    fn headless_record_frames_csv_and_motion() {
+        let dir = scratch_dir("record");
+        let path = long_file(&dir);
+        let out = dir.join("rec");
         let mut session = session_for_test(640, 400);
-        let lines = run_script(&mut session, b"record 2 /tmp/rriter-headless-unported\n");
-        assert_eq!(lines, vec!["err 'record' is not available yet"]);
+        let script = format!("open {}\nrecord 3 {} wheel 0 -3\n", path.display(), out.display());
+        let lines = run_script(&mut session, script.as_bytes());
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        let summary = ok_json(&lines[1]);
+        assert_eq!(summary["frames"], 3);
+        assert_eq!(summary["csv"], out.join("frames.csv").display().to_string());
+        for key in ["scroll_y_delta_min", "scroll_y_delta_max", "nonmonotonic_frames"] {
+            assert!(summary["motion"].get(key).is_some(), "missing motion.{key}: {summary}");
+        }
+        for frame in 0..3 {
+            let png = out.join(format!("frame-{frame:04}.png"));
+            assert_eq!(image::image_dimensions(&png).expect("png written"), (640, 400));
+        }
+        assert!(!out.join("frame-0003.png").exists());
+        let text = std::fs::read_to_string(out.join("frames.csv")).expect("csv written");
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows.len(), 4, "{text}");
+        assert!(rows[0].ends_with(",scroll_y,sticky_anim_progress,search_anim_y,tab_scroll"), "{}", rows[0]);
+        assert!(rows.iter().all(|row| row.split(',').count() == rows[0].split(',').count()), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_record_io_error_then_continues() {
+        let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, b"record 3 /proc/rriter-nope\ndump\n");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("err io:"), "{lines:?}");
+        assert!(lines[1].starts_with("ok {"), "{lines:?}");
     }
 
     fn ok_json(line: &str) -> serde_json::Value {
@@ -419,9 +456,7 @@ mod session_cases {
     #[test]
     fn headless_bench_wheel_scrolls_long_document() {
         let dir = scratch_dir("bench-wheel");
-        let path = dir.join("long.txt");
-        let text: String = (0..600).map(|i| format!("line {i:04} of a long bench document\n")).collect();
-        std::fs::write(&path, text).expect("write long file");
+        let path = long_file(&dir);
         let csv = dir.join("wheel.csv");
         let mut session = session_for_test(640, 400);
         let script = format!("open {}\nbench 3 csv={} wheel 0 -3\n", path.display(), csv.display());

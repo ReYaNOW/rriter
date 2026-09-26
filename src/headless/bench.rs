@@ -27,6 +27,8 @@ const GPU_UTIL_TIMEOUT: Duration = Duration::from_secs(2);
 const CSV_HEADER: &str = "frame,update_ms,draw_cpu_ms,gpu_ms,total_ms,flush_calls,vertices,\
 root_prep_ms,root_cache_ms,root_pre_editor_ms,root_overlays_ms,root_chrome_ms,\
 chrome_0_ms,chrome_1_ms,chrome_2_ms,chrome_3_ms,chrome_4_ms,chrome_5_ms,scroll_y";
+/// Extra `record` columns: animation state passed to `Renderer::draw`.
+const RECORD_COLUMNS: &str = ",sticky_anim_progress,search_anim_y,tab_scroll";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Budget {
@@ -123,6 +125,8 @@ pub(crate) struct FrameRow {
     pub total_ms: f64,
     pub telemetry: FrameTelemetry,
     pub scroll_y: f64,
+    /// `record` only: `sticky_anim_progress`, `search_anim_y`, `tab_scroll`.
+    pub anim: Option<[f32; 3]>,
 }
 
 impl FrameRow {
@@ -140,7 +144,11 @@ impl FrameRow {
         for ms in t.root_phase_ms.iter().chain(&t.chrome_ms) {
             let _ = write!(line, ",{ms:.4}");
         }
-        let _ = writeln!(line, ",{}", self.scroll_y);
+        let _ = write!(line, ",{}", self.scroll_y);
+        if let Some([sticky, search, tab]) = self.anim {
+            let _ = write!(line, ",{sticky},{search},{tab}");
+        }
+        line.push('\n');
     }
 
     fn worst_json(&self) -> Value {
@@ -240,9 +248,28 @@ fn ms(duration: Duration) -> f64 {
 
 /// The measured frame loop shared by `bench` and `record`: action + `about_to_wait`
 /// (`update_ms`), draw calls (`draw_cpu_ms`), GPU time, and the whole step (`total_ms`).
-pub(crate) fn run_frames(session: &mut HeadlessSession, frames: u32, action: &BenchAction) -> Vec<FrameRow> {
+/// With `record_dir`, every frame is also saved as `frame-%04d.png` outside the timings.
+pub(crate) fn run_frames(
+    session: &mut HeadlessSession,
+    frames: u32,
+    action: &BenchAction,
+    record_dir: Option<&Path>,
+) -> Result<Vec<FrameRow>, String> {
     let gl = session.gl.glow();
     let mut timer = GpuTimer::new(&gl);
+    let rows = measured_frames(session, &gl, &mut timer, frames, action, record_dir);
+    timer.delete(&gl);
+    rows
+}
+
+fn measured_frames(
+    session: &mut HeadlessSession,
+    gl: &glow::Context,
+    timer: &mut GpuTimer,
+    frames: u32,
+    action: &BenchAction,
+    record_dir: Option<&Path>,
+) -> Result<Vec<FrameRow>, String> {
     let _telemetry = TelemetryOn::enable();
     take_frame_telemetry();
     let mut rows = Vec::with_capacity(frames as usize);
@@ -253,24 +280,61 @@ pub(crate) fn run_frames(session: &mut HeadlessSession, frames: u32, action: &Be
         // Every bench frame is forced; drop the request so it cannot leak into a later step.
         frame::take_redraw_request(&session.app);
         let draw_start = Instant::now();
-        timer.begin(&gl);
+        timer.begin(gl);
         let outcome = frame::render_frame(&mut session.app);
         let draw_end = Instant::now();
         frame::finish_gl(&session.app);
-        let gpu_ms = timer.end(&gl);
+        let gpu_ms = timer.end(gl);
         session.app.finish_main_frame(outcome);
+        let total_ms = ms(start.elapsed());
+        let app = &session.app;
         rows.push(FrameRow {
             frame,
             update_ms: ms(draw_start - start),
             draw_cpu_ms: ms(draw_end - draw_start),
             gpu_ms,
-            total_ms: ms(start.elapsed()),
+            total_ms,
             telemetry: take_frame_telemetry(),
-            scroll_y: f64::from(session.app.scroll_y.current),
+            scroll_y: f64::from(app.scroll_y.current),
+            anim: record_dir
+                .map(|_| [app.sticky_anim_progress, app.search_anim_y, app.tab_scroll.current]),
         });
+        if let Some(dir) = record_dir {
+            session.save_frame(&dir.join(format!("frame-{frame:04}.png")))?;
+        }
     }
-    timer.delete(&gl);
-    rows
+    Ok(rows)
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct Motion {
+    pub delta_min: f64,
+    pub delta_max: f64,
+    pub nonmonotonic_frames: u32,
+}
+
+/// Frame-to-frame `scroll_y` deltas; a frame is non-monotonic when its delta is nonzero and
+/// against the direction of the first nonzero delta (the action's direction does not change).
+pub(crate) fn motion_stats(scroll_y: &[f64]) -> Motion {
+    let mut motion = Motion::default();
+    let mut direction = 0.0;
+    for (index, pair) in scroll_y.windows(2).enumerate() {
+        let delta = pair[1] - pair[0];
+        if index == 0 {
+            (motion.delta_min, motion.delta_max) = (delta, delta);
+        }
+        motion.delta_min = motion.delta_min.min(delta);
+        motion.delta_max = motion.delta_max.max(delta);
+        if delta == 0.0 {
+            continue;
+        }
+        if direction == 0.0 {
+            direction = delta.signum();
+        } else if delta.signum() != direction {
+            motion.nonmonotonic_frames += 1;
+        }
+    }
+    motion
 }
 
 struct SystemSample {
@@ -297,9 +361,10 @@ fn create_file(path: &Path) -> io::Result<File> {
     File::create(path)
 }
 
-fn write_csv(file: File, rows: &[FrameRow]) -> io::Result<()> {
+fn write_csv(file: File, rows: &[FrameRow], record: bool) -> io::Result<()> {
     let mut out = BufWriter::new(file);
-    writeln!(out, "{CSV_HEADER}")?;
+    let extra = if record { RECORD_COLUMNS } else { "" };
+    writeln!(out, "{CSV_HEADER}{extra}")?;
     let mut line = String::new();
     for row in rows {
         line.clear();
@@ -348,21 +413,54 @@ fn summary_json(
 pub(crate) fn bench(session: &mut HeadlessSession, frames: u32, csv: Option<PathBuf>, action: &BenchAction) -> Response {
     let csv = csv.unwrap_or_else(default_csv_path);
     let csv = std::path::absolute(&csv).unwrap_or(csv);
-    let file = match create_file(&csv) {
+    measure(session, frames, action, &csv, None)
+}
+
+/// `record <frames> <dir> [action]`: `bench` plus a PNG per frame, animation columns in
+/// `<dir>/frames.csv`, and the `motion` of `scroll_y` in the summary.
+pub(crate) fn record(session: &mut HeadlessSession, frames: u32, dir: PathBuf, action: &BenchAction) -> Response {
+    let dir = std::path::absolute(&dir).unwrap_or(dir);
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        return Response::Err(format!("io: {error}"));
+    }
+    measure(session, frames, action, &dir.join("frames.csv"), Some(&dir))
+}
+
+fn measure(
+    session: &mut HeadlessSession,
+    frames: u32,
+    action: &BenchAction,
+    csv: &Path,
+    record_dir: Option<&Path>,
+) -> Response {
+    let file = match create_file(csv) {
         Ok(file) => file,
         Err(error) => return Response::Err(format!("io: {error}")),
     };
     let budget = resolve_budget(session.budget, session.hz_probe);
     let before = SystemSample::take();
     let cpu_before = process_cpu_ms();
-    let rows = run_frames(session, frames, action);
+    let rows = match run_frames(session, frames, action, record_dir) {
+        Ok(rows) => rows,
+        Err(error) => return Response::Err(error),
+    };
     let cpu_after = process_cpu_ms();
     let after = SystemSample::take();
-    if let Err(error) = write_csv(file, &rows) {
+    if let Err(error) = write_csv(file, &rows, record_dir.is_some()) {
         return Response::Err(format!("io: {error}"));
     }
     let process_cpu_ms = cpu_before.zip(cpu_after).map(|(before, after)| after - before);
-    Response::Ok(Some(summary_json(&rows, budget, [&before, &after], process_cpu_ms, &csv).to_string()))
+    let mut summary = summary_json(&rows, budget, [&before, &after], process_cpu_ms, csv);
+    if record_dir.is_some() {
+        let scroll: Vec<f64> = rows.iter().map(|row| row.scroll_y).collect();
+        let motion = motion_stats(&scroll);
+        summary["motion"] = json!({
+            "scroll_y_delta_min": motion.delta_min,
+            "scroll_y_delta_max": motion.delta_max,
+            "nonmonotonic_frames": motion.nonmonotonic_frames,
+        });
+    }
+    Response::Ok(Some(summary.to_string()))
 }
 
 /// `info` payload: frame budget, GL strings, write policy, profile root.
@@ -421,6 +519,19 @@ mod tests {
             assert_eq!(parse_proc_stat_cpu_ms(bad, 100.0), None, "{bad}");
         }
         assert_eq!(parse_proc_stat_cpu_ms(stat, 0.0), None);
+    }
+
+    #[test]
+    fn headless_record_motion_stats() {
+        let monotonic = motion_stats(&[0.0, 1.0, 3.0, 3.0, 6.0]);
+        assert_eq!(monotonic, Motion { delta_min: 0.0, delta_max: 3.0, nonmonotonic_frames: 0 });
+        // Deltas 1, 2, -1, 2: only frame 3 moves against the action's direction.
+        let back = motion_stats(&[0.0, 1.0, 3.0, 2.0, 4.0]);
+        assert_eq!(back, Motion { delta_min: -1.0, delta_max: 2.0, nonmonotonic_frames: 1 });
+        let up = motion_stats(&[10.0, 8.0, 9.0, 5.0]);
+        assert_eq!(up, Motion { delta_min: -4.0, delta_max: 1.0, nonmonotonic_frames: 1 });
+        assert_eq!(motion_stats(&[]), Motion::default());
+        assert_eq!(motion_stats(&[5.0]), Motion::default());
     }
 
     #[test]
