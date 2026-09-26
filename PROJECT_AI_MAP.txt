@@ -5057,13 +5057,13 @@ F handle_ui_click@254>9,ul,uo,uu,v4,va,vh,vi,vj,vk,wo,wp,wq,wr,wv,ww,wz,x8,z5,za
 F handle_database_ui_click@2354>ww,10e,19n,19o,19z,1a0,1a3,1a4,1an,1aq,1ar,1as,1at,1au,1av,1aw,1ax,1ay,1az,1b4,1b6,1nt,1o2,1o4,1o5,1o6,1o8,1o9,1oa,1ob,1oi,1oj,1ol,1om,1on,1tl,1tn,1tz,1u0,1u1,1u2,1u4,1u6,1u7,1u8,1u9,1v2,1v3,1v4,1v5,1v6,1v7,1vd,1ve,1vi,1vn,1vo,1vr,1vs,1vt,1vu,1vv,1vw,1vx,1vy,1w1,1w2,3cn,3cw
 F open_database_context_menu_for_hit@2882>1b3
 M src/app.rs
-F apply_initial_import_folds@61>336,3qc,3u9,3va
-F one_line_input_max_scroll_x@109>34z
-F sync_one_line_input_scroll_target@128>34z
-F write_api_client_tab_display_title@154
-F tab_effective_path@180
-F tab_display_titles_for@193>3d8
-F write_tab_display_titles_for@210>3d5,3d6
+F apply_initial_import_folds@59>336,3qc,3u9,3va
+F one_line_input_max_scroll_x@107>34z
+F sync_one_line_input_scroll_target@126>34z
+F write_api_client_tab_display_title@152
+F tab_effective_path@178
+F tab_display_titles_for@191>3d8
+F write_tab_display_titles_for@208>3d5,3d6
 M src/bin/api_fetch_bench.rs
 C enum ReqwestTls@19
 C struct Row@160

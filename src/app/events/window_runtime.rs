@@ -13,7 +13,7 @@ use std::cmp::Reverse;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use winit::event_loop::ActiveEventLoop;
-use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use winit::raw_window_handle::RawWindowHandle;
 use winit::window::{Window, WindowAttributes};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

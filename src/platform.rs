@@ -30,7 +30,7 @@ mod windows;
 pub use integration::ManagedToolInstallPlan;
 pub(crate) use integration::user_home_dir;
 pub use integration::{
-    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, app_root_override,
+    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths,
     async_http_client_builder, blocking_http_client_builder, configure_dart_workspace_root,
     configure_tool_paths, configured_tool_path, current_process_memory_kb,
     proxy_routing_is_configured, refresh_tool_resolutions, resolve_dart_for_workspace,

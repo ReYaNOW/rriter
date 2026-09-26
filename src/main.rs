@@ -2145,7 +2145,7 @@ fn main() {
         }
     }
 
-    let mut editor = App::initial_editor(&initial_text);
+    let editor = App::initial_editor(&initial_text);
     let mut event_loop_builder = EventLoop::builder();
     #[cfg(target_os = "macos")]
     {
