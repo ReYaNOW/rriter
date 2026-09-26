@@ -83,6 +83,34 @@ pub(crate) mod tests_support {
         dir
     }
 
+    /// Git repo with one commit, then a modified, a deleted and an untracked file.
+    pub(crate) fn git_fixture(dir: &Path) {
+        let run = |args: &[&str]| {
+            let output = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .expect("git fixture command");
+            assert!(
+                output.status.success(),
+                "git {:?}: {}",
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        std::fs::write(dir.join("changed.txt"), "before\n").unwrap();
+        std::fs::write(dir.join("deleted.txt"), "delete me\n").unwrap();
+        run(&["init", "-q"]);
+        run(&["config", "user.name", "Headless Test"]);
+        run(&["config", "user.email", "headless@example.invalid"]);
+        run(&["add", "."]);
+        run(&["commit", "-qm", "fixture"]);
+        std::fs::write(dir.join("changed.txt"), "after\n").unwrap();
+        std::fs::remove_file(dir.join("deleted.txt")).unwrap();
+        std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
+    }
+
     pub(crate) fn run_script(session: &mut HeadlessSession, script: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         assert!(session.run_loop(Cursor::new(script.to_vec()), &mut out));
