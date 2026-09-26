@@ -869,6 +869,36 @@ impl App {
         }
         self.save_tabs_state();
     }
+
+    pub(crate) fn switch_tab_from_keyboard(&mut self, key: winit::keyboard::PhysicalKey) -> bool {
+        let next = match key {
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::PageDown) => true,
+            winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::PageUp) => false,
+            _ => return false,
+        };
+        if !self.is_ide_mode {
+            return false;
+        }
+        let count = self.tabs.len();
+        if count < 2 || self.active_tab >= count {
+            return true;
+        }
+        let active = self.active_tab;
+        let target = if next {
+            if active == count - 1 {
+                0
+            } else {
+                active + 1
+            }
+        } else if active == 0 {
+            count - 1
+        } else {
+            active - 1
+        };
+        self.switch_to_tab(target);
+        self.ide_panel.terminal_focused = false;
+        true
+    }
 }
 
 
