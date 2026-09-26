@@ -7,7 +7,7 @@ Read on demand, not upfront:
 * `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
 * `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
 * `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
-* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`.
+* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make test` once at the end. Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
 
 Search (`rg`-first):
 
