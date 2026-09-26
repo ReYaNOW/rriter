@@ -105,6 +105,18 @@ fn autocomplete_popup_width(screen_w: f32, x: f32, min_width: f32, scale: f32) -
         .min(available_w)
 }
 
+/// Left edge of the completion popup: near the right window edge the width floor of
+/// `autocomplete_popup_width` can exceed the space right of the anchor, so the popup is
+/// shifted left to keep the same edge margin instead of being clipped.
+fn autocomplete_popup_x(screen_w: f32, x: f32, popup_w: f32, scale: f32) -> f32 {
+    let edge_margin = 8.0 * scale;
+    if x + popup_w + edge_margin > screen_w {
+        (screen_w - popup_w - edge_margin).max(0.0).round()
+    } else {
+        x
+    }
+}
+
 fn autocomplete_source_is_type_or_signature(source: &str, class_repr: bool) -> bool {
     if class_repr {
         return false;
@@ -325,6 +337,13 @@ mod tests {
         .unwrap();
         assert_eq!(full.text, "car_wash.core");
         assert_eq!(full.x + full.width, 180.0);
+    }
+
+    #[test]
+    fn autocomplete_popup_x_shifts_left_only_at_right_window_edge() {
+        assert_eq!(autocomplete_popup_x(1000.0, 100.0, 400.0, 1.0), 100.0);
+        assert_eq!(autocomplete_popup_x(1000.0, 900.0, 400.0, 1.0), 592.0);
+        assert_eq!(autocomplete_popup_x(300.0, 250.0, 400.0, 1.0), 0.0);
     }
 
     #[test]
@@ -612,7 +631,7 @@ impl Renderer {
 
     pub fn draw_autocomplete(
         &mut self,
-        x: f32,
+        mut x: f32,
         mut y: f32,
         options: &[(crate::app::AutocompleteItem, Vec<usize>)],
         mode: crate::app::AutocompleteMode,
@@ -631,6 +650,7 @@ impl Renderer {
             let max_w = autocomplete_popup_width(self.width, x, min_width, scale)
                 .max(220.0 * scale)
                 .min((self.width - x - 8.0 * scale).max(195.0 * scale));
+            x = autocomplete_popup_x(self.width, x, max_w, scale);
             let target_h = 36.0 * scale;
             let anim_progress = anim_progress.clamp(0.0, 1.0);
             let smooth_progress = anim_progress
@@ -638,7 +658,7 @@ impl Renderer {
                 * anim_progress
                 * (anim_progress * (anim_progress * 6.0 - 15.0) + 10.0);
             let current_h = target_h * smooth_progress;
-            if y + target_h > self.height {
+            if y + 10.0 * scale + target_h > self.height {
                 y -= target_h + 10.0 * scale;
             } else {
                 y += 10.0 * scale;
@@ -693,6 +713,7 @@ impl Renderer {
         let max_w = autocomplete_popup_width(self.width, x, min_width, scale)
             .max(name_min_w)
             .min(available_w);
+        x = autocomplete_popup_x(self.width, x, max_w, scale);
 
         let visible_items = options.len().max(1).min(7);
 
@@ -706,7 +727,7 @@ impl Renderer {
             * (anim_progress * (anim_progress * 6.0 - 15.0) + 10.0);
         let current_h = target_h * smooth_progress;
 
-        if y + target_h > self.height {
+        if y + 10.0 * scale + target_h > self.height {
             y -= target_h + 10.0 * scale;
         } else {
             y += 10.0 * scale;
