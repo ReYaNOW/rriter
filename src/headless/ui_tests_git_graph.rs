@@ -2,55 +2,39 @@
 
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
-    click_ui, dump, git_fixture, has_ui, run_script, scratch_dir, ui_center,
-    assert_ui_rect_inside_window, workspace_with_explorer,
+    assert_ui_rect_inside_window, click_ui, dump, git, git_fixture, has_ui, run_script,
+    scratch_dir, ui_center, workspace_with_explorer,
 };
 use serde_json::Value;
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::PathBuf;
 
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
 const GIT_WAIT_MS: u32 = 8000;
 
-fn git_output(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("git graph fixture command");
-    assert!(
-        output.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    String::from_utf8_lossy(&output.stdout).trim().to_string()
-}
-
 fn graph_fixture(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
     git_fixture(&dir);
-    git_output(&dir, &["add", "--all"]);
-    git_output(&dir, &["commit", "-qm", "graph-root"]);
-    git_output(&dir, &["branch", "-M", "main"]);
+    git(&dir, &["add", "--all"]);
+    git(&dir, &["commit", "-qm", "graph-root"]);
+    git(&dir, &["branch", "-M", "main"]);
 
     for i in 1..=10 {
         let message = format!("main-{i:02}");
-        git_output(&dir, &["commit", "--allow-empty", "-qm", &message]);
+        git(&dir, &["commit", "--allow-empty", "-qm", &message]);
     }
-    git_output(&dir, &["switch", "-c", "feature"]);
+    git(&dir, &["switch", "-c", "feature"]);
     for i in 1..=3 {
         let message = format!("feature-{i}");
-        git_output(&dir, &["commit", "--allow-empty", "-qm", &message]);
+        git(&dir, &["commit", "--allow-empty", "-qm", &message]);
     }
-    git_output(&dir, &["switch", "main"]);
+    git(&dir, &["switch", "main"]);
     for i in 11..=30 {
         let message = format!("main-{i:02}");
-        git_output(&dir, &["commit", "--allow-empty", "-qm", &message]);
+        git(&dir, &["commit", "--allow-empty", "-qm", &message]);
     }
-    git_output(&dir, &["merge", "--no-ff", "-qm", "graph-merge", "feature"]);
+    git(&dir, &["merge", "--no-ff", "-qm", "graph-merge", "feature"]);
     dir
 }
 
@@ -116,7 +100,7 @@ fn headless_git_graph_commit_click_shows_details_and_copies_hash() {
     assert!(has_ui(&details, "GitGraphOpenCommit(0, 0)"), "{details}");
     click_ui(&mut session, "GitGraphCopyCommit(0, 0)");
     let copied = dump(&mut session);
-    let expected = git_output(&dir, &["rev-parse", "HEAD"]);
+    let expected = git(&dir, &["rev-parse", "HEAD"]).trim().to_string();
     assert_eq!(copied["clipboard"]["text"].as_str(), Some(expected.as_str()));
 
     drop(session);

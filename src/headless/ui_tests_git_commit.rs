@@ -2,20 +2,13 @@
 
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
-    click_ui, dump, git_fixture, has_ui, run_script, scratch_dir, workspace_with_explorer,
+    click_ui, dump, git, git_fixture, has_ui, run_script, scratch_dir, workspace_with_explorer,
 };
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
-
-fn git_output(dir: &Path, args: &[&str]) -> String {
-    let output = Command::new("git").arg("-C").arg(dir).args(args).output().expect("run git");
-    assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
-    String::from_utf8(output.stdout).expect("git stdout is utf-8")
-}
 
 fn open_git_panel(dir: &Path) -> HeadlessSession {
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, dir);
@@ -36,22 +29,11 @@ fn git_fixture_with_bare_remote(dir: &Path) -> (PathBuf, String) {
     let name = dir.file_name().and_then(|name| name.to_str()).expect("scratch dir name");
     let bare = dir.with_file_name(format!("{name}-bare"));
     let _ = std::fs::remove_dir_all(&bare);
-    let output = Command::new("git")
-        .args(["init", "-q", "--bare"])
-        .arg(&bare)
-        .output()
-        .expect("create bare remote");
-    assert!(output.status.success(), "git init --bare: {}", String::from_utf8_lossy(&output.stderr));
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(["remote", "add", "origin"])
-        .arg(&bare)
-        .output()
-        .expect("add local bare remote");
-    assert!(output.status.success(), "git remote add: {}", String::from_utf8_lossy(&output.stderr));
-    let branch = git_output(dir, &["branch", "--show-current"]).trim().to_string();
-    git_output(dir, &["push", "--quiet", "--set-upstream", "origin", &branch]);
+    let bare_path = bare.to_str().expect("bare repo path is utf-8");
+    git(dir, &["init", "-q", "--bare", bare_path]);
+    git(dir, &["remote", "add", "origin", bare_path]);
+    let branch = git(dir, &["branch", "--show-current"]).trim().to_string();
+    git(dir, &["push", "--quiet", "--set-upstream", "origin", &branch]);
     (bare, branch)
 }
 
@@ -61,15 +43,15 @@ fn headless_git_file_can_be_staged_and_unstaged() {
     git_fixture(&dir);
     let mut session = open_git_panel(&dir);
 
-    assert_eq!(git_output(&dir, &["diff", "--cached", "--name-only"]), "");
+    assert_eq!(git(&dir, &["diff", "--cached", "--name-only"]), "");
     click_ui(&mut session, "GitFile(0, 0)");
     wait_git(&mut session);
-    assert_eq!(git_output(&dir, &["diff", "--cached", "--name-only"]), "changed.txt\n");
+    assert_eq!(git(&dir, &["diff", "--cached", "--name-only"]), "changed.txt\n");
 
     click_ui(&mut session, "GitFile(0, 0)");
     wait_git(&mut session);
-    assert_eq!(git_output(&dir, &["diff", "--cached", "--name-only"]), "");
-    assert!(git_output(&dir, &["status", "--porcelain"]).contains(" M changed.txt"));
+    assert_eq!(git(&dir, &["diff", "--cached", "--name-only"]), "");
+    assert!(git(&dir, &["status", "--porcelain"]).contains(" M changed.txt"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -87,9 +69,9 @@ fn headless_git_commit_uses_message_and_commits_only_staged_file() {
     let lines = run_script(&mut session, b"wait 8000\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 
-    assert_eq!(git_output(&dir, &["log", "-1", "--format=%s"]).trim(), "headless: staged-file commit");
-    assert_eq!(git_output(&dir, &["show", "--pretty=format:", "--name-only", "HEAD"]).trim(), "changed.txt");
-    assert!(git_output(&dir, &["status", "--porcelain"]).contains("?? untracked.txt"));
+    assert_eq!(git(&dir, &["log", "-1", "--format=%s"]).trim(), "headless: staged-file commit");
+    assert_eq!(git(&dir, &["show", "--pretty=format:", "--name-only", "HEAD"]).trim(), "changed.txt");
+    assert!(git(&dir, &["status", "--porcelain"]).contains("?? untracked.txt"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -97,7 +79,7 @@ fn headless_git_commit_uses_message_and_commits_only_staged_file() {
 fn headless_git_commit_menu_and_options_are_actionable() {
     let dir = scratch_dir("ui-git-commit-options");
     git_fixture(&dir);
-    let before = git_output(&dir, &["rev-parse", "HEAD"]);
+    let before = git(&dir, &["rev-parse", "HEAD"]);
     let mut session = open_git_panel(&dir);
     click_ui(&mut session, "GitFile(0, 0)");
     wait_git(&mut session);
@@ -111,7 +93,7 @@ fn headless_git_commit_menu_and_options_are_actionable() {
     }
     click_ui(&mut session, "GitCommitMenuItem(0)");
     wait_git(&mut session);
-    assert_eq!(git_output(&dir, &["rev-parse", "HEAD"]), before);
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
 
     click_ui(&mut session, "GitCommitOptionsToggle");
     let lines = run_script(&mut session, b"wait 400\n");
@@ -127,7 +109,7 @@ fn headless_git_commit_menu_and_options_are_actionable() {
 fn headless_git_rejects_empty_message_and_hides_commit_without_staged_files() {
     let dir = scratch_dir("ui-git-empty-commit");
     git_fixture(&dir);
-    let before = git_output(&dir, &["rev-parse", "HEAD"]);
+    let before = git(&dir, &["rev-parse", "HEAD"]);
     let mut session = open_git_panel(&dir);
     let empty = dump(&mut session);
     assert!(!has_ui(&empty, "GitCommit"), "commit enabled without staged files: {empty}");
@@ -137,8 +119,8 @@ fn headless_git_rejects_empty_message_and_hides_commit_without_staged_files() {
     wait_git(&mut session);
     click_ui(&mut session, "GitCommit");
     wait_git(&mut session);
-    assert_eq!(git_output(&dir, &["rev-parse", "HEAD"]), before);
-    assert_eq!(git_output(&dir, &["diff", "--cached", "--name-only"]), "changed.txt\n");
+    assert_eq!(git(&dir, &["rev-parse", "HEAD"]), before);
+    assert_eq!(git(&dir, &["diff", "--cached", "--name-only"]), "changed.txt\n");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -160,8 +142,8 @@ fn headless_git_push_updates_local_bare_remote() {
     click_ui(&mut session, "GitPush(0)");
     let lines = run_script(&mut session, b"wait 8000\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    let local_head = git_output(&dir, &["rev-parse", "HEAD"]);
-    let remote_head = git_output(&bare, &["rev-parse", &format!("refs/heads/{branch}")]);
+    let local_head = git(&dir, &["rev-parse", "HEAD"]);
+    let remote_head = git(&bare, &["rev-parse", &format!("refs/heads/{branch}")]);
     assert_eq!(remote_head, local_head);
 
     let _ = std::fs::remove_dir_all(dir);

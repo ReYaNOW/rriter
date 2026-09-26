@@ -2,8 +2,8 @@
 
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
-    assert_ui_rect_inside_window, click_ui, dump, has_ui, run_script, scratch_dir, ui_center,
-    workspace_with_explorer,
+    assert_ui_rect_inside_window, click_ui, dump, git, git_init, has_ui, run_script,
+    scratch_dir, ui_center, workspace_with_explorer,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -11,20 +11,6 @@ use std::path::{Path, PathBuf};
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
-
-fn run_git(dir: &Path, args: &[&str]) {
-    let output = std::process::Command::new("git")
-        .arg("-C")
-        .arg(dir)
-        .args(args)
-        .output()
-        .expect("git fixture command");
-    assert!(
-        output.status.success(),
-        "git {args:?}: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-}
 
 fn git_diff_fixture(name: &str) -> (PathBuf, String) {
     let dir = scratch_dir(name);
@@ -42,11 +28,9 @@ fn git_diff_fixture(name: &str) -> (PathBuf, String) {
         changed.push_str(&format!("{text}\n"));
     }
     std::fs::write(&path, &original).unwrap();
-    run_git(&dir, &["init", "-q"]);
-    run_git(&dir, &["config", "user.name", "Headless Test"]);
-    run_git(&dir, &["config", "user.email", "headless@example.invalid"]);
-    run_git(&dir, &["add", "."]);
-    run_git(&dir, &["commit", "-qm", "fixture"]);
+    git_init(&dir);
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-qm", "fixture"]);
     std::fs::write(path, changed).unwrap();
     (dir, original)
 }
