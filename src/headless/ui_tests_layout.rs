@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_rect_inside_window, assert_ui_y_integral, click_ui, dump, has_ui, ok_json, run_script,
-    sample_file, scratch_dir, session_for_test,
+    sample_file, scratch_dir, session_for_test, ui_center,
 };
 
 fn open_file(session: &mut crate::headless::HeadlessSession, path: &std::path::Path) {
@@ -321,7 +321,12 @@ fn open_layout_panel(
         return None;
     }
     click_ui(session, &id);
-    run_script(session, b"settle 100\n");
+    if slot == "Terminal" {
+        // Terminal stays hidden until the spawned shell is ready for presentation.
+        run_script(session, b"wait 8000\n");
+    } else {
+        run_script(session, b"settle 100\n");
+    }
     let state = dump(session);
     assert!(
         state["ide_panel"]["open"]
@@ -399,7 +404,6 @@ fn headless_layout_registered_hitboxes_settings_tabs_that_fit_matrix() {
 }
 
 #[test]
-#[ignore = "kanri jbn6bb6q5whxo5ro4h9k5k46: editor scrollbar hitbox y is fractional"]
 fn headless_bug_editor_hitbox_y_integral_size_matrix() {
     let dir = layout_hitbox_fixture("ui-layout-bug-editor-hitbox-y");
     let file = dir.join("wide.txt");
@@ -414,7 +418,6 @@ fn headless_bug_editor_hitbox_y_integral_size_matrix() {
 }
 
 #[test]
-#[ignore = "kanri h158154p1igj3c7ovzi56i2j: IDE sidebar hitbox y is fractional at scale 4/3"]
 fn headless_bug_sidebar_panel_hitbox_y_integral_size_matrix() {
     let dir = layout_hitbox_fixture("ui-layout-bug-sidebar-hitbox-y");
     for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
@@ -429,7 +432,6 @@ fn headless_bug_sidebar_panel_hitbox_y_integral_size_matrix() {
 }
 
 #[test]
-#[ignore = "kanri tdxq0x7q0f0glr5iyl54nr6n: API Client spec row hitbox y is fractional"]
 fn headless_bug_api_client_spec_refresh_hitbox_y_integral_size_matrix() {
     let dir = layout_hitbox_fixture("ui-layout-bug-api-spec-hitbox-y");
     for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
@@ -450,7 +452,18 @@ fn headless_bug_api_client_spec_refresh_hitbox_y_integral_size_matrix() {
             selected: true,
             error: None,
         });
-        if let Some(state) = open_layout_panel(&mut session, w, h, scale, "ApiClient", "api") {
+        if let Some(mut state) = open_layout_panel(&mut session, w, h, scale, "ApiClient", "api") {
+            if !has_ui(&state, "ApiSpecRefresh(0)") {
+                // The mock-server section precedes spec cards and can push them below a short
+                // panel's viewport. Scroll the real panel so the card hitbox is registered.
+                let (x, y) = ui_center(&state, "ApiImportAdd");
+                let lines = run_script(
+                    &mut session,
+                    format!("mouse_move {x} {y}\nwheel 0 -1000\nsettle 2000\n").as_bytes(),
+                );
+                assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} API panel scroll: {lines:?}");
+                state = dump(&mut session);
+            }
             assert!(has_ui(&state, "ApiSpecRefresh(0)"), "{w}x{h}@{scale} spec row missing");
             assert_layout_hitboxes(&state, w, h, scale, "panel ApiClient with spec");
         }
@@ -459,12 +472,14 @@ fn headless_bug_api_client_spec_refresh_hitbox_y_integral_size_matrix() {
 }
 
 #[test]
-#[ignore = "kanri pgwvbzz1pvi8fjcccipu0ar2: settings tab hitbox leaves the window"]
 fn headless_bug_settings_hitboxes_inside_window_size_matrix() {
     for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
         let mut session = layout_hitbox_session(w, h, scale);
-        let lines = run_script(&mut session, b"key f1\nsettle 100\n");
+        // The modal slides in from below the window; `settle 100` can stop mid-slide
+        // in debug builds at 2560x1440, so wait for the animation to finish.
+        let lines = run_script(&mut session, b"key f1\nsettle 5000\n");
         assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} settings open: {lines:?}");
+        assert!(lines.iter().any(|line| line.contains("settled=true")), "{w}x{h}@{scale} settings open did not settle: {lines:?}");
         for tab in 0..6 {
             if tab > 0 {
                 let before = dump(&mut session);

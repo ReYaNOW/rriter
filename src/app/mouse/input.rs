@@ -1459,13 +1459,13 @@ impl App {
                         });
                     } else if let crate::ui_system::UiId::EditorTab(idx) = clicked_id {
                         self.ide_panel.terminal_tab_drag = None;
+                        self.handle_ui_click(clicked_id);
                         self.ide_panel.tab_drag = Some(crate::app::TabDragState {
                             start_idx: idx,
                             start_x: mx,
                             current_x: mx,
                             threshold_passed: false,
                         });
-                        self.handle_ui_click(clicked_id);
                     } else if let crate::ui_system::UiId::TerminalTab(idx) = clicked_id {
                         self.ide_panel.tab_drag = None;
                         self.ide_panel.terminal_tab_drag = Some(crate::app::TabDragState {

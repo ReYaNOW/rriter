@@ -484,7 +484,6 @@ fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist()
 }
 
 #[test]
-#[ignore = "kanri slh44n9j98m9xpg9kl7sewwg: hover popup hitbox y is fractional"]
 fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
     let dir = scratch_dir("ui-bug-hover-popup-y");
     let source = hover_source_with_docs(18);
@@ -515,7 +514,6 @@ fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
 }
 
 #[test]
-#[ignore = "kanri q83ryjk7ajlrqpet9umh4b38: typing does not hide LSP hover popup"]
 fn headless_bug_typing_hides_lsp_hover_popup() {
     let dir = scratch_dir("ui-bug-hover-typing");
     let source = hover_source_with_docs(2);

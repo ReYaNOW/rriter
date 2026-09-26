@@ -589,6 +589,10 @@ impl Renderer {
             1.1,
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
+        // Content column below the tab title pill, shared by the clipped tabs.
+        let settings_content_clip = crate::ui_system::UiClipRect::new(
+            ix + sidebar_w, iy + 52.0 * s, (iw - sidebar_w).max(0.0), (ih - 52.0 * s).max(0.0),
+        );
 
         if active_tab == 0 {
             // ── Scissor для скролла вкладки IDE ──────────────────────────────
@@ -972,21 +976,7 @@ impl Renderer {
                 );
             }
         } else if active_tab == 1 {
-            let tools_clip_y = iy + 52.0 * s;
-            let tools_clip_h = (iy + ih - tools_clip_y).max(0.0);
-            self.flush();
-            unsafe {
-                self.gl.enable(glow::SCISSOR_TEST);
-                self.gl.scissor(
-                    (ix + sidebar_w).round() as i32,
-                    (self.height - (tools_clip_y + tools_clip_h)).round() as i32,
-                    (iw - sidebar_w).max(0.0).round() as i32,
-                    tools_clip_h.round() as i32,
-                );
-            }
-            ui_registry.push_clip(crate::ui_system::UiClipRect::new(
-                ix + sidebar_w, tools_clip_y, (iw - sidebar_w).max(0.0), tools_clip_h,
-            ));
+            self.begin_settings_content_clip(ui_registry, settings_content_clip);
             content_y = content_y.round();
             self.draw_string_scaled_stable(
                 "Внешние инструменты",
@@ -1254,11 +1244,7 @@ impl Renderer {
                 icon_size: 14.0 * s,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            ui_registry.pop_clip();
-            self.flush();
-            unsafe {
-                self.gl.disable(glow::SCISSOR_TEST);
-            }
+            self.end_settings_content_clip(ui_registry);
         } else if active_tab == 2 {
             self.draw_string_scaled(
                 "Размер шрифта: 14px",
@@ -1410,6 +1396,9 @@ impl Renderer {
                 );
             }
         } else if active_tab == 5 {
+            // Ten fixed-height rows overflow short windows (1280x720 at 4/3): clip them
+            // to the modal like the tools tab instead of drawing past its bottom.
+            self.begin_settings_content_clip(ui_registry, settings_content_clip);
             self.draw_database_settings_tab(
                 database_settings,
                 content_x,
@@ -1417,6 +1406,7 @@ impl Renderer {
                 content_y,
                 ui_registry,
             );
+            self.end_settings_content_clip(ui_registry);
         }
 
         if tool_installer.is_log_open() {

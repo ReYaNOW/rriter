@@ -573,7 +573,6 @@ fn headless_tabs_drag_autoscrolls_and_preserves_active_content() {
 }
 
 #[test]
-#[ignore = "kanri ed6laj2sl12m8hfi8l5ufmya: dragging an inactive tab does not reorder"]
 fn headless_bug_dragging_inactive_editor_tab_reorders_and_activates_it() {
     let dir = scratch_dir("ui-tabs-drag-inactive");
     let mut session = session_for_test(1280, 720);

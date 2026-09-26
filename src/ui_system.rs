@@ -564,6 +564,17 @@ impl UiClipRect {
         self.intersect(other.x, other.y, other.w, other.h)
     }
 
+    /// Snaps the edges to whole pixels exactly like `quad_vertices` does when a rect
+    /// is drawn, so a registered hitbox covers the pixels the renderer fills instead
+    /// of the fractional layout rect (e.g. `32.0 * s` at scale 4/3). Keeps >= 1 px.
+    pub fn pixel_snapped(self) -> Self {
+        let left = self.x.round();
+        let top = self.y.round();
+        let right = (self.x + self.w).round().max(left + 1.0);
+        let bottom = (self.y + self.h).round().max(top + 1.0);
+        Self { x: left, y: top, w: right - left, h: bottom - top }
+    }
+
     pub fn contains(self, x: f32, y: f32) -> bool {
         self.w > 0.0
             && self.h > 0.0
@@ -599,7 +610,9 @@ fn icon_hit_rect(
     } else {
         (x, y, size, size)
     };
-    UiClipRect::new(hit_x, hit_y, hit_w, hit_h).intersect(hit_x, hit_y, hit_w, hit_h)
+    UiClipRect::new(hit_x, hit_y, hit_w, hit_h)
+        .intersect(hit_x, hit_y, hit_w, hit_h)
+        .map(UiClipRect::pixel_snapped)
 }
 
 impl UiElement {
@@ -716,11 +729,13 @@ impl UiRegistry {
             Some(parent) => parent.intersect_rect(explicit_clip)?,
             None => explicit_clip,
         };
-        clip.intersect(x, y, w, h)
+        clip.intersect(x, y, w, h).map(UiClipRect::pixel_snapped)
     }
 
     fn valid_rect(x: f32, y: f32, w: f32, h: f32) -> Option<UiClipRect> {
-        UiClipRect::new(x, y, w, h).intersect(x, y, w, h)
+        UiClipRect::new(x, y, w, h)
+            .intersect(x, y, w, h)
+            .map(UiClipRect::pixel_snapped)
     }
 
     fn button_rect(button: ButtonView<'_>) -> Option<UiClipRect> {
@@ -989,6 +1004,7 @@ impl UiRegistry {
         };
         let hovered = rect.contains(mx, my);
 
+        let UiClipRect { x, y, w, h } = rect;
         self.elements.push(UiElement::TextInput { id, x, y, w, h });
 
         if hovered {
@@ -1070,6 +1086,7 @@ impl UiRegistry {
         };
         let hovered = rect.contains(mx, my);
 
+        let UiClipRect { x, y, w, h } = rect;
         self.elements.push(UiElement::Rect { id, x, y, w, h });
 
         if hovered {
@@ -1133,6 +1150,7 @@ impl UiRegistry {
         };
         let hovered = rect.contains(mx, my);
 
+        let UiClipRect { x, y, w, h } = rect;
         self.elements.push(UiElement::Rect { id, x, y, w, h });
         if hovered {
             self.hovered = Some(id);
@@ -1197,6 +1215,7 @@ impl UiRegistry {
         };
         let hovered = rect.contains(mx, my);
 
+        let UiClipRect { x, y, w, h } = rect;
         self.elements.push(UiElement::Rect { id, x, y, w, h });
 
         if hovered {
