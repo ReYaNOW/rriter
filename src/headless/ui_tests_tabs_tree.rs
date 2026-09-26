@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_rect_inside_window, assert_ui_y_integral, click_ui, dump, has_ui, ok_json, run_script,
-    scratch_dir, session_for_test, ui_center, ui_rect, workspace_with_explorer,
+    scratch_dir, session_for_test, ui_center, ui_rect, wait_until, workspace_with_explorer,
 };
 
 #[test]
@@ -603,8 +603,7 @@ fn headless_bug_dragging_inactive_editor_tab_reorders_and_activates_it() {
 }
 
 #[test]
-#[ignore = "kanri xi36fantzstotb70ffk8rbi8: no keyboard tab switching"]
-fn headless_bug_keyboard_activation_reveals_offscreen_tab() {
+fn headless_keyboard_activation_reveals_offscreen_tab() {
     const TAB_COUNT: usize = 32;
     let dir = scratch_dir("ui-tabs-keyboard-switch");
     let mut session = session_for_test(1280, 720);
@@ -615,20 +614,74 @@ fn headless_bug_keyboard_activation_reveals_offscreen_tab() {
     let initially_visible = visible_tab_indexes(&at_start);
     let mut selected_offscreen = None;
 
-    for _ in 0..TAB_COUNT {
-        let lines = run_script(&mut session, b"key ctrl+tab\n");
+    for step in 0..TAB_COUNT {
+        let lines = run_script(&mut session, b"key ctrl+pagedown\n");
         assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
         let state = dump(&mut session);
         let active = active_tab_index(&state);
+        assert_eq!(active, (step + 1) % TAB_COUNT);
         if !initially_visible.contains(&active) {
             selected_offscreen = Some((active, state));
             break;
         }
     }
 
-    let (active, state) = selected_offscreen.expect("Ctrl+Tab did not select an offscreen editor tab");
+    let (active, state) = selected_offscreen.expect("Ctrl+PageDown did not select an offscreen tab");
     assert!(visible_tab_indexes(&state).contains(&active));
     assert_eq!(state["tabs"][active]["path"], files[active].display().to_string());
     assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(active));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_keyboard_tab_switch_wraps_and_reveals_ends() {
+    const TAB_COUNT: usize = 32;
+    let dir = scratch_dir("ui-tabs-keyboard-wrap");
+    let mut session = session_for_test(1280, 720);
+    open_tab_fixtures(&mut session, &dir, TAB_COUNT);
+    assert_eq!(active_tab_index(&dump(&mut session)), TAB_COUNT - 1);
+
+    run_script(&mut session, b"key ctrl+pagedown\n");
+    let first = dump(&mut session);
+    assert_eq!(active_tab_index(&first), 0);
+    assert!(visible_tab_indexes(&first).contains(&0));
+
+    run_script(&mut session, b"key ctrl+pageup\n");
+    let last = dump(&mut session);
+    assert_eq!(active_tab_index(&last), TAB_COUNT - 1);
+    assert!(visible_tab_indexes(&last).contains(&(TAB_COUNT - 1)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_terminal_plain_page_keys_do_not_switch_editor_tabs() {
+    let dir = scratch_dir("ui-tabs-terminal-page-keys");
+    let mut session = session_for_test(1280, 720);
+    open_tab_fixtures(&mut session, &dir, 2);
+    let terminal_was_open = session
+        .app
+        .ide_panel
+        .is_open(crate::app::PanelId::Terminal);
+    let terminal_was_focused = session.app.ide_panel.terminal_focused;
+    if !terminal_was_open {
+        click_ui(&mut session, "SidebarSlot(Terminal)");
+    }
+    wait_until(&mut session, 3000, "terminal body", |session| {
+        has_ui(&dump(session), "TerminalBody")
+    });
+    let state = dump(&mut session);
+    let (x, y) = ui_center(&state, "TerminalBody");
+    run_script(&mut session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
+    assert!(session.app.ide_panel.terminal_focused);
+    let active = active_tab_index(&dump(&mut session));
+    run_script(&mut session, b"key pagedown\nkey pageup\n");
+    assert_eq!(active_tab_index(&dump(&mut session)), active);
+    run_script(&mut session, b"key ctrl+pagedown\n");
+    assert_eq!(active_tab_index(&dump(&mut session)), (active + 1) % 2);
+    if terminal_was_open {
+        session.app.ide_panel.terminal_focused = terminal_was_focused;
+    } else {
+        click_ui(&mut session, "SidebarSlot(Terminal)");
+    }
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -831,6 +831,12 @@ impl App {
                 }
             }
 
+            if ctrl && key_event.state == ElementState::Pressed
+                && self.switch_tab_from_keyboard(key_event.physical_key)
+            {
+                return;
+            }
+
             if is_terminal_tab_close_shortcut(&self.ide_panel, key_event.physical_key, ctrl) {
                 self.close_terminal_tab_at(self.ide_panel.active_terminal);
                 self.last_action = std::time::Instant::now();
