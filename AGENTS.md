@@ -72,11 +72,11 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
-* `git commit` and `git push` of the current branch (`-u origin <branch>` if no upstream). At the end of a finished, verified task (`make codex_test` green) commit and decide on the push yourself, without waiting for the user: push by default; don't push WIP, red tests, or a branch the user asked to keep local. Say in the final report whether you pushed. Reason: the user had to ask for the push after every task (26.09). Only the main session; subagents never commit.
+* Branches, commits, PRs — only the main session; subagents never commit. Work on a branch off `master`, and decide yourself when to open one: a new task unrelated to the current branch → `git switch master && git pull && git switch -c <short-name>`; follow-up work on the current branch → stay. Commit and push the branch (`-u origin <branch>` if no upstream). At the end of a finished, verified task (`make codex_test` green) finish it into `master` without waiting for the user: `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, then `git switch master && git pull`. Don't merge WIP, red tests, or a branch the user asked to keep open. Say in the final report which PR was merged. Reason: the user had to ask for push and merge after every task (26.09, 27.09).
 
 Forbidden unless user explicitly asks:
 
-* force-push, pushing to `master`, deleting remote branches, rewriting pushed history
+* force-push, pushing to `master` other than by the squash-merged PR above, deleting remote branches other than the merged PR branch, rewriting pushed history
 * network commands (only mutable)
 * package installs
 * destructive commands outside project
