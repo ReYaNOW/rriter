@@ -181,7 +181,6 @@ fn headless_layout_large_scale_scroll_record_and_4k_bench_summary() {
 }
 
 #[test]
-#[ignore = "kanri j38ars8wtrqhwaf9q0837wtp: welcome hitboxes leave compact window"]
 fn headless_bug_welcome_rectangles_inside_compact_windows() {
     for (w, h, scale) in [(400, 300, 1.0), (640, 480, 2.0)] {
         let mut session = session_for_test(w, h);
@@ -196,7 +195,6 @@ fn headless_bug_welcome_rectangles_inside_compact_windows() {
 }
 
 #[test]
-#[ignore = "kanri pdogejwchp8es8frldky27mg: status bar moves below framebuffer when bottom panel is open"]
 fn headless_bug_status_bar_stays_inside_with_bottom_panel() {
     let dir = scratch_dir("ui-bug-status-bar");
     let mut session = session_for_test(1920, 1080);

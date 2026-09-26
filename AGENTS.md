@@ -71,10 +71,11 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
+* `git commit` and `git push` of the current branch when the work needs it (finished, verified task; handing off between sessions). Only the main session; subagents never commit.
 
 Forbidden unless user explicitly asks:
 
-* `git push` or anything other that could change something in remote/origin
+* force-push, pushing to `master`, deleting remote branches, rewriting pushed history
 * network commands (only mutable)
 * package installs
 * destructive commands outside project

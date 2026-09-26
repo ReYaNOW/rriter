@@ -479,7 +479,7 @@ impl crate::app::App {
                         track_len,
                         thumb,
                         max_scroll,
-                        None,
+                        Some(thumb.len * 0.5),
                     ) {
                         let scroll = &mut self.ide_panel.api.mock_guide_scroll;
                         crate::app::mouse::apply_scrollbar_drag_target(

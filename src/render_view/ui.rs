@@ -1099,33 +1099,40 @@ impl Renderer {
             card_bg,
         );
 
-        let title_x = content_x + 40.0 * scale;
-        let mut y = content_y + 60.0 * scale;
+        let title_x = (content_x + 40.0 * scale).round();
+        let title_y = (content_y + (60.0 * scale).round()).round();
+        let button_y = title_y + (40.0 * scale).round() + (60.0 * scale).round();
+        let (btn_new, btn_open, btn_ide) = crate::widgets::get_welcome_buttons(
+            content_w,
+            self.height,
+            title_x,
+            button_y,
+            scale,
+            self,
+        );
+        let block_shift = btn_new.y - button_y;
+        let mut y = title_y + block_shift;
 
         if let Some(tex) = self.icon_logo {
-            let icon_y = y - 40.0 * scale;
+            let icon_y = (y - 40.0 * scale).round();
             self.draw_icon(&tex, title_x, icon_y, 110.0 * scale, 110.0 * scale);
         }
 
         self.draw_string_scaled(
             "Добро пожаловать в RRiter",
-            title_x + 130.0 * scale,
+            (title_x + 130.0 * scale).round(),
             y,
             [0.741, 0.576, 0.976, 1.0],
             1.0,
         );
-        y += 40.0 * scale;
+        y += (40.0 * scale).round();
         self.draw_string_scaled(
             "Молниеносный текстовый редактор с GPU-рендерингом",
-            title_x + 130.0 * scale,
+            (title_x + 130.0 * scale).round(),
             y,
             [0.7, 0.7, 0.75, 1.0],
             1.0,
         );
-
-        y += 60.0 * scale;
-        let (btn_new, btn_open, btn_ide) =
-            crate::widgets::get_welcome_buttons(content_w, title_x, y, scale, self);
 
         let mx = self.last_mouse_x;
         let my = self.last_mouse_y;
@@ -1159,7 +1166,11 @@ impl Renderer {
             false,
         );
 
-        y += 80.0 * scale;
+        y = if btn_new.y == btn_ide.y {
+            btn_new.y + (80.0 * scale).round()
+        } else {
+            btn_ide.y + btn_ide.h + (40.0 * scale).round()
+        };
         self.draw_string_scaled(
             "Недавние файлы",
             title_x,
@@ -1168,7 +1179,7 @@ impl Renderer {
             1.0,
         );
 
-        let line_y = y + 20.0 * scale;
+        let line_y = y + (20.0 * scale).round();
         self.push_rect(
             title_x,
             line_y,
@@ -1177,7 +1188,7 @@ impl Renderer {
             [1.0, 1.0, 1.0, 0.08],
         );
 
-        y += 35.0 * scale;
+        y += (35.0 * scale).round();
 
         let item_h = 44.0 * scale;
         for (idx, path) in recent_files.iter().enumerate() {

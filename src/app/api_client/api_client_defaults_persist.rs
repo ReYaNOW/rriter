@@ -1682,7 +1682,7 @@ pub(crate) fn api_mock_server_log_scrollbar_drag_target(
 }
 
 pub(crate) fn api_mock_guide_max_scroll(visible_h: f32, s: f32) -> f32 {
-    (720.0 * s - visible_h).max(0.0)
+    (740.0 * s - visible_h).max(0.0)
 }
 
 fn api_mock_server_event_text(event: &ApiMockServerEvent) -> String {

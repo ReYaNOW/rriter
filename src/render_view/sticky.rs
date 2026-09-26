@@ -37,6 +37,9 @@ impl Renderer {
         tab_bar_h: f32,
     ) -> Vec<(usize, usize)> {
         self.sticky_scroll_rects.clear();
+        if render_scroll_y <= 0.0 {
+            return Vec::new();
+        }
         let mut active_ranges = Vec::new();
 
         for &(start_b, end_b, is_sticky) in &editor.foldable_ranges_bytes {

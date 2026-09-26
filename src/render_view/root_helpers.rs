@@ -287,7 +287,7 @@ impl Renderer {
 
 #[inline(always)]
 pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
-    IDE_STATUS_BAR_HEIGHT * scale
+    (IDE_STATUS_BAR_HEIGHT * scale).round()
 }
 
 /// Visible viewport height of the active API Client tab: window minus tab bar and

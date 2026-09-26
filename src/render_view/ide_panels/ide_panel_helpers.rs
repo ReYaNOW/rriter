@@ -6,7 +6,7 @@ use crate::renderer::Renderer;
 use crate::widgets::{Button, IconButton};
 use glow::HasContext;
 
-fn clipped_label_prefix_len<F>(
+pub(super) fn clipped_label_prefix_len<F>(
     text: &str,
     max_w: f32,
     ellipsis_w: f32,

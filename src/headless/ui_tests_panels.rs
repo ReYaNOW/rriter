@@ -4,6 +4,19 @@ fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
     click_ui(session, id);
 }
 
+fn close_panel_if_open(
+    session: &mut crate::headless::HeadlessSession,
+    slot_id: &str,
+    panel_name: &str,
+) {
+    let is_open = dump(session)["ide_panel"]["open"]
+        .as_array()
+        .is_some_and(|panels| panels.iter().any(|panel| panel == panel_name));
+    if is_open {
+        click(session, slot_id);
+    }
+}
+
 fn workspace_session(
     w: u32,
     h: u32,
@@ -244,12 +257,13 @@ fn headless_terminal_scroll_returns_to_bottom_after_output() {
 }
 
 #[test]
-#[ignore = "bug: Terminal sidebar click does not open the panel at 1920x1080"]
 fn headless_bug_terminal_sidebar_slot_opens_panel() {
     let dir = scratch_dir("ui-terminal-slot");
     let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
     click(&mut session, "SidebarSlot(Terminal)");
-    run_script(&mut session, b"settle 2000\n");
+    // The panel is shown once the shell prints its first output.
+    run_script(&mut session, b"wait 8000\n");
     let state = dump(&mut session);
     assert!(
         state["ide_panel"]["open"]
@@ -259,11 +273,12 @@ fn headless_bug_terminal_sidebar_slot_opens_panel() {
             .any(|panel| panel == "terminal"),
         "{state}"
     );
+    // Panel state is saved to the process-wide test profile; do not leak it into later tests.
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-#[ignore = "kanri tfoqjpo43yd5i5j2esxnvj6n: API Mock guide scroll does not move content"]
 fn headless_bug_api_mock_guide_wheel_scrolls_content() {
     let dir = scratch_dir("ui-bug-api-guide");
     let mut session = workspace_session(1920, 1080, 1.0, &dir);
@@ -300,11 +315,11 @@ fn headless_bug_api_mock_guide_wheel_scrolls_content() {
 }
 
 #[test]
-#[ignore = "kanri n9iluhk183dugwo1q8omibzx: sidebar slots overlap at compact scale"]
 fn headless_bug_sidebar_slots_hit_lsp_servers_at_small_sizes() {
     let dir = scratch_dir("ui-bug-sidebar-slots");
     for (w, h, scale) in [(640, 480, 1.5), (400, 300, 1.0)] {
         let mut session = workspace_session(w, h, scale, &dir);
+        close_panel_if_open(&mut session, "SidebarSlot(LspServers)", "lsp");
         click(&mut session, "SidebarSlot(LspServers)");
         assert!(dump(&mut session)["ide_panel"]["open"].as_array().unwrap().iter().any(|v| v == "lsp"));
     }
@@ -312,11 +327,11 @@ fn headless_bug_sidebar_slots_hit_lsp_servers_at_small_sizes() {
 }
 
 #[test]
-#[ignore = "kanri vt6tflpf9e99vs1bpietqbld: Git change list races initial refresh"]
 fn headless_bug_git_changes_load_without_manual_refresh() {
     let dir = scratch_dir("ui-bug-git-refresh");
     git_fixture(&dir);
     let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Git)", "git");
     click(&mut session, "SidebarSlot(Git)");
     run_script(&mut session, b"wait 8000\n");
     assert!(dump(&mut session)["ui"].as_array().unwrap().iter().any(|e| e["id"].as_str().unwrap_or("").starts_with("GitFile")));
@@ -324,19 +339,61 @@ fn headless_bug_git_changes_load_without_manual_refresh() {
 }
 
 #[test]
-#[ignore = "kanri eydb0ylohhjr1zx8clsiz4lv: settings tab hitbox y should be integral"]
 fn headless_bug_settings_tab_y_integral() {
+    // Card eydb0ylohhjr1zx8clsiz4lv: 640x400 at 1.5 with a file open, F1.
+    let dir = scratch_dir("ui-bug-settings-tabs");
+    let file = sample_file(&dir);
     let mut session = session_for_test(640, 400);
-    run_script(&mut session, b"scale 1.5\nkey f1\n");
+    run_script(&mut session, format!("scale 1.5\nopen {}\nkey f1\nsettle 800\n", file.display()).as_bytes());
     let state = dump(&mut session);
-    for element in state["ui"].as_array().unwrap().iter().filter(|e| e["id"].as_str().unwrap_or("").starts_with("SettingsTab(")) {
-        let y = element["rect"][1].as_f64().unwrap();
-        assert_eq!(y.fract(), 0.0, "{} y={y}", element["id"]);
+    let rect_of = |element: &serde_json::Value| -> [f64; 4] {
+        let rect = element["rect"].as_array().unwrap();
+        [0, 1, 2, 3].map(|i| rect[i].as_f64().unwrap())
+    };
+    let tabs: Vec<[f64; 4]> = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["id"].as_str().unwrap_or("").starts_with("SettingsTab("))
+        .map(rect_of)
+        .collect();
+    assert_eq!(tabs.len(), 6, "settings tabs missing: {state}");
+    for (i, rect) in tabs.iter().enumerate() {
+        assert_eq!(rect[1].fract(), 0.0, "SettingsTab({i}) y={}", rect[1]);
+        assert_eq!(rect[3].fract(), 0.0, "SettingsTab({i}) h={}", rect[3]);
     }
+    let add = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "SettingsIdeAddWorkspace")
+        .map(rect_of)
+        .unwrap_or_else(|| panic!("SettingsIdeAddWorkspace missing: {state}"));
+    let screenshot = dir.join("tabs.png");
+    run_script(&mut session, format!("screenshot {}\n", screenshot.display()).as_bytes());
+    let image = image::open(&screenshot).unwrap().to_rgba8();
+    let bright = |x: u32, y: u32| image.get_pixel(x, y).0[..3].iter().all(|&c| c >= 140);
+    // Labels stay inside their hitbox: nothing bright between the hitbox's
+    // right edge and the sidebar divider (10 * scale further right).
+    for rect in &tabs {
+        let right = (rect[0] + rect[2]).round() as u32;
+        for y in rect[1] as u32..(rect[1] + rect[3]) as u32 {
+            for x in right.saturating_sub(3)..right + 13 {
+                assert!(!bright(x, y), "tab label crosses its hitbox at ({x}, {y})");
+            }
+        }
+    }
+    // The «+» icon of «Добавить папку» stays inside the button.
+    let left = add[0].round() as u32;
+    for y in add[1] as u32..(add[1] + add[3]) as u32 {
+        for x in left.saturating_sub(12)..left {
+            assert!(!bright(x, y), "add-folder content sticks out left of the button at ({x}, {y})");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-#[ignore = "kanri bb1kifmrn4q7tv3gy10uulhb: settings Help content clips at right edge"]
 fn headless_bug_settings_help_right_edge_content() {
     let dir = scratch_dir("ui-bug-settings-help");
     let mut session = session_for_test(1280, 800);

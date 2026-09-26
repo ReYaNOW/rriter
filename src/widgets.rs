@@ -433,7 +433,8 @@ impl IconButton {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn get_welcome_buttons(
-    _width: f32,
+    width: f32,
+    height: f32,
     x: f32,
     y: f32,
     scale: f32,
@@ -442,7 +443,51 @@ pub fn get_welcome_buttons(
     let w_new_text = renderer.measure_ui_width("Новый файл", 1.0);
     let w_open_text = renderer.measure_ui_width("Открыть файл", 1.0);
     let w_ide_text = renderer.measure_ui_width("Режим IDE", 1.0);
-    welcome_buttons_from_widths(x, y, scale, w_new_text, w_open_text, w_ide_text)
+    let (btn_new, btn_open, btn_ide) =
+        welcome_buttons_from_widths(x, y, scale, w_new_text, w_open_text, w_ide_text);
+    let inner_width = (width - 80.0 * scale).max(0.0);
+    let row_width = btn_ide.x + btn_ide.w - x;
+
+    if row_width <= inner_width {
+        return (
+            Button {
+                x: btn_new.x.round(),
+                y: btn_new.y.round(),
+                ..btn_new
+            },
+            Button {
+                x: btn_open.x.round(),
+                y: btn_open.y.round(),
+                ..btn_open
+            },
+            Button {
+                x: btn_ide.x.round(),
+                y: btn_ide.y.round(),
+                ..btn_ide
+            },
+        );
+    }
+
+    let step = (55.0 * scale).round();
+    let column_height = btn_new.h + step * 2.0;
+    let bottom_margin = (40.0 * scale).round();
+    let column_y = if y + column_height > height - bottom_margin {
+        (height - bottom_margin - column_height).round()
+    } else {
+        y.round()
+    };
+    let center_x = (x + width * 0.5).round();
+    let centered_button = |button: Button, row: f32| Button {
+        x: (center_x - button.w * 0.5).round(),
+        y: (column_y + step * row).round(),
+        ..button
+    };
+
+    (
+        centered_button(btn_new, 0.0),
+        centered_button(btn_open, 1.0),
+        centered_button(btn_ide, 2.0),
+    )
 }
 
 fn welcome_buttons_from_widths(

@@ -188,21 +188,24 @@ fn headless_editor_record_wheel_and_page_down_settle_without_reverse_frames() {
 }
 
 #[test]
-#[ignore = "kanri s7km0ntrqjrytta08lkaibyt: fold click at top is intercepted by sticky line"]
 fn headless_bug_fold_arrow_top_visible() {
     let dir = scratch_dir("ui-bug-fold-top");
     let file = dir.join("top.rs");
-    std::fs::write(&file, "fn outer() {\n    fn inner() {}\n}\n").unwrap();
+    let mut source = String::from("fn outer() {\n    fn inner() {}\n");
+    for line in 0..350 {
+        source.push_str(&format!("    let _line_{line} = {line};\n"));
+    }
+    source.push_str("}\n");
+    std::fs::write(&file, source).unwrap();
     let mut session = open_file(1920, 1080, 1.0, &file);
-    let state = dump(&mut session);
-    let (x, y) = ui_center(&state, "EditorFoldArrow(0)");
-    run_script(&mut session, format!("mouse_move {x} {}\nclick\n", y.max(1.0)).as_bytes());
+    run_script(&mut session, b"settle 1500\n");
+    assert!(!has_ui(&dump(&mut session), "StickyLine(0, 0)"));
+    run_script(&mut session, b"mouse_move 53 10\nclick\nsettle 1000\n");
     assert!(!has_ui(&dump(&mut session), "EditorFoldArrow(1)"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-#[ignore = "kanri sull1cabgnsrmgvw4d2snl95: editor width at compact size"]
 fn headless_bug_editor_text_body_minimum_width() {
     let dir = scratch_dir("ui-bug-editor-width");
     let file = sample_file(&dir);
@@ -210,17 +213,28 @@ fn headless_bug_editor_text_body_minimum_width() {
     let state = dump(&mut session);
     let rect = state["ui"].as_array().unwrap().iter().find(|e| e["id"] == "EditorTextBody").unwrap()["rect"].clone();
     assert!(rect[2].as_f64().unwrap() >= 150.0, "{rect}");
+    assert!(!has_ui(&state, "EditorMinimap"));
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-#[ignore = "kanri wtpc0gdmb281r2o2j3mxzg0y: long editor tab title clips tab strip"]
 fn headless_bug_long_editor_tab_visible_close() {
     let dir = scratch_dir("ui-bug-long-tab");
     let file = dir.join(format!("{}.txt", "x".repeat(120)));
     std::fs::write(&file, "x\n").unwrap();
-    let mut session = open_file(1280, 800, 1.5, &file);
+    let mut session = session_for_test(1280, 800);
+    let lines = run_script(
+        &mut session,
+        format!(
+            "scale 1.5\nworkspace {}\nopen {}\nsettle 2000\n",
+            dir.display(),
+            file.display()
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = dump(&mut session);
+    assert!(has_ui(&state, "EditorTab(0)"));
     assert!(has_ui(&state, "EditorTabClose(0)"));
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -438,6 +438,14 @@ impl App {
             slot.map(|s| s.group.clone())
         };
         self.ide_panel.toggle(panel_id);
+        if toggled_open && panel_id == crate::app::PanelId::Terminal {
+            self.ide_panel.terminal_focused = true;
+            self.ide_panel.term_search_focused = false;
+            if self.ide_panel.terminals.is_empty() {
+                self.add_terminal();
+            }
+            self.defer_terminal_panel_until_ready();
+        }
         // При открытии Explorer — запускаем скан файлов
         if toggled_open && panel_id == crate::app::PanelId::Explorer {
             self.refresh_file_tree();
@@ -459,6 +467,11 @@ impl App {
         // Restored expanded connections wait for catalog loads started on panel open.
         if toggled_open && panel_id == crate::app::PanelId::Database {
             self.reconcile_expanded_database_connections();
+        }
+        // Same load as the `UiId::SidebarSlot` branch of `handle_ui_click`; a refresh already
+        // in flight is not duplicated, `begin_status_refresh` marks a follow-up instead.
+        if toggled_open && panel_id == crate::app::PanelId::Git {
+            self.refresh_git_panel();
         }
     }
 

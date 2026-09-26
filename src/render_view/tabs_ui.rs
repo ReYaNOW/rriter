@@ -314,7 +314,8 @@ impl Renderer {
                 + 30.0 * scale
         } else {
             let title_w = self.measure_ui_width(title, 1.0);
-            tab_pad * 2.0 + icon_size_tab + 8.0 * scale + title_w + 30.0 * scale
+            (tab_pad * 2.0 + icon_size_tab + 8.0 * scale + title_w + 30.0 * scale)
+                .min((240.0 * scale).round())
         }
     }
 
@@ -364,8 +365,29 @@ impl Renderer {
         );
 
         let mut tab_widths = Vec::with_capacity(tabs.len());
-        for (idx, title) in display_titles.iter().enumerate() {
-            tab_widths.push(self.editor_tab_width(&tabs[idx], title, s));
+        for (idx, title) in display_titles.iter_mut().enumerate() {
+            let tab_width = self.editor_tab_width(&tabs[idx], title, s);
+            if !tabs[idx].kind.is_api_client() {
+                let fixed_w = tab_pad * 2.0 + icon_size_tab + 8.0 * s + 30.0 * s;
+                let max_title_w = (tab_width - fixed_w).max(0.0);
+                if self.measure_ui_width(title, 1.0) > max_title_w {
+                    let ellipsis = "…";
+                    let ellipsis_w = self.measure_ui_width(ellipsis, 1.0);
+                    let prefix_len = crate::render_view::ide_panels::clipped_label_prefix_len(
+                        title,
+                        max_title_w,
+                        ellipsis_w,
+                        |ch| {
+                            self.get_ui_glyph(ch)
+                                .map(|glyph| Self::snapped_text_advance(glyph.advance, 1.0))
+                                .unwrap_or(0.0)
+                        },
+                    );
+                    title.truncate(prefix_len);
+                    title.push_str(ellipsis);
+                }
+            }
+            tab_widths.push(tab_width);
         }
 
         let mut hovered_tab_tooltip = None;

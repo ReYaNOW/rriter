@@ -900,34 +900,34 @@ impl App {
             return;
         }
 
+        if self.ide_panel.api.mock_guide_open {
+            let hovered_id = self.ui_registry.find_at(mx, my);
+            if matches!(
+                hovered_id,
+                Some(
+                    crate::ui_system::UiId::ApiMockGuideBody
+                        | crate::ui_system::UiId::ApiMockGuideScrollY
+                )
+            ) && let Some((_, _, _, guide_h)) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
+            {
+                let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
+                self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
+                self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .mock_guide_scroll
+                    .clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.active_tab_is_api_client() {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let hovered_id = self.ui_registry.find_at(mx, my);
-            if self.ide_panel.api.mock_guide_open
-                && matches!(
-                    hovered_id,
-                    Some(
-                        crate::ui_system::UiId::ApiMockGuideBody
-                            | crate::ui_system::UiId::ApiMockGuideScrollY
-                    )
-                )
-            {
-                if let Some((_, _, _, guide_h)) = self
-                    .ui_registry
-                    .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
-                {
-                    let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
-                    self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
-                    self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
-                    self.ide_panel
-                        .api
-                        .mock_guide_scroll
-                        .clamp_target(0.0, max_scroll);
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-            }
             if self.ide_panel.api.mock_server_detail_open
                 && matches!(
                     hovered_id,
