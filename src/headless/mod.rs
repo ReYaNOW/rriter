@@ -12,6 +12,12 @@ mod tests;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_git_commit;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_git_diff;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_git_graph;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_layout;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;

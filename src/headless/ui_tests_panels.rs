@@ -1,5 +1,5 @@
 use crate::headless::tests_support::{
-    assert_ui_y_integral, click_ui, dump, has_ui, run_script, sample_file, scratch_dir,
+    assert_ui_y_integral, click_ui, dump, git_fixture, has_ui, run_script, sample_file, scratch_dir,
     session_for_test, ui_center,
 };
 
@@ -169,33 +169,6 @@ fn headless_ide_panel_slots_open_and_register_controls() {
         assert!(controls > 0, "{slot}: {state}");
     }
     let _ = std::fs::remove_dir_all(dir);
-}
-
-fn git_fixture(dir: &std::path::Path) {
-    let run = |args: &[&str]| {
-        let output = std::process::Command::new("git")
-            .arg("-C")
-            .arg(dir)
-            .args(args)
-            .output()
-            .expect("git fixture command");
-        assert!(
-            output.status.success(),
-            "git {:?}: {}",
-            args,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    };
-    std::fs::write(dir.join("changed.txt"), "before\n").unwrap();
-    std::fs::write(dir.join("deleted.txt"), "delete me\n").unwrap();
-    run(&["init", "-q"]);
-    run(&["config", "user.name", "Headless Test"]);
-    run(&["config", "user.email", "headless@example.invalid"]);
-    run(&["add", "."]);
-    run(&["commit", "-qm", "fixture"]);
-    std::fs::write(dir.join("changed.txt"), "after\n").unwrap();
-    std::fs::remove_file(dir.join("deleted.txt")).unwrap();
-    std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
 }
 
 #[test]

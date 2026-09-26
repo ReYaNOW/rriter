@@ -83,6 +83,40 @@ pub(crate) mod tests_support {
         dir
     }
 
+    pub(crate) fn git(dir: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    pub(crate) fn git_init(dir: &Path) {
+        git(dir, &["init", "-q"]);
+        git(dir, &["config", "user.name", "Headless Test"]);
+        git(dir, &["config", "user.email", "headless@example.invalid"]);
+        git(dir, &["config", "commit.gpgsign", "false"]);
+    }
+
+    /// Git repo with one commit, then a modified, a deleted and an untracked file.
+    pub(crate) fn git_fixture(dir: &Path) {
+        std::fs::write(dir.join("changed.txt"), "before\n").unwrap();
+        std::fs::write(dir.join("deleted.txt"), "delete me\n").unwrap();
+        git_init(dir);
+        git(dir, &["add", "."]);
+        git(dir, &["commit", "-qm", "fixture"]);
+        std::fs::write(dir.join("changed.txt"), "after\n").unwrap();
+        std::fs::remove_file(dir.join("deleted.txt")).unwrap();
+        std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
+    }
+
     pub(crate) fn run_script(session: &mut HeadlessSession, script: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         assert!(session.run_loop(Cursor::new(script.to_vec()), &mut out));

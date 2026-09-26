@@ -1146,24 +1146,38 @@ impl Renderer {
             [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.10],
         );
 
+        // visual_lines carry an overscan margin above/below the viewport (update_cache),
+        // so gutter hitboxes are clipped to the editor area: off-screen rows must not be clickable.
+        let gutter_hit_clip =
+            crate::ui_system::UiClipRect::new(0.0, editor_clip_y, self.width, editor_clip_h);
+        let gutter_bottom = editor_clip_y + editor_clip_h;
         for i in skip_visual_lines..end_visual_line {
             let v_line = self.visual_lines[i];
             let y = self.baseline_offset + v_line.y_offset - render_scroll_y;
             let phys_idx = v_line.physical_line - 1;
+            let line_top = v_line.y_offset - render_scroll_y;
+            let line_visible =
+                line_top + self.line_height > editor_clip_y && line_top < gutter_bottom;
 
-            if let Some(hunk_idx) =
-                active_git_diff_state.and_then(|state| state.rollback_hunk_index_at_line(phys_idx))
+            if let Some(hunk_idx) = active_git_diff_state
+                .filter(|_| line_visible)
+                .and_then(|state| state.rollback_hunk_index_at_line(phys_idx))
             {
-                let line_top = v_line.y_offset - render_scroll_y;
                 let icon_size = 22.0 * s;
                 let icon_x = self.left_padding - 22.0 * s;
                 let icon_y = line_top + (self.line_height - icon_size) * 0.5;
                 let hit_x = icon_x - 5.0 * s;
                 let hit_w = icon_size + 10.0 * s;
-                let hovered = self.last_mouse_x >= hit_x
-                    && self.last_mouse_x <= hit_x + hit_w
-                    && self.last_mouse_y >= line_top
-                    && self.last_mouse_y <= line_top + self.line_height;
+                let hovered = ui_registry.register_rect_clipped(
+                    crate::ui_system::UiId::GitDiffRollbackHunk(active_tab, hunk_idx),
+                    hit_x,
+                    line_top,
+                    hit_w,
+                    self.line_height,
+                    gutter_hit_clip,
+                    self.last_mouse_x,
+                    self.last_mouse_y,
+                );
                 self.draw_atlas_icon(
                     crate::widgets::IconType::Rollback,
                     icon_x,
@@ -1175,15 +1189,6 @@ impl Renderer {
                         [1.0, 1.0, 1.0, 1.0]
                     },
                 );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::GitDiffRollbackHunk(active_tab, hunk_idx),
-                    hit_x,
-                    line_top,
-                    hit_w,
-                    self.line_height,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
-                );
             } else if active_git_diff_state.is_none()
                 && editor.foldable_lines.contains_key(&phys_idx)
             {
@@ -1191,12 +1196,13 @@ impl Renderer {
                 let is_folded = editor.folded_lines.contains(&phys_idx);
                 let arrow_str = if is_folded { "▶" } else { "▼" };
                 self.draw_string_scaled(arrow_str, arrow_x, y - 1.0 * s, self.theme.line_num, 1.0);
-                ui_registry.register_rect(
+                ui_registry.register_rect_clipped(
                     crate::ui_system::UiId::EditorFoldArrow(phys_idx),
                     arrow_x - 5.0 * s,
                     y - self.line_height,
                     20.0 * s,
                     self.line_height + 5.0 * s,
+                    gutter_hit_clip,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
@@ -1247,12 +1253,13 @@ impl Renderer {
                     continue;
                 };
                 let y_top = v_line.y_offset - render_scroll_y;
-                ui_registry.register_rect(
+                ui_registry.register_rect_clipped(
                     crate::ui_system::UiId::EditorGitHunk(hunk_idx, phys_idx),
                     self.left_padding - 14.0 * s,
                     y_top,
                     16.0 * s,
                     self.line_height,
+                    gutter_hit_clip,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
