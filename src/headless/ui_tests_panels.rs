@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_ui_y_integral, click_ui, dump, git_fixture, has_ui, run_script, sample_file, scratch_dir,
-    session_for_test, ui_center,
+    session_for_test, ui_center, wait_until,
 };
 
 fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
@@ -281,7 +281,11 @@ fn headless_lsp_server_toggle_exposes_stop_control_when_available() {
         return;
     }
     click(&mut session, &toggle);
-    run_script(&mut session, b"wait 8000\n");
+    wait_until(&mut session, 8000, "LSP server startup", |session| {
+        session.app.ide_panel.lsp_servers.get(index).is_some_and(|server| {
+            server.status != crate::lsp::LspServerStatus::Starting
+        })
+    });
     let state = dump(&mut session);
     let server_status = session.app.ide_panel.lsp_servers.get(index).map(|server| server.status);
     if server_status == Some(crate::lsp::LspServerStatus::Running) {
@@ -538,7 +542,9 @@ fn headless_terminal_scroll_returns_to_bottom_after_output() {
     let dir = scratch_dir("ui-terminal-scroll");
     let mut session = workspace_session(1920, 1080, 1.0, &dir);
     click(&mut session, "SidebarSlot(Terminal)");
-    run_script(&mut session, b"wait 3000\n");
+    wait_until(&mut session, 3000, "terminal body", |session| {
+        has_ui(&dump(session), "TerminalBody")
+    });
     let state = dump(&mut session);
     let terminal_spawn_failed = session.app.ide_panel.terminals.first().is_some_and(|terminal| {
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
@@ -572,7 +578,11 @@ fn headless_bug_terminal_sidebar_slot_opens_panel() {
     close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
     click(&mut session, "SidebarSlot(Terminal)");
     // The panel is shown once the shell prints its first output.
-    run_script(&mut session, b"wait 8000\n");
+    wait_until(&mut session, 8000, "terminal panel open", |session| {
+        dump(session)["ide_panel"]["open"]
+            .as_array()
+            .is_some_and(|panels| panels.iter().any(|panel| panel == "terminal"))
+    });
     let state = dump(&mut session);
     assert!(
         state["ide_panel"]["open"]
@@ -642,7 +652,9 @@ fn headless_bug_git_changes_load_without_manual_refresh() {
     let mut session = workspace_session(1920, 1080, 1.0, &dir);
     close_panel_if_open(&mut session, "SidebarSlot(Git)", "git");
     click(&mut session, "SidebarSlot(Git)");
-    run_script(&mut session, b"wait 8000\n");
+    wait_until(&mut session, 8000, "Git changed-file list", |session| {
+        dump(session)["ui"].as_array().unwrap().iter().any(|e| e["id"].as_str().unwrap_or("").starts_with("GitFile"))
+    });
     assert!(dump(&mut session)["ui"].as_array().unwrap().iter().any(|e| e["id"].as_str().unwrap_or("").starts_with("GitFile")));
     let _ = std::fs::remove_dir_all(dir);
 }

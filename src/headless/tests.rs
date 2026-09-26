@@ -7,6 +7,7 @@ pub(crate) mod tests_support {
     use std::io::Cursor;
     use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
+    use std::time::{Duration, Instant};
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
 
@@ -125,6 +126,23 @@ pub(crate) mod tests_support {
             .lines()
             .map(str::to_string)
             .collect()
+    }
+
+    pub(crate) fn wait_until(
+        session: &mut HeadlessSession,
+        timeout_ms: u64,
+        what: &str,
+        mut done: impl FnMut(&mut HeadlessSession) -> bool,
+    ) {
+        let started = Instant::now();
+        while started.elapsed() < Duration::from_millis(timeout_ms) {
+            let lines = run_script(session, b"wait 50\n");
+            assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+            if done(session) {
+                return;
+            }
+        }
+        panic!("timed out waiting for {what}; last dump: {}", dump(session));
     }
 
     pub(crate) fn sample_file(dir: &Path) -> PathBuf {

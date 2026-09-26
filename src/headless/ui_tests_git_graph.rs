@@ -3,7 +3,7 @@
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
     assert_ui_rect_inside_window, click_ui, dump, git, git_fixture, has_ui, run_script,
-    scratch_dir, ui_center, workspace_with_explorer,
+    scratch_dir, ui_center, wait_until, workspace_with_explorer,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
-const GIT_WAIT_MS: u32 = 8000;
+const GIT_WAIT_MS: u64 = 8000;
 
 fn graph_fixture(name: &str) -> PathBuf {
     let dir = scratch_dir(name);
@@ -42,11 +42,13 @@ fn open_graph(name: &str) -> (PathBuf, HeadlessSession) {
     let dir = graph_fixture(name);
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
     click_ui(&mut session, "SidebarSlot(Git)");
-    let lines = run_script(&mut session, format!("wait {GIT_WAIT_MS}\n").as_bytes());
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, GIT_WAIT_MS, "Git graph toggle", |session| {
+        has_ui(&dump(session), "GitGraphToggle")
+    });
     click_ui(&mut session, "GitGraphToggle");
-    let lines = run_script(&mut session, format!("wait {GIT_WAIT_MS}\n").as_bytes());
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, GIT_WAIT_MS, "first graph commit", |session| {
+        has_ui(&dump(session), "GitGraphCommit(0, 0)")
+    });
     (dir, session)
 }
 
