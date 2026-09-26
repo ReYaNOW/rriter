@@ -14,6 +14,7 @@ python3 scripts/rriter_headless.py shot src/main.rs  # prints /tmp/rriter-headle
 python3 scripts/rriter_headless.py shot . --size 1280x800 --scale 2 --out /tmp/ide.png
 python3 scripts/rriter_headless.py run ui-check.txt  # replies on stdout, exit code of rriter
 python3 scripts/rriter_headless.py repl              # type commands by hand
+python3 scripts/rriter_headless.py bench src/main.rs 480 wheel 0 -3  # summary JSON, then CSV path
 ```
 
 The wrapper looks for `target/x86_64-unknown-linux-gnu/release/rriter`
@@ -74,6 +75,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `screenshot <out.png>` | Draw one frame and save a PNG; the directory is created. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
+| `bench <frames> [csv=<path>] [action]` | Measure frame cost (see Bench). | `ok <json summary>` |
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |
 | `quit` | Stop. EOF does the same. | `ok` |
 
@@ -124,6 +126,41 @@ In a window this dialog is a second OS window. Headless draws it centered over
 the frame, and `dump` returns its buttons as `dialog.buttons` in screenshot
 coordinates. Answer it only with `dialog save|discard|cancel` or `key escape`;
 clicking the button coordinates does not reach it.
+
+## Bench
+
+`bench <frames> [csv=<path>] [action]` draws `frames` forced frames and applies
+the action before each one: `none` (default), `wheel <dx> <dy>` (line
+delta), `key <combo>` (press+release) or `type <text>`. Per frame:
+
+| Column | Meaning |
+|---|---|
+| `update_ms` | action + `about_to_wait` (CPU) |
+| `draw_cpu_ms` | frame draw calls, up to `glFinish` |
+| `gpu_ms` | `GL_TIME_ELAPSED` around draw + finish; empty when timer queries are unsupported |
+| `total_ms` | the whole step, including the wait for `glFinish` |
+| `flush_calls`, `vertices` | renderer flushes and vertices of the frame |
+| `root_*_ms`, `chrome_*_ms` | root phases (prep, cache, pre-editor, overlays, chrome) and chrome details |
+| `scroll_y` | editor scroll, to see that the action works |
+
+The CSV goes to `csv=<path>` or `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless/bench-<unix_ms>.csv`
+(outside the profile, so it survives exit). The summary holds `frames`,
+`budget_ms`, `hz`, `hz_source` (`arg|monitor|default`), p50/p95/p99/max of
+`total_ms`, `gpu_ms` (or `null`) and `draw_cpu_ms`, `over_budget` (frames with
+`total_ms` above the budget), the five `worst` frames, `system`
+(`loadavg_before/after`, `cpus`, `gpu_util_before/after` from `nvidia-smi` or
+`null`, `process_cpu_ms` of the run) and the absolute `csv` path.
+
+The budget is `--budget-ms`, or `1000 / --hz`, or the highest monitor refresh
+rate (probed once without a window), or 240 Hz.
+
+Interpretation: each pbuffer frame is serialized by `glFinish`, so `total_ms` is
+the cost of one frame without pipelining — an upper bound for a vsynced window.
+CPU phases are the app's cost when `loadavg` stays below `cpus`. `gpu_ms` is
+polluted while a game or another GPU load runs: repeat the bench; the minimum
+over runs is the lower bound of the app's cost, the spread is external load.
+`RRITER_EGL_VENDOR=mesa` renders on the CPU, away from the game's GPU, but its
+`gpu_ms` is not representative.
 
 ## Isolation
 

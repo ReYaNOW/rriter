@@ -138,6 +138,42 @@ pub(crate) fn editor_writes_allowed(policy: Option<HeadlessPolicy>) -> bool {
     policy.is_none_or(|policy| policy.allow_writes)
 }
 
+/// Highest refresh rate among connected monitors, in Hz. Probed once per process through a
+/// window-less winit event loop (winit allows one `EventLoop` per process, so the windowed
+/// app never calls this). `None` without a display. Main thread only.
+#[cfg(target_os = "linux")]
+pub fn probe_display_refresh_hz() -> Option<f64> {
+    use winit::event_loop::{ActiveEventLoop, EventLoop};
+
+    struct Probe(Option<f64>);
+    impl winit::application::ApplicationHandler for Probe {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.0 = event_loop
+                .available_monitors()
+                .filter_map(|monitor| monitor.refresh_rate_millihertz())
+                .filter(|&millihertz| millihertz > 0)
+                .max()
+                .map(|millihertz| f64::from(millihertz) / 1000.0);
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _event_loop: &ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            _event: winit::event::WindowEvent,
+        ) {
+        }
+    }
+
+    static REFRESH_HZ: OnceLock<Option<f64>> = OnceLock::new();
+    *REFRESH_HZ.get_or_init(|| {
+        let event_loop = EventLoop::builder().build().ok()?;
+        let mut probe = Probe(None);
+        event_loop.run_app(&mut probe).ok()?;
+        probe.0
+    })
+}
+
 /// pkexec/UAC prompts would pop over the user's fullscreen app: never in headless.
 pub(crate) fn elevation_allowed(policy: Option<HeadlessPolicy>) -> bool {
     policy.is_none()

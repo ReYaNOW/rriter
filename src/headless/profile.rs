@@ -195,7 +195,7 @@ impl Profile {
     }
 }
 
-fn runtime_base() -> PathBuf {
+pub(crate) fn runtime_base() -> PathBuf {
     std::env::var_os("XDG_RUNTIME_DIR")
         .map(PathBuf::from)
         .filter(|p| p.is_absolute())

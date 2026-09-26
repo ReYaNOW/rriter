@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::app::events::about;
 use crate::app::events::host_loop::{HeadlessLoopState, HostLoop};
+use crate::app::events::main_frame::FrameOutcome;
 use glow::HasContext;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -24,14 +25,24 @@ pub(crate) enum StepState {
 pub(crate) fn step_frame(app: &mut App, loop_state: &HeadlessLoopState, force: bool) -> bool {
     about::about_to_wait(app, &HostLoop::headless(loop_state));
     // Always consume the request, also on forced frames, so it does not trigger a second frame.
-    let requested = app
-        .window
-        .as_ref()
-        .and_then(|window| window.headless())
-        .is_some_and(|window| window.take_redraw_request());
-    if !requested && !force {
+    if !take_redraw_request(app) && !force {
         return false;
     }
+    let outcome = render_frame(app);
+    finish_gl(app);
+    app.finish_main_frame(outcome);
+    true
+}
+
+pub(crate) fn take_redraw_request(app: &App) -> bool {
+    app.window
+        .as_ref()
+        .and_then(|window| window.headless())
+        .is_some_and(|window| window.take_redraw_request())
+}
+
+/// The frame's draw calls: the main frame, then the confirmation dialog over it.
+pub(crate) fn render_frame(app: &mut App) -> FrameOutcome {
     let outcome = app.render_main_frame();
     if app.headless_dialog_open
         && let (Some(window), Some(renderer)) = (app.window.as_ref(), app.renderer.as_mut())
@@ -39,12 +50,14 @@ pub(crate) fn step_frame(app: &mut App, loop_state: &HeadlessLoopState, force: b
         let size = window.inner_size();
         super::dump::draw_dialog(renderer, &app.base_title, size.width, size.height);
     }
+    outcome
+}
+
+/// No swap on a pbuffer: finishing makes the frame's pixels complete for readback.
+pub(crate) fn finish_gl(app: &App) {
     if let Some(renderer) = app.renderer.as_ref() {
-        // No swap on a pbuffer: finishing makes the frame's pixels complete for readback.
         unsafe { renderer.gl.finish() };
     }
-    app.finish_main_frame(outcome);
-    true
 }
 
 /// Steps until two consecutive idle steps report `ControlFlow::Wait`, or `budget` runs out.

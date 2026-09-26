@@ -969,6 +969,7 @@ impl App {
 
                     if crate::render_view::TELEMETRY_ENABLED
                         .load(std::sync::atomic::Ordering::Relaxed)
+                        && !crate::platform::is_headless()
                     {
                         println!(
                             "Key: {:?} | Total: {:.2}ms (Input->HL: {:.2}ms, HL->RenderPrep: {:.2}ms, Render+Swap: {:.2}ms)",

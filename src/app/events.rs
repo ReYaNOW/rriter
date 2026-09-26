@@ -10,7 +10,7 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 use winit::window::WindowId;
 
 pub(crate) mod about;
-mod main_frame;
+pub(crate) mod main_frame;
 pub(crate) mod host_loop;
 use host_loop::HostLoop;
 mod window_runtime;
@@ -118,7 +118,9 @@ thread_local! {
 }
 
 fn autocomplete_log_enabled() -> bool {
+    // Headless stdout is the protocol channel.
     crate::render_view::TELEMETRY_ENABLED.load(std::sync::atomic::Ordering::Relaxed)
+        && !crate::platform::is_headless()
 }
 
 fn autocomplete_frame_start(active: bool) -> (Option<Instant>, Option<Instant>) {

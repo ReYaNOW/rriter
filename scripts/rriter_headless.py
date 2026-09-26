@@ -6,6 +6,7 @@ runs the release binary (`RRITER_BIN` overrides the path) and speaks the line
 protocol described in docs/headless.md.
 
     python3 scripts/rriter_headless.py shot src/main.rs      # prints the PNG path
+    python3 scripts/rriter_headless.py bench src/main.rs 480 wheel 0 -3
     python3 scripts/rriter_headless.py run script.txt --size 1280x800
     python3 scripts/rriter_headless.py repl
 """
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import json
 import os
 import subprocess
 import sys
@@ -52,6 +54,11 @@ def parse_cli(argv: Sequence[str]) -> argparse.Namespace:
     shot.add_argument("target", help="file (open) or directory (workspace)")
     shot.add_argument("--out", help="PNG path, default /tmp/rriter-headless/<name>-<ts>.png")
     shot.add_argument("--settle", type=int, default=500, help="settle budget in ms (default 500)")
+    bench = sub.add_parser("bench", parents=[common], help="open, settle, measure frame cost; prints the summary and CSV path")
+    bench.add_argument("target", help="file (open) or directory (workspace)")
+    bench.add_argument("frames", type=int, help="number of measured frames")
+    bench.add_argument("action", nargs="*", help="per-frame action: wheel DX DY | key COMBO | type TEXT")
+    bench.add_argument("--settle", type=int, default=500, help="settle budget in ms before measuring (default 500)")
     run = sub.add_parser("run", parents=[common], help="run a command script")
     run.add_argument("script", help="command file, '-' for stdin")
     sub.add_parser("repl", parents=[common], help="type commands interactively")
@@ -79,9 +86,16 @@ def default_shot_path(target: Path, now: datetime) -> Path:
     return SHOT_DIR / f"{target.name}-{now:%Y%m%d-%H%M%S}.png"
 
 
+def open_command(target: Path) -> str:
+    return f"{'workspace' if target.is_dir() else 'open'} {target}"
+
+
 def shot_commands(target: Path, settle_ms: int, out: Path) -> list[str]:
-    opener = "workspace" if target.is_dir() else "open"
-    return [f"{opener} {target}", f"settle {settle_ms}", f"screenshot {out}", "quit"]
+    return [open_command(target), f"settle {settle_ms}", f"screenshot {out}", "quit"]
+
+
+def bench_commands(target: Path, settle_ms: int, frames: int, action: Sequence[str]) -> list[str]:
+    return [open_command(target), f"settle {settle_ms}", " ".join(["bench", str(frames), *action]), "quit"]
 
 
 def find_binary() -> Path | None:
@@ -111,13 +125,11 @@ def exit_status(code: int) -> int:
     return 128 - code if code < 0 else code
 
 
-def cmd_shot(binary: Path, ns: argparse.Namespace) -> int:
-    target = Path(ns.target).resolve()
-    out = Path(ns.out).resolve() if ns.out else default_shot_path(target, datetime.now())
-    commands = shot_commands(target, ns.settle, out)
-    proc = spawn(binary, headless_args(ns), subprocess.PIPE)
+def drive(binary: Path, args: list[str], commands: list[str]) -> tuple[int, list[str]]:
+    """Send `commands` one by one; returns (exit code, replies). Any `err` or a missing reply is 1."""
+    proc = spawn(binary, args, subprocess.PIPE)
     assert proc.stdin is not None and proc.stdout is not None
-    answered = 0
+    replies: list[str] = []
     failed = False
     for command in commands:
         try:
@@ -128,7 +140,7 @@ def cmd_shot(binary: Path, ns: argparse.Namespace) -> int:
         reply = read_reply(proc.stdout)
         if reply is None:
             break
-        answered += 1
+        replies.append(reply)
         if classify(reply) == "err":
             print(f"{command}: {reply}", file=sys.stderr)
             failed = True
@@ -138,14 +150,32 @@ def cmd_shot(binary: Path, ns: argparse.Namespace) -> int:
         pass
     code = exit_status(proc.wait())
     if failed:
-        return 1
+        return 1, replies
     if code != 0:
-        return code
-    if answered < len(commands):
+        return code, replies
+    if len(replies) < len(commands):
         print("rriter exited before answering every command", file=sys.stderr)
-        return 1
-    print(out)
-    return 0
+        return 1, replies
+    return 0, replies
+
+
+def cmd_shot(binary: Path, ns: argparse.Namespace) -> int:
+    target = Path(ns.target).resolve()
+    out = Path(ns.out).resolve() if ns.out else default_shot_path(target, datetime.now())
+    code, _ = drive(binary, headless_args(ns), shot_commands(target, ns.settle, out))
+    if code == 0:
+        print(out)
+    return code
+
+
+def cmd_bench(binary: Path, ns: argparse.Namespace) -> int:
+    target = Path(ns.target).resolve()
+    code, replies = drive(binary, headless_args(ns), bench_commands(target, ns.settle, ns.frames, ns.action))
+    if code == 0:
+        summary = replies[2].removeprefix("ok ")
+        print(summary)
+        print(json.loads(summary).get("csv"))
+    return code
 
 
 def cmd_relay(binary: Path, args: list[str]) -> int:
@@ -196,6 +226,21 @@ def self_test() -> None:
         out = SHOT_DIR / "x.png"
         assert shot_commands(file, 500, out) == [f"open {file}", "settle 500", f"screenshot {out}", "quit"]
         assert shot_commands(file.parent, 0, out) == [f"workspace {file.parent}", "settle 0", f"screenshot {out}", "quit"]
+        assert bench_commands(file, 500, 480, ["wheel", "0", "-3"]) == [f"open {file}", "settle 500", "bench 480 wheel 0 -3", "quit"]
+        assert bench_commands(file.parent, 500, 10, []) == [f"workspace {file.parent}", "settle 500", "bench 10", "quit"]
+
+    ns = parse_cli(["bench", "src/main.rs", "480", "wheel", "0", "-3", "--hz", "144"])
+    assert (ns.command, ns.target, ns.frames, ns.action, ns.settle) == ("bench", "src/main.rs", 480, ["wheel", "0", "-3"], 500), ns
+    assert headless_args(ns) == ["--headless", "--hz", "144"], headless_args(ns)
+    ns = parse_cli(["bench", "x.rs", "5"])
+    assert (ns.frames, ns.action) == (5, []), ns
+    for bad in (["bench", "x.rs"], ["bench", "x.rs", "many"]):
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                parse_cli(bad)
+        except SystemExit:
+            continue
+        raise AssertionError(f"parse_cli accepted {bad}")
     print("rriter_headless self-test: ok")
 
 
@@ -209,6 +254,8 @@ def main(argv: Sequence[str]) -> int:
         return 2
     if ns.command == "shot":
         return cmd_shot(binary, ns)
+    if ns.command == "bench":
+        return cmd_bench(binary, ns)
     if ns.command == "run":
         return cmd_relay(binary, [*headless_args(ns), "--script", ns.script])
     return cmd_relay(binary, headless_args(ns))

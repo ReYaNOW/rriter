@@ -530,6 +530,39 @@ impl Default for Telemetry {
     }
 }
 
+/// Per-frame counters of the root frame, in milliseconds (headless `bench`/`record`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameTelemetry {
+    pub flush_calls: u32,
+    pub vertices: u64,
+    pub root_phase_ms: [f32; 5],
+    pub chrome_ms: [f32; 6],
+}
+
+/// Takes and zeroes the flush, root-phase and chrome accumulators since the last call.
+/// Also restarts the 10 s print window, so its reset does not wipe a frame before it is taken.
+pub fn take_frame_telemetry() -> FrameTelemetry {
+    TELEMETRY.with(|telemetry| {
+        let mut t = telemetry.borrow_mut();
+        let taken = FrameTelemetry {
+            flush_calls: t.flush_count,
+            vertices: t.flush_vertices,
+            root_phase_ms: t.root_phase_time.map(|secs| secs * 1000.0),
+            chrome_ms: t.chrome_detail_time.map(|secs| secs * 1000.0),
+        };
+        t.flush_time = 0.0;
+        t.flush_count = 0;
+        t.flush_max_time = 0.0;
+        t.flush_vertices = 0;
+        t.root_phase_time = [0.0; 5];
+        t.root_phase_count = [0; 5];
+        t.chrome_detail_time = [0.0; 6];
+        t.chrome_detail_count = [0; 6];
+        t.last_print = Instant::now();
+        taken
+    })
+}
+
 fn transient_python_member_dot_byte(editor: &Editor) -> Option<usize> {
     let cursor = editor.cursor.min(editor.len());
     if cursor < 2 || editor.byte_at(cursor - 1) != b'.' || editor.byte_at(cursor - 2) == b'.' {

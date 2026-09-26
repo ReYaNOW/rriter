@@ -2,6 +2,7 @@
 //! driven by line commands from stdin or `--script`.
 #![cfg(target_os = "linux")]
 
+pub(crate) mod bench;
 pub(crate) mod dump;
 pub(crate) mod frame;
 pub(crate) mod profile;
@@ -83,6 +84,7 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
             return code;
         }
     };
+    session.hz_probe = platform::probe_display_refresh_hz;
     if let Some(path) = options.path.clone() {
         session.open_startup_path(path);
     }
@@ -266,8 +268,8 @@ impl HeadlessSession {
                 }
                 self.frame_ok()
             }
-            Command::Info => not_available("info"),
-            Command::Bench { .. } => not_available("bench"),
+            Command::Info => Response::Ok(Some(bench::info_json(self).to_string())),
+            Command::Bench { frames, csv, action } => bench::bench(self, frames, csv, &action),
             Command::Record { .. } => not_available("record"),
         }
     }

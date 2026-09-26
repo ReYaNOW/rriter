@@ -376,7 +376,89 @@ mod session_cases {
     #[test]
     fn headless_session_unported_commands_report_not_available() {
         let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, b"record 2 /tmp/rriter-headless-unported\n");
+        assert_eq!(lines, vec!["err 'record' is not available yet"]);
+    }
+
+    fn ok_json(line: &str) -> serde_json::Value {
+        let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
+        serde_json::from_str(payload).expect("json payload")
+    }
+
+    #[test]
+    fn headless_bench_session_csv_summary_and_telemetry_restored() {
+        use std::sync::atomic::Ordering;
+        let dir = scratch_dir("bench-csv");
+        let csv = dir.join("a.csv");
+        let mut session = session_for_test(640, 400);
+        let before = crate::render_view::TELEMETRY_ENABLED.load(Ordering::Relaxed);
+        let lines = run_script(&mut session, format!("bench 5 csv={}\n", csv.display()).as_bytes());
+        assert_eq!(crate::render_view::TELEMETRY_ENABLED.load(Ordering::Relaxed), before);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let summary = ok_json(&lines[0]);
+        assert_eq!(summary["frames"], 5);
+        assert_eq!(summary["hz_source"], "default");
+        assert_eq!(summary["hz"], 240.0);
+        assert_eq!(summary["csv"], csv.display().to_string());
+        for key in ["budget_ms", "total_ms", "gpu_ms", "draw_cpu_ms", "over_budget", "worst", "system"] {
+            assert!(summary.get(key).is_some(), "missing {key}: {summary}");
+        }
+        assert_eq!(summary["worst"].as_array().map(Vec::len), Some(5));
+        for key in ["loadavg_before", "loadavg_after", "cpus", "gpu_util_before", "gpu_util_after", "process_cpu_ms"] {
+            assert!(summary["system"].get(key).is_some(), "missing system.{key}: {summary}");
+        }
+        let text = std::fs::read_to_string(&csv).expect("csv written");
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows.len(), 6, "{text}");
+        assert!(rows[0].starts_with("frame,update_ms,draw_cpu_ms,gpu_ms,total_ms,"), "{}", rows[0]);
+        assert!(rows[0].ends_with(",scroll_y"), "{}", rows[0]);
+        assert!(rows[1].starts_with("0,") && rows[5].starts_with("4,"), "{text}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_bench_wheel_scrolls_long_document() {
+        let dir = scratch_dir("bench-wheel");
+        let path = dir.join("long.txt");
+        let text: String = (0..600).map(|i| format!("line {i:04} of a long bench document\n")).collect();
+        std::fs::write(&path, text).expect("write long file");
+        let csv = dir.join("wheel.csv");
+        let mut session = session_for_test(640, 400);
+        let script = format!("open {}\nbench 3 csv={} wheel 0 -3\n", path.display(), csv.display());
+        let lines = run_script(&mut session, script.as_bytes());
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        let text = std::fs::read_to_string(&csv).expect("csv written");
+        let scroll: Vec<f64> = text
+            .lines()
+            .skip(1)
+            .map(|row| row.rsplit(',').next().and_then(|v| v.parse().ok()).expect("scroll_y column"))
+            .collect();
+        assert_eq!(scroll.len(), 3, "{text}");
+        assert!(scroll[2] > scroll[0], "wheel must scroll: {scroll:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_bench_csv_io_error_then_continues() {
+        let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, b"bench 2 csv=/proc/rriter-nope/a.csv\ndump\n");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].starts_with("err io:"), "{lines:?}");
+        assert!(lines[1].starts_with("ok {"), "{lines:?}");
+        assert!(session.had_error);
+    }
+
+    #[test]
+    fn headless_info_reports_budget_gl_and_policy() {
+        let mut session = session_for_test(640, 400);
         let lines = run_script(&mut session, b"info\n");
-        assert_eq!(lines, vec!["err 'info' is not available yet"]);
+        assert_eq!(lines.len(), 1, "{lines:?}");
+        let info = ok_json(&lines[0]);
+        for key in ["hz", "budget_ms", "hz_source", "gl_renderer", "gl_version", "gl_vendor", "writes_allowed", "profile"] {
+            assert!(info.get(key).is_some(), "missing {key}: {info}");
+        }
+        assert_eq!(info["hz_source"], "default");
+        assert_eq!(info["profile"], session.profile_root.display().to_string());
+        assert!(info["gl_version"].as_str().is_some_and(|v| !v.is_empty()), "{info}");
     }
 }
