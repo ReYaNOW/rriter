@@ -59,7 +59,7 @@ impl App {
                 let (autocomplete_frame_start, autocomplete_prev_frame) =
                     autocomplete_frame_start(self.autocomplete_active);
 
-                let blink_alpha = if !self.is_focused || self.dialog_window.is_some() {
+                let blink_alpha = if !self.is_focused || self.modal_dialog_open() {
                     1.0
                 } else if self.last_blink_state {
                     1.0
@@ -180,7 +180,8 @@ impl App {
                     blink_alpha,
                     self.show_fps,
                     &self.highlighter.spans,
-                    self.dialog_window.is_some(),
+                    // `modal_dialog_open()` by fields: `self.renderer` is borrowed here.
+                    self.dialog_window.is_some() || self.headless_dialog_open,
                     is_resizing,
                     &self.search_results,
                     self.search_current_idx,
@@ -828,7 +829,7 @@ impl App {
                     }
 
                     if self.show_settings
-                        || self.dialog_window.is_some()
+                        || self.modal_dialog_open()
                         || self.settings_anim_progress >= 1.5
                     {
                         is_text = settings_cursor_mode == 2;

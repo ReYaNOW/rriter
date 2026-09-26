@@ -345,7 +345,12 @@ fn utf8_char_width(first_byte: u8) -> usize {
 }
 
 pub(crate) fn cursor_line_and_character(editor: &Editor) -> (usize, usize) {
-    let cursor = editor.cursor.min(editor.len());
+    line_and_character_at(editor, editor.cursor)
+}
+
+/// 1-based line and character of byte `offset` (clamped to the text).
+pub(crate) fn line_and_character_at(editor: &Editor, offset: usize) -> (usize, usize) {
+    let cursor = offset.min(editor.len());
     let line_idx = editor
         .line_offsets
         .partition_point(|&offset| offset <= cursor)

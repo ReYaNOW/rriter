@@ -29,7 +29,7 @@ pub(crate) fn update_cursor_blink(app: &mut App, now: Instant, needs_redraw: &mu
 }
 
 pub(crate) fn idle_blink_enabled(app: &App) -> bool {
-    app.is_focused && app.dialog_window.is_none() && !app.headless_mode
+    app.is_focused && !app.modal_dialog_open() && !app.headless_mode
 }
 
 fn update_markdown_read_selection_autoscroll(
@@ -113,7 +113,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
     }
 
-    if app.dialog_window.is_none()
+    if !app.modal_dialog_open()
         && !app.pending_action_waiting_for_save_as
         && !app.pending_action_ready
         && matches!(app.pending_action, PendingAction::CloseTab(_))

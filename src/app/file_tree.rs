@@ -1514,7 +1514,7 @@ impl App {
     /// или None если курсор не над областью дерева файлов.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
-        if self.show_settings || self.dialog_window.is_some() {
+        if self.show_settings || self.modal_dialog_open() {
             return None;
         }
         if !self.is_ide_mode {
@@ -1542,7 +1542,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_panel_contains(&self, mx: f32, my: f32) -> bool {
-        if self.show_settings || self.dialog_window.is_some() || !self.is_ide_mode {
+        if self.show_settings || self.modal_dialog_open() || !self.is_ide_mode {
             return false;
         }
         if !self.ide_panel.is_open(crate::app::PanelId::Explorer) {

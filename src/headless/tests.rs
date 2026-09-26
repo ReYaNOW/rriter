@@ -205,6 +205,174 @@ mod session_cases {
         assert_eq!(session.exit_code(), 0);
     }
 
+    fn dump(session: &mut HeadlessSession) -> serde_json::Value {
+        let lines = run_script(session, b"dump\n");
+        let payload = lines[0].strip_prefix("ok ").unwrap_or_else(|| panic!("{lines:?}"));
+        serde_json::from_str(payload).expect("dump payload is JSON")
+    }
+
+    fn ui_center(dump: &serde_json::Value, id: &str) -> (f64, f64) {
+        let element = dump["ui"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|element| element["id"] == id)
+            .unwrap_or_else(|| panic!("no {id} in ui"));
+        let rect = &element["rect"];
+        let at = |i: usize| rect[i].as_f64().unwrap();
+        (at(0) + at(2) / 2.0, at(1) + at(3) / 2.0)
+    }
+
+    /// Workspace with one dirty file tab, in IDE mode where Ctrl+4 asks before closing.
+    fn dirty_ide_tab(name: &str) -> (PathBuf, PathBuf, HeadlessSession) {
+        let dir = scratch_dir(name);
+        let file = sample_file(&dir);
+        let mut session = session_for_test(1280, 800);
+        let script = format!("workspace {}\nopen {}\ntype xyz\n", dir.display(), file.display());
+        let lines = run_script(&mut session, script.as_bytes());
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        (dir, file, session)
+    }
+
+    #[test]
+    fn headless_dump_has_all_keys_and_welcome_mode() {
+        let mut session = session_for_test(640, 400);
+        // `ui` is the last frame's registry: draw one first.
+        run_script(&mut session, b"mouse_move 1 1\n");
+        let dump = dump(&mut session);
+        let mut keys: Vec<&str> = dump.as_object().unwrap().keys().map(String::as_str).collect();
+        keys.sort_unstable();
+        assert_eq!(
+            keys,
+            [
+                "clipboard", "cursor_icon", "dialog", "editor", "external_request", "hover", "ide_panel", "mode",
+                "overlays", "scale", "size", "tabs", "ui", "writes_allowed"
+            ]
+        );
+        assert_eq!(dump["mode"], "welcome");
+        assert_eq!(dump["size"], serde_json::json!([640, 400]));
+        assert_eq!(dump["clipboard"], "disabled");
+        assert_eq!(dump["dialog"], serde_json::Value::Null);
+        assert!(!dump["ui"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn headless_dump_to_file_and_io_error() {
+        let dir = scratch_dir("dump-file");
+        let out = dir.join("nested").join("d.json");
+        let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, format!("dump {}\ndump /proc/rriter-nope/d.json\n", out.display()).as_bytes());
+        assert_eq!(lines[0], format!("ok {}", out.display()));
+        assert!(lines[1].starts_with("err io: "), "{lines:?}");
+        let text = std::fs::read_to_string(&out).expect("dump file");
+        assert_eq!(serde_json::from_str::<serde_json::Value>(&text).unwrap()["mode"], "welcome");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_dump_tracks_opened_tab() {
+        let dir = scratch_dir("dump-tab");
+        let file = sample_file(&dir);
+        let mut session = session_for_test(640, 400);
+        run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
+        let dump = dump(&mut session);
+        assert_eq!(dump["mode"], "editor");
+        let tabs = dump["tabs"].as_array().unwrap();
+        let tab = tabs.iter().find(|tab| tab["path"] == file.display().to_string()).expect("opened tab");
+        assert_eq!(tab["active"], true);
+        assert_eq!(tab["modified"], false);
+        assert_eq!(dump["editor"]["lines"], 41);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_dump_ui_rect_click_and_settings_key() {
+        let dir = scratch_dir("dump-click");
+        let file = dir.join("doc.md");
+        std::fs::write(&file, "# Title\n\nBody text.\n").expect("write markdown");
+        let mut session = session_for_test(1280, 800);
+        run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), file.display()).as_bytes());
+        let before = dump(&mut session);
+        assert_eq!(before["mode"], "ide");
+        let markdown = |dump: &serde_json::Value| {
+            dump["tabs"].as_array().unwrap().iter().find(|tab| tab["active"] == true).unwrap()["markdown"].clone()
+        };
+        assert_eq!(markdown(&before), false);
+        // The settings overlay has no button, only F1; a click is checked on the markdown toggle.
+        let (x, y) = ui_center(&before, "MarkdownModeToggle");
+        let lines = run_script(&mut session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
+        assert_eq!(lines, ["ok", "ok"]);
+        assert_eq!(markdown(&dump(&mut session)), true);
+        run_script(&mut session, b"key f1\n");
+        assert_eq!(dump(&mut session)["overlays"]["settings"], true);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_dialog_cancel_then_discard_close_tab() {
+        let (dir, file, mut session) = dirty_ide_tab("dialog-discard");
+        let shot = dir.join("before.png");
+        run_script(&mut session, format!("screenshot {}\nkey ctrl+4\n", shot.display()).as_bytes());
+        let open = dump(&mut session);
+        let dialog = &open["dialog"];
+        assert_eq!(dialog["action"], "CloseTab", "{open}");
+        let buttons = dialog["buttons"].as_array().unwrap();
+        let names: Vec<&str> = buttons.iter().map(|button| button["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["save", "discard", "cancel"]);
+        for button in buttons {
+            let r: Vec<f64> = button["rect"].as_array().unwrap().iter().map(|v| v.as_f64().unwrap()).collect();
+            assert!(r[0] >= 0.0 && r[1] >= 0.0 && r[2] > 0.0 && r[3] > 0.0, "{button}");
+            assert!(r[0] + r[2] <= 1280.0 && r[1] + r[3] <= 800.0, "{button}");
+        }
+        // The dialog is drawn into the frame: the buffer center changes.
+        let with_dialog = dir.join("dialog.png");
+        run_script(&mut session, format!("screenshot {}\n", with_dialog.display()).as_bytes());
+        let center = |path: &PathBuf| image::open(path).expect("decode").to_rgba8().get_pixel(640, 400).0;
+        assert_ne!(center(&shot), center(&with_dialog));
+
+        assert_eq!(run_script(&mut session, b"dialog cancel\n"), ["ok"]);
+        let cancelled = dump(&mut session);
+        assert_eq!(cancelled["dialog"], serde_json::Value::Null);
+        assert_eq!(cancelled["tabs"].as_array().unwrap().len(), 1);
+
+        assert_eq!(run_script(&mut session, b"key ctrl+4\ndialog discard\n"), ["ok", "ok"]);
+        let discarded = dump(&mut session);
+        assert_eq!(discarded["dialog"], serde_json::Value::Null);
+        assert!(discarded["tabs"].as_array().unwrap().iter().all(|tab| tab["path"] != file.display().to_string()));
+        assert!(!std::fs::read_to_string(&file).unwrap().contains("xyz"));
+        assert_eq!(session.exit_code(), 0);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_dialog_save_writes_file() {
+        let (dir, file, mut session) = dirty_ide_tab("dialog-save");
+        assert_eq!(run_script(&mut session, b"key ctrl+4\ndialog save\n"), ["ok", "ok"]);
+        assert_eq!(dump(&mut session)["dialog"], serde_json::Value::Null);
+        assert!(std::fs::read_to_string(&file).unwrap().contains("xyz"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn headless_dialog_without_dialog_errs() {
+        let mut session = session_for_test(640, 400);
+        assert_eq!(run_script(&mut session, b"dialog save\n"), ["err no dialog"]);
+        assert_eq!(session.exit_code(), 1);
+    }
+
+    #[test]
+    fn headless_dialog_escape_closes_like_window() {
+        // Editor mode: Ctrl+Q on a dirty file asks with CloseFile, which Escape does not reopen.
+        let dir = scratch_dir("dialog-escape");
+        let file = sample_file(&dir);
+        let mut session = session_for_test(1280, 800);
+        run_script(&mut session, format!("open {}\ntype xyz\nkey ctrl+q\n", file.display()).as_bytes());
+        assert_eq!(dump(&mut session)["dialog"]["action"], "CloseFile");
+        assert_eq!(run_script(&mut session, b"key escape\n"), ["ok"]);
+        assert_eq!(dump(&mut session)["dialog"], serde_json::Value::Null);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn headless_session_unported_commands_report_not_available() {
         let mut session = session_for_test(640, 400);

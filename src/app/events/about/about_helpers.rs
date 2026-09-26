@@ -1595,7 +1595,7 @@ mod tests {
             .split("pub fn handle_main_cursor_moved")
             .nth(1)
             .unwrap()
-            .split("if self.dialog_window.is_some()")
+            .split("if self.modal_dialog_open()")
             .next()
             .unwrap();
         assert!(cursor_move.contains("renderer.last_mouse_x = px;"));

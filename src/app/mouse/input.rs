@@ -1096,7 +1096,7 @@ impl App {
             }
 
             // Глобальная обработка декларативного UI
-            if !self.show_settings && self.dialog_window.is_none() {
+            if !self.show_settings && !self.modal_dialog_open() {
                 if self.is_ide_mode
                     && let Some(layout) = super::problems_scrollbar_layout(
                         self,
@@ -1628,7 +1628,7 @@ impl App {
 
         // Clicks routed through UI system
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             if state == ElementState::Pressed {
                 if let Some(dw) = self.dialog_window.as_ref() {
                     dw.focus_window();

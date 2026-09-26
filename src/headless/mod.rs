@@ -2,6 +2,7 @@
 //! driven by line commands from stdin or `--script`.
 #![cfg(target_os = "linux")]
 
+pub(crate) mod dump;
 pub(crate) mod frame;
 pub(crate) mod profile;
 pub(crate) mod protocol;
@@ -17,7 +18,7 @@ use crate::platform::{self, HeadlessPolicy, HeadlessWindow, WindowHost};
 use crate::renderer::Renderer;
 use frame::StepState;
 use profile::{BudgetChoice, HeadlessOptions, Profile};
-use protocol::{ClickPhase, Command, MouseButtonArg, Response, WheelUnit};
+use protocol::{ClickPhase, Command, DialogAnswer, MouseButtonArg, Response, WheelUnit};
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
@@ -252,8 +253,19 @@ impl HeadlessSession {
             }
             Command::Screenshot(path) => self.screenshot(&path),
             Command::Quit => Response::Ok(None),
-            Command::Dump(_) => not_available("dump"),
-            Command::Dialog(_) => not_available("dialog"),
+            Command::Dump(path) => self.dump(path.as_deref()),
+            Command::Dialog(answer) => {
+                if !self.app.headless_dialog_open {
+                    return Response::Err("no dialog".to_string());
+                }
+                // The same methods as the window's dialog buttons; they clear the flag.
+                match answer {
+                    DialogAnswer::Save => self.app.begin_pending_action_save(),
+                    DialogAnswer::Discard => self.app.discard_pending_action_changes(),
+                    DialogAnswer::Cancel => self.app.cancel_pending_action(),
+                }
+                self.frame_ok()
+            }
             Command::Info => not_available("info"),
             Command::Bench { .. } => not_available("bench"),
             Command::Record { .. } => not_available("record"),
@@ -292,6 +304,10 @@ impl HeadlessSession {
         if !dir.is_dir() {
             return Response::Err(format!("{}: not a directory", dir.display()));
         }
+        // A dropped directory only adds a workspace; the spec's `workspace` also enters IDE mode.
+        if !self.app.is_ide_mode {
+            self.app.enter_ide_mode();
+        }
         // Same call as a dropped directory in `WindowEvent::DroppedFile`.
         self.app.apply_selected_workspace_folder(dir);
         self.frame_ok()
@@ -322,6 +338,22 @@ impl HeadlessSession {
         frame::force_opaque(&mut self.frame_buf);
         match frame::write_png(path, &self.frame_buf, w, h) {
             Ok(written) => Response::Ok(Some(format!("{} {w}x{h}", written.display()))),
+            Err(error) => Response::Err(format!("io: {error}")),
+        }
+    }
+
+    fn dump(&mut self, path: Option<&Path>) -> Response {
+        let json = dump::dump_json(&mut self.app).to_string();
+        let Some(path) = path else {
+            return Response::Ok(Some(json));
+        };
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let written = path
+            .parent()
+            .map_or(Ok(()), std::fs::create_dir_all)
+            .and_then(|()| std::fs::write(&path, json));
+        match written {
+            Ok(()) => Response::Ok(Some(path.display().to_string())),
             Err(error) => Response::Err(format!("io: {error}")),
         }
     }

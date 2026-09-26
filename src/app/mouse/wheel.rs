@@ -765,7 +765,7 @@ impl App {
             return;
         }
 
-        if self.show_welcome || self.show_settings || self.dialog_window.is_some() {
+        if self.show_welcome || self.show_settings || self.modal_dialog_open() {
             return;
         }
 

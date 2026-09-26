@@ -307,6 +307,7 @@ impl App {
             active_tab: 0,
             run_ide_on_startup: options.run_ide_on_startup,
             headless_mode: options.headless,
+            headless_dialog_open: false,
         };
 
         if !options.headless {

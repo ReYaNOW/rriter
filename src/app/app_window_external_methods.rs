@@ -42,11 +42,16 @@ impl App {
         self.cancel_pointer_interactions();
         self.pending_action = action;
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             return;
         }
 
         let Some(event_loop) = host.native() else {
+            // Headless: no second window, the dialog is drawn into the main frame.
+            self.headless_dialog_open = true;
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
+            }
             return;
         };
 
@@ -111,10 +116,16 @@ impl App {
         }
     }
 
+    /// Confirmation dialog is open: a second window, or drawn into the headless frame.
+    pub(crate) fn modal_dialog_open(&self) -> bool {
+        self.dialog_window.is_some() || self.headless_dialog_open
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn close_dialog(&mut self) {
         self.dialog_window = None;
         self.dialog_gl_surface = None;
+        self.headless_dialog_open = false;
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }

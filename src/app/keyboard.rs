@@ -272,7 +272,7 @@ impl App {
 
     fn handle_main_ime_commit_inner(&mut self, text: &str) -> bool {
         if self.handle_file_tree_modal_ime_commit(text)
-            || self.dialog_window.is_some()
+            || self.modal_dialog_open()
             || self.ide_panel.project_search.help_open
         {
             return true;

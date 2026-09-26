@@ -1216,6 +1216,8 @@ pub struct App {
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,
     pub headless_mode: bool,
+    /// Headless confirmation dialog: drawn into the main frame instead of a second window.
+    pub headless_dialog_open: bool,
 }
 
 #[cfg(test)]

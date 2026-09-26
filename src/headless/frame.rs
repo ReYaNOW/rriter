@@ -33,6 +33,12 @@ pub(crate) fn step_frame(app: &mut App, loop_state: &HeadlessLoopState, force: b
         return false;
     }
     let outcome = app.render_main_frame();
+    if app.headless_dialog_open
+        && let (Some(window), Some(renderer)) = (app.window.as_ref(), app.renderer.as_mut())
+    {
+        let size = window.inner_size();
+        super::dump::draw_dialog(renderer, &app.base_title, size.width, size.height);
+    }
     if let Some(renderer) = app.renderer.as_ref() {
         // No swap on a pbuffer: finishing makes the frame's pixels complete for readback.
         unsafe { renderer.gl.finish() };

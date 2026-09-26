@@ -1284,6 +1284,23 @@ impl UiRegistry {
         })
     }
 
+    /// Frame elements for the headless `dump`: id, kind, hit-test rect, after `overlay_mark`.
+    pub(crate) fn element_hits(
+        &self,
+    ) -> impl Iterator<Item = (UiId, &'static str, Option<UiClipRect>, bool)> + '_ {
+        self.elements.iter().enumerate().map(move |(i, el)| {
+            let (kind, rect) = match *el {
+                UiElement::Button { x, y, w, h, .. } => ("Button", Some(UiClipRect::new(x, y, w, h))),
+                UiElement::TextInput { x, y, w, h, .. } => ("TextInput", Some(UiClipRect::new(x, y, w, h))),
+                UiElement::Rect { x, y, w, h, .. } => ("Rect", Some(UiClipRect::new(x, y, w, h))),
+                UiElement::IconButton { x, y, size, active_square_width, .. } => {
+                    ("IconButton", icon_hit_rect(x, y, size, active_square_width))
+                }
+            };
+            (el.id(), kind, rect, self.overlay_mark > 0 && i >= self.overlay_mark)
+        })
+    }
+
     /// Возвращает текущий наведённый элемент
     pub fn hovered(&self) -> Option<UiId> {
         self.hovered

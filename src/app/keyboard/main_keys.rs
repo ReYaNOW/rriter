@@ -294,7 +294,7 @@ impl App {
             }
         }
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             if key_event.state == ElementState::Pressed {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                     self.close_dialog();
@@ -1582,11 +1582,11 @@ mod tests {
         assert!(terminal_route < editor_route);
 
         let dialog_window = source
-            .find("if self.dialog_window.is_some()")
+            .find("if self.modal_dialog_open()")
             .expect("dialog route");
         assert!(dialog_window < route_apply);
         assert!(
-            include_str!("../../main.rs")
+            include_str!("../app_bootstrap.rs")
                 .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование")
         );
     }

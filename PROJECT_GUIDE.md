@@ -1455,6 +1455,7 @@ Root:
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.
 * `src/headless/frame.rs` -> headless frame step (`step_frame`: `about_to_wait` + forced/requested frame), `settle_loop`/`StepState`, pbuffer readback (`read_frame_rgba`, `flip_rows_in_place`) and `write_png`.
+* `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/profile.rs` -> headless CLI options (`parse_args`, `HeadlessOptions`) and the isolated profile root (`Profile`: private temp root, explicit dir, or copy of the user's config/data/state; removed on `finish`).

@@ -209,7 +209,7 @@ impl App {
             window.request_redraw();
         }
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             return;
         }
 

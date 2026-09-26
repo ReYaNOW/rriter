@@ -1998,7 +1998,7 @@ fn hover_blocker_diagnostics(app: &App) -> String {
         app.ide_panel.project_search.help_open,
         api_blocking_popup,
         app.show_settings,
-        app.dialog_window.is_some(),
+        app.modal_dialog_open(),
     )
 }
 
