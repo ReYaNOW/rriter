@@ -205,6 +205,24 @@ mod session_cases {
         assert_eq!(session.exit_code(), 0);
     }
 
+    #[test]
+    fn headless_session_unreadable_input_is_an_error_exit() {
+        let mut session = session_for_test(640, 400);
+        // Reading a directory fails with EISDIR, like `--script <dir>`.
+        let dir = std::fs::File::open(scratch_dir("unreadable-input")).expect("open dir");
+        assert!(!session.run_loop(io::BufReader::new(dir), Vec::new()));
+        assert_eq!(session.exit_code(), 1);
+    }
+
+    #[test]
+    fn headless_session_idle_settle_converges_without_frames() {
+        let mut session = session_for_test(640, 400);
+        let lines = run_script(&mut session, b"settle 2000\nsettle 2000\n");
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert!(lines[0].ends_with(" settled=true"), "{lines:?}");
+        assert_eq!(lines[1], "ok frames=0 settled=true", "{lines:?}");
+    }
+
     fn dump(session: &mut HeadlessSession) -> serde_json::Value {
         let lines = run_script(session, b"dump\n");
         let payload = lines[0].strip_prefix("ok ").unwrap_or_else(|| panic!("{lines:?}"));
@@ -495,5 +513,36 @@ mod session_cases {
         assert_eq!(info["hz_source"], "default");
         assert_eq!(info["profile"], session.profile_root.display().to_string());
         assert!(info["gl_version"].as_str().is_some_and(|v| !v.is_empty()), "{info}");
+    }
+}
+
+mod protocol_fd_cases {
+    use crate::headless::split_protocol_fd;
+    use std::fs::File;
+    use std::io::{Read, Write};
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+
+    fn pipe() -> (File, File) {
+        let mut fds = [0; 2];
+        assert_eq!(unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) }, 0);
+        unsafe { (File::from(OwnedFd::from_raw_fd(fds[0])), File::from(OwnedFd::from_raw_fd(fds[1]))) }
+    }
+
+    #[test]
+    fn headless_protocol_fd_keeps_replies_and_moves_stray_output() {
+        let (mut protocol_read, protocol_write) = pipe();
+        let (mut stray_read, stray_write) = pipe();
+        // `protocol_write` plays fd 1, `stray_write` plays fd 2.
+        let mut protocol = split_protocol_fd(protocol_write.as_raw_fd(), stray_write.as_raw_fd())
+            .expect("split protocol fd");
+        writeln!(protocol, "ok").expect("write reply");
+        let mut former_stdout = &protocol_write;
+        writeln!(former_stdout, "[GIT status] ok").expect("write stray line");
+        drop((protocol, protocol_write, stray_write));
+        let (mut replies, mut stray) = (String::new(), String::new());
+        protocol_read.read_to_string(&mut replies).expect("read replies");
+        stray_read.read_to_string(&mut stray).expect("read stray");
+        assert_eq!(replies, "ok\n");
+        assert_eq!(stray, "[GIT status] ok\n");
     }
 }

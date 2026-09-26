@@ -356,6 +356,11 @@ fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Insta
     wake_at
 }
 
+/// Whether the app itself wants the next frame (as opposed to an idle `Wait`).
+pub(crate) fn wait_plan_wants_frame(needs_redraw: bool, show_welcome: bool, is_ide_mode: bool) -> bool {
+    needs_redraw || (show_welcome && is_ide_mode)
+}
+
 pub(crate) fn compute_about_wait_plan(
     now: Instant,
     last_action: Instant,
@@ -368,7 +373,7 @@ pub(crate) fn compute_about_wait_plan(
     hover_poll_pending: bool,
     api_poll_pending: bool,
 ) -> AboutWaitPlan {
-    if needs_redraw || (show_welcome && is_ide_mode) {
+    if wait_plan_wants_frame(needs_redraw, show_welcome, is_ide_mode) {
         return AboutWaitPlan::Wait;
     }
 

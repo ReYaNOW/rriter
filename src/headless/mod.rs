@@ -23,6 +23,7 @@ use protocol::{ClickPhase, Command, DialogAnswer, MouseButtonArg, Response, Whee
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader, Write};
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
@@ -67,6 +68,13 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
     // Env-only (honours RRITER_EGL_VENDOR) and still single-threaded here, as in `main`.
     crate::prefer_egl_vendor();
     crate::init_rayon_global_pool();
+    let protocol = match split_protocol_fd(libc::STDOUT_FILENO, libc::STDERR_FILENO) {
+        Ok(file) => file,
+        Err(error) => {
+            eprintln!("headless: cannot separate protocol stdout: {error}");
+            return 2;
+        }
+    };
     let input: Box<dyn BufRead> = match options.script.as_deref() {
         Some(script) if script != Path::new("-") => match File::open(script) {
             Ok(file) => Box::new(BufReader::new(file)),
@@ -89,11 +97,26 @@ fn run_prepared(options: &HeadlessOptions, root: &Path) -> u8 {
         session.open_startup_path(path);
     }
     session.settle(STARTUP_SETTLE);
-    session.run_loop(input, io::stdout().lock());
+    session.run_loop(input, io::LineWriter::new(protocol));
     session.app.shutdown_background_services();
     let code = session.exit_code();
     drop(session);
     code
+}
+
+/// Protocol replies keep the original `stdout` fd (returned, close-on-exec); `stdout` itself
+/// becomes a copy of `stray`. The app's own `println!` from any thread then never mixes into
+/// the protocol, never waits on a locked `Stdout`, and never hits EPIPE when the reader closes.
+pub(crate) fn split_protocol_fd(stdout: RawFd, stray: RawFd) -> io::Result<File> {
+    let fd = unsafe { libc::fcntl(stdout, libc::F_DUPFD_CLOEXEC, 3) };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let protocol = File::from(unsafe { OwnedFd::from_raw_fd(fd) });
+    if unsafe { libc::dup2(stray, stdout) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(protocol)
 }
 
 fn no_display_probe() -> Option<f64> {
@@ -169,6 +192,7 @@ impl HeadlessSession {
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => {
                     eprintln!("headless: cannot read commands: {error}");
+                    self.had_error = true;
                     return false;
                 }
             }

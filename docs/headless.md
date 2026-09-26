@@ -20,9 +20,8 @@ python3 scripts/rriter_headless.py bench src/main.rs 480 wheel 0 -3  # summary J
 The wrapper looks for `target/x86_64-unknown-linux-gnu/release/rriter`
 (`RRITER_BIN` overrides it); without a binary it prints `run make fast` and
 exits with 2. `shot` sends `open` (file) or `workspace` (directory), `settle`,
-`screenshot`, `quit`; any `err` goes to stderr with exit code 1. Lines the app
-prints to stdout that are not protocol replies go to stderr as `app: …`; the
-app's own stderr passes through. `python3 scripts/rriter_headless.py --self-test`
+`screenshot`, `quit`; any `err` goes to stderr with exit code 1. The app's own
+stderr passes through. `python3 scripts/rriter_headless.py --self-test`
 checks the wrapper without a binary.
 
 ## CLI
@@ -44,10 +43,9 @@ rriter --headless [--script FILE] [--size WxH] [--scale S] [--profile DIR | --pr
 | `--allow-writes` | Allow writing opened files, file-tree mutations and Git. Off by default. |
 | `FILE_OR_DIR` | Same as a leading `open` (file) or `workspace` (directory). No path — welcome screen. |
 
-Exit codes: `0` all commands `ok`, ended by `quit`/EOF (or stdout closed by the
-reader); `1` at least one `err`; `2` bad arguments or unsupported platform;
-`3` EGL context or `Renderer` failed (`headless: EGL setup failed at <stage>: …
-Try RRITER_EGL_VENDOR=mesa`).
+Exit codes: `0` all `ok`, ended by `quit`/EOF/closed stdout; `1` an `err` or
+unreadable input; `2` bad arguments or platform; `3` EGL or `Renderer` failed
+(`headless: EGL setup failed at <stage>: … Try RRITER_EGL_VENDOR=mesa`).
 
 ## Protocol
 
@@ -174,17 +172,17 @@ what `bench` measures.
 
 ## Isolation
 
-- RRiter state (config, data, cache, state) lives in the profile root: a temp
-  directory `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless-<pid>/`, removed on exit
-  unless `--keep-profile`, or `--profile DIR`. The live editor is untouched;
-  several headless processes can run next to it.
+- RRiter state lives in the profile root, `--profile DIR` or a temp directory
+  `${XDG_RUNTIME_DIR:-/tmp}/rriter-headless-<pid>/` removed on exit unless
+  `--keep-profile`. The live editor and other headless runs are untouched.
 - Opened files, file-tree mutations and Git are not written without
   `--allow-writes`; a blocked save shows the usual read-only notice. Saving a
   protected file never asks for elevation (`pkexec`) in headless mode.
 - File pickers, `open_url` and "reveal in file manager" do nothing; the last
   such request appears in `dump` as `external_request`.
-- The system clipboard is not used (`"clipboard": "disabled"`); cursor blink
-  is off so `settle` can converge.
+- No system clipboard or keyring: saved database passwords are not found, and
+  remembering one fails. No cursor blink; an idle app draws no frames.
+- Replies keep the original stdout; the app's own stdout goes to stderr.
 
 Not isolated: opened files are read from their real paths; LSP servers
 (`ruff`, `ty`) start on `open *.py` as in a window and write their own caches

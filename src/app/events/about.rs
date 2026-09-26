@@ -1645,7 +1645,11 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             || app.api_runtime_poll_pending(),
     ) {
         AboutWaitPlan::Wait => {
-            if let Some(w) = app.window.as_ref() {
+            // Headless has no compositor pacing: an idle `Wait` must not spin frames.
+            if let Some(w) = app.window.as_ref()
+                && (!app.headless_mode
+                    || wait_plan_wants_frame(needs_redraw, app.show_welcome, app.is_ide_mode))
+            {
                 w.request_redraw();
             }
             if needs_continuous_poll(
