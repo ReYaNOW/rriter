@@ -4,7 +4,8 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
-    use std::path::PathBuf;
+    use std::io::Cursor;
+    use std::path::{Path, PathBuf};
     use std::sync::OnceLock;
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -35,16 +36,8 @@ pub(crate) mod tests_support {
         session.hz_probe = || None;
         session
     }
-}
 
-mod session_cases {
-    use crate::headless::tests_support::session_for_test;
-    use crate::app::events::host_loop::HostLoop;
-    use crate::headless::HeadlessSession;
-    use std::io::{self, Cursor, Write};
-    use std::path::PathBuf;
-
-    fn scratch_dir(name: &str) -> PathBuf {
+    pub(crate) fn scratch_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir()
             .join(format!("rriter-headless-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -52,7 +45,7 @@ mod session_cases {
         dir
     }
 
-    fn run_script(session: &mut HeadlessSession, script: &[u8]) -> Vec<String> {
+    pub(crate) fn run_script(session: &mut HeadlessSession, script: &[u8]) -> Vec<String> {
         let mut out = Vec::new();
         assert!(session.run_loop(Cursor::new(script.to_vec()), &mut out));
         String::from_utf8(out)
@@ -62,7 +55,7 @@ mod session_cases {
             .collect()
     }
 
-    fn sample_file(dir: &std::path::Path) -> PathBuf {
+    pub(crate) fn sample_file(dir: &Path) -> PathBuf {
         let path = dir.join("sample.txt");
         let mut text = String::new();
         for i in 0..40 {
@@ -71,6 +64,57 @@ mod session_cases {
         std::fs::write(&path, text).expect("write sample file");
         path
     }
+
+    pub(crate) fn dump(session: &mut HeadlessSession) -> serde_json::Value {
+        let lines = run_script(session, b"dump\n");
+        let payload = lines[0].strip_prefix("ok ").unwrap_or_else(|| panic!("{lines:?}"));
+        serde_json::from_str(payload).expect("dump payload is JSON")
+    }
+
+    pub(crate) fn ui_center(dump: &serde_json::Value, id: &str) -> (f64, f64) {
+        let element = dump["ui"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|element| element["id"] == id)
+            .unwrap_or_else(|| panic!("no {id} in ui"));
+        let rect = &element["rect"];
+        let at = |i: usize| rect[i].as_f64().unwrap();
+        (at(0) + at(2) / 2.0, at(1) + at(3) / 2.0)
+    }
+
+    pub(crate) fn click_ui(session: &mut HeadlessSession, id: &str) {
+        let (x, y) = ui_center(&dump(session), id);
+        let lines = run_script(session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    }
+
+    pub(crate) fn has_ui(dump: &serde_json::Value, id: &str) -> bool {
+        dump["ui"].as_array().is_some_and(|ui| ui.iter().any(|element| element["id"] == id))
+    }
+
+    pub(crate) fn long_file(dir: &Path) -> PathBuf {
+        let path = dir.join("long.txt");
+        let text: String = (0..600).map(|i| format!("line {i:04} of a long bench document\n")).collect();
+        std::fs::write(&path, text).expect("write long file");
+        path
+    }
+
+    pub(crate) fn ok_json(line: &str) -> serde_json::Value {
+        let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
+        serde_json::from_str(payload).expect("json payload")
+    }
+}
+
+mod session_cases {
+    use crate::headless::tests_support::{
+        dump, long_file, ok_json, run_script, sample_file, scratch_dir, session_for_test,
+        ui_center,
+    };
+    use crate::app::events::host_loop::HostLoop;
+    use crate::headless::HeadlessSession;
+    use std::io::{self, Cursor, Write};
+    use std::path::PathBuf;
 
     fn close_to(pixel: &[u8], expected: [u8; 3]) -> bool {
         pixel.iter().zip(expected).all(|(&have, want)| have.abs_diff(want) <= 2)
@@ -223,24 +267,6 @@ mod session_cases {
         assert_eq!(lines[1], "ok frames=0 settled=true", "{lines:?}");
     }
 
-    fn dump(session: &mut HeadlessSession) -> serde_json::Value {
-        let lines = run_script(session, b"dump\n");
-        let payload = lines[0].strip_prefix("ok ").unwrap_or_else(|| panic!("{lines:?}"));
-        serde_json::from_str(payload).expect("dump payload is JSON")
-    }
-
-    fn ui_center(dump: &serde_json::Value, id: &str) -> (f64, f64) {
-        let element = dump["ui"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .find(|element| element["id"] == id)
-            .unwrap_or_else(|| panic!("no {id} in ui"));
-        let rect = &element["rect"];
-        let at = |i: usize| rect[i].as_f64().unwrap();
-        (at(0) + at(2) / 2.0, at(1) + at(3) / 2.0)
-    }
-
     /// Workspace with one dirty file tab, in IDE mode where Ctrl+4 asks before closing.
     fn dirty_ide_tab(name: &str) -> (PathBuf, PathBuf, HeadlessSession) {
         let dir = scratch_dir(name);
@@ -391,13 +417,6 @@ mod session_cases {
         let _ = std::fs::remove_dir_all(dir);
     }
 
-    fn long_file(dir: &std::path::Path) -> PathBuf {
-        let path = dir.join("long.txt");
-        let text: String = (0..600).map(|i| format!("line {i:04} of a long bench document\n")).collect();
-        std::fs::write(&path, text).expect("write long file");
-        path
-    }
-
     #[test]
     fn headless_record_frames_csv_and_motion() {
         let dir = scratch_dir("record");
@@ -433,11 +452,6 @@ mod session_cases {
         assert_eq!(lines.len(), 2, "{lines:?}");
         assert!(lines[0].starts_with("err io:"), "{lines:?}");
         assert!(lines[1].starts_with("ok {"), "{lines:?}");
-    }
-
-    fn ok_json(line: &str) -> serde_json::Value {
-        let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
-        serde_json::from_str(payload).expect("json payload")
     }
 
     #[test]

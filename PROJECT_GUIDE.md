@@ -1458,6 +1458,10 @@ Root:
 * `src/headless/frame.rs` -> headless frame step (`step_frame`: `about_to_wait` + forced/requested frame), `settle_loop`/`StepState`, pbuffer readback (`read_frame_rgba`, `flip_rows_in_place`) and `write_png`.
 * `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
+* `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, and long tabs.
+* `src/headless/ui_tests_layout.rs` -> headless UI regression tests for welcome/editor/tree size and scale matrices, resize, and frame benchmarks.
+* `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
+* `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
 * `src/headless/profile.rs` -> headless CLI options (`parse_args`, `HeadlessOptions`) and the isolated profile root (`Profile`: private temp root, explicit dir, or copy of the user's config/data/state; removed on `finish`).

@@ -10,6 +10,14 @@ pub(crate) mod protocol;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_editor;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_layout;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_panels;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_tabs_tree;
+#[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 
 use crate::app::events::host_loop::{HeadlessLoopState, HostLoop};
