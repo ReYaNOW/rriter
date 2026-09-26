@@ -7,6 +7,7 @@ Read on demand, not upfront:
 * `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
 * `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
 * `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
+* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`.
 
 Search (`rg`-first):
 

@@ -1449,6 +1449,7 @@ Root:
 * `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
+* `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
