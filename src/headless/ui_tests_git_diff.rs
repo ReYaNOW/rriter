@@ -3,7 +3,7 @@
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{
     assert_ui_rect_inside_window, click_ui, dump, git, git_init, has_ui, run_script,
-    scratch_dir, ui_center, workspace_with_explorer,
+    scratch_dir, ui_center, wait_until, workspace_with_explorer,
 };
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -57,11 +57,13 @@ fn writable_workspace(dir: &Path) -> HeadlessSession {
 
 fn double_click_ui(session: &mut HeadlessSession, id: &str) {
     let (x, y) = ui_center(&dump(session), id);
-    let lines = run_script(
-        session,
-        format!("mouse_move {x} {y}\ndblclick\nwait 1500\n").as_bytes(),
-    );
+    let lines = run_script(session, format!("mouse_move {x} {y}\ndblclick\n").as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(session, 1500, "diff tab open", |session| {
+        dump(session)["tabs"].as_array().is_some_and(|tabs| {
+            tabs.iter().any(|tab| tab["title"] == "Diff: hunks.txt")
+        })
+    });
 }
 
 fn open_git_diff(session: &mut HeadlessSession) -> Value {
@@ -69,8 +71,9 @@ fn open_git_diff(session: &mut HeadlessSession) -> Value {
     if state["ide_panel"]["active"] != "git" {
         click_ui(session, "SidebarSlot(Git)");
     }
-    let lines = run_script(session, b"wait 8000\n");
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(session, 8000, "changed Git file list", |session| {
+        has_ui(&dump(session), "GitFileDiff(0, 0)")
+    });
     let files = dump(session);
     assert!(has_ui(&files, "GitFileDiff(0, 0)"), "changed Git file missing: {files}");
     double_click_ui(session, "GitFileDiff(0, 0)");
@@ -130,11 +133,14 @@ fn headless_git_diff_rollback_saves_only_selected_hunk() {
     assert!(has_ui(&opened, "GitDiffRollbackHunk(0, 0)"), "first hunk rollback missing: {opened}");
 
     click_ui(&mut session, "GitDiffRollbackHunk(0, 0)");
-    let lines = run_script(&mut session, b"key ctrl+s\nwait 1000\n");
+    let lines = run_script(&mut session, b"key ctrl+s\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let expected = original
         .replace("line 15\n", "changed second hunk\n")
         .replace("line 27\n", "changed third hunk\n");
+    wait_until(&mut session, 1000, "rolled-back hunk saved", |_| {
+        std::fs::read_to_string(&path).is_ok_and(|contents| contents == expected)
+    });
     assert_eq!(std::fs::read_to_string(path).unwrap(), expected);
     let _ = std::fs::remove_dir_all(dir);
 }
