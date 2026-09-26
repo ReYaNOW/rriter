@@ -1,24 +1,7 @@
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, ok_json, run_script, scratch_dir, session_for_test, ui_center,
+    assert_rect_inside_window, assert_ui_y_integral, click_ui, dump, has_ui, ok_json, run_script,
+    scratch_dir, session_for_test, ui_center, ui_rect, workspace_with_explorer,
 };
-
-fn workspace_with_explorer(
-    w: u32,
-    h: u32,
-    scale: f32,
-    dir: &std::path::Path,
-) -> crate::headless::HeadlessSession {
-    let mut session = session_for_test(w, h);
-    let lines = run_script(
-        &mut session,
-        format!("scale {scale}\nworkspace {}\nsettle 2000\n", dir.display()).as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    click_ui(&mut session, "SidebarSlot(Explorer)");
-    let lines = run_script(&mut session, b"settle 2000\n");
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    session
-}
 
 #[test]
 fn headless_tabs_open_counts_and_active_close_switches_to_previous() {
@@ -319,5 +302,334 @@ fn headless_tree_and_tabs_dump_use_only_scratch_fixture_paths() {
     let state = dump(&mut session);
     assert_eq!(state["tabs"][0]["path"], file.display().to_string());
     assert!(state["tabs"][0]["path"].as_str().unwrap().contains("rriter-headless-ui-path-isolation-"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn tab_fixture_content(index: usize) -> String {
+    format!("tab {index}\ncontent {index}\n")
+}
+
+fn write_tab_fixture(dir: &std::path::Path, index: usize) -> std::path::PathBuf {
+    let path = dir.join(format!("tab-{index:02}.txt"));
+    std::fs::write(&path, tab_fixture_content(index)).unwrap();
+    path
+}
+
+fn open_tab_fixtures(
+    session: &mut crate::headless::HeadlessSession,
+    dir: &std::path::Path,
+    count: usize,
+) -> Vec<std::path::PathBuf> {
+    let mut files = Vec::with_capacity(count);
+    let mut script = format!("scale {}\nworkspace {}\nsettle 2000\n", 4.0f64 / 3.0, dir.display());
+    for index in 0..count {
+        let path = write_tab_fixture(dir, index);
+        script.push_str(&format!("open {}\n", path.display()));
+        files.push(path);
+    }
+    script.push_str("settle 2000\n");
+    let lines = run_script(session, script.as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    files
+}
+
+fn tab_paths(state: &serde_json::Value) -> Vec<String> {
+    state["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tab| tab["path"].as_str().unwrap().to_string())
+        .collect()
+}
+
+fn active_tab_index(state: &serde_json::Value) -> usize {
+    state["tabs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|tab| tab["active"] == true)
+        .unwrap()
+}
+
+fn visible_tab_indexes(state: &serde_json::Value) -> Vec<usize> {
+    state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|element| {
+            element["id"]
+                .as_str()?
+                .strip_prefix("EditorTab(")?
+                .strip_suffix(')')?
+                .parse()
+                .ok()
+        })
+        .collect()
+}
+
+fn assert_tab_hitboxes_fit(state: &serde_json::Value, width: u32, height: u32) {
+    let mut visible_count = 0;
+    for element in state["ui"].as_array().unwrap() {
+        let Some(id) = element["id"].as_str() else {
+            continue;
+        };
+        if !id.starts_with("EditorTab(") {
+            continue;
+        }
+        visible_count += 1;
+        let rect = ui_rect(state, id);
+        assert_rect_inside_window(rect, width as f64, height as f64, 0.0, 0.01, id);
+        assert_ui_y_integral(rect[1], 0.0, id);
+    }
+    assert!(visible_count > 0, "no visible editor tab hitboxes: {state}");
+}
+
+fn scroll_tab_strip(session: &mut crate::headless::HeadlessSession, width: u32, dy: i32) {
+    let lines = run_script(
+        session,
+        format!("mouse_move {} 20\nwheel 0 {dy}\nsettle 2000\n", width / 2).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+#[test]
+fn headless_tabs_drag_active_reorders_and_preserves_content() {
+    let dir = scratch_dir("ui-tabs-drag-active");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, 4);
+    let before = dump(&mut session);
+    let (start_x, start_y) = ui_center(&before, "EditorTab(3)");
+    let (_, target_y) = ui_center(&before, "EditorTab(0)");
+    let target_x = ui_rect(&before, "EditorTab(0)")[0] + 4.0;
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {start_x} {start_y}\nclick left down\nmouse_move {target_x} {target_y}\nclick left up\nsettle 1000\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+
+    let after = dump(&mut session);
+    assert_eq!(
+        tab_paths(&after),
+        vec![
+            files[3].display().to_string(),
+            files[0].display().to_string(),
+            files[1].display().to_string(),
+            files[2].display().to_string(),
+        ]
+    );
+    assert_eq!(active_tab_index(&after), 0);
+    assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(3));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_drag_clamps_at_both_ends_and_click_does_not_reorder() {
+    let dir = scratch_dir("ui-tabs-drag-edges");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, 4);
+    let before = dump(&mut session);
+    let (start_x, start_y) = ui_center(&before, "EditorTab(3)");
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {start_x} {start_y}\nclick left down\nmouse_move 64 {start_y}\nclick left up\nsettle 1000\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let first = dump(&mut session);
+    assert_eq!(tab_paths(&first)[0], files[3].display().to_string());
+    assert_eq!(active_tab_index(&first), 0);
+
+    let (start_x, start_y) = ui_center(&first, "EditorTab(0)");
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {start_x} {start_y}\nclick left down\nmouse_move 1279 {start_y}\nclick left up\nsettle 1000\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let last = dump(&mut session);
+    assert_eq!(tab_paths(&last)[3], files[3].display().to_string());
+    assert_eq!(active_tab_index(&last), 3);
+    let order_before_click = tab_paths(&last);
+
+    let (click_x, click_y) = ui_center(&last, "EditorTab(1)");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {click_x} {click_y}\nclick\nsettle 500\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let clicked = dump(&mut session);
+    assert_eq!(tab_paths(&clicked), order_before_click);
+    assert_eq!(active_tab_index(&clicked), 1);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_overflow_wheel_clamps_reveals_new_file_and_keeps_hitboxes_inside_1280x720() {
+    const TAB_COUNT: usize = 32;
+    let dir = scratch_dir("ui-tabs-overflow-1280");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, TAB_COUNT);
+    let opened = dump(&mut session);
+    assert_eq!(opened["tabs"].as_array().unwrap().len(), TAB_COUNT);
+    assert_eq!(active_tab_index(&opened), TAB_COUNT - 1);
+    let at_end = visible_tab_indexes(&opened);
+    assert!(at_end.len() < TAB_COUNT, "fixture tabs did not overflow: {at_end:?}");
+    assert!(at_end.contains(&(TAB_COUNT - 1)), "new active tab is not visible: {at_end:?}");
+    assert_tab_hitboxes_fit(&opened, 1280, 720);
+
+    scroll_tab_strip(&mut session, 1280, 10_000);
+    let at_start = dump(&mut session);
+    let start_indexes = visible_tab_indexes(&at_start);
+    assert_eq!(start_indexes.first(), Some(&0));
+    assert!(!start_indexes.contains(&(TAB_COUNT - 1)));
+    scroll_tab_strip(&mut session, 1280, 10_000);
+    assert_eq!(visible_tab_indexes(&dump(&mut session)), start_indexes);
+
+    scroll_tab_strip(&mut session, 1280, -10_000);
+    let at_end_again = dump(&mut session);
+    let end_indexes = visible_tab_indexes(&at_end_again);
+    assert_eq!(end_indexes.last(), Some(&(TAB_COUNT - 1)));
+    scroll_tab_strip(&mut session, 1280, -10_000);
+    assert_eq!(visible_tab_indexes(&dump(&mut session)), end_indexes);
+
+    scroll_tab_strip(&mut session, 1280, 10_000);
+    let new_file = write_tab_fixture(&dir, TAB_COUNT);
+    let lines = run_script(
+        &mut session,
+        format!("open {}\nsettle 1000\n", new_file.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let after_open = dump(&mut session);
+    assert_eq!(after_open["tabs"].as_array().unwrap().len(), TAB_COUNT + 1);
+    assert_eq!(active_tab_index(&after_open), TAB_COUNT);
+    assert!(visible_tab_indexes(&after_open).contains(&TAB_COUNT));
+    assert_eq!(after_open["tabs"][TAB_COUNT]["path"], new_file.display().to_string());
+    assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(TAB_COUNT));
+    assert_tab_hitboxes_fit(&after_open, 1280, 720);
+    assert_eq!(files.len(), TAB_COUNT);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_overflow_hitboxes_fit_2560x1440_at_fractional_scale() {
+    const TAB_COUNT: usize = 32;
+    let dir = scratch_dir("ui-tabs-overflow-2560");
+    let mut session = session_for_test(2560, 1440);
+    let files = open_tab_fixtures(&mut session, &dir, TAB_COUNT);
+    let state = dump(&mut session);
+    assert_eq!(state["size"][0], 2560);
+    assert!((state["scale"].as_f64().unwrap() - 4.0 / 3.0).abs() < 0.00001);
+    assert_eq!(state["tabs"].as_array().unwrap().len(), files.len());
+    assert!(visible_tab_indexes(&state).len() < files.len(), "fixture tabs did not overflow");
+    assert!(visible_tab_indexes(&state).contains(&(files.len() - 1)));
+    assert_tab_hitboxes_fit(&state, 2560, 1440);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_drag_autoscrolls_and_preserves_active_content() {
+    const TAB_COUNT: usize = 32;
+    let dir = scratch_dir("ui-tabs-drag-autoscroll");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, TAB_COUNT);
+    scroll_tab_strip(&mut session, 1280, 10_000);
+    let at_start = dump(&mut session);
+    assert_eq!(visible_tab_indexes(&at_start).first(), Some(&0));
+
+    click_ui(&mut session, "EditorTab(1)");
+    let selected = dump(&mut session);
+    assert_eq!(active_tab_index(&selected), 1);
+    let (start_x, start_y) = ui_center(&selected, "EditorTab(1)");
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {start_x} {start_y}\nclick left down\nmouse_move 1278 {start_y}\nwait 1200\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let while_dragging = dump(&mut session);
+    assert!(visible_tab_indexes(&while_dragging).first().unwrap() > &0);
+    assert_tab_hitboxes_fit(&while_dragging, 1280, 720);
+
+    let lines = run_script(&mut session, b"click left up\nsettle 1500\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let after = dump(&mut session);
+    assert_ne!(tab_paths(&after), files.iter().map(|path| path.display().to_string()).collect::<Vec<_>>());
+    let active = active_tab_index(&after);
+    assert!(active > 1);
+    assert_eq!(after["tabs"][active]["path"], files[1].display().to_string());
+    assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(1));
+    assert!(visible_tab_indexes(&after).contains(&active));
+    assert_tab_hitboxes_fit(&after, 1280, 720);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri ed6laj2sl12m8hfi8l5ufmya: dragging an inactive tab does not reorder"]
+fn headless_bug_dragging_inactive_editor_tab_reorders_and_activates_it() {
+    let dir = scratch_dir("ui-tabs-drag-inactive");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, 4);
+    let before = dump(&mut session);
+    let (start_x, start_y) = ui_center(&before, "EditorTab(0)");
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {start_x} {start_y}\nclick left down\nmouse_move 1279 {start_y}\nclick left up\nsettle 1000\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let after = dump(&mut session);
+    assert_eq!(
+        tab_paths(&after),
+        vec![
+            files[1].display().to_string(),
+            files[2].display().to_string(),
+            files[3].display().to_string(),
+            files[0].display().to_string(),
+        ]
+    );
+    assert_eq!(active_tab_index(&after), 3);
+    assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(0));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri xi36fantzstotb70ffk8rbi8: no keyboard tab switching"]
+fn headless_bug_keyboard_activation_reveals_offscreen_tab() {
+    const TAB_COUNT: usize = 32;
+    let dir = scratch_dir("ui-tabs-keyboard-switch");
+    let mut session = session_for_test(1280, 720);
+    let files = open_tab_fixtures(&mut session, &dir, TAB_COUNT);
+    scroll_tab_strip(&mut session, 1280, 10_000);
+    click_ui(&mut session, "EditorTab(0)");
+    let at_start = dump(&mut session);
+    let initially_visible = visible_tab_indexes(&at_start);
+    let mut selected_offscreen = None;
+
+    for _ in 0..TAB_COUNT {
+        let lines = run_script(&mut session, b"key ctrl+tab\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        let state = dump(&mut session);
+        let active = active_tab_index(&state);
+        if !initially_visible.contains(&active) {
+            selected_offscreen = Some((active, state));
+            break;
+        }
+    }
+
+    let (active, state) = selected_offscreen.expect("Ctrl+Tab did not select an offscreen editor tab");
+    assert!(visible_tab_indexes(&state).contains(&active));
+    assert_eq!(state["tabs"][active]["path"], files[active].display().to_string());
+    assert_eq!(session.app.editor.get_full_text(), tab_fixture_content(active));
     let _ = std::fs::remove_dir_all(dir);
 }

@@ -1,5 +1,6 @@
 use crate::headless::tests_support::{
-    click_ui, dump, ok_json, run_script, sample_file, scratch_dir, session_for_test,
+    assert_rect_inside_window, assert_ui_y_integral, click_ui, dump, has_ui, ok_json, run_script,
+    sample_file, scratch_dir, session_for_test,
 };
 
 fn open_file(session: &mut crate::headless::HeadlessSession, path: &std::path::Path) {
@@ -210,4 +211,271 @@ fn headless_bug_status_bar_stays_inside_with_bottom_panel() {
     let rect = &status["rect"];
     assert!(rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() <= 1080.0, "{rect}");
     let _ = std::fs::remove_dir_all(dir);
+}
+
+const LAYOUT_HITBOX_SIZE_SCALE_MATRIX: [(u32, u32, f32); 4] = [
+    (2560, 1440, 4.0 / 3.0),
+    (1280, 1440, 4.0 / 3.0),
+    (1280, 720, 4.0 / 3.0),
+    (640, 480, 1.5),
+];
+
+const LAYOUT_PANEL_CASES: [(&str, &str); 8] = [
+    ("Explorer", "explorer"),
+    ("Search", "search"),
+    ("Git", "git"),
+    ("ApiClient", "api"),
+    ("Database", "database"),
+    ("LspServers", "lsp"),
+    ("Problems", "problems"),
+    ("Terminal", "terminal"),
+];
+
+fn layout_hitbox_session(w: u32, h: u32, scale: f32) -> crate::headless::HeadlessSession {
+    let mut session = session_for_test(w, h);
+    let lines = run_script(&mut session, format!("scale {scale}\nsettle 800\n").as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} scale setup: {lines:?}");
+    session
+}
+
+fn layout_hitbox_workspace_session(
+    w: u32,
+    h: u32,
+    scale: f32,
+    dir: &std::path::Path,
+) -> crate::headless::HeadlessSession {
+    let mut session = layout_hitbox_session(w, h, scale);
+    let lines = run_script(
+        &mut session,
+        format!("workspace {}\nsettle 800\n", dir.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} workspace setup: {lines:?}");
+    session
+}
+
+fn layout_hitbox_fixture(name: &str) -> std::path::PathBuf {
+    let dir = scratch_dir(name);
+    let _ = sample_file(&dir);
+    let folder = dir.join("folder");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("child.txt"), "child\n").unwrap();
+    dir
+}
+
+fn assert_layout_hitboxes(
+    state: &serde_json::Value,
+    w: u32,
+    h: u32,
+    scale: f32,
+    state_name: &str,
+) {
+    let label = format!("{w}x{h}@{scale} {state_name}");
+    let ui = state["ui"].as_array().unwrap_or_else(|| panic!("{label}: UI dump missing"));
+    assert!(!ui.is_empty(), "{label}: no registered UiId hitboxes");
+    for element in ui {
+        let id = element["id"].as_str().unwrap_or("<missing>");
+        let rect = element["rect"].as_array().unwrap_or_else(|| panic!("{label} UiId={id}: rect missing"));
+        assert_eq!(rect.len(), 4, "{label} UiId={id}: rect={rect:?}");
+        let x = rect[0].as_f64().unwrap_or_else(|| panic!("{label} UiId={id}: rect={rect:?}"));
+        let y = rect[1].as_f64().unwrap_or_else(|| panic!("{label} UiId={id}: rect={rect:?}"));
+        let width = rect[2].as_f64().unwrap_or_else(|| panic!("{label} UiId={id}: rect={rect:?}"));
+        let height = rect[3].as_f64().unwrap_or_else(|| panic!("{label} UiId={id}: rect={rect:?}"));
+        assert_rect_inside_window(
+            [x, y, width, height],
+            w as f64,
+            h as f64,
+            0.01,
+            0.01,
+            &format!("{label} UiId={id}"),
+        );
+        assert_ui_y_integral(y, 0.01, &format!("{label} UiId={id}"));
+    }
+}
+
+fn close_layout_panels(session: &mut crate::headless::HeadlessSession) {
+    for (slot, panel) in LAYOUT_PANEL_CASES {
+        let state = dump(session);
+        let is_open = state["ide_panel"]["open"]
+            .as_array()
+            .is_some_and(|panels| panels.iter().any(|value| value == panel));
+        let id = format!("SidebarSlot({slot})");
+        if is_open && has_ui(&state, &id) {
+            click_ui(session, &id);
+        }
+    }
+}
+
+fn open_layout_panel(
+    session: &mut crate::headless::HeadlessSession,
+    w: u32,
+    h: u32,
+    scale: f32,
+    slot: &str,
+    panel: &str,
+) -> Option<serde_json::Value> {
+    close_layout_panels(session);
+    let id = format!("SidebarSlot({slot})");
+    let before = dump(session);
+    if !has_ui(&before, &id) {
+        assert_eq!((w, h), (640, 480), "{w}x{h}@{scale} panel {slot} missing UiId={id}");
+        return None;
+    }
+    click_ui(session, &id);
+    run_script(session, b"settle 100\n");
+    let state = dump(session);
+    assert!(
+        state["ide_panel"]["open"]
+            .as_array()
+            .is_some_and(|panels| panels.iter().any(|value| value == panel)),
+        "{w}x{h}@{scale} panel {slot} did not open UiId={id}: {state}"
+    );
+    Some(state)
+}
+
+#[test]
+fn headless_layout_registered_hitboxes_welcome_size_matrix() {
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_session(w, h, scale);
+        let state = dump(&mut session);
+        assert_eq!(state["mode"], "welcome", "{w}x{h}@{scale} welcome mode");
+        assert_layout_hitboxes(&state, w, h, scale, "welcome");
+    }
+}
+
+#[test]
+fn headless_layout_registered_hitboxes_workspace_and_api_matrix() {
+    let dir = layout_hitbox_fixture("ui-layout-hitbox-api-matrix");
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_workspace_session(w, h, scale, &dir);
+        let workspace = dump(&mut session);
+        assert_eq!(workspace["mode"], "ide", "{w}x{h}@{scale} workspace mode");
+        assert_layout_hitboxes(&workspace, w, h, scale, "workspace");
+        let api = open_layout_panel(&mut session, w, h, scale, "ApiClient", "api")
+            .unwrap_or_else(|| panic!("{w}x{h}@{scale} API client missing UiId=SidebarSlot(ApiClient)"));
+        assert_layout_hitboxes(&api, w, h, scale, "panel ApiClient");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_layout_registered_hitboxes_smoke_file_explorer_and_lsp() {
+    let dir = layout_hitbox_fixture("ui-layout-hitbox-smoke");
+    let file = dir.join("sample.txt");
+    let (w, h, scale) = (640, 480, 1.5);
+
+    let mut file_session = layout_hitbox_session(w, h, scale);
+    open_file(&mut file_session, &file);
+    let file_state = dump(&mut file_session);
+    assert_eq!(file_state["mode"], "editor", "{w}x{h}@{scale} file editor mode");
+    assert_layout_hitboxes(&file_state, w, h, scale, "file open");
+
+    let mut workspace = layout_hitbox_workspace_session(w, h, scale, &dir);
+    for (slot, panel) in [("Explorer", "explorer"), ("LspServers", "lsp")] {
+        let state = open_layout_panel(&mut workspace, w, h, scale, slot, panel)
+            .unwrap_or_else(|| panic!("{w}x{h}@{scale} panel {slot} missing UiId=SidebarSlot({slot})"));
+        assert_layout_hitboxes(&state, w, h, scale, &format!("panel {slot}"));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_layout_registered_hitboxes_settings_tabs_that_fit_matrix() {
+    for (w, h, last_tab) in [(2560, 1440, 5), (1280, 1440, 5), (1280, 720, 3)] {
+        let scale = 4.0 / 3.0;
+        let mut session = layout_hitbox_session(w, h, scale);
+        let lines = run_script(&mut session, b"key f1\nsettle 100\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} settings open: {lines:?}");
+        for tab in 2..=last_tab {
+            let before = dump(&mut session);
+            let id = format!("SettingsTab({tab})");
+            assert!(has_ui(&before, &id), "{w}x{h}@{scale} settings tab {tab} missing UiId={id}");
+            click_ui(&mut session, &id);
+            run_script(&mut session, b"settle 100\n");
+            let state = dump(&mut session);
+            assert!(state["overlays"]["settings"].as_bool().unwrap_or(false), "{w}x{h}@{scale} settings tab {tab} overlay");
+            assert_layout_hitboxes(&state, w, h, scale, &format!("settings tab {tab}"));
+        }
+    }
+}
+
+#[test]
+#[ignore = "kanri jbn6bb6q5whxo5ro4h9k5k46: editor scrollbar hitbox y is fractional"]
+fn headless_bug_editor_hitbox_y_integral_size_matrix() {
+    let dir = layout_hitbox_fixture("ui-layout-bug-editor-hitbox-y");
+    let file = dir.join("wide.txt");
+    std::fs::write(&file, format!("{}\n", "x".repeat(600))).unwrap();
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_session(w, h, scale);
+        open_file(&mut session, &file);
+        let state = dump(&mut session);
+        assert_layout_hitboxes(&state, w, h, scale, "file open");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri h158154p1igj3c7ovzi56i2j: IDE sidebar hitbox y is fractional at scale 4/3"]
+fn headless_bug_sidebar_panel_hitbox_y_integral_size_matrix() {
+    let dir = layout_hitbox_fixture("ui-layout-bug-sidebar-hitbox-y");
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_workspace_session(w, h, scale, &dir);
+        for (slot, panel) in LAYOUT_PANEL_CASES {
+            if let Some(state) = open_layout_panel(&mut session, w, h, scale, slot, panel) {
+                assert_layout_hitboxes(&state, w, h, scale, &format!("panel {slot}"));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri tdxq0x7q0f0glr5iyl54nr6n: API Client spec row hitbox y is fractional"]
+fn headless_bug_api_client_spec_refresh_hitbox_y_integral_size_matrix() {
+    let dir = layout_hitbox_fixture("ui-layout-bug-api-spec-hitbox-y");
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_workspace_session(w, h, scale, &dir);
+        // A URL spec card registers `ApiSpecRefresh(0)`; the default state has no spec.
+        session.app.ide_panel.api.specs.push(crate::app::api_client::ApiSpecEntry {
+            id: crate::app::api_client::ApiSpecId(1),
+            title: "Spec API".to_string(),
+            version: "1".to_string(),
+            openapi_version: "3.1.0".to_string(),
+            source: crate::app::api_client::ApiSpecSource::Url(
+                "https://example.test/openapi.json".to_string(),
+            ),
+            last_loaded: None,
+            last_fetch_secs: None,
+            last_parse_secs: None,
+            last_url_status: None,
+            selected: true,
+            error: None,
+        });
+        if let Some(state) = open_layout_panel(&mut session, w, h, scale, "ApiClient", "api") {
+            assert!(has_ui(&state, "ApiSpecRefresh(0)"), "{w}x{h}@{scale} spec row missing");
+            assert_layout_hitboxes(&state, w, h, scale, "panel ApiClient with spec");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri pgwvbzz1pvi8fjcccipu0ar2: settings tab hitbox leaves the window"]
+fn headless_bug_settings_hitboxes_inside_window_size_matrix() {
+    for (w, h, scale) in LAYOUT_HITBOX_SIZE_SCALE_MATRIX {
+        let mut session = layout_hitbox_session(w, h, scale);
+        let lines = run_script(&mut session, b"key f1\nsettle 100\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{w}x{h}@{scale} settings open: {lines:?}");
+        for tab in 0..6 {
+            if tab > 0 {
+                let before = dump(&mut session);
+                let id = format!("SettingsTab({tab})");
+                assert!(has_ui(&before, &id), "{w}x{h}@{scale} settings tab {tab} missing UiId={id}");
+                click_ui(&mut session, &id);
+                run_script(&mut session, b"settle 100\n");
+            }
+            let state = dump(&mut session);
+            assert!(state["overlays"]["settings"].as_bool().unwrap_or(false), "{w}x{h}@{scale} settings tab {tab} overlay");
+            assert_layout_hitboxes(&state, w, h, scale, &format!("settings tab {tab}"));
+        }
+    }
 }

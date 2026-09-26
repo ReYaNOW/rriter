@@ -20,9 +20,22 @@ pub(crate) mod tests_support {
                     .join(format!("rriter-headless-test-profile-{}", std::process::id()));
                 std::fs::create_dir_all(&root).expect("create test profile root");
                 let _ = crate::platform::set_app_root_override(root.clone());
+                reset_api_test_state();
                 root
             })
             .clone()
+    }
+
+    /// Under `cfg(test)` the API client and API Mock state ignore the profile root and live
+    /// in fixed temp dirs shared by every test process (`api_config_dir`, `api_mock_data_dir`).
+    /// App-level API tests persist a URL spec and mock routes there, and `workspace` loads
+    /// them back, so headless tests start from the defaults instead of the last writer.
+    fn reset_api_test_state() {
+        let api_dir = std::env::temp_dir().join("rriter_api_client_tests");
+        for file in ["api_specs.json", "api_auth.json"] {
+            let _ = std::fs::remove_file(api_dir.join(file));
+        }
+        let _ = std::fs::remove_file(crate::app::api_mock::persist::api_mocks_path());
     }
 
     /// Session on its own offscreen context; the global headless policy stays unset.
@@ -34,6 +47,31 @@ pub(crate) mod tests_support {
             Err((code, message)) => panic!("headless session (code {code}): {message}"),
         };
         session.hz_probe = || None;
+        session
+    }
+
+    pub(crate) fn workspace_with_explorer(
+        w: u32,
+        h: u32,
+        scale: f32,
+        dir: &Path,
+    ) -> HeadlessSession {
+        let mut session = session_for_test(w, h);
+        let lines = run_script(
+            &mut session,
+            format!("scale {scale}\nworkspace {}\nsettle 2000\n", dir.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+
+        let state = dump(&mut session);
+        let explorer_open = state["ide_panel"]["open"]
+            .as_array()
+            .is_some_and(|panels| panels.iter().any(|panel| panel == "explorer"));
+        if !explorer_open {
+            click_ui(&mut session, "SidebarSlot(Explorer)");
+        }
+        let lines = run_script(&mut session, b"settle 2000\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
         session
     }
 
@@ -72,15 +110,63 @@ pub(crate) mod tests_support {
     }
 
     pub(crate) fn ui_center(dump: &serde_json::Value, id: &str) -> (f64, f64) {
+        let [x, y, width, height] = ui_rect(dump, id);
+        (x + width / 2.0, y + height / 2.0)
+    }
+
+    pub(crate) fn ui_rect(dump: &serde_json::Value, id: &str) -> [f64; 4] {
         let element = dump["ui"]
             .as_array()
             .unwrap()
             .iter()
             .find(|element| element["id"] == id)
             .unwrap_or_else(|| panic!("no {id} in ui"));
-        let rect = &element["rect"];
-        let at = |i: usize| rect[i].as_f64().unwrap();
-        (at(0) + at(2) / 2.0, at(1) + at(3) / 2.0)
+        let rect = element["rect"].as_array().unwrap();
+        [
+            rect[0].as_f64().unwrap(),
+            rect[1].as_f64().unwrap(),
+            rect[2].as_f64().unwrap(),
+            rect[3].as_f64().unwrap(),
+        ]
+    }
+
+    pub(crate) fn assert_rect_inside_window(
+        [x, y, width, height]: [f64; 4],
+        window_width: f64,
+        window_height: f64,
+        start_tolerance: f64,
+        end_tolerance: f64,
+        label: &str,
+    ) {
+        assert!(
+            x >= -start_tolerance
+                && y >= -start_tolerance
+                && x + width <= window_width + end_tolerance
+                && y + height <= window_height + end_tolerance,
+            "{label} outside {window_width}x{window_height}: [{x}, {y}, {width}, {height}]"
+        );
+    }
+
+    pub(crate) fn assert_ui_rect_inside_window(dump: &serde_json::Value, id: &str) {
+        let [x, y, width, height] = ui_rect(dump, id);
+        let window_width = dump["size"][0].as_f64().unwrap();
+        let window_height = dump["size"][1].as_f64().unwrap();
+        assert!(
+            x >= 0.0 && y >= 0.0 && width > 0.0 && height > 0.0,
+            "{id} has invalid rect [{x}, {y}, {width}, {height}]"
+        );
+        assert_rect_inside_window(
+            [x, y, width, height],
+            window_width,
+            window_height,
+            0.0,
+            0.5,
+            id,
+        );
+    }
+
+    pub(crate) fn assert_ui_y_integral(y: f64, tolerance: f64, label: &str) {
+        assert!((y - y.round()).abs() <= tolerance, "{label} has fractional y={y}");
     }
 
     pub(crate) fn click_ui(session: &mut HeadlessSession, id: &str) {

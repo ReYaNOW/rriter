@@ -168,7 +168,8 @@
 
 ### Welcome, настройки и overlays
 
-- [~] Welcome экран — тесты проверяют режим, отсутствие вкладок и границы hitbox, но не кликают New File, Open File, IDE Mode или Recent File: headless_layout_welcome_dump_has_no_file_tabs, headless_bug_welcome_rectangles_inside_compact_windows (ui_tests_layout.rs:85,183).
+- [x] Матрица экрана пользователя — 2560×1440, 1280×1440, 1280×720 @ 4/3 и smoke 640×480 @ 1.5 для welcome, файла, дерева, IDE-панелей и вкладок Settings: все hitbox внутри окна, y целые. Зелёные части: headless_layout_registered_hitboxes_welcome_size_matrix, headless_layout_registered_hitboxes_workspace_and_api_matrix, headless_layout_registered_hitboxes_smoke_file_explorer_and_lsp, headless_layout_registered_hitboxes_settings_tabs_that_fit_matrix (ui_tests_layout.rs:336,346,361,382). Нарушения — ignored: дробный y EditorScrollbarX при длинной строке (kanri jbn6bb6q5whxo5ro4h9k5k46), дробный y хитбоксов боковых панелей FileTreeNode/ProjectSearchHelp (kanri h158154p1igj3c7ovzi56i2j), Settings при 2560×1440: SettingsTab(3) за низом окна и дробный y SettingsIdeIgnoreInput (kanri pgwvbzz1pvi8fjcccipu0ar2), дробный y ApiSpecRefresh при наличии спецификации в API Client (kanri tdxq0x7q0f0glr5iyl54nr6n) — headless_bug_*_size_matrix в ui_tests_layout.rs. Состояние API Client/API Mock из общих /tmp-каталогов тестов сбрасывается перед каждым тестом (tests.rs reset_api_test_state). Высота hitbox не проверяется: строки дерева при 4/3 имеют h=37.333.
+- [~] Welcome экран — тесты проверяют режим, отсутствие вкладок и границы hitbox, но не кликают New File, Open File, IDE Mode или Recent File: headless_layout_welcome_dump_has_no_file_tabs, headless_bug_welcome_rectangles_inside_compact_windows (ui_tests_layout.rs:87,185).
 - [x] Диалог закрытия dirty-файла/вкладки — Save, Discard, Cancel и Escape проверены; кадр с диалогом отличается: headless_dialog_cancel_then_discard_close_tab, headless_dialog_save_writes_file, headless_dialog_escape_closes_like_window (tests.rs:355,391,407).
 - [~] Settings overlay — F1 открывает, внешний клик закрывает; общая логика содержимого настроек этим не покрыта: headless_editor_settings_overlay_closes_on_outside_click, headless_dump_ui_rect_click_and_settings_key (ui_tests_editor.rs:131, tests.rs:332).
 - [~] Settings → Editor (индекс 2) — только целочисленные y/height hitbox вкладок в тесте всех шести вкладок; элементы редакторских настроек не меняются: headless_bug_settings_tab_y_integral (ui_tests_panels.rs:341; названия вкладок render_view/settings_ui.rs:496).
@@ -176,14 +177,14 @@
 - [~] Settings → IDE — проверяется наличие Add Workspace hitbox и геометрия вкладок, но добавление/удаление workspace и ignore не выполняется: headless_bug_settings_tab_y_integral (ui_tests_panels.rs:341; UiId src/ui_system.rs:47-54).
 - [ ] Settings → Основные, Внешний вид, Базы данных — тесты не меняют соответствующие значения; проверка шести вкладок касается только геометрии. Вкладки перечислены в render_view/settings_ui.rs:496.
 - [ ] Установка инструментов и Dart-настройки Settings — pick/install/cancel/log и Dart support controls не упражняются headless-тестами: UiId src/ui_system.rs:56-76.
-- [ ] Контекстные меню и File Tree create/rename/move/delete dialogs — нет headless-проверки открытия меню, подтверждения и изменения файлов: UiId src/ui_system.rs:368-382.
-- [ ] Hover popup и LSP hover/diagnostic popup — нет проверки появления, текста, прокрутки или кнопок popup; UiId src/ui_system.rs:424-464.
+- [~] Контекстные меню и File Tree create/rename/move/delete — меню на файле, папке и пустом месте (пункты, границы, Escape/внешний клик), создание файла и папки, отказ для пустого, существующего имени и имени с '/', rename с открытой вкладкой, drag-move с обновлением вкладки и отказ переноса папки в себя/потомка, диалог удаления с Cancel проверены при 1280×720 @ 4/3: ui_tests_tree_ops.rs:105-317. Подтверждённое удаление не тестируется — оно идёт в реальную ~/.local/share/Trash (platform.rs trash_layout); нужен test-double Trash (kanri bf26z6jckzub0vzu2pzy1wj5).
+- [~] Hover popup и LSP hover/diagnostic popup — при доступном ty/ruff: появление после задержки, релевантный текст, скрытие по уходу мыши и Escape, границы у правого/нижнего края, прокрутка длинной документации, copy у diagnostic popup: headless_lsp_hover_popup_* (ui_tests_panels.rs:311,343,386,427). Без LSP-сервера тесты деградируют; безусловных путей нет — hover всегда идёт через LSP. Баги — ignored: дробный y hitbox попапа (kanri slh44n9j98m9xpg9kl7sewwg), ввод текста не скрывает попап (kanri q83ryjk7ajlrqpet9umh4b38) — ui_tests_panels.rs:478,509.
 - [~] Обычный поиск в редакторе — Ctrl+F, ввод, переход Enter на совпадение и Escape проверены; replace, case toggle и отдельные prev/next кнопки не упражняются: headless_editor_search_overlay_and_completion, headless_editor_search_match_advances_and_escape_closes_at_both_scales (ui_tests_editor.rs:92,112; UiId src/ui_system.rs:384-390).
 
 ### IDE панели и сервисы
 
 - [~] Sidebar slots — проверено переключение Explorer, Search, Git, API Client, Database, LSP Servers и Problems с появлением контролов; Terminal проверен отдельно: headless_ide_panel_slots_open_and_register_controls, headless_bug_terminal_sidebar_slot_opens_panel (ui_tests_panels.rs:35,259; PanelId src/app/app_state.rs:140-148).
-- [~] File Tree просмотр — раскрытие/сворачивание, открытие длинного имени, большой список, полоса прокрутки и дробный scale проверены; создание, переименование, перенос и удаление — нет: headless_tree_expand_and_collapse_folder_restores_child_nodes, headless_tree_long_filename_single_and_double_click, headless_tree_250_files_expands_and_scrolls_within_budget (ui_tests_tabs_tree.rs:118,148,210).
+- [~] File Tree просмотр — раскрытие/сворачивание, открытие длинного имени, большой список, полоса прокрутки и дробный scale проверены; операции с файлами — отдельный пункт выше: headless_tree_expand_and_collapse_folder_restores_child_nodes, headless_tree_long_filename_single_and_double_click, headless_tree_250_files_expands_and_scrolls_within_budget (ui_tests_tabs_tree.rs:194,132,102).
 - [~] Project Search — поиск совпадения, переход к строке и пустой результат проверены; include/exclude/filter/help и многократные результаты не проверены: headless_project_search_empty_and_open_result (ui_tests_panels.rs:92; UiId src/ui_system.rs:392-406).
 - [~] Git changes — список изменённых файлов появляется без ручного refresh; stage/unstage, rollback и выбор diff здесь не проходят: headless_bug_git_changes_load_without_manual_refresh (ui_tests_panels.rs:329; Git UiId src/ui_system.rs:331-364).
 - [ ] Git graph и commit history — ни отрисовка/выбор commit, ни прокрутка графа в headless UI не проверяются: UiId src/ui_system.rs:353-364.
@@ -199,7 +200,8 @@
 
 ### Редактор, клавиатура и вкладки
 
-- [~] Клавиатурная маршрутизация — headless UI использует F1, Ctrl+F, Ctrl+Space, Escape, Enter, PageDown, Shift+Right, Backspace, Ctrl+4 и Ctrl+Q; Save/Undo/Redo/Cut/Copy/Paste/comment и panel shortcuts отдельно не проверяются: ui_tests_editor.rs:10-220, tests.rs:332-408; обработчики editor_keys.rs:631-1013, main_keys.rs:671-740.
+- [~] Клавиатурная маршрутизация — headless UI использует F1, Ctrl+F, Ctrl+Space, Escape, Enter, PageDown, Shift+Right, Backspace, Ctrl+4 и Ctrl+Q; panel shortcuts отдельно не проверяются: ui_tests_editor.rs:10-220, tests.rs:332-408; обработчики editor_keys.rs:631-1013, main_keys.rs:671-740.
+- [~] Editor shortcuts — Save (файл на диске, dirty снят), Undo с пустой историей, Undo, Redo по Ctrl+Y, Copy (выделение сохраняется), Cut, Paste при отключённом буфере, comment toggle на пустой, одной и нескольких строках проверены при 1280×720 @ 4/3: ui_tests_editor.rs:268,302,330. Ctrl+Shift+Z не привязан к Redo. Round trip Copy/Cut→Paste не проверяется: в headless буфер обмена отключён (app_bootstrap.rs:148-151); нужен мок буфера обмена для тестов (kanri bf26z6jckzub0vzu2pzy1wj5).
 - [~] Выделение и курсор — drag, Shift+Right и Backspace меняют selection/cursor; расширенные формы выделения не покрыты: headless_editor_selection_and_cursor_at_multiple_scales, headless_editor_drag_selection_does_not_require_double_click (ui_tests_editor.rs:10,145).
 - [ ] Multi-cursor — headless UI тестов нет; вывод: поиск по editor.rs, editor_navigation.rs и keyboard-модулям не нашёл multi-cursor символов; наличие реализации другими средствами не проверял.
 - [~] Folding — внешняя функция скрывает вложенную fold arrow и раскрывает её обратно; верхний край проверен только на отсутствие ложной стрелки: headless_editor_drag_selection_and_fold_unfold, headless_bug_fold_arrow_top_visible (ui_tests_editor.rs:30,190).
@@ -208,13 +210,13 @@
 - [~] Markdown preview/Read mode — кликом MarkdownModeToggle включается режим; рендер markdown, scroll, code-copy и scrollbar не проверяются: headless_dump_ui_rect_click_and_settings_key (tests.rs:332; UiId src/ui_system.rs:424-430).
 - [ ] Goto definition — headless UI сценария перехода к определению нет: клавиатурные/LSP actions находятся в src/app/keyboard/* и src/app/lsp_actions.rs.
 - [~] Completion — Ctrl+Space только активирует popup; выбор и применение completion item не проверяются: headless_editor_search_overlay_and_completion (ui_tests_editor.rs:92).
-- [~] Вкладки: open/close — проверены счётчик, закрытие активной/неактивной вкладки и dirty confirm; drag вкладок и tab-strip scroll не проверяются: headless_tabs_open_counts_and_active_close_switches_to_previous, headless_tabs_closing_inactive_tab_preserves_active_tab, headless_tabs_dirty_close_dialog_discard_closes_tab (ui_tests_tabs_tree.rs:23,62,94).
-- [ ] Перетаскивание вкладок и прокрутка длинной полосы вкладок — headless-тестов нет; тест длинного имени проверяет только видимость close hitbox: headless_bug_long_editor_tab_visible_close (ui_tests_editor.rs:220).
+- [~] Вкладки: open/close — проверены счётчик, закрытие активной/неактивной вкладки и dirty confirm; drag и полоса вкладок — следующий пункт: headless_tabs_open_counts_and_active_close_switches_to_previous, headless_tabs_closing_inactive_tab_preserves_active_tab, headless_tabs_dirty_close_dialog_discard_closes_tab (ui_tests_tabs_tree.rs).
+- [~] Перетаскивание вкладок и прокрутка длинной полосы вкладок — drag активной вкладки меняет порядок и сохраняет содержимое, края ограничивают, клик без движения не переставляет, autoscroll у края при drag, колесо прокручивает полосу с ограничением на обоих концах, новая вкладка попадает в кадр, hitbox вкладок внутри окна с целым y при 1280×720 и 2560×1440 @ 4/3: ui_tests_tabs_tree.rs:396-537. Кнопок прокрутки у полосы нет (только edge fades). Ignored: drag неактивной вкладки не меняет порядок (kanri ed6laj2sl12m8hfi8l5ufmya), нет переключения вкладок с клавиатуры Ctrl+Tab — фича (kanri xi36fantzstotb70ffk8rbi8): ui_tests_tabs_tree.rs:577,608.
 
 ### Размер окна и масштаб
 
 - [x] Resize/scale состояние и layout — матрицы размеров, масштабы 1.0–2.0, циклы resize, компактные окна и 4K проверены в headless режиме: headless_layout_welcome_file_and_tree_size_scale_matrix, headless_layout_small_large_framebuffer_reports_exact_size_and_scale, headless_layout_file_and_tree_keep_requested_scale_through_resize, headless_layout_mode_survives_repeated_resize_cycle (ui_tests_layout.rs:10,55,97,130).
-- [~] DPI-пара 2560×1440 @ 1.333 (логические 1920×1080) — такой пары нет: в headless исходниках проверены scale 1.0, 1.25, 1.5, 2.0 для 2560×1440 и 1.0/1.25 для 1920×1080 (ui_tests_layout.rs:18,57,200; поиск 1.333 по src/headless не дал совпадений). Native OS DPI/window scaling этим не проверяется.
+- [x] DPI-пара 2560×1440 @ 4/3 (логические 1920×1080), половина 1280×1440 и четверть 1280×720 при том же scale — матрица hitbox выше, вкладки, дерево, шорткаты и hover. Native OS DPI/window scaling этим не проверяется.
 
 ## 3. Уникальные размеры окна и scale
 
@@ -227,9 +229,11 @@
 - 900×600 @ 1.0, 1.5
 - 1000×700 @ 1.0
 - 1024×768 @ 1.0
+- 1280×720 @ 4/3
+- 1280×1440 @ 4/3
 - 1280×800 @ 1.0, 1.25, 1.5, 2.0
 - 1920×1080 @ 1.0, 1.25
-- 2560×1440 @ 1.0, 1.25, 1.5, 2.0
+- 2560×1440 @ 1.0, 1.25, 4/3, 1.5, 2.0
 - 3840×2160 @ 2.0
 
 Дополнительно, только входы чистой функции dialog_layout, не окна: 1920×1080 @ 1.0 и 2.0; 1000×500 @ 1.25; 320×200 @ 1.0 (src/headless/dump.rs:296-307). Размер 800×600 указан как итог resize-сценария, а не исходный HeadlessSession (src/headless/tests.rs:164-172).

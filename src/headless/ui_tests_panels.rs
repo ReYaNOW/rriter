@@ -1,4 +1,7 @@
-use crate::headless::tests_support::{click_ui, dump, has_ui, run_script, sample_file, scratch_dir, session_for_test, ui_center};
+use crate::headless::tests_support::{
+    assert_ui_y_integral, click_ui, dump, has_ui, run_script, sample_file, scratch_dir,
+    session_for_test, ui_center,
+};
 
 fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
     click_ui(session, id);
@@ -30,6 +33,112 @@ fn workspace_session(
     );
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     session
+}
+
+fn write_python_hover_fixture(dir: &std::path::Path, source: &str) -> std::path::PathBuf {
+    let file = dir.join("main.py");
+    std::fs::write(&file, source).unwrap();
+    file
+}
+
+fn has_available_lsp(session: &crate::headless::HeadlessSession, names: &[&str]) -> bool {
+    session.app.ide_panel.lsp_servers.iter().any(|server| {
+        names.contains(&server.name)
+            && !matches!(
+                server.status,
+                crate::lsp::LspServerStatus::Missing | crate::lsp::LspServerStatus::Crashed
+            )
+    })
+}
+
+fn open_hover_file(session: &mut crate::headless::HeadlessSession, file: &std::path::Path) {
+    let lines = run_script(
+        session,
+        format!("open {}\nsettle 2000\n", file.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn mouse_move_to_source_offset(
+    session: &mut crate::headless::HeadlessSession,
+    byte_offset: usize,
+) -> (f32, f32) {
+    let state = dump(session);
+    let body = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "EditorTextBody")
+        .unwrap_or_else(|| panic!("editor text body missing: {state}"));
+    let body_rect = body["rect"].as_array().unwrap();
+    let body_x = body_rect[0].as_f64().unwrap() as f32;
+    let body_y = body_rect[1].as_f64().unwrap() as f32;
+    let (x, y) = {
+        let app = &mut session.app;
+        let scroll_x = app.scroll_x.current.round();
+        let scroll_y = app.scroll_y.current.round();
+        let editor = &app.editor;
+        let line = editor
+            .line_offsets
+            .partition_point(|&offset| offset <= byte_offset)
+            .saturating_sub(1);
+        let line_start = editor.line_offsets.get(line).copied().unwrap_or(0);
+        let renderer = app.renderer.as_mut().expect("headless renderer");
+        let visual_line = renderer.phys_to_visual.get(line).copied().unwrap_or(line) as f32;
+        let text_x = renderer.visual_x_for_byte_offset(editor, line_start, byte_offset, true);
+        let char_advance = renderer.ascii_advances['a' as usize];
+        (
+            (body_x + text_x + char_advance * 0.5 - scroll_x).round(),
+            (body_y + visual_line * renderer.line_height + renderer.line_height * 0.5 - scroll_y)
+                .round(),
+        )
+    };
+    let lines = run_script(session, format!("mouse_move {x} {y}\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    (x, y)
+}
+
+fn wait_for_hover(session: &mut crate::headless::HeadlessSession) {
+    let lines = run_script(session, b"wait 1600\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn current_hover_popup_text() -> Option<String> {
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        state.borrow().popup.as_ref().map(|popup| popup.text.clone())
+    })
+}
+
+fn current_hover_popup_rect() -> Option<(f32, f32, f32, f32)> {
+    crate::app::mouse::HOVER_STATE.with(|state| state.borrow().rect)
+}
+
+fn hover_source_with_docs(detail_lines: usize) -> String {
+    let mut source = String::from(
+        "def hover_subject(value: int) -> int:\n    \"\"\"hover_subject documentation.\n",
+    );
+    for line in 0..detail_lines {
+        source.push_str(&format!("    Detail {line}: hover_subject returns an integer.\n"));
+    }
+    source.push_str("    \"\"\"\n    return value\n\nresult = hover_subject(7)\n");
+    source
+}
+
+fn edge_hover_source(target_row: usize, target_column: usize) -> String {
+    let mut source = String::from(
+        "def hover_subject(value: int) -> int:\n    \"\"\"hover_subject returns a value.\n\n    It documents edge placement.\n    \"\"\"\n    return value\n",
+    );
+    let mut row = source.lines().count();
+    while row < target_row {
+        source.push_str(&format!("padding_{row} = {row}\n"));
+        row += 1;
+    }
+    let prefix = "edge_result = ";
+    let repeated_terms = target_column.saturating_sub(prefix.len()) / 4;
+    source.push_str(prefix);
+    source.push_str(&"0 + ".repeat(repeated_terms));
+    source.push_str("hover_subject(1)\n");
+    source
 }
 
 #[test]
@@ -146,7 +255,17 @@ fn headless_database_dialog_and_api_mock_guide_controls() {
     let api = dump(&mut session);
     if has_ui(&api, "ApiMockServerToggle") {
         click(&mut session, "ApiMockServerToggle");
-        assert!(has_ui(&dump(&mut session), "ApiMockServerCopyUrl"));
+        // `Running` comes from the server thread and reaches the UI only through `wait`
+        // (docs/headless.md); a single post-click frame races the runtime start and bind.
+        let mut state = dump(&mut session);
+        for _ in 0..50 {
+            if has_ui(&state, "ApiMockServerCopyUrl") {
+                break;
+            }
+            run_script(&mut session, b"wait 100\n");
+            state = dump(&mut session);
+        }
+        assert!(has_ui(&state, "ApiMockServerCopyUrl"), "{}", state["ui"]);
     }
     if has_ui(&dump(&mut session), "ApiMockGuideOpen") {
         click(&mut session, "ApiMockGuideOpen");
@@ -195,6 +314,225 @@ fn headless_lsp_server_toggle_exposes_stop_control_when_available() {
     if server_status == Some(crate::lsp::LspServerStatus::Running) {
         assert!(has_ui(&state, &format!("LspServerStop({index})")), "{state}");
     }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_hover_popup_shows_symbol_and_dismisses_on_mouse_or_escape() {
+    let dir = scratch_dir("ui-lsp-hover-dismiss");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    let target = source.find("hover_subject").unwrap();
+    mouse_move_to_source_offset(&mut session, target);
+    assert!(current_hover_popup_text().is_none(), "hover popup appeared before the delay");
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("hover response popup missing");
+    assert!(!text.trim().is_empty(), "hover response was empty");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+
+    run_script(&mut session, b"mouse_move 1270 710\nwait 400\n");
+    assert!(current_hover_popup_text().is_none(), "moving away must hide the hover popup");
+
+    mouse_move_to_source_offset(&mut session, target);
+    wait_for_hover(&mut session);
+    assert!(current_hover_popup_text().is_some(), "hover popup did not reopen");
+    run_script(&mut session, b"key escape\n");
+    assert!(current_hover_popup_text().is_none(), "Escape must hide the hover popup");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_hover_popup_stays_inside_window_at_right_and_bottom_edges() {
+    for (w, h) in [(1280, 720), (2560, 1440)] {
+        let dir = scratch_dir("ui-lsp-hover-edges");
+        let mut session = workspace_session(w, h, 4.0 / 3.0, &dir);
+        let (target_row, target_column) = {
+            let renderer = session.app.renderer.as_ref().expect("headless renderer");
+            let char_advance = renderer.ascii_advances['0' as usize].max(1.0);
+            (
+                (((renderer.height - 100.0) / renderer.line_height).floor() as usize)
+                    .saturating_sub(1),
+                ((renderer.width - 430.0) / char_advance).max(1.0) as usize,
+            )
+        };
+        let source = edge_hover_source(target_row, target_column);
+        let file = write_python_hover_fixture(&dir, &source);
+        open_hover_file(&mut session, &file);
+        if !has_available_lsp(&session, &["ty"]) {
+            eprintln!("skip: no available ty LSP server");
+            let _ = std::fs::remove_dir_all(dir);
+            continue;
+        }
+
+        let target = source.rfind("hover_subject").unwrap();
+        let (mouse_x, mouse_y) = mouse_move_to_source_offset(&mut session, target);
+        assert!(mouse_x > w as f32 * 0.7, "hover target was not near the right edge: {mouse_x}");
+        assert!(mouse_y > h as f32 * 0.8, "hover target was not near the bottom edge: {mouse_y}");
+        wait_for_hover(&mut session);
+        let (x, y, popup_w, popup_h) = current_hover_popup_rect().expect("hover popup bounds missing");
+        assert!(
+            x >= 0.0 && y >= 0.0,
+            "popup starts outside {w}x{h}: {:?}",
+            (x, y, popup_w, popup_h)
+        );
+        assert!(
+            x + popup_w <= w as f32 && y + popup_h <= h as f32,
+            "popup ends outside {w}x{h}: {:?}",
+            (x, y, popup_w, popup_h)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn headless_lsp_hover_popup_scrolls_long_documentation() {
+    let dir = scratch_dir("ui-lsp-hover-scroll");
+    let source = hover_source_with_docs(18);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("long hover popup missing");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+    let before = crate::app::mouse::HOVER_STATE.with(|state| {
+        let state = state.borrow();
+        assert!(
+            state.max_scroll > 0.0,
+            "long hover response did not scroll: {}",
+            text.lines().count()
+        );
+        state.popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
+    });
+    let state = dump(&mut session);
+    assert!(has_ui(&state, "HoverPopupScroll"), "hover scrollbar missing: {state}");
+    let (scroll_x, scroll_y) = ui_center(&state, "HoverPopupScroll");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {scroll_x} {scroll_y}\nwheel 0 -3\nwait 300\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let after = crate::app::mouse::HOVER_STATE.with(|state| {
+        state.borrow().popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
+    });
+    assert!((after - before).abs() > 0.1, "hover content did not scroll: {before} -> {after}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist() {
+    let dir = scratch_dir("ui-lsp-diagnostic-hover");
+    let source = "def broken_value() -> int:\n    return missing_hover_name\n";
+    let file = write_python_hover_fixture(&dir, source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ruff", "ty"]) {
+        eprintln!("skip: no available Python LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    run_script(&mut session, b"wait 5000\n");
+    let diagnostic = session.app.lsp.as_ref().and_then(|lsp| {
+        lsp.get_diagnostics(&file)
+            .iter()
+            .find(|diagnostic| diagnostic.severity == crate::lsp::DiagSeverity::Error)
+            .map(|diagnostic| diagnostic.message.to_string())
+    });
+    if diagnostic.is_none() {
+        eprintln!("skip: no Python error diagnostic available");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("missing_hover_name").unwrap());
+    wait_for_hover(&mut session);
+    let diagnostic_text = crate::app::mouse::HOVER_STATE.with(|state| state.borrow().diag_text.clone());
+    assert!(!diagnostic_text.trim().is_empty(), "diagnostic hover popup text was empty");
+    assert!(
+        diagnostic_text.contains("missing_hover_name"),
+        "diagnostic hover text is unrelated: {diagnostic_text}"
+    );
+    let state = dump(&mut session);
+    let copy_id = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|element| {
+            element["id"]
+                .as_str()
+                .filter(|id| id.starts_with("PopupCopyDiagnostic("))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("diagnostic copy button missing: {state}"));
+    click(&mut session, &copy_id);
+    assert!(session.app.ide_panel.diag_copied_idx.is_some(), "diagnostic copy control did not run");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri slh44n9j98m9xpg9kl7sewwg: hover popup hitbox y is fractional"]
+fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
+    let dir = scratch_dir("ui-bug-hover-popup-y");
+    let source = hover_source_with_docs(18);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("hover popup missing");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+    let state = dump(&mut session);
+    let popup_y = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "HoverPopupScroll")
+        .unwrap_or_else(|| panic!("hover popup scrollbar missing: {state}"))["rect"][1]
+        .as_f64()
+        .unwrap();
+    assert_ui_y_integral(popup_y, 0.0, "hover popup hitbox");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+#[ignore = "kanri q83ryjk7ajlrqpet9umh4b38: typing does not hide LSP hover popup"]
+fn headless_bug_typing_hides_lsp_hover_popup() {
+    let dir = scratch_dir("ui-bug-hover-typing");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    assert!(current_hover_popup_text().is_some(), "hover popup missing before typing");
+    run_script(&mut session, b"type x\n");
+    assert!(current_hover_popup_text().is_none(), "typing must hide the hover popup");
     let _ = std::fs::remove_dir_all(dir);
 }
 

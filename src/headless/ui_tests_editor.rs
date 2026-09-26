@@ -238,3 +238,120 @@ fn headless_bug_long_editor_tab_visible_close() {
     assert!(has_ui(&state, "EditorTabClose(0)"));
     let _ = std::fs::remove_dir_all(dir);
 }
+
+fn open_writable_file(
+    w: u32,
+    h: u32,
+    scale: f32,
+    path: &std::path::Path,
+) -> crate::headless::HeadlessSession {
+    let options = crate::headless::profile::HeadlessOptions {
+        size: (w, h),
+        allow_writes: true,
+        ..Default::default()
+    };
+    let root = crate::headless::tests_support::ensure_test_profile_root();
+    let mut session = match crate::headless::HeadlessSession::new(&options, root) {
+        Ok(session) => session,
+        Err((code, message)) => panic!("headless session (code {code}): {message}"),
+    };
+    session.hz_probe = || None;
+    let lines = run_script(
+        &mut session,
+        format!("scale {scale}\nopen {}\nsettle 2000\n", path.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    session
+}
+
+#[test]
+fn headless_editor_save_undo_redo_shortcuts() {
+    let dir = scratch_dir("ui-editor-shortcuts-save-history");
+    let file = dir.join("history.txt");
+    let original = "before\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_writable_file(1280, 720, 4.0 / 3.0, &file);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!dump(&mut session)["tabs"][0]["modified"].as_bool().unwrap());
+
+    run_script(&mut session, b"key ctrl+z\n");
+    let empty_undo = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!empty_undo["tabs"][0]["modified"].as_bool().unwrap());
+
+    run_script(&mut session, b"type x\n");
+    let edited = "xbefore\n";
+    assert_eq!(session.app.editor.get_full_text(), edited);
+    assert!(dump(&mut session)["tabs"][0]["modified"].as_bool().unwrap());
+    run_script(&mut session, b"key ctrl+z\n");
+    let undone = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!undone["tabs"][0]["modified"].as_bool().unwrap());
+
+    run_script(&mut session, b"key ctrl+y\n");
+    let redone = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), edited);
+    assert!(redone["tabs"][0]["modified"].as_bool().unwrap());
+    run_script(&mut session, b"key ctrl+s\n");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), edited);
+    assert!(!dump(&mut session)["tabs"][0]["modified"].as_bool().unwrap());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_copy_cut_paste_shortcuts_with_disabled_clipboard() {
+    let dir = scratch_dir("ui-editor-shortcuts-clipboard");
+    let file = dir.join("clipboard.txt");
+    let original = "selected text\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
+    assert_eq!(dump(&mut session)["clipboard"], "disabled");
+
+    run_script(&mut session, b"key ctrl+a\nkey ctrl+c\n");
+    let copied = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!copied["editor"]["selection"].is_null());
+    assert!(!copied["tabs"][0]["modified"].as_bool().unwrap());
+
+    run_script(&mut session, b"key right\nkey ctrl+v\n");
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(dump(&mut session)["editor"]["selection"].is_null());
+
+    run_script(&mut session, b"key ctrl+a\nkey ctrl+x\n");
+    let cut = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), "");
+    assert!(cut["tabs"][0]["modified"].as_bool().unwrap());
+    run_script(&mut session, b"key ctrl+v\n");
+    assert_eq!(session.app.editor.get_full_text(), "");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_comment_toggle_single_and_multiple_lines() {
+    let dir = scratch_dir("ui-editor-shortcuts-comments");
+    let file = dir.join("comments.rs");
+    let original = "\nfn main() {\n    let a = 1;\n    let b = 2;\n}\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
+    run_script(&mut session, b"key ctrl+home\nkey ctrl+/\n");
+    let empty_line = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!empty_line["tabs"][0]["modified"].as_bool().unwrap());
+
+    run_script(&mut session, b"key down\nkey shift+end\nkey ctrl+/\n");
+    let single_line = "\n//fn main() {\n    let a = 1;\n    let b = 2;\n}\n";
+    assert_eq!(session.app.editor.get_full_text(), single_line);
+    assert!(dump(&mut session)["tabs"][0]["modified"].as_bool().unwrap());
+    run_script(&mut session, b"key ctrl+/\n");
+    assert_eq!(session.app.editor.get_full_text(), original);
+
+    run_script(&mut session, b"key ctrl+a\nkey ctrl+/\n");
+    let multiple_lines = "\n//fn main() {\n    //let a = 1;\n    //let b = 2;\n//}\n";
+    assert_eq!(session.app.editor.get_full_text(), multiple_lines);
+    assert!(dump(&mut session)["tabs"][0]["modified"].as_bool().unwrap());
+    run_script(&mut session, b"key ctrl+/\n");
+    let uncommented = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert!(!uncommented["tabs"][0]["modified"].as_bool().unwrap());
+    let _ = std::fs::remove_dir_all(dir);
+}
