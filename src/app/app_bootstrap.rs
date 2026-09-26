@@ -146,7 +146,7 @@ impl App {
             renderer: None,
             editor,
             clipboard: if options.headless {
-                None
+                Some(crate::platform::Clipboard::in_memory())
             } else {
                 crate::platform::Clipboard::new().ok()
             },
@@ -339,7 +339,7 @@ mod tests {
         let app = App::new_from_config(crate::Config::default(), AppInitOptions::headless());
 
         assert!(app.headless_mode);
-        assert!(app.clipboard.is_none());
+        assert!(app.clipboard.as_ref().is_some_and(crate::platform::Clipboard::is_in_memory));
         assert!(app.show_welcome);
         assert_eq!(app.base_title, "Добро пожаловать");
         assert!(!app.editor.original_hashes.is_empty());

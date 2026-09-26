@@ -1275,24 +1275,57 @@ pub fn trash_layout() -> TrashLayout {
 }
 
 pub struct Clipboard {
-    inner: arboard::Clipboard,
+    backend: ClipboardBackend,
+}
+
+enum ClipboardBackend {
+    System(arboard::Clipboard),
+    InMemory(Option<String>),
 }
 
 impl Clipboard {
     pub fn new() -> Result<Self, arboard::Error> {
-        arboard::Clipboard::new().map(|inner| Self { inner })
+        arboard::Clipboard::new().map(|inner| Self { backend: ClipboardBackend::System(inner) })
+    }
+
+    pub fn in_memory() -> Self {
+        Self { backend: ClipboardBackend::InMemory(None) }
+    }
+
+    pub fn is_in_memory(&self) -> bool {
+        matches!(&self.backend, ClipboardBackend::InMemory(_))
+    }
+
+    pub fn in_memory_text(&self) -> Option<&str> {
+        match &self.backend {
+            ClipboardBackend::InMemory(text) => text.as_deref(),
+            ClipboardBackend::System(_) => None,
+        }
     }
 
     pub fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
-        clipboard_retry(|| self.inner.set_text(text.clone()))
+        match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.set_text(text.clone())),
+            ClipboardBackend::InMemory(contents) => {
+                *contents = Some(text);
+                Ok(())
+            }
+        }
     }
 
     pub fn get_text(&mut self) -> Result<String, arboard::Error> {
-        clipboard_retry(|| self.inner.get_text())
+        match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get_text()),
+            ClipboardBackend::InMemory(Some(text)) => Ok(text.clone()),
+            ClipboardBackend::InMemory(None) => Err(arboard::Error::ContentNotAvailable),
+        }
     }
 
     pub fn get_file_list(&mut self) -> Result<Vec<PathBuf>, arboard::Error> {
-        let mut paths = clipboard_retry(|| self.inner.get().file_list())?;
+        let mut paths = match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get().file_list())?,
+            ClipboardBackend::InMemory(_) => return Ok(Vec::new()),
+        };
         #[cfg(target_os = "linux")]
         normalize_linux_arboard_file_list(&mut paths);
         Ok(paths)

@@ -119,6 +119,15 @@ pub(crate) fn dump_json(app: &mut App) -> Value {
     let open_panels: Vec<&str> =
         panel.slots.iter().filter(|slot| slot.open).map(|slot| panel_name(slot.id)).collect();
     let hover_popup = crate::app::mouse::HOVER_STATE.with(|state| state.borrow().popup.is_some());
+    let clipboard = app.clipboard.as_ref().map_or_else(
+        || json!({"mode": "disabled", "text": null}),
+        |clipboard| {
+            json!({
+                "mode": if clipboard.is_in_memory() { "memory" } else { "system" },
+                "text": clipboard.in_memory_text(),
+            })
+        },
+    );
     let ui: Vec<Value> = app
         .ui_registry
         .element_hits()
@@ -155,7 +164,7 @@ pub(crate) fn dump_json(app: &mut App) -> Value {
         },
         "dialog": dialog,
         "external_request": external_request_json(crate::platform::take_external_request()),
-        "clipboard": "disabled",
+        "clipboard": clipboard,
         "writes_allowed": crate::platform::headless_writes_allowed(),
         "hover": {
             "ui": app.ui_registry.hovered().map(|id| format!("{id:?}")),

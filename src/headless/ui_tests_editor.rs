@@ -299,30 +299,81 @@ fn headless_editor_save_undo_redo_shortcuts() {
 }
 
 #[test]
-fn headless_editor_copy_cut_paste_shortcuts_with_disabled_clipboard() {
+fn headless_editor_copy_paste_round_trip() {
     let dir = scratch_dir("ui-editor-shortcuts-clipboard");
     let file = dir.join("clipboard.txt");
     let original = "selected text\n";
     std::fs::write(&file, original).unwrap();
     let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
-    assert_eq!(dump(&mut session)["clipboard"], "disabled");
+    assert_eq!(dump(&mut session)["clipboard"], serde_json::json!({"mode": "memory", "text": null}));
 
     run_script(&mut session, b"key ctrl+a\nkey ctrl+c\n");
     let copied = dump(&mut session);
     assert_eq!(session.app.editor.get_full_text(), original);
     assert!(!copied["editor"]["selection"].is_null());
     assert!(!copied["tabs"][0]["modified"].as_bool().unwrap());
+    assert_eq!(copied["clipboard"]["text"], original);
 
     run_script(&mut session, b"key right\nkey ctrl+v\n");
-    assert_eq!(session.app.editor.get_full_text(), original);
-    assert!(dump(&mut session)["editor"]["selection"].is_null());
+    assert_eq!(session.app.editor.get_full_text(), format!("{original}{original}"));
+    let pasted = dump(&mut session);
+    assert!(pasted["editor"]["selection"].is_null());
+    assert_eq!(pasted["clipboard"]["text"], original);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_cut_paste_round_trip() {
+    let dir = scratch_dir("ui-editor-cut-paste");
+    let file = dir.join("cut.txt");
+    let original = "cut text\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
 
     run_script(&mut session, b"key ctrl+a\nkey ctrl+x\n");
     let cut = dump(&mut session);
     assert_eq!(session.app.editor.get_full_text(), "");
     assert!(cut["tabs"][0]["modified"].as_bool().unwrap());
+    assert_eq!(cut["clipboard"]["text"], original);
     run_script(&mut session, b"key ctrl+v\n");
-    assert_eq!(session.app.editor.get_full_text(), "");
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert_eq!(dump(&mut session)["clipboard"]["text"], original);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_paste_with_empty_clipboard_does_nothing() {
+    let dir = scratch_dir("ui-editor-empty-clipboard");
+    let file = dir.join("empty.txt");
+    let original = "keep selected\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
+
+    run_script(&mut session, b"key ctrl+a\n");
+    let before = dump(&mut session);
+    assert_eq!(before["clipboard"], serde_json::json!({"mode": "memory", "text": null}));
+    run_script(&mut session, b"key ctrl+v\n");
+    let after = dump(&mut session);
+    assert_eq!(session.app.editor.get_full_text(), original);
+    assert_eq!(after["editor"]["selection"], before["editor"]["selection"]);
+    assert_eq!(after["tabs"][0]["cursor"], before["tabs"][0]["cursor"]);
+    assert_eq!(after["tabs"][0]["modified"], before["tabs"][0]["modified"]);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_multiline_copy_paste_round_trip() {
+    let dir = scratch_dir("ui-editor-multiline-clipboard");
+    let file = dir.join("multiline.txt");
+    let original = "first line\nsecond line\nthird line\n";
+    std::fs::write(&file, original).unwrap();
+    let mut session = open_file(1280, 720, 4.0 / 3.0, &file);
+
+    run_script(&mut session, b"key ctrl+a\nkey ctrl+c\nkey right\nkey ctrl+v\n");
+    assert_eq!(session.app.editor.get_full_text(), format!("{original}{original}"));
+    let state = dump(&mut session);
+    assert_eq!(state["clipboard"]["text"], original);
+    assert!(state["editor"]["selection"].is_null());
     let _ = std::fs::remove_dir_all(dir);
 }
 

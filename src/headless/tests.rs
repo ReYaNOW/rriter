@@ -381,7 +381,7 @@ mod session_cases {
         );
         assert_eq!(dump["mode"], "welcome");
         assert_eq!(dump["size"], serde_json::json!([640, 400]));
-        assert_eq!(dump["clipboard"], "disabled");
+        assert_eq!(dump["clipboard"], serde_json::json!({"mode": "memory", "text": null}));
         assert_eq!(dump["dialog"], serde_json::Value::Null);
         assert!(!dump["ui"].as_array().unwrap().is_empty());
     }

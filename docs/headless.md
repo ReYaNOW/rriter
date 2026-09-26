@@ -118,6 +118,8 @@ Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
 markdown), `editor` (line count, selection), `ide_panel`, `overlays`,
 `dialog`, `external_request`, `clipboard`, `writes_allowed`.
+In headless mode, `clipboard` is `{"mode":"memory","text":...}`; `text` is
+`null` until something is copied.
 
 ### Unsaved-changes dialog
 
@@ -180,8 +182,9 @@ what `bench` measures.
   protected file never asks for elevation (`pkexec`) in headless mode.
 - File pickers, `open_url` and "reveal in file manager" do nothing; the last
   such request appears in `dump` as `external_request`.
-- No system clipboard or keyring: saved database passwords are not found, and
-  remembering one fails. No cursor blink; an idle app draws no frames.
+- Headless uses an in-process clipboard; no system clipboard or keyring is
+  accessed. Saved database passwords are not found, and remembering one fails.
+  No cursor blink; an idle app draws no frames.
 - Replies keep the original stdout; the app's own stdout goes to stderr.
 
 Not isolated: opened files are read from their real paths; LSP servers
