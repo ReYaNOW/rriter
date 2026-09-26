@@ -7,7 +7,8 @@ Read on demand, not upfront:
 * `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
 * `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
 * `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
-* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make test` once at the end. Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
+* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make codex_test` once at the end (§4). Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
+* Delegating UI-test work: size each agent by scenarios, not by file — 3–5 scenarios (~10 min of driver probes) per agent, at most 6–8 agents in parallel, the rest in waves; each agent writes its scenarios to its own file or the main session merges them into the shared `ui_tests_*.rs` afterwards (never two agents editing one file at once). Reason: one agent given all tree-ops scenarios ran three times longer than its siblings with one or two, and the whole batch waited for it (26.09).
 
 Search (`rg`-first):
 
@@ -35,8 +36,8 @@ No speculative features. No broad refactors unless asked.
 * Act, don't ask: find the cause, change code, run checks. Stop only for destructive or out-of-scope actions.
 * Context discipline: search first, then read relevant ranges (offset/limit for large files). Do not read whole large files or guides "just in case".
 * Long command output (builds, tests): redirect to a file (`cmd > /tmp/<task>.log 2>&1`), then `grep`/`tail` it. Never dump full logs into context.
-* While a long build or test run is in flight (`make codex_test`, `make test`, `make fast`, cargo builds): start it in the background and then **go idle**. No polling the log, no peeking at partial output, no "meanwhile" side work, no thinking out loud. Every such check is a full model turn that re-ships the whole context for nothing. Wait for the completion notification, then read the result once with `grep`/`tail`.
-* Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on.
+* While a long build or test run is in flight (`make codex_test`, `make test`, `make fast`, cargo builds): the main session starts it in the background and then **goes idle** (a subagent runs tests in the foreground, or its turn ends before the result). No polling the log, no peeking at partial output, no "meanwhile" side work, no thinking out loud. Every such check is a full model turn that re-ships the whole context for nothing. Wait for the completion notification, then read the result once with `grep`/`tail`.
+* Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on. Exception: UI tests are probed on the prebuilt binary via `dump`/`shot` (§0), not relinked per edit.
 * Fix at the root: if a shared helper is wrong, fix the helper, not one caller; check sibling code paths that use it.
 * Batch independent searches/reads in one step.
 * Edit files directly. Use unified diff only when showing changes; do not use chat parser `Before/After` blocks.
@@ -71,7 +72,7 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
-* `git commit` and `git push` of the current branch when the work needs it (finished, verified task; handing off between sessions). Only the main session; subagents never commit.
+* `git commit` and `git push` of the current branch (`-u origin <branch>` if no upstream). At the end of a finished, verified task (`make codex_test` green) commit and decide on the push yourself, without waiting for the user: push by default; don't push WIP, red tests, or a branch the user asked to keep local. Say in the final report whether you pushed. Reason: the user had to ask for the push after every task (26.09). Only the main session; subagents never commit.
 
 Forbidden unless user explicitly asks:
 
@@ -101,7 +102,7 @@ Always run `make codex_test` at the end of task if ANY file related to RRiter ch
 
 Run it in the background and stay silent until it reports. It takes minutes; checking on it costs a full model turn each time and tells you nothing the completion notification will not.
 
-Do not run `make fast` for RRiter unless user explicitly asks.
+Do not run `make fast` on its own mid-task unless the user explicitly asks; it is rebuilt by `make codex_test` at the end, and once if the release binary is missing (§0).
 
 No-edit tasks:
 
