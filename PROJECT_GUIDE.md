@@ -1480,7 +1480,10 @@ Root:
 
 Entrypoints/state:
 
-* `src/main.rs` -> app startup, config, event loop, GL/window boot.
+* `src/main.rs` -> crate root `mod`s, CLI arguments/automation options, event loop and `main`; re-exports persistence/startup helpers at `crate::`.
+* `src/state_persistence.rs` -> `Config`, recent files, open tabs, IDE panel state: paths, text parse/format, load/save, and their roundtrip tests.
+* `src/startup_environment.rs` -> startup environment: theme/selection colors, KDE colors, EGL vendor preference, Rayon thread cap, project-search probe, and tests.
+* `src/headless_ty_mem_probe.rs` -> headless ty LSP memory probe (`--headless-ty-mem`): smaps/RSS sampling of LSP child processes.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
 * `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
 * `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
@@ -1521,6 +1524,11 @@ Entrypoints/state:
 * `src/app/events/host_loop.rs` -> native or headless event-loop exit and control-flow adapter.
 * `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.
 * `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
+* `src/app/events/about/about_helpers.rs` -> `about.rs` include chunk: Python inlay hints and event-loop wait-plan helpers.
+* `src/app/events/about/about_drag_animation_helpers.rs` -> `about.rs` include chunk: animation ticks and drag autoscroll helpers.
+* `src/app/events/about/about_animation_tests.rs` -> animation and event-loop wait tests.
+* `src/app/events/about/about_markdown_reader_tests.rs` -> Markdown reader and shared-scroll tick tests.
+* `src/app/events/about/about_selection_drag_tests.rs` -> selection drag and cursor-leave tests.
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
 * `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
 * `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
@@ -1556,8 +1564,21 @@ Input:
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
 * `src/app/mouse.rs` -> mouse module shell.
-* `src/app/mouse/input.rs` -> click/release/drag start, UI dispatch, panel/tab clicks.
-* `src/app/mouse/cursor.rs` -> mouse move, hover hit-test, drag update.
+* `src/app/mouse/input.rs` -> mouse button module shell + shared click helpers.
+* `src/app/mouse/input/mouse_dispatch.rs` -> `handle_main_mouse_input_inner`: ordered press/release phase dispatch.
+* `src/app/mouse/input/mouse_drag_capture.rs` -> release: finish text/popup captures, panel DnD/resize, tab reorder.
+* `src/app/mouse/input/mouse_overlay_press.rs` -> press on popups, menus, modal overlays, settings modal, dialogs.
+* `src/app/mouse/input/mouse_editor_terminal_press.rs` -> autocomplete clicks, Ctrl+click definition, terminal SGR mouse reports.
+* `src/app/mouse/input/mouse_declarative_press.rs` -> LSP actions menu, declarative UI pre-dispatch (problems scrollbar, panel edge resize, menu dismiss).
+* `src/app/mouse/input/mouse_ui_element_press.rs` -> press on a registered `UiId`: scrollbars, hover body, terminal focus, tab/sidebar drag start.
+* `src/app/mouse/input/input_tests.rs` -> mouse input tests.
+* `src/app/mouse/input/input_modal_tests.rs` -> modal click-through tests.
+* `src/app/mouse/cursor.rs` -> `handle_main_cursor_moved`: ordered mouse-move phase dispatch (hot path).
+* `src/app/mouse/cursor/cursor_overlays.rs` -> mouse move over modal overlays, database text drags, autocomplete popups.
+* `src/app/mouse/cursor/cursor_scroll_drags.rs` -> scrollbar drags and popup/log text selection on move.
+* `src/app/mouse/cursor/cursor_hover.rs` -> hover: drag suppression, file tree, API mock, bottom panels, editor/diagnostic hover.
+* `src/app/mouse/cursor/cursor_drag_updates.rs` -> in-progress drag updates: IDE panel DnD/resize before hover, then the post-hover drag chain (settings ignore, LSP log, problems, search, editor scrollbars, terminal/editor selection).
+* `src/app/mouse/cursor/cursor_helpers.rs` -> cursor geometry helpers and their tests.
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
@@ -1569,8 +1590,16 @@ Input:
 
 UI/actions:
 
-* `src/ui_system.rs` -> `UiId`, `UiRegistry`, hit-test, pointer/text capture.
-* `src/app/ui_handlers.rs` -> registered UI action handling.
+* `src/ui_system.rs` -> module shell re-exporting `ui_ids` and `ui_registry`.
+* `src/ui_system/ui_ids.rs` -> `UiId` and related enums (add new buttons here).
+* `src/ui_system/ui_registry.rs` -> `UiElement`, clip rects, `UiRegistry` registration, hit-test, pointer/text capture, hitbox tests.
+* `src/app/ui_handlers.rs` -> registered UI action routing, API and database dispatch.
+* `src/app/ui_handlers/ui_database.rs` -> Database Tools connection/table/query actions.
+* `src/app/ui_handlers/ui_editor.rs` -> editor, tab, scroll and inline Git actions.
+* `src/app/ui_handlers/ui_git.rs` -> Git panel actions.
+* `src/app/ui_handlers/ui_lsp.rs` -> LSP, logs and diagnostics actions.
+* `src/app/ui_handlers/ui_panels.rs` -> terminal, file tree, search, welcome and dialog actions.
+* `src/app/ui_handlers/ui_settings.rs` -> settings actions.
 * `src/widgets.rs` -> reusable button/icon widgets.
 
 Editor/text:

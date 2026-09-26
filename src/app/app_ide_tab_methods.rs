@@ -901,7 +901,14 @@ mod tests {
     fn terminal_creation_routes_share_the_same_session_factory() {
         let app_tabs = include_str!("app_ide_tab_methods.rs");
         let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let about = include_str!("events/about.rs");
 
         assert_eq!(app_production.matches("Terminal::spawn(").count(), 1);
@@ -944,7 +951,14 @@ mod tests {
             .split("    pub(crate) fn add_terminal")
             .next()
             .unwrap();
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let main_keys = include_str!("keyboard/main_keys.rs");
         let editor_keys = include_str!("keyboard/editor_keys.rs");
 
@@ -1039,7 +1053,14 @@ mod tests {
             .split("    pub(crate) fn shutdown_background_services")
             .next()
             .unwrap();
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let main_keys = include_str!("keyboard/main_keys.rs");
         let about = include_str!("events/about.rs");
         let renderer = include_str!("../render_view/terminal_ui.rs");

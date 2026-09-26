@@ -16,7 +16,15 @@ fn lsp_action_selection_after_prepend(
 
 use super::*;
 
+include!("about/about_drag_animation_helpers.rs");
 include!("about/about_helpers.rs");
+
+#[cfg(test)]
+mod about_animation_tests;
+#[cfg(test)]
+mod about_markdown_reader_tests;
+#[cfg(test)]
+mod about_selection_drag_tests;
 
 pub(crate) fn update_cursor_blink(app: &mut App, now: Instant, needs_redraw: &mut bool) {
     if app.is_focused && !app.headless_mode {
