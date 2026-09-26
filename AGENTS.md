@@ -72,11 +72,14 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
-* Branches, commits, PRs — only the main session; subagents never commit. Work on a branch off `master`, and decide yourself when to open one: a new task unrelated to the current branch → `git switch master && git pull && git switch -c <short-name>`; follow-up work on the current branch → stay. Commit and push the branch (`-u origin <branch>` if no upstream). At the end of a finished, verified task (`make codex_test` green) finish it into `master` without waiting for the user: `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, then `git switch master && git pull`. Don't merge WIP, red tests, or a branch the user asked to keep open. Say in the final report which PR was merged. Reason: the user had to ask for push and merge after every task (26.09, 27.09).
+* Branches, commits, PRs — only the main session; subagents never commit. Decide yourself, and don't shy away from branches:
+  * Small change (one-line fix, doc/rule tweak, a test or two, no behaviour change worth reviewing) → commit straight to `master` and push.
+  * Substantial change (feature, bug fix with real logic, refactor, multi-file work, iteration of a larger plan) → branch off fresh `master` (`git switch master && git pull && git switch -c <short-name>`), commit and push it (`-u origin <branch>`); at the end of the verified task `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, `git switch master && git pull`. Follow-up work on the current branch stays on it.
+  * Either way, only after the task is finished and verified (`make codex_test` green) — no WIP or red tests on `master`, don't merge a branch the user asked to keep open, and say in the final report what was pushed or which PR was merged. Reason: the user had to ask for push and merge after every task (26.09, 27.09).
 
 Forbidden unless user explicitly asks:
 
-* force-push, pushing to `master` other than by the squash-merged PR above, deleting remote branches other than the merged PR branch, rewriting pushed history
+* force-push, deleting remote branches other than the merged PR branch, rewriting pushed history
 * network commands (only mutable)
 * package installs
 * destructive commands outside project
