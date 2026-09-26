@@ -1,8 +1,8 @@
 use super::{
     DatabaseConnectionColor, DatabaseConnectionConfig, DatabaseConnectionId, DatabaseGeneration,
-    DatabaseJobId, DatabasePersistedState, DatabaseSecretBundle, DatabaseSettings,
-    DatabaseMultilineLayoutCache, DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode,
-    SshConnectionConfig, SshJumpHostConfig,
+    DatabaseJobId, DatabaseMultilineLayoutCache, DatabasePersistedState, DatabaseSecretBundle,
+    DatabaseSettings, DatabaseTableInfo, DatabaseTableModal, PostgresTlsMode, SshConnectionConfig,
+    SshJumpHostConfig,
 };
 use crate::app::mouse::HoverPopup;
 use rustc_hash::{FxHashMap, FxHashSet};

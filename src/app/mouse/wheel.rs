@@ -22,7 +22,10 @@ fn wheel_delta(
             -x * 4.0 * line_height * line_multiplier,
             -y * 4.0 * line_height * line_multiplier,
         ),
-        MouseScrollDelta::PixelDelta(pos) => (-pos.x as f32, -pos.y as f32),
+        MouseScrollDelta::PixelDelta(pos) => (
+            -(pos.x as f32) * line_multiplier,
+            -(pos.y as f32) * line_multiplier,
+        ),
     }
 }
 
@@ -181,9 +184,12 @@ impl App {
                 .rect_for(crate::ui_system::UiId::DatabaseTableGridBody);
             if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
                 if let Some((_, _, width, height)) = grid_rect {
-                    state.grid.viewport_width = (width / s - 54.0).max(0.0);
-                    state.grid.viewport_height =
-                        (height / s - crate::app::database::DATABASE_GRID_HEADER_HEIGHT).max(0.0);
+                    let (viewport_width, viewport_height) =
+                        crate::app::database::database_grid_viewport_from_body_rect(
+                            width, height, s,
+                        );
+                    state.grid.viewport_width = viewport_width;
+                    state.grid.viewport_height = viewport_height;
                 }
                 if shift || dx.abs() > dy.abs() {
                     let amount = if shift { dy } else { dx } / s.max(0.001);
@@ -195,7 +201,7 @@ impl App {
                     state.grid.scroll_x.clamp_target(0.0, max);
                 } else {
                     let max = (state.grid.logical_row_count() as f32
-                        * crate::app::database::DATABASE_GRID_ROW_HEIGHT
+                        * crate::app::database::database_grid_row_height_logical(s)
                         - state.grid.viewport_height)
                         .max(0.0);
                     state.grid.scroll_y.anim_speed = 7.0;
@@ -263,47 +269,43 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
-        let mut consumed_by_diag = false;
-        HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if let Some(rect) = state.diag_rect {
-                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
-                    state.diag_scroll.anim_speed = 7.0;
-                    state.diag_scroll.scroll_by(dy);
-                    let max_scroll = state.diag_max_scroll;
-                    state.diag_scroll.clamp_target(0.0, max_scroll);
-                    consumed_by_diag = true;
-                }
-            }
-        });
-        if consumed_by_diag {
-            self.window.as_ref().unwrap().request_redraw();
-            return;
-        }
-
         let mut consumed_by_hover = false;
         HOVER_STATE.with(|state| {
             let mut state = state.borrow_mut();
-            if let Some(rect) = state.rect {
-                if crate::ui_system::point_in_rect(mx, my, (rect.0, rect.1, rect.2, rect.3)) {
-                    let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup {
-                        popup.scroll.anim_speed = 7.0;
-                        popup.scroll.scroll_by(dy);
-                        popup.scroll.clamp_target(0.0, max_scroll);
-                        consumed_by_hover = true;
-                    }
+            if state
+                .interaction_rect
+                .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
+            {
+                let in_type = state
+                    .rect
+                    .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect));
+                let max_scroll = state.max_scroll;
+                let diag_max_scroll = state.diag_max_scroll;
+                if in_type && let Some(popup) = state.popup.as_mut() {
+                    popup.scroll.anim_speed = 7.0;
+                    popup.scroll.scroll_by(dy);
+                    popup.scroll.clamp_target(0.0, max_scroll);
+                    consumed_by_hover = true;
+                } else if state.diag_rect.is_some_and(|(x, y, w, h, _, _, _)| {
+                    crate::ui_system::point_in_rect(mx, my, (x, y, w, h))
+                }) {
+                    state.diag_scroll.anim_speed = 7.0;
+                    state.diag_scroll.scroll_by(dy);
+                    state.diag_scroll.clamp_target(0.0, diag_max_scroll);
+                    consumed_by_hover = true;
                 }
             }
         });
         if consumed_by_hover {
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
-        let hover_cleared = clear_hover_popup(self.renderer.as_mut());
-        if hover_cleared && self.markdown_mode() != crate::app::MarkdownMode::Read {
-            self.window.as_ref().unwrap().request_redraw();
-            return;
+        if clear_hover_popup(self.renderer.as_mut()) {
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
         }
 
         // Скролл в области проводника файлов — перехватываем до всего остального
@@ -763,7 +765,7 @@ impl App {
             return;
         }
 
-        if self.show_welcome || self.show_settings || self.dialog_window.is_some() {
+        if self.show_welcome || self.show_settings || self.modal_dialog_open() {
             return;
         }
 
@@ -898,34 +900,34 @@ impl App {
             return;
         }
 
+        if self.ide_panel.api.mock_guide_open {
+            let hovered_id = self.ui_registry.find_at(mx, my);
+            if matches!(
+                hovered_id,
+                Some(
+                    crate::ui_system::UiId::ApiMockGuideBody
+                        | crate::ui_system::UiId::ApiMockGuideScrollY
+                )
+            ) && let Some((_, _, _, guide_h)) = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
+            {
+                let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
+                self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
+                self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
+                self.ide_panel
+                    .api
+                    .mock_guide_scroll
+                    .clamp_target(0.0, max_scroll);
+                self.window.as_ref().unwrap().request_redraw();
+                return;
+            }
+        }
+
         if self.active_tab_is_api_client() {
             let mx = self.renderer.as_ref().unwrap().last_mouse_x;
             let my = self.renderer.as_ref().unwrap().last_mouse_y;
             let hovered_id = self.ui_registry.find_at(mx, my);
-            if self.ide_panel.api.mock_guide_open
-                && matches!(
-                    hovered_id,
-                    Some(
-                        crate::ui_system::UiId::ApiMockGuideBody
-                            | crate::ui_system::UiId::ApiMockGuideScrollY
-                    )
-                )
-            {
-                if let Some((_, _, _, guide_h)) = self
-                    .ui_registry
-                    .rect_for(crate::ui_system::UiId::ApiMockGuideBody)
-                {
-                    let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(guide_h, s);
-                    self.ide_panel.api.mock_guide_scroll.anim_speed = 7.0;
-                    self.ide_panel.api.mock_guide_scroll.scroll_by(dy);
-                    self.ide_panel
-                        .api
-                        .mock_guide_scroll
-                        .clamp_target(0.0, max_scroll);
-                    self.window.as_ref().unwrap().request_redraw();
-                    return;
-                }
-            }
             if self.ide_panel.api.mock_server_detail_open
                 && matches!(
                     hovered_id,
@@ -1259,8 +1261,12 @@ impl App {
                 }
             }
             let wh = self.window.as_ref().unwrap().inner_size().height as f32;
-            let status_h = crate::render_view::ide_status_bar_height(s);
-            let visible_h = (wh - tab_bar_h - status_h).max(0.0);
+            let visible_h = crate::render_view::api_tab_viewport_height(
+                wh,
+                self.show_welcome,
+                self.is_ide_mode,
+                s,
+            );
             let max_scroll = self
                 .tabs
                 .get(self.active_tab)
@@ -1411,7 +1417,23 @@ mod tests {
                 10.0,
                 5.0,
             ),
-            (-12.5, 8.0)
+            (-62.5, 40.0)
+        );
+    }
+
+    #[test]
+    fn configured_ctrl_multiplier_scales_line_and_pixel_deltas_exactly_once() {
+        assert_eq!(
+            wheel_delta(MouseScrollDelta::LineDelta(1.0, -1.0), 10.0, 5.0),
+            (-200.0, 200.0)
+        );
+        assert_eq!(
+            wheel_delta(
+                MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(12.5, -8.0)),
+                10.0,
+                5.0,
+            ),
+            (-62.5, 40.0)
         );
     }
 

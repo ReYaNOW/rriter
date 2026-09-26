@@ -450,11 +450,7 @@ where
     .scroll_x
 }
 
-pub(crate) fn file_tree_name_input_hit_index<F>(
-    text: &str,
-    x_offset: f32,
-    char_advance: F,
-) -> usize
+pub(crate) fn file_tree_name_input_hit_index<F>(text: &str, x_offset: f32, char_advance: F) -> usize
 where
     F: FnMut(char) -> f32,
 {
@@ -602,6 +598,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn undo_file_tree_operation(&mut self) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(entry) = self.ide_panel.file_tree_undo_stack.pop() else {
             return Ok(());
         };
@@ -1152,6 +1149,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn submit_file_tree_create_dialog(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_create_dialog.as_mut() else {
             return;
         };
@@ -1189,6 +1187,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn submit_file_tree_rename_dialog(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_rename_dialog.as_mut() else {
             return;
         };
@@ -1312,6 +1311,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn paste_file_tree_clipboard(&mut self, target_dir: PathBuf) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(clipboard) = self.ide_panel.file_tree_clipboard.clone() else {
             return Ok(());
         };
@@ -1372,6 +1372,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn confirm_file_tree_delete(&mut self) -> Result<(), String> {
+        if self.headless_write_blocked() { return Ok(()); }
         let Some(dialog) = self.ide_panel.file_tree_delete_dialog.as_mut() else {
             return Ok(());
         };
@@ -1416,6 +1417,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn finish_file_tree_move(&mut self) {
+        if self.headless_write_blocked() { return; }
         let Some(dialog) = self.ide_panel.file_tree_move_dialog.as_ref() else {
             return;
         };
@@ -1512,7 +1514,7 @@ impl App {
     /// или None если курсор не над областью дерева файлов.
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_node_at(&self, mx: f32, my: f32) -> Option<usize> {
-        if self.show_settings || self.dialog_window.is_some() {
+        if self.show_settings || self.modal_dialog_open() {
             return None;
         }
         if !self.is_ide_mode {
@@ -1540,7 +1542,7 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn file_tree_panel_contains(&self, mx: f32, my: f32) -> bool {
-        if self.show_settings || self.dialog_window.is_some() || !self.is_ide_mode {
+        if self.show_settings || self.modal_dialog_open() || !self.is_ide_mode {
             return false;
         }
         if !self.ide_panel.is_open(crate::app::PanelId::Explorer) {

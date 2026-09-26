@@ -7,13 +7,15 @@ use std::borrow::Cow;
 #[cfg(target_os = "linux")]
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use winit::event::{ElementState, KeyEvent};
-use winit::event_loop::ActiveEventLoop;
+use winit::event::ElementState;
+use crate::app::events::host_loop::HostLoop;
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 mod editor_keys;
+mod key_input;
 mod main_keys;
 pub(crate) use editor_keys::paired_editor_insert_text;
+pub(crate) use key_input::KeyInput;
 
 #[cfg(target_os = "linux")]
 fn terminal_clipboard_paste_bytes(
@@ -48,10 +50,10 @@ fn terminal_shell_escape_path(path: &Path, out: &mut Vec<u8>) {
                 out.extend_from_slice(&[b'\'', byte, b'\'']);
                 continue;
             }
-            b' ' | b'\t' | b'\\' | b'\'' | b'"' | b'`' | b'$' | b'&' | b';' | b'|'
-            | b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'?' | b'!'
-            | b'#' | b'~' | b'^' | b'%' | b'=' => out.push(b'\\'),
-            _ => {},
+            b' ' | b'\t' | b'\\' | b'\'' | b'"' | b'`' | b'$' | b'&' | b';' | b'|' | b'<'
+            | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'*' | b'?' | b'!' | b'#' | b'~'
+            | b'^' | b'%' | b'=' => out.push(b'\\'),
+            _ => {}
         }
         out.push(byte);
     }
@@ -270,7 +272,7 @@ impl App {
 
     fn handle_main_ime_commit_inner(&mut self, text: &str) -> bool {
         if self.handle_file_tree_modal_ime_commit(text)
-            || self.dialog_window.is_some()
+            || self.modal_dialog_open()
             || self.ide_panel.project_search.help_open
         {
             return true;
@@ -286,7 +288,9 @@ impl App {
                         *error = None;
                     }
                 }
-                crate::app::database::DatabaseTableModal::MultilineEditor { input, error, .. } => {
+                crate::app::database::DatabaseTableModal::MultilineEditor {
+                    input, error, ..
+                } => {
                     input.insert(text, crate::app::database::MAX_EDITABLE_MULTILINE_BYTES);
                     invalidate_table_modal_layout = true;
                     *error = None;
@@ -479,7 +483,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_terminal_keyboard_input(&mut self, key_event: KeyInput) {
         let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
         let terminal_ctrl = crate::platform::terminal_control_modifier(self.modifiers);
         let terminal_alt = crate::platform::terminal_alt_modifier(self.modifiers);
@@ -532,12 +536,10 @@ impl App {
                             None
                         }
                     }
-                    PhysicalKey::Code(KeyCode::KeyV) if primary => {
-                        paste
-                    }
+                    PhysicalKey::Code(KeyCode::KeyV) if primary => paste,
                     _ => terminal_key_sequence(
                         key_event.physical_key,
-                        key_event.logical_key.to_text(),
+                        key_event.logical_text.as_deref(),
                         self.modifiers.shift_key(),
                         terminal_ctrl,
                         terminal_alt,
@@ -559,7 +561,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_terminal_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == winit::event::ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -671,7 +673,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.term_search_editor.insert_str(&clean_txt);
@@ -692,7 +694,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -800,7 +802,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.search_editor.insert_str(&clean_txt);
@@ -821,7 +823,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_project_search_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state != ElementState::Pressed {
             return;
         }
@@ -941,7 +943,7 @@ impl App {
             }
             _ => {
                 if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                    if let Some(text) = key_event.logical_key.to_text() {
+                    if let Some(text) = key_event.logical_text.as_deref() {
                         let text = if field == crate::app::project_search::ProjectSearchField::Query
                         {
                             text.to_string()
@@ -1049,7 +1051,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_lsp_log_filter_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -1118,7 +1120,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.lsp_log_filter_editor.insert_str(&clean_txt);
@@ -1141,7 +1143,7 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyEvent) {
+    pub fn handle_git_message_keyboard_input(&mut self, key_event: KeyInput) {
         if key_event.state == ElementState::Pressed {
             let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
             let word = crate::platform::word_navigation_modifier(self.modifiers);
@@ -1215,7 +1217,7 @@ impl App {
                 }
                 _ => {
                     if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                        if let Some(txt) = key_event.logical_key.to_text() {
+                        if let Some(txt) = key_event.logical_text.as_deref() {
                             let clean_txt = txt.replace('\n', "");
                             if !clean_txt.is_empty() {
                                 self.ide_panel.git.message_editor.insert_str(&clean_txt);
@@ -1263,7 +1265,10 @@ mod tests {
     #[test]
     fn terminal_file_list_paste_escapes_shell_syntax_and_keeps_multiple_arguments() {
         for (path, expected) in [
-            ("/home/reyan/My File.txt", b"/home/reyan/My\\ File.txt".as_slice()),
+            (
+                "/home/reyan/My File.txt",
+                b"/home/reyan/My\\ File.txt".as_slice(),
+            ),
             ("/tmp/O'Brien.txt", b"/tmp/O\\'Brien.txt".as_slice()),
             ("/tmp/back\\slash", b"/tmp/back\\\\slash".as_slice()),
             ("/tmp/$HOME;file", b"/tmp/\\$HOME\\;file".as_slice()),
@@ -1281,7 +1286,11 @@ mod tests {
         ];
         assert_eq!(
             terminal_clipboard_paste_bytes(Some(&files), Some("ignored text")),
-            Some("/tmp/файл.txt /home/reyan/My\\ Directory".as_bytes().to_vec())
+            Some(
+                "/tmp/файл.txt /home/reyan/My\\ Directory"
+                    .as_bytes()
+                    .to_vec()
+            )
         );
     }
 

@@ -531,7 +531,7 @@ mod tests {
         let body = source_between(
             source,
             "// Кнопка «Добавить» — неактивна если поле пустое или только пробелы",
-            "content_y += input_h + 16.0 * s;",
+            "content_y += input_h + SETTINGS_IDE_IGNORE_INPUT_GAP * s;",
         );
 
         assert!(body.contains("btn_ignore_add.render_disabled(self, s);"));

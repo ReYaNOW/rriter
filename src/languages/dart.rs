@@ -1179,10 +1179,7 @@ mod tests {
         }
     }
 
-    fn hover_color_at(
-        spans: &[crate::highlighter::ColorSpan],
-        byte: usize,
-    ) -> [f32; 4] {
+    fn hover_color_at(spans: &[crate::highlighter::ColorSpan], byte: usize) -> [f32; 4] {
         spans
             .iter()
             .find(|span| span.start <= byte && byte < span.end)
@@ -1264,7 +1261,10 @@ mod tests {
             "unmatched * marker",
             "unmatched _ marker",
         ] {
-            assert!(text.lines().any(|line| line == expected), "missing {expected:?}: {text:?}");
+            assert!(
+                text.lines().any(|line| line == expected),
+                "missing {expected:?}: {text:?}"
+            );
         }
     }
 
@@ -1308,12 +1308,7 @@ mod tests {
         assert!(parse(snippet).root_node().has_error());
 
         let mut spans = Vec::new();
-        push_hover_highlight_spans(
-            snippet,
-            0,
-            &mut spans,
-            HoverParseMode::StatementFragment,
-        );
+        push_hover_highlight_spans(snippet, 0, &mut spans, HoverParseMode::StatementFragment);
         let offsets = |token: &str| {
             snippet
                 .match_indices(token)
@@ -1322,7 +1317,10 @@ mod tests {
         };
 
         for offset in offsets("dio") {
-            assert_eq!(hover_color_at(&spans, offset), crate::highlighter::DRACULA_FG);
+            assert_eq!(
+                hover_color_at(&spans, offset),
+                crate::highlighter::DRACULA_FG
+            );
         }
         for member in ["baseUrl", "connectTimeout", "receiveTimeout"] {
             assert_eq!(
@@ -1374,7 +1372,9 @@ mod tests {
             "same-role dio identifiers must share one color: {dio_colors:?}"
         );
         assert!(
-            member_colors.windows(2).all(|colors| colors[0] == colors[1]),
+            member_colors
+                .windows(2)
+                .all(|colors| colors[0] == colors[1]),
             "same-role option members must share one color: {member_colors:?}"
         );
         assert_eq!(

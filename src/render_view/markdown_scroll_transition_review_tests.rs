@@ -6,146 +6,10 @@ pub(crate) mod reviewer_stage2_integration {
     use super::*;
     use crate::app::{App, MarkdownMode};
     use crate::render_view::markdown_read::MarkdownSourceAnchor;
-    use std::ffi::{CString, c_char, c_void};
-
-    type EglObject = *mut c_void;
-    type GetProc = unsafe extern "C" fn(*const c_char) -> *const c_void;
-    type MakeCurrent = unsafe extern "C" fn(EglObject, EglObject, EglObject, EglObject) -> u32;
-    type Destroy = unsafe extern "C" fn(EglObject, EglObject) -> u32;
-    type Terminate = unsafe extern "C" fn(EglObject) -> u32;
-
-    pub(crate) struct OffscreenContext {
-        library: EglObject,
-        display: EglObject,
-        surface: EglObject,
-        context: EglObject,
-        get_proc: GetProc,
-        make_current: MakeCurrent,
-        destroy_surface: Destroy,
-        destroy_context: Destroy,
-        terminate: Terminate,
-    }
-
-    impl OffscreenContext {
-        fn new() -> Self {
-            unsafe {
-                let library =
-                    libc::dlopen(c"libEGL.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_LOCAL);
-                assert!(
-                    !library.is_null(),
-                    "review integration tests require libEGL.so.1"
-                );
-                macro_rules! symbol {
-                    ($name:literal, $ty:ty) => {{
-                        let name = CString::new($name).unwrap();
-                        let ptr = libc::dlsym(library, name.as_ptr());
-                        assert!(!ptr.is_null(), "missing EGL entry {}", $name);
-                        std::mem::transmute::<*mut c_void, $ty>(ptr)
-                    }};
-                }
-                let get_display = symbol!(
-                    "eglGetPlatformDisplay",
-                    unsafe extern "C" fn(u32, EglObject, *const isize) -> EglObject
-                );
-                let initialize = symbol!(
-                    "eglInitialize",
-                    unsafe extern "C" fn(EglObject, *mut i32, *mut i32) -> u32
-                );
-                let bind_api = symbol!("eglBindAPI", unsafe extern "C" fn(u32) -> u32);
-                let choose_config = symbol!(
-                    "eglChooseConfig",
-                    unsafe extern "C" fn(
-                        EglObject,
-                        *const i32,
-                        *mut EglObject,
-                        i32,
-                        *mut i32,
-                    ) -> u32
-                );
-                let create_surface = symbol!(
-                    "eglCreatePbufferSurface",
-                    unsafe extern "C" fn(EglObject, EglObject, *const i32) -> EglObject
-                );
-                let create_context = symbol!(
-                    "eglCreateContext",
-                    unsafe extern "C" fn(EglObject, EglObject, EglObject, *const i32) -> EglObject
-                );
-                let make_current = symbol!("eglMakeCurrent", MakeCurrent);
-                let get_proc = symbol!("eglGetProcAddress", GetProc);
-                let display = get_display(0x31DD, std::ptr::null_mut(), std::ptr::null());
-                assert!(!display.is_null(), "EGL_MESA_platform_surfaceless display");
-                let (mut major, mut minor) = (0, 0);
-                assert_eq!(
-                    initialize(display, &mut major, &mut minor),
-                    1,
-                    "EGL initialization"
-                );
-                assert_eq!(bind_api(0x30A2), 1, "EGL_OPENGL_API");
-                let attrs = [
-                    0x3033, 1, 0x3040, 8, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3038,
-                ];
-                let mut config = std::ptr::null_mut();
-                let mut count = 0;
-                assert_eq!(
-                    choose_config(display, attrs.as_ptr(), &mut config, 1, &mut count),
-                    1
-                );
-                assert_eq!(count, 1, "OpenGL pbuffer config");
-                let surface_attrs = [0x3057, 1000, 0x3056, 800, 0x3038];
-                let surface = create_surface(display, config, surface_attrs.as_ptr());
-                assert!(!surface.is_null(), "offscreen pbuffer");
-                let context_attrs = [0x3098, 3, 0x30FB, 3, 0x30FD, 1, 0x3038];
-                let context = create_context(
-                    display,
-                    config,
-                    std::ptr::null_mut(),
-                    context_attrs.as_ptr(),
-                );
-                assert!(!context.is_null(), "OpenGL 3.3 context");
-                assert_eq!(make_current(display, surface, surface, context), 1);
-                Self {
-                    library,
-                    display,
-                    surface,
-                    context,
-                    get_proc,
-                    make_current,
-                    destroy_surface: symbol!("eglDestroySurface", Destroy),
-                    destroy_context: symbol!("eglDestroyContext", Destroy),
-                    terminate: symbol!("eglTerminate", Terminate),
-                }
-            }
-        }
-
-        fn glow(&self) -> glow::Context {
-            unsafe {
-                glow::Context::from_loader_function(|name| {
-                    let name = CString::new(name).unwrap();
-                    (self.get_proc)(name.as_ptr())
-                })
-            }
-        }
-    }
-
-    impl Drop for OffscreenContext {
-        fn drop(&mut self) {
-            unsafe {
-                (self.make_current)(
-                    self.display,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                );
-                (self.destroy_context)(self.display, self.context);
-                (self.destroy_surface)(self.display, self.surface);
-                (self.terminate)(self.display);
-                libc::dlclose(self.library);
-            }
-        }
-    }
+    use crate::platform::offscreen_gl::OffscreenContext;
 
     pub(crate) fn fixture(source: &str, width: f32, scale: f32) -> (OffscreenContext, App) {
-        let context = OffscreenContext::new();
+        let context = OffscreenContext::new(1000, 800).expect("offscreen EGL context");
         let mut app = crate::app::reviewer_stage2_test_app().expect("headless App");
         app.show_welcome = false;
         app.file_path = Some(std::path::PathBuf::from("/tmp/reviewer-stage2.md"));
@@ -156,7 +20,7 @@ pub(crate) mod reviewer_stage2_integration {
             context.glow(),
             scale,
             app.theme.clone(),
-            "review surfaceless".to_string(),
+            context.requested_context(),
         )
         .expect("production Renderer");
         renderer.width = width;
@@ -1007,10 +871,35 @@ pub(crate) mod reviewer_stage2_integration {
             .unwrap();
         let expected_current = edit_expected(&mut app, &anchor);
         let result = source.find("paragraph034").unwrap();
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let line_y = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .markdown_edit_source_y(&app.editor, &(result..result + 12))
+            .unwrap();
+        let max_scroll = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .get_max_scroll(&app.editor, visible_h);
+        app.scroll_y.set_target(line_y - visible_h * 0.20);
         app.search_results = vec![(result, result + 12)];
         app.search_current_idx = Some(0);
         app.jump_to_search_result();
         let destination_target = app.scroll_y.target;
+        let expected_target = (line_y - visible_h * 0.35)
+            .clamp(0.0, max_scroll)
+            .round();
+        assert_eq!(destination_target, expected_target);
         review_v3_root_frame(&mut app);
         println!(
             "SEARCH_DURING_PENDING read_current={read_y} expected_current={expected_current} actual_current={} expected_target={destination_target} actual_target={}",
@@ -1024,6 +913,279 @@ pub(crate) mod reviewer_stage2_integration {
             (app.scroll_y.current - expected_current).abs() <= 1.0,
             "animated search changes destination target, not the coordinate system of current; first Edit frame must not retain Read pixels"
         );
+    }
+
+    #[test]
+    fn reviewer_stage2_pending_edit_search_uses_destination_band_without_preconverted_target() {
+        for (needle, expected_ratio) in [("paragraph034", None), ("paragraph045", Some(0.65))] {
+            let source = document();
+            let (_context, mut app) = fixture(&source, 720.0, 1.0);
+            app.renderer.as_mut().unwrap().height = 420.0;
+            let origin = source.find("paragraph030").unwrap();
+            let _ = review_v3_root_read_at(&mut app, origin, 3.25);
+            app.set_markdown_mode(MarkdownMode::Edit);
+            let origin_target = app.scroll_y.target;
+            assert!(app.prepare_markdown_absolute_scroll_target_navigation());
+            assert!(app.scroll_y.update(f32::MIN_POSITIVE));
+            assert_eq!(app.scroll_y.target, origin_target);
+            let destination_current = app.scroll_y.current;
+
+            let result = source.find(needle).unwrap();
+            let line_y = app
+                .renderer
+                .as_mut()
+                .unwrap()
+                .markdown_edit_source_y(&app.editor, &(result..result + needle.len()))
+                .unwrap();
+            let renderer = app.renderer.as_ref().unwrap();
+            let scale = renderer.scale_factor;
+            let visible_h = crate::render_view::editor_view_height(
+                renderer.height,
+                crate::render_view::editor_content_top_inset(false, false, false, scale),
+                0.0,
+                false,
+                scale,
+            );
+            let max_scroll = app
+                .renderer
+                .as_mut()
+                .unwrap()
+                .get_max_scroll(&app.editor, visible_h);
+            let destination_ratio = (line_y - destination_current) / visible_h;
+            if expected_ratio.is_none() {
+                assert!((0.35..=0.65).contains(&destination_ratio));
+            } else {
+                assert!(destination_ratio > 0.65);
+            }
+            app.search_results = vec![(result, result + needle.len())];
+            app.search_current_idx = Some(0);
+
+            app.jump_to_search_result();
+
+            let expected_target = expected_ratio.map_or(destination_current.round(), |ratio| {
+                (line_y - visible_h * ratio)
+                    .clamp(0.0, max_scroll)
+                    .round()
+            });
+            assert_eq!(app.scroll_y.target, expected_target, "needle={needle}");
+        }
+    }
+
+    #[test]
+    fn reviewer_stage2_search_navigation_uses_nearest_edit_central_band_edge() {
+        let source = document();
+        let (_context, mut app) = fixture(&source, 720.0, 1.0);
+        app.renderer.as_mut().unwrap().height = 420.0;
+        let result = source.find("paragraph030").unwrap();
+        let line_y = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .markdown_edit_source_y(&app.editor, &(result..result + 12))
+            .unwrap();
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let max_scroll = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .get_max_scroll(&app.editor, visible_h);
+
+        app.scroll_y.jump_to(line_y - visible_h * 0.20);
+        app.search_results = vec![(result, result + 12)];
+        app.search_current_idx = Some(0);
+
+        app.jump_to_search_result();
+
+        let expected = (line_y - visible_h * 0.35)
+            .clamp(0.0, max_scroll)
+            .round();
+        assert_eq!(app.scroll_y.target, expected);
+    }
+
+    #[test]
+    fn reviewer_stage2_search_navigation_preserves_an_edit_target_inside_central_band() {
+        let source = document();
+        let (_context, mut app) = fixture(&source, 720.0, 1.0);
+        app.renderer.as_mut().unwrap().height = 420.0;
+        let result = source.find("paragraph030").unwrap();
+        let line_y = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .markdown_edit_source_y(&app.editor, &(result..result + 12))
+            .unwrap();
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let previous_target = (line_y - visible_h * 0.42).round();
+        app.scroll_y.jump_to(previous_target);
+        app.search_results = vec![(result, result + 12)];
+        app.search_current_idx = Some(0);
+
+        app.jump_to_search_result();
+
+        assert_eq!(app.scroll_y.target, previous_target);
+    }
+
+    #[test]
+    fn reviewer_stage2_folded_edit_search_uses_visual_anchor_for_central_band() {
+        let source = document();
+        let (_context, mut app) = fixture(&source, 720.0, 1.0);
+        app.renderer.as_mut().unwrap().height = 420.0;
+        app.editor.foldable_lines.insert(10, 50);
+        app.editor.folded_lines.insert(10);
+        let result = source.find("paragraph030").unwrap();
+        let line_y = app
+            .renderer
+            .as_mut()
+            .unwrap()
+            .markdown_edit_source_y(&app.editor, &(result..result + 12))
+            .unwrap();
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let previous_target = (line_y - visible_h * 0.42).round();
+        app.scroll_y.jump_to(previous_target);
+        app.search_results = vec![(result, result + 12)];
+        app.search_current_idx = Some(0);
+
+        app.jump_to_search_result();
+
+        assert_eq!(app.scroll_y.target, previous_target);
+        let viewport_ratio = (line_y - app.scroll_y.target) / visible_h;
+        assert!((0.35..=0.65).contains(&viewport_ratio));
+    }
+
+    #[test]
+    fn reviewer_stage2_in_band_read_search_replaces_the_recorded_navigation_range() {
+        let source = document();
+        let (_context, mut app) = fixture(&source, 720.0, 1.0);
+        app.renderer.as_mut().unwrap().height = 420.0;
+        app.set_markdown_mode(MarkdownMode::Read);
+        read_frame(&mut app);
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let max_scroll = app.markdown.read_scroll_bounds().unwrap_or(f32::MAX);
+        let previous = source.find("paragraph020").unwrap();
+        let current = source.find("paragraph030").unwrap();
+        let previous_y = app
+            .markdown
+            .read_layout
+            .source_target_y(&(previous..previous + 12))
+            .unwrap();
+        let current_y = app
+            .markdown
+            .read_layout
+            .source_target_y(&(current..current + 12))
+            .unwrap();
+        let recorded_range = |app: &App| {
+            app.markdown
+                .pending_absolute_scroll_target(MarkdownMode::Read, app.scroll_y.target)
+                .and_then(|(target, _)| match target {
+                    crate::app::MarkdownAbsoluteScrollTarget::Source { source_range, .. } => {
+                        Some(source_range)
+                    }
+                    _ => None,
+                })
+        };
+
+        // The first jump lands outside the band and records `previous`.
+        app.scroll_y.jump_to(previous_y - visible_h * 0.9);
+        app.search_results = vec![(previous, previous + 12)];
+        app.search_current_idx = Some(0);
+        app.jump_to_search_result();
+        assert_eq!(recorded_range(&app), Some(previous..previous + 12));
+
+        // The second jump is already inside the band: the scroll target is preserved,
+        // but the navigation record must follow the match the user jumped to.
+        let in_band_target = (current_y - visible_h * 0.5).round();
+        app.scroll_y.jump_to(in_band_target);
+        app.search_results = vec![(current, current + 12)];
+        app.search_current_idx = Some(0);
+        app.jump_to_search_result();
+        assert_eq!(app.scroll_y.target, in_band_target.clamp(0.0, max_scroll));
+        read_frame(&mut app);
+
+        let (target, relative_delta) = app
+            .markdown
+            .pending_absolute_scroll_target(MarkdownMode::Read, app.scroll_y.target)
+            .expect("an in-band search jump keeps its absolute navigation record");
+        let crate::app::MarkdownAbsoluteScrollTarget::Source {
+            source_range,
+            viewport_ratio,
+        } = target
+        else {
+            panic!("an in-band search jump must record its source range");
+        };
+        assert_eq!(source_range, current..current + 12);
+        assert!((0.35..=0.65).contains(&viewport_ratio));
+        assert_eq!(
+            relative_delta, 0.0,
+            "keeping the in-band target must stay a zero-delta navigation"
+        );
+    }
+
+    #[test]
+    fn reviewer_stage2_search_navigation_uses_nearest_reader_central_band_edge() {
+        let source = document();
+        let (_context, mut app) = fixture(&source, 720.0, 1.0);
+        app.renderer.as_mut().unwrap().height = 420.0;
+        app.set_markdown_mode(MarkdownMode::Read);
+        read_frame(&mut app);
+        let result = source.find("paragraph030").unwrap();
+        let target_y = app
+            .markdown
+            .read_layout
+            .source_target_y(&(result..result + 12))
+            .unwrap();
+        let renderer = app.renderer.as_ref().unwrap();
+        let scale = renderer.scale_factor;
+        let visible_h = crate::render_view::editor_view_height(
+            renderer.height,
+            crate::render_view::editor_content_top_inset(false, false, false, scale),
+            0.0,
+            false,
+            scale,
+        );
+        let max_scroll = app.markdown.read_scroll_bounds().unwrap();
+
+        app.scroll_y.jump_to(target_y - visible_h * 0.80);
+        app.search_results = vec![(result, result + 12)];
+        app.search_current_idx = Some(0);
+
+        app.jump_to_search_result();
+
+        let expected = (target_y - visible_h * 0.65)
+            .clamp(0.0, max_scroll)
+            .round();
+        assert_eq!(app.scroll_y.target, expected);
     }
 
     #[test]

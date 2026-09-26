@@ -545,9 +545,9 @@ impl Renderer {
         let header_h = if result.columns.is_empty() {
             0.0
         } else {
-            (crate::app::database::DATABASE_GRID_HEADER_HEIGHT * s).round()
+            crate::app::database::database_grid_header_height_px(s)
         };
-        let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * s).round();
+        let row_h = crate::app::database::database_grid_row_height_px(s);
         let content_w = crate::app::database::database_columns_content_width(
             &state.result_view.column_widths,
             result.columns.iter().map(String::as_str),

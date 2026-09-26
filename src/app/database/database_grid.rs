@@ -137,6 +137,31 @@ pub fn database_grid_max_scroll(row_count: usize, row_height: f32, viewport_heig
     (row_count as f32 * row_height.max(0.0) - viewport_height.max(0.0)).max(0.0)
 }
 
+/// Render height of one grid row. Renders round it so glyphs stay pixel-stable;
+/// scroll math must use the same rounded value or the last rows stay unreachable
+/// at fractional scales.
+pub fn database_grid_row_height_px(scale: f32) -> f32 {
+    (DATABASE_GRID_ROW_HEIGHT * scale).round()
+}
+
+pub fn database_grid_header_height_px(scale: f32) -> f32 {
+    (DATABASE_GRID_HEADER_HEIGHT * scale).round()
+}
+
+/// Row height in logical (unscaled) units, matching the render's rounded pixels.
+pub fn database_grid_row_height_logical(scale: f32) -> f32 {
+    database_grid_row_height_px(scale) / scale.max(0.001)
+}
+
+/// Logical viewport size of the grid body rect as produced by the layout.
+pub fn database_grid_viewport_from_body_rect(width: f32, height: f32, scale: f32) -> (f32, f32) {
+    let s = scale.max(0.001);
+    (
+        (width / s - 54.0).max(0.0),
+        ((height - database_grid_header_height_px(scale)) / s).max(0.0),
+    )
+}
+
 pub fn database_grid_visible_row_range(
     scroll_y: f32,
     row_height: f32,
@@ -1668,7 +1693,10 @@ mod tests {
                 rows: vec![row],
             });
         }
-        assert!(grid.chunks.contains_key(&0), "visible chunk stays protected");
+        assert!(
+            grid.chunks.contains_key(&0),
+            "visible chunk stays protected"
+        );
         let evicted = (1..10)
             .find(|chunk_index| !grid.chunks.contains_key(chunk_index))
             .expect("one non-visible chunk should be evicted");

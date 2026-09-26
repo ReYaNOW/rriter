@@ -1,13 +1,16 @@
 pub mod api_client;
 pub mod api_mock;
 mod markdown;
-pub(crate) use markdown::{MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension};
+pub(crate) use markdown::{
+    MarkdownAbsoluteScrollTarget, MarkdownCodeScrollX, is_markdown_extension,
+};
 pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
+mod app_bootstrap;
 mod autocomplete;
 pub mod automation;
-mod automation_database;
 mod automation_dart;
+mod automation_database;
 mod automation_markdown;
 pub(crate) mod context_menu;
 mod dart_settings;
@@ -33,6 +36,7 @@ use crate::highlighter::{CompletionItem, SymbolKind, TREE_SITTER_HIGHLIGHT_MAX_B
 use crate::renderer::Renderer;
 use app_state::fuzzy_match;
 pub use app_state::*;
+pub(crate) use app_bootstrap::AppInitOptions;
 #[cfg(test)]
 pub(crate) use autocomplete::{
     AutocompleteKeyAction, autocomplete_key_action, autocomplete_next_index,
@@ -46,8 +50,6 @@ use glutin::display::GetGlDisplay;
 use python_completion::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
-use winit::event_loop::ActiveEventLoop;
-use winit::window::Window;
 
 const FILE_OPEN_HIGHLIGHT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(150);
 const FILE_OPEN_LARGE_PRIORITY_HIGHLIGHT_TIMEOUT: std::time::Duration =

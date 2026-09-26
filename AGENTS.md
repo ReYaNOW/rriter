@@ -1,262 +1,22 @@
-RRiter agent rules. Strict mode. Small patches. Fast UI first. Always think about the most performant and non resource-intensive solution. If you are an Agent, always write in the summary after completed task - why your solution is SOTA in performance and most non resource-intensive solution. If not SOTA, make SOTA. But for SOTA ONLY touch code that you have been writen in current task, dont touch otherwise if not asked. Do not tell about SOTA in bugfix tasks.
+RRiter agent rules. Strict mode. Small patches. Fast UI first. Prefer the most performant, least resource-intensive solution for the code you write in the task; do not rework other code for that unless asked. In the final report, mention performance only when a real choice was made (allocation, per-frame work, I/O); no boilerplate justification.
 
-## 0. Context Order
+## 0. Context and search
 
-Read in order:
+Read on demand, not upfront:
 
-1. `AGENTS.md`
-2. Use `code-review-graph` MCP as primary project index/call graph
-3. Needed source files in workspace
-4. `PROJECT_AI_MAP.txt` only as fallback if MCP unavailable
-5. `PROJECT_GUIDE.md` only for broader architecture
+* `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
+* `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
+* `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
+* UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make codex_test` once at the end (§4). Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
+* Delegating UI-test work: size each agent by scenarios, not by file — 3–5 scenarios (~10 min of driver probes) per agent, at most 6–8 agents in parallel, the rest in waves; each agent writes its scenarios to its own file or the main session merges them into the shared `ui_tests_*.rs` afterwards (never two agents editing one file at once). Reason: one agent given all tree-ops scenarios ran three times longer than its siblings with one or two, and the whole batch waited for it (26.09).
 
-Do not infer exact code from graph/map. Graph/map = index only.
-Always read exact source files before exact patches.
+Search (`rg`-first):
 
-## 0.1 code-review-graph MCP
-
-This project has `code-review-graph` MCP. Use it before Grep/Glob/Read for non-trivial code exploration.
-
-Purpose:
-
-* Avoid broad repo scans.
-* Find exact symbols/files fast.
-* Check callers/callees before editing.
-* Check affected flows and review risk before risky changes.
-* Read only source files that matter.
-
-Use `PROJECT_AI_MAP.txt` only when MCP is unavailable or broken.
-
-Do not use graph/map as source code.
-Do not create exact patches from graph/map only.
-Always read exact source before editing.
-
-### 0.1.1 Required MCP-first workflow
-
-For non-trivial edit/review/debug tasks:
-
-1. Start with `code-review-graph`.
-2. Find relevant node by exact file path or exact symbol name.
-3. Use graph to inspect callers, callees, impact radius, affected flows, and tests.
-4. Pick minimum exact source files.
-5. Read exact source files.
-6. Patch surgically.
-7. If ANY file related to RRiter changed, run `make codex_test`.
-8. Summarize graph findings, files changed, verify result.
-
-Do not start with broad Grep/Glob/Read unless MCP unavailable.
-
-### 0.1.2 Tool usage rules
-
-Use these tools by intent:
-
-* `get_minimal_context_tool`
-
-  * First-pass context for task, changed files, or target area.
-  * Good for summary, risk, key entities, communities, flow hints.
-  * Treat output as triage, not exact code.
-
-* `semantic_search_nodes_tool`
-
-  * Find files/symbols by exact names.
-  * Prefer precise queries:
-
-    * `handle_main_mouse_input`
-    * `Renderer.draw_editor_visible_text`
-    * `src/render_view/editor_text_layer.rs`
-    * `UiRegistry`
-    * `start_active_api_request`
-  * Avoid broad prose queries like `render frame draw hot path ui registry mouse input project search api client`; they may return 0.
-  * If broad query returns 0, retry with exact symbol/file names from AGENTS.md, PROJECT_GUIDE.md, or user task.
-
-* `query_graph_tool`
-
-  * Use for structural facts.
-  * Preferred patterns:
-
-    * `file_summary` for file contents overview and line ranges.
-    * `callers_of` before changing public/shared/hot functions.
-    * `callees_of` before changing a function with many dependencies.
-    * `tests_for` before/after patch planning.
-    * `children_of` only when target format is known to work; if 0, use `file_summary`.
-  * Prefer fully qualified targets when available:
-
-    * `/abs/path/src/file.rs::FunctionName`
-    * `/abs/path/src/file.rs::Type.method`
-  * If relative target returns 0, retry with absolute path from graph search result.
-
-* `get_affected_flows_tool`
-
-  * Use when changing one or more files.
-  * Use especially for render/input/API/LSP/editor hot paths.
-  * Report affected flows only if useful to task.
-  * Do not over-expand source reads just because graph shows many impacted nodes; choose files by risk and direct relevance.
-
-* `get_review_context_tool`
-
-  * Use for review tasks, current changes, risky edits, and multi-file changes.
-  * Use to estimate impacted files/nodes, risk, and test gaps.
-  * Use before final summary for non-trivial changed files.
-
-* `refactor_tool`
-
-  * Use before renames/moves/dead-code cleanup.
-  * Do not delete unrelated dead code.
-  * If dead code unrelated to current task appears, mention it only.
-
-* `run_postprocess_tool`
-
-  * Use only when graph appears stale or user asks to refresh analysis.
-  * Do not run expensive postprocess repeatedly during normal edits.
-
-* `embed_graph_tool`
-
-  * Use only if semantic search quality is poor and embeddings are missing/stale.
-  * Do not run unless needed.
-
-* `generate_wiki_tool`
-
-  * Use only for documentation/architecture summary tasks.
-  * Do not use for normal bugfix.
-
-* `get_docs_section_tool`
-
-  * Use when unsure how to use code-review-graph tools.
-  * Prefer this over guessing tool syntax.
-
-### 0.1.3 Graph target strategy
-
-Preferred target order:
-
-1. Exact symbol from user task.
-2. Exact file path from user task.
-3. Known hot file from AGENTS.md.
-4. File guide path from PROJECT_GUIDE.md.
-5. Fallback map entry from `PROJECT_AI_MAP.txt`.
-
-When searching:
-
-* First query exact name.
-* If no result, query file basename.
-* If no result, query owner/type name.
-* If no result, use PROJECT_GUIDE.md routing.
-* If still no result, use Grep/read-only search.
-
-When graph returns standard/library callees (`get`, `map`, `unwrap_or`, `clone`, `round`, etc.), ignore them unless task is specifically about those calls.
-
-### 0.1.3.1 Graph miss fallback for Rust include/impl methods
-
-`callers_of` can return false `0` for Rust methods split through `include!`/module shell files, especially `impl Type { fn method(...) }` in chunk files.
-
-If `callers_of('/abs/path/file.rs::Type.method')` returns `0` but target is an impl method or constructor:
-
-1. Do not treat `0` as proof of no callers.
-2. Use `semantic_search_nodes_tool` for exact variants:
-
-   * `Type.method`
-   * `Type::method`
-   * `method`
-   * implementation file basename
-
-3. Run `file_summary` on both:
-
-   * concrete implementation file, for example `src/renderer/renderer_init_methods.rs`
-   * include shell/module file, for example `src/renderer.rs`
-
-4. Retry `callers_of` only with canonical node ids/targets returned by graph search or `file_summary`; do not rely only on hand-written target strings.
-5. If graph still returns `0`, use exact read-only `rg` as MCP gap fallback, not as first step:
-
-   * constructors: `rg -n "Type::method\\(" src`
-   * methods: `rg -n "\\.method\\(" src`
-   * function name fallback: `rg -n "method\\(" src`
-
-6. In summary, say: `Graph callers_of returned 0 for include/impl target; verified with exact rg fallback`.
-
-### 0.1.4 Required graph checks by task type
-
-Bug fix:
-
-1. `semantic_search_nodes_tool` for failing symbol/file.
-2. `query_graph_tool file_summary` for target file.
-3. `query_graph_tool callers_of` for target function if function behavior changes.
-4. `query_graph_tool callees_of` for target function if it delegates logic.
-5. `query_graph_tool tests_for` when target function/class known.
-6. Read exact source.
-7. Patch minimal code.
-8. Run `make codex_test` if any RRiter file changed.
-
-Render/input/editor hot-path change:
-
-1. Find target symbol/file.
-2. `file_summary`.
-3. `callers_of`.
-4. `callees_of`.
-5. `get_affected_flows_tool` for changed files.
-6. Read exact source.
-7. Patch allocation-light.
-8. Run `make codex_test`.
-
-Review current changes:
-
-1. `get_review_context_tool`.
-2. `get_affected_flows_tool`.
-3. Inspect high-risk files only.
-4. Read exact source/diff as needed.
-5. Report risks, tests, and minimal fixes.
-6. If editing, run `make codex_test`.
-
-Refactor/rename:
-
-1. `semantic_search_nodes_tool` exact symbol.
-2. `query_graph_tool callers_of`.
-3. `query_graph_tool callees_of`.
-4. `refactor_tool` where useful.
-5. Read exact source and direct call sites.
-6. Patch only required files.
-7. Run `make codex_test`.
-
-Architecture explanation:
-
-1. `get_minimal_context_tool`.
-2. `semantic_search_nodes_tool` for entrypoints.
-3. `query_graph_tool file_summary`.
-4. `get_affected_flows_tool` or docs/wiki tool if needed.
-5. Do not edit files.
-
-### 0.1.5 Graph freshness
-
-Graph lives in `.code-review-graph/`.
-
-Normal update command:
-
-```bash
-code-review-graph update
-```
-
-Full rebuild command:
-
-```bash
-code-review-graph build
-```
-
-Use full build after large moves/splits or graph corruption.
-
-If full postprocess is too slow, acceptable fallback:
-
-```bash
-code-review-graph build --skip-postprocess
-```
-
-Do not edit `.code-review-graph/` manually.
-Do not commit `.code-review-graph/`.
-
-`.code-review-graphignore` must ignore:
-
-```text
-target/
-.git/
-.code-review-graph/
-```
+* Default: `rg -n` for symbols, strings, error text, file names. Start narrow (exact symbol or distinctive string), widen only if empty.
+* The Bash tool runs **zsh**, not bash. Bash-only syntax fails with `bad substitution` (`${var^^}`, `${!var}`, `mapfile`), and an unmatched glob aborts the whole command with `no matches found` instead of passing the pattern through. Keep commands POSIX-ish, or quote the glob and let the tool expand it.
+* Read only the files/ranges the search points to. Always read exact source before editing.
+* `code-review-graph` MCP is optional: use it when `rg` answers poorly — callers of a widely used function before changing its behavior, test ownership, impact of a multi-file change. Never a mandatory first step.
+* Graph output is an index, not source. Rust `include!`-split files can return false `0` callers; verify with `rg`.
 
 ## 1. Role
 
@@ -271,117 +31,20 @@ Priority order:
 
 No speculative features. No broad refactors unless asked.
 
-## 2. Chat Workflow
+## 2. Working style
 
-When source files unavailable:
+* Act, don't ask: find the cause, change code, run checks. Stop only for destructive or out-of-scope actions.
+* Context discipline: search first, then read relevant ranges (offset/limit for large files). Do not read whole large files or guides "just in case".
+* Long command output (builds, tests): redirect to a file (`cmd > /tmp/<task>.log 2>&1`), then `grep`/`tail` it. Never dump full logs into context.
+* While a long build or test run is in flight (`make codex_test`, `make test`, `make fast`, cargo builds): the main session starts it in the background and then **goes idle** (a subagent runs tests in the foreground, or its turn ends before the result). No polling the log, no peeking at partial output, no "meanwhile" side work, no thinking out loud. Every such check is a full model turn that re-ships the whole context for nothing. Wait for the completion notification, then read the result once with `grep`/`tail`.
+* Feedback loop: after a substantive edit run the narrowest check (`make test TEST_FILTER=<module path>`) and fix what it reports before moving on. Exception: UI tests are probed on the prebuilt binary via `dump`/`shot` (§0), not relinked per edit.
+* Fix at the root: if a shared helper is wrong, fix the helper, not one caller; check sibling code paths that use it.
+* Batch independent searches/reads in one step.
+* Edit files directly. Use unified diff only when showing changes; do not use chat parser `Before/After` blocks.
+* Final report: short — root cause (`file:line`), change, verification result (plus the SOTA note from the header when it applies). No essays.
+* Task tracking: rriter tasks go to the Kanri board, never Linear (Linear is Skyhold-only). Use the `kanri-task` skill, or `kanri-add "Title" [--desc ...] [--board RRiter] [--column Backlog|Features|Bugs|Doing|Done] [--top] [--list]`, `kanri-add --move <id> --column <col>` — it writes straight into Kanri's JSON store `~/.local/share/tech.trobonox.kanri/.kanri.dat`, keeps a backup, and refuses to write while Kanri is running (Kanri would overwrite the file on its own save). Move cards yourself when their status changes: work started → Doing, fixed and verified (`make codex_test` green, ignored test lifted) → Done, not a bug → say so and move per the user's call; mention each move in the report. Exception: large features (Features column, multi-step work) — propose the move instead of doing it. Reason: the user had to move cards by hand after every task (26.09).
 
-1. Use `code-review-graph` MCP to inspect relevant files/symbols/call edges.
-2. If MCP unavailable, use `PROJECT_AI_MAP.txt` fallback.
-3. Pick minimal files.
-4. Ask complete files.
-5. No exact patches before full source.
-6. No exact code from graph/map/index.
-
-Fallback map format for `PROJECT_AI_MAP.txt`:
-
-* `M path` -> source file. All following `C`, `I`, `F` rows belong to this file until next `M`.
-* `C kind name@line` -> type symbol (`struct` / `enum`) and source line.
-* `I owner` -> impl/type owner. Following `F` rows are methods for this owner until next `I` or `M`.
-* `F name@line>called_fn_ids` -> function/method declaration, source line, and direct calls.
-* Function id = zero-based order of all `F` rows in the whole map.
-* Call ids after `>` are base36 function ids.
-* Missing `>` means no known direct project calls.
-
-Required file request format:
-
-```text
-Need files:
-1. path/to/file.rs
-   Reason: exact code needed for `Owner.method` / behavior.
-   Graph ref: `file_summary` / `callers_of` / `callees_of` result for target symbol.
-
-2. path/to/other.rs
-   Reason: called by / calls previous symbol.
-   Graph ref: direct caller/callee from `code-review-graph`.
-```
-
-If MCP unavailable and fallback map is used:
-
-```text
-Need files:
-1. path/to/file.rs
-   Reason: exact code needed for `Owner.method` / behavior.
-   Map ref: `M path/to/file.rs` -> `I Owner` -> `F method@line>...`
-
-2. path/to/other.rs
-   Reason: called by / calls previous symbol.
-   Map ref: call id `<base36_id>` from `F caller>...`
-```
-
-Request minimum files:
-
-* Prefer 1-3 files.
-* Ask 4+ only when behavior crosses subsystems.
-* Unsure -> ask narrowest entrypoint file first.
-* Stop after file request. No speculative patch.
-
-## 3. Editing Workflow
-
-### Direct File Access
-
-If inside VS Code, Cursor, Continue, Cline, Copilot Workspace, or tool with write access:
-
-* Use `code-review-graph` before broad exploration.
-* Edit files directly.
-* Use unified diff only when showing changes.
-* Do not use chat parser `Before/After` blocks.
-* Run `make codex_test` if ANY RRiter-related file changed.
-
-### Chat-Only
-
-If no write access:
-
-* Request full source first.
-* Then provide patch format user asks for.
-* Convenient diff -> unified diff.
-* Exact-substring parser -> strict format below.
-
-### Strict Exact-Substring Parser
-
-Use only when user explicitly needs exact-substring parser patches and direct edits/unified diff unavailable.
-
-````text
-1) path/to/file.rs
-```rust
-// Before:
-exact_old_code
-// After:
-exact_new_code
-```
-````
-
-Rules:
-
-1. `Before:` copied from actual source provided in task.
-2. Never create `Before:` from memory/map/summary/guess.
-3. No `...`, no omitted code, no `unchanged`.
-4. Distant edits -> split numbered blocks.
-5. Use fewest lines needed for unique exact match.
-6. Missing exact source -> ask file, do not patch.
-7. Block line only path, or path plus `(New file)`.
-8. No comments on path line.
-9. Preserve original spacing in `Before:` exactly.
-
-New file:
-
-````text
-2) path/to/new_file.rs (New file)
-```rust
-file contents
-```
-````
-
-## 4. Allowed Ops
+## 3. Allowed Ops
 
 Allowed file ops inside project:
 
@@ -395,9 +58,11 @@ Allowed shell commands:
 
 * `ls`
 * `grep`
+* `rg`
 * `python3 gen_project_ai_map.py`
 * `make codex_test`
-* `cargo +nightly fmt`
+* `make test TEST_FILTER=<module path>` (focused tests)
+* No `rustfmt` / `cargo fmt` at all, not even on a single file: the tree is not rustfmt-clean, and rustfmt follows `mod` declarations, so one file drags dozens of untouched files into the diff. Match the surrounding style by hand.
 * `make api-map` if still present
 * `python3 scripts/build_windows.py --self-test`
 * `python3 scripts/build_macos.py --self-test`
@@ -407,35 +72,25 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
+* Branches, commits, PRs — only the main session; subagents never commit. Work on a branch off `master`, and decide yourself when to open one: a new task unrelated to the current branch → `git switch master && git pull && git switch -c <short-name>`; follow-up work on the current branch → stay. Commit and push the branch (`-u origin <branch>` if no upstream). At the end of a finished, verified task (`make codex_test` green) finish it into `master` without waiting for the user: `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, then `git switch master && git pull`. Don't merge WIP, red tests, or a branch the user asked to keep open. Say in the final report which PR was merged. Reason: the user had to ask for push and merge after every task (26.09, 27.09).
 
 Forbidden unless user explicitly asks:
 
-* `git *` (only mutable)
+* force-push, pushing to `master` other than by the squash-merged PR above, deleting remote branches other than the merged PR branch, rewriting pushed history
 * network commands (only mutable)
 * package installs
 * destructive commands outside project
 * whole-project formatting
 
-## 5. Plan + Verify
+## 4. Plan + Verify
+
+### Builds and tests with several agents
+
+Only one agent builds or tests at a time, in the main checkout where `target/` is warm. Parallel agents only edit; the integrator builds and runs tests once after integration. A fresh worktree starts with an empty `target/`: the first build takes tens of minutes and gigabytes, and concurrent Cargo processes fight for CPU and for one target directory.
 
 If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
-Before multi-file/risky change:
-
-```text
-1. Graph check X -> read files Y
-2. Change X -> verify focused behavior
-3. Change Z -> verify make codex_test
-```
-
-Bug fix path:
-
-1. Use `code-review-graph` MCP -> smallest relevant path and impact radius.
-2. If MCP unavailable, use `PROJECT_AI_MAP.txt` fallback.
-3. Read exact source.
-4. Find cause.
-5. Patch minimal code.
-6. Verify with `make codex_test` if ANY RRiter-related file changed.
+Bug fix path: `rg` (graph optional for callers/impact) -> read exact source -> find root cause -> minimal patch -> focused test -> `make codex_test` at the end.
 
 Primary success check after edits:
 
@@ -445,14 +100,16 @@ make codex_test
 
 Always run `make codex_test` at the end of task if ANY file related to RRiter changed.
 
-Do not run `make fast` for RRiter unless user explicitly asks.
+Run it in the background and stay silent until it reports. It takes minutes; checking on it costs a full model turn each time and tells you nothing the completion notification will not.
+
+Do not run `make fast` on its own mid-task unless the user explicitly asks; it is rebuilt by `make codex_test` at the end, and once if the release binary is missing (§0).
 
 No-edit tasks:
 
 * Do not run `make codex_test` if no files changed.
 * Say explicitly: `Verify: not run, no files changed.`
 
-## 6. Coding Rules
+## 5. Coding Rules
 
 ### Simplicity
 
@@ -474,7 +131,7 @@ No-edit tasks:
 * Keep source files under 1500 lines when practical.
 * Split by behavior/state/render responsibility, not line ranges.
 * Extract real duplication before new module.
-* No new source file under 300 lines unless asked.
+* No new source file under 200 lines unless asked.
 * No duplicate filenames in different folders.
 * Tests move with logic. Never delete tests during splits.
 
@@ -509,7 +166,7 @@ In draw/render/frame paths:
 
 * Always reuse already implemented code. Do not copy it, but move to a separate function / class and use it in all places. If you are implementing something, try to search for it in the repo, it MAY be already implemented.
 
-* DO not create files larger than 1600 lines of code. Move logic blocks to new files if that happens. Add info about new files in both .md files. Do not create files with less than 200 lines.
+* Hard limit: no source file above 1600 lines; move logic blocks to new files before a file would exceed it. Add new files to the compact file index in `PROJECT_GUIDE.md` §4.
 
 ### Platform and filesystem invariants
 
@@ -570,11 +227,9 @@ src/editor_navigation.rs
 
 Before editing hot files:
 
-1. Use `code-review-graph` `file_summary`.
-2. Check `callers_of` for edited function.
-3. Check `callees_of` if logic delegates.
-4. Check `get_affected_flows_tool` for changed file.
-5. Keep patch allocation-light.
+1. Find callers of the edited function (`rg`, or graph `callers_of` for widely used helpers).
+2. Check callees if the logic delegates.
+3. Keep the patch allocation-light and run the focused tests for the module.
 
 ### UI Architecture
 
@@ -587,226 +242,13 @@ Use declarative UI registry for new buttons/elements when applicable:
 
 Before new UI action:
 
-1. Search graph for existing `UiId` / similar handler.
+1. Search (`rg`) for existing `UiId` / similar handler.
 2. Read `src/ui_system.rs`.
 3. Read relevant render module.
 4. Read `src/app/ui_handlers.rs`.
 5. Patch smallest route.
 
-
-Detailed notes: `PROJECT_GUIDE.md`.
-
-## 9. File Guide
-
-Root:
-
-* `AGENTS.md` -> agent rules.
-* `.code-review-graph/` -> generated code-review graph database. Do not edit manually. Ignored by git.
-* `.code-review-graphignore` -> graph ignore rules. Must ignore `target/`, `.git/`, `.code-review-graph/`.
-* `PROJECT_AI_MAP.txt` -> fallback AI source index/call map. Not exact source. Use only when `code-review-graph` MCP unavailable.
-* `PROJECT_GUIDE.md` -> broader architecture guide.
-* `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
-* `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
-* `Cargo.toml` -> deps/profile/features.
-* `Makefile` -> `make codex_test`, `make api-map`.
-* `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
-* `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
-* `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
-* `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
-* `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
-* `src/platform/text_file.rs` -> centralized UTF/legacy text decoding, format preservation, conservative charset detection, strict re-encoding, and atomic text-save entrypoint.
-* `src/platform/integration.rs` -> platform directories, configured tool resolution including Dart/Flutter SDK priority, shared native-root/proxy HTTP builders, and process memory.
-* `src/platform/process.rs` -> executable resolution, cancelable captured/streaming commands with timeout, Unix process groups, Windows Job Objects, and deterministic process-tree cleanup.
-* `src/platform/secret_store.rs` -> strict system-only credential storage for Database Tools: Windows DPAPI, macOS Keychain, Linux Secret Service via `secret-tool`, with no plaintext fallback.
-* `src/platform/elevated_save.rs` -> validated platform helper request and atomic elevated file replacement.
-* `src/platform/windows.rs` -> Windows WTF-16 paths, Win32 shell/application setup, DPAPI, trust/proxy, Job/elevation helpers, and process memory.
-* `src/platform/macos.rs` -> Keychain, Finder/open, native proxy/trust, Mach memory, and administrator helper integration.
-* `src/platform/tests.rs` -> platform/path/encoding/atomic-write/modifier/tool-resolution regression tests.
-* `src/render_view/settings_tool_rows.rs` -> shared external-tool settings rows and Dart SDK controls; keeps tool UI behavior out of the main settings renderer.
-* `src/bin/project_search_grep_searcher_bench.rs` -> direct grep-searcher library benchmark for project substring search.
-* `src/bin/project_search_io_uring_bench.rs` -> Linux io_uring benchmark for batched project substring search reads.
-
-Entrypoints/state:
-
-* `src/main.rs` -> app startup, config, event loop, GL/window boot.
-* `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
-* `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
-* `src/app/markdown_scroll_transition.rs` -> `markdown.rs` include chunk for shared vertical `ScrollState` mode rebasing, cold-layout pending transitions, source-anchor carry-over, and transition physics regressions; it must not become a second scroll owner.
-* `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.
-* `src/app/automation_database.rs` -> PGO-only semantic Database Tools workload: fixture endpoint parsing, in-memory secretless PostgreSQL connection seeding, production DB waits/actions, table/query scrolling, diagnostics, and regression tests.
-* `src/app/automation_dart.rs` -> PGO-only Dart setup/waits: disables external Dart SDK/LSP work for deterministic training while requiring current tree-sitter syntax closing hints, with diagnostics and regression tests.
-* `src/app/automation_markdown.rs` -> PGO-only Markdown Edit/Read workload: semantic mode/readiness steps, production shared vertical scrolling, deterministic incremental scenario chunk, and focused regressions.
-* `src/app/dart_settings.rs` -> persistent Dart support and closing-label settings shared by settings UI, Dart LSP lifecycle, and the closing-label runtime adapter.
-* `src/app/single_line_input.rs` -> shared one-line keyboard, selection, clipboard, word-navigation, and bounded insertion path reused by file-tree dialogs and Database Tools fields. Do not fork this behavior in feature-specific inputs.
-* `src/app/database.rs` -> Database Tools foundation: PostgreSQL/SSH connection config, limits, execution policies, persisted table/console state, atomic state/scratch storage, and regression tests.
-* `src/app/database/database_postgres.rs` -> PostgreSQL TCP/TLS connection backend plus bounded autocommit discovery of databases and `public` tables.
-* `src/app/database/database_ssh.rs` -> system OpenSSH selection, platform executable lookup, config/jump arguments, managed tunnel lifecycle, and alias resolution.
-* `src/app/database/database_ssh_builtin.rs` -> built-in `russh` password/key/agent fallback, host-key verification, direct-tcpip, and one-hop bastion support.
-* `src/app/database/database_secrets.rs` -> stable Database secret identities and zeroizing load/store/delete coordination through the strict platform secret API.
-* `src/app/database/database_runtime.rs` -> dedicated Tokio database worker, one-active-job policy, busy/cancel/shutdown events, and cancellation propagation.
-* `src/app/database/database_panel.rs` -> Database panel/tree/dialog/context/host-key/DDL-hover state plus global table overlays; password fields must remain zeroizing and non-debuggable.
-* `src/app/database/database_panel_restored_expansion_tests.rs` -> restored connection expansion/catalog-loading state-machine regressions included by `database_panel.rs`.
-* `src/app/database/database_catalog.rs` -> bounded autocommit PostgreSQL metadata reads and reconstructed `public` table DDL.
-* `src/app/database/database_app_methods.rs` and `database_app_event_methods.rs` -> Database panel commands/events, tab/session restore, connection delete guards, and exact SQL console persistence.
-* `src/render_view/ide_panels/ide_panel_database_renderer.rs` -> Database sidebar, embedded dimmed dialogs, tree/context rendering, and common-hover-based selectable DDL overlay.
-* `src/app/database/database_grid.rs` -> typed table rows/cells, selection, bounded chunk cache, visible ranges, editor state, and PK-based post-refresh selection restore.
-* `src/app/database/database_table.rs` -> autocommit COUNT/chunk SQL, immutable parameterized DML plans, PK+`xmin` conflict checks, and dedicated pending transaction execution.
-* `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
-* `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
-* `src/app/database/database_query_app_methods.rs` -> query Run/Cancel, Explain/Analyze, Format, History, completion, result selection, close guards, transaction Apply/Rollback, and Database-settings mutation.
-* `src/render_view/database_table_tab.rs` -> virtualized editable grid, two-axis smooth scrolling, pagination, typed cell editors, selection, and column resizing; render code must never perform database or filesystem I/O.
-* `src/render_view/database_table_tab_overlay.rs` -> full-app-blocking SQL preview, multiline editor, dirty confirmation, custom limit, and transaction review overlays.
-* `src/render_view/database_query_tab.rs` -> SQL toolbar, virtualized result/message/history panes, internal result tabs, and full-app-blocking user-query transaction review; render code must never execute SQL or touch persistence.
-* `src/render_view/settings_database_ui.rs` -> Settings -> Databases value rows and +/- controls; keep row ordering aligned with `adjust_database_setting` and test every adjustable entry.
-* `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
-* `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
-* `src/app/tool_installer.rs` -> cross-platform managed uv/Ruff/Ty bootstrap, isolated install layout, progress/log state, cancellation, validation, and App integration.
-* `src/app/tool_installer_tests.rs` -> managed-install command/layout, rollback, cancellation, log bounding, and platform-plan regression tests.
-* `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close, scale-factor and IME routing.
-* `src/app/events/window_runtime.rs` -> platform GL-context plans, window/surface bootstrap, graphics diagnostics, and persisted shutdown.
-* `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.
-* `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
-* `src/app/events/source_hover.rs` -> source-backed hover enrichment.
-* `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
-* `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
-* `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
-* `src/app/api_client/*` -> API client request runtime, layout/input, App methods, parser/loading, persistence, and tests.
-* `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
-* `src/app/api_mock/contract.rs` -> Python mock contract builder for signature, classes, worker arg plan, defaults, OpenAPI schema pieces.
-* `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON export patch/synthesis for selected spec and manual mock routes.
-* `src/app/autocomplete.rs` -> include shell for `App` autocomplete detail/request/update/apply behavior.
-* `src/app/autocomplete/*` -> autocomplete helper/method chunks split by detail flow, Ty flow, popup/apply flow.
-* `src/app/python_completion.rs` -> include shell for Python autocomplete/fold/source-owner helpers.
-* `src/app/python_completion/*` -> Python completion chunks split by source/module helpers and class/member helpers.
-* `src/app/app_behavior_tests.rs` -> include shell for app/autocomplete behavior tests.
-* `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
-* `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
-* `src/app/git_panel/git_process.rs` -> managed Git executable resolution, Windows Schannel selection, credential/SSH/proxy-preserving environment, timeouts, and actionable failures.
-* `src/app/git_panel/git_commit_runtime.rs` -> hook-aware Git commit/push streaming runtime, Trace2 hook events, bounded session VCS logs, ANSI parsing, and Git progress state.
-* `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
-* `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
-* `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
-* `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, fallback scanning, and results.
-* `src/app/project_search_grep.rs` -> grep-searcher streaming backend and line-level match building for fast project search.
-* `src/app/project_search_preview.rs` -> lazy visible-row preview worker and project-search scrollbar drag math.
-* `src/app/project_search_app.rs` -> App methods for project search panel focus, worker start/poll, cursor placement, and result jumps.
-* `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
-* `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
-
-Input:
-
-* `src/app/keyboard.rs` -> keyboard router + terminal/search helpers.
-* `src/app/keyboard/main_keys.rs` -> global shortcuts + mode routing.
-* `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
-* `src/app/mouse.rs` -> mouse module shell.
-* `src/app/mouse/input.rs` -> click/release/drag start, UI dispatch, panel/tab clicks.
-* `src/app/mouse/cursor.rs` -> mouse move, hover hit-test, drag update.
-* `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
-* `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
-* `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
-* `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.
-* `src/app/mouse/hover_visibility_tests.rs` -> hover visibility/state tests.
-* `src/app/mouse/hover_transition_tests.rs` -> stale/in-flight hover transition tests.
-* `src/app/mouse/hover_diagnostic_range_tests.rs` -> diagnostic hover target/range tests.
-* `src/app/mouse/hover_bridge_tests.rs` -> hover popup bridge/hitbox tests.
-
-UI/actions:
-
-* `src/ui_system.rs` -> `UiId`, `UiRegistry`, hit-test, pointer/text capture.
-* `src/app/ui_handlers.rs` -> registered UI action handling.
-* `src/widgets.rs` -> reusable button/icon widgets.
-
-Editor/text:
-
-* `src/editor.rs` -> include shell for gap buffer, edits, undo/redo, line offsets, dirty state.
-* `src/editor/*` -> editor core and editor behavior tests.
-* `src/editor_navigation.rs` -> cursor movement, selection, word/line/page nav, folds.
-* `src/scroll.rs` -> smooth scroll state/physics.
-
-Rendering:
-
-* `src/renderer.rs` -> include shell for OpenGL, shaders, atlas, glyphs, primitives, flush. Hot path.
-* `src/renderer/*` -> renderer chunks for types, init, glyph cache, primitives/tests; `geometry.rs` stays primitive geometry.
-* `src/renderer/geometry.rs` -> vertex layout and quad/squiggle/rounded-rect geometry helpers.
-* `src/render_view.rs` -> include shell for frame draw orchestration and layer order. Hot path.
-* `src/render_view/root_*.rs` -> root render helpers and main frame renderer chunks. Hot path.
-* `src/render_view/root_frame_overlay_helpers.rs` -> shared root chrome/finalization plus overlay/resize/search/notice helpers; normal editor and Markdown Read reuse the same tab/status/modal/telemetry path. Hot path.
-* `src/render_view/api_client_panel.rs`, `src/render_view/api_client_tab.rs` -> include shells for API panel/tab renderers.
-* `src/render_view/api_client_panel/*`, `src/render_view/api_client_tab/*` -> API client panel/tab renderer chunks.
-* `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract controls and locked contract block helpers.
-* `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
-* `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
-* `src/render_view/markdown_scroll.rs` -> `markdown_read.rs` include chunk for source-backed Read/Edit viewport anchors, indexed Reader source-line geometry, and fold-aware editor source projection; it owns geometry only, not scroll physics or mode switching. Hot path.
-* `src/render_view/markdown_scroll_review_tests.rs` -> focused stage-1 source/viewport geometry regressions kept outside the hot include chunk so reviewer coverage does not push production geometry past the source-file size limit.
-* `src/render_view/markdown_read_interaction.rs` -> `markdown_read.rs` include chunk for Reader visual/source mapping, mouse hit-testing, selection/copy, search target/highlight geometry, and focused large-layout interaction regressions. Hot path.
-* `src/render_view/markdown_code_scroll.rs` -> `markdown_read.rs` include chunk for Reader code-block horizontal overflow: layout-width geometry, per-block scroll state projection, nested scissor draw, thumb geometry/registry, App wheel/drag input methods, and focused regressions. Hot path.
-* `src/render_view/editor_text_layer.rs` -> editor glyph/background/cursor loops. Hot path.
-* `src/render_view/ide_panels.rs` -> include shell for sidebar, explorer rows, panel shells.
-* `src/render_view/ide_panels/*` -> IDE panel chunks split by helpers, side panel, Git tooltip/graph/workspace/logs, dialogs, tests.
-* `src/render_view/ide_panels/ide_panel_project_search_renderer.rs` -> project search panel controls/results rendering.
-* `src/render_view/tabs_ui.rs` -> tab bar visuals/hitbox rendering.
-* `src/render_view/search.rs` -> search panel UI.
-* `src/render_view/settings_ui.rs` -> tool executable configuration and managed install controls/logs, native directory actions, graphics diagnostics, and appearance settings UI.
-* `src/render_view/minimap_ui.rs` -> minimap content/viewport. Hot path.
-* `src/render_view/sticky.rs` -> sticky headers.
-* `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.
-* `src/render_view/lsp_ui.rs` -> LSP server panel/action menu visuals.
-* `src/render_view/hover_overlays.rs` -> squiggles + hover popup routing.
-* `src/render_view/ui/hover_widget.rs` -> hover popup layout/render/selection/scroll.
-* `src/render_view/ui/problems_panel.rs` -> Problems panel rows/groups.
-* `src/render_view/ui.rs` -> dialogs, welcome, autocomplete, icons, misc overlay UI.
-
-Syntax/languages:
-
-* `src/highlighter.rs` -> include shell for Tree-sitter thread, parser/query setup, spans/completions/folds.
-* `src/highlighter/*` -> highlighter core and worker/test chunks.
-* `src/highlighter_tests.rs` -> highlighter unit tests.
-* `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
-* `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
-* `src/languages/mod.rs` -> language registry.
-* `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.
-* `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches.
-* `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
-* `src/languages/python_tests.rs` -> Python language helper tests.
-* `src/languages/rust.rs` -> Rust import-block helpers.
-* `src/languages/sql.rs` -> PostgreSQL statement scanner/classifier, managed-transaction safety validation, statement selection, SQL keywords/functions, and regression tests.
-
-LSP:
-
-* `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
-* `src/lsp/lsp_process.rs` -> managed server spawn, protocol shutdown, bounded restart supervisor, and missing-tool state.
-* `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, diagnostics/log state, and explicit retry.
-* `src/lsp/dart_workspace.rs` -> Dart package-root lifecycle, versioned open documents, managed `dart analyze` workspace diagnostics, and Dart-specific manager tests.
-* `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
-* `src/lsp/lsp_tests.rs` -> LSP manager/process tests.
-* `src/lsp/protocol.rs` -> include shell for JSON-RPC framing, LSP encode/decode, wire parsing.
-* `src/lsp/protocol/*` -> protocol wire encoding/dispatch and value parser chunks.
-* `src/lsp/protocol_tests.rs` -> protocol parse/encode tests.
-* `src/lsp/hover.rs` -> hover text normalization/highlighting.
-* `src/lsp/python_hover_tests.rs` -> Python hover normalization/highlight tests.
-* `src/app/lsp_actions.rs` -> code actions, go-to-def, quick fixes, noqa/workspace edits.
-
-Project tree/files:
-
-* `src/app/file_tree.rs` -> explorer types and `App` tree/menu operations.
-* `src/app/file_tree_scan.rs` -> explorer scan/watch/icon raster cache.
-* `src/app/file_tree_ops.rs` -> file-tree filesystem copy/move/delete/trash helpers.
-* `src/app/file_tree_dialog.rs` -> file-tree dialog keyboard/input routing.
-* `src/app/file_tree_tests.rs` -> file-tree unit tests.
-* `src/app/file_icons.rs` -> file/folder icon keys + SVG lookup.
-
-Terminal:
-
-* `src/app/terminal.rs` -> terminal grid facade, input/output access, resize, dirty redraw, and shutdown ownership.
-* `src/app/terminal_process.rs` -> platform shell selection, PTY spawn, batched reader, process-tree ownership, and bounded terminal shutdown.
-* `src/render_view/terminal_ui.rs` -> terminal visuals only.
-
-Assets:
-
-* `src/fonts/*` -> bundled fonts. Edit only for font asset change.
-* `src/icons/*` -> bundled icons. Edit only for icon resource change.
-
-Common routing:
+## 6. Routing
 
 * New button -> `src/ui_system.rs`, render module, `src/app/ui_handlers.rs`.
 * Keyboard shortcut -> `src/app/keyboard/main_keys.rs`, `src/app/keyboard/editor_keys.rs`, maybe `src/editor.rs`.
@@ -818,3 +260,5 @@ Common routing:
 * LSP hover bug -> `src/lsp.rs`, `src/lsp/hover.rs`, `src/lsp/protocol.rs`, `src/app/events/source_hover.rs`, `src/languages/python.rs`, hover UI.
 * Terminal bug -> `src/app/terminal.rs`, `src/render_view/terminal_ui.rs`, keyboard routing.
 * File tree bug -> `src/app/file_tree.rs`, `src/app/mouse/input.rs`, explorer render, `src/app/ui_handlers.rs`.
+
+Architecture and full file index: `PROJECT_GUIDE.md`.

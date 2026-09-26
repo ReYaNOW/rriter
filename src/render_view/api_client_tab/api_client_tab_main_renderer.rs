@@ -768,7 +768,7 @@ impl Renderer {
             mx,
             my,
         );
-        cy += 42.0 * s;
+        cy += API_ROUTE_PATH_ROW_ADVANCE * s;
         if !route.summary.is_empty() {
             let summary_selection = tab_state
                 .route_text_selection
@@ -795,7 +795,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            cy += 28.0 * s;
+            cy += API_ROUTE_SUMMARY_ROW_ADVANCE * s;
         }
         if !route.description.trim().is_empty() {
             let description_y = cy;
@@ -816,7 +816,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            cy += description_h + 8.0 * s;
+            cy += description_h + API_ROUTE_BLOCK_GAP_ADVANCE * s;
         }
 
         self.draw_api_section_title("Мок", x + pad, cy + 18.0 * s, s);
@@ -839,7 +839,7 @@ impl Renderer {
                 0.86,
             );
         }
-        cy += 30.0 * s;
+        cy += API_ROUTE_MOCK_TITLE_ADVANCE * s;
         let mock_expanded = ide_panel
             .api
             .expanded_mock_routes
@@ -868,7 +868,7 @@ impl Renderer {
             s,
             false,
         );
-        cy += 46.0 * s;
+        cy += API_ROUTE_MOCK_TOGGLE_ADVANCE * s;
         let mock_frame_y = cy - 8.0 * s;
         if mock_expanded {
             let btn_h = 30.0 * s;
@@ -1645,7 +1645,7 @@ impl Renderer {
                     0.86,
                 );
             }
-            cy += 28.0 * s;
+            cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
             self.draw_api_dynamic_table_frame(
                 x + pad,
                 cy,
@@ -1675,7 +1675,7 @@ impl Renderer {
                     );
                 }
             }
-            cy += 8.0 * s;
+            cy += API_ROUTE_BLOCK_GAP_ADVANCE * s;
         }
 
         let input_tab_y = cy;
@@ -1708,7 +1708,7 @@ impl Renderer {
             mx,
             my,
         );
-        cy += 40.0 * s;
+        cy += API_ROUTE_INPUT_TABS_ADVANCE * s;
 
         if tab_state.input_doc_view == ApiInputDocView::Schema {
             let mock_input_contract = manual_mock
@@ -1728,11 +1728,8 @@ impl Renderer {
                     }
                     contract
                 });
-            let selected_media_count = if mock_input_contract.is_some() {
-                1
-            } else {
-                api_route_input_media_count(route).max(1)
-            };
+            let selected_media_count =
+                api_route_selected_media_count(mock_input_contract.is_some(), route);
             let selected_schema_idx = tab_state
                 .input_schema_idx
                 .min(selected_media_count.saturating_sub(1));
@@ -1795,7 +1792,7 @@ impl Renderer {
                     0.82,
                 );
             }
-            cy += 28.0 * s;
+            cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
             if selected_media_count > 1 && tab_state.input_schema_menu_open {
                 for media_idx in 0..selected_media_count {
                     let item_y = cy + media_idx as f32 * 30.0 * s;
@@ -1829,7 +1826,8 @@ impl Renderer {
                         0.80,
                     );
                 }
-                cy += selected_media_count as f32 * 30.0 * s + 4.0 * s;
+                cy += selected_media_count as f32 * API_ROUTE_INPUT_MEDIA_MENU_ITEM_ADVANCE * s
+                    + API_ROUTE_INPUT_MEDIA_MENU_TAIL_ADVANCE * s;
             }
             let input_schema_focused = tab_state.focused_schema_pane
                 == Some(crate::app::api_client::ApiSchemaPaneFocus::Input);
@@ -1925,11 +1923,11 @@ impl Renderer {
                 );
                 self.restore_api_tab_clip(tab_clip);
             }
-            cy += schema_h + 16.0 * s;
+            cy += schema_h + API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * s;
         } else {
             if !route.path_params.is_empty() {
                 self.draw_api_section_title("Параметры пути", x + pad, cy + 18.0 * s, s);
-                cy += 28.0 * s;
+                cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
                 let mut table_h = 0.0;
                 for param in &route.path_params {
                     let value = tab_state
@@ -1970,12 +1968,12 @@ impl Renderer {
                     my,
                 );
                 }
-                cy += 8.0 * s;
+                cy += API_ROUTE_BLOCK_GAP_ADVANCE * s;
             }
 
             if !route.query_params.is_empty() {
                 self.draw_api_section_title("Параметры query", x + pad, cy + 18.0 * s, s);
-                cy += 28.0 * s;
+                cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
                 let mut table_h = 0.0;
                 for param in &route.query_params {
                     let value = tab_state
@@ -2016,7 +2014,7 @@ impl Renderer {
                     my,
                 );
                 }
-                cy += 8.0 * s;
+                cy += API_ROUTE_BLOCK_GAP_ADVANCE * s;
             }
 
             if let Some(body) = &route.request_body {
@@ -2066,7 +2064,7 @@ impl Renderer {
                         0.92,
                     );
                 }
-                cy += 28.0 * s;
+                cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
                 if body.is_multipart || body.is_form_urlencoded {
                     if let Some(schema_ref) = body.schema
                         && let Some(schema) = model.schema_arena.get(schema_ref.0)
@@ -2130,7 +2128,7 @@ impl Renderer {
                                 cy += row_h;
                             }
                         }
-                        cy += 16.0 * s;
+                        cy += API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * s;
                     }
                 } else {
                     let body_text = if body_focused {
@@ -2236,14 +2234,14 @@ impl Renderer {
                             my,
                         );
                     }
-                    cy += body_h + 16.0 * s;
+                    cy += body_h + API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * s;
                 }
             }
         }
 
         if !route.responses.is_empty() {
             self.draw_api_section_title("Output", x + pad, cy + 18.0 * s, s);
-            cy += 28.0 * s;
+            cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
             let mut status_x = x + pad;
             let selected_status_idx = tab_state
                 .output_status_idx
@@ -2253,7 +2251,7 @@ impl Renderer {
                 let chip_w = (self.measure_ui_width(label, 0.86) + 22.0 * s).max(54.0 * s);
                 if status_x + chip_w > x + pad + content_w {
                     status_x = x + pad;
-                    cy += 34.0 * s;
+                    cy += API_ROUTE_OUTPUT_STATUS_ROW_ADVANCE * s;
                 }
                 self.draw_api_response_tab(
                     label,
@@ -2270,7 +2268,7 @@ impl Renderer {
                 );
                 status_x += chip_w + 8.0 * s;
             }
-            cy += 38.0 * s;
+            cy += API_ROUTE_OUTPUT_TABS_ROW_ADVANCE * s;
             let output_tab_y = cy;
             let output_tab_h = 28.0 * s;
             let example_w = self.measure_ui_width("Example", 0.86) + 22.0 * s;
@@ -2332,7 +2330,7 @@ impl Renderer {
                 mx,
                 my,
             );
-            cy += 34.0 * s;
+            cy += API_ROUTE_OUTPUT_VIEW_TABS_ADVANCE * s;
             let output_menu_y = cy;
             if show_example_label {
                 self.push_rounded_rect(
@@ -2407,7 +2405,7 @@ impl Renderer {
             if tab_state.output_doc_view == ApiOutputDocView::Schema && !output_summary.is_empty() {
                 self.draw_api_schema_summary(&output_summary, x + pad, cy + 18.0 * s);
             }
-            cy += 40.0 * s;
+            cy += API_ROUTE_OUTPUT_BODY_GAP_ADVANCE * s;
             let output_schema_focused = tab_state.focused_schema_pane
                 == Some(crate::app::api_client::ApiSchemaPaneFocus::Output);
             self.push_rounded_rect_border(
@@ -2694,12 +2692,12 @@ impl Renderer {
                     self.restore_api_tab_clip(tab_clip);
                 }
             }
-            cy += output_h + 18.0 * s;
+            cy += output_h + API_ROUTE_OUTPUT_TAIL_ADVANCE * s;
         }
 
         if model.servers.len() > 1 {
             self.draw_api_section_title("Сервер", x + pad, cy + 18.0 * s, s);
-            cy += 28.0 * s;
+            cy += API_ROUTE_SECTION_TITLE_ADVANCE * s;
             let mut sx = x + pad;
             for (idx, server) in model.servers.iter().enumerate() {
                 let label = server.url.as_str();
@@ -2709,7 +2707,7 @@ impl Renderer {
                     .min(content_w);
                 if sx + chip_w > x + pad + content_w {
                     sx = x + pad;
-                    cy += 34.0 * s;
+                    cy += API_ROUTE_SERVER_CHIP_ROW_ADVANCE * s;
                 }
                 let active = idx == tab_state.server_idx;
                 self.push_rounded_rect(
@@ -2742,7 +2740,7 @@ impl Renderer {
                 );
                 sx += chip_w + 8.0 * s;
             }
-            cy += 42.0 * s;
+            cy += API_ROUTE_SERVER_TAIL_ADVANCE * s;
         }
 
         let try_btn = Button {
@@ -2771,10 +2769,10 @@ impl Renderer {
                 my,
             );
         }
-        cy += 54.0 * s;
+        cy += API_ROUTE_TRY_BUTTON_ADVANCE * s;
 
         self.draw_api_section_title("Ответ", x + pad, cy + 18.0 * s, s);
-        cy += 30.0 * s;
+        cy += API_ROUTE_RESPONSE_TITLE_ADVANCE * s;
         if let Some(response) = &tab_state.response {
             if let Some(err) = &response.error {
                 self.draw_string_scaled_stable(
@@ -2784,7 +2782,7 @@ impl Renderer {
                     [1.0, 0.42, 0.42, 1.0],
                     0.88,
                 );
-                cy += 28.0 * s;
+                cy += API_ROUTE_RESPONSE_ERROR_ROW_ADVANCE * s;
             }
             if response.error.is_none() || !response.body.is_empty() {
                 let status_text = response
@@ -2805,7 +2803,7 @@ impl Renderer {
                     [0.68, 0.70, 0.78, 1.0],
                     0.88,
                 );
-                cy += 28.0 * s;
+                cy += API_ROUTE_RESPONSE_STATUS_ROW_ADVANCE * s;
                 let tab_y = cy;
                 let tab_h = 28.0 * s;
                 let body_w = self.measure_ui_width("Body", 0.86) + 22.0 * s;
@@ -2850,10 +2848,10 @@ impl Renderer {
                     mx,
                     my,
                 );
-                cy += 34.0 * s;
+                cy += API_ROUTE_RESPONSE_TABS_ADVANCE * s;
                 let (has_access, has_refresh) = response_auth_token_flags(response);
                 if has_access || has_refresh {
-                    let row_h = 30.0 * s;
+                    let row_h = API_ROUTE_RESPONSE_TOKEN_ROW_ADVANCE * s;
                     let btn_h = 24.0 * s;
                     let access_w = self.measure_ui_width("Сохранить access", 0.78) + 18.0 * s;
                     let refresh_w = self.measure_ui_width("Сохранить refresh", 0.78) + 18.0 * s;

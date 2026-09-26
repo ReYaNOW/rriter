@@ -740,7 +740,7 @@ impl Renderer {
     ) {
         self.git_file_tooltip = None;
 
-        let sb_w = 48.0 * s;
+        let sb_w = (48.0 * s).round();
         let blocking_bottom_y =
             if ide_panel.any_bottom_open() && ide_panel.bottom_panel_blocks_editor_hover() {
                 Some(ide_bottom_panel_y(
@@ -764,6 +764,18 @@ impl Renderer {
         let btn_gap = 0.0;
         let btn_x = 0.0;
         let top_start_y = 0.0;
+        let top_count = ide_panel
+            .slots
+            .iter()
+            .filter(|slot| slot.group == crate::app::PanelGroup::Top)
+            .count();
+        let bottom_count = ide_panel
+            .slots
+            .iter()
+            .filter(|slot| slot.group == crate::app::PanelGroup::Bottom)
+            .count();
+        let top_group_height = top_count as f32 * btn_size;
+        let groups_fit = top_group_height + bottom_count as f32 * btn_size <= real_height;
 
         let mut top_idx = 0usize;
         let mut bottom_idx = 0usize;
@@ -793,15 +805,22 @@ impl Renderer {
             }
 
             let btn_y = if slot.group == crate::app::PanelGroup::Top {
-                let y = top_start_y + top_idx as f32 * (btn_size + btn_gap);
+                let y = (top_start_y + top_idx as f32 * (btn_size + btn_gap)).round();
                 top_idx += 1;
                 y
             } else {
-                // Кнопки нижней группы фиксированы у дна окна, независимо от панели
-                let y = real_height - btn_size - bottom_idx as f32 * btn_size;
+                let y = if groups_fit {
+                    (real_height - btn_size - bottom_idx as f32 * btn_size).round()
+                } else {
+                    (top_group_height + (bottom_count - bottom_idx - 1) as f32 * btn_size)
+                        .round()
+                };
                 bottom_idx += 1;
                 y
             };
+            if btn_y < 0.0 || btn_y + btn_size > real_height {
+                continue;
+            }
 
             let custom_color = if slot.id == crate::app::PanelId::Problems {
                 if lsp_has_issues {

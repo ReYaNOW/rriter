@@ -2492,6 +2492,27 @@ mod tests {
     }
 
     #[test]
+    fn api_panel_scroll_height_matches_selected_model_header_rows() {
+        let mut state = ApiClientState::default();
+        let model = parse_openapi_model(ApiSpecId(5), &sample_spec()).expect("parse");
+        state.models.insert(model.id, model.clone());
+        state.collapsed_route_roots.insert(model.id);
+        let base = api_panel_max_scroll(&state, 0.0, 1.0);
+        state.selected_spec = Some(model.id);
+        assert!(state.selected_model().is_some());
+        // Renderer: routes gap, auth row, routes root row; root collapsed stops there.
+        assert_eq!(
+            api_panel_max_scroll(&state, 0.0, 2.0) - 2.0 * base
+                - 2.0 * (API_PANEL_ROUTES_GAP_ADVANCE + 2.0 * API_PANEL_TREE_ROW_ADVANCE),
+            0.0
+        );
+        assert_eq!(
+            api_panel_max_scroll(&state, 0.0, 1.0) - base,
+            API_PANEL_ROUTES_GAP_ADVANCE + 2.0 * API_PANEL_TREE_ROW_ADVANCE
+        );
+    }
+
+    #[test]
     fn api_panel_scroll_height_matches_optional_rows_and_manual_route_stride() {
         let mut state = ApiClientState::default();
         let base = api_panel_max_scroll(&state, 0.0, 1.0);

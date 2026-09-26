@@ -1,0 +1,767 @@
+use crate::headless::tests_support::{
+    assert_ui_y_integral, click_ui, dump, has_ui, run_script, sample_file, scratch_dir,
+    session_for_test, ui_center,
+};
+
+fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
+    click_ui(session, id);
+}
+
+fn close_panel_if_open(
+    session: &mut crate::headless::HeadlessSession,
+    slot_id: &str,
+    panel_name: &str,
+) {
+    let is_open = dump(session)["ide_panel"]["open"]
+        .as_array()
+        .is_some_and(|panels| panels.iter().any(|panel| panel == panel_name));
+    if is_open {
+        click(session, slot_id);
+    }
+}
+
+fn workspace_session(
+    w: u32,
+    h: u32,
+    scale: f32,
+    dir: &std::path::Path,
+) -> crate::headless::HeadlessSession {
+    let mut session = session_for_test(w, h);
+    let lines = run_script(
+        &mut session,
+        format!("scale {scale}\nworkspace {}\nsettle 2000\n", dir.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    session
+}
+
+fn write_python_hover_fixture(dir: &std::path::Path, source: &str) -> std::path::PathBuf {
+    let file = dir.join("main.py");
+    std::fs::write(&file, source).unwrap();
+    file
+}
+
+fn has_available_lsp(session: &crate::headless::HeadlessSession, names: &[&str]) -> bool {
+    session.app.ide_panel.lsp_servers.iter().any(|server| {
+        names.contains(&server.name)
+            && !matches!(
+                server.status,
+                crate::lsp::LspServerStatus::Missing | crate::lsp::LspServerStatus::Crashed
+            )
+    })
+}
+
+fn open_hover_file(session: &mut crate::headless::HeadlessSession, file: &std::path::Path) {
+    let lines = run_script(
+        session,
+        format!("open {}\nsettle 2000\n", file.display()).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn mouse_move_to_source_offset(
+    session: &mut crate::headless::HeadlessSession,
+    byte_offset: usize,
+) -> (f32, f32) {
+    let state = dump(session);
+    let body = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "EditorTextBody")
+        .unwrap_or_else(|| panic!("editor text body missing: {state}"));
+    let body_rect = body["rect"].as_array().unwrap();
+    let body_x = body_rect[0].as_f64().unwrap() as f32;
+    let body_y = body_rect[1].as_f64().unwrap() as f32;
+    let (x, y) = {
+        let app = &mut session.app;
+        let scroll_x = app.scroll_x.current.round();
+        let scroll_y = app.scroll_y.current.round();
+        let editor = &app.editor;
+        let line = editor
+            .line_offsets
+            .partition_point(|&offset| offset <= byte_offset)
+            .saturating_sub(1);
+        let line_start = editor.line_offsets.get(line).copied().unwrap_or(0);
+        let renderer = app.renderer.as_mut().expect("headless renderer");
+        let visual_line = renderer.phys_to_visual.get(line).copied().unwrap_or(line) as f32;
+        let text_x = renderer.visual_x_for_byte_offset(editor, line_start, byte_offset, true);
+        let char_advance = renderer.ascii_advances['a' as usize];
+        (
+            (body_x + text_x + char_advance * 0.5 - scroll_x).round(),
+            (body_y + visual_line * renderer.line_height + renderer.line_height * 0.5 - scroll_y)
+                .round(),
+        )
+    };
+    let lines = run_script(session, format!("mouse_move {x} {y}\n").as_bytes());
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    (x, y)
+}
+
+fn wait_for_hover(session: &mut crate::headless::HeadlessSession) {
+    let lines = run_script(session, b"wait 1600\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+}
+
+fn current_hover_popup_text() -> Option<String> {
+    crate::app::mouse::HOVER_STATE.with(|state| {
+        state.borrow().popup.as_ref().map(|popup| popup.text.clone())
+    })
+}
+
+fn current_hover_popup_rect() -> Option<(f32, f32, f32, f32)> {
+    crate::app::mouse::HOVER_STATE.with(|state| state.borrow().rect)
+}
+
+fn hover_source_with_docs(detail_lines: usize) -> String {
+    let mut source = String::from(
+        "def hover_subject(value: int) -> int:\n    \"\"\"hover_subject documentation.\n",
+    );
+    for line in 0..detail_lines {
+        source.push_str(&format!("    Detail {line}: hover_subject returns an integer.\n"));
+    }
+    source.push_str("    \"\"\"\n    return value\n\nresult = hover_subject(7)\n");
+    source
+}
+
+fn edge_hover_source(target_row: usize, target_column: usize) -> String {
+    let mut source = String::from(
+        "def hover_subject(value: int) -> int:\n    \"\"\"hover_subject returns a value.\n\n    It documents edge placement.\n    \"\"\"\n    return value\n",
+    );
+    let mut row = source.lines().count();
+    while row < target_row {
+        source.push_str(&format!("padding_{row} = {row}\n"));
+        row += 1;
+    }
+    let prefix = "edge_result = ";
+    let repeated_terms = target_column.saturating_sub(prefix.len()) / 4;
+    source.push_str(prefix);
+    source.push_str(&"0 + ".repeat(repeated_terms));
+    source.push_str("hover_subject(1)\n");
+    source
+}
+
+#[test]
+fn headless_ide_panel_slots_open_and_register_controls() {
+    let dir = scratch_dir("ui-panels-slots");
+    let _ = sample_file(&dir);
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    for (slot, active) in [
+        ("Explorer", "explorer"),
+        ("Search", "search"),
+        ("Git", "git"),
+        ("ApiClient", "api"),
+        ("Database", "database"),
+        ("LspServers", "lsp"),
+        ("Problems", "problems"),
+    ] {
+        let id = format!("SidebarSlot({slot})");
+        click(&mut session, &id);
+        run_script(&mut session, b"settle 2000\n");
+        let state = dump(&mut session);
+        assert!(state["ide_panel"]["open"].as_array().unwrap().iter().any(|v| v == active), "{slot}: {state}");
+        let controls = state["ui"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|e| !e["id"].as_str().unwrap_or("").starts_with("SidebarSlot("))
+            .count();
+        assert!(controls > 0, "{slot}: {state}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+fn git_fixture(dir: &std::path::Path) {
+    let run = |args: &[&str]| {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .expect("git fixture command");
+        assert!(
+            output.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    std::fs::write(dir.join("changed.txt"), "before\n").unwrap();
+    std::fs::write(dir.join("deleted.txt"), "delete me\n").unwrap();
+    run(&["init", "-q"]);
+    run(&["config", "user.name", "Headless Test"]);
+    run(&["config", "user.email", "headless@example.invalid"]);
+    run(&["add", "."]);
+    run(&["commit", "-qm", "fixture"]);
+    std::fs::write(dir.join("changed.txt"), "after\n").unwrap();
+    std::fs::remove_file(dir.join("deleted.txt")).unwrap();
+    std::fs::write(dir.join("untracked.txt"), "new\n").unwrap();
+}
+
+#[test]
+fn headless_project_search_empty_and_open_result() {
+    let dir = scratch_dir("ui-project-search");
+    let file = dir.join("needle.txt");
+    std::fs::write(&file, "zero\none needle\ntwo\n").unwrap();
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    click(&mut session, "SidebarSlot(Search)");
+    run_script(&mut session, b"settle 2000\n");
+    let state = dump(&mut session);
+    assert!(
+        has_ui(&state, "ProjectSearchQueryInput"),
+        "project search input missing: {state}"
+    );
+    let (x, y) = ui_center(&state, "ProjectSearchQueryInput");
+    run_script(&mut session, format!("mouse_move {x} {y}\nclick\ntype needle\n").as_bytes());
+    click(&mut session, "ProjectSearchRun");
+    run_script(&mut session, b"wait 1000\n");
+    let results = dump(&mut session);
+    assert!(has_ui(&results, "ProjectSearchFileToggle(0)"), "{results}");
+    click(&mut session, "ProjectSearchFileToggle(0)");
+    let match_state = dump(&mut session);
+    let hit = match_state["ui"].as_array().unwrap().iter().find(|e| e["id"].as_str().unwrap_or("").contains("ProjectSearchMatch"));
+    if let Some(hit) = hit {
+        let r = &hit["rect"];
+        let (x, y) = (
+            r[0].as_f64().unwrap() + r[2].as_f64().unwrap() / 2.0,
+            r[1].as_f64().unwrap() + r[3].as_f64().unwrap() / 2.0,
+        );
+        run_script(&mut session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
+        assert_eq!(dump(&mut session)["tabs"][0]["cursor"]["line"], 2);
+    }
+    let query_state = dump(&mut session);
+    if has_ui(&query_state, "ProjectSearchQueryInput") {
+        click(&mut session, "ProjectSearchQueryInput");
+        run_script(&mut session, b"key ctrl+a\ntype no-such-result-987\n");
+        click(&mut session, "ProjectSearchRun");
+        run_script(&mut session, b"wait 1000\n");
+    }
+    assert!(!has_ui(&dump(&mut session), "ProjectSearchFileToggle(0)"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_database_dialog_and_api_mock_guide_controls() {
+    let dir = scratch_dir("ui-database-api");
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    click(&mut session, "SidebarSlot(Database)");
+    if has_ui(&dump(&mut session), "DatabaseAdd") {
+        click(&mut session, "DatabaseAdd");
+        let dialog = dump(&mut session);
+        assert!(dialog["ui"].as_array().unwrap().iter().any(|e| e["id"].as_str().unwrap_or("").contains("DatabaseDialogField")), "{dialog}");
+        run_script(&mut session, b"key escape\n");
+    }
+    click(&mut session, "SidebarSlot(ApiClient)");
+    let api = dump(&mut session);
+    if has_ui(&api, "ApiMockServerToggle") {
+        click(&mut session, "ApiMockServerToggle");
+        // `Running` comes from the server thread and reaches the UI only through `wait`
+        // (docs/headless.md); a single post-click frame races the runtime start and bind.
+        let mut state = dump(&mut session);
+        for _ in 0..50 {
+            if has_ui(&state, "ApiMockServerCopyUrl") {
+                break;
+            }
+            run_script(&mut session, b"wait 100\n");
+            state = dump(&mut session);
+        }
+        assert!(has_ui(&state, "ApiMockServerCopyUrl"), "{}", state["ui"]);
+    }
+    if has_ui(&dump(&mut session), "ApiMockGuideOpen") {
+        click(&mut session, "ApiMockGuideOpen");
+        assert!(has_ui(&dump(&mut session), "ApiMockGuideClose"));
+        click(&mut session, "ApiMockGuideClose");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_server_toggle_exposes_stop_control_when_available() {
+    let dir = scratch_dir("ui-lsp-toggle");
+    let file = dir.join("main.py");
+    std::fs::write(&file, "def main():\n    value = 1\n").unwrap();
+    let mut session = workspace_session(1920, 1080, 1.25, &dir);
+    run_script(&mut session, format!("open {}\nsettle 2000\n", file.display()).as_bytes());
+    click(&mut session, "SidebarSlot(LspServers)");
+    run_script(&mut session, b"settle 2000\n");
+    let state = dump(&mut session);
+    let available = session
+        .app
+        .ide_panel
+        .lsp_servers
+        .iter()
+        .position(|server| {
+            !matches!(
+                server.status,
+                crate::lsp::LspServerStatus::Missing | crate::lsp::LspServerStatus::Crashed
+            )
+        });
+    let Some(index) = available else {
+        eprintln!("skip: no available LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    };
+    let toggle = format!("LspServerToggle({index})");
+    if !has_ui(&state, &toggle) {
+        eprintln!("skip: LSP server toggle is unavailable");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    click(&mut session, &toggle);
+    run_script(&mut session, b"wait 8000\n");
+    let state = dump(&mut session);
+    let server_status = session.app.ide_panel.lsp_servers.get(index).map(|server| server.status);
+    if server_status == Some(crate::lsp::LspServerStatus::Running) {
+        assert!(has_ui(&state, &format!("LspServerStop({index})")), "{state}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_hover_popup_shows_symbol_and_dismisses_on_mouse_or_escape() {
+    let dir = scratch_dir("ui-lsp-hover-dismiss");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    let target = source.find("hover_subject").unwrap();
+    mouse_move_to_source_offset(&mut session, target);
+    assert!(current_hover_popup_text().is_none(), "hover popup appeared before the delay");
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("hover response popup missing");
+    assert!(!text.trim().is_empty(), "hover response was empty");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+
+    run_script(&mut session, b"mouse_move 1270 710\nwait 400\n");
+    assert!(current_hover_popup_text().is_none(), "moving away must hide the hover popup");
+
+    mouse_move_to_source_offset(&mut session, target);
+    wait_for_hover(&mut session);
+    assert!(current_hover_popup_text().is_some(), "hover popup did not reopen");
+    run_script(&mut session, b"key escape\n");
+    assert!(current_hover_popup_text().is_none(), "Escape must hide the hover popup");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_hover_popup_stays_inside_window_at_right_and_bottom_edges() {
+    for (w, h) in [(1280, 720), (2560, 1440)] {
+        let dir = scratch_dir("ui-lsp-hover-edges");
+        let mut session = workspace_session(w, h, 4.0 / 3.0, &dir);
+        let (target_row, target_column) = {
+            let renderer = session.app.renderer.as_ref().expect("headless renderer");
+            let char_advance = renderer.ascii_advances['0' as usize].max(1.0);
+            (
+                (((renderer.height - 100.0) / renderer.line_height).floor() as usize)
+                    .saturating_sub(1),
+                ((renderer.width - 430.0) / char_advance).max(1.0) as usize,
+            )
+        };
+        let source = edge_hover_source(target_row, target_column);
+        let file = write_python_hover_fixture(&dir, &source);
+        open_hover_file(&mut session, &file);
+        if !has_available_lsp(&session, &["ty"]) {
+            eprintln!("skip: no available ty LSP server");
+            let _ = std::fs::remove_dir_all(dir);
+            continue;
+        }
+
+        let target = source.rfind("hover_subject").unwrap();
+        let (mouse_x, mouse_y) = mouse_move_to_source_offset(&mut session, target);
+        assert!(mouse_x > w as f32 * 0.7, "hover target was not near the right edge: {mouse_x}");
+        assert!(mouse_y > h as f32 * 0.8, "hover target was not near the bottom edge: {mouse_y}");
+        wait_for_hover(&mut session);
+        let (x, y, popup_w, popup_h) = current_hover_popup_rect().expect("hover popup bounds missing");
+        assert!(
+            x >= 0.0 && y >= 0.0,
+            "popup starts outside {w}x{h}: {:?}",
+            (x, y, popup_w, popup_h)
+        );
+        assert!(
+            x + popup_w <= w as f32 && y + popup_h <= h as f32,
+            "popup ends outside {w}x{h}: {:?}",
+            (x, y, popup_w, popup_h)
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[test]
+fn headless_lsp_hover_popup_scrolls_long_documentation() {
+    let dir = scratch_dir("ui-lsp-hover-scroll");
+    let source = hover_source_with_docs(18);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("long hover popup missing");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+    let before = crate::app::mouse::HOVER_STATE.with(|state| {
+        let state = state.borrow();
+        assert!(
+            state.max_scroll > 0.0,
+            "long hover response did not scroll: {}",
+            text.lines().count()
+        );
+        state.popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
+    });
+    let state = dump(&mut session);
+    assert!(has_ui(&state, "HoverPopupScroll"), "hover scrollbar missing: {state}");
+    let (scroll_x, scroll_y) = ui_center(&state, "HoverPopupScroll");
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {scroll_x} {scroll_y}\nwheel 0 -3\nwait 300\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let after = crate::app::mouse::HOVER_STATE.with(|state| {
+        state.borrow().popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
+    });
+    assert!((after - before).abs() > 0.1, "hover content did not scroll: {before} -> {after}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist() {
+    let dir = scratch_dir("ui-lsp-diagnostic-hover");
+    let source = "def broken_value() -> int:\n    return missing_hover_name\n";
+    let file = write_python_hover_fixture(&dir, source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ruff", "ty"]) {
+        eprintln!("skip: no available Python LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    run_script(&mut session, b"wait 5000\n");
+    let diagnostic = session.app.lsp.as_ref().and_then(|lsp| {
+        lsp.get_diagnostics(&file)
+            .iter()
+            .find(|diagnostic| diagnostic.severity == crate::lsp::DiagSeverity::Error)
+            .map(|diagnostic| diagnostic.message.to_string())
+    });
+    if diagnostic.is_none() {
+        eprintln!("skip: no Python error diagnostic available");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("missing_hover_name").unwrap());
+    wait_for_hover(&mut session);
+    let diagnostic_text = crate::app::mouse::HOVER_STATE.with(|state| state.borrow().diag_text.clone());
+    assert!(!diagnostic_text.trim().is_empty(), "diagnostic hover popup text was empty");
+    assert!(
+        diagnostic_text.contains("missing_hover_name"),
+        "diagnostic hover text is unrelated: {diagnostic_text}"
+    );
+    let state = dump(&mut session);
+    let copy_id = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|element| {
+            element["id"]
+                .as_str()
+                .filter(|id| id.starts_with("PopupCopyDiagnostic("))
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| panic!("diagnostic copy button missing: {state}"));
+    click(&mut session, &copy_id);
+    assert!(session.app.ide_panel.diag_copied_idx.is_some(), "diagnostic copy control did not run");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
+    let dir = scratch_dir("ui-bug-hover-popup-y");
+    let source = hover_source_with_docs(18);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text().expect("hover popup missing");
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+    let state = dump(&mut session);
+    let popup_y = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "HoverPopupScroll")
+        .unwrap_or_else(|| panic!("hover popup scrollbar missing: {state}"))["rect"][1]
+        .as_f64()
+        .unwrap();
+    assert_ui_y_integral(popup_y, 0.0, "hover popup hitbox");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_typing_hides_lsp_hover_popup() {
+    let dir = scratch_dir("ui-bug-hover-typing");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    open_hover_file(&mut session, &file);
+    if !has_available_lsp(&session, &["ty"]) {
+        eprintln!("skip: no available ty LSP server");
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+
+    mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
+    wait_for_hover(&mut session);
+    assert!(current_hover_popup_text().is_some(), "hover popup missing before typing");
+    run_script(&mut session, b"type x\n");
+    assert!(current_hover_popup_text().is_none(), "typing must hide the hover popup");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_ide_panel_splitters_resize_side_and_bottom_panels() {
+    let dir = scratch_dir("ui-panel-splitters");
+    let file = sample_file(&dir);
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    run_script(&mut session, format!("open {}\nsettle 2000\n", file.display()).as_bytes());
+    click(&mut session, "SidebarSlot(Git)");
+    run_script(&mut session, b"settle 2000\n");
+    let before = dump(&mut session);
+    let width_before = before["ide_panel"]["width"].as_f64().unwrap();
+    let (x, y) = ui_center(&before, "ResizeLeft");
+    run_script(&mut session, format!("mouse_move {x} {y}\nclick down\nmouse_move {} {y}\nclick up\n", x + 100.0).as_bytes());
+    run_script(&mut session, b"settle 2000\n");
+    assert_ne!(dump(&mut session)["ide_panel"]["width"].as_f64().unwrap(), width_before);
+    click(&mut session, "SidebarSlot(Problems)");
+    run_script(&mut session, b"settle 2000\n");
+    let before = dump(&mut session);
+    let rect = before["ui"].as_array().unwrap().iter().find(|e| e["id"] == "ResizeBottom").unwrap()["rect"].clone();
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap()/2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap()/2.0;
+    run_script(&mut session, format!("mouse_move {x} {y}\nclick down\nmouse_move {x} {}\nclick up\n", y - 120.0).as_bytes());
+    let resized = dump(&mut session);
+    assert!(has_ui(&resized, "ResizeBottom"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_terminal_scroll_returns_to_bottom_after_output() {
+    let dir = scratch_dir("ui-terminal-scroll");
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    click(&mut session, "SidebarSlot(Terminal)");
+    run_script(&mut session, b"wait 3000\n");
+    let state = dump(&mut session);
+    let terminal_spawn_failed = session.app.ide_panel.terminals.first().is_some_and(|terminal| {
+        let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
+        grid.lines.iter().flatten().map(|cell| cell.c).collect::<String>().contains("RRiter terminal error:")
+    });
+    if terminal_spawn_failed {
+        let _ = std::fs::remove_dir_all(dir);
+        return;
+    }
+    assert!(has_ui(&state, "TerminalBody"), "{state}");
+    let (x, y) = ui_center(&state, "TerminalBody");
+    run_script(&mut session, format!("mouse_move {x} {y}\nclick\ntype seq 1 500\\n\nwait 1500\n").as_bytes());
+    let top = dir.join("terminal-top.png");
+    let bottom = dir.join("terminal-bottom.png");
+    run_script(
+        &mut session,
+        format!("screenshot {}\nmouse_move {x} {y}\nwheel 0 10\nsettle 2000\n", top.display()).as_bytes(),
+    );
+    run_script(&mut session, b"wheel 0 -1000\nsettle 2000\n");
+    run_script(&mut session, format!("screenshot {}\n", bottom.display()).as_bytes());
+    let top = image::open(top).unwrap().to_rgba8();
+    let bottom = image::open(bottom).unwrap().to_rgba8();
+    assert_eq!(top.as_raw(), bottom.as_raw());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_terminal_sidebar_slot_opens_panel() {
+    let dir = scratch_dir("ui-terminal-slot");
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    click(&mut session, "SidebarSlot(Terminal)");
+    // The panel is shown once the shell prints its first output.
+    run_script(&mut session, b"wait 8000\n");
+    let state = dump(&mut session);
+    assert!(
+        state["ide_panel"]["open"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|panel| panel == "terminal"),
+        "{state}"
+    );
+    // Panel state is saved to the process-wide test profile; do not leak it into later tests.
+    close_panel_if_open(&mut session, "SidebarSlot(Terminal)", "terminal");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_api_mock_guide_wheel_scrolls_content() {
+    let dir = scratch_dir("ui-bug-api-guide");
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    click(&mut session, "SidebarSlot(ApiClient)");
+    click(&mut session, "ApiMockGuideOpen");
+    let shot_a = dir.join("before.png");
+    let shot_b = dir.join("after.png");
+    let state = dump(&mut session);
+    let body = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "ApiMockGuideBody")
+        .unwrap_or_else(|| panic!("ApiMockGuideBody missing: {state}"));
+    let rect = body["rect"].as_array().unwrap();
+    let x = rect[0].as_f64().unwrap() + rect[2].as_f64().unwrap() / 2.0;
+    let y = rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap() / 2.0;
+    run_script(&mut session, format!("mouse_move {x} {y}\nsettle 200\n").as_bytes());
+    run_script(&mut session, format!("screenshot {}\n", shot_a.display()).as_bytes());
+    run_script(&mut session, b"wheel 0 -10\nwait 800\n");
+    run_script(&mut session, format!("screenshot {}\n", shot_b.display()).as_bytes());
+    let a = image::open(shot_a).unwrap().to_rgba8();
+    let b = image::open(shot_b).unwrap().to_rgba8();
+    let x = rect[0].as_f64().unwrap().round() as u32;
+    let y = rect[1].as_f64().unwrap().round() as u32;
+    let width = rect[2].as_f64().unwrap().round() as u32;
+    let height = rect[3].as_f64().unwrap().round() as u32;
+    assert_ne!(
+        image::imageops::crop_imm(&a, x, y, width, height).to_image().as_raw(),
+        image::imageops::crop_imm(&b, x, y, width, height).to_image().as_raw(),
+        "API Mock guide body did not scroll"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_sidebar_slots_hit_lsp_servers_at_small_sizes() {
+    let dir = scratch_dir("ui-bug-sidebar-slots");
+    for (w, h, scale) in [(640, 480, 1.5), (400, 300, 1.0)] {
+        let mut session = workspace_session(w, h, scale, &dir);
+        close_panel_if_open(&mut session, "SidebarSlot(LspServers)", "lsp");
+        click(&mut session, "SidebarSlot(LspServers)");
+        assert!(dump(&mut session)["ide_panel"]["open"].as_array().unwrap().iter().any(|v| v == "lsp"));
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_git_changes_load_without_manual_refresh() {
+    let dir = scratch_dir("ui-bug-git-refresh");
+    git_fixture(&dir);
+    let mut session = workspace_session(1920, 1080, 1.0, &dir);
+    close_panel_if_open(&mut session, "SidebarSlot(Git)", "git");
+    click(&mut session, "SidebarSlot(Git)");
+    run_script(&mut session, b"wait 8000\n");
+    assert!(dump(&mut session)["ui"].as_array().unwrap().iter().any(|e| e["id"].as_str().unwrap_or("").starts_with("GitFile")));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_settings_tab_y_integral() {
+    // Card eydb0ylohhjr1zx8clsiz4lv: 640x400 at 1.5 with a file open, F1.
+    let dir = scratch_dir("ui-bug-settings-tabs");
+    let file = sample_file(&dir);
+    let mut session = session_for_test(640, 400);
+    run_script(&mut session, format!("scale 1.5\nopen {}\nkey f1\nsettle 800\n", file.display()).as_bytes());
+    let state = dump(&mut session);
+    let rect_of = |element: &serde_json::Value| -> [f64; 4] {
+        let rect = element["rect"].as_array().unwrap();
+        [0, 1, 2, 3].map(|i| rect[i].as_f64().unwrap())
+    };
+    let tabs: Vec<[f64; 4]> = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|e| e["id"].as_str().unwrap_or("").starts_with("SettingsTab("))
+        .map(rect_of)
+        .collect();
+    assert_eq!(tabs.len(), 6, "settings tabs missing: {state}");
+    for (i, rect) in tabs.iter().enumerate() {
+        assert_eq!(rect[1].fract(), 0.0, "SettingsTab({i}) y={}", rect[1]);
+        assert_eq!(rect[3].fract(), 0.0, "SettingsTab({i}) h={}", rect[3]);
+    }
+    let add = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["id"] == "SettingsIdeAddWorkspace")
+        .map(rect_of)
+        .unwrap_or_else(|| panic!("SettingsIdeAddWorkspace missing: {state}"));
+    let screenshot = dir.join("tabs.png");
+    run_script(&mut session, format!("screenshot {}\n", screenshot.display()).as_bytes());
+    let image = image::open(&screenshot).unwrap().to_rgba8();
+    let bright = |x: u32, y: u32| image.get_pixel(x, y).0[..3].iter().all(|&c| c >= 140);
+    // Labels stay inside their hitbox: nothing bright between the hitbox's
+    // right edge and the sidebar divider (10 * scale further right).
+    for rect in &tabs {
+        let right = (rect[0] + rect[2]).round() as u32;
+        for y in rect[1] as u32..(rect[1] + rect[3]) as u32 {
+            for x in right.saturating_sub(3)..right + 13 {
+                assert!(!bright(x, y), "tab label crosses its hitbox at ({x}, {y})");
+            }
+        }
+    }
+    // The «+» icon of «Добавить папку» stays inside the button.
+    let left = add[0].round() as u32;
+    for y in add[1] as u32..(add[1] + add[3]) as u32 {
+        for x in left.saturating_sub(12)..left {
+            assert!(!bright(x, y), "add-folder content sticks out left of the button at ({x}, {y})");
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_bug_settings_help_right_edge_content() {
+    let dir = scratch_dir("ui-bug-settings-help");
+    let mut session = session_for_test(1280, 800);
+    run_script(&mut session, b"scale 1.5\nkey f1\nsettle 500\n");
+    let tabs = dump(&mut session);
+    assert!(has_ui(&tabs, "SettingsTab(4)"), "Help settings tab missing: {tabs}");
+    click(&mut session, "SettingsTab(4)");
+    run_script(&mut session, b"settle 500\n");
+    let state = dump(&mut session);
+    assert!(state["overlays"]["settings"].as_bool().unwrap_or(false));
+    assert!(has_ui(&state, "SettingsFaqScrollY"), "Help scrollbar missing: {state}");
+    let scroll = state["ui"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|element| element["id"] == "SettingsFaqScrollY")
+        .unwrap();
+    let rect = scroll["rect"].as_array().unwrap();
+    let edge = rect[0].as_f64().unwrap().floor() as u32;
+    let top = rect[1].as_f64().unwrap().floor() as u32;
+    let bottom = (rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap()).ceil() as u32;
+    let screenshot = dir.join("help.png");
+    run_script(&mut session, format!("screenshot {}\n", screenshot.display()).as_bytes());
+    let image = image::open(&screenshot).unwrap().to_rgba8();
+    for y in top..bottom {
+        for x in edge.saturating_sub(3)..edge {
+            let pixel = image.get_pixel(x, y);
+            assert!(
+                pixel[0] < 160 || pixel[1] < 160 || pixel[2] < 160,
+                "Help text reaches right edge at ({x}, {y}): {pixel:?}"
+            );
+        }
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}

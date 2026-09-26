@@ -752,9 +752,7 @@ enum ProjectSearchBackend {
 }
 
 fn project_search_backend(query: &str) -> ProjectSearchBackend {
-    if query.is_ascii()
-        && !query.as_bytes().contains(&b'\n')
-        && !query.as_bytes().contains(&b'\r')
+    if query.is_ascii() && !query.as_bytes().contains(&b'\n') && !query.as_bytes().contains(&b'\r')
     {
         ProjectSearchBackend::Grep
     } else {
@@ -1942,7 +1940,11 @@ mod tests {
         );
         let windows1251 = by_name("windows1251.txt");
         assert_eq!(
-            (windows1251.start_line, windows1251.start_col, windows1251.end_col),
+            (
+                windows1251.start_line,
+                windows1251.start_col,
+                windows1251.end_col
+            ),
             (1, 0, 6)
         );
         let _ = std::fs::remove_dir_all(root);

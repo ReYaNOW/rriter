@@ -16,7 +16,29 @@ fn lsp_action_selection_after_prepend(
 
 use super::*;
 
+include!("about/about_drag_animation_helpers.rs");
 include!("about/about_helpers.rs");
+
+#[cfg(test)]
+mod about_animation_tests;
+#[cfg(test)]
+mod about_markdown_reader_tests;
+#[cfg(test)]
+mod about_selection_drag_tests;
+
+pub(crate) fn update_cursor_blink(app: &mut App, now: Instant, needs_redraw: &mut bool) {
+    if app.is_focused && !app.headless_mode {
+        let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
+        if blink_state != app.last_blink_state {
+            app.last_blink_state = blink_state;
+            *needs_redraw = true;
+        }
+    }
+}
+
+pub(crate) fn idle_blink_enabled(app: &App) -> bool {
+    app.is_focused && !app.modal_dialog_open() && !app.headless_mode
+}
 
 fn update_markdown_read_selection_autoscroll(
     app: &mut App,
@@ -92,14 +114,14 @@ fn update_markdown_read_selection_autoscroll(
 }
 
 #[cfg_attr(coverage_nightly, coverage(off))]
-pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
+pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     if app.run_ide_on_startup {
         app.run_ide_on_startup = false;
         app.enter_ide_mode();
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
     }
 
-    if app.dialog_window.is_none()
+    if !app.modal_dialog_open()
         && !app.pending_action_waiting_for_save_as
         && !app.pending_action_ready
         && matches!(app.pending_action, PendingAction::CloseTab(_))
@@ -361,9 +383,7 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         }
         needs_redraw = true;
     }
-    if markdown_read
-        && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated)
-    {
+    if markdown_read && update_markdown_read_selection_autoscroll(app, dt, shared_scroll_updated) {
         needs_redraw = true;
     }
     if markdown_read && app.markdown.update_code_scroll_x(dt) {
@@ -1611,17 +1631,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
         needs_redraw = true;
     }
 
-    if app.is_focused {
-        let blink_state = (now.duration_since(app.last_action).as_millis() / 500) % 2 == 0;
-        if blink_state != app.last_blink_state {
-            app.last_blink_state = blink_state;
-            needs_redraw = true;
-        }
-    }
+    update_cursor_blink(app, now, &mut needs_redraw);
 
     let is_highlighting =
         !app.is_highlighted_once || app.highlighter.has_pending_priority_highlight();
-    let idle_blink_enabled = app.is_focused && app.dialog_window.is_none();
+    let idle_blink_enabled = idle_blink_enabled(app);
     let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
     let scroll_animating = !app.scroll_y.is_settled() || !app.scroll_x.is_settled();
     match compute_about_wait_plan(
@@ -1639,7 +1653,11 @@ pub(super) fn about_to_wait(app: &mut App, event_loop: &ActiveEventLoop) {
             || app.api_runtime_poll_pending(),
     ) {
         AboutWaitPlan::Wait => {
-            if let Some(w) = app.window.as_ref() {
+            // Headless has no compositor pacing: an idle `Wait` must not spin frames.
+            if let Some(w) = app.window.as_ref()
+                && (!app.headless_mode
+                    || wait_plan_wants_frame(needs_redraw, app.show_welcome, app.is_ide_mode))
+            {
                 w.request_redraw();
             }
             if needs_continuous_poll(

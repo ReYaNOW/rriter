@@ -75,10 +75,10 @@ impl Renderer {
         blink_alpha: f32,
         active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
     ) {
-        let sb_w = 48.0 * s;
-        let panel_x = sb_w;
+        let sb_w = (48.0 * s).round();
+        let panel_x = sb_w + ide_panel.visible_left_width(s);
         let panel_y = ide_bottom_panel_y(self.height, panel_bottom_h, s);
-        let panel_w = self.width - panel_x;
+        let panel_w = (self.width - panel_x).max(0.0);
 
         let uses_translucent_bg = ide_panel.slots.iter().any(|sl| {
             sl.group == crate::app::PanelGroup::Bottom

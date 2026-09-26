@@ -35,7 +35,24 @@ fn validate_purpose(purpose: &str) -> io::Result<()> {
 /// in memory for the current session when the service is unavailable, but must
 /// not persist it by another means.
 pub fn store_system_user_secret(purpose: &str, bytes: &[u8]) -> io::Result<()> {
+    store_secret_for(super::headless_policy(), purpose, bytes)
+}
+
+// Headless keeps no secrets: the OS store lives outside the profile, is shared with the
+// live editor, and unlocking it could show a prompt. Lookups find nothing, deletes succeed,
+// stores fail as an unavailable service (callers keep the value in memory).
+fn store_secret_for(
+    headless: Option<super::HeadlessPolicy>,
+    purpose: &str,
+    bytes: &[u8],
+) -> io::Result<()> {
     validate_purpose(purpose)?;
+    if headless.is_some() {
+        return Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "system secret storage is disabled in headless mode",
+        ));
+    }
 
     #[cfg(windows)]
     {
@@ -66,7 +83,17 @@ pub fn store_system_user_secret(purpose: &str, bytes: &[u8]) -> io::Result<()> {
 /// Loads a secret from the current operating system's user secret service.
 #[allow(dead_code)] // Database connection UI starts loading stored secrets in stage 3.
 pub fn load_system_user_secret(purpose: &str) -> io::Result<Option<Vec<u8>>> {
+    load_secret_for(super::headless_policy(), purpose)
+}
+
+fn load_secret_for(
+    headless: Option<super::HeadlessPolicy>,
+    purpose: &str,
+) -> io::Result<Option<Vec<u8>>> {
     validate_purpose(purpose)?;
+    if headless.is_some() {
+        return Ok(None);
+    }
 
     #[cfg(windows)]
     {
@@ -104,7 +131,14 @@ pub fn load_system_user_secret(purpose: &str) -> io::Result<Option<Vec<u8>>> {
 
 /// Deletes a secret from the current operating system's user secret service.
 pub fn delete_system_user_secret(purpose: &str) -> io::Result<()> {
+    delete_secret_for(super::headless_policy(), purpose)
+}
+
+fn delete_secret_for(headless: Option<super::HeadlessPolicy>, purpose: &str) -> io::Result<()> {
     validate_purpose(purpose)?;
+    if headless.is_some() {
+        return Ok(());
+    }
 
     #[cfg(windows)]
     {
@@ -302,6 +336,17 @@ mod tests {
         assert!(validate_purpose("database\npassword").is_err());
         assert!(validate_purpose(&"x".repeat(MAX_SECRET_PURPOSE_BYTES + 1)).is_err());
         assert!(validate_purpose("database:42:postgres_password").is_ok());
+    }
+
+    #[test]
+    fn headless_keeps_no_system_secrets() {
+        let headless = Some(super::super::HeadlessPolicy { allow_writes: true });
+        let purpose = "database:1:postgres_password";
+        let stored = store_secret_for(headless, purpose, b"value");
+        assert_eq!(stored.map_err(|error| error.kind()), Err(io::ErrorKind::Unsupported));
+        assert!(matches!(load_secret_for(headless, purpose), Ok(None)));
+        assert!(delete_secret_for(headless, purpose).is_ok());
+        assert!(load_secret_for(headless, "").is_err());
     }
 
     #[cfg(target_os = "linux")]

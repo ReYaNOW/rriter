@@ -1,7 +1,8 @@
 use crate::app::database::{DatabaseConnectionColor, DatabaseSettings};
 use crate::renderer::Renderer;
-use crate::ui_system::{UiId, UiRegistry};
+use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 use crate::widgets::ButtonView;
+use glow::HasContext;
 
 const DATABASE_SETTINGS_ROW_COUNT: usize = 10;
 const DATABASE_SETTINGS_ROW_HEIGHT: f32 = 43.0;
@@ -128,6 +129,35 @@ fn database_settings_rows(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    /// Clips a settings tab's content (GL scissor and hitboxes) to `clip`, so rows
+    /// that do not fit the modal are neither drawn nor clickable outside it.
+    /// Pair every call with `end_settings_content_clip`.
+    pub(crate) fn begin_settings_content_clip(
+        &mut self,
+        ui_registry: &mut UiRegistry,
+        clip: UiClipRect,
+    ) {
+        self.flush();
+        unsafe {
+            self.gl.enable(glow::SCISSOR_TEST);
+            self.gl.scissor(
+                clip.x.round() as i32,
+                (self.height - (clip.y + clip.h)).round() as i32,
+                clip.w.round() as i32,
+                clip.h.round() as i32,
+            );
+        }
+        ui_registry.push_clip(clip);
+    }
+
+    pub(crate) fn end_settings_content_clip(&mut self, ui_registry: &mut UiRegistry) {
+        ui_registry.pop_clip();
+        self.flush();
+        unsafe {
+            self.gl.disable(glow::SCISSOR_TEST);
+        }
+    }
+
     pub(crate) fn draw_database_settings_tab(
         &mut self,
         settings: &DatabaseSettings,

@@ -993,7 +993,7 @@ impl App {
             let Some((_, rect_y, _, rect_h)) = vertical_rect else {
                 return DatabaseDragUpdate::None;
             };
-            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let row_h = crate::app::database::database_grid_row_height_px(scale);
             let content_h = state.grid.logical_row_count() as f32 * row_h;
             let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse_y,
@@ -1044,7 +1044,7 @@ impl App {
 
     pub(crate) fn handle_database_table_key(
         &mut self,
-        key_event: &winit::event::KeyEvent,
+        key_event: &crate::app::keyboard::KeyInput,
     ) -> bool {
         use winit::event::ElementState;
         use winit::keyboard::{KeyCode, PhysicalKey};
@@ -1162,7 +1162,7 @@ impl App {
                     let invalidate_multiline_layout = multiline
                         && database_multiline_edit_may_change_text(
                             physical_key,
-                            key_event.logical_key.to_text(),
+                            key_event.logical_text.as_deref(),
                             primary,
                             text_input_allowed,
                         );
@@ -1172,7 +1172,7 @@ impl App {
                         copy_text = edit_database_table_input(
                             input,
                             physical_key,
-                            key_event.logical_key.to_text(),
+                            key_event.logical_text.as_deref(),
                             primary,
                             word,
                             shift,
@@ -1333,7 +1333,7 @@ impl App {
                 copy_text = edit_database_table_input(
                     input,
                     physical_key,
-                    key_event.logical_key.to_text(),
+                    key_event.logical_text.as_deref(),
                     primary,
                     word,
                     shift,
@@ -1797,7 +1797,7 @@ impl App {
             );
         } else {
             let Some((_, track_y, _, track_h)) = vertical_rect else { return; };
-            let row_h = (crate::app::database::DATABASE_GRID_ROW_HEIGHT * scale).round();
+            let row_h = crate::app::database::database_grid_row_height_px(scale);
             let content_h = state.grid.logical_row_count() as f32 * row_h;
             let Some((drag_offset, target)) = database_table_scroll_drag_target(
                 mouse.1,

@@ -28,7 +28,7 @@ fn render_should_continue_after_present<T, E>(
 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn update_window_title(window: &Window, base_title: &str, is_dirty: bool) {
+    pub fn update_window_title(window: &crate::platform::WindowHost, base_title: &str, is_dirty: bool) {
         let title = if is_dirty {
             format!("{} * — RRiter", base_title)
         } else {
@@ -38,13 +38,22 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn show_action_dialog(&mut self, event_loop: &ActiveEventLoop, action: PendingAction) {
+    pub fn show_action_dialog(&mut self, host: &crate::app::events::host_loop::HostLoop, action: PendingAction) {
         self.cancel_pointer_interactions();
         self.pending_action = action;
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             return;
         }
+
+        let Some(event_loop) = host.native() else {
+            // Headless: no second window, the dialog is drawn into the main frame.
+            self.headless_dialog_open = true;
+            if let Some(w) = self.window.as_ref() {
+                w.request_redraw();
+            }
+            return;
+        };
 
         let attrs = crate::platform::apply_window_attributes(winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
@@ -107,10 +116,16 @@ impl App {
         }
     }
 
+    /// Confirmation dialog is open: a second window, or drawn into the headless frame.
+    pub(crate) fn modal_dialog_open(&self) -> bool {
+        self.dialog_window.is_some() || self.headless_dialog_open
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn close_dialog(&mut self) {
         self.dialog_window = None;
         self.dialog_gl_surface = None;
+        self.headless_dialog_open = false;
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
@@ -453,10 +468,26 @@ impl App {
         false
     }
 
+    /// Headless without --allow-writes: disk-mutating UI actions are refused with the readonly notice.
+    pub(crate) fn headless_write_blocked(&mut self) -> bool {
+        if crate::platform::editor_writes_allowed(crate::platform::headless_policy()) {
+            return false;
+        }
+        self.show_readonly_notice();
+        true
+    }
+
     fn write_current_text_to_path(&mut self, path: &Path, content: &str) -> bool {
+        if self.headless_write_blocked() {
+            return false;
+        }
         let result = match crate::platform::write_text_file(path, content, self.text_file_format) {
             Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+            // Refused elevation falls through to the plain write-error path below.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+            {
                 crate::platform::write_text_file_elevated(
                     path,
                     content,

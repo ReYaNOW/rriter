@@ -22,6 +22,18 @@ impl Renderer {
         }
     }
 
+    /// Draws into the sub-rectangle `(x, y_gl, w, h)` of the current surface as if it were
+    /// a `w`x`h` surface; `y_gl` counts from the bottom edge. `resize` restores the full one.
+    pub fn resize_viewport(&mut self, x: i32, y_gl: i32, w: u32, h: u32) {
+        if w > 0 && h > 0 {
+            self.width = w as f32;
+            self.height = h as f32;
+            unsafe {
+                self.gl.viewport(x, y_gl, w as i32, h as i32);
+            }
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn measure_ui_width(&mut self, text: &str, scale: f32) -> f32 {
         let mut w = 0.0;

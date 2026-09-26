@@ -287,7 +287,22 @@ impl Renderer {
 
 #[inline(always)]
 pub(crate) fn ide_status_bar_height(scale: f32) -> f32 {
-    IDE_STATUS_BAR_HEIGHT * scale
+    (IDE_STATUS_BAR_HEIGHT * scale).round()
+}
+
+/// Visible viewport height of the active API Client tab: window minus tab bar and
+/// status bar. Shared by wheel scrolling and automation so both agree on the
+/// scrollable range.
+#[inline(always)]
+pub(crate) fn api_tab_viewport_height(
+    window_height: f32,
+    show_welcome: bool,
+    is_ide_mode: bool,
+    scale: f32,
+) -> f32 {
+    (window_height - ide_tab_bar_height(show_welcome, is_ide_mode, scale)
+        - ide_status_bar_height(scale))
+    .max(0.0)
 }
 
 #[inline(always)]
@@ -330,7 +345,12 @@ fn utf8_char_width(first_byte: u8) -> usize {
 }
 
 pub(crate) fn cursor_line_and_character(editor: &Editor) -> (usize, usize) {
-    let cursor = editor.cursor.min(editor.len());
+    line_and_character_at(editor, editor.cursor)
+}
+
+/// 1-based line and character of byte `offset` (clamped to the text).
+pub(crate) fn line_and_character_at(editor: &Editor, offset: usize) -> (usize, usize) {
+    let cursor = offset.min(editor.len());
     let line_idx = editor
         .line_offsets
         .partition_point(|&offset| offset <= cursor)
@@ -508,6 +528,39 @@ impl Default for Telemetry {
             last_print: Instant::now(),
         }
     }
+}
+
+/// Per-frame counters of the root frame, in milliseconds (headless `bench`/`record`).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FrameTelemetry {
+    pub flush_calls: u32,
+    pub vertices: u64,
+    pub root_phase_ms: [f32; 5],
+    pub chrome_ms: [f32; 6],
+}
+
+/// Takes and zeroes the flush, root-phase and chrome accumulators since the last call.
+/// Also restarts the 10 s print window, so its reset does not wipe a frame before it is taken.
+pub fn take_frame_telemetry() -> FrameTelemetry {
+    TELEMETRY.with(|telemetry| {
+        let mut t = telemetry.borrow_mut();
+        let taken = FrameTelemetry {
+            flush_calls: t.flush_count,
+            vertices: t.flush_vertices,
+            root_phase_ms: t.root_phase_time.map(|secs| secs * 1000.0),
+            chrome_ms: t.chrome_detail_time.map(|secs| secs * 1000.0),
+        };
+        t.flush_time = 0.0;
+        t.flush_count = 0;
+        t.flush_max_time = 0.0;
+        t.flush_vertices = 0;
+        t.root_phase_time = [0.0; 5];
+        t.root_phase_count = [0; 5];
+        t.chrome_detail_time = [0.0; 6];
+        t.chrome_detail_count = [0; 6];
+        t.last_print = Instant::now();
+        taken
+    })
 }
 
 fn transient_python_member_dot_byte(editor: &Editor) -> Option<usize> {

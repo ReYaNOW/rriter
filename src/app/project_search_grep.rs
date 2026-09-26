@@ -317,8 +317,14 @@ mod tests {
     #[test]
     fn project_search_backend_keeps_grep_only_for_ascii_single_line_queries() {
         assert_eq!(project_search_backend("needle"), ProjectSearchBackend::Grep);
-        assert_eq!(project_search_backend("Привет"), ProjectSearchBackend::Decoded);
-        assert_eq!(project_search_backend("привет"), ProjectSearchBackend::Decoded);
+        assert_eq!(
+            project_search_backend("Привет"),
+            ProjectSearchBackend::Decoded
+        );
+        assert_eq!(
+            project_search_backend("привет"),
+            ProjectSearchBackend::Decoded
+        );
         assert_eq!(
             project_search_backend("needle\nsecond"),
             ProjectSearchBackend::Decoded
@@ -482,7 +488,10 @@ mod tests {
             &capped,
         );
 
-        assert!(matches!(result, ProjectSearchGrepResult::NeedsDecodedFallback));
+        assert!(matches!(
+            result,
+            ProjectSearchGrepResult::NeedsDecodedFallback
+        ));
         let caps = crate::platform::lock_recover(&caps);
         assert_eq!(caps.matches, 0);
         assert_eq!(caps.files, 0);

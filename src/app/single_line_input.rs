@@ -119,11 +119,7 @@ where
     }
 }
 
-pub(crate) fn single_line_hit_index<F>(
-    text: &str,
-    x_offset: f32,
-    mut char_advance: F,
-) -> usize
+pub(crate) fn single_line_hit_index<F>(text: &str, x_offset: f32, mut char_advance: F) -> usize
 where
     F: FnMut(char) -> f32,
 {
@@ -460,15 +456,8 @@ mod tests {
         let scale = 1.0;
         let caret_w = single_line_caret_width(scale);
         let edge_pad = single_line_cursor_edge_pad(scale);
-        let geometry = single_line_cursor_geometry(
-            "abcdef",
-            6,
-            30.0,
-            0.0,
-            edge_pad,
-            edge_pad,
-            |_| 10.0,
-        );
+        let geometry =
+            single_line_cursor_geometry("abcdef", 6, 30.0, 0.0, edge_pad, edge_pad, |_| 10.0);
 
         assert_eq!(geometry.cursor_x, 60.0);
         assert_eq!(geometry.total_width, 60.0);
@@ -477,27 +466,13 @@ mod tests {
         let cursor_draw_x = geometry.cursor_x - geometry.scroll_x;
         assert!(cursor_draw_x + caret_w < 30.0);
 
-        let old_boundary_case = single_line_cursor_geometry(
-            "abc",
-            3,
-            30.0,
-            0.0,
-            edge_pad,
-            edge_pad,
-            |_| 10.0,
-        );
+        let old_boundary_case =
+            single_line_cursor_geometry("abc", 3, 30.0, 0.0, edge_pad, edge_pad, |_| 10.0);
         assert_eq!(old_boundary_case.scroll_x, edge_pad);
         assert!(old_boundary_case.cursor_x - old_boundary_case.scroll_x + caret_w < 30.0);
 
-        let narrow = single_line_cursor_geometry(
-            "a",
-            1,
-            caret_w,
-            0.0,
-            edge_pad,
-            edge_pad,
-            |_| caret_w,
-        );
+        let narrow =
+            single_line_cursor_geometry("a", 1, caret_w, 0.0, edge_pad, edge_pad, |_| caret_w);
         assert!(narrow.cursor_x - narrow.scroll_x + caret_w <= caret_w);
     }
 
@@ -523,12 +498,7 @@ mod tests {
     #[test]
     fn cursor_scroll_home_left_and_fractional_text_geometry_stay_consistent() {
         for scale in [1.25, 1.5, 1.75, 1.33] {
-            let horizontal = single_line_text_geometry(
-                10.4,
-                101.6,
-                8.0 * scale,
-                28.0 * scale,
-            );
+            let horizontal = single_line_text_geometry(10.4, 101.6, 8.0 * scale, 28.0 * scale);
             let expected_pad = (8.0 * scale).round().clamp(0.0, 51.0);
             let expected_right_inset = (28.0 * scale).round().clamp(0.0, 101.0);
             assert_eq!(horizontal.text_start_x, 10.0 + expected_pad);
@@ -639,7 +609,11 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(visible.len() >= 3);
 
-            let cases = [visible[0], visible[visible.len() / 2], visible[visible.len() - 1]];
+            let cases = [
+                visible[0],
+                visible[visible.len() / 2],
+                visible[visible.len() - 1],
+            ];
             for (byte_idx, logical_x) in cases {
                 let rendered_x = single_line_rendered_x(input, logical_x, cursor.scroll_x);
                 let hit_offset = single_line_hit_offset(input, rendered_x, cursor.scroll_x);
@@ -648,13 +622,19 @@ mod tests {
                 assert!(text.is_char_boundary(hit));
             }
 
-            let left_distance = single_line_rendered_x(input, visible[0].1, cursor.scroll_x)
-                - clip_left;
+            let left_distance =
+                single_line_rendered_x(input, visible[0].1, cursor.scroll_x) - clip_left;
             let right_distance = clip_right
                 - single_line_rendered_x(input, visible[visible.len() - 1].1, cursor.scroll_x);
             let max_advance = text.chars().map(advance).fold(0.0_f32, f32::max);
-            assert!(left_distance <= max_advance, "left boundary not exercised at scale={scale}");
-            assert!(right_distance <= max_advance, "right boundary not exercised at scale={scale}");
+            assert!(
+                left_distance <= max_advance,
+                "left boundary not exercised at scale={scale}"
+            );
+            assert!(
+                right_distance <= max_advance,
+                "right boundary not exercised at scale={scale}"
+            );
         }
     }
 
@@ -774,7 +754,8 @@ mod tests {
         let connection_hit = include_str!("database/database_app_methods.rs");
         assert!(!connection_hit.contains("glyph.advance * text_scale"));
 
-        let shared_renderer = include_str!("../render_view/ide_panels/ide_panel_dialog_renderer.rs");
+        let shared_renderer =
+            include_str!("../render_view/ide_panels/ide_panel_dialog_renderer.rs");
         assert!(!shared_renderer.contains("content_w + edge_pad"));
     }
 }

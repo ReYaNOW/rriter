@@ -62,8 +62,7 @@ fn is_terminal_tab_close_shortcut(
     primary
         && physical_key == PhysicalKey::Code(KeyCode::Digit4)
         && panels.is_open(crate::app::PanelId::Terminal)
-        && (panels.terminal_focused
-            || (panels.term_show_search && panels.term_search_focused))
+        && (panels.terminal_focused || (panels.term_show_search && panels.term_search_focused))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -85,14 +84,11 @@ fn terminal_owns_keyboard_context(
 
     let higher_priority_non_terminal_owner = show_settings
         || file_tree_text_input_owns_keyboard_context(panels)
-        || (panels.is_open(crate::app::PanelId::Search)
-            && panels.project_search.focused.is_some())
-        || (panels.is_open(crate::app::PanelId::LspServers)
-            && panels.lsp_log_filter_focused)
+        || (panels.is_open(crate::app::PanelId::Search) && panels.project_search.focused.is_some())
+        || (panels.is_open(crate::app::PanelId::LspServers) && panels.lsp_log_filter_focused)
         || (panels.is_open(crate::app::PanelId::Git) && panels.git.message_focused)
         || (panels.is_open(crate::app::PanelId::ApiClient) && panels.api.focused.is_some())
-        || (panels.is_open(crate::app::PanelId::LspServers)
-            && panels.lsp_logs_focused.is_some());
+        || (panels.is_open(crate::app::PanelId::LspServers) && panels.lsp_logs_focused.is_some());
     if higher_priority_non_terminal_owner {
         return false;
     }
@@ -113,17 +109,14 @@ fn git_logs_keyboard_copy_eligible(
     api_keyboard_surface_visible: bool,
     panels: &crate::app::IdePanelState,
 ) -> bool {
-    if !is_ide_mode
-        || !panels.is_open(crate::app::PanelId::Git)
-        || !panels.git.owns_git_logs_copy()
+    if !is_ide_mode || !panels.is_open(crate::app::PanelId::Git) || !panels.git.owns_git_logs_copy()
     {
         return false;
     }
 
     let downstream_keyboard_owner = panels.git.message_focused
         || (api_keyboard_surface_visible && panels.api.focused.is_some())
-        || (panels.is_open(crate::app::PanelId::LspServers)
-            && panels.lsp_logs_focused.is_some())
+        || (panels.is_open(crate::app::PanelId::LspServers) && panels.lsp_logs_focused.is_some())
         || (panels.is_open(crate::app::PanelId::Terminal)
             && panels.term_show_search
             && panels.term_search_focused)
@@ -179,10 +172,10 @@ fn markdown_global_toggle_action(
 
 impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn handle_main_keyboard_input(
+    pub fn handle_main_key_input(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        key_event: KeyEvent,
+        event_loop: &HostLoop,
+        key_event: KeyInput,
     ) {
         let editor_was_focused = self.editor_has_input_focus();
         self.handle_main_keyboard_input_inner(event_loop, key_event);
@@ -192,8 +185,8 @@ impl App {
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn handle_main_keyboard_input_inner(
         &mut self,
-        event_loop: &ActiveEventLoop,
-        key_event: KeyEvent,
+        event_loop: &HostLoop,
+        key_event: KeyInput,
     ) {
         let ctrl = crate::platform::primary_shortcut_modifier(self.modifiers);
         let alt = self.modifiers.alt_key();
@@ -301,7 +294,7 @@ impl App {
             }
         }
 
-        if self.dialog_window.is_some() {
+        if self.modal_dialog_open() {
             if key_event.state == ElementState::Pressed {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                     self.close_dialog();
@@ -653,7 +646,7 @@ impl App {
                     }
                     _ => {
                         if crate::platform::text_input_modifiers_allowed(self.modifiers) {
-                            if let Some(txt) = key_event.logical_key.to_text() {
+                            if let Some(txt) = key_event.logical_text.as_deref() {
                                 let clean_txt = txt.replace('\n', "");
                                 if !clean_txt.is_empty() {
                                     self.settings_ignore_editor.insert_str(&clean_txt);
@@ -1184,7 +1177,11 @@ mod tests {
         assert!(!app.ide_panel.git.message_focused);
         assert!(app.ide_panel.git.owns_git_logs_copy());
         assert!(git_logs_keyboard_copy_eligible(
-            true, false, false, false, &app.ide_panel
+            true,
+            false,
+            false,
+            false,
+            &app.ide_panel
         ));
         assert_eq!(
             app.ide_panel.git.copy_owned_git_logs_selection().as_deref(),
@@ -1202,12 +1199,20 @@ mod tests {
 
         assert!(!app.search_focused);
         assert!(git_logs_keyboard_copy_eligible(
-            true, true, app.search_focused, false, &app.ide_panel
+            true,
+            true,
+            app.search_focused,
+            false,
+            &app.ide_panel
         ));
 
         app.search_focused = true;
         assert!(!git_logs_keyboard_copy_eligible(
-            true, true, app.search_focused, false, &app.ide_panel
+            true,
+            true,
+            app.search_focused,
+            false,
+            &app.ide_panel
         ));
         assert_eq!(
             app.ide_panel.git.copy_owned_git_logs_selection().as_deref(),
@@ -1223,10 +1228,18 @@ mod tests {
         app.ide_panel.api.focused = Some(crate::app::api_client::ApiFocus::RouteFilter);
 
         assert!(git_logs_keyboard_copy_eligible(
-            true, false, false, false, &app.ide_panel
+            true,
+            false,
+            false,
+            false,
+            &app.ide_panel
         ));
         assert!(!git_logs_keyboard_copy_eligible(
-            true, false, false, true, &app.ide_panel
+            true,
+            false,
+            false,
+            true,
+            &app.ide_panel
         ));
         assert_eq!(
             app.ide_panel.git.copy_owned_git_logs_selection().as_deref(),
@@ -1278,7 +1291,11 @@ mod tests {
         let mut git_message = panels_with_owned_vcs_copy();
         git_message.git.message_focused = true;
         assert!(!git_logs_keyboard_copy_eligible(
-            true, false, false, false, &git_message
+            true,
+            false,
+            false,
+            false,
+            &git_message
         ));
 
         let mut api = panels_with_owned_vcs_copy();
@@ -1395,11 +1412,13 @@ mod tests {
     fn markdown_global_toggle_beats_stale_terminal_focus_for_project_search() {
         let mut panels = stale_terminal_focus_state();
         panels.open(crate::app::PanelId::Search);
-        panels.project_search.focused =
-            Some(crate::app::project_search::ProjectSearchField::Query);
+        panels.project_search.focused = Some(crate::app::project_search::ProjectSearchField::Query);
 
         assert!(panels.is_open(crate::app::PanelId::Terminal));
-        assert!(panels.terminal_focused, "fixture must preserve stale terminal focus");
+        assert!(
+            panels.terminal_focused,
+            "fixture must preserve stale terminal focus"
+        );
         assert_eq!(
             panels.project_search.focused,
             Some(crate::app::project_search::ProjectSearchField::Query)
@@ -1544,7 +1563,10 @@ mod tests {
             let routed_field = source
                 .find(marker)
                 .unwrap_or_else(|| panic!("missing route: {marker}"));
-            assert!(route_apply < routed_field, "Markdown toggle must precede {marker}");
+            assert!(
+                route_apply < routed_field,
+                "Markdown toggle must precede {marker}"
+            );
         }
 
         let api_route = source
@@ -1560,10 +1582,12 @@ mod tests {
         assert!(terminal_route < editor_route);
 
         let dialog_window = source
-            .find("if self.dialog_window.is_some()")
+            .find("if self.modal_dialog_open()")
             .expect("dialog route");
         assert!(dialog_window < route_apply);
-        assert!(include_str!("../../main.rs")
-            .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование"));
+        assert!(
+            include_str!("../app_bootstrap.rs")
+                .contains("Ctrl/Cmd + Shift + V\\tMarkdown: чтение / редактирование")
+        );
     }
 }

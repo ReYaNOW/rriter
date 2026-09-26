@@ -8,7 +8,10 @@ const SETTINGS: &str = include_str!("render_view/settings_ui.rs");
 const SETTINGS_TOOL_ROWS: &str = include_str!("render_view/settings_tool_rows.rs");
 const GIT_UI: &str = include_str!("render_view/ide_panels/ide_panel_git_workspace_renderer.rs");
 const TABS_UI: &str = include_str!("render_view/tabs_ui.rs");
-const TAB_INPUT: &str = include_str!("app/mouse/input.rs");
+const TAB_INPUT: &str = concat!(
+    include_str!("app/mouse/input.rs"),
+    include_str!("app/mouse/input/mouse_drag_capture.rs"),
+);
 const PROJECT_SEARCH_UI: &str =
     include_str!("render_view/ide_panels/ide_panel_project_search_renderer.rs");
 const FILE_TREE_UI: &str = include_str!("render_view/ide_panels/ide_panel_side_renderer.rs");
@@ -19,7 +22,11 @@ const ROOT_FRAME_HELPERS: &str = include_str!("render_view/root_frame_helpers.rs
 const CORE_TEXT: &str = include_str!("render_view/core_text.rs");
 const EDITOR_TEXT: &str = include_str!("render_view/editor_text_layer.rs");
 const LSP_UI: &str = include_str!("render_view/lsp_ui.rs");
-const UI_SYSTEM: &str = include_str!("ui_system.rs");
+const UI_SYSTEM: &str = concat!(
+    include_str!("ui_system.rs"),
+    include_str!("ui_system/ui_ids.rs"),
+    include_str!("ui_system/ui_registry.rs"),
+);
 const API_STATE: &str = include_str!("app/api_client.rs");
 const API_REQUESTS: &str = include_str!("app/api_client/api_client_app_request_methods.rs");
 const API_TEXT: &str = include_str!("app/api_client/api_client_app_text_methods.rs");
@@ -29,7 +36,12 @@ const PROJECT_PREVIEW: &str = include_str!("app/project_search_preview.rs");
 const TERMINAL_PROCESS: &str = include_str!("app/terminal_process.rs");
 const GIT_DIFF: &str = include_str!("app/git_diff.rs");
 const GIT_ACTIONS: &str = include_str!("app/git_panel/git_panel_app_action_methods.rs");
-const MAIN_SOURCE: &str = include_str!("main.rs");
+const MAIN_SOURCE: &str = concat!(
+    include_str!("main.rs"),
+    include_str!("state_persistence.rs"),
+    include_str!("startup_environment.rs"),
+    include_str!("headless_ty_mem_probe.rs"),
+);
 
 fn has_all(source: &str, needles: &[&str]) {
     for needle in needles {
@@ -339,11 +351,9 @@ fn r2_056_file_tree_disables_rows_during_inertial_scroll() {
 fn r2_057_terminal_tabs_overflow_into_scrollable_strip() {
     for panel_w in [0.0, 20.0, 50.0, 100.0, 640.0] {
         for tab_count in [0, 1, 2, 20, 200] {
-            let tab_w = crate::render_view::terminal_ui::terminal_tab_width_from_title_width(
-                100.0, 1.0,
-            );
-            let add_size =
-                crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, 1.0);
+            let tab_w =
+                crate::render_view::terminal_ui::terminal_tab_width_from_title_width(100.0, 1.0);
+            let add_size = crate::render_view::terminal_ui::terminal_tab_add_size(panel_w, 1.0);
             let max_scroll = crate::render_view::terminal_ui::terminal_tab_strip_max_scroll(
                 panel_w,
                 tab_w * tab_count as f32,

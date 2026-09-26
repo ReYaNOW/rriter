@@ -1156,7 +1156,10 @@ mod tests {
             measured += 1;
             line.len() as f32 * 2.0
         }));
-        assert_eq!(measured, 6, "same-length text edit must rebuild after invalidation");
+        assert_eq!(
+            measured, 6,
+            "same-length text edit must rebuild after invalidation"
+        );
 
         assert!(cache.ensure("zz\nyyyy\n", 1.5, true, |line| {
             measured += 1;
@@ -1168,12 +1171,18 @@ mod tests {
             measured += 1;
             line.len() as f32
         }));
-        assert_eq!(measured, 12, "fallback metrics must have a distinct cache identity");
+        assert_eq!(
+            measured, 12,
+            "fallback metrics must have a distinct cache identity"
+        );
         assert!(cache.ensure("zz\nyyyy\n", 1.5, true, |line| {
             measured += 1;
             line.len() as f32 * 2.0
         }));
-        assert_eq!(measured, 15, "precise renderer metrics must replace fallback widths");
+        assert_eq!(
+            measured, 15,
+            "precise renderer metrics must replace fallback widths"
+        );
     }
 
     #[test]

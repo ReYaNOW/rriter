@@ -4,8 +4,36 @@ pub(crate) const API_PANEL_PERSISTENCE_ERROR_ADVANCE: f32 = 20.0;
 pub(crate) const API_PANEL_UV_ERROR_ADVANCE: f32 = 22.0;
 pub(crate) const API_PANEL_MANUAL_ROUTE_ADVANCE: f32 = 38.0;
 pub(crate) const API_PANEL_SPEC_CARD_ADVANCE: f32 = 122.0;
+pub(crate) const API_PANEL_ROUTES_GAP_ADVANCE: f32 = 6.0;
 pub(crate) const API_PANEL_TREE_ROW_ADVANCE: f32 = 28.0;
 pub(crate) const API_PANEL_FILTER_ADVANCE: f32 = 38.0;
+
+// Fixed vertical advances of the API Client route tab. The tab renderer performs the same steps in
+// the same order (render_view/api_client_tab/api_client_tab_main_renderer.rs), so the content model
+// and the renderer share these names instead of repeating the numbers.
+pub(crate) const API_ROUTE_PATH_ROW_ADVANCE: f32 = 42.0;
+pub(crate) const API_ROUTE_SUMMARY_ROW_ADVANCE: f32 = 28.0;
+pub(crate) const API_ROUTE_BLOCK_GAP_ADVANCE: f32 = 8.0;
+pub(crate) const API_ROUTE_MOCK_TITLE_ADVANCE: f32 = 30.0;
+pub(crate) const API_ROUTE_MOCK_TOGGLE_ADVANCE: f32 = 46.0;
+pub(crate) const API_ROUTE_SECTION_TITLE_ADVANCE: f32 = 28.0;
+pub(crate) const API_ROUTE_INPUT_TABS_ADVANCE: f32 = 40.0;
+pub(crate) const API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE: f32 = 16.0;
+pub(crate) const API_ROUTE_INPUT_MEDIA_MENU_ITEM_ADVANCE: f32 = 30.0;
+pub(crate) const API_ROUTE_INPUT_MEDIA_MENU_TAIL_ADVANCE: f32 = 4.0;
+pub(crate) const API_ROUTE_OUTPUT_STATUS_ROW_ADVANCE: f32 = 34.0;
+pub(crate) const API_ROUTE_OUTPUT_TABS_ROW_ADVANCE: f32 = 38.0;
+pub(crate) const API_ROUTE_OUTPUT_VIEW_TABS_ADVANCE: f32 = 34.0;
+pub(crate) const API_ROUTE_OUTPUT_BODY_GAP_ADVANCE: f32 = 40.0;
+pub(crate) const API_ROUTE_OUTPUT_TAIL_ADVANCE: f32 = 18.0;
+pub(crate) const API_ROUTE_SERVER_CHIP_ROW_ADVANCE: f32 = 34.0;
+pub(crate) const API_ROUTE_SERVER_TAIL_ADVANCE: f32 = 42.0;
+pub(crate) const API_ROUTE_TRY_BUTTON_ADVANCE: f32 = 54.0;
+pub(crate) const API_ROUTE_RESPONSE_TITLE_ADVANCE: f32 = 30.0;
+pub(crate) const API_ROUTE_RESPONSE_ERROR_ROW_ADVANCE: f32 = 28.0;
+pub(crate) const API_ROUTE_RESPONSE_STATUS_ROW_ADVANCE: f32 = 28.0;
+pub(crate) const API_ROUTE_RESPONSE_TABS_ADVANCE: f32 = 34.0;
+pub(crate) const API_ROUTE_RESPONSE_TOKEN_ROW_ADVANCE: f32 = 30.0;
 
 pub(crate) fn api_panel_import_error_visible(api: &ApiClientState, now: u64) -> bool {
     api.import_error.is_some()
@@ -37,7 +65,7 @@ pub fn api_panel_max_scroll(api: &ApiClientState, visible_h: f32, scale: f32) ->
     content_h += api.mock.manual_routes.len() as f32 * API_PANEL_MANUAL_ROUTE_ADVANCE * scale;
     content_h += api.specs.len() as f32 * API_PANEL_SPEC_CARD_ADVANCE * scale;
     if let Some(model) = api.selected_model() {
-        content_h += API_PANEL_TREE_ROW_ADVANCE * scale * 2.0;
+        content_h += (API_PANEL_ROUTES_GAP_ADVANCE + API_PANEL_TREE_ROW_ADVANCE * 2.0) * scale;
         if !api.collapsed_route_roots.contains(&model.id) {
             content_h += API_PANEL_FILTER_ADVANCE * scale;
             let filter = api.route_filter.trim();
@@ -132,57 +160,60 @@ pub fn api_tab_max_scroll(
         return 0.0;
     };
     let pad = 28.0 * scale;
-    let mut content_h = pad + 42.0 * scale;
+    let mut content_h = pad + API_ROUTE_PATH_ROW_ADVANCE * scale;
     if !route.summary.is_empty() {
-        content_h += 30.0 * scale;
+        content_h += API_ROUTE_SUMMARY_ROW_ADVANCE * scale;
     }
     if !route.description.trim().is_empty() {
-        content_h += api_route_description_height(&route.description, scale) + 8.0 * scale;
+        content_h += api_route_description_height(&route.description, scale)
+            + API_ROUTE_BLOCK_GAP_ADVANCE * scale;
     }
-    content_h += 558.0 * scale;
-    content_h += 28.0 * scale;
-    if model.servers.len() > 1 {
-        content_h += model.servers.len() as f32 * 34.0 * scale + 42.0 * scale;
-    }
+    content_h += API_ROUTE_MOCK_TITLE_ADVANCE * scale + API_ROUTE_MOCK_TOGGLE_ADVANCE * scale;
     let auth_scheme_indices = api_route_auth_scheme_indices(model, route);
     if !auth_scheme_indices.is_empty() {
-        content_h += 28.0 * scale
+        content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
             + auth_scheme_indices
                 .iter()
                 .filter_map(|idx| model.security_schemes.get(*idx))
                 .map(|scheme| api_auth_scheme_row_height(scheme, scale))
                 .sum::<f32>()
-            + 8.0 * scale;
+            + API_ROUTE_BLOCK_GAP_ADVANCE * scale;
     }
-    content_h += 40.0 * scale;
+    content_h += API_ROUTE_INPUT_TABS_ADVANCE * scale;
     let input_content_h = api_route_input_view_height(route, model, tab_state, scale);
     if tab_state.input_doc_view == ApiInputDocView::Schema {
-        content_h += 30.0 * scale + input_content_h + 16.0 * scale;
-        if tab_state.input_schema_menu_open {
-            content_h += api_route_input_media_count(route).max(1) as f32 * 30.0 * scale
-                + 4.0 * scale;
+        let mock_contract = api.is_some_and(|api| {
+            api_mock_route_python_script(api, model, route_idx, route).is_some()
+        });
+        let media_count = api_route_selected_media_count(mock_contract, route);
+        content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
+            + input_content_h
+            + API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * scale;
+        if media_count > 1 && tab_state.input_schema_menu_open {
+            content_h += media_count as f32 * API_ROUTE_INPUT_MEDIA_MENU_ITEM_ADVANCE * scale
+                + API_ROUTE_INPUT_MEDIA_MENU_TAIL_ADVANCE * scale;
         }
     } else {
         if !route.path_params.is_empty() {
-            content_h += 28.0 * scale
+            content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
                 + route
                     .path_params
                     .iter()
                     .map(|param| api_param_row_height(param, scale))
                     .sum::<f32>()
-                + 8.0 * scale;
+                + API_ROUTE_BLOCK_GAP_ADVANCE * scale;
         }
         if !route.query_params.is_empty() {
-            content_h += 28.0 * scale
+            content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
                 + route
                     .query_params
                     .iter()
                     .map(|param| api_param_row_height(param, scale))
                     .sum::<f32>()
-                + 8.0 * scale;
+                + API_ROUTE_BLOCK_GAP_ADVANCE * scale;
         }
         if let Some(body) = &route.request_body {
-            content_h += 28.0 * scale;
+            content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale;
             if body.is_multipart || body.is_form_urlencoded {
                 content_h += body
                     .schema
@@ -195,33 +226,18 @@ pub fn api_tab_max_scroll(
                             .map(|schema| api_body_prop_row_height(schema, model, scale))
                             .sum::<f32>()
                     })
-                    .unwrap_or(0.0);
+                    .unwrap_or(0.0)
+                    + API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * scale;
             } else {
-                content_h += api_body_text_area_height(&tab_state.body_json, scale) + 16.0 * scale;
+                content_h += api_body_text_area_height(&tab_state.body_json, scale)
+                    + API_ROUTE_INPUT_SCHEMA_GAP_ADVANCE * scale;
             }
         }
     }
-    content_h += 84.0 * scale;
     if let Some(api) = api
         && api.expanded_mock_routes.contains(&(model.id, route_idx))
     {
-        let manual_route = (model.id == API_MANUAL_MOCK_SPEC_ID)
-            .then(|| api.mock.manual_routes.get(route_idx))
-            .flatten();
-        let mock_script = manual_route
-            .and_then(|route| route.python.as_ref())
-            .or_else(|| {
-                api.mock
-                    .route_overrides
-                    .iter()
-                    .find(|item| {
-                        item.method == route.method
-                            && item.path == route.path
-                            && item.python.as_ref().is_some_and(|script| script.enabled)
-                    })
-                    .and_then(|item| item.python.as_ref())
-            })
-            .filter(|script| script.enabled);
+        let mock_script = api_mock_route_python_script(api, model, route_idx, route);
         content_h += if let Some(script) = mock_script {
             let contract = crate::app::api_mock::types::api_mock_effective_contract(
                 script, route, model,
@@ -236,16 +252,25 @@ pub fn api_tab_max_scroll(
         };
     }
     if let Some(response) = &tab_state.response {
-        let response_text = api_response_text(response, tab_state.response_view);
-        content_h += 62.0 * scale + api_response_text_area_height(response_text, scale);
-        if api_response_has_auth_tokens(response) {
-            content_h += model
-                .security_schemes
-                .iter()
-                .filter(|scheme| scheme.token_capable())
-                .count() as f32
-                * 30.0
-                * scale;
+        // The renderer draws the status row only while the body is on screen; a failed request with
+        // an empty body ends on the error line.
+        if response.error.is_some() {
+            content_h += API_ROUTE_RESPONSE_ERROR_ROW_ADVANCE * scale;
+        }
+        if response.error.is_none() || !response.body.is_empty() {
+            let response_text = api_response_text(response, tab_state.response_view);
+            content_h += API_ROUTE_RESPONSE_STATUS_ROW_ADVANCE * scale
+                + API_ROUTE_RESPONSE_TABS_ADVANCE * scale
+                + api_response_text_area_height(response_text, scale);
+            if api_response_has_auth_tokens(response) {
+                content_h += model
+                    .security_schemes
+                    .iter()
+                    .filter(|scheme| scheme.token_capable())
+                    .count() as f32
+                    * API_ROUTE_RESPONSE_TOKEN_ROW_ADVANCE
+                    * scale;
+            }
         }
     } else if tab_state.pending {
         content_h += 24.0 * scale;
@@ -264,11 +289,57 @@ pub fn api_tab_max_scroll(
             tab_state.output_schema_idx,
             &tab_state.output_schema_collapsed,
         );
-        content_h += 120.0 * scale
+        content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
+            + API_ROUTE_OUTPUT_STATUS_ROW_ADVANCE * scale
+            + API_ROUTE_OUTPUT_TABS_ROW_ADVANCE * scale
+            + API_ROUTE_OUTPUT_VIEW_TABS_ADVANCE * scale
+            + API_ROUTE_OUTPUT_BODY_GAP_ADVANCE * scale
+            + API_ROUTE_OUTPUT_TAIL_ADVANCE * scale
             + api_response_text_area_height(&example, scale)
                 .max(api_response_text_area_height(&schema, scale));
     }
+    if model.servers.len() > 1 {
+        content_h += API_ROUTE_SECTION_TITLE_ADVANCE * scale
+            + model.servers.len() as f32 * API_ROUTE_SERVER_CHIP_ROW_ADVANCE * scale
+            + API_ROUTE_SERVER_TAIL_ADVANCE * scale;
+    }
+    content_h += API_ROUTE_TRY_BUTTON_ADVANCE * scale + API_ROUTE_RESPONSE_TITLE_ADVANCE * scale;
     (content_h + pad + 36.0 * scale - visible_h).max(0.0)
+}
+
+/// Schema media switch of the request body: a python mock contract replaces it with a single
+/// "schema" entry, so the menu exists only without a contract.
+pub(crate) fn api_route_selected_media_count(
+    has_mock_contract: bool,
+    route: &ApiRouteRow,
+) -> usize {
+    if has_mock_contract {
+        1
+    } else {
+        api_route_input_media_count(route).max(1)
+    }
+}
+
+/// Enabled python mock script of the route: manual route first, then the route override.
+fn api_mock_route_python_script<'a>(
+    api: &'a ApiClientState,
+    model: &ApiSpecModel,
+    route_idx: usize,
+    route: &ApiRouteRow,
+) -> Option<&'a crate::app::api_mock::types::ApiMockPythonScript> {
+    let manual_route = (model.id == API_MANUAL_MOCK_SPEC_ID)
+        .then(|| api.mock.manual_routes.get(route_idx))
+        .flatten();
+    manual_route
+        .and_then(|route| route.python.as_ref())
+        .or_else(|| {
+            api.mock
+                .route_overrides
+                .iter()
+                .find(|item| item.method == route.method && item.path == route.path)
+                .and_then(|item| item.python.as_ref())
+        })
+        .filter(|script| script.enabled)
 }
 
 pub fn api_route_input_view_height(

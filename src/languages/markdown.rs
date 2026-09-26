@@ -227,16 +227,10 @@ fn build_block(
             append_block_children(source, tree, node, depth, list_depth, &mut blocks);
             MarkdownBlockKind::BlockQuote { depth, blocks }
         }
-        "list" => MarkdownBlockKind::List(build_list(
-            source,
-            tree,
-            node,
-            quote_depth,
-            list_depth + 1,
-        )),
-        "fenced_code_block" => {
-            MarkdownBlockKind::Code(build_fenced_code_block(source, node))
+        "list" => {
+            MarkdownBlockKind::List(build_list(source, tree, node, quote_depth, list_depth + 1))
         }
+        "fenced_code_block" => MarkdownBlockKind::Code(build_fenced_code_block(source, node)),
         "indented_code_block" => MarkdownBlockKind::Code(MarkdownCodeBlock {
             source_range: source_range.clone(),
             content_ranges: indented_code_content_ranges(source, node),
@@ -342,7 +336,9 @@ fn build_list(
             if is_list_marker(child.kind())
                 || matches!(
                     child.kind(),
-                    "task_list_marker_checked" | "task_list_marker_unchecked" | "block_continuation"
+                    "task_list_marker_checked"
+                        | "task_list_marker_unchecked"
+                        | "block_continuation"
                 )
             {
                 continue;
@@ -525,8 +521,8 @@ fn build_inline_span(
                 .or_else(|| first_named_child_kind(node, "link_label"));
             let destination = first_named_child_kind(node, "link_destination")
                 .map(|child| node_range(source, child));
-            let reference = first_named_child_kind(node, "link_label")
-                .map(|child| node_range(source, child));
+            let reference =
+                first_named_child_kind(node, "link_label").map(|child| node_range(source, child));
             (
                 MarkdownInlineStyle::Link {
                     destination_range: destination,
@@ -541,8 +537,8 @@ fn build_inline_span(
             let description = first_named_child_kind(node, "image_description");
             let destination = first_named_child_kind(node, "link_destination")
                 .map(|child| node_range(source, child));
-            let reference = first_named_child_kind(node, "link_label")
-                .map(|child| node_range(source, child));
+            let reference =
+                first_named_child_kind(node, "link_label").map(|child| node_range(source, child));
             (
                 MarkdownInlineStyle::Image {
                     destination_range: destination,
@@ -571,8 +567,14 @@ fn build_inline_span(
     };
     let text_ranges = intersect_source_ranges(source, visible_ranges, raw_text_range);
     let children = match node.kind() {
-        "emphasis" | "strong_emphasis" | "inline_link" | "full_reference_link"
-        | "collapsed_reference_link" | "shortcut_link" | "image" | "link_text"
+        "emphasis"
+        | "strong_emphasis"
+        | "inline_link"
+        | "full_reference_link"
+        | "collapsed_reference_link"
+        | "shortcut_link"
+        | "image"
+        | "link_text"
         | "image_description" => parse_inline_children(source, node, &text_ranges),
         _ => Vec::new(),
     };
@@ -666,18 +668,10 @@ fn indented_chunk_content_start(source: &str, start: usize, end: usize) -> Optio
 }
 
 fn scanner_column_after(column: usize, ch: char) -> usize {
-    if ch == '\t' {
-        0
-    } else {
-        (column + 1) % 4
-    }
+    if ch == '\t' { 0 } else { (column + 1) % 4 }
 }
 
-fn collect_omitted_source_ranges(
-    source: &str,
-    node: Node<'_>,
-    omitted: &mut Vec<Range<usize>>,
-) {
+fn collect_omitted_source_ranges(source: &str, node: Node<'_>, omitted: &mut Vec<Range<usize>>) {
     let mut cursor = node.walk();
     for child in node.children(&mut cursor) {
         if is_omitted_source_syntax(child.kind()) {
@@ -792,7 +786,12 @@ fn ordered_list_index(source: &str, marker: Node<'_>) -> Option<u64> {
         .take_while(u8::is_ascii_digit)
         .fold(None, |value, digit| {
             let digit = u64::from(digit - b'0');
-            Some(value.unwrap_or(0u64).saturating_mul(10).saturating_add(digit))
+            Some(
+                value
+                    .unwrap_or(0u64)
+                    .saturating_mul(10)
+                    .saturating_add(digit),
+            )
         })
 }
 
@@ -845,12 +844,7 @@ fn strip_ascii_prefix(source: &str, range: Range<usize>, prefix: u8) -> Range<us
     }
 }
 
-fn strip_ascii_wrappers(
-    source: &str,
-    range: Range<usize>,
-    prefix: u8,
-    suffix: u8,
-) -> Range<usize> {
+fn strip_ascii_wrappers(source: &str, range: Range<usize>, prefix: u8, suffix: u8) -> Range<usize> {
     if range.end > range.start + 1
         && source.as_bytes().get(range.start) == Some(&prefix)
         && source.as_bytes().get(range.end - 1) == Some(&suffix)
@@ -871,21 +865,21 @@ mod tests {
         state.parse(source).expect("markdown should parse")
     }
 
-    fn walk_inlines<'a>(
-        spans: &'a [MarkdownInlineSpan],
-        out: &mut Vec<&'a MarkdownInlineSpan>,
-    ) {
+    fn walk_inlines<'a>(spans: &'a [MarkdownInlineSpan], out: &mut Vec<&'a MarkdownInlineSpan>) {
         for span in spans {
             out.push(span);
             walk_inlines(&span.children, out);
         }
     }
 
-
     fn text_from_ranges(source: &str, ranges: &[Range<usize>]) -> String {
         let mut text = String::new();
         for range in ranges {
-            text.push_str(source.get(range.clone()).expect("semantic range must be source-backed"));
+            text.push_str(
+                source
+                    .get(range.clone())
+                    .expect("semantic range must be source-backed"),
+            );
         }
         text
     }
@@ -950,7 +944,10 @@ mod tests {
     fn collect_quote_depths(blocks: &[MarkdownBlock], depths: &mut Vec<usize>) {
         for block in blocks {
             match &block.kind {
-                MarkdownBlockKind::BlockQuote { depth, blocks: nested } => {
+                MarkdownBlockKind::BlockQuote {
+                    depth,
+                    blocks: nested,
+                } => {
                     depths.push(*depth);
                     collect_quote_depths(nested, depths);
                 }
@@ -995,7 +992,9 @@ mod tests {
                 match &block.kind {
                     MarkdownBlockKind::Heading { inlines, .. }
                     | MarkdownBlockKind::Paragraph { inlines, .. } => walk_inlines(inlines, out),
-                    MarkdownBlockKind::BlockQuote { blocks: nested, .. } => collect_blocks(nested, out),
+                    MarkdownBlockKind::BlockQuote { blocks: nested, .. } => {
+                        collect_blocks(nested, out)
+                    }
                     MarkdownBlockKind::List(list) => {
                         for item in &list.items {
                             collect_blocks(&item.blocks, out);
@@ -1049,14 +1048,18 @@ mod tests {
             MarkdownBlockKind::Heading { level: 2, content_ranges, .. }
                 if text_from_ranges(source, content_ranges).contains("Setext")
         )));
-        assert!(document.blocks.iter().any(|block| matches!(
-            block.kind,
-            MarkdownBlockKind::BlockQuote { depth: 1, .. }
-        )));
-        assert!(document.blocks.iter().any(|block| matches!(
-            block.kind,
-            MarkdownBlockKind::ThematicBreak
-        )));
+        assert!(
+            document
+                .blocks
+                .iter()
+                .any(|block| matches!(block.kind, MarkdownBlockKind::BlockQuote { depth: 1, .. }))
+        );
+        assert!(
+            document
+                .blocks
+                .iter()
+                .any(|block| matches!(block.kind, MarkdownBlockKind::ThematicBreak))
+        );
         assert!(document.blocks.iter().any(|block| matches!(
             &block.kind,
             MarkdownBlockKind::Table(table)
@@ -1097,15 +1100,21 @@ mod tests {
         )));
 
         let inlines = collect_document_inlines(&document);
-        assert!(inlines
-            .iter()
-            .any(|span| matches!(span.style, MarkdownInlineStyle::Emphasis)));
-        assert!(inlines
-            .iter()
-            .any(|span| matches!(span.style, MarkdownInlineStyle::Strong)));
-        assert!(inlines
-            .iter()
-            .any(|span| matches!(span.style, MarkdownInlineStyle::Code)));
+        assert!(
+            inlines
+                .iter()
+                .any(|span| matches!(span.style, MarkdownInlineStyle::Emphasis))
+        );
+        assert!(
+            inlines
+                .iter()
+                .any(|span| matches!(span.style, MarkdownInlineStyle::Strong))
+        );
+        assert!(
+            inlines
+                .iter()
+                .any(|span| matches!(span.style, MarkdownInlineStyle::Code))
+        );
         assert!(inlines.iter().any(|span| matches!(
             &span.style,
             MarkdownInlineStyle::Link { destination_range: Some(range), .. }
@@ -1121,7 +1130,8 @@ mod tests {
 
     #[test]
     fn semantic_ranges_remain_utf8_boundaries() {
-        let source = "# Привет 👋\n\nТекст **жирный 😀** и [ссылка](https://example.invalid/юникод).\n";
+        let source =
+            "# Привет 👋\n\nТекст **жирный 😀** и [ссылка](https://example.invalid/юникод).\n";
         let document = parse(source);
         assert_eq!(document.source_len, source.len());
         for block in &document.blocks {
@@ -1144,7 +1154,10 @@ mod tests {
             Some(MarkdownBlockKind::BlockQuote { depth: 1, .. })
         ));
         assert_no_raw_blocks(&document.blocks);
-        assert_eq!(visible_block_text(source, &document.blocks).trim_end(), "quote");
+        assert_eq!(
+            visible_block_text(source, &document.blocks).trim_end(),
+            "quote"
+        );
     }
 
     #[test]
@@ -1300,9 +1313,11 @@ mod tests {
             block.kind,
             MarkdownBlockKind::HtmlRaw | MarkdownBlockKind::Paragraph { .. }
         )));
-        assert!(document
-            .blocks
-            .iter()
-            .all(|block| source.get(block.source_range.clone()).is_some()));
+        assert!(
+            document
+                .blocks
+                .iter()
+                .all(|block| source.get(block.source_range.clone()).is_some())
+        );
     }
 }

@@ -1,7 +1,7 @@
 use crate::app::App;
 use std::time::Instant;
 use winit::event::{ElementState, MouseScrollDelta};
-use winit::event_loop::ActiveEventLoop;
+use crate::app::events::host_loop::HostLoop;
 
 const SCROLLBAR_DRAG_ANIM_SPEED: f32 = 15.0;
 
@@ -75,8 +75,7 @@ pub(crate) fn ide_root_resize_cursor(
     }
 
     if panel_bottom_h > 0.0 {
-        let resize_y =
-            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, scale);
+        let resize_y = crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, scale);
         if (my - resize_y).abs() < 6.0 * scale && mx >= sidebar_w {
             return Some(winit::window::CursorIcon::NsResize);
         }
@@ -260,7 +259,7 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
     })
 }
 
-fn git_graph_rows_bounds(app: &App, scale: f32) -> Option<(f32, f32)> {
+pub(crate) fn git_graph_rows_bounds(app: &App, scale: f32) -> Option<(f32, f32)> {
     if !app.ide_panel.git.graph_open() {
         return None;
     }
@@ -369,8 +368,7 @@ mod panel_geometry_tests {
     fn bottom_splitter_hover_uses_resize_cursor_before_drag() {
         let window_height = 900.0;
         let panel_bottom_h = 180.0;
-        let resize_y =
-            crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, 1.0);
+        let resize_y = crate::render_view::ide_bottom_panel_y(window_height, panel_bottom_h, 1.0);
 
         assert_eq!(
             ide_root_resize_cursor(

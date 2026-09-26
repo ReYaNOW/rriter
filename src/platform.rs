@@ -9,32 +9,36 @@ use std::process::Child;
 #[cfg(any(windows, target_os = "linux"))]
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use winit::window::WindowAttributes;
 
 mod elevated_save;
 mod integration;
+#[cfg(target_os = "linux")]
+pub mod offscreen_gl;
 #[cfg(target_os = "macos")]
 mod macos;
 mod process;
 mod secret_store;
 mod text_file;
+pub mod window_host;
 #[cfg(windows)]
 mod windows;
 #[cfg(test)]
 pub use integration::ManagedToolInstallPlan;
-pub use integration::{
-    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths, async_http_client_builder,
-    blocking_http_client_builder, configure_dart_workspace_root, configure_tool_paths,
-    configured_tool_path, current_process_memory_kb, proxy_routing_is_configured,
-    refresh_tool_resolutions, resolve_dart_for_workspace, resolve_tool_kind, system_proxy_config,
-    user_cache_root,
-};
 pub(crate) use integration::user_home_dir;
-#[cfg(test)]
+pub use integration::{
+    SystemProxyConfig, ToolKind, ToolPaths, ToolResolution, app_paths,
+    async_http_client_builder, blocking_http_client_builder, configure_dart_workspace_root,
+    configure_tool_paths, configured_tool_path, current_process_memory_kb,
+    proxy_routing_is_configured, refresh_tool_resolutions, resolve_dart_for_workspace,
+    resolve_tool_kind, set_app_root_override, system_proxy_config, user_cache_root,
+};
+pub(crate) use integration::app_paths_for_root;
 pub(crate) type AppPaths = integration::AppPaths;
+pub use window_host::{HeadlessWindow, WindowHost};
 
 #[cfg_attr(test, allow(dead_code))]
 pub fn config_dir() -> PathBuf {
@@ -66,14 +70,14 @@ pub(crate) use integration::{
 };
 #[cfg(all(test, unix))]
 use process::command_for;
+#[cfg(test)]
+pub(crate) use process::process_snapshot;
 pub use process::{
     ManagedChild, ProcessOutputStream, ProcessTree, command_for_executable, command_for_tool,
     resolve_executable, resolve_tool_executable, run_command_output, run_command_output_cancelable,
     run_command_streaming_cancelable,
 };
 pub(crate) use process::{ProcessSnapshot, foreground_process_snapshot};
-#[cfg(test)]
-pub(crate) use process::process_snapshot;
 pub use secret_store::{
     delete_system_user_secret, load_system_user_secret, store_system_user_secret,
 };
@@ -102,6 +106,108 @@ pub(crate) fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HeadlessPolicy {
+    pub allow_writes: bool,
+}
+
+static HEADLESS_POLICY: OnceLock<HeadlessPolicy> = OnceLock::new();
+
+/// Set once by `headless::run` before any thread starts. Tests never call it:
+/// the policy is process-wide and would block file writes in every later test.
+pub fn set_headless(policy: HeadlessPolicy) {
+    let _ = HEADLESS_POLICY.set(policy);
+}
+
+pub fn headless_policy() -> Option<HeadlessPolicy> {
+    HEADLESS_POLICY.get().copied()
+}
+
+pub fn is_headless() -> bool {
+    headless_policy().is_some()
+}
+
+pub fn headless_writes_allowed() -> bool {
+    editor_writes_allowed(headless_policy())
+}
+
+/// Windowed mode (`None`) always writes; headless writes only with `--allow-writes`.
+pub(crate) fn editor_writes_allowed(policy: Option<HeadlessPolicy>) -> bool {
+    policy.is_none_or(|policy| policy.allow_writes)
+}
+
+/// Highest refresh rate among connected monitors, in Hz. Probed once per process through a
+/// window-less winit event loop (winit allows one `EventLoop` per process, so the windowed
+/// app never calls this). `None` without a display. Main thread only.
+#[cfg(target_os = "linux")]
+pub fn probe_display_refresh_hz() -> Option<f64> {
+    use winit::event_loop::{ActiveEventLoop, EventLoop};
+
+    struct Probe(Option<f64>);
+    impl winit::application::ApplicationHandler for Probe {
+        fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+            self.0 = event_loop
+                .available_monitors()
+                .filter_map(|monitor| monitor.refresh_rate_millihertz())
+                .filter(|&millihertz| millihertz > 0)
+                .max()
+                .map(|millihertz| f64::from(millihertz) / 1000.0);
+            event_loop.exit();
+        }
+        fn window_event(
+            &mut self,
+            _event_loop: &ActiveEventLoop,
+            _window_id: winit::window::WindowId,
+            _event: winit::event::WindowEvent,
+        ) {
+        }
+    }
+
+    static REFRESH_HZ: OnceLock<Option<f64>> = OnceLock::new();
+    *REFRESH_HZ.get_or_init(|| {
+        let event_loop = EventLoop::builder().build().ok()?;
+        let mut probe = Probe(None);
+        event_loop.run_app(&mut probe).ok()?;
+        probe.0
+    })
+}
+
+/// pkexec/UAC prompts would pop over the user's fullscreen app: never in headless.
+pub(crate) fn elevation_allowed(policy: Option<HeadlessPolicy>) -> bool {
+    policy.is_none()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExternalRequest {
+    PickFile,
+    PickFiles,
+    PickFolder,
+    SaveFile,
+    OpenUrl(String),
+    RevealPath(PathBuf),
+}
+
+static LAST_EXTERNAL_REQUEST: Mutex<Option<ExternalRequest>> = Mutex::new(None);
+
+pub fn note_external_request(request: ExternalRequest) {
+    *lock_recover(&LAST_EXTERNAL_REQUEST) = Some(request);
+}
+
+/// Returns the last intercepted request and clears it (read by `dump`).
+pub fn take_external_request() -> Option<ExternalRequest> {
+    lock_recover(&LAST_EXTERNAL_REQUEST).take()
+}
+
+/// `true` when the caller must not touch the desktop: headless records the
+/// request instead of opening a picker, browser, or file manager.
+pub(crate) fn intercept_external(policy: Option<HeadlessPolicy>, request: ExternalRequest) -> bool {
+    if policy.is_none() {
+        return false;
+    }
+    note_external_request(request);
+    true
 }
 
 pub(crate) fn corrupt_file_backup_note(path: &Path) -> String {
@@ -1169,24 +1275,57 @@ pub fn trash_layout() -> TrashLayout {
 }
 
 pub struct Clipboard {
-    inner: arboard::Clipboard,
+    backend: ClipboardBackend,
+}
+
+enum ClipboardBackend {
+    System(arboard::Clipboard),
+    InMemory(Option<String>),
 }
 
 impl Clipboard {
     pub fn new() -> Result<Self, arboard::Error> {
-        arboard::Clipboard::new().map(|inner| Self { inner })
+        arboard::Clipboard::new().map(|inner| Self { backend: ClipboardBackend::System(inner) })
+    }
+
+    pub fn in_memory() -> Self {
+        Self { backend: ClipboardBackend::InMemory(None) }
+    }
+
+    pub fn is_in_memory(&self) -> bool {
+        matches!(&self.backend, ClipboardBackend::InMemory(_))
+    }
+
+    pub fn in_memory_text(&self) -> Option<&str> {
+        match &self.backend {
+            ClipboardBackend::InMemory(text) => text.as_deref(),
+            ClipboardBackend::System(_) => None,
+        }
     }
 
     pub fn set_text(&mut self, text: String) -> Result<(), arboard::Error> {
-        clipboard_retry(|| self.inner.set_text(text.clone()))
+        match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.set_text(text.clone())),
+            ClipboardBackend::InMemory(contents) => {
+                *contents = Some(text);
+                Ok(())
+            }
+        }
     }
 
     pub fn get_text(&mut self) -> Result<String, arboard::Error> {
-        clipboard_retry(|| self.inner.get_text())
+        match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get_text()),
+            ClipboardBackend::InMemory(Some(text)) => Ok(text.clone()),
+            ClipboardBackend::InMemory(None) => Err(arboard::Error::ContentNotAvailable),
+        }
     }
 
     pub fn get_file_list(&mut self) -> Result<Vec<PathBuf>, arboard::Error> {
-        let mut paths = clipboard_retry(|| self.inner.get().file_list())?;
+        let mut paths = match &mut self.backend {
+            ClipboardBackend::System(inner) => clipboard_retry(|| inner.get().file_list())?,
+            ClipboardBackend::InMemory(_) => return Ok(Vec::new()),
+        };
         #[cfg(target_os = "linux")]
         normalize_linux_arboard_file_list(&mut paths);
         Ok(paths)
@@ -1231,6 +1370,9 @@ fn clipboard_retry<T>(
 }
 
 pub fn pick_file(title: &str) -> Option<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::PickFile) {
+        return None;
+    }
     rfd::FileDialog::new().set_title(title).pick_file()
 }
 
@@ -1239,6 +1381,9 @@ pub fn pick_file_with_filter(
     filter_name: &str,
     extensions: &[&str],
 ) -> Option<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::PickFile) {
+        return None;
+    }
     rfd::FileDialog::new()
         .set_title(title)
         .add_filter(filter_name, extensions)
@@ -1246,6 +1391,9 @@ pub fn pick_file_with_filter(
 }
 
 pub fn pick_files(title: &str) -> Vec<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::PickFiles) {
+        return Vec::new();
+    }
     rfd::FileDialog::new()
         .set_title(title)
         .pick_files()
@@ -1253,10 +1401,16 @@ pub fn pick_files(title: &str) -> Vec<PathBuf> {
 }
 
 pub fn pick_folder(title: &str) -> Option<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::PickFolder) {
+        return None;
+    }
     rfd::FileDialog::new().set_title(title).pick_folder()
 }
 
 pub fn save_file(title: &str, file_name: &str) -> Option<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::SaveFile) {
+        return None;
+    }
     rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(file_name)
@@ -1269,6 +1423,9 @@ pub fn save_file_with_filter(
     filter_name: &str,
     extensions: &[&str],
 ) -> Option<PathBuf> {
+    if intercept_external(headless_policy(), ExternalRequest::SaveFile) {
+        return None;
+    }
     rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(file_name)
@@ -1277,6 +1434,9 @@ pub fn save_file_with_filter(
 }
 
 pub fn reveal_path(path: &Path) -> io::Result<Child> {
+    if intercept_external(headless_policy(), ExternalRequest::RevealPath(path.to_path_buf())) {
+        return Err(io::Error::new(io::ErrorKind::Unsupported, "disabled in headless mode"));
+    }
     #[cfg(windows)]
     {
         let mut command = Command::new("explorer.exe");
@@ -1309,6 +1469,9 @@ pub fn reveal_path(path: &Path) -> io::Result<Child> {
 }
 
 pub fn open_url(url: &str) -> io::Result<()> {
+    if intercept_external(headless_policy(), ExternalRequest::OpenUrl(url.to_string())) {
+        return Ok(());
+    }
     let parsed =
         url::Url::parse(url).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
     if !matches!(parsed.scheme(), "http" | "https") {

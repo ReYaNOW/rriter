@@ -1,6 +1,7 @@
 use super::{DartSettings, MarkdownTabState};
 use crate::editor::Editor;
 use crate::highlighter::{CompletionItem, Highlighter, SymbolKind, SyncEdit};
+use crate::platform::WindowHost;
 use crate::renderer::{Renderer, Theme};
 use crate::ui_system::UiId;
 use glutin::context::PossiblyCurrentContext;
@@ -1029,7 +1030,7 @@ pub struct App {
     pub gl_config: Option<glutin::config::Config>,
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,
-    pub window: Option<std::sync::Arc<Window>>,
+    pub window: Option<std::sync::Arc<WindowHost>>,
     pub dialog_window: Option<std::sync::Arc<Window>>,
     pub dialog_gl_surface: Option<Surface<WindowSurface>>,
     pub settings_scroll: crate::scroll::ScrollState,
@@ -1214,6 +1215,9 @@ pub struct App {
 
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,
+    pub headless_mode: bool,
+    /// Headless confirmation dialog: drawn into the main frame instead of a second window.
+    pub headless_dialog_open: bool,
 }
 
 #[cfg(test)]

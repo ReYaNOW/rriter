@@ -14,7 +14,9 @@ fn settings_sidebar_tab_metrics(
     tab_count: usize,
     scale: f32,
 ) -> SettingsSidebarTabMetrics {
-    let top = (20.0 * scale).min((inner_h * 0.10).max(0.0));
+    // Whole-pixel top, gap and row height: rows are placed at
+    // `top + i * (row_h + gap)` and must land on integral y at any scale.
+    let top = (20.0 * scale).min((inner_h * 0.10).max(0.0)).round();
     if tab_count == 0 {
         return SettingsSidebarTabMetrics {
             top,
@@ -24,15 +26,16 @@ fn settings_sidebar_tab_metrics(
     }
     let bottom = (20.0 * scale).min((inner_h - top).max(0.0) * 0.12);
     let available = (inner_h - top - bottom).max(0.0);
-    let desired_gap = 4.0 * scale;
+    let desired_gap = (4.0 * scale).round();
     let gap = if tab_count > 1 {
-        desired_gap.min(available / (tab_count - 1) as f32)
+        desired_gap.min((available / (tab_count - 1) as f32).floor())
     } else {
         0.0
     };
     let row_h = ((available - gap * tab_count.saturating_sub(1) as f32)
         / tab_count as f32)
-        .clamp(0.0, 36.0 * scale);
+        .clamp(0.0, 36.0 * scale)
+        .floor();
     SettingsSidebarTabMetrics { top, row_h, gap }
 }
 
@@ -80,6 +83,30 @@ pub(crate) fn animated_settings_modal_layout(
     layout
 }
 
+/// Vertical steps of the IDE tab scroll content, in unscaled pixels. The render
+/// code and the scroll model must walk the same steps: the content height is
+/// built from these values, so a change in `draw_settings` that is not mirrored
+/// here would make the scrollbar thumb drift from what is drawn.
+const SETTINGS_IDE_SCROLL_TOP: f32 = 52.0; // clip top, just below the tab pill
+/// `draw_settings` starts the tab content cursor at `inner.y + 40 * s` and
+/// advances it by the tab block step (`46 * s`) before the IDE rows, so the
+/// first IDE row sits this far below the clip top.
+const SETTINGS_IDE_CONTENT_TOP_INSET: f32 = 86.0 - SETTINGS_IDE_SCROLL_TOP;
+const SETTINGS_IDE_SECTION_TITLE_STEP: f32 = 40.0;
+const SETTINGS_IDE_WORKSPACE_ROW_STEP: f32 = 46.0;
+const SETTINGS_IDE_ADD_WORKSPACE_STEP: f32 = 56.0;
+const SETTINGS_IDE_DIVIDER_STEP: f32 = 20.0;
+const SETTINGS_IDE_IGNORE_TITLE_STEP: f32 = 28.0;
+const SETTINGS_IDE_IGNORE_HINT_STEP: f32 = 22.0;
+const SETTINGS_IDE_IGNORE_EXAMPLES_STEP: f32 = 20.0;
+const SETTINGS_IDE_IGNORE_INPUT_H: f32 = 34.0;
+const SETTINGS_IDE_IGNORE_INPUT_GAP: f32 = 16.0;
+const SETTINGS_IDE_CHIP_H: f32 = 28.0;
+const SETTINGS_IDE_CHIP_GAP_X: f32 = 8.0;
+const SETTINGS_IDE_CHIP_GAP_Y: f32 = 8.0;
+/// Air kept under the last chip row when the tab is scrolled to the bottom.
+const SETTINGS_IDE_CONTENT_BOTTOM_PAD: f32 = 24.0;
+
 pub(crate) fn settings_ignore_input_rect(
     layout: SettingsModalLayout,
     scale: f32,
@@ -93,12 +120,26 @@ pub(crate) fn settings_ignore_input_rect(
     let button_w = (110.0 * scale).min((content_available_w * 0.32).max(0.0));
     let effective_gap = add_gap.min((content_available_w - button_w).max(0.0));
     let input_w = (content_available_w - effective_gap - button_w).max(0.0);
-    let input_y = layout.inner.y
-        + (272.0 + workspace_count as f32 * 46.0) * scale
-        - ide_scroll_y.round();
-    crate::ui_system::UiClipRect::new(content_x, input_y, input_w, 34.0 * scale)
+    // Every step the IDE tab render walks from the modal inner top down to the
+    // input row, so hit-testing and drawing share one vertical model.
+    let input_top = (SETTINGS_IDE_CONTENT_TOP_INSET
+        + SETTINGS_IDE_SCROLL_TOP
+        + SETTINGS_IDE_SECTION_TITLE_STEP
+        + workspace_count as f32 * SETTINGS_IDE_WORKSPACE_ROW_STEP
+        + SETTINGS_IDE_ADD_WORKSPACE_STEP
+        + SETTINGS_IDE_DIVIDER_STEP
+        + SETTINGS_IDE_IGNORE_TITLE_STEP
+        + SETTINGS_IDE_IGNORE_HINT_STEP
+        + SETTINGS_IDE_IGNORE_EXAMPLES_STEP)
+        * scale;
+    let input_y = layout.inner.y + input_top - ide_scroll_y.round();
+    crate::ui_system::UiClipRect::new(
+        content_x,
+        input_y,
+        input_w,
+        SETTINGS_IDE_IGNORE_INPUT_H * scale,
+    )
 }
-
 
 pub(crate) fn settings_ide_content_height(
     workspace_count: usize,
@@ -106,11 +147,8 @@ pub(crate) fn settings_ide_content_height(
     max_row_width: f32,
     scale: f32,
 ) -> f32 {
-    let workspace_h = workspace_count as f32 * 46.0 * scale + 126.0 * scale;
-    let chip_h = 28.0 * scale;
-    let chip_gap_y = 8.0 * scale;
-    let chip_gap_x = 8.0 * scale;
     let max_row_w = max_row_width.max(1.0);
+    let chip_gap_x = SETTINGS_IDE_CHIP_GAP_X * scale;
     let mut chip_rows = 1usize;
     let mut row_w = 0.0;
     for width in ignore_chip_widths {
@@ -120,12 +158,60 @@ pub(crate) fn settings_ide_content_height(
         }
         row_w += width + chip_gap_x;
     }
-    let ignore_h = 160.0 * scale + chip_rows as f32 * (chip_h + chip_gap_y);
-    workspace_h + ignore_h
+    // Content below the clip top: the same steps `draw_settings` walks, the
+    // chip rows it wraps, and the air kept under the last row.
+    let fixed = SETTINGS_IDE_CONTENT_TOP_INSET
+        + SETTINGS_IDE_SECTION_TITLE_STEP
+        + SETTINGS_IDE_ADD_WORKSPACE_STEP
+        + SETTINGS_IDE_DIVIDER_STEP
+        + SETTINGS_IDE_IGNORE_TITLE_STEP
+        + SETTINGS_IDE_IGNORE_HINT_STEP
+        + SETTINGS_IDE_IGNORE_EXAMPLES_STEP
+        + SETTINGS_IDE_IGNORE_INPUT_H
+        + SETTINGS_IDE_IGNORE_INPUT_GAP
+        + SETTINGS_IDE_CHIP_H
+        + SETTINGS_IDE_CONTENT_BOTTOM_PAD;
+    let workspaces_h = workspace_count as f32 * SETTINGS_IDE_WORKSPACE_ROW_STEP;
+    // Extra chip rows advance by the row height plus the vertical gap.
+    let extra_chip_rows_h = chip_rows.saturating_sub(1) as f32
+        * (SETTINGS_IDE_CHIP_H + SETTINGS_IDE_CHIP_GAP_Y);
+    (fixed + workspaces_h + extra_chip_rows_h) * scale
 }
 
 pub(crate) fn settings_ide_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
-    (layout.inner.h - 52.0 * scale).max(0.0)
+    (layout.inner.h - SETTINGS_IDE_SCROLL_TOP * scale).max(0.0)
+}
+
+/// Vertical steps of the Help tab, in unscaled pixels. `draw_settings` and
+/// `get_faq_max_scroll` both walk the text with `Renderer::settings_faq_line_units`
+/// and these steps, so the scrollbar range matches the wrapped rows drawn.
+const SETTINGS_FAQ_TOP_PAD: f32 = 20.0;
+const SETTINGS_FAQ_HEADER_STEP: f32 = 50.0;
+const SETTINGS_FAQ_SHORTCUT_STEP: f32 = 38.0;
+const SETTINGS_FAQ_TEXT_STEP: f32 = 30.0;
+const SETTINGS_FAQ_BLANK_STEP: f32 = 15.0;
+/// Extra height of every wrapped continuation row.
+const SETTINGS_FAQ_WRAP_STEP: f32 = 24.0;
+/// Baseline of the first description row when it is stacked under the key.
+const SETTINGS_FAQ_STACKED_DESC_TOP: f32 = 30.0;
+const SETTINGS_FAQ_KEY_COL_W: f32 = 260.0;
+/// Narrowest description column kept beside the key before stacking below it.
+const SETTINGS_FAQ_MIN_DESC_W: f32 = 160.0;
+/// Space under the text when scrolled to the bottom (includes the top pad).
+const SETTINGS_FAQ_BOTTOM_PAD: f32 = 80.0;
+
+/// Width of the Help text column, from its left edge to the scrollbar.
+fn settings_faq_column_w(inner_w: f32, sidebar_w: f32, scale: f32) -> f32 {
+    inner_w - sidebar_w - 76.0 * scale
+}
+
+/// Borrows the FAQ text when it is contiguous in the gap buffer (the normal
+/// case for this read-only editor), so the Help tab does not copy it per frame.
+fn settings_faq_text(faq_editor: &Editor) -> std::borrow::Cow<'_, str> {
+    match faq_editor.text_parts() {
+        (text, "") | ("", text) => std::borrow::Cow::Borrowed(text),
+        _ => std::borrow::Cow::Owned(faq_editor.get_full_text()),
+    }
 }
 
 pub(crate) fn settings_faq_viewport_height(layout: SettingsModalLayout, scale: f32) -> f32 {
@@ -188,22 +274,136 @@ pub(super) fn compact_settings_path(path: &std::path::Path, max_chars: usize) ->
 impl Renderer {
     pub fn get_faq_max_scroll(&mut self, faq_editor: &Editor, viewport_height: f32) -> f32 {
         let scale = self.scale_factor;
-        let mut total_h = 0.0;
+        let layout = settings_modal_layout(self.width, self.height, scale);
+        let cw = settings_faq_column_w(layout.inner.w, layout.sidebar_w, scale);
+        let text = settings_faq_text(faq_editor);
+        let mut units = 0.0;
+        for line in text.split('\n') {
+            units += self.settings_faq_line_units(line, cw, None);
+        }
+        ((units + SETTINGS_FAQ_BOTTOM_PAD) * scale - viewport_height.max(0.0)).max(0.0)
+    }
 
-        for line in faq_editor.get_full_text().split('\n') {
-            if line.starts_with("# ") {
-                total_h += 50.0 * scale;
-            } else if line.contains('\t') {
-                total_h += 38.0 * scale;
-            } else if !line.trim().is_empty() {
-                total_h += 30.0 * scale;
+    /// Byte end of the first row of `text` that fits `max_w`, breaking after
+    /// whitespace when possible. Uses the advances of `draw_string_scaled_stable`.
+    fn settings_faq_wrap_end(&mut self, text: &str, max_w: f32, text_scale: f32) -> usize {
+        let mut used = 0.0;
+        let mut last_break = None;
+        let mut end = 0usize;
+        for (idx, ch) in text.char_indices() {
+            let adv = if matches!(ch, '\n' | '\r' | '\u{FE0F}' | '\u{200D}') {
+                0.0
             } else {
-                total_h += 15.0 * scale;
+                self.get_ui_glyph(ch)
+                    .map_or(0.0, |g| Self::snapped_text_advance(g.advance, text_scale))
+            };
+            if end > 0 && used + adv > max_w {
+                return last_break.filter(|&break_at| break_at > 0).unwrap_or(end);
+            }
+            used += adv;
+            end = idx + ch.len_utf8();
+            if ch.is_whitespace() {
+                last_break = Some(end);
             }
         }
+        end
+    }
 
-        total_h += 80.0 * scale;
-        (total_h - viewport_height.max(0.0)).max(0.0)
+    /// Word-wraps `text` into `max_w`; draws the rows when `origin` (x, first
+    /// baseline) is given. Returns the number of rows, at least one.
+    fn settings_faq_wrapped_text(
+        &mut self,
+        mut text: &str,
+        max_w: f32,
+        origin: Option<(f32, f32)>,
+        color: [f32; 4],
+    ) -> usize {
+        let s = self.scale_factor;
+        let mut rows = 0usize;
+        loop {
+            let end = self.settings_faq_wrap_end(text, max_w, 1.0);
+            if let Some((x, y)) = origin {
+                let row_y = y + (rows as f32 * SETTINGS_FAQ_WRAP_STEP * s).round();
+                self.draw_string_scaled(text[..end].trim_end(), x, row_y, color, 1.0);
+            }
+            rows += 1;
+            if end >= text.len() {
+                return rows;
+            }
+            text = text[end..].trim_start();
+            if text.is_empty() {
+                return rows;
+            }
+        }
+    }
+
+    /// Height of one non-header FAQ line in unscaled pixels; draws it when
+    /// `origin` (column x, baseline y) is given. Shortcut lines put the key in
+    /// a left column and wrap the description beside it, or below the key when
+    /// the column would be too narrow.
+    fn settings_faq_line_units(
+        &mut self,
+        line: &str,
+        cw: f32,
+        origin: Option<(f32, f32)>,
+    ) -> f32 {
+        let s = self.scale_factor;
+        let text_w = (cw - 8.0 * s).max(1.0);
+        if line.starts_with("# ") {
+            return SETTINGS_FAQ_HEADER_STEP;
+        }
+        if let Some(tab_idx) = line.find('\t') {
+            let shortcut = &line[..tab_idx];
+            let description = &line[tab_idx + 1..];
+            let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
+            let key_col_w = SETTINGS_FAQ_KEY_COL_W * s;
+            let stacked = kbd_w + 12.0 * s > key_col_w
+                || text_w - key_col_w < SETTINGS_FAQ_MIN_DESC_W * s;
+            if let Some((x, y)) = origin {
+                let kbd_h = 24.0 * s;
+                let kbd_y = y - 18.0 * s;
+                self.push_rounded_rect(
+                    x - 1.0,
+                    kbd_y - 1.0,
+                    kbd_w + 2.0,
+                    kbd_h + 2.0,
+                    4.0 * s,
+                    [0.306, 0.318, 0.341, 1.0],
+                );
+                self.push_rounded_rect(x, kbd_y, kbd_w, kbd_h, 4.0 * s, [0.224, 0.231, 0.251, 1.0]);
+                self.draw_string_scaled(
+                    shortcut,
+                    x + 10.0 * s,
+                    y - 1.0 * s,
+                    [0.875, 0.882, 0.902, 1.0],
+                    0.95,
+                );
+            }
+            let desc_color = [0.663, 0.690, 0.729, 1.0];
+            if stacked {
+                let desc_origin =
+                    origin.map(|(x, y)| (x, y + (SETTINGS_FAQ_STACKED_DESC_TOP * s).round()));
+                let rows = self.settings_faq_wrapped_text(description, text_w, desc_origin, desc_color);
+                return SETTINGS_FAQ_STACKED_DESC_TOP
+                    + SETTINGS_FAQ_SHORTCUT_STEP
+                    + rows.saturating_sub(1) as f32 * SETTINGS_FAQ_WRAP_STEP;
+            }
+            let desc_origin = origin.map(|(x, y)| (x + key_col_w, y));
+            let rows = self.settings_faq_wrapped_text(
+                description,
+                text_w - key_col_w,
+                desc_origin,
+                desc_color,
+            );
+            return SETTINGS_FAQ_SHORTCUT_STEP
+                + rows.saturating_sub(1) as f32 * SETTINGS_FAQ_WRAP_STEP;
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return SETTINGS_FAQ_BLANK_STEP;
+        }
+        let rows = self.settings_faq_wrapped_text(trimmed, text_w, origin, [0.875, 0.882, 0.902, 1.0]);
+        SETTINGS_FAQ_TEXT_STEP + rows.saturating_sub(1) as f32 * SETTINGS_FAQ_WRAP_STEP
     }
 
     pub(crate) fn draw_settings(
@@ -296,9 +496,14 @@ impl Renderer {
         let tabs = ["IDE", "Основные", "Редактор", "Внешний вид", "Помощь", "Базы данных"];
         let active_tab = clamped_settings_tab(active_tab, tabs.len());
         let tab_metrics = settings_sidebar_tab_metrics(ih, tabs.len(), s);
-        let mut tab_y = iy + tab_metrics.top;
+        let tab_step = tab_metrics.row_h + tab_metrics.gap;
+        // Labels are clipped to the tab hitbox minus the text inset on the left
+        // and a small right pad, so narrow sidebars never run into the divider.
+        let tab_label_x = (ix + 25.0 * s).round();
+        let tab_label_max_w = (ix + sidebar_w - 16.0 * s - tab_label_x).max(0.0);
+        let mut label_scratch = std::mem::take(&mut self.scratch_buffer);
         for (i, title) in tabs.iter().enumerate() {
-            let tab_rect_y = tab_y;
+            let tab_rect_y = (iy + tab_metrics.top + i as f32 * tab_step).round();
             let tab_rect_h = tab_metrics.row_h;
             if tab_rect_h <= 0.0 {
                 break;
@@ -339,15 +544,17 @@ impl Renderer {
             } else {
                 [0.7, 0.7, 0.7, 1.0]
             };
-            self.draw_string_scaled_stable(
+            self.draw_tree_label_clipped(
                 title,
-                (ix + 25.0 * s).round(),
-                (tab_y + tab_rect_h * 0.5 + 5.0 * s).round(),
+                tab_label_x,
+                (tab_rect_y + tab_rect_h * 0.5 + 5.0 * s).round(),
+                tab_label_max_w,
                 color,
                 0.95,
+                &mut label_scratch,
             );
-            tab_y += tab_rect_h + tab_metrics.gap;
         }
+        self.scratch_buffer = label_scratch;
 
         let content_x = ix + sidebar_w + 30.0 * s;
         let content_available_w = (ix + iw - content_x - 18.0 * s).max(1.0);
@@ -382,17 +589,21 @@ impl Renderer {
             1.1,
         );
         content_y += if active_tab == 4 { 30.0 * s } else { 46.0 * s };
+        // Content column below the tab title pill, shared by the clipped tabs.
+        let settings_content_clip = crate::ui_system::UiClipRect::new(
+            ix + sidebar_w, iy + 52.0 * s, (iw - sidebar_w).max(0.0), (ih - 52.0 * s).max(0.0),
+        );
 
         if active_tab == 0 {
             // ── Scissor для скролла вкладки IDE ──────────────────────────────
-            // Начало scissor = iy + 52.0 * s (ниже пилюли заголовка iy+18..iy+48)
+            // Начало scissor = iy + SETTINGS_IDE_SCROLL_TOP * s (ниже пилюли заголовка iy+18..iy+48)
             let ide_content_area_x = ix + sidebar_w;
             let ide_content_area_w = iw - sidebar_w;
-            let ide_content_area_h = ih - 52.0 * s;
+            let ide_content_area_h = ih - SETTINGS_IDE_SCROLL_TOP * s;
             self.flush();
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
-                let scissor_y = self.height - (iy + 52.0 * s + ide_content_area_h);
+                let scissor_y = self.height - (iy + SETTINGS_IDE_SCROLL_TOP * s + ide_content_area_h);
                 self.gl.scissor(
                     ide_content_area_x.round() as i32,
                     scissor_y.round() as i32,
@@ -402,7 +613,7 @@ impl Renderer {
             }
             ui_registry.push_clip(crate::ui_system::UiClipRect::new(
                 ide_content_area_x,
-                iy + 52.0 * s,
+                iy + SETTINGS_IDE_SCROLL_TOP * s,
                 ide_content_area_w,
                 ide_content_area_h,
             ));
@@ -416,7 +627,7 @@ impl Renderer {
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
-            content_y += 40.0 * s;
+            content_y += SETTINGS_IDE_SECTION_TITLE_STEP * s;
 
             for (ws_idx, path) in ide_workspaces.iter().enumerate() {
                 let path_str = path.to_string_lossy();
@@ -474,34 +685,45 @@ impl Renderer {
                     custom_color: None,
                 };
                 btn_del.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-                content_y += 46.0 * s;
+                content_y += SETTINGS_IDE_WORKSPACE_ROW_STEP * s;
             }
 
             let add_btn_y_reg = content_y.round();
+            let add_btn_w = (190.0 * s).min(content_available_w);
             ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsIdeAddWorkspace,
                 content_x,
                 add_btn_y_reg,
-                (190.0 * s).min(content_available_w),
+                add_btn_w,
                 36.0 * s,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );
-            let btn_add = crate::widgets::Button {
+            let add_btn_text = "Добавить папку";
+            let add_btn_icon_size = 20.0 * s;
+            // `ButtonView` centres icon + text; when that content is wider than
+            // the button, the centred start lands left of the button and the
+            // «+» sticks out. Drop the icon then and keep the label.
+            let add_btn_content_w = self.measure_ui_width(add_btn_text, 1.0)
+                + add_btn_icon_size.round()
+                + (8.0 * s).round()
+                + 2.0 * (8.0 * s).round();
+            let btn_add = crate::widgets::ButtonView {
                 x: content_x,
                 y: add_btn_y_reg,
-                w: (190.0 * s).min(content_available_w),
+                w: add_btn_w,
                 h: 36.0 * s,
-                text: "Добавить папку".to_string(),
-                icon: Some(crate::widgets::IconType::Plus),
+                text: add_btn_text,
+                icon: (add_btn_content_w <= add_btn_w.round())
+                    .then_some(crate::widgets::IconType::Plus),
                 text_scale: 1.0,
-                icon_size: 20.0 * s,
+                icon_size: add_btn_icon_size,
             };
             btn_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            content_y += 56.0 * s;
+            content_y += SETTINGS_IDE_ADD_WORKSPACE_STEP * s;
             // ── Разделитель ───────────────────────────────────────────────
             self.push_rect(content_x, content_y, content_available_w, 1.0, [1.0, 1.0, 1.0, 0.07]);
-            content_y += 20.0 * s;
+            content_y += SETTINGS_IDE_DIVIDER_STEP * s;
 
             // ── Заголовок секции игноров ──────────────────────────────────
             self.draw_string_scaled(
@@ -511,7 +733,7 @@ impl Renderer {
                 [0.8, 0.8, 0.8, 1.0],
                 1.0,
             );
-            content_y += 28.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_TITLE_STEP * s;
 
             // Пояснение
             self.draw_string_scaled(
@@ -521,7 +743,7 @@ impl Renderer {
                 [0.45, 0.47, 0.55, 1.0],
                 0.85,
             );
-            content_y += 22.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_HINT_STEP * s;
             self.draw_string_scaled(
                 "Примеры: *.log  temp/  .DS_Store  *.min.js  build  dist",
                 content_x,
@@ -529,7 +751,7 @@ impl Renderer {
                 [0.35, 0.37, 0.44, 1.0],
                 0.82,
             );
-            content_y += 20.0 * s;
+            content_y += SETTINGS_IDE_IGNORE_EXAMPLES_STEP * s;
 
             // ── Поле ввода + кнопка «Добавить» ───────────────────────────
             let content_w = content_available_w;
@@ -537,7 +759,7 @@ impl Renderer {
             let btn_add_w = (110.0 * s).min((content_w * 0.32).max(0.0));
             let effective_gap = add_gap.min((content_w - btn_add_w).max(0.0));
             let input_w = (content_w - effective_gap - btn_add_w).max(0.0);
-            let input_h = 34.0 * s;
+            let input_h = SETTINGS_IDE_IGNORE_INPUT_H * s;
             let text_scale_input = 0.95f32; // Округленный скейл для ровного бейзлайна
 
             ui_registry.register_text_input(
@@ -619,14 +841,14 @@ impl Renderer {
             } else {
                 btn_ignore_add.render(self, self.last_mouse_x, self.last_mouse_y, s, false);
             }
-            content_y += input_h + 16.0 * s;
+            content_y += input_h + SETTINGS_IDE_IGNORE_INPUT_GAP * s;
 
             // ── Чипы пользовательских паттернов ──────────────────────────
-            let chip_h = 28.0 * s;
+            let chip_h = SETTINGS_IDE_CHIP_H * s;
             let chip_r = chip_h / 2.0;
             let pad_x = 12.0 * s;
-            let chip_gap_x = 8.0 * s;
-            let chip_gap_y = 8.0 * s;
+            let chip_gap_x = SETTINGS_IDE_CHIP_GAP_X * s;
+            let chip_gap_y = SETTINGS_IDE_CHIP_GAP_Y * s;
             let max_row_w = content_available_w;
             let mut chip_x = content_x;
 
@@ -727,7 +949,7 @@ impl Renderer {
             );
             let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
             if let Some(thumb) = settings_scrollbar_thumb(
-                iy + 52.0 * s,
+                iy + SETTINGS_IDE_SCROLL_TOP * s,
                 ide_content_area_h,
                 max_scroll,
                 ide_scroll_y,
@@ -746,7 +968,7 @@ impl Renderer {
                 ui_registry.register_rect(
                     crate::ui_system::UiId::SettingsIdeScrollY,
                     sb_x - 5.0 * s,
-                    iy + 52.0 * s,
+                    iy + SETTINGS_IDE_SCROLL_TOP * s,
                     16.0 * s,
                     track_h,
                     self.last_mouse_x,
@@ -754,21 +976,7 @@ impl Renderer {
                 );
             }
         } else if active_tab == 1 {
-            let tools_clip_y = iy + 52.0 * s;
-            let tools_clip_h = (iy + ih - tools_clip_y).max(0.0);
-            self.flush();
-            unsafe {
-                self.gl.enable(glow::SCISSOR_TEST);
-                self.gl.scissor(
-                    (ix + sidebar_w).round() as i32,
-                    (self.height - (tools_clip_y + tools_clip_h)).round() as i32,
-                    (iw - sidebar_w).max(0.0).round() as i32,
-                    tools_clip_h.round() as i32,
-                );
-            }
-            ui_registry.push_clip(crate::ui_system::UiClipRect::new(
-                ix + sidebar_w, tools_clip_y, (iw - sidebar_w).max(0.0), tools_clip_h,
-            ));
+            self.begin_settings_content_clip(ui_registry, settings_content_clip);
             content_y = content_y.round();
             self.draw_string_scaled_stable(
                 "Внешние инструменты",
@@ -1036,11 +1244,7 @@ impl Renderer {
                 icon_size: 14.0 * s,
             }
             .render(self, self.last_mouse_x, self.last_mouse_y, s, false);
-            ui_registry.pop_clip();
-            self.flush();
-            unsafe {
-                self.gl.disable(glow::SCISSOR_TEST);
-            }
+            self.end_settings_content_clip(ui_registry);
         } else if active_tab == 2 {
             self.draw_string_scaled(
                 "Размер шрифта: 14px",
@@ -1078,28 +1282,32 @@ impl Renderer {
             let text_area_y = content_y;
             let text_area_h = ih - (text_area_y - iy) - 20.0 * s;
 
+            let start_x = content_x;
+            let main_header_x = content_x - 14.0 * s;
+            let render_scroll_y = scroll_y.round();
+            let text_base_y = (text_area_y - render_scroll_y).round();
+            let text = settings_faq_text(faq_editor);
+
+            let cw = settings_faq_column_w(iw, sidebar_w, s);
+            let mut main_header_drawn = false;
+            let mut units = 0.0;
+
+            // The clip ends at the scrollbar column: text never reaches it,
+            // and an unbreakable word is cut there instead of past the panel.
             unsafe {
                 self.gl.enable(glow::SCISSOR_TEST);
                 let scissor_y = self.height - (text_area_y + text_area_h);
+                let clip_x = (content_x - 10.0 * s).round();
                 self.gl.scissor(
-                    (content_x - 10.0 * s).round() as i32,
+                    clip_x as i32,
                     scissor_y.round() as i32,
-                    (iw - sidebar_w - 10.0 * s).round() as i32,
+                    ((start_x + cw).round() - clip_x).max(0.0) as i32,
                     text_area_h.round() as i32,
                 );
             }
 
-            let start_x = content_x;
-            let main_header_x = content_x - 14.0 * s;
-            let render_scroll_y = scroll_y.round();
-            let mut text_y = text_area_y + 20.0 * s - render_scroll_y;
-            let text = faq_editor.get_full_text();
-
-            let left_col_w = 260.0 * s;
-            let cw = iw - sidebar_w - 76.0 * s;
-            let mut main_header_drawn = false;
-
             for line in text.split('\n') {
+                let text_y = text_base_y + ((SETTINGS_FAQ_TOP_PAD + units) * s).round();
                 let is_header = line.starts_with("# ");
 
                 if is_header {
@@ -1149,60 +1357,11 @@ impl Renderer {
                         self.push_rect(sep_x, sep_y, sep_w, 1.0, [1.0, 1.0, 1.0, 0.10]);
                     }
 
-                    text_y += 50.0 * s;
+                    units += SETTINGS_FAQ_HEADER_STEP;
                     continue;
                 }
 
-                if let Some(tab_idx) = line.find('\t') {
-                    let shortcut = &line[..tab_idx];
-                    let description = &line[tab_idx + 1..];
-
-                    let kbd_bg = [0.224, 0.231, 0.251, 1.0];
-                    let kbd_border = [0.306, 0.318, 0.341, 1.0];
-                    let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
-
-                    let kbd_w = self.measure_ui_width(shortcut, 0.95) + 20.0 * s;
-                    let kbd_h = 24.0 * s;
-                    let kbd_x = start_x;
-                    let kbd_y = text_y - 18.0 * s;
-
-                    self.push_rounded_rect(
-                        kbd_x - 1.0,
-                        kbd_y - 1.0,
-                        kbd_w + 2.0,
-                        kbd_h + 2.0,
-                        4.0 * s,
-                        kbd_border,
-                    );
-                    self.push_rounded_rect(kbd_x, kbd_y, kbd_w, kbd_h, 4.0 * s, kbd_bg);
-                    self.draw_string_scaled(
-                        shortcut,
-                        kbd_x + 10.0 * s,
-                        text_y - 1.0 * s,
-                        kbd_text_color,
-                        0.95,
-                    );
-
-                    let desc_color = [0.663, 0.690, 0.729, 1.0];
-                    self.draw_string_scaled(
-                        description,
-                        start_x + left_col_w,
-                        text_y,
-                        desc_color,
-                        1.0,
-                    );
-
-                    text_y += 38.0 * s;
-                    continue;
-                }
-
-                if !line.trim().is_empty() {
-                    let normal_color = [0.875, 0.882, 0.902, 1.0];
-                    self.draw_string_scaled(line.trim(), start_x, text_y, normal_color, 1.0);
-                    text_y += 30.0 * s;
-                } else {
-                    text_y += 15.0 * s;
-                }
+                units += self.settings_faq_line_units(line, cw, Some((start_x, text_y)));
             }
 
             self.flush();
@@ -1210,7 +1369,8 @@ impl Renderer {
                 self.gl.disable(glow::SCISSOR_TEST);
             }
 
-            let max_scroll = self.get_faq_max_scroll(faq_editor, text_area_h);
+            // Same walk as `get_faq_max_scroll`, without a second pass.
+            let max_scroll = ((units + SETTINGS_FAQ_BOTTOM_PAD) * s - text_area_h.max(0.0)).max(0.0);
             if let Some(thumb) = settings_scrollbar_thumb(
                 text_area_y, text_area_h, max_scroll, scroll_y, s,
             ) {
@@ -1236,6 +1396,9 @@ impl Renderer {
                 );
             }
         } else if active_tab == 5 {
+            // Ten fixed-height rows overflow short windows (1280x720 at 4/3): clip them
+            // to the modal like the tools tab instead of drawing past its bottom.
+            self.begin_settings_content_clip(ui_registry, settings_content_clip);
             self.draw_database_settings_tab(
                 database_settings,
                 content_x,
@@ -1243,6 +1406,7 @@ impl Renderer {
                 content_y,
                 ui_registry,
             );
+            self.end_settings_content_clip(ui_registry);
         }
 
         if tool_installer.is_log_open() {

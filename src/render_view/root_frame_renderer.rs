@@ -426,13 +426,6 @@ impl Renderer {
             scroll_y = scroll_y_state.current;
         }
 
-        let target_minimap_w = 119.0 * s;
-
-        if (self.minimap_width - target_minimap_w).abs() > 0.5 {
-            self.minimap_width = target_minimap_w;
-            self.visual_lines.clear();
-        }
-
         let active_tab_is_git_diff_for_layout = tabs
             .get(active_tab)
             .is_some_and(|tab| tab.kind.is_git_diff());
@@ -445,6 +438,23 @@ impl Renderer {
         );
         if (self.left_padding - target_padding).abs() > 0.5 {
             self.left_padding = target_padding;
+            self.visual_lines.clear();
+        }
+
+        let max_scroll =
+            editor_max_scroll_for_lines(total_lines, self.line_height, editor_scroll_height);
+        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
+        let target_minimap_w = 119.0 * s;
+        let minimap_w =
+            if self.width - self.left_padding - scrollbar_width - target_minimap_w
+                < 2.0 * target_minimap_w
+            {
+                0.0
+            } else {
+                target_minimap_w
+            };
+        if (self.minimap_width - minimap_w).abs() > 0.5 {
+            self.minimap_width = minimap_w;
             self.visual_lines.clear();
         }
 
@@ -974,11 +984,7 @@ impl Renderer {
             editor, first, second, first_len, len, sel_start, sel_end,
         );
 
-        let max_scroll =
-            editor_max_scroll_for_lines(total_lines, self.line_height, editor_scroll_height);
-
         let render_scroll_y = render_scroll_y.min(max_scroll.max(0.0));
-        let scrollbar_width = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
         let minimap_w = self.minimap_width;
         let editor_right =
@@ -1255,43 +1261,49 @@ impl Renderer {
 
         self.flush();
 
-        self.push_rect(
-            minimap_x,
-            tab_bar_h,
-            minimap_w,
-            editor_height,
-            solid_minimap_bg,
-        );
+        if minimap_w > 0.0 {
+            self.push_rect(
+                minimap_x,
+                tab_bar_h,
+                minimap_w,
+                editor_height,
+                solid_minimap_bg,
+            );
+        }
 
         if let Some(overlays_start) = overlays_start {
             telemetry_root_phases[3] = overlays_start.elapsed().as_secs_f32();
         }
         let stage_start = telemetry_frame_start.map(|_| Instant::now());
-        self.draw_minimap(
-            editor,
-            spans,
-            render_scroll_y,
-            max_scroll,
-            total_lines,
-            visible_cursor_line,
-            editor_scroll_height,
-            tab_bar_h,
-        );
+        if minimap_w > 0.0 {
+            self.draw_minimap(
+                editor,
+                spans,
+                render_scroll_y,
+                max_scroll,
+                total_lines,
+                visible_cursor_line,
+                editor_scroll_height,
+                tab_bar_h,
+            );
+        }
         if let Some(stage_start) = stage_start {
             telemetry_minimap_time = stage_start.elapsed().as_secs_f32();
         }
         let chrome_start = telemetry_frame_start.map(|_| Instant::now());
         let mut chrome_detail_start = chrome_start;
 
-        ui_registry.register_rect(
-            crate::ui_system::UiId::EditorMinimap,
-            minimap_x,
-            tab_bar_h,
-            minimap_w,
-            editor_scroll_height,
-            ui_mx,
-            ui_my,
-        );
+        if minimap_w > 0.0 {
+            ui_registry.register_rect(
+                crate::ui_system::UiId::EditorMinimap,
+                minimap_x,
+                tab_bar_h,
+                minimap_w,
+                editor_scroll_height,
+                ui_mx,
+                ui_my,
+            );
+        }
 
         self.draw_editor_horizontal_scrollbar(
             render_scroll_x,

@@ -621,12 +621,7 @@ impl App {
             return false;
         };
         let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer_y,
-            track_y,
-            track_h,
-            thumb,
-            max_scroll,
-            None,
+            pointer_y, track_y, track_h, thumb, max_scroll, None,
         ) else {
             return false;
         };

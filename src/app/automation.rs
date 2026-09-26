@@ -3,11 +3,11 @@ use std::time::{Duration, Instant};
 
 use serde_json::json;
 use winit::dpi::PhysicalSize;
-use winit::event_loop::ActiveEventLoop;
+use crate::app::events::host_loop::HostLoop;
 
 use crate::app::api_client::ApiFocus;
-use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
 use crate::app::automation_dart::{DartAutomationStep, DartStepResult};
+use crate::app::automation_database::{DatabaseAutomationStep, DatabaseStepResult};
 use crate::app::automation_markdown::{MarkdownAutomationStep, MarkdownStepResult};
 use crate::app::{App, PanelId};
 
@@ -411,7 +411,7 @@ impl AutomationController {
     pub fn tick(
         &mut self,
         app: &mut App,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         now: Instant,
     ) -> AutomationTick {
         if now.saturating_duration_since(self.started_at) > self.options.timeout {
@@ -423,12 +423,7 @@ impl AutomationController {
             let context = step
                 .as_ref()
                 .map(|step| {
-                    step_failure_context(
-                        app,
-                        step,
-                        self.step_progress,
-                        self.hover_last_anchor,
-                    )
+                    step_failure_context(app, step, self.step_progress, self.hover_last_anchor)
                 })
                 .filter(|context| !context.is_empty());
             return self.fail_and_exit(
@@ -448,16 +443,9 @@ impl AutomationController {
         };
         self.log_step_start(&step);
         if now.saturating_duration_since(self.step_started_at) > step.timeout() {
-            let message = format!(
-                "step timeout after {:.1}s",
-                step.timeout().as_secs_f32()
-            );
-            let context = step_failure_context(
-                app,
-                &step,
-                self.step_progress,
-                self.hover_last_anchor,
-            );
+            let message = format!("step timeout after {:.1}s", step.timeout().as_secs_f32());
+            let context =
+                step_failure_context(app, &step, self.step_progress, self.hover_last_anchor);
             if step.optional() {
                 println!(
                     "PGO_AUTOMATION_SKIP index={} name={:?} reason={:?} context={:?}",
@@ -487,12 +475,8 @@ impl AutomationController {
                 AutomationTick::Running
             }
             StepResult::Failed(message) if step.optional() => {
-                let context = step_failure_context(
-                    app,
-                    &step,
-                    self.step_progress,
-                    self.hover_last_anchor,
-                );
+                let context =
+                    step_failure_context(app, &step, self.step_progress, self.hover_last_anchor);
                 println!(
                     "PGO_AUTOMATION_SKIP index={} name={:?} reason={:?} context={:?}",
                     self.step_index,
@@ -505,12 +489,8 @@ impl AutomationController {
                 AutomationTick::Running
             }
             StepResult::Failed(message) => {
-                let context = step_failure_context(
-                    app,
-                    &step,
-                    self.step_progress,
-                    self.hover_last_anchor,
-                );
+                let context =
+                    step_failure_context(app, &step, self.step_progress, self.hover_last_anchor);
                 self.fail_and_exit(
                     step.name(),
                     message,
@@ -526,7 +506,7 @@ impl AutomationController {
     fn run_step(
         &mut self,
         app: &mut App,
-        _event_loop: &ActiveEventLoop,
+        _event_loop: &HostLoop,
         step: &AutomationStep,
         now: Instant,
     ) -> StepResult {
@@ -1005,9 +985,8 @@ impl AutomationController {
                         .renderer
                         .as_ref()
                         .map_or(1.0, |renderer| renderer.scale_factor);
-                    let view_h = app.renderer.as_ref().map_or(600.0 * scale, |renderer| {
-                        (renderer.height * 0.55).max(240.0 * scale)
-                    });
+                    let view_h = crate::app::mouse::git_graph_rows_bounds(app, scale)
+                        .map_or(0.0, |(_, rows_h)| rows_h);
                     let max_scroll = crate::app::git_panel::git_graph_max_scroll(
                         app.ide_panel.git.graph_snapshot.len(),
                         view_h,
@@ -1088,10 +1067,11 @@ impl AutomationController {
                         .renderer
                         .as_ref()
                         .map_or(1.0, |renderer| renderer.scale_factor);
-                    let visible_h = app
-                        .renderer
-                        .as_ref()
-                        .map_or(720.0, |renderer| renderer.height);
+                    let visible_h = if app.renderer.is_some() {
+                        crate::app::mouse::app_panel_scroll_rect(app, PanelId::ApiClient, scale).3
+                    } else {
+                        720.0
+                    };
                     let max_scroll = crate::app::api_client::api_panel_max_scroll(
                         &app.ide_panel.api,
                         visible_h,
@@ -1384,9 +1364,8 @@ impl AutomationController {
                     let mut failure = None;
                     let result = self.timed_scroll(app, now, duration_secs, |app, direction| {
                         if failure.is_none()
-                            && let Err(error) = crate::app::automation_database::scroll_table(
-                                app, direction,
-                            )
+                            && let Err(error) =
+                                crate::app::automation_database::scroll_table(app, direction)
                         {
                             failure = Some(error);
                         }
@@ -1543,9 +1522,7 @@ impl AutomationController {
         let failure = AutomationFailure {
             index: self.step_index,
             name,
-            step_elapsed_ms: duration_ms(
-                now.saturating_duration_since(self.step_started_at),
-            ),
+            step_elapsed_ms: duration_ms(now.saturating_duration_since(self.step_started_at)),
             reason,
             previous_completed_step: self.completed.last().cloned(),
             context,
@@ -1668,7 +1645,7 @@ impl App {
     #[inline(never)]
     pub(crate) fn advance_automation(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        event_loop: &HostLoop,
         now: Instant,
     ) -> Option<AutomationTick> {
         let mut automation = self.automation.take()?;
@@ -1721,9 +1698,7 @@ fn begin_open_panel_action(step_progress: &mut u32) -> bool {
 
 fn terminal_panel_open_state_from_values(
     panel_open: bool,
-    terminals: impl IntoIterator<
-        Item = (crate::app::terminal::TerminalPresentationIntent, bool),
-    >,
+    terminals: impl IntoIterator<Item = (crate::app::terminal::TerminalPresentationIntent, bool)>,
 ) -> TerminalPanelOpenState {
     if panel_open {
         return TerminalPanelOpenState::Open;
@@ -1752,9 +1727,7 @@ fn panel_failure_diagnostics(app: &App, requested_panel: PanelId) -> String {
         .ide_panel
         .slots
         .iter()
-        .find(|slot| {
-            slot.open && slot.group == crate::app::app_state::PanelGroup::Top
-        })
+        .find(|slot| slot.open && slot.group == crate::app::app_state::PanelGroup::Top)
         .map(|slot| format!("{:?}", slot.id))
         .unwrap_or_else(|| "none".to_string());
     let open_bottom_panel = app
@@ -2025,7 +1998,7 @@ fn hover_blocker_diagnostics(app: &App) -> String {
         app.ide_panel.project_search.help_open,
         api_blocking_popup,
         app.show_settings,
-        app.dialog_window.is_some(),
+        app.modal_dialog_open(),
     )
 }
 
@@ -2035,10 +2008,10 @@ fn hover_failure_diagnostics(
     install_attempts: u32,
     derived_anchor: Option<(f32, f32)>,
 ) -> String {
-    let active_file = app.file_path.as_deref().map_or_else(
-        || "<none>".to_string(),
-        |path| path.display().to_string(),
-    );
+    let active_file = app
+        .file_path
+        .as_deref()
+        .map_or_else(|| "<none>".to_string(), |path| path.display().to_string());
     let renderer = app.renderer.as_ref().map_or_else(
         || "renderer=none".to_string(),
         |renderer| {
@@ -2077,10 +2050,7 @@ fn hover_failure_diagnostics(
     )
 }
 
-fn prepare_automation_hover_pointer(
-    app: &mut App,
-    byte_offset: usize,
-) -> Option<(f32, f32)> {
+fn prepare_automation_hover_pointer(app: &mut App, byte_offset: usize) -> Option<(f32, f32)> {
     let scale = app.renderer.as_ref()?.scale_factor;
     let editor_top_inset = app.editor_top_inset(scale);
     let render_scroll_y = app.scroll_y.current.round() - editor_top_inset;
@@ -2107,10 +2077,7 @@ fn prepare_automation_hover_pointer(
     Some(anchor)
 }
 
-fn install_automation_hover_popup(
-    byte_offset: usize,
-    popup: crate::app::mouse::HoverPopup,
-) {
+fn install_automation_hover_popup(byte_offset: usize, popup: crate::app::mouse::HoverPopup) {
     crate::app::mouse::HOVER_STATE.with(|state| {
         let mut state = state.borrow_mut();
         *state = crate::app::mouse::HoverState::default();
@@ -2193,10 +2160,14 @@ fn scroll_active_api_tab(app: &mut App, delta: f32) {
         .renderer
         .as_ref()
         .map_or(1.0, |renderer| renderer.scale_factor);
-    let visible_h = app
-        .renderer
-        .as_ref()
-        .map_or(720.0, |renderer| renderer.height);
+    let visible_h = app.renderer.as_ref().map_or(720.0, |renderer| {
+        crate::render_view::api_tab_viewport_height(
+            renderer.height,
+            app.show_welcome,
+            app.is_ide_mode,
+            scale,
+        )
+    });
     let Some((meta, state)) = app.active_api_tab() else {
         return;
     };
@@ -2701,10 +2672,7 @@ mod tests {
         assert!(matches!(steps.last(), Some(AutomationStep::Finish)));
         let setup_dart = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::Dart(DartAutomationStep::Setup)
-            ))
+            .position(|step| matches!(step, AutomationStep::Dart(DartAutomationStep::Setup)))
             .unwrap();
         let apply_workspace = steps
             .iter()
@@ -2712,17 +2680,21 @@ mod tests {
             .unwrap();
         let open_dart = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::OpenFile(path) if path == Path::new("lib/pgo_training.dart")
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::OpenFile(path) if path == Path::new("lib/pgo_training.dart")
+                )
+            })
             .unwrap();
         let open_large = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::OpenFile(path) if path == Path::new("src/large.rs")
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::OpenFile(path) if path == Path::new("src/large.rs")
+                )
+            })
             .unwrap();
         let dart_steps = &steps[open_dart..open_large];
         assert!(setup_dart < apply_workspace);
@@ -2730,44 +2702,52 @@ mod tests {
 
         let open_worker = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::OpenFile(path) if path == Path::new("src/worker.py")
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::OpenFile(path) if path == Path::new("src/worker.py")
+                )
+            })
             .unwrap();
         let open_markdown = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::OpenFile(path) if path == Path::new("README.md")
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::OpenFile(path) if path == Path::new("README.md")
+                )
+            })
             .unwrap();
         let return_to_main = steps
             .iter()
             .enumerate()
             .skip(open_markdown + 1)
-            .find_map(|(index, step)| matches!(
-                step,
-                AutomationStep::SwitchToFile(path) if path == Path::new("src/main.rs")
-            ).then_some(index))
+            .find_map(|(index, step)| {
+                matches!(
+                    step,
+                    AutomationStep::SwitchToFile(path) if path == Path::new("src/main.rs")
+                )
+                .then_some(index)
+            })
             .unwrap();
         assert!(open_worker < open_markdown);
         assert!(open_markdown < return_to_main);
-        assert!(steps[open_markdown..return_to_main]
-            .iter()
-            .any(|step| matches!(step, AutomationStep::Markdown(_))));
-        assert!(dart_steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::WaitHighlight
-        )));
+        assert!(
+            steps[open_markdown..return_to_main]
+                .iter()
+                .any(|step| matches!(step, AutomationStep::Markdown(_)))
+        );
+        assert!(
+            dart_steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::WaitHighlight))
+        );
         assert_eq!(
             dart_steps
                 .iter()
                 .filter(|step| matches!(
                     step,
-                    AutomationStep::Dart(DartAutomationStep::WaitClosingHints {
-                        minimum_count: 8
-                    })
+                    AutomationStep::Dart(DartAutomationStep::WaitClosingHints { minimum_count: 8 })
                 ))
                 .count(),
             2
@@ -2787,14 +2767,16 @@ mod tests {
                 .count(),
             2
         );
-        assert!(dart_steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::ToggleFirstFold
-        )));
-        assert!(dart_steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::SetSearchQuery("pgoDartTarget")
-        )));
+        assert!(
+            dart_steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::ToggleFirstFold))
+        );
+        assert!(
+            dart_steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::SetSearchQuery("pgoDartTarget")))
+        );
         assert!(dart_steps.iter().any(|step| matches!(
             step,
             AutomationStep::ScrollEditorTimed { duration_secs: 10 }
@@ -2811,10 +2793,11 @@ mod tests {
             step,
             AutomationStep::TypeText(text) if text.contains("pgoDartEditedValue")
         )));
-        assert!(dart_steps.iter().any(|step| matches!(
-            step,
-            AutomationStep::SaveCurrentFile
-        )));
+        assert!(
+            dart_steps
+                .iter()
+                .any(|step| matches!(step, AutomationStep::SaveCurrentFile))
+        );
         assert!(steps.iter().any(|step| matches!(
             step,
             AutomationStep::LoadGitGraph {
@@ -2925,14 +2908,18 @@ mod tests {
         )));
         assert!(steps.iter().any(|step| matches!(
             step,
-            AutomationStep::Database(DatabaseAutomationStep::ScrollQueryResultTimed { duration_secs: 8 })
+            AutomationStep::Database(DatabaseAutomationStep::ScrollQueryResultTimed {
+                duration_secs: 8
+            })
         )));
         let ddl_index = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::Database(DatabaseAutomationStep::LoadDdl)
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::Database(DatabaseAutomationStep::LoadDdl)
+                )
+            })
             .unwrap();
         assert!(matches!(
             steps.get(ddl_index + 1),
@@ -2953,10 +2940,12 @@ mod tests {
 
         let explain_index = steps
             .iter()
-            .position(|step| matches!(
-                step,
-                AutomationStep::Database(DatabaseAutomationStep::WaitExplain)
-            ))
+            .position(|step| {
+                matches!(
+                    step,
+                    AutomationStep::Database(DatabaseAutomationStep::WaitExplain)
+                )
+            })
             .unwrap();
         assert!(matches!(
             steps.get(explain_index + 1),
@@ -3098,10 +3087,8 @@ mod tests {
             AutomationTick::Exit
         );
 
-        let report: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(&report_path).unwrap(),
-        )
-        .unwrap();
+        let report: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&report_path).unwrap()).unwrap();
         assert_eq!(report["failed_step"], "step timeout after 0.1s");
         assert_eq!(report["failed_step_index"], 1);
         assert_eq!(report["failed_step_name"], step_name);
@@ -3145,7 +3132,10 @@ mod tests {
         assert_eq!(failure.name, step_name);
         assert_eq!(failure.reason, "forced failure");
         assert_eq!(failure.step_elapsed_ms, 42);
-        assert_eq!(failure.previous_completed_step.as_deref(), Some("previous-step"));
+        assert_eq!(
+            failure.previous_completed_step.as_deref(),
+            Some("previous-step")
+        );
         assert_eq!(failure.context.as_deref(), Some("state-context"));
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -3169,10 +3159,7 @@ mod tests {
             TerminalPanelOpenState::WaitingForPresentation
         );
         assert_eq!(
-            terminal_panel_open_state_from_values(
-                true,
-                [(TerminalPresentationIntent::None, true)],
-            ),
+            terminal_panel_open_state_from_values(true, [(TerminalPresentationIntent::None, true)],),
             TerminalPanelOpenState::Open
         );
         assert_eq!(
@@ -3365,10 +3352,8 @@ mod tests {
 
     #[test]
     fn completion_hover_sequence_is_preserved() {
-        let root = std::env::temp_dir().join(format!(
-            "rriter-pgo-hover-sequence-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("rriter-pgo-hover-sequence-{}", std::process::id()));
         std::fs::create_dir_all(root.join("tests")).unwrap();
         let names = full_pgo_scenario(&root)
             .into_iter()

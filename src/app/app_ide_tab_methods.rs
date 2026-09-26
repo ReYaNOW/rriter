@@ -722,12 +722,11 @@ impl App {
                 return;
             }
 
-            let widths = titles
+            let widths = self
+                .tabs
                 .iter()
-                .map(|title| {
-                    let title_w = r.measure_ui_width(title, 1.0);
-                    16.0 * s * 2.0 + 20.0 * s + 8.0 * s + title_w + 30.0 * s
-                })
+                .zip(&titles)
+                .map(|(tab, title)| r.editor_tab_width(tab, title, s))
                 .collect::<Vec<_>>();
             let target = crate::render_view::tabs_ui::tab_strip_reveal_target(
                 &widths,
@@ -774,13 +773,11 @@ impl App {
             return;
         }
 
-        let tab_pad = 16.0 * s;
-        let icon_size_tab = 20.0 * s;
-        let total_w = titles
+        let total_w = self
+            .tabs
             .iter()
-            .map(|title| {
-                tab_pad * 2.0 + icon_size_tab + 8.0 * s + r.measure_ui_width(title, 1.0) + 30.0 * s
-            })
+            .zip(&titles)
+            .map(|(tab, title)| r.editor_tab_width(tab, title, s))
             .sum::<f32>();
         let max_scroll = (total_w - viewport_w).max(0.0);
         self.tab_scroll.current = self.tab_scroll.current.clamp(0.0, max_scroll);
@@ -904,7 +901,14 @@ mod tests {
     fn terminal_creation_routes_share_the_same_session_factory() {
         let app_tabs = include_str!("app_ide_tab_methods.rs");
         let app_production = app_tabs.split("\n#[cfg(test)]").next().unwrap_or(app_tabs);
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let about = include_str!("events/about.rs");
 
         assert_eq!(app_production.matches("Terminal::spawn(").count(), 1);
@@ -947,7 +951,14 @@ mod tests {
             .split("    pub(crate) fn add_terminal")
             .next()
             .unwrap();
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let main_keys = include_str!("keyboard/main_keys.rs");
         let editor_keys = include_str!("keyboard/editor_keys.rs");
 
@@ -1042,7 +1053,14 @@ mod tests {
             .split("    pub(crate) fn shutdown_background_services")
             .next()
             .unwrap();
-        let ui_handlers = include_str!("ui_handlers.rs");
+        let ui_handlers = concat!(
+            include_str!("ui_handlers/ui_database.rs"),
+            include_str!("ui_handlers/ui_editor.rs"),
+            include_str!("ui_handlers/ui_git.rs"),
+            include_str!("ui_handlers/ui_lsp.rs"),
+            include_str!("ui_handlers/ui_panels.rs"),
+            include_str!("ui_handlers/ui_settings.rs"),
+        );
         let main_keys = include_str!("keyboard/main_keys.rs");
         let about = include_str!("events/about.rs");
         let renderer = include_str!("../render_view/terminal_ui.rs");

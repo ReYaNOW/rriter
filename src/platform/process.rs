@@ -105,9 +105,7 @@ fn linux_process_children(process_id: u32) -> Vec<u32> {
 }
 
 #[cfg(target_os = "linux")]
-fn select_effective_foreground_process(
-    candidates: &[ForegroundProcessCandidate],
-) -> Option<u32> {
+fn select_effective_foreground_process(candidates: &[ForegroundProcessCandidate]) -> Option<u32> {
     candidates
         .iter()
         .max_by_key(|candidate| (candidate.depth, candidate.process_id))
