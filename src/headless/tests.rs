@@ -51,6 +51,16 @@ pub(crate) mod tests_support {
         session
     }
 
+    pub(crate) fn open_file_session(w: u32, h: u32, scale: f32, path: &Path) -> HeadlessSession {
+        let mut session = session_for_test(w, h);
+        let lines = run_script(
+            &mut session,
+            format!("scale {scale}\nopen {}\nsettle 2000\n", path.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        session
+    }
+
     pub(crate) fn workspace_with_explorer(
         w: u32,
         h: u32,
