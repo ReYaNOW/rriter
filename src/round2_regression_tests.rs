@@ -29,7 +29,7 @@ const UI_SYSTEM: &str = concat!(
 );
 const API_STATE: &str = include_str!("app/api_client.rs");
 const API_REQUESTS: &str = include_str!("app/api_client/api_client_app_request_methods.rs");
-const API_TEXT: &str = include_str!("app/api_client/api_client_app_text_methods.rs");
+const API_TABS: &str = include_str!("app/api_client/api_client_app_tabs.rs");
 const FILE_TREE_SCAN: &str = include_str!("app/file_tree_scan.rs");
 const PROJECT_SEARCH: &str = include_str!("app/project_search.rs");
 const PROJECT_PREVIEW: &str = include_str!("app/project_search_preview.rs");
@@ -512,8 +512,8 @@ fn r2_076_removing_spec_removes_its_load_ticket() {
 
 #[test]
 fn r2_077_background_refresh_does_not_select_spec() {
-    has_all(API_TEXT, &["begin_load(id, false)"]);
-    assert!(API_TEXT.matches("begin_load(id, false)").count() >= 2);
+    has_all(API_TABS, &["begin_load(id, false)"]);
+    assert!(API_TABS.matches("begin_load(id, false)").count() >= 2);
 }
 
 #[test]
