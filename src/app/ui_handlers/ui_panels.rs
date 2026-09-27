@@ -28,8 +28,14 @@ impl App {
                 self.ide_panel.term_search_focused = false;
                 self.ide_panel.file_tree_focused = false;
                 let active = self.ide_panel.active_terminal;
+                let mouse = self
+                    .renderer
+                    .as_ref()
+                    .map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
+                let cell = mouse.and_then(|(mx, my)| self.terminal_selection_cell(mx, my));
                 if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                    crate::app::terminal::lock_terminal_grid(&term.grid).selection = None;
+                    let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+                    grid.selection = cell.map(|(x, y)| (x, y, x, y));
                 }
             }
             // Terminal scrollbar drag state is initialized in mouse/input.rs, where

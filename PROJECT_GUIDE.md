@@ -1459,8 +1459,16 @@ Root:
 * `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
 * `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, and long tabs.
+* `src/headless/ui_tests_goto_definition.rs` -> headless UI tests for Ctrl-hover highlighting and same-file/cross-file definition navigation.
 * `src/headless/ui_tests_layout.rs` -> headless UI regression tests for welcome/editor/tree size and scale matrices, resize, and frame benchmarks.
+* `src/headless/ui_tests_problems.rs` -> headless UI tests for listing Python diagnostics, jumping to a diagnostic, and clearing stale rows.
+* `src/headless/ui_tests_markdown.rs` -> headless UI tests for Markdown Read block layout, scrolling, code copy, edit toggle, and scrollbar drag.
+* `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
+* `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
+* `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
+* `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
+* `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
 * `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).

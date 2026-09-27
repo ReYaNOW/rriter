@@ -62,7 +62,7 @@ impl App {
             return;
         }
 
-        if self.finish_panel_drags_on_release(state) {
+        if self.finish_panel_drags_on_release(state, button) {
             return;
         }
 
