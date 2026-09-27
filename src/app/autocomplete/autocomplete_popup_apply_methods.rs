@@ -951,7 +951,7 @@ impl App {
         {
             return false;
         }
-        let editor = if self.api_mock_completion_focus().is_some() {
+        let editor = if self.ide_panel.api.api_mock_completion_focus().is_some() {
             &self.ide_panel.api.input_editor
         } else {
             &self.editor
@@ -1103,7 +1103,7 @@ impl App {
         if self.apply_database_table_filter_autocomplete() {
             return;
         }
-        if let Some((route_idx, part)) = self.api_mock_completion_focus()
+        if let Some((route_idx, part)) = self.ide_panel.api.api_mock_completion_focus()
             && self.apply_api_mock_autocomplete()
         {
             self.ide_panel.api.focused = Some(match part {

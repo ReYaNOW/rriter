@@ -171,7 +171,7 @@ impl App {
     }
 
     pub(crate) fn active_autocomplete_detail_editor(&self) -> &Editor {
-        if self.api_mock_completion_focus().is_some() {
+        if self.ide_panel.api.api_mock_completion_focus().is_some() {
             &self.ide_panel.api.input_editor
         } else {
             &self.editor

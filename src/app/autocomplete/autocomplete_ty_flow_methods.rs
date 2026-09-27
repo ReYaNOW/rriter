@@ -550,7 +550,7 @@ fn api_mock_contract_constraint_options(
 
 impl App {
     pub(crate) fn active_api_mock_autocomplete_source(&self) -> Option<ActiveAutocompleteSource> {
-        let (route_idx, part) = self.api_mock_completion_focus()?;
+        let (route_idx, part) = self.ide_panel.api.api_mock_completion_focus()?;
         let (meta, _) = self.active_api_tab()?;
         Some(ActiveAutocompleteSource::ApiMock {
             spec_id: meta.spec_id,
@@ -605,7 +605,9 @@ impl App {
                     analysis_text,
                     visible_cursor: cursor,
                     analysis_cursor: source_cursor,
-                    path: Some(Self::api_mock_virtual_path_for(spec_id, route_idx)),
+                    path: Some(crate::app::api_client::ApiClientState::api_mock_virtual_path_for(
+                        spec_id, route_idx,
+                    )),
                     line_offsets,
                     version: crate::editor::lsp_document_version(self.ide_panel.api.input_editor.version),
                 })
@@ -1195,7 +1197,7 @@ impl App {
     }
 
     pub fn update_ty_autocomplete(&mut self, items: Vec<crate::lsp::LspCompletionItem>) {
-        if self.api_mock_completion_focus().is_some() {
+        if self.ide_panel.api.api_mock_completion_focus().is_some() {
             self.update_api_mock_ty_autocomplete(items);
             return;
         }
@@ -1327,7 +1329,7 @@ impl App {
     }
 
     pub fn update_ty_signature_help_autocomplete(&mut self, parameters: Vec<String>) {
-        if self.api_mock_completion_focus().is_some() {
+        if self.ide_panel.api.api_mock_completion_focus().is_some() {
             self.update_api_mock_ty_signature_help_autocomplete(parameters);
             return;
         }

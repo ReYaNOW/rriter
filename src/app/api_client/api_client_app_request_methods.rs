@@ -216,56 +216,6 @@ impl crate::app::App {
         }
     }
 
-    fn api_mock_request_wants_server(&self, route_idx: usize) -> bool {
-        api_mock_route_wants_server(self.ide_panel.api.mock.mode, self.api_route_override(route_idx))
-    }
-
-    fn api_mock_server_running(&self) -> bool {
-        matches!(
-            self.ide_panel.api.mock.server_status,
-            crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
-        )
-    }
-
-    fn api_mock_job_target(&self, route_idx: usize) -> ApiJobMockTarget {
-        match self.ide_panel.api.mock.mode.canonical() {
-            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
-            | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
-                if self
-                    .api_route_override(route_idx)
-                    .is_some_and(|route| route.enabled)
-                {
-                    ApiJobMockTarget::Mock
-                } else {
-                    ApiJobMockTarget::Proxy
-                }
-            }
-            crate::app::api_mock::types::ApiMockMode::MockAll => ApiJobMockTarget::Mock,
-        }
-    }
-
-    fn api_server_proxy_base_url(server: &ApiServer) -> String {
-        let mut server_url = server.url.clone();
-        for var in &server.variables {
-            let needle = format!("{{{}}}", var.name);
-            server_url = server_url.replace(&needle, &var.default_value);
-        }
-        if server_url == "/" {
-            server_url = "http://localhost".to_string();
-        }
-        server_url.trim_end_matches('/').to_string()
-    }
-
-    fn sync_api_mock_proxy_base_to_server(&mut self, server: &ApiServer) -> bool {
-        let proxy_base_url = Self::api_server_proxy_base_url(server);
-        if proxy_base_url.is_empty() || self.ide_panel.api.mock.proxy_base_url == proxy_base_url {
-            return false;
-        }
-        self.ide_panel.api.mock.proxy_base_url = proxy_base_url;
-        self.ide_panel.api.commit_mock_config();
-        true
-    }
-
     pub(crate) fn sync_api_mock_proxy_base_to_active_server(&mut self) -> bool {
         let Some((meta, state)) = self.active_api_tab() else {
             return false;
@@ -284,7 +234,7 @@ impl crate::app::App {
             .cloned();
         selected_server
             .as_ref()
-            .is_some_and(|server| self.sync_api_mock_proxy_base_to_server(server))
+            .is_some_and(|server| self.ide_panel.api.sync_api_mock_proxy_base_to_server(server))
     }
 
     pub(crate) fn copy_hover_popup_selection_or_diagnostic(&mut self) -> bool {
@@ -358,7 +308,7 @@ impl crate::app::App {
     ) {
         if let Some(route_idx) = api_mock_tools_queue_route_after_key(
             mock_python_target,
-            self.api_mock_python_focus_target(),
+            self.ide_panel.api.api_mock_python_focus_target(),
             input_version_before,
             self.ide_panel.api.input_editor.version,
         ) {
@@ -400,7 +350,7 @@ impl crate::app::App {
             .api
             .focused
             .as_ref()
-            .and_then(|focus| self.api_focus_ui_target(focus))
+            .and_then(|focus| self.ide_panel.api.api_focus_ui_target(focus))
         {
             if multiline {
                 self.sync_api_multiline_scroll_target(id, false);
@@ -409,7 +359,7 @@ impl crate::app::App {
             }
         }
         self.pulse_api_cursor_blink();
-        self.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation();
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -435,7 +385,7 @@ impl crate::app::App {
             return false;
         }
 
-        let mock_python_target = self.api_mock_python_focus_target();
+        let mock_python_target = self.ide_panel.api.api_mock_python_focus_target();
         let is_body = matches!(
             self.ide_panel.api.focused,
             Some(
@@ -463,7 +413,7 @@ impl crate::app::App {
             .api
             .focused
             .as_ref()
-            .is_some_and(|focus| self.api_focus_is_array_input(focus));
+            .is_some_and(|focus| self.ide_panel.api.api_focus_is_array_input(focus));
         let clean = if is_body {
             text.to_string()
         } else if is_array {
@@ -542,7 +492,7 @@ impl crate::app::App {
             return true;
         }
         let shift = self.modifiers.shift_key();
-        let mock_python_target = self.api_mock_python_focus_target();
+        let mock_python_target = self.ide_panel.api.api_mock_python_focus_target();
         let is_enter_key = matches!(
             key_event.physical_key,
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Enter)
@@ -601,7 +551,7 @@ impl crate::app::App {
             .api
             .focused
             .as_ref()
-            .is_some_and(|focus| self.api_focus_is_array_input(focus));
+            .is_some_and(|focus| self.ide_panel.api.api_focus_is_array_input(focus));
         match key_event.physical_key {
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Escape) => {
                 self.commit_api_focus();
@@ -881,94 +831,36 @@ impl crate::app::App {
         if state.pending_request_id.is_some() || state.pending {
             return;
         }
-        let Some(model) = self.ide_panel.api.models.get(&spec_id) else {
-            return;
-        };
-        let Some(route) = model.routes.get(route_idx) else {
-            return;
-        };
-        let Some(server) = model
-            .servers
-            .get(state.server_idx)
-            .or_else(|| model.servers.first())
+        let Some(selected_server) = self
+            .ide_panel
+            .api
+            .models
+            .get(&spec_id)
+            .and_then(|model| {
+                model
+                    .servers
+                    .get(state.server_idx)
+                    .or_else(|| model.servers.first())
+                    .cloned()
+            })
         else {
             return;
         };
-        let mock_server_running = self.api_mock_server_running();
-        let wants_mock_server = if mock_server_running {
-            self.api_mock_request_wants_server(route_idx)
-        } else {
-            api_mock_request_requires_stopped_server(
-                self.ide_panel.api.mock.mode,
-                self.api_route_override(route_idx),
-            )
-        };
+        let mock_server_running = self.ide_panel.api.mock.api_mock_server_running();
+        let wants_mock_server = self
+            .ide_panel
+            .api
+            .api_mock_request_wants_server(spec_id, route_idx);
         let use_mock_server = wants_mock_server && mock_server_running;
-        let method = route.method;
-        let path = route.path.clone();
-        let body_content_type = route
-            .request_body
-            .as_ref()
-            .filter(|body| !body.is_multipart && !body.is_form_urlencoded)
-            .map(|body| body.content_type.trim().to_string())
-            .filter(|content_type| !content_type.is_empty());
-        let is_json_body = body_content_type
-            .as_deref()
-            .is_some_and(api_content_type_is_json);
-        let is_multipart_body = route
-            .request_body
-            .as_ref()
-            .is_some_and(|body| body.is_multipart);
-        let is_form_body = route
-            .request_body
-            .as_ref()
-            .is_some_and(|body| body.is_form_urlencoded);
-        let path_values = state.path_values.clone();
-        let query_values = state.query_values.clone();
-        let body_values = state.body_values.clone();
-        let body_file_paths = state.body_file_paths.clone();
-        let body_json_text = state.body_json.clone();
-        let selected_server = server.clone();
-        let auth_parts = prepared_auth_for_route(model, route, &self.ide_panel.api.auth);
-        let proxy_url_for_reach = if use_mock_server {
-            build_request_url(&selected_server, &path, &path_values, &query_values)
-                .ok()
-                .map(|mut url| {
-                    append_auth_query(&mut url, &auth_parts);
-                    url
-                })
-        } else {
-            None
-        };
-        let body_multipart = (method.can_send_body() && is_multipart_body)
-            .then(|| {
-                api_multipart_parts_for_route(route, model, &body_values, &body_file_paths)
-            });
-        let body_form = (method.can_send_body() && is_form_body).then_some(body_values);
-        let body_json = (method.can_send_body() && body_content_type.is_some())
-            .then_some(body_json_text.clone())
-            .filter(|body| !body.trim().is_empty());
         if wants_mock_server && !use_mock_server {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                state.response = Some(ApiJobResponse {
-                    request_id: 0,
-                    spec_id,
-                    route_idx,
-                    status: None,
-                    elapsed_ms: 0,
-                    server_reach_ms: None,
-                    timing_text: String::new(),
-                    headers: Vec::new(),
-                    headers_text: String::new(),
-                    curl_text: String::new(),
-                    body: String::new(),
-                    truncated: false,
-                    error: Some(ApiLoadError::new(
+                state.response = Some(api_request_disconnect_response(0, spec_id, route_idx));
+                if let Some(response) = &mut state.response {
+                    response.error = Some(ApiLoadError::new(
                         ApiLoadErrorKind::Other,
                         "Мок-сервер не запущен",
-                    )),
-                    resolved_host: None,
-                });
+                    ));
+                }
             }
             return;
         }
@@ -976,44 +868,21 @@ impl crate::app::App {
             self.ide_panel.api.mock.server_status,
             crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
         ) {
-            self.sync_api_mock_proxy_base_to_server(&selected_server);
+            self.ide_panel
+                .api
+                .sync_api_mock_proxy_base_to_server(&selected_server);
             self.ide_panel.api.refresh_mock_server();
         }
-        let server = if use_mock_server {
-            ApiServer {
-                url: api_mock_lan_url(&self.ide_panel.api.mock),
-                description: String::new(),
-                variables: Vec::new(),
-            }
-        } else {
-            selected_server
-        };
-        if method.can_send_body() && is_json_body && !json_body_is_valid(&body_json_text) {
-            if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                state.response = Some(ApiJobResponse {
-                    request_id: 0,
-                    spec_id,
-                    route_idx,
-                    status: None,
-                    elapsed_ms: 0,
-                    server_reach_ms: None,
-                    timing_text: String::new(),
-                    headers: Vec::new(),
-                    headers_text: String::new(),
-                    curl_text: String::new(),
-                    body: String::new(),
-                    truncated: false,
-                    error: Some(ApiLoadError::new(
-                        ApiLoadErrorKind::InvalidJson,
-                        "JSON body невалиден",
-                    )),
-                    resolved_host: None,
-                });
-            }
+        // Re-borrow the tab after the mock-config commit above; tabs are unchanged.
+        let Some((_, state)) = self.active_api_tab() else {
             return;
-        }
-        let mut url = match build_request_url(&server, &path, &path_values, &query_values) {
-            Ok(url) => url,
+        };
+        let mut job = match self
+            .ide_panel
+            .api
+            .build_api_job_request(spec_id, route_idx, state, 0, use_mock_server)
+        {
+            Ok(job) => job,
             Err(err) => {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.response = Some(ApiJobResponse {
@@ -1036,29 +905,8 @@ impl crate::app::App {
                 return;
             }
         };
-        append_auth_query(&mut url, &auth_parts);
         let request_id = self.allocate_api_request_id();
-        let job = ApiJobRequest {
-            request_id,
-            spec_id,
-            route_idx,
-            method,
-            resolved_host: proxy_url_for_reach
-                .as_ref()
-                .and_then(|url| resolve_api_url_host(url))
-                .or_else(|| resolve_api_url_host(&url)),
-            url,
-            mock_target: if use_mock_server {
-                self.api_mock_job_target(route_idx)
-            } else {
-                ApiJobMockTarget::None
-            },
-            auth_parts,
-            body_content_type: method.can_send_body().then_some(body_content_type).flatten(),
-            body_json,
-            body_form,
-            body_multipart,
-        };
+        job.request_id = request_id;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.pending = true;
             state.pending_request_id = Some(request_id);
@@ -1096,7 +944,7 @@ impl crate::app::App {
                 state.query_values.clone(),
             )
         };
-        if !self.api_mock_server_running() {
+        if !self.ide_panel.api.mock.api_mock_server_running() {
             if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                 state.route_idx = Some(manual_idx);
                 state.response = Some(ApiJobResponse {
@@ -1122,13 +970,14 @@ impl crate::app::App {
             return;
         }
         self.ide_panel.api.refresh_mock_server();
-        let server = ApiServer {
-            url: api_mock_lan_url(&self.ide_panel.api.mock),
-            description: String::new(),
-            variables: Vec::new(),
-        };
-        let url = match build_manual_api_request_url(&server, &route, &path_values, &query_values) {
-            Ok(url) => url,
+        let mut job = match self.ide_panel.api.build_manual_api_job_request(
+            spec_id,
+            manual_idx,
+            &route,
+            &path_values,
+            &query_values,
+        ) {
+            Ok(job) => job,
             Err(err) => {
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
                     state.route_idx = Some(manual_idx);
@@ -1153,20 +1002,7 @@ impl crate::app::App {
             }
         };
         let request_id = self.allocate_api_request_id();
-        let job = ApiJobRequest {
-            request_id,
-            spec_id,
-            route_idx: manual_idx,
-            method: route.method,
-            resolved_host: resolve_api_url_host(&url),
-            url,
-            mock_target: ApiJobMockTarget::Mock,
-            auth_parts: Vec::new(),
-            body_content_type: None,
-            body_json: None,
-            body_form: None,
-            body_multipart: None,
-        };
+        job.request_id = request_id;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.route_idx = Some(manual_idx);
             state.pending = true;
@@ -1238,7 +1074,7 @@ impl crate::app::App {
             {
                 let virtual_source =
                     build_api_mock_virtual_source(method, &path, &route, &model, &script);
-                self.refresh_api_mock_highlight_cache_for_spans(route_idx, &spans, &virtual_source);
+                self.ide_panel.api.refresh_api_mock_highlight_cache_for_spans(route_idx, &spans, &virtual_source);
                 self.ide_panel.api.mock_highlight_spans = self
                     .ide_panel
                     .api
@@ -1246,7 +1082,7 @@ impl crate::app::App {
                     .get(&(route_idx, part))
                     .cloned()
                     .unwrap_or_default();
-                if self.api_mock_completion_focus() == Some((route_idx, part))
+                if self.ide_panel.api.api_mock_completion_focus() == Some((route_idx, part))
                     && self.autocomplete_active
                 {
                     self.update_api_mock_tree_sitter_autocomplete();
@@ -1259,7 +1095,7 @@ impl crate::app::App {
         {
             if Instant::now() >= due {
                 self.ide_panel.api.mock_ty_due = None;
-                if let Some((route_idx, _)) = self.api_mock_python_focus_target() {
+                if let Some((route_idx, _)) = self.ide_panel.api.api_mock_python_focus_target() {
                     if let Some(version) = self.api_mock_route_tools_version(route_idx) {
                         self.start_api_mock_ty_check_now(route_idx, version);
                     }
@@ -1615,40 +1451,18 @@ impl crate::app::App {
 
     fn apply_api_job_response(&mut self, result: ApiJobResponse) {
         let resolved = result.resolved_host.clone();
-        let focused_response = match self.ide_panel.api.focused {
-            Some(ApiFocus::Response { spec_id, route_idx }) => Some((spec_id, route_idx)),
-            _ => None,
-        };
         let mut focused_text = None;
         let mut applied = false;
         for tab in &mut self.tabs {
             if let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind
                 && meta.spec_id == result.spec_id
             {
-                if state.pending_request_id == Some(result.request_id) {
-                    state.pending = false;
-                    state.pending_request_id = None;
-                    state.response_scroll.reset();
-                    state.response_scroll_x.reset();
-                    if state
-                        .route_idx
-                        .is_some_and(|route_idx| focused_response == Some((meta.spec_id, route_idx)))
-                    {
-                        focused_text =
-                            Some(api_response_text(&result, state.response_view).to_string());
-                    }
-                    state.response = Some(result.clone());
-                    applied = true;
-                    break;
-                }
-                if let Some(saved) = state
-                    .route_states
-                    .iter_mut()
-                    .find(|saved| saved.pending_request_id == Some(result.request_id))
-                {
-                    saved.pending = false;
-                    saved.pending_request_id = None;
-                    saved.response = Some(result.clone());
+                let (did_apply, text) = self
+                    .ide_panel
+                    .api
+                    .apply_api_job_response_to_tab(meta.spec_id, state, &result);
+                if did_apply {
+                    focused_text = text;
                     applied = true;
                     break;
                 }

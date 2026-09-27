@@ -5,67 +5,14 @@ pub(crate) fn native_picker_can_start<T>(
 }
 
 impl crate::app::App {
-    fn api_route_row_text(route: &ApiRouteRow, field: ApiRouteTextField) -> String {
-        match field {
-            ApiRouteTextField::Path => {
-                let mut display = String::with_capacity(route.path.len().saturating_add(8));
-                write_api_path_display(&route.path, &mut display);
-                display
-            }
-            ApiRouteTextField::Summary => route.summary.clone(),
-            ApiRouteTextField::Description => route.description.clone(),
-        }
-    }
-
     fn active_api_route_text(&self, field: ApiRouteTextField) -> Option<String> {
         let (meta, state) = self.active_api_tab()?;
-        match &meta.route_identity {
-            Some(ApiClientRouteIdentity::Manual { stable_id }) => {
-                let route = self
-                    .ide_panel
-                    .api
-                    .mock
-                    .manual_routes
-                    .iter()
-                    .find(|route| route.stable_id == *stable_id)?;
-                Some(match field {
-                    ApiRouteTextField::Path => {
-                        let mut display = String::with_capacity(route.path.len().saturating_add(8));
-                        write_api_path_display(&route.path, &mut display);
-                        display
-                    }
-                    ApiRouteTextField::Summary => "Manual mock route".to_string(),
-                    ApiRouteTextField::Description => String::new(),
-                })
-            }
-            Some(ApiClientRouteIdentity::OpenApi { spec_id, route_idx }) => self
-                .ide_panel
-                .api
-                .models
-                .get(spec_id)
-                .and_then(|model| model.routes.get(*route_idx))
-                .map(|route| Self::api_route_row_text(route, field)),
-            None => self
-                .ide_panel
-                .api
-                .models
-                .get(&meta.spec_id)
-                .and_then(|model| state.route_idx.and_then(|idx| model.routes.get(idx)))
-                .map(|route| Self::api_route_row_text(route, field)),
-        }
-    }
-
-    fn api_route_text_ui_id(
-        field: ApiRouteTextField,
-        route_idx: usize,
-    ) -> crate::ui_system::UiId {
-        match field {
-            ApiRouteTextField::Path => crate::ui_system::UiId::ApiRoutePathText(route_idx),
-            ApiRouteTextField::Summary => crate::ui_system::UiId::ApiRouteSummaryText(route_idx),
-            ApiRouteTextField::Description => {
-                crate::ui_system::UiId::ApiRouteDescriptionText(route_idx)
-            }
-        }
+        self.ide_panel.api.api_route_text_for_tab(
+            meta.spec_id,
+            state.route_idx,
+            meta.route_identity.as_ref(),
+            field,
+        )
     }
 
     pub(crate) fn begin_api_route_text_selection(
@@ -76,7 +23,7 @@ impl crate::app::App {
         let Some(text) = self.active_api_route_text(field) else {
             return false;
         };
-        let id = Self::api_route_text_ui_id(field, route_idx);
+        let id = ApiClientState::api_route_text_ui_id(field, route_idx);
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return false;
         };
@@ -128,7 +75,7 @@ impl crate::app::App {
         let Some(text) = self.active_api_route_text(selection.field) else {
             return false;
         };
-        let id = Self::api_route_text_ui_id(selection.field, route_idx);
+        let id = ApiClientState::api_route_text_ui_id(selection.field, route_idx);
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return false;
         };
@@ -195,41 +142,6 @@ impl crate::app::App {
     fn pulse_api_cursor_blink(&mut self) {
         self.last_action = std::time::Instant::now();
         self.last_blink_state = true;
-    }
-
-    fn queue_api_body_json_validation(&mut self) {
-        let Some(ApiFocus::Body { spec_id, route_idx }) = self.ide_panel.api.focused else {
-            return;
-        };
-        let version = self.ide_panel.api.input_editor.version;
-        if self
-            .ide_panel
-            .api
-            .body_json_validation
-            .is_some_and(|state| {
-                state.spec_id == spec_id && state.route_idx == route_idx && state.version == version
-            })
-            || self.ide_panel.api.body_json_validation_pending
-                == Some((spec_id, route_idx, version))
-        {
-            return;
-        }
-        let text = self.ide_panel.api.input_editor.get_full_text();
-        let (tx, rx) = mpsc::channel();
-        self.ide_panel.api.body_json_validation_pending = Some((spec_id, route_idx, version));
-        self.ide_panel.api.body_json_validation_rx = Some(rx);
-        let worker_tx = tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-json-validation", move || {
-            let valid = json_body_is_valid(&text);
-            let _ = worker_tx.send(ApiJsonValidationResult {
-                spec_id, route_idx, version, valid,
-            });
-        }) {
-            eprintln!("RRiter: не удалось запустить JSON validation worker: {err}");
-            let _ = tx.send(ApiJsonValidationResult {
-                spec_id, route_idx, version, valid: false,
-            });
-        }
     }
 
     fn api_text_scroll_for_ui(&self, id: crate::ui_system::UiId) -> f32 {
@@ -455,7 +367,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => self
                 .api_route_python_script(route_idx)
                 .map(|script| {
-                    if self.api_mock_python_focus_target()
+                    if self.ide_panel.api.api_mock_python_focus_target()
                         == Some((route_idx, ApiMockSourcePart::Prelude))
                     {
                         self.ide_panel.api.input_editor.get_full_text()
@@ -466,7 +378,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockContractInput(route_idx) => self
                 .api_route_python_script(route_idx)
                 .map(|_| {
-                    if self.api_mock_python_focus_target()
+                    if self.ide_panel.api.api_mock_python_focus_target()
                         == Some((route_idx, ApiMockSourcePart::Contract))
                     {
                         self.ide_panel.api.input_editor.get_full_text()
@@ -478,7 +390,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockBodyInput(route_idx) => self
                 .api_route_python_script(route_idx)
                 .map(|script| {
-                    if self.api_mock_python_focus_target()
+                    if self.ide_panel.api.api_mock_python_focus_target()
                         == Some((route_idx, ApiMockSourcePart::Body))
                     {
                         self.ide_panel.api.input_editor.get_full_text()
@@ -511,7 +423,7 @@ impl crate::app::App {
         let Some(renderer) = self.renderer.as_mut() else {
             return 0.0;
         };
-        let use_mono_width = Self::api_mock_part_for_ui(id).is_some();
+        let use_mono_width = ApiClientState::api_mock_part_for_ui(id).is_some();
         api_text_area_max_scroll_x(&text, visible_w, |line| {
             if use_mono_width {
                 line.chars().map(|ch| renderer.char_advance(ch)).sum()
@@ -572,17 +484,6 @@ impl crate::app::App {
         api_text_area_max_scroll(&text, rect.3, scale)
     }
 
-    fn api_one_line_text_scale_for_ui(id: crate::ui_system::UiId) -> f32 {
-        match id {
-            crate::ui_system::UiId::ApiRouteFilterInput => 0.78,
-            crate::ui_system::UiId::ApiMockPythonUvPathInput
-            | crate::ui_system::UiId::ApiMockPythonCustomPathInput => {
-                crate::app::file_tree::FILE_TREE_DIALOG_INPUT_TEXT_SCALE
-            }
-            _ => crate::render_view::api_client_tab::API_ONE_LINE_INPUT_SCALE,
-        }
-    }
-
     fn api_one_line_max_scroll_x_for_ui(&mut self, id: crate::ui_system::UiId) -> f32 {
         let Some(rect) = self.ui_registry.rect_for(id) else {
             return 0.0;
@@ -601,7 +502,7 @@ impl crate::app::App {
             renderer,
             &text,
             visible_w,
-            Self::api_one_line_text_scale_for_ui(id),
+            ApiClientState::api_one_line_text_scale_for_ui(id),
             20.0 * scale,
         )
     }
@@ -610,10 +511,10 @@ impl crate::app::App {
         let Some(focus) = self.ide_panel.api.focused.clone() else {
             return;
         };
-        if self.api_focus_is_array_input(&focus) {
+        if self.ide_panel.api.api_focus_is_array_input(&focus) {
             return;
         }
-        let Some((id, false)) = self.api_focus_ui_target(&focus) else {
+        let Some((id, false)) = self.ide_panel.api.api_focus_ui_target(&focus) else {
             return;
         };
         let Some(rect) = self.ui_registry.rect_for(id) else {
@@ -633,59 +534,10 @@ impl crate::app::App {
             &self.ide_panel.api.input_editor,
             &mut self.ide_panel.api.input_scroll_x,
             visible_w,
-            Self::api_one_line_text_scale_for_ui(id),
+            ApiClientState::api_one_line_text_scale_for_ui(id),
             10.0 * scale,
             immediate,
         );
-    }
-
-    fn api_mock_part_for_ui(id: crate::ui_system::UiId) -> Option<(usize, ApiMockSourcePart)> {
-        match id {
-            crate::ui_system::UiId::ApiMockContractInput(route_idx) => {
-                Some((route_idx, ApiMockSourcePart::Contract))
-            }
-            crate::ui_system::UiId::ApiMockPreludeInput(route_idx) => {
-                Some((route_idx, ApiMockSourcePart::Prelude))
-            }
-            crate::ui_system::UiId::ApiMockBodyInput(route_idx) => {
-                Some((route_idx, ApiMockSourcePart::Body))
-            }
-            crate::ui_system::UiId::ApiMockSignatureInput(route_idx) => {
-                Some((route_idx, ApiMockSourcePart::Signature))
-            }
-            _ => None,
-        }
-    }
-
-    fn api_mock_combined_max_scroll_for_route(&self, route_idx: usize, scale: f32) -> f32 {
-        let Some((_, _, route, model)) = self.api_mock_route_context(route_idx) else {
-            return 0.0;
-        };
-        let Some(script) = self.api_mock_script_for_tools(route_idx) else {
-            return 0.0;
-        };
-        let contract = crate::app::api_mock::types::api_mock_effective_contract(
-            &script, &route, &model,
-        );
-        let signature_text =
-            crate::app::api_mock::contract::api_mock_handler_signature_text(&contract);
-        let contract_text = if self.api_mock_python_focus_target()
-            == Some((route_idx, ApiMockSourcePart::Contract))
-        {
-            self.ide_panel.api.input_editor.get_full_text()
-        } else {
-            self.api_mock_contract_source_for_route(route_idx)
-                .unwrap_or_default()
-        };
-        let content_h = api_mock_combined_editor_content_height(
-            &script.prelude,
-            &contract_text,
-            &signature_text,
-            &script.body,
-            scale,
-        );
-        let viewport_h = api_mock_combined_editor_viewport_height(&signature_text, scale);
-        (content_h - viewport_h).max(0.0)
     }
 
     fn sync_api_multiline_scroll_target(&mut self, id: crate::ui_system::UiId, immediate: bool) {
@@ -708,7 +560,7 @@ impl crate::app::App {
             .map(|idx| idx.saturating_add(1))
             .unwrap_or(0);
         let cursor_line_text = &text[line_start..cursor];
-        let mock_part = Self::api_mock_part_for_ui(id);
+        let mock_part = ApiClientState::api_mock_part_for_ui(id);
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
@@ -816,8 +668,13 @@ impl crate::app::App {
                         .ui_registry
                         .rect_for(crate::ui_system::UiId::ApiMockCombinedPython(route_idx))
                     {
-                        let max_scroll = self.api_mock_combined_max_scroll_for_route(route_idx, scale);
-                        let text_top_y = Self::api_multiline_cursor_top_y(id, rect, scale);
+                        let active = self.api_active_route();
+                        let max_scroll = self
+                            .ide_panel
+                            .api
+                            .api_mock_combined_max_scroll_for_route(active.as_ref(), route_idx, scale);
+                        let text_top_y =
+                            ApiClientState::api_multiline_cursor_top_y(id, rect, scale);
                         let cursor_top = text_top_y + cursor_y;
                         let cursor_bottom = cursor_top + line_h;
                         let top_limit = viewport.1 + edge;
@@ -1085,192 +942,6 @@ impl crate::app::App {
         true
     }
 
-    fn api_focus_ui_target(&self, focus: &ApiFocus) -> Option<(crate::ui_system::UiId, bool)> {
-        match focus {
-            ApiFocus::ImportUrl => Some((crate::ui_system::UiId::ApiImportUrlInput, false)),
-            ApiFocus::RouteFilter => {
-                Some((crate::ui_system::UiId::ApiRouteFilterInput, false))
-            }
-            ApiFocus::MockProxyBase => Some((crate::ui_system::UiId::ApiMockProxyBaseInput, false)),
-            ApiFocus::MockPythonUvPath => {
-                Some((crate::ui_system::UiId::ApiMockPythonUvPathInput, false))
-            }
-            ApiFocus::MockPythonVersion => {
-                Some((crate::ui_system::UiId::ApiMockPythonVersionInput, false))
-            }
-            ApiFocus::MockPythonCustomPath => Some((
-                crate::ui_system::UiId::ApiMockPythonCustomPathInput,
-                false,
-            )),
-            ApiFocus::MockManualPath { manual_idx } => Some((
-                crate::ui_system::UiId::ApiMockManualRoutePath(*manual_idx),
-                false,
-            )),
-            ApiFocus::MockContract { route_idx } => Some((
-                crate::ui_system::UiId::ApiMockContractInput(*route_idx),
-                true,
-            )),
-            ApiFocus::MockPrelude { route_idx } => Some((
-                crate::ui_system::UiId::ApiMockPreludeInput(*route_idx),
-                true,
-            )),
-            ApiFocus::MockBody { route_idx } => {
-                Some((crate::ui_system::UiId::ApiMockBodyInput(*route_idx), true))
-            }
-            ApiFocus::MockSignature { route_idx } => Some((
-                crate::ui_system::UiId::ApiMockSignatureInput(*route_idx),
-                true,
-            )),
-            ApiFocus::MockStaticResponse { route_idx } => Some((
-                crate::ui_system::UiId::ApiMockStaticResponseInput(*route_idx),
-                true,
-            )),
-            ApiFocus::MockContractField {
-                route_idx,
-                group,
-                field_idx,
-                prop,
-            } => Some((
-                crate::ui_system::UiId::ApiMockContractFieldPropInput(
-                    *route_idx, *group, *field_idx, *prop,
-                ),
-                false,
-            )),
-            ApiFocus::Body { route_idx, .. } => {
-                Some((crate::ui_system::UiId::ApiBodyInput(*route_idx), true))
-            }
-            ApiFocus::InputSchema { route_idx, .. } => Some((
-                crate::ui_system::UiId::ApiInputSchemaBody(*route_idx),
-                true,
-            )),
-            ApiFocus::OutputSchema { route_idx, .. } => Some((
-                crate::ui_system::UiId::ApiOutputSchemaBody(*route_idx),
-                true,
-            )),
-            ApiFocus::Response { route_idx, .. } => {
-                Some((crate::ui_system::UiId::ApiResponseBody(*route_idx), true))
-            }
-            ApiFocus::AuthValue { spec_id, scheme }
-            | ApiFocus::AuthRefreshToken { spec_id, scheme }
-            | ApiFocus::AuthUsername { spec_id, scheme }
-            | ApiFocus::AuthPassword { spec_id, scheme } => {
-                let idx = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(spec_id)?
-                    .security_schemes
-                    .iter()
-                    .position(|item| item.name == *scheme)?;
-                let id = match focus {
-                    ApiFocus::AuthUsername { .. } => crate::ui_system::UiId::ApiAuthUsername(idx),
-                    ApiFocus::AuthPassword { .. } => crate::ui_system::UiId::ApiAuthPassword(idx),
-                    ApiFocus::AuthRefreshToken { .. } => {
-                        crate::ui_system::UiId::ApiAuthRefreshToken(idx)
-                    }
-                    _ => crate::ui_system::UiId::ApiAuthValue(idx),
-                };
-                Some((id, false))
-            }
-            ApiFocus::PathParam {
-                spec_id,
-                route_idx,
-                name,
-            } => {
-                let idx = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(spec_id)?
-                    .routes
-                    .get(*route_idx)?
-                    .path_params
-                    .iter()
-                    .position(|param| param.name == *name)?;
-                Some((
-                    crate::ui_system::UiId::ApiPathParamInput(*route_idx, idx),
-                    false,
-                ))
-            }
-            ApiFocus::QueryParam {
-                spec_id,
-                route_idx,
-                name,
-            } => {
-                let idx = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(spec_id)?
-                    .routes
-                    .get(*route_idx)?
-                    .query_params
-                    .iter()
-                    .position(|param| param.name == *name)?;
-                Some((
-                    crate::ui_system::UiId::ApiQueryParamInput(*route_idx, idx),
-                    false,
-                ))
-            }
-            ApiFocus::BodyField {
-                spec_id,
-                route_idx,
-                name,
-            } => {
-                let model = self.ide_panel.api.models.get(spec_id)?;
-                let route = model.routes.get(*route_idx)?;
-                let root = route.request_body.as_ref()?.schema?;
-                let idx = model
-                    .schema_arena
-                    .get(root.0)?
-                    .properties
-                    .iter()
-                    .position(|prop| prop.name == *name)?;
-                Some((
-                    crate::ui_system::UiId::ApiBodyFieldInput(*route_idx, idx),
-                    false,
-                ))
-            }
-        }
-    }
-
-    fn api_multiline_cursor_top_y(
-        id: crate::ui_system::UiId,
-        rect: (f32, f32, f32, f32),
-        scale: f32,
-    ) -> f32 {
-        match id {
-            crate::ui_system::UiId::ApiMockSignatureInput(_) => rect.1,
-            crate::ui_system::UiId::ApiMockContractInput(_)
-            | crate::ui_system::UiId::ApiMockPreludeInput(_)
-            | crate::ui_system::UiId::ApiMockBodyInput(_) => {
-                api_text_area_top_from_baseline(
-                    Self::api_mock_text_baseline_y(id, rect, scale),
-                    scale,
-                )
-            }
-            crate::ui_system::UiId::ApiInputSchemaBody(_)
-            | crate::ui_system::UiId::ApiOutputSchemaBody(_)
-            | crate::ui_system::UiId::ApiBodyInput(_)
-            | crate::ui_system::UiId::ApiResponseBody(_)
-            | crate::ui_system::UiId::ApiMockStaticResponseInput(_) => {
-                api_text_area_top_from_baseline(rect.1 + 29.0 * scale, scale)
-            }
-            _ => rect.1 + 10.0 * scale,
-        }
-    }
-
-    fn api_multiline_cursor_left_x(
-        id: crate::ui_system::UiId,
-        rect: (f32, f32, f32, f32),
-        scale: f32,
-    ) -> f32 {
-        match id {
-            crate::ui_system::UiId::ApiMockSignatureInput(_) => rect.0,
-            _ => rect.0 + 10.0 * scale,
-        }
-    }
-
     fn place_api_cursor_from_last_click(
         &mut self,
         id: crate::ui_system::UiId,
@@ -1285,7 +956,7 @@ impl crate::app::App {
             .api
             .focused
             .as_ref()
-            .is_some_and(|focus| self.api_focus_is_array_input(focus))
+            .is_some_and(|focus| self.ide_panel.api.api_focus_is_array_input(focus))
         {
             self.ide_panel.api.input_editor.cursor = self.ide_panel.api.input_editor.len();
             self.ide_panel.api.input_editor.selection_anchor =
@@ -1321,8 +992,8 @@ impl crate::app::App {
             api_multiline_ui_byte_at_pointer(
                 &self.ide_panel.api.input_editor,
                 renderer,
-                Self::api_multiline_cursor_left_x(id, rect, scale),
-                Self::api_multiline_cursor_top_y(id, rect, scale),
+                ApiClientState::api_multiline_cursor_left_x(id, rect, scale),
+                ApiClientState::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,
@@ -1334,8 +1005,8 @@ impl crate::app::App {
             set_api_multiline_cursor_at_pointer(
                 &mut self.ide_panel.api.input_editor,
                 renderer,
-                Self::api_multiline_cursor_left_x(id, rect, scale),
-                Self::api_multiline_cursor_top_y(id, rect, scale),
+                ApiClientState::api_multiline_cursor_left_x(id, rect, scale),
+                ApiClientState::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,
@@ -1358,7 +1029,7 @@ impl crate::app::App {
                 renderer,
                 &text,
                 target_x,
-                Self::api_one_line_text_scale_for_ui(id),
+                ApiClientState::api_one_line_text_scale_for_ui(id),
             )
         };
         self.ide_panel.api.input_editor.cursor = cursor;
@@ -1387,14 +1058,14 @@ impl crate::app::App {
             self.sync_api_one_line_scroll_target(true);
         }
         self.pulse_api_cursor_blink();
-        self.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation();
     }
 
     pub(crate) fn drag_api_text_cursor_from_last_mouse(&mut self) -> bool {
         let Some(focus) = self.ide_panel.api.focused.clone() else {
             return false;
         };
-        let Some((id, multiline)) = self.api_focus_ui_target(&focus) else {
+        let Some((id, multiline)) = self.ide_panel.api.api_focus_ui_target(&focus) else {
             return false;
         };
         let Some(rect) = self.ui_registry.rect_for(id) else {
@@ -1424,8 +1095,8 @@ impl crate::app::App {
             api_multiline_ui_byte_at_pointer(
                 &self.ide_panel.api.input_editor,
                 renderer,
-                Self::api_multiline_cursor_left_x(id, rect, scale),
-                Self::api_multiline_cursor_top_y(id, rect, scale),
+                ApiClientState::api_multiline_cursor_left_x(id, rect, scale),
+                ApiClientState::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,
@@ -1437,8 +1108,8 @@ impl crate::app::App {
             set_api_multiline_cursor_at_pointer(
                 &mut self.ide_panel.api.input_editor,
                 renderer,
-                Self::api_multiline_cursor_left_x(id, rect, scale),
-                Self::api_multiline_cursor_top_y(id, rect, scale),
+                ApiClientState::api_multiline_cursor_left_x(id, rect, scale),
+                ApiClientState::api_multiline_cursor_top_y(id, rect, scale),
                 mx,
                 my,
                 scale,
@@ -1461,7 +1132,7 @@ impl crate::app::App {
                 renderer,
                 &text,
                 target_x,
-                Self::api_one_line_text_scale_for_ui(id),
+                ApiClientState::api_one_line_text_scale_for_ui(id),
             )
         };
         if self.ide_panel.api.input_editor.selection_anchor.is_none() {
@@ -1485,7 +1156,7 @@ impl crate::app::App {
             }
         }
         self.pulse_api_cursor_blink();
-        self.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation();
         true
     }
 
@@ -1595,178 +1266,27 @@ impl crate::app::App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_version_list(&mut self) {
-        if let Some(cancel) = self.ide_panel.api.python_version_list_cancel.take() {
-            cancel.store(true, Ordering::Release);
-        }
-        let Some(uv_path) = self.ide_panel.api.mock.uv.selected_uv_path() else {
-            self.ide_panel.api.mock.uv.status =
-                crate::app::api_mock::types::ApiPythonRuntimeStatus::Missing;
-            self.ide_panel.api.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
-            return;
-        };
-        let (tx, rx) = mpsc::channel();
-        self.ide_panel.api.python_version_list_rx = Some(rx);
-        self.ide_panel.api.mock_python_versions_loading = true;
-        self.ide_panel.api.mock_python_version_picker_open = true;
-        self.ide_panel.api.mock_python_versions_scroll.reset();
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.ide_panel.api.python_version_list_cancel = Some(cancel.clone());
-        let worker_tx = tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-python-list", move || {
-            let mut command = Command::new(uv_path);
-            command.arg("python").arg("list").arg("--all-versions");
-            let result = crate::platform::run_command_output_cancelable(
-                &mut command,
-                API_PYTHON_LIST_TIMEOUT,
-                &cancel,
-            );
-            let payload = match result {
-                Ok(output) if output.status.success() => ApiPythonVersionListResult {
-                    rows: parse_uv_python_list(&String::from_utf8_lossy(&output.stdout)),
-                    error: None,
-                },
-                Ok(output) => ApiPythonVersionListResult {
-                    rows: Vec::new(),
-                    error: Some(format!(
-                        "Ошибка списка версий: {}",
-                        String::from_utf8_lossy(&output.stderr).trim()
-                    )),
-                },
-                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
-                    ApiPythonVersionListResult {
-                        rows: Vec::new(),
-                        error: Some("Получение списка версий Python отменено.".to_string()),
-                    }
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::TimedOut => {
-                    ApiPythonVersionListResult {
-                        rows: Vec::new(),
-                        error: Some("uv python list превысил лимит времени.".to_string()),
-                    }
-                }
-                Err(err) => ApiPythonVersionListResult {
-                    rows: Vec::new(),
-                    error: Some(format!("Ошибка запуска uv: {err}")),
-                },
-            };
-            let _ = worker_tx.send(payload);
-        }) {
-            let _ = tx.send(ApiPythonVersionListResult {
-                rows: Vec::new(),
-                error: Some(format!("не удалось запустить worker списка Python: {err}")),
-            });
-        }
+        self.ide_panel.api.trigger_api_python_version_list();
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_install(&mut self) {
-        if self.ide_panel.api.mock_python_install_running {
-            return;
-        }
-        let Some(uv_path) = self.ide_panel.api.mock.uv.selected_uv_path() else {
-            self.ide_panel.api.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
-            return;
-        };
-        let version = self.ide_panel.api.mock.uv.python_version.trim().to_string();
-        if version.is_empty() {
-            self.ide_panel.api.mock.uv.last_error = "Выберите версию Python.".to_string();
-            return;
-        }
-        let (tx, rx) = mpsc::channel();
-        self.ide_panel.api.python_install_rx = Some(rx);
-        let cancel = Arc::new(AtomicBool::new(false));
-        self.ide_panel.api.python_install_cancel = Some(cancel.clone());
-        self.ide_panel.api.mock_python_install_running = true;
-        self.ide_panel.api.mock_python_install_log.clear();
-        self.ide_panel
-            .api
-            .mock_python_install_log
-            .push(ApiPythonInstallLogLine {
-                text: format!("uv python install {version}"),
-                kind: ApiPythonInstallLogKind::Info,
-            });
-        let worker_tx = tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-python-install", move || {
-            let mut command = Command::new(uv_path);
-            command.arg("python").arg("install").arg(&version);
-            let result = crate::platform::run_command_streaming_cancelable(
-                &mut command,
-                API_PYTHON_INSTALL_TIMEOUT,
-                &cancel,
-                |stream, line| {
-                    if line.trim().is_empty() {
-                        return;
-                    }
-                    let kind = match stream {
-                        crate::platform::ProcessOutputStream::Stdout => {
-                            ApiPythonInstallLogKind::Info
-                        }
-                        crate::platform::ProcessOutputStream::Stderr => {
-                            ApiPythonInstallLogKind::Error
-                        }
-                    };
-                    let _ = worker_tx.send(ApiPythonInstallEvent::Line(ApiPythonInstallLogLine {
-                        text: line,
-                        kind,
-                    }));
-                },
-            )
-            .map_err(|error| match error.kind() {
-                std::io::ErrorKind::Interrupted => "Установка Python отменена.".to_string(),
-                std::io::ErrorKind::TimedOut => {
-                    "uv python install превысил лимит времени.".to_string()
-                }
-                _ => format!("Ошибка запуска uv: {error}"),
-            })
-            .and_then(|status| {
-                if status.success() {
-                    Ok(())
-                } else {
-                    Err(format!("uv завершился с кодом {:?}", status.code()))
-                }
-            });
-            let _ = worker_tx.send(ApiPythonInstallEvent::Done(result));
-        }) {
-            let _ = tx.send(ApiPythonInstallEvent::Done(Err(format!(
-                "не удалось запустить worker установки Python: {err}"
-            ))));
-        }
+        self.ide_panel.api.trigger_api_python_install();
     }
 
     fn apply_api_body_file_pick(&mut self, result: ApiBodyFilePickResult) {
-        if result.paths.is_empty() {
-            return;
-        }
-        let new_value = result
-            .paths
-            .iter()
-            .map(|path| path.to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if let Some((_, state)) = self.active_api_tab_mut_for(result.spec_id)
-            && state.route_idx == Some(result.route_idx)
-            && let Some(value) = state
-                .body_values
-                .iter_mut()
-                .find(|value| value.name == result.name)
-        {
-            value.value = new_value.clone();
-            state
-                .body_file_paths
-                .insert(result.name.clone(), result.paths.clone());
-        }
-        if matches!(
-            self.ide_panel.api.focused,
-            Some(ApiFocus::BodyField {
-                spec_id,
-                route_idx,
-                ref name,
-            }) if spec_id == result.spec_id && route_idx == result.route_idx && name == &result.name
-        ) {
-            let old_version = self.ide_panel.api.input_editor.version;
-            self.ide_panel.api.input_editor.set_text_clean(&new_value);
-            self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
-        }
+        let (tabs, active_tab, api) = (
+            &mut self.tabs,
+            self.active_tab,
+            &mut self.ide_panel.api,
+        );
+        let state = tabs.get_mut(active_tab).and_then(|tab| match &mut tab.kind {
+            crate::app::EditorTabKind::ApiClient(meta, state) if meta.spec_id == result.spec_id => {
+                Some(state)
+            }
+            _ => None,
+        });
+        api.apply_api_body_file_pick(state, result);
     }
 
     pub fn start_api_local_import(&mut self, path: PathBuf) {
@@ -1913,16 +1433,6 @@ impl crate::app::App {
         self.save_tabs_state();
     }
 
-    fn api_spec_title(&self, id: ApiSpecId) -> String {
-        self.ide_panel
-            .api
-            .specs
-            .iter()
-            .find(|entry| entry.id == id)
-            .map(|entry| entry.title.clone())
-            .unwrap_or_else(|| "API".to_string())
-    }
-
     fn last_api_route_tab_idx(&self, id: ApiSpecId) -> Option<usize> {
         self.tabs.iter().rposition(|tab| {
             matches!(
@@ -1934,7 +1444,7 @@ impl crate::app::App {
     }
 
     fn open_new_api_spec_tab(&mut self, id: ApiSpecId) {
-        let title = self.api_spec_title(id);
+        let title = self.ide_panel.api.api_spec_title(id);
         let mut api_state = ApiClientTabState::default();
         let mut route_method = None;
         let mut route_path = String::new();
@@ -2385,16 +1895,16 @@ impl crate::app::App {
         );
         if focus_changed {
             self.commit_api_focus();
-            self.stash_active_api_mock_editor();
+            self.ide_panel.api.stash_active_api_mock_editor();
         }
         if focus_changed || dynamic_readonly_focus {
-            let is_array = self.api_focus_is_array_input(&focus);
+            let is_array = self.ide_panel.api.api_focus_is_array_input(&focus);
             let mut text = self.api_focus_text(&focus);
             if is_array {
                 text = api_array_editor_text(&text);
             }
             let old_version = self.ide_panel.api.input_editor.version;
-            if let Some(key) = Self::api_mock_editor_key_for_focus(&focus)
+            if let Some(key) = ApiClientState::api_mock_editor_key_for_focus(&focus)
                 && let Some(editor) = self.ide_panel.api.mock_python_editors.remove(&key)
             {
                 self.ide_panel.api.input_editor = editor;
@@ -2432,7 +1942,7 @@ impl crate::app::App {
         self.ide_panel.lsp_log_filter_focused = false;
         self.ide_panel.file_tree_focused = false;
         self.pulse_api_cursor_blink();
-        self.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation();
     }
 
 }

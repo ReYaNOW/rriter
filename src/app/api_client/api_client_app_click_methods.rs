@@ -24,20 +24,6 @@ fn api_mock_constraint_menu_contains_ui_id(
 }
 
 impl crate::app::App {
-    pub(crate) fn api_mock_constraint_menu_contains_ui_id(
-        &self,
-        id: Option<crate::ui_system::UiId>,
-    ) -> bool {
-        api_mock_constraint_menu_contains_ui_id(
-            self.ide_panel.api.mock_contract_constraint_menu,
-            id,
-        )
-    }
-
-    pub(crate) fn close_api_mock_constraint_menu(&mut self) -> bool {
-        self.ide_panel.api.mock_contract_constraint_menu.take().is_some()
-    }
-
     pub(crate) fn close_active_api_output_example_menu(&mut self) -> bool {
         let Some((meta, state)) = self.active_api_tab() else {
             return false;
@@ -193,46 +179,9 @@ impl crate::app::App {
             .renderer
             .as_ref()
             .map_or(rect.1, |renderer| renderer.last_mouse_y);
-        let (scroll, max_scroll) = match id {
-            crate::ui_system::UiId::ApiMockPythonVersionsScrollY
-                if self.ide_panel.api.mock_python_version_picker_open =>
-            {
-                let max_scroll = crate::app::api_client::api_python_version_list_max_scroll(
-                    self.ide_panel.api.mock_python_versions.len(),
-                    rect.3 + 12.0 * scale,
-                    scale,
-                );
-                (
-                    &mut self.ide_panel.api.mock_python_versions_scroll,
-                    max_scroll,
-                )
-            }
-            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY
-                if crate::app::api_client::api_python_install_log_visible(&self.ide_panel.api) =>
-            {
-                let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
-                    self.ide_panel.api.mock_python_install_log.len(),
-                    rect.3 + 12.0 * scale,
-                    scale,
-                );
-                (
-                    &mut self.ide_panel.api.mock_python_install_log_scroll,
-                    max_scroll,
-                )
-            }
-            _ => return false,
-        };
-        let Some((drag_offset, target)) = crate::app::api_client::api_python_scrollbar_drag_target(
-            (rect.0, rect.1 - 6.0 * scale, rect.2, rect.3 + 12.0 * scale),
-            scroll.current,
-            max_scroll,
-            pointer_y,
-            scale,
-            None,
-        ) else {
-            return false;
-        };
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
+        self.ide_panel
+            .api
+            .start_api_python_runtime_scroll_drag(id, rect, pointer_y, scale)
     }
 
     pub(crate) fn update_api_python_runtime_scroll_drag(&mut self, pointer_y: f32) -> bool {
@@ -248,60 +197,14 @@ impl crate::app::App {
         } else {
             return false;
         };
-        let Some(rect) = self.ui_registry.rect_for(id) else {
-            match id {
-                crate::ui_system::UiId::ApiMockPythonVersionsScrollY => {
-                    self.ide_panel.api.mock_python_versions_scroll.end_drag();
-                }
-                crate::ui_system::UiId::ApiMockPythonInstallLogScrollY => {
-                    self.ide_panel.api.mock_python_install_log_scroll.end_drag();
-                }
-                _ => {}
-            }
-            return false;
-        };
         let scale = self
             .renderer
             .as_ref()
             .map_or(1.0, |renderer| renderer.scale_factor);
-        let source_rect = (rect.0, rect.1 - 6.0 * scale, rect.2, rect.3 + 12.0 * scale);
-        let (scroll, max_scroll) = match id {
-            crate::ui_system::UiId::ApiMockPythonVersionsScrollY => {
-                let max_scroll = crate::app::api_client::api_python_version_list_max_scroll(
-                    self.ide_panel.api.mock_python_versions.len(),
-                    source_rect.3,
-                    scale,
-                );
-                (
-                    &mut self.ide_panel.api.mock_python_versions_scroll,
-                    max_scroll,
-                )
-            }
-            crate::ui_system::UiId::ApiMockPythonInstallLogScrollY => {
-                let max_scroll = crate::app::api_client::api_python_install_log_max_scroll(
-                    self.ide_panel.api.mock_python_install_log.len(),
-                    source_rect.3,
-                    scale,
-                );
-                (
-                    &mut self.ide_panel.api.mock_python_install_log_scroll,
-                    max_scroll,
-                )
-            }
-            _ => return false,
-        };
-        let Some((drag_offset, target)) = crate::app::api_client::api_python_scrollbar_drag_target(
-            source_rect,
-            scroll.current,
-            max_scroll,
-            pointer_y,
-            scale,
-            Some(scroll.drag_offset),
-        ) else {
-            scroll.end_drag();
-            return false;
-        };
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset)
+        let rect = self.ui_registry.rect_for(id);
+        self.ide_panel
+            .api
+            .update_api_python_runtime_scroll_drag(id, rect, pointer_y, scale)
     }
 
     pub fn handle_api_client_click(
@@ -608,30 +511,46 @@ impl crate::app::App {
                 self.trigger_api_mock_export_openapi();
             }
             crate::ui_system::UiId::ApiMockContractPathToggle(route_idx) => {
-                self.toggle_api_mock_contract_path(route_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_path(active, route_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractQueryToggle(route_idx) => {
-                self.toggle_api_mock_contract_query(route_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_query(active, route_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractBodyToggle(route_idx) => {
-                self.toggle_api_mock_contract_body(route_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_body(active, route_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractPathFieldToggle(route_idx, field_idx) => {
-                self.toggle_api_mock_contract_path_field(route_idx, field_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_path_field(active, route_idx, field_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractQueryFieldToggle(route_idx, field_idx) => {
-                self.toggle_api_mock_contract_query_field(route_idx, field_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_query_field(active, route_idx, field_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractBodyFieldToggle(route_idx, field_idx) => {
-                self.toggle_api_mock_contract_body_field(route_idx, field_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_body_field(active, route_idx, field_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractFieldRequired(route_idx, group, field_idx) => {
                 self.ide_panel.api.mock_contract_constraint_menu = None;
-                self.toggle_api_mock_contract_field_required(route_idx, group, field_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_field_required(active, route_idx, group, field_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractFieldNullable(route_idx, group, field_idx) => {
                 self.ide_panel.api.mock_contract_constraint_menu = None;
-                self.toggle_api_mock_contract_field_nullable(route_idx, group, field_idx);
+                self.edit_api_mock_contract(route_idx, |api, active| {
+                    api.toggle_api_mock_contract_field_nullable(active, route_idx, group, field_idx)
+                });
             }
             crate::ui_system::UiId::ApiMockContractFieldRemove(route_idx, group, field_idx) => {
                 self.open_api_mock_contract_field_delete_dialog(route_idx, group, field_idx);
@@ -899,7 +818,7 @@ impl crate::app::App {
                     state.server_idx = idx;
                 }
                 if let Some(server) = selected_server {
-                    self.sync_api_mock_proxy_base_to_server(&server);
+                    self.ide_panel.api.sync_api_mock_proxy_base_to_server(&server);
                     self.ide_panel.api.refresh_mock_server();
                 }
             }

@@ -300,11 +300,6 @@ impl crate::app::App {
         }
     }
 
-    fn api_mock_generated_preview(&self, route_idx: usize) -> Option<String> {
-        let (_, _, route, model) = self.api_mock_route_context(route_idx)?;
-        Some(api_generated_response_for_route(&route, &model).2)
-    }
-
     fn apply_response_token_to_auth(
         &mut self,
         route_idx: usize,
@@ -322,46 +317,15 @@ impl crate::app::App {
         let Some(response) = state.response.as_ref() else {
             return;
         };
-        let Ok(json) = serde_json::from_str::<Value>(&response.body) else {
-            return;
-        };
-        let access_token = json.get("access_token").and_then(Value::as_str);
-        let refresh_token = json.get("refresh_token").and_then(Value::as_str);
-        if (!save_access || access_token.is_none()) && (!save_refresh || refresh_token.is_none()) {
-            return;
-        }
-        let token_type = json
-            .get("token_type")
-            .and_then(Value::as_str)
-            .unwrap_or("Bearer")
-            .to_string();
-        let expires_at = json
-            .get("expires_in")
-            .and_then(Value::as_u64)
-            .map(|secs| now_epoch_secs().saturating_add(secs));
-        let Some(scheme_name) = self
-            .ide_panel
-            .api
-            .models
-            .get(&spec_id)
-            .and_then(|model| model.security_schemes.get(scheme_idx))
-            .filter(|scheme| scheme.token_capable())
-            .map(|scheme| scheme.name.clone())
-        else {
-            return;
-        };
-        let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme_name);
-        if save_access && let Some(token) = access_token {
-            entry.access_token = token.to_string();
-            entry.value = token.to_string();
-        }
-        if save_refresh && let Some(token) = refresh_token {
-            entry.refresh_token = token.to_string();
-            entry.value = token.to_string();
-        }
-        entry.token_type = token_type;
-        entry.expires_at = expires_at;
-        self.ide_panel.api.persist();
+        // Owned copy: the tab borrow must end before `ide_panel.api` is borrowed mutably.
+        let response_body = response.body.clone();
+        self.ide_panel.api.apply_response_token_to_auth(
+            spec_id,
+            &response_body,
+            scheme_idx,
+            save_access,
+            save_refresh,
+        );
     }
 
     pub fn commit_api_focus(&mut self) {
@@ -369,7 +333,7 @@ impl crate::app::App {
             return;
         };
         let mut text = self.ide_panel.api.input_editor.get_full_text();
-        if self.api_focus_is_array_input(&focus) {
+        if self.ide_panel.api.api_focus_is_array_input(&focus) {
             text = split_api_array_values(&text).join("\n");
         }
         // Mock arms only set this; `commit_mock_config` after the match persists and
@@ -433,7 +397,7 @@ impl crate::app::App {
                     }
                     self.sync_api_manual_route_tabs();
                     if contract_path_changed {
-                        self.invalidate_api_mock_contract_tools(manual_idx);
+                        self.ide_panel.api.invalidate_api_mock_contract_tools(manual_idx);
                     }
                     mock_changed = true;
                 }
@@ -465,7 +429,7 @@ impl crate::app::App {
                     if changed {
                         script.contract = contract;
                         script.contract_source = contract_source;
-                        self.invalidate_api_mock_contract_tools(route_idx);
+                        self.ide_panel.api.invalidate_api_mock_contract_tools(route_idx);
                         mock_changed = true;
                     }
                 }
@@ -516,7 +480,17 @@ impl crate::app::App {
                 prop,
             } => {
                 // Commits through `mutate_api_mock_contract_no_commit`.
-                self.commit_api_mock_contract_field_prop(route_idx, group, field_idx, prop, &text);
+                let active = self.api_active_route();
+                if self.ide_panel.api.commit_api_mock_contract_field_prop(
+                    active.as_ref(),
+                    route_idx,
+                    group,
+                    field_idx,
+                    prop,
+                    &text,
+                ) {
+                    self.start_api_mock_contract_tools(route_idx);
+                }
             }
             ApiFocus::AuthValue { spec_id, scheme } => {
                 self.ide_panel.api.auth.set_value(spec_id, &scheme, text);
@@ -590,57 +564,4 @@ impl crate::app::App {
         }
     }
 
-    fn api_focus_is_array_input(&self, focus: &ApiFocus) -> bool {
-        match focus {
-            ApiFocus::PathParam {
-                spec_id,
-                route_idx,
-                name,
-            } => self
-                .ide_panel
-                .api
-                .models
-                .get(spec_id)
-                .and_then(|model| model.routes.get(*route_idx))
-                .and_then(|route| route.path_params.iter().find(|param| param.name == *name))
-                .is_some_and(|param| matches!(param.primitive_type, ApiPrimitiveType::Array)),
-            ApiFocus::QueryParam {
-                spec_id,
-                route_idx,
-                name,
-            } => self
-                .ide_panel
-                .api
-                .models
-                .get(spec_id)
-                .and_then(|model| model.routes.get(*route_idx))
-                .and_then(|route| route.query_params.iter().find(|param| param.name == *name))
-                .is_some_and(|param| matches!(param.primitive_type, ApiPrimitiveType::Array)),
-            ApiFocus::BodyField {
-                spec_id,
-                route_idx,
-                name,
-            } => self
-                .ide_panel
-                .api
-                .models
-                .get(spec_id)
-                .and_then(|model| model.routes.get(*route_idx).map(|route| (model, route)))
-                .and_then(|(model, route)| {
-                    let root = route.request_body.as_ref()?.schema?;
-                    let prop = model
-                        .schema_arena
-                        .get(root.0)?
-                        .properties
-                        .iter()
-                        .find(|prop| prop.name == *name)?;
-                    model.schema_arena.get(prop.schema.0)
-                })
-                .is_some_and(api_schema_is_array_input),
-            ApiFocus::MockContractField { prop, .. } => {
-                matches!(prop, crate::ui_system::ApiMockContractFieldProp::Enum)
-            }
-            _ => false,
-        }
-    }
 }

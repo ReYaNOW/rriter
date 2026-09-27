@@ -214,7 +214,7 @@ impl App {
             return;
         }
 
-        if self.api_python_runtime_overlay_active() {
+        if self.ide_panel.api.api_python_runtime_overlay_active() {
             self.scroll_api_python_runtime_overlay(dy);
             self.window.as_ref().unwrap().request_redraw();
             return;

@@ -35,8 +35,8 @@ impl App {
             }
             if self.ide_panel.api.mock_contract_constraint_menu.is_some() {
                 let clicked_id = self.ui_registry.find_at(mx, my);
-                if !self.api_mock_constraint_menu_contains_ui_id(clicked_id) {
-                    self.close_api_mock_constraint_menu();
+                if !self.ide_panel.api.api_mock_constraint_menu_contains_ui_id(clicked_id) {
+                    self.ide_panel.api.close_api_mock_constraint_menu();
                     if let Some(window) = self.window.as_ref() {
                         window.request_redraw();
                     }
@@ -164,11 +164,13 @@ impl App {
         mx: f32,
         my: f32,
     ) -> bool {
-        if state == ElementState::Pressed && self.api_python_runtime_overlay_active() {
+        if state == ElementState::Pressed && self.ide_panel.api.api_python_runtime_overlay_active() {
             if button == winit::event::MouseButton::Left {
                 let clicked_id = self.ui_registry.find_overlay_at(mx, my);
                 if let Some(clicked_id) = clicked_id
-                    && crate::app::App::ui_id_is_api_python_runtime_overlay(clicked_id)
+                    && crate::app::api_client::ApiClientState::ui_id_is_api_python_runtime_overlay(
+                        clicked_id,
+                    )
                 {
                     self.handle_ui_click(clicked_id);
                 }

@@ -103,9 +103,9 @@ mod tests {
 
     #[test]
     fn api_mock_virtual_path_is_unique_per_spec_and_route() {
-        let a = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 0);
-        let b = crate::app::App::api_mock_virtual_path_for(ApiSpecId(2), 0);
-        let c = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 1);
+        let a = ApiClientState::api_mock_virtual_path_for(ApiSpecId(1), 0);
+        let b = ApiClientState::api_mock_virtual_path_for(ApiSpecId(2), 0);
+        let c = ApiClientState::api_mock_virtual_path_for(ApiSpecId(1), 1);
 
         assert_ne!(a, b);
         assert_ne!(a, c);
@@ -681,7 +681,7 @@ mod tests {
     fn api_mock_autocomplete_anchor_uses_cursor_baseline_and_scroll_x() {
         let rect = (100.0, 200.0, 300.0, 120.0);
         let text = "seed\n    Response";
-        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+        let (x, y) = ApiClientState::api_mock_autocomplete_anchor_for_text(
             crate::ui_system::UiId::ApiMockBodyInput(0),
             rect,
             1.0,
@@ -699,7 +699,7 @@ mod tests {
     fn api_mock_signature_autocomplete_anchor_uses_registered_left_edge() {
         let rect = (140.0, 80.0, 360.0, 32.0);
         let text = "def handler";
-        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+        let (x, y) = ApiClientState::api_mock_autocomplete_anchor_for_text(
             crate::ui_system::UiId::ApiMockSignatureInput(0),
             rect,
             1.0,
