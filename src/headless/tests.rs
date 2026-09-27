@@ -4,12 +4,73 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
-    use std::io::Cursor;
+    use std::io::{BufRead, BufReader, Cursor};
     use std::path::{Path, PathBuf};
+    use std::process::{ChildStdin, Command, Stdio};
+    use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+    const POSTGRES_FIXTURE_DATABASE: &str = "rriter_pgo";
+    const POSTGRES_FIXTURE_USER: &str = "rriter_pgo";
+
+    pub(crate) struct PostgresFixture {
+        pub port: u16,
+        pub database: &'static str,
+        pub user: &'static str,
+        child: crate::platform::ManagedChild,
+        stdin: Option<ChildStdin>,
+    }
+
+    pub(crate) fn postgres_fixture() -> PostgresFixture {
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("postgres_fixture.py");
+        let mut command = Command::new("python3");
+        command
+            .arg(script)
+            .args(["--port", "0"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut child = crate::platform::ManagedChild::spawn(&mut command)
+            .expect("start shared PostgreSQL fixture process");
+        let stdin = child
+            .take_stdin()
+            .expect("shared PostgreSQL fixture stdin unavailable");
+        let stdout = child
+            .take_stdout()
+            .expect("shared PostgreSQL fixture stdout unavailable");
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = sender.send(result);
+        });
+        let port_line = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|error| panic!("timed out waiting for PostgreSQL fixture port: {error}"))
+            .expect("failed to read PostgreSQL fixture port");
+        let port = port_line
+            .trim()
+            .parse::<u16>()
+            .expect("PostgreSQL fixture did not print a valid port");
+        assert_ne!(port, 0, "PostgreSQL fixture printed port zero");
+        PostgresFixture {
+            port,
+            database: POSTGRES_FIXTURE_DATABASE,
+            user: POSTGRES_FIXTURE_USER,
+            child,
+            stdin: Some(stdin),
+        }
+    }
+
+    impl Drop for PostgresFixture {
+        fn drop(&mut self) {
+            self.stdin.take();
+            let _ = self.child.terminate(Duration::from_millis(250));
+        }
+    }
 
     /// One temporary profile root per test process. The first call installs it as the
     /// app root override, so every later test writes RRiter state there, never into the
@@ -237,6 +298,102 @@ pub(crate) mod tests_support {
         assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     }
 
+    /// Point at (`x_fraction`, `y_fraction`) of the `id` hitbox, `(0, 0)` is its top-left.
+    pub(crate) fn ui_point(
+        dump: &serde_json::Value,
+        id: &str,
+        x_fraction: f64,
+        y_fraction: f64,
+    ) -> (f64, f64) {
+        let [x, y, width, height] = ui_rect(dump, id);
+        (x + width * x_fraction, y + height * y_fraction)
+    }
+
+    /// `click_ui` at a fractional point of the hitbox instead of its center.
+    pub(crate) fn click_ui_fraction(
+        session: &mut HeadlessSession,
+        id: &str,
+        x_fraction: f64,
+        y_fraction: f64,
+    ) -> (f64, f64) {
+        let (x, y) = ui_point(&dump(session), id, x_fraction, y_fraction);
+        let lines = run_script(session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        (x, y)
+    }
+
+    /// Replaces the text of a Database connection dialog field (`DatabaseFormField` name).
+    pub(crate) fn set_database_dialog_field(session: &mut HeadlessSession, field: &str, value: &str) {
+        let id = format!("DatabaseDialogField({field})");
+        let state = dump(session);
+        let is_input = state["ui"].as_array().is_some_and(|ui| {
+            ui.iter().any(|element| element["id"] == id.as_str() && element["kind"] == "TextInput")
+        });
+        assert!(is_input, "missing database text input {id}: {}", state["ui"]);
+        let (x, y) = ui_center(&state, &id);
+        let lines = run_script(
+            session,
+            format!("mouse_move {x} {y}\nclick\nkey ctrl+a\ntype {value}\n").as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    }
+
+    /// Adds a PostgreSQL connection to the fixture credentials through the Database panel
+    /// form and returns its index. Connections persist in the shared test profile, so the
+    /// index is looked up by `display_name`, which callers keep unique per test.
+    pub(crate) fn add_database_connection_through_ui(
+        session: &mut HeadlessSession,
+        display_name: &str,
+        port: u16,
+    ) -> usize {
+        click_ui(session, "SidebarSlot(Database)");
+        click_ui(session, "DatabaseAdd");
+        set_database_dialog_field(session, "DisplayName", display_name);
+        set_database_dialog_field(session, "Host", "127.0.0.1");
+        set_database_dialog_field(session, "Port", &port.to_string());
+        set_database_dialog_field(session, "Username", POSTGRES_FIXTURE_USER);
+        set_database_dialog_field(session, "PostgresPassword", "fixture");
+        set_database_dialog_field(session, "MaintenanceDatabase", POSTGRES_FIXTURE_DATABASE);
+        click_ui(session, "DatabaseDialogSave");
+        let find = |session: &HeadlessSession| {
+            session
+                .app
+                .ide_panel
+                .database
+                .connections
+                .iter()
+                .position(|connection| connection.config.display_name == display_name)
+        };
+        wait_until(session, 5000, "saved Database connection", |session| {
+            find(session).is_some_and(|index| {
+                has_ui(&dump(session), &format!("DatabaseConnectionRow({index})"))
+            })
+        });
+        find(session).unwrap()
+    }
+
+    /// Adds a connection to `fixture` through the UI, expands it and waits until the
+    /// fixture database is in the loaded catalog. Returns the connection index.
+    pub(crate) fn connect_postgres_fixture_through_ui(
+        session: &mut HeadlessSession,
+        fixture: &PostgresFixture,
+        display_name: &str,
+    ) -> usize {
+        let index = add_database_connection_through_ui(session, display_name, fixture.port);
+        click_ui(session, &format!("DatabaseConnectionArrow({index})"));
+        wait_until(session, 8000, "PostgreSQL fixture database catalog", |session| {
+            session.app.ide_panel.database.connections.get(index).is_some_and(|connection| {
+                connection.status == crate::app::database::DatabaseConnectionStatus::Ready
+                    && connection.databases_loaded
+                    && connection
+                        .databases
+                        .iter()
+                        .any(|database| database.name == fixture.database)
+            })
+        });
+        index
+    }
+
     pub(crate) fn has_ui(dump: &serde_json::Value, id: &str) -> bool {
         dump["ui"].as_array().is_some_and(|ui| ui.iter().any(|element| element["id"] == id))
     }
@@ -279,6 +436,32 @@ pub(crate) mod tests_support {
     pub(crate) fn ok_json(line: &str) -> serde_json::Value {
         let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
         serde_json::from_str(payload).expect("json payload")
+    }
+}
+
+mod postgres_fixture_cases {
+    use crate::headless::tests_support::postgres_fixture;
+    use std::net::{SocketAddr, TcpStream};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn postgres_fixture_starts_and_accepts_tcp() {
+        let fixture = postgres_fixture();
+        assert_eq!(fixture.database, "rriter_pgo");
+        assert_eq!(fixture.user, "rriter_pgo");
+        let address = SocketAddr::from(([127, 0, 0, 1], fixture.port));
+        assert!(TcpStream::connect(address).is_ok(), "fixture rejected TCP connection");
+
+        drop(fixture);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_err() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("PostgreSQL fixture still accepts connections after drop");
     }
 }
 

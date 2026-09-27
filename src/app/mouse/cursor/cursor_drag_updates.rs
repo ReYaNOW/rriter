@@ -1,7 +1,8 @@
 //! Cursor-move phases: IDE panel DnD/resize and in-progress drags after hover.
 use super::cursor_helpers::{resized_bottom_height, resized_left_width};
 use super::*;
-use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
+use crate::render_view::editor_scroll_content_height;
+use crate::render_view::minimap_ui::{minimap_thumb_height, minimap_view_metrics};
 
 impl App {
     pub(crate) fn terminal_selection_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
@@ -721,15 +722,15 @@ impl App {
 
                 let track_h = editor_height;
                 let thumb_h = if is_minimap_drag {
-                    let total_lines_f32 = self.editor.line_offsets.len() as f32;
-                    let bottom_blank_lines =
-                        editor_bottom_blank_lines(editor_height, r.line_height);
-                    let visible_minimap_lines = total_lines_f32.min(900.0);
-                    let minimap_line_h = (editor_height
-                        / (visible_minimap_lines + bottom_blank_lines).max(1.0))
-                    .max(1.5);
-                    let visible_lines = editor_height / r.line_height;
-                    (visible_lines * minimap_line_h).max(4.0)
+                    // Same geometry as `draw_minimap` and the minimap click handler.
+                    let minimap = minimap_view_metrics(
+                        r.minimap_total_visual_lines(&self.editor),
+                        editor_height,
+                        r.line_height,
+                        self.scroll_y.current.min(max_scroll),
+                        max_scroll,
+                    );
+                    minimap_thumb_height(editor_height, r.line_height, minimap.line_height)
                 } else {
                     let total_content_height = editor_scroll_content_height(
                         self.editor.get_visible_lines_count(),

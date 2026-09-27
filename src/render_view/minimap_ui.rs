@@ -89,15 +89,27 @@ fn minimap_mask_chunk(
     chunk
 }
 
+/// Minimap geometry shared by `draw_minimap` and the minimap click/drag handlers, so a
+/// click lands on the line drawn under the pointer.
 #[derive(Clone, Copy, Debug)]
-struct MinimapViewMetrics {
-    line_height: f32,
-    scroll: f32,
+pub(crate) struct MinimapViewMetrics {
+    pub(crate) line_height: f32,
+    pub(crate) scroll: f32,
     view_top: f32,
     view_bottom: f32,
 }
 
-fn minimap_view_metrics(
+/// Height of the minimap viewport thumb when the editor can scroll.
+#[inline]
+pub(crate) fn minimap_thumb_height(
+    editor_height: f32,
+    editor_line_height: f32,
+    minimap_line_height: f32,
+) -> f32 {
+    (editor_height / editor_line_height * minimap_line_height).max(4.0)
+}
+
+pub(crate) fn minimap_view_metrics(
     total_lines: usize,
     editor_height: f32,
     editor_line_height: f32,
@@ -145,6 +157,20 @@ fn minimap_visible_visual_line_range(
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    /// Visual line count the minimap lays out (`draw_minimap` gets the same count from
+    /// `ensure_editor_visual_line_map`); falls back to physical lines before the map exists.
+    pub(crate) fn minimap_total_visual_lines(&self, editor: &Editor) -> usize {
+        if self.editor_visual_line_map_is_valid(editor) {
+            self.phys_to_visual
+                .last()
+                .copied()
+                .map(|line| line + 1)
+                .unwrap_or(1)
+        } else {
+            editor.line_offsets.len()
+        }
+    }
+
     pub(crate) fn minimap_visible_physical_line_range(
         &self,
         editor: &Editor,
@@ -156,15 +182,7 @@ impl Renderer {
             return 0..0;
         }
         let mapping_ready = self.editor_visual_line_map_is_valid(editor);
-        let total_visual_lines = if mapping_ready {
-            self.phys_to_visual
-                .last()
-                .copied()
-                .map(|line| line + 1)
-                .unwrap_or(1)
-        } else {
-            physical_line_count
-        };
+        let total_visual_lines = self.minimap_total_visual_lines(editor);
         let max_scroll =
             editor_max_scroll_for_lines(total_visual_lines, self.line_height, editor_height);
         let metrics = minimap_view_metrics(
@@ -217,11 +235,10 @@ impl Renderer {
         let current_visible_top_line = render_scroll_y / self.line_height;
         let viewport_y = tab_bar_h
             + (current_visible_top_line * minimap_line_h - current_minimap_scroll).round();
-        let visible_lines = editor_height / self.line_height;
         let viewport_h = if max_scroll <= 0.0 {
             editor_height
         } else {
-            (visible_lines * minimap_line_h).max(4.0)
+            minimap_thumb_height(editor_height, self.line_height, minimap_line_h)
         };
 
         let view_bg = [

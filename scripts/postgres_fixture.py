@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic PostgreSQL wire-protocol fixture for RRiter PGO training.
+"""Deterministic PostgreSQL wire-protocol fixture for RRiter PGO and headless tests.
 
 This server intentionally implements only the protocol and SQL families used by
 RRiter Database Tools. It has no PostgreSQL process dependency and no alternate
@@ -9,10 +9,13 @@ RRiter backend: tokio-postgres connects to it over a real loopback TCP socket.
 from __future__ import annotations
 
 import collections
+import argparse
 import errno
 import re
+import signal
 import socket
 import struct
+import sys
 import threading
 from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
@@ -22,8 +25,8 @@ POSTGRES_SSL_REQUEST = 80877103
 POSTGRES_GSSENC_REQUEST = 80877104
 MAX_PROTOCOL_MESSAGE_BYTES = 16 * 1024 * 1024
 
-PGO_DATABASE_NAME = "rriter_pgo"
-PGO_DATABASE_USER = "rriter_pgo"
+DEFAULT_DATABASE_NAME = "rriter_pgo"
+DEFAULT_DATABASE_USER = "rriter_pgo"
 PGO_SCHEMA_NAME = "public"
 PGO_TABLE_NAME = "pgo_items"
 PGO_ROW_COUNT = 80
@@ -563,8 +566,8 @@ class LocalPostgresFixture:
     def __init__(
         self,
         *,
-        database_name: str = PGO_DATABASE_NAME,
-        username: str = PGO_DATABASE_USER,
+        database_name: str = DEFAULT_DATABASE_NAME,
+        username: str = DEFAULT_DATABASE_USER,
         row_count: int = PGO_ROW_COUNT,
     ) -> None:
         if row_count < 1:
@@ -597,14 +600,14 @@ class LocalPostgresFixture:
         self._peer_disconnects: list[str] = []
         self._worker_errors: list[str] = []
 
-    def start(self) -> "LocalPostgresFixture":
+    def start(self, *, host: str = "127.0.0.1", port: int = 0) -> "LocalPostgresFixture":
         with self._lock:
             if self._listener is not None:
                 raise PostgresFixtureError("PostgreSQL fixture is already running")
             self._stop_event.clear()
             listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            listener.bind(("127.0.0.1", 0))
+            listener.bind((host, port))
             listener.listen(16)
             listener.settimeout(0.2)
             self._listener = listener
@@ -1433,3 +1436,31 @@ class _FixtureSession:
             self.transaction_status = "E"
         self.client.sendall(_message_error(message, sqlstate))
         self.client.sendall(_message_ready(self.transaction_status))
+
+
+def _stop_on_signal(_signum: int, _frame: object) -> None:
+    raise KeyboardInterrupt
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--port", type=int, required=True)
+    parser.add_argument("--host", default="127.0.0.1")
+    args = parser.parse_args(argv)
+
+    fixture = LocalPostgresFixture().start(host=args.host, port=args.port)
+    signal.signal(signal.SIGTERM, _stop_on_signal)
+    signal.signal(signal.SIGINT, _stop_on_signal)
+    print(fixture.endpoint[1], flush=True)
+    try:
+        while sys.stdin.read(1):
+            pass
+    except KeyboardInterrupt:
+        pass
+    finally:
+        fixture.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

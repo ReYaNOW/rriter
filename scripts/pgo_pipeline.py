@@ -27,9 +27,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from pgo_postgres_fixture import (
-    PGO_DATABASE_NAME,
-    PGO_DATABASE_USER,
+from postgres_fixture import (
+    DEFAULT_DATABASE_NAME,
+    DEFAULT_DATABASE_USER,
     LocalPostgresFixture,
     PostgresFixtureTelemetry,
 )
@@ -981,8 +981,8 @@ def isolated_runtime_environment(
             {
                 PGO_DATABASE_ENV_HOST: host,
                 PGO_DATABASE_ENV_PORT: str(port),
-                PGO_DATABASE_ENV_NAME: PGO_DATABASE_NAME,
-                PGO_DATABASE_ENV_USER: PGO_DATABASE_USER,
+                PGO_DATABASE_ENV_NAME: DEFAULT_DATABASE_NAME,
+                PGO_DATABASE_ENV_USER: DEFAULT_DATABASE_USER,
             }
         )
     if "linux" in config.target:
@@ -1113,7 +1113,7 @@ def run_training(
         database_endpoint = database_fixture.endpoint
         print(
             "[rriter-pgo] local PostgreSQL fixture: "
-            f"{database_endpoint[0]}:{database_endpoint[1]}/{PGO_DATABASE_NAME}",
+            f"{database_endpoint[0]}:{database_endpoint[1]}/{DEFAULT_DATABASE_NAME}",
             flush=True,
         )
         _set_openapi_server_url(paths.fixture_dir / "openapi.json", api_server.base_url)
