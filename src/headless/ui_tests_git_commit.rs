@@ -68,7 +68,7 @@ fn headless_git_commit_uses_message_and_commits_only_staged_file() {
     let lines = run_script(&mut session, b"type headless: staged-file commit\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     click_ui(&mut session, "GitCommit");
-    wait_until(&mut session, 8000, "Git commit", |session| {
+    wait_until(&mut session, 8000, "Git commit", |_| {
         git(&dir, &["log", "-1", "--format=%s"]).trim() == "headless: staged-file commit"
     });
 
