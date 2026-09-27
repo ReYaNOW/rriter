@@ -23,10 +23,10 @@ import build_common
 import build_macos
 import build_windows
 import pgo_pipeline
-import pgo_postgres_fixture
+import postgres_fixture
 
 
-def complete_pgo_database_telemetry(**overrides: object) -> pgo_postgres_fixture.PostgresFixtureTelemetry:
+def complete_pgo_database_telemetry(**overrides: object) -> postgres_fixture.PostgresFixtureTelemetry:
     values: dict[str, object] = {
         "accepted_connection_count": 6,
         "startup_count": 6,
@@ -42,7 +42,7 @@ def complete_pgo_database_telemetry(**overrides: object) -> pgo_postgres_fixture
         "worker_errors": (),
     }
     values.update(overrides)
-    return pgo_postgres_fixture.PostgresFixtureTelemetry(**values)
+    return postgres_fixture.PostgresFixtureTelemetry(**values)
 
 
 TABLE_METADATA_SQL = """
@@ -98,11 +98,11 @@ class RawPostgresClient:
 
     def startup(self) -> list[tuple[bytes, bytes]]:
         self.socket.sendall(
-            pgo_postgres_fixture.encode_startup_packet(
+            postgres_fixture.encode_startup_packet(
                 {
                     "client_encoding": "UTF8",
-                    "user": pgo_postgres_fixture.PGO_DATABASE_USER,
-                    "database": pgo_postgres_fixture.PGO_DATABASE_NAME,
+                    "user": postgres_fixture.DEFAULT_DATABASE_USER,
+                    "database": postgres_fixture.DEFAULT_DATABASE_NAME,
                     "application_name": "RRiter Database Tools",
                 }
             )
@@ -110,20 +110,20 @@ class RawPostgresClient:
         return self.read_until_ready()
 
     def query(self, sql: str) -> list[tuple[bytes, bytes]]:
-        self.send("Q", pgo_postgres_fixture.encode_cstring(sql))
+        self.send("Q", postgres_fixture.encode_cstring(sql))
         return self.read_until_ready()
 
     def prepare(self, name: str, sql: str) -> list[tuple[bytes, bytes]]:
         parse_body = (
-            pgo_postgres_fixture.encode_cstring(name)
-            + pgo_postgres_fixture.encode_cstring(sql)
+            postgres_fixture.encode_cstring(name)
+            + postgres_fixture.encode_cstring(sql)
             + struct.pack("!h", 0)
         )
-        describe_body = b"S" + pgo_postgres_fixture.encode_cstring(name)
+        describe_body = b"S" + postgres_fixture.encode_cstring(name)
         self.socket.sendall(
-            pgo_postgres_fixture.encode_protocol_message("P", parse_body)
-            + pgo_postgres_fixture.encode_protocol_message("D", describe_body)
-            + pgo_postgres_fixture.encode_protocol_message("S")
+            postgres_fixture.encode_protocol_message("P", parse_body)
+            + postgres_fixture.encode_protocol_message("D", describe_body)
+            + postgres_fixture.encode_protocol_message("S")
         )
         return self.read_until_ready()
 
@@ -136,8 +136,8 @@ class RawPostgresClient:
         result_format: int = 1,
     ) -> list[tuple[bytes, bytes]]:
         body = bytearray()
-        body.extend(pgo_postgres_fixture.encode_cstring(""))
-        body.extend(pgo_postgres_fixture.encode_cstring(statement_name))
+        body.extend(postgres_fixture.encode_cstring(""))
+        body.extend(postgres_fixture.encode_cstring(statement_name))
         if parameters:
             body.extend(struct.pack("!h", 1))
             body.extend(struct.pack("!h", parameter_format))
@@ -149,30 +149,30 @@ class RawPostgresClient:
             body.extend(value)
         body.extend(struct.pack("!h", 1))
         body.extend(struct.pack("!h", result_format))
-        execute = pgo_postgres_fixture.encode_cstring("") + struct.pack("!i", 0)
+        execute = postgres_fixture.encode_cstring("") + struct.pack("!i", 0)
         self.socket.sendall(
-            pgo_postgres_fixture.encode_protocol_message("B", bytes(body))
-            + pgo_postgres_fixture.encode_protocol_message("E", execute)
-            + pgo_postgres_fixture.encode_protocol_message("S")
+            postgres_fixture.encode_protocol_message("B", bytes(body))
+            + postgres_fixture.encode_protocol_message("E", execute)
+            + postgres_fixture.encode_protocol_message("S")
         )
         return self.read_until_ready()
 
     def close_statement_with_flush(self, name: str) -> list[tuple[bytes, bytes]]:
-        close_body = b"S" + pgo_postgres_fixture.encode_cstring(name)
+        close_body = b"S" + postgres_fixture.encode_cstring(name)
         self.socket.sendall(
-            pgo_postgres_fixture.encode_protocol_message("C", close_body)
-            + pgo_postgres_fixture.encode_protocol_message("H")
-            + pgo_postgres_fixture.encode_protocol_message("S")
+            postgres_fixture.encode_protocol_message("C", close_body)
+            + postgres_fixture.encode_protocol_message("H")
+            + postgres_fixture.encode_protocol_message("S")
         )
         return self.read_until_ready()
 
     def send(self, code: str, body: bytes = b"") -> None:
-        self.socket.sendall(pgo_postgres_fixture.encode_protocol_message(code, body))
+        self.socket.sendall(postgres_fixture.encode_protocol_message(code, body))
 
     def read_until_ready(self) -> list[tuple[bytes, bytes]]:
         messages: list[tuple[bytes, bytes]] = []
         while True:
-            message = pgo_postgres_fixture.read_protocol_message(self.socket)
+            message = postgres_fixture.read_protocol_message(self.socket)
             if message is None:
                 raise AssertionError("fixture closed connection before ReadyForQuery")
             messages.append(message)
@@ -221,7 +221,7 @@ def encode_binary_oid_array(values: list[int]) -> bytes:
             "!iiIii",
             1,
             0,
-            pgo_postgres_fixture.OID_OID,
+            postgres_fixture.OID_OID,
             len(values),
             1,
         )
@@ -365,25 +365,25 @@ class PlatformArgumentTests(unittest.TestCase):
 class PostgresFixtureTests(unittest.TestCase):
     def test_broken_pipe_is_peer_disconnect(self) -> None:
         error = BrokenPipeError(errno.EPIPE, "Broken pipe")
-        self.assertTrue(pgo_postgres_fixture._is_peer_disconnect_error(error))
+        self.assertTrue(postgres_fixture._is_peer_disconnect_error(error))
 
     def test_connection_reset_is_peer_disconnect(self) -> None:
         error = ConnectionResetError(errno.ECONNRESET, "Connection reset")
-        self.assertTrue(pgo_postgres_fixture._is_peer_disconnect_error(error))
+        self.assertTrue(postgres_fixture._is_peer_disconnect_error(error))
 
     def test_connection_aborted_is_peer_disconnect(self) -> None:
         error = ConnectionAbortedError(errno.ECONNABORTED, "Connection aborted")
-        self.assertTrue(pgo_postgres_fixture._is_peer_disconnect_error(error))
+        self.assertTrue(postgres_fixture._is_peer_disconnect_error(error))
 
     def test_plain_oserror_disconnect_errnos_are_peer_disconnects(self) -> None:
         for error_number in (errno.EPIPE, errno.ECONNRESET, errno.ECONNABORTED):
             with self.subTest(errno=error_number):
                 error = OSError("synthetic peer disconnect")
                 error.errno = error_number
-                self.assertTrue(pgo_postgres_fixture._is_peer_disconnect_error(error))
+                self.assertTrue(postgres_fixture._is_peer_disconnect_error(error))
 
     def test_worker_peer_disconnect_is_nonfatal_and_observable(self) -> None:
-        fixture = pgo_postgres_fixture.LocalPostgresFixture()
+        fixture = postgres_fixture.LocalPostgresFixture()
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             with mock.patch.object(
@@ -404,9 +404,9 @@ class PostgresFixtureTests(unittest.TestCase):
         fixture.assert_healthy()
 
     def test_real_oserror_remains_fatal_worker_error(self) -> None:
-        fixture = pgo_postgres_fixture.LocalPostgresFixture()
+        fixture = postgres_fixture.LocalPostgresFixture()
         error = OSError(errno.EIO, "fixture I/O failure")
-        self.assertFalse(pgo_postgres_fixture._is_peer_disconnect_error(error))
+        self.assertFalse(postgres_fixture._is_peer_disconnect_error(error))
         client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             with mock.patch.object(fixture, "_serve_connection", side_effect=error):
@@ -420,12 +420,12 @@ class PostgresFixtureTests(unittest.TestCase):
             any("fixture I/O failure" in value for value in telemetry.worker_errors)
         )
         with self.assertRaisesRegex(
-            pgo_postgres_fixture.PostgresFixtureError, "fixture I/O failure"
+            postgres_fixture.PostgresFixtureError, "fixture I/O failure"
         ):
             fixture.assert_healthy()
 
     def test_start_stop_uses_ephemeral_loopback_and_releases_listener(self) -> None:
-        fixture = pgo_postgres_fixture.LocalPostgresFixture()
+        fixture = postgres_fixture.LocalPostgresFixture()
         fixture.start()
         endpoint = fixture.endpoint
         self.assertEqual(endpoint[0], "127.0.0.1")
@@ -444,7 +444,7 @@ class PostgresFixtureTests(unittest.TestCase):
             probe.close()
 
     def test_worker_error_is_retained_and_fails_health_check(self) -> None:
-        fixture = pgo_postgres_fixture.LocalPostgresFixture()
+        fixture = postgres_fixture.LocalPostgresFixture()
         worker_started = threading.Event()
 
         def fail_worker(_client: socket.socket, _connection_id: int) -> None:
@@ -462,12 +462,12 @@ class PostgresFixtureTests(unittest.TestCase):
             any("forced worker failure" in value for value in fixture.telemetry().worker_errors)
         )
         with self.assertRaisesRegex(
-            pgo_postgres_fixture.PostgresFixtureError, "forced worker failure"
+            postgres_fixture.PostgresFixtureError, "forced worker failure"
         ):
             fixture.assert_healthy()
 
     def test_malformed_protocol_remains_fatal(self) -> None:
-        fixture = pgo_postgres_fixture.LocalPostgresFixture()
+        fixture = postgres_fixture.LocalPostgresFixture()
         fixture.start()
         try:
             with RawPostgresClient(fixture.endpoint) as client:
@@ -487,12 +487,12 @@ class PostgresFixtureTests(unittest.TestCase):
             )
         )
         with self.assertRaisesRegex(
-            pgo_postgres_fixture.PostgresFixtureError, "protocol errors"
+            postgres_fixture.PostgresFixtureError, "protocol errors"
         ):
             fixture.assert_healthy()
 
     def test_startup_returns_authentication_parameters_backend_key_and_ready(self) -> None:
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 messages = client.startup()
 
@@ -514,7 +514,7 @@ class PostgresFixtureTests(unittest.TestCase):
             ORDER BY id
             LIMIT 64;
         """
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 client.startup()
                 messages = client.query(sql)
@@ -528,11 +528,11 @@ class PostgresFixtureTests(unittest.TestCase):
             self.assertEqual(messages[-1][1], b"I")
             telemetry = fixture.telemetry()
             self.assertEqual(telemetry.family_count("user_select"), 1)
-            self.assertIn(pgo_postgres_fixture.normalize_sql(sql), telemetry.sql_statements)
+            self.assertIn(postgres_fixture.normalize_sql(sql), telemetry.sql_statements)
             fixture.assert_healthy()
 
     def test_extended_query_matches_tokio_postgres_binary_formats(self) -> None:
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 client.startup()
                 prepare = client.prepare("s1", TABLE_METADATA_SQL)
@@ -545,22 +545,22 @@ class PostgresFixtureTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     decode_parameter_oids(parameter_description),
-                    [pgo_postgres_fixture.OID_NAME],
+                    [postgres_fixture.OID_NAME],
                 )
                 description = next(body for code, body in prepare if code == b"T")
                 self.assertEqual(
                     row_description_oids(description),
                     [
-                        pgo_postgres_fixture.OID_INT4,
-                        pgo_postgres_fixture.OID_NAME,
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_INT8,
-                        pgo_postgres_fixture.OID_BOOL,
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_BOOL,
-                        pgo_postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_INT4,
+                        postgres_fixture.OID_NAME,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_INT8,
+                        postgres_fixture.OID_BOOL,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_BOOL,
+                        postgres_fixture.OID_TEXT,
                     ],
                 )
 
@@ -591,7 +591,7 @@ class PostgresFixtureTests(unittest.TestCase):
             WHERE e.enumtypid = ANY($1::oid[])
             ORDER BY e.enumtypid, e.enumsortorder
         """
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 client.startup()
                 prepare = client.prepare("s_enum", sql)
@@ -600,11 +600,11 @@ class PostgresFixtureTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     decode_parameter_oids(parameter_description),
-                    [pgo_postgres_fixture.OID_OID_ARRAY],
+                    [postgres_fixture.OID_OID_ARRAY],
                 )
                 execute = client.bind_execute(
                     "s_enum",
-                    [encode_binary_oid_array([pgo_postgres_fixture.OID_INT4])],
+                    [encode_binary_oid_array([postgres_fixture.OID_INT4])],
                 )
                 self.assertEqual([code for code, _body in execute], [b"2", b"C", b"Z"])
                 self.assertEqual(execute[-1], (b"Z", b"I"))
@@ -614,7 +614,7 @@ class PostgresFixtureTests(unittest.TestCase):
 
     def test_unexpected_sql_returns_error_and_is_never_counted_as_success(self) -> None:
         sql = "SELECT definitely_not_a_fixture_query()"
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 client.startup()
                 messages = client.query(sql)
@@ -624,11 +624,11 @@ class PostgresFixtureTests(unittest.TestCase):
             telemetry = fixture.telemetry()
             self.assertEqual(
                 telemetry.unexpected_sql,
-                (pgo_postgres_fixture.normalize_sql(sql),),
+                (postgres_fixture.normalize_sql(sql),),
             )
-            self.assertNotIn(pgo_postgres_fixture.normalize_sql(sql), telemetry.sql_statements)
+            self.assertNotIn(postgres_fixture.normalize_sql(sql), telemetry.sql_statements)
             with self.assertRaisesRegex(
-                pgo_postgres_fixture.PostgresFixtureError, "unexpected SQL"
+                postgres_fixture.PostgresFixtureError, "unexpected SQL"
             ):
                 fixture.assert_healthy()
 
@@ -639,7 +639,7 @@ class PostgresFixtureTests(unittest.TestCase):
             ORDER BY id
             LIMIT 1;
         """
-        with pgo_postgres_fixture.LocalPostgresFixture() as fixture:
+        with postgres_fixture.LocalPostgresFixture() as fixture:
             with RawPostgresClient(fixture.endpoint) as client:
                 client.startup()
                 begin = client.query(
@@ -657,9 +657,9 @@ class PostgresFixtureTests(unittest.TestCase):
                 self.assertEqual(
                     decode_parameter_oids(parameter_description),
                     [
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_TEXT,
-                        pgo_postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_TEXT,
+                        postgres_fixture.OID_TEXT,
                     ],
                 )
                 self.assertEqual(prepare[-1], (b"Z", b"T"))
@@ -851,11 +851,11 @@ class PgoPipelineTests(unittest.TestCase):
             self.assertEqual(environment[pgo_pipeline.PGO_DATABASE_ENV_PORT], "15432")
             self.assertEqual(
                 environment[pgo_pipeline.PGO_DATABASE_ENV_NAME],
-                pgo_postgres_fixture.PGO_DATABASE_NAME,
+                postgres_fixture.DEFAULT_DATABASE_NAME,
             )
             self.assertEqual(
                 environment[pgo_pipeline.PGO_DATABASE_ENV_USER],
-                pgo_postgres_fixture.PGO_DATABASE_USER,
+                postgres_fixture.DEFAULT_DATABASE_USER,
             )
 
     def test_database_fixture_telemetry_requires_all_production_workload_families(self) -> None:
@@ -953,7 +953,7 @@ class PgoPipelineTests(unittest.TestCase):
                 def stop(self) -> None:
                     self.stopped = True
 
-                def telemetry(self) -> pgo_postgres_fixture.PostgresFixtureTelemetry:
+                def telemetry(self) -> postgres_fixture.PostgresFixtureTelemetry:
                     return complete_pgo_database_telemetry()
 
             self_test = self

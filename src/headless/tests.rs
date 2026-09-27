@@ -4,12 +4,71 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
-    use std::io::Cursor;
+    use std::io::{BufRead, BufReader, Cursor};
     use std::path::{Path, PathBuf};
+    use std::process::{ChildStdin, Command, Stdio};
+    use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
+
+    pub(crate) struct PostgresFixture {
+        pub port: u16,
+        pub database: &'static str,
+        pub user: &'static str,
+        child: crate::platform::ManagedChild,
+        stdin: Option<ChildStdin>,
+    }
+
+    pub(crate) fn postgres_fixture() -> PostgresFixture {
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("postgres_fixture.py");
+        let mut command = Command::new("python3");
+        command
+            .arg(script)
+            .args(["--port", "0"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped());
+        let mut child = crate::platform::ManagedChild::spawn(&mut command)
+            .expect("start shared PostgreSQL fixture process");
+        let stdin = child
+            .take_stdin()
+            .expect("shared PostgreSQL fixture stdin unavailable");
+        let stdout = child
+            .take_stdout()
+            .expect("shared PostgreSQL fixture stdout unavailable");
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut line = String::new();
+            let result = BufReader::new(stdout).read_line(&mut line).map(|_| line);
+            let _ = sender.send(result);
+        });
+        let port_line = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .unwrap_or_else(|error| panic!("timed out waiting for PostgreSQL fixture port: {error}"))
+            .expect("failed to read PostgreSQL fixture port");
+        let port = port_line
+            .trim()
+            .parse::<u16>()
+            .expect("PostgreSQL fixture did not print a valid port");
+        assert_ne!(port, 0, "PostgreSQL fixture printed port zero");
+        PostgresFixture {
+            port,
+            database: "rriter_pgo",
+            user: "rriter_pgo",
+            child,
+            stdin: Some(stdin),
+        }
+    }
+
+    impl Drop for PostgresFixture {
+        fn drop(&mut self) {
+            self.stdin.take();
+            let _ = self.child.terminate(Duration::from_millis(250));
+        }
+    }
 
     /// One temporary profile root per test process. The first call installs it as the
     /// app root override, so every later test writes RRiter state there, never into the
@@ -279,6 +338,32 @@ pub(crate) mod tests_support {
     pub(crate) fn ok_json(line: &str) -> serde_json::Value {
         let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
         serde_json::from_str(payload).expect("json payload")
+    }
+}
+
+mod postgres_fixture_cases {
+    use crate::headless::tests_support::postgres_fixture;
+    use std::net::{SocketAddr, TcpStream};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn postgres_fixture_starts_and_accepts_tcp() {
+        let fixture = postgres_fixture();
+        assert_eq!(fixture.database, "rriter_pgo");
+        assert_eq!(fixture.user, "rriter_pgo");
+        let address = SocketAddr::from(([127, 0, 0, 1], fixture.port));
+        assert!(TcpStream::connect(address).is_ok(), "fixture rejected TCP connection");
+
+        drop(fixture);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_err() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("PostgreSQL fixture still accepts connections after drop");
     }
 }
 

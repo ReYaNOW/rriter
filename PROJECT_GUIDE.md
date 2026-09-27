@@ -303,9 +303,9 @@ Standard-library-only Windows release driver. It discovers Visual Studio Build T
 
 Standard-library-only macOS release driver. It builds native or Universal 2 executables, runs the project test suite once on the native architecture with the serial-test policy, applies the selected deployment target to both Cargo and `Info.plist`, creates a Retina `.app` and ICNS, signs nested code before the bundle under hardened runtime, optionally notarizes/staples, creates a DMG, verifies Gatekeeper, and can launch RRiter. Run `python3 scripts/build_macos.py --self-test` on any platform.
 
-#### `scripts/pgo_postgres_fixture.py`
+#### `scripts/postgres_fixture.py`
 
-Standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools. It listens only on `127.0.0.1` with an ephemeral port, implements the narrow startup/simple/extended-query protocol subset exercised by RRiter `tokio-postgres`, serves the deterministic `rriter_pgo.public.pgo_items` dataset, fails unknown SQL instead of fabricating success, and exposes protocol/SQL/lifecycle telemetry for PGO validation. It is a transport-boundary test/training helper, not an alternate RRiter database backend.
+Standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO Database Tools and headless UI tests. It listens on a configurable host and port (loopback with an ephemeral port by default), implements the narrow startup/simple/extended-query protocol subset exercised by RRiter `tokio-postgres`, serves the deterministic `rriter_pgo.public.pgo_items` dataset, fails unknown SQL instead of fabricating success, and exposes protocol/SQL/lifecycle telemetry for validation. It is a transport-boundary test/training helper, not an alternate RRiter database backend.
 
 Full operator commands live in `WINDOWS_BUILD.md` and `MACOS_BUILD.md`.
 
@@ -1450,7 +1450,7 @@ Root:
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
-* `scripts/pgo_postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture for PGO Database Tools; loopback ephemeral TCP server, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
+* `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
