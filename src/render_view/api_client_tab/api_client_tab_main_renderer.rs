@@ -523,23 +523,21 @@ impl Renderer {
                 .find(|(_, route)| route.stable_id == *stable_id),
             _ => None,
         };
-        let manual_model;
-        let model = if let Some((_, route)) = manual_route {
-            manual_model = api_manual_route_model(route);
-            &manual_model
-        } else {
-            let Some(model) = ide_panel.api.models.get(&tab_meta.spec_id) else {
-                self.draw_string_scaled_stable(
-                    "Спецификация загружается или кэш пустой",
-                    x + 28.0 * s,
-                    y + 46.0 * s,
-                    [0.72, 0.74, 0.82, 1.0],
-                    0.95,
-                );
-                return;
-            };
-            model
+        let Some(model) = crate::app::api_client::api_route_model_for_identity(
+            &ide_panel.api,
+            tab_meta.spec_id,
+            tab_meta.route_identity.as_ref(),
+        ) else {
+            self.draw_string_scaled_stable(
+                "Спецификация загружается или кэш пустой",
+                x + 28.0 * s,
+                y + 46.0 * s,
+                [0.72, 0.74, 0.82, 1.0],
+                0.95,
+            );
+            return;
         };
+        let model = model.as_ref();
         if tab_state.auth_view {
             ui_registry.push_clip(crate::ui_system::UiClipRect::new(x, y, w, h));
             self.flush();

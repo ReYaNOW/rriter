@@ -5,7 +5,7 @@ pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
-    use std::net::{SocketAddr, TcpStream};
+    use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
     use std::process::{ChildStdin, Command, Stdio};
     use std::sync::mpsc;
@@ -486,6 +486,230 @@ pub(crate) mod tests_support {
         terminal_text(session, index).is_some_and(|rows| rows.iter().any(|row| row.trim() == expected))
     }
 
+    pub(crate) fn python_route_session(name: &str) -> (PathBuf, HeadlessSession, usize) {
+        const TEST_WIDTH: u32 = 1280;
+        const TEST_HEIGHT: u32 = 720;
+        const TEST_SCALE: f32 = 4.0 / 3.0;
+
+        ensure_test_profile_root();
+        reset_api_test_state();
+        let dir = scratch_dir(name);
+        let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+        if dump(&mut session)["ide_panel"]["active"] != "api" {
+            click_ui(&mut session, "SidebarSlot(ApiClient)");
+        }
+        wait_until(&mut session, 5000, "API Mock controls", |session| {
+            has_ui(&dump(session), "ApiMockAddManualRoute")
+        });
+        click_ui(&mut session, "ApiMockAddManualRoute");
+        let route_idx = session.app.ide_panel.api.mock.manual_routes.len() - 1;
+        click_ui(&mut session, &format!("ApiMockRoutePythonToggle({route_idx})"));
+        click_ui(&mut session, "ApiMockPythonManage");
+        wait_until(&mut session, 2000, "Python runtime dialog", |session| {
+            has_ui(&dump(session), "ApiMockPythonManageClose")
+        });
+        click_ui(&mut session, "ApiMockPythonManageClose");
+        assert!(
+            session.app.ide_panel.api.mock.uv.selected_uv_path().is_some(),
+            "uv was not detected: {:?}",
+            session.app.ide_panel.api.mock.uv
+        );
+        (dir, session, route_idx)
+    }
+
+    pub(crate) fn focus_handler_body(session: &mut HeadlessSession, route_idx: usize, contract_layout: bool) {
+        const TEST_HEIGHT: u32 = 720;
+        const TAB_TOP_POINT: (f64, f64) = (800.0, 120.0);
+        const MIN_HITBOX: f64 = 24.0;
+
+        let reset_id = format!("ApiMockBodyReset({route_idx})");
+        let body_id = format!("ApiMockBodyInput({route_idx})");
+        if contract_layout {
+            let mut reset_rect = None;
+            for _ in 0..20 {
+                let state = dump(session);
+                if has_ui(&state, &reset_id) {
+                    let rect = ui_rect(&state, &reset_id);
+                    if rect[3] >= MIN_HITBOX && rect[1] < TEST_HEIGHT as f64 * 0.7 {
+                        reset_rect = Some(rect);
+                        break;
+                    }
+                }
+                let (x, y) = TAB_TOP_POINT;
+                let lines = run_script(session, format!("mouse_move {x} {y}\nwheel 0 -1\nsettle 200\n").as_bytes());
+                assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+            }
+            let [_, reset_y, _, _] = reset_rect.unwrap_or_else(|| {
+                panic!("{reset_id} did not reach the upper tab area: {}", dump(session))
+            });
+            let lines = run_script(
+                session,
+                format!("mouse_move {} {}\n", TAB_TOP_POINT.0, reset_y + 60.0).as_bytes(),
+            );
+            assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+            let signature_id = format!("ApiMockSignatureInput({route_idx})");
+            assert!(has_ui(&dump(session), &signature_id), "{signature_id} not registered under cursor");
+            click_ui(session, &signature_id);
+            for _ in 0..20 {
+                let lines = run_script(session, b"mouse_move 800 180\nwheel 0 -1\nsettle 200\n");
+                assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+                if has_ui(&dump(session), &body_id) {
+                    click_ui(session, &body_id);
+                    return;
+                }
+            }
+            panic!("{body_id} did not enter the combined Python editor viewport: {}", dump(session));
+        }
+        let mut reset_rect = None;
+        for _ in 0..20 {
+            let state = dump(session);
+            if has_ui(&state, &reset_id) {
+                let rect = ui_rect(&state, &reset_id);
+                if rect[3] >= MIN_HITBOX && rect[1] < TEST_HEIGHT as f64 * 0.7 {
+                    reset_rect = Some(rect);
+                    break;
+                }
+            }
+            let (x, y) = TAB_TOP_POINT;
+            let lines = run_script(session, format!("mouse_move {x} {y}\nwheel 0 -1\nsettle 200\n").as_bytes());
+            assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        }
+        let [_, reset_y, _, _] = reset_rect
+            .unwrap_or_else(|| panic!("{reset_id} did not reach the upper tab area: {}", dump(session)));
+        let lines = run_script(session, format!("mouse_move {} {}\n", TAB_TOP_POINT.0, reset_y + 60.0).as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        let state = dump(session);
+        assert!(has_ui(&state, &body_id), "{body_id} not registered under the cursor: {state}");
+        click_ui(session, &body_id);
+    }
+
+    pub(crate) fn set_handler_body(session: &mut HeadlessSession, route_idx: usize, body: &str) {
+        set_handler_body_for_layout(session, route_idx, body, false);
+    }
+
+    pub(crate) fn set_contract_handler_body(session: &mut HeadlessSession, route_idx: usize, body: &str) {
+        set_handler_body_for_layout(session, route_idx, body, true);
+    }
+
+    fn set_handler_body_for_layout(
+        session: &mut HeadlessSession,
+        route_idx: usize,
+        body: &str,
+        contract_layout: bool,
+    ) {
+        focus_handler_body(session, route_idx, contract_layout);
+        let lines = run_script(session, format!("key ctrl+a\ntype {body}\nkey escape\n").as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        let script = session.app.ide_panel.api.mock.manual_routes[route_idx]
+            .python
+            .as_ref()
+            .expect("Python handler");
+        assert_eq!(script.body.trim(), body);
+    }
+
+    pub(crate) fn wait_for_request_log(session: &mut HeadlessSession, line: &str) {
+        wait_until(session, 5000, line, |session| {
+            session.app.ide_panel.api.mock_server_logs.iter().any(|log| log.text.ends_with(line))
+        });
+    }
+
+    pub(crate) fn read_http_request(stream: &mut TcpStream) -> Vec<u8> {
+        let mut request = Vec::new();
+        let mut buffer = [0_u8; 2048];
+        loop {
+            let read = match stream.read(&mut buffer) {
+                Ok(read) => read,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return request,
+                Err(_) if request.is_empty() => return request,
+                Err(error) => panic!("read API request: {error}"),
+            };
+            if read == 0 {
+                return request;
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers.lines().find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    key.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                }).unwrap_or(0);
+                if request.len() >= header_end + 4 + content_length {
+                    return request;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn serve_api_spec(server: &str, paths: serde_json::Value) -> String {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind API spec server");
+        let address = listener.local_addr().expect("API spec server address");
+        let server = server.to_string();
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept API spec import");
+            let spec = serde_json::json!({
+                "openapi": "3.1.0",
+                "info": {"title": "Headless API Client", "version": "1.0.0"},
+                "servers": [{"url": server}],
+                "paths": paths
+            }).to_string();
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                spec.len(), spec
+            );
+            stream.write_all(response.as_bytes()).expect("write API spec");
+        });
+        format!("http://{address}/openapi.json")
+    }
+
+    pub(crate) fn workspace_session(dir: &Path) -> HeadlessSession {
+        const TEST_WIDTH: u32 = 1280;
+        const TEST_HEIGHT: u32 = 720;
+        const TEST_SCALE: f32 = 4.0 / 3.0;
+
+        let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
+        let lines = run_script(
+            &mut session,
+            format!("scale {TEST_SCALE}\nworkspace {}\nsettle 2000\n", dir.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        if dump(&mut session)["ide_panel"]["active"] != "api" {
+            click_ui(&mut session, "SidebarSlot(ApiClient)");
+        }
+        wait_until(&mut session, 5000, "API Client panel", |session| {
+            has_ui(&dump(session), "ApiImportAdd")
+        });
+        session
+    }
+
+    pub(crate) fn install_spec(session: &mut HeadlessSession, spec_url: &str) {
+        click_ui(session, "ApiImportAdd");
+        click_ui(session, "ApiImportUrl");
+        click_ui(session, "ApiImportUrlInput");
+        let lines = run_script(session, format!("key ctrl+a\ntype {spec_url}\n").as_bytes());
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        click_ui(session, "ApiImportUrlConfirm");
+        wait_until(session, 5000, "local API spec", |session| {
+            let api = &session.app.ide_panel.api;
+            api.loading.is_empty() && api.selected_spec.is_some_and(|id| api.models.contains_key(&id))
+        });
+    }
+
+    pub(crate) fn send_request(session: &mut HeadlessSession, route_idx: usize) {
+        const TAB_POINT: (f64, f64) = (800.0, 400.0);
+        const MIN_HITBOX: f64 = 24.0;
+
+        let visible = wheel_until_visible(session, TAB_POINT, "ApiTryRequest", MIN_HITBOX, 30);
+        assert!(visible, "ApiTryRequest did not enter the endpoint tab: {}", dump(session));
+        click_ui(session, "ApiTryRequest");
+        wait_until(session, 15000, "API response", |session| {
+            session.app.active_api_tab().is_some_and(|(_, state)| {
+                state.route_idx == Some(route_idx) && state.response.is_some()
+            })
+        });
+    }
+
     /// The API Mock server and its Python worker are process-wide singletons: every
     /// headless test that starts the server holds this lock.
     pub(crate) static API_MOCK_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -537,8 +761,25 @@ pub(crate) mod tests_support {
     /// GETs `path` on a worker thread while the session keeps drawing frames, so the
     /// server events reach the panel log. Returns the status code and body.
     pub(crate) fn get_from_mock(session: &mut HeadlessSession, url: &str, path: &str) -> (u16, String) {
+        request_to_mock(session, url, "GET", path, &[], b"")
+    }
+
+    pub(crate) fn request_to_mock(
+        session: &mut HeadlessSession,
+        url: &str,
+        method: &str,
+        path: &str,
+        headers: &[(&str, &str)],
+        body: &[u8],
+    ) -> (u16, String) {
         let (sender, receiver) = mpsc::channel();
-        let (url, path) = (url.to_string(), path.to_string());
+        let (url, method, path, headers, body) = (
+            url.to_string(),
+            method.to_string(),
+            path.to_string(),
+            headers.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect::<Vec<_>>(),
+            body.to_vec(),
+        );
         std::thread::spawn(move || {
             let response = (|| {
                 let address = loopback_addr_from_panel_url(&url)?;
@@ -551,8 +792,17 @@ pub(crate) mod tests_support {
                 stream
                     .set_write_timeout(Some(Duration::from_secs(2)))
                     .map_err(|error| error.to_string())?;
-                write!(stream, "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
+                write!(stream, "{method} {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n")
                     .map_err(|error| error.to_string())?;
+                for (key, value) in headers {
+                    write!(stream, "{key}: {value}\r\n").map_err(|error| error.to_string())?;
+                }
+                if !body.is_empty() || method != "GET" {
+                    write!(stream, "Content-Length: {}\r\n", body.len())
+                        .map_err(|error| error.to_string())?;
+                }
+                stream.write_all(b"\r\n").map_err(|error| error.to_string())?;
+                stream.write_all(&body).map_err(|error| error.to_string())?;
                 let mut bytes = Vec::new();
                 stream.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
                 let response = String::from_utf8_lossy(&bytes);

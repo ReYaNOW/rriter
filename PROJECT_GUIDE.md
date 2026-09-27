@@ -1485,6 +1485,8 @@ Root:
 * `src/headless/ui_tests_keyboard_panels.rs` -> headless UI tests for panel shortcuts Alt+Q/Shift+Alt+Q terminal, F1 in terminal focus, Alt+W Problems, and Ctrl+Shift+F from the terminal.
 * `src/headless/ui_tests_api_client_import.rs` -> headless UI tests for OpenAPI import by URL from a local HTTP server: routes, URL validation, 404/invalid JSON errors, and no duplicate spec on re-import.
 * `src/headless/ui_tests_api_mock_python.rs` -> headless UI tests for API Mock Python handlers: served result, exception/syntax error → 500, edit after restart, and hot update on a running server.
+* `src/headless/ui_tests_api_mock_contract.rs` -> headless UI tests for the API Mock Python handler contract: path/query/JSON body arguments, missing optional query, and timeout → 500 with recovery.
+* `src/headless/ui_tests_api_client_multipart.rs` -> headless UI tests for API Client multipart bodies: fields and file parts, non-ASCII text, empty required field, missing file error.
 * `src/headless/ui_tests_settings_tools.rs` -> headless UI tests for Settings tool rows: Refresh, clearing an override, install log copy/close, Dart Restart and LSP log in/outside IDE, and row button layout.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
