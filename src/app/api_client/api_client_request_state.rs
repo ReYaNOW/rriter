@@ -1,4 +1,40 @@
 impl ApiClientState {
+    pub(crate) fn handle_json_validation_disconnect(&mut self) {
+        self.body_json_validation_pending = None;
+        self.body_json_validation = None;
+        self.body_json_validation_rx = None;
+        self.import_error = Some("Проверка JSON неожиданно завершилась".to_string());
+    }
+
+    pub(crate) fn handle_python_path_disconnect(&mut self) {
+        self.python_path_pick_rx = None;
+        self.mock.uv.last_error = "Окно выбора Python/uv неожиданно завершилось".to_string();
+    }
+
+    pub(crate) fn handle_python_versions_disconnect(&mut self) {
+        self.python_version_list_rx = None;
+        self.mock_python_versions_loading = false;
+        self.python_version_list_cancel = None;
+        self.mock_python_versions.clear();
+        self.mock.uv.last_error = "Загрузка списка Python неожиданно завершилась".to_string();
+    }
+
+    pub(crate) fn handle_python_install_disconnect(&mut self) {
+        self.python_install_rx = None;
+        self.mock_python_install_running = false;
+        self.python_install_cancel = None;
+        self.mock.uv.status = crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
+        let message = "Установка Python неожиданно завершилась".to_string();
+        self.mock.uv.last_error = message.clone();
+        push_api_python_install_log(
+            self,
+            ApiPythonInstallLogLine {
+                text: message,
+                kind: ApiPythonInstallLogKind::Error,
+            },
+        );
+    }
+
     fn insert_api_client_text(
         &mut self,
         text: &str,

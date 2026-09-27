@@ -14,9 +14,7 @@ impl ApiClientState {
         part: ApiMockSourcePart,
         default_contract: Option<crate::app::api_mock::types::ApiMockPythonContract>,
     ) -> Option<bool> {
-        let Some(script) = self.api_route_python_script_mut(active, route_idx) else {
-            return None;
-        };
+        let script = self.api_route_python_script_mut(active, route_idx)?;
         match part {
             ApiMockSourcePart::Contract => {
                 script.contract = default_contract.unwrap_or_default();

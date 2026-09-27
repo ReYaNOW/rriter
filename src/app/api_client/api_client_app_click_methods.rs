@@ -23,13 +23,15 @@ fn api_mock_constraint_menu_contains_ui_id(
     }
 }
 
+type ApiClickPointerMetrics = ((f32, f32, f32, f32), f32, f32);
+
 impl crate::app::App {
     /// Pointer position and scale for a scrollbar id, as the click handler needs
     /// them: the registry rect, the click y and the UI scale.
     fn api_click_pointer_metrics(
         &self,
         id: crate::ui_system::UiId,
-    ) -> Option<((f32, f32, f32, f32), f32, f32)> {
+    ) -> Option<ApiClickPointerMetrics> {
         let rect = self.ui_registry.rect_for(id)?;
         let (scale, pointer_y) = match self.renderer.as_ref() {
             Some(renderer) => (renderer.scale_factor, renderer.last_mouse_y),

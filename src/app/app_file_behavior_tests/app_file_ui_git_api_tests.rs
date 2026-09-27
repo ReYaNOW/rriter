@@ -2016,14 +2016,10 @@ fn api_mock_contract_field_editor_commits_constraints_and_flags() {
             ..
         })
     ));
-
-    app.edit_api_mock_contract(0, |api, active| {
-        api.toggle_api_mock_contract_field_required(active, 0, ApiMockContractFieldGroup::Query, 0)
-    });
-    app.edit_api_mock_contract(0, |api, active| {
-        api.toggle_api_mock_contract_field_nullable(active, 0, ApiMockContractFieldGroup::Query, 0)
-    });
-
+    app.edit_api_mock_contract(0, |api, active| api
+        .toggle_api_mock_contract_field_required(active, 0, ApiMockContractFieldGroup::Query, 0));
+    app.edit_api_mock_contract(0, |api, active| api
+        .toggle_api_mock_contract_field_nullable(active, 0, ApiMockContractFieldGroup::Query, 0));
     for (prop, text) in [
         (ApiMockContractFieldProp::Default, "guest"),
         (ApiMockContractFieldProp::Enum, "guest, admin"),
