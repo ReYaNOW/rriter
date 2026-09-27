@@ -225,6 +225,22 @@ pub(crate) fn api_manual_route_model(
     model
 }
 
+pub(crate) fn api_route_model_for_identity<'a>(
+    api: &'a ApiClientState,
+    spec_id: ApiSpecId,
+    route_identity: Option<&ApiClientRouteIdentity>,
+) -> Option<std::borrow::Cow<'a, ApiSpecModel>> {
+    match route_identity {
+        Some(ApiClientRouteIdentity::Manual { stable_id }) => api
+            .mock
+            .manual_routes
+            .iter()
+            .find(|route| route.stable_id == *stable_id)
+            .map(|route| std::borrow::Cow::Owned(api_manual_route_model(route))),
+        _ => api.models.get(&spec_id).map(std::borrow::Cow::Borrowed),
+    }
+}
+
 pub(crate) fn api_manual_route_row(
     route: &crate::app::api_mock::types::ApiManualRoute,
 ) -> ApiRouteRow {

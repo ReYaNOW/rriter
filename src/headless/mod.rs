@@ -12,11 +12,15 @@ mod tests;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_import;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_multipart;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_request;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_spec;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_mock;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_mock_contract;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_mock_python;
 #[cfg(all(test, target_os = "linux"))]

@@ -3,18 +3,16 @@
 use crate::app::api_client::ApiClientRouteIdentity;
 use crate::headless::tests_support::{
     click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script,
-    scratch_dir, session_for_test, wait_until, wheel_until_visible,
+    scratch_dir, send_request, serve_api_spec, read_http_request, workspace_session,
+    install_spec, wait_until, wheel_until_visible,
 };
 use crate::headless::HeadlessSession;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-const TEST_WIDTH: u32 = 1280;
-const TEST_HEIGHT: u32 = 720;
-const TEST_SCALE: f32 = 4.0 / 3.0;
 /// Cursor over the API side panel (x 64..384 at this size and scale).
 const PANEL_POINT: (f64, f64) = (200.0, 500.0);
 /// Cursor over the API endpoint tab body.
@@ -23,33 +21,16 @@ const TAB_POINT: (f64, f64) = (800.0, 400.0);
 const MIN_HITBOX: f64 = 24.0;
 
 fn serve_spec(server: &str) -> String {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind request spec server");
-    let address = listener.local_addr().expect("request spec server address");
-    let server = server.to_string();
-    thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept request spec import");
-        let spec = serde_json::json!({
-            "openapi": "3.1.0",
-            "info": {"title": "Headless request flow", "version": "1.0.0"},
-            "servers": [{"url": server}],
-            "paths": {
-                "/get": {"get": {"responses": {"200": {"description": "ok"}}}},
-                "/post": {"post": {
-                    "requestBody": {"required": true, "content": {
-                        "application/json": {"schema": {"type": "object"}}
-                    }},
-                    "responses": {"201": {"description": "created"}}
-                }},
-                "/fail": {"get": {"responses": {"500": {"description": "failure"}}}}
-            }
-        }).to_string();
-        let response = format!(
-            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-            spec.len(), spec
-        );
-        stream.write_all(response.as_bytes()).expect("write request spec");
-    });
-    format!("http://{address}/openapi.json")
+    serve_api_spec(server, serde_json::json!({
+        "/get": {"get": {"responses": {"200": {"description": "ok"}}}},
+        "/post": {"post": {
+            "requestBody": {"required": true, "content": {
+                "application/json": {"schema": {"type": "object"}}
+            }},
+            "responses": {"201": {"description": "created"}}
+        }},
+        "/fail": {"get": {"responses": {"500": {"description": "failure"}}}}
+    }))
 }
 
 fn request_server(status: u16, body: &'static str) -> (String, Receiver<String>) {
@@ -102,36 +83,6 @@ fn request_server(status: u16, body: &'static str) -> (String, Receiver<String>)
     (format!("http://{address}"), rx)
 }
 
-/// Reads one HTTP request (headers plus `Content-Length` body); empty when the peer
-/// closed the connection without sending anything.
-fn read_http_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
-    let mut request = Vec::new();
-    let mut buffer = [0_u8; 2048];
-    loop {
-        let read = match stream.read(&mut buffer) {
-            Ok(read) => read,
-            Err(_) if request.is_empty() => return request,
-            Err(error) => panic!("read API request: {error}"),
-        };
-        if read == 0 {
-            return request;
-        }
-        request.extend_from_slice(&buffer[..read]);
-        if let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-            let headers = String::from_utf8_lossy(&request[..header_end]);
-            let content_length = headers.lines().find_map(|line| {
-                let (key, value) = line.split_once(':')?;
-                key.eq_ignore_ascii_case("content-length")
-                    .then(|| value.trim().parse::<usize>().ok())
-                    .flatten()
-            }).unwrap_or(0);
-            if request.len() >= header_end + 4 + content_length {
-                return request;
-            }
-        }
-    }
-}
-
 fn refused_address() -> String {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve closed port");
     let address = listener.local_addr().expect("closed port address");
@@ -139,43 +90,11 @@ fn refused_address() -> String {
     format!("http://{address}")
 }
 
-fn workspace_session(dir: &Path) -> HeadlessSession {
-    let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
-    let lines = run_script(
-        &mut session,
-        format!("scale {TEST_SCALE}\nworkspace {}\nsettle 2000\n", dir.display()).as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    // The slot toggles the panel, so click it only when API Client is not already shown.
-    if dump(&mut session)["ide_panel"]["active"] != "api" {
-        click_ui(&mut session, "SidebarSlot(ApiClient)");
-    }
-    wait_until(&mut session, 5000, "API Client panel", |session| {
-        has_ui(&dump(session), "ApiImportAdd")
-    });
-    session
-}
-
 /// Scrolls the endpoint tab down until `id` is on screen; the form grows downwards
 /// (parameters, body, schemas, "Try request", response).
 fn reveal_in_tab(session: &mut HeadlessSession, id: &str) {
     let visible = wheel_until_visible(session, TAB_POINT, id, MIN_HITBOX, 30);
     assert!(visible, "{id} did not enter the endpoint tab viewport: {}", dump(session));
-}
-
-fn install_spec(session: &mut HeadlessSession, server: &str) {
-    let spec_url = serve_spec(server);
-    click_ui(session, "ApiImportAdd");
-    click_ui(session, "ApiImportUrl");
-    click_ui(session, "ApiImportUrlInput");
-    let lines = run_script(session, format!("key ctrl+a\ntype {spec_url}\n").as_bytes());
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    click_ui(session, "ApiImportUrlConfirm");
-    wait_until(session, 5000, "local request-flow spec", |session| {
-        let api = &session.app.ide_panel.api;
-        api.loading.is_empty()
-            && api.selected_spec.is_some_and(|id| api.models.contains_key(&id))
-    });
 }
 
 fn open_route(session: &mut HeadlessSession, method: &str, path: &str) -> usize {
@@ -204,23 +123,12 @@ fn open_route(session: &mut HeadlessSession, method: &str, path: &str) -> usize 
     route_idx
 }
 
-fn send_request(session: &mut HeadlessSession, route_idx: usize) {
-    reveal_in_tab(session, "ApiTryRequest");
-    click_ui(session, "ApiTryRequest");
-    wait_until(session, 15000, "API response", |session| {
-        session
-            .app
-            .active_api_tab()
-            .is_some_and(|(_, state)| state.route_idx == Some(route_idx) && state.response.is_some())
-    });
-}
-
 fn scratch_request(name: &str, server: &str) -> (PathBuf, HeadlessSession) {
     ensure_test_profile_root();
     reset_api_test_state();
     let dir = scratch_dir(name);
     let mut session = workspace_session(&dir);
-    install_spec(&mut session, server);
+    install_spec(&mut session, &serve_spec(server));
     (dir, session)
 }
 

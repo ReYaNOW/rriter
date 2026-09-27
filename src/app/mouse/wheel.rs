@@ -1021,9 +1021,9 @@ impl App {
                     _ => id,
                 };
                 self.ui_registry.rect_for(rect_id)?;
-                let (spec_id, active_route_idx) = {
+                let (spec_id, active_route_idx, route_identity) = {
                     let (meta, state) = self.active_api_tab()?;
-                    (meta.spec_id, state.route_idx)
+                    (meta.spec_id, state.route_idx, meta.route_identity.as_ref())
                 };
                 match id {
                     crate::ui_system::UiId::ApiBodyInput(route_idx)
@@ -1111,20 +1111,35 @@ impl App {
                             _ => None,
                         };
                         focused_part?;
-                        let route = self
-                            .ide_panel
-                            .api
-                            .models
-                            .get(&spec_id)
-                            .and_then(|model| model.routes.get(route_idx))?;
-                        let script = self
-                            .ide_panel
-                            .api
-                            .mock
-                            .route_overrides
-                            .iter()
-                            .find(|item| item.method == route.method && item.path == route.path)
-                            .and_then(|item| item.python.as_ref())?;
+                        let model = crate::app::api_client::api_route_model_for_identity(
+                            &self.ide_panel.api,
+                            spec_id,
+                            route_identity,
+                        )?;
+                        let route = model.routes.get(route_idx)?;
+                        let script = match route_identity {
+                            Some(crate::app::api_client::ApiClientRouteIdentity::Manual {
+                                stable_id,
+                            }) => self
+                                .ide_panel
+                                .api
+                                .mock
+                                .manual_routes
+                                .iter()
+                                .find(|manual_route| manual_route.stable_id == *stable_id)?
+                                .python
+                                .as_ref()?,
+                            _ => self
+                                .ide_panel
+                                .api
+                                .mock
+                                .route_overrides
+                                .iter()
+                                .find(|item| {
+                                    item.method == route.method && item.path == route.path
+                                })
+                                .and_then(|item| item.python.as_ref())?,
+                        };
                         let prelude_text = if focused_part
                             == Some(crate::app::api_mock::ty_check::ApiMockSourcePart::Prelude)
                         {
@@ -1147,9 +1162,8 @@ impl App {
                         } else {
                             crate::app::api_client::api_mock_body_editor_text(&script.body)
                         };
-                        let model = self.ide_panel.api.models.get(&spec_id)?;
                         let contract = crate::app::api_mock::types::api_mock_effective_contract(
-                            script, route, model,
+                            script, route, &model,
                         );
                         let signature_text =
                             crate::app::api_mock::contract::api_mock_handler_signature_text(
@@ -1294,26 +1308,13 @@ impl App {
                 .get(self.active_tab)
                 .and_then(|tab| match &tab.kind {
                     crate::app::EditorTabKind::ApiClient(meta, state) => {
-                        let manual_model;
-                        let model = match &meta.route_identity {
-                            Some(crate::app::api_client::ApiClientRouteIdentity::Manual {
-                                stable_id,
-                            }) => {
-                                let route = self
-                                    .ide_panel
-                                    .api
-                                    .mock
-                                    .manual_routes
-                                    .iter()
-                                    .find(|route| route.stable_id == *stable_id)?;
-                                manual_model =
-                                    crate::app::api_client::api_manual_route_model(route);
-                                Some(&manual_model)
-                            }
-                            _ => self.ide_panel.api.models.get(&meta.spec_id),
-                        };
+                        let model = crate::app::api_client::api_route_model_for_identity(
+                            &self.ide_panel.api,
+                            meta.spec_id,
+                            meta.route_identity.as_ref(),
+                        );
                         Some(crate::app::api_client::api_tab_max_scroll(
-                            model,
+                            model.as_deref(),
                             state,
                             Some(&self.ide_panel.api),
                             visible_h,
