@@ -21,7 +21,7 @@ TEST ?=
 TEST_THREADS ?= 1
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean
+.PHONY: all fast max bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean
 
 all: max
 
@@ -73,8 +73,12 @@ bloat-max:
 	-n 40
 
 codex_test:
+	@python3 scripts/lint_changed.py
 	@$(CODEX_ENV) $(MAKE) test
 	@$(CODEX_ENV) $(MAKE) fast
+
+lint-baseline:
+	@python3 scripts/lint_changed.py --update-baseline
 	
 # 3. Команда TEST
 # Главное: флаги идентичны команде 'fast', поэтому пересборки не будет.

@@ -5,6 +5,16 @@ name = "rriter"
 version = "0.1.0"
 edition = "2024"
 
+[lints.clippy]
+struct_excessive_bools = "warn"
+too_many_lines = "warn"
+cognitive_complexity = "warn"
+large_enum_variant = "warn"
+unwrap_used = "warn"
+expect_used = "warn"
+disallowed_methods = "warn"
+too_many_arguments = "allow"
+
 [dependencies]
 glow = "0.18.0"
 swash = "0.2.9"

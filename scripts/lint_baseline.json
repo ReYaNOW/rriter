@@ -1,0 +1,915 @@
+{
+  "clippy": {
+    "build.rs": {
+      "collapsible_if": 1,
+      "expect_used": 1,
+      "needless_range_loop": 1,
+      "too_many_lines": 1,
+      "unwrap_used": 51
+    },
+    "src/app/api_client.rs": {
+      "collapsible_if": 2,
+      "needless_lifetimes": 2,
+      "struct_excessive_bools": 4
+    },
+    "src/app/api_client/api_client_app_click_methods.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/app/api_client/api_client_app_focus_methods.rs": {
+      "too_many_lines": 4
+    },
+    "src/app/api_client/api_client_app_request_methods.rs": {
+      "cognitive_complexity": 4,
+      "collapsible_if": 2,
+      "collapsible_str_replace": 4,
+      "too_many_lines": 6
+    },
+    "src/app/api_client/api_client_defaults_persist.rs": {
+      "needless_return": 1
+    },
+    "src/app/api_client/api_client_layout_input.rs": {
+      "if_same_then_else": 2,
+      "obfuscated_if_else": 2
+    },
+    "src/app/api_client/api_client_tests.rs": {
+      "assertions_on_constants": 2
+    },
+    "src/app/api_mock/contract.rs": {
+      "field_reassign_with_default": 2
+    },
+    "src/app/api_mock/merge.rs": {
+      "collapsible_if": 4
+    },
+    "src/app/api_mock/openapi_export.rs": {
+      "expect_used": 10
+    },
+    "src/app/api_mock/persist.rs": {
+      "needless_return": 1
+    },
+    "src/app/api_mock/python_env.rs": {
+      "needless_return": 1
+    },
+    "src/app/api_mock/types.rs": {
+      "enum_variant_names": 2
+    },
+    "src/app/app_behavior_tests/app_behavior_autocomplete_base_cases.rs": {
+      "len_zero": 1,
+      "manual_contains": 1
+    },
+    "src/app/app_bootstrap.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/app_file_behavior_tests/app_file_tab_flow_tests.rs": {
+      "cmp_owned": 1
+    },
+    "src/app/app_file_tab_methods.rs": {
+      "collapsible_if": 8,
+      "implicit_saturating_sub": 2,
+      "nonminimal_bool": 2,
+      "redundant_pattern_matching": 8
+    },
+    "src/app/app_ide_tab_methods.rs": {
+      "collapsible_if": 4,
+      "redundant_pattern_matching": 6
+    },
+    "src/app/app_state.rs": {
+      "collapsible_if": 2,
+      "field_reassign_with_default": 3,
+      "large_enum_variant": 2,
+      "manual_ignore_case_cmp": 2,
+      "struct_excessive_bools": 6,
+      "unnecessary_lazy_evaluations": 2
+    },
+    "src/app/app_window_external_methods.rs": {
+      "collapsible_if": 7,
+      "redundant_pattern_matching": 7
+    },
+    "src/app/autocomplete/autocomplete_detail_flow_methods.rs": {
+      "ptr_arg": 2,
+      "unwrap_used": 2
+    },
+    "src/app/autocomplete/autocomplete_detail_helpers.rs": {
+      "collapsible_if": 2,
+      "question_mark": 8
+    },
+    "src/app/autocomplete/autocomplete_popup_apply_methods.rs": {
+      "collapsible_if": 2,
+      "implicit_saturating_sub": 2,
+      "ptr_arg": 2
+    },
+    "src/app/autocomplete/autocomplete_ty_flow_methods.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 2,
+      "too_many_lines": 2
+    },
+    "src/app/automation.rs": {
+      "cognitive_complexity": 3,
+      "collapsible_if": 2,
+      "collapsible_match": 2,
+      "struct_excessive_bools": 2,
+      "too_many_lines": 5
+    },
+    "src/app/automation_database.rs": {
+      "collapsible_if": 2,
+      "field_reassign_with_default": 1
+    },
+    "src/app/database.rs": {
+      "field_reassign_with_default": 1
+    },
+    "src/app/database/database_app_event_methods.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 2,
+      "too_many_lines": 2
+    },
+    "src/app/database/database_app_methods.rs": {
+      "field_reassign_with_default": 2,
+      "io_other_error": 2,
+      "type_complexity": 2,
+      "unnecessary_lazy_evaluations": 2
+    },
+    "src/app/database/database_catalog.rs": {
+      "struct_excessive_bools": 2,
+      "useless_vec": 1
+    },
+    "src/app/database/database_grid.rs": {
+      "struct_excessive_bools": 2
+    },
+    "src/app/database/database_panel.rs": {
+      "field_reassign_with_default": 2,
+      "items_after_test_module": 1,
+      "struct_excessive_bools": 6
+    },
+    "src/app/database/database_query.rs": {
+      "redundant_async_block": 1
+    },
+    "src/app/database/database_runtime.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/app/database/database_table.rs": {
+      "field_reassign_with_default": 2
+    },
+    "src/app/database/database_table_edit_methods.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 2,
+      "too_many_lines": 2
+    },
+    "src/app/events.rs": {
+      "collapsible_if": 4,
+      "too_many_lines": 2,
+      "unwrap_used": 42
+    },
+    "src/app/events/about.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 32,
+      "collapsible_match": 2,
+      "extend_with_drain": 2,
+      "manual_is_multiple_of": 2,
+      "too_many_lines": 2,
+      "unwrap_used": 20
+    },
+    "src/app/events/about/about_helpers.rs": {
+      "collapsible_if": 4,
+      "manual_pattern_char_comparison": 2
+    },
+    "src/app/events/main_frame.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 6,
+      "if_same_then_else": 4,
+      "needless_bool_assign": 2,
+      "too_many_lines": 2,
+      "unwrap_used": 74
+    },
+    "src/app/events/source_hover.rs": {
+      "collapsible_if": 12,
+      "too_many_lines": 2,
+      "type_complexity": 2
+    },
+    "src/app/file_tree.rs": {
+      "collapsible_if": 4,
+      "manual_strip": 4
+    },
+    "src/app/file_tree_dialog.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/file_tree_ops.rs": {
+      "collapsible_if": 2
+    },
+    "src/app/file_tree_scan.rs": {
+      "cloned_ref_to_slice_refs": 1,
+      "collapsible_if": 2,
+      "type_complexity": 2
+    },
+    "src/app/file_tree_tests.rs": {
+      "cloned_ref_to_slice_refs": 5
+    },
+    "src/app/git_diff.rs": {
+      "manual_pattern_char_comparison": 2,
+      "redundant_pattern_matching": 2
+    },
+    "src/app/git_panel/git_commit_runtime.rs": {
+      "derivable_impls": 2,
+      "drop_non_drop": 2,
+      "field_reassign_with_default": 6
+    },
+    "src/app/git_panel/git_panel_app_graph_methods.rs": {
+      "collapsible_if": 2,
+      "too_many_lines": 2,
+      "while_let_loop": 2
+    },
+    "src/app/git_panel/git_panel_graph_helpers.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/git_panel/git_panel_status_tests.rs": {
+      "field_reassign_with_default": 7,
+      "needless_range_loop": 4,
+      "question_mark": 2
+    },
+    "src/app/git_panel/git_panel_types.rs": {
+      "field_reassign_with_default": 2,
+      "struct_excessive_bools": 4
+    },
+    "src/app/git_panel/git_process.rs": {
+      "disallowed_methods": 9
+    },
+    "src/app/keyboard.rs": {
+      "collapsible_if": 10,
+      "collapsible_str_replace": 6,
+      "unwrap_used": 10
+    },
+    "src/app/keyboard/editor_keys.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 10,
+      "too_many_lines": 2,
+      "unwrap_used": 52
+    },
+    "src/app/keyboard/key_input.rs": {
+      "double_ended_iterator_last": 1
+    },
+    "src/app/keyboard/main_keys.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 14,
+      "collapsible_str_replace": 2,
+      "field_reassign_with_default": 1,
+      "too_many_lines": 2,
+      "unwrap_used": 54
+    },
+    "src/app/lsp_actions.rs": {
+      "collapsible_if": 8,
+      "unwrap_used": 10
+    },
+    "src/app/markdown.rs": {
+      "struct_excessive_bools": 2
+    },
+    "src/app/markdown_scroll_transition.rs": {
+      "field_reassign_with_default": 8,
+      "too_many_lines": 2
+    },
+    "src/app/mouse.rs": {
+      "expect_used": 2
+    },
+    "src/app/mouse/cursor.rs": {
+      "unwrap_used": 14
+    },
+    "src/app/mouse/cursor/cursor_drag_updates.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 4,
+      "too_many_lines": 2,
+      "unwrap_used": 64
+    },
+    "src/app/mouse/cursor/cursor_hover.rs": {
+      "too_many_lines": 2,
+      "unwrap_used": 22
+    },
+    "src/app/mouse/cursor/cursor_overlays.rs": {
+      "collapsible_if": 4,
+      "unwrap_used": 34
+    },
+    "src/app/mouse/cursor/cursor_scroll_drags.rs": {
+      "too_many_lines": 2,
+      "unwrap_used": 64
+    },
+    "src/app/mouse/hover_bridge_tests.rs": {
+      "field_reassign_with_default": 1
+    },
+    "src/app/mouse/hover_diagnostic_range_tests.rs": {
+      "field_reassign_with_default": 1
+    },
+    "src/app/mouse/hover_mouse_logic.rs": {
+      "collapsible_if": 4,
+      "items_after_test_module": 1,
+      "manual_range_contains": 2,
+      "needless_bool": 2,
+      "needless_range_loop": 6
+    },
+    "src/app/mouse/hover_mouse_tests.rs": {
+      "field_reassign_with_default": 1
+    },
+    "src/app/mouse/hover_state_core.rs": {
+      "collapsible_if": 6,
+      "nonminimal_bool": 2,
+      "struct_excessive_bools": 2,
+      "type_complexity": 2
+    },
+    "src/app/mouse/hover_transition_tests.rs": {
+      "field_reassign_with_default": 12
+    },
+    "src/app/mouse/hover_visibility_tests.rs": {
+      "assertions_on_constants": 1,
+      "field_reassign_with_default": 15
+    },
+    "src/app/mouse/input.rs": {
+      "clone_on_copy": 2,
+      "collapsible_if": 2
+    },
+    "src/app/mouse/input/mouse_declarative_press.rs": {
+      "collapsible_if": 2,
+      "unwrap_used": 26
+    },
+    "src/app/mouse/input/mouse_dispatch.rs": {
+      "collapsible_if": 2,
+      "unwrap_used": 14
+    },
+    "src/app/mouse/input/mouse_drag_capture.rs": {
+      "clone_on_copy": 2,
+      "collapsible_if": 10,
+      "too_many_lines": 2,
+      "unwrap_used": 26
+    },
+    "src/app/mouse/input/mouse_editor_terminal_press.rs": {
+      "collapsible_if": 8,
+      "unwrap_used": 26
+    },
+    "src/app/mouse/input/mouse_overlay_press.rs": {
+      "collapsible_if": 4,
+      "unwrap_used": 36
+    },
+    "src/app/mouse/input/mouse_ui_element_press.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 4,
+      "needless_bool_assign": 2,
+      "too_many_lines": 2,
+      "unnecessary_map_or": 2,
+      "unwrap_used": 22
+    },
+    "src/app/mouse/wheel.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 8,
+      "too_many_lines": 2,
+      "unwrap_used": 160
+    },
+    "src/app/project_search.rs": {
+      "cloned_ref_to_slice_refs": 1,
+      "collapsible_if": 2,
+      "field_reassign_with_default": 1,
+      "needless_return": 1,
+      "obfuscated_if_else": 2,
+      "struct_excessive_bools": 2
+    },
+    "src/app/project_search_grep.rs": {
+      "cloned_ref_to_slice_refs": 1
+    },
+    "src/app/project_search_preview.rs": {
+      "field_reassign_with_default": 2
+    },
+    "src/app/python_completion/python_completion_class_helpers.rs": {
+      "collapsible_if": 4,
+      "unnecessary_to_owned": 2
+    },
+    "src/app/python_completion/python_completion_source_helpers.rs": {
+      "collapsible_if": 2,
+      "question_mark": 2
+    },
+    "src/app/terminal.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 30,
+      "collapsible_match": 4,
+      "struct_excessive_bools": 2,
+      "too_many_lines": 2
+    },
+    "src/app/terminal_process.rs": {
+      "needless_borrow": 2,
+      "type_complexity": 2,
+      "while_let_loop": 2
+    },
+    "src/app/tool_installer.rs": {
+      "manual_div_ceil": 6
+    },
+    "src/app/ui_handlers.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/ui_handlers/ui_database.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/app/ui_handlers/ui_editor.rs": {
+      "too_many_lines": 2,
+      "unwrap_used": 18
+    },
+    "src/app/ui_handlers/ui_git.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/ui_handlers/ui_lsp.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 14,
+      "too_many_lines": 2,
+      "unwrap_used": 8
+    },
+    "src/app/ui_handlers/ui_panels.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 6,
+      "redundant_pattern_matching": 2,
+      "too_many_lines": 2,
+      "unwrap_used": 62
+    },
+    "src/app/ui_handlers/ui_settings.rs": {
+      "too_many_lines": 2,
+      "unwrap_used": 16
+    },
+    "src/bin/api_fetch_bench.rs": {
+      "expect_used": 22
+    },
+    "src/editor/editor_core.rs": {
+      "collapsible_if": 2
+    },
+    "src/editor_navigation.rs": {
+      "collapsible_if": 4,
+      "manual_range_contains": 2,
+      "needless_range_loop": 2
+    },
+    "src/headless/bench.rs": {
+      "neg_cmp_op_on_partial_ord": 2
+    },
+    "src/headless/tests.rs": {
+      "disallowed_methods": 1,
+      "expect_used": 21,
+      "unwrap_used": 14
+    },
+    "src/headless/ui_tests_api_client_import.rs": {
+      "expect_used": 3
+    },
+    "src/headless/ui_tests_api_client_multipart.rs": {
+      "expect_used": 16
+    },
+    "src/headless/ui_tests_api_client_request.rs": {
+      "expect_used": 9
+    },
+    "src/headless/ui_tests_api_client_spec.rs": {
+      "expect_used": 9
+    },
+    "src/headless/ui_tests_api_mock_contract.rs": {
+      "expect_used": 1
+    },
+    "src/headless/ui_tests_database_query.rs": {
+      "expect_used": 1
+    },
+    "src/headless/ui_tests_editor_completion.rs": {
+      "expect_used": 1,
+      "unwrap_used": 3
+    },
+    "src/headless/ui_tests_editor_folding_minimap.rs": {
+      "expect_used": 4
+    },
+    "src/headless/ui_tests_editor_search.rs": {
+      "unwrap_used": 1
+    },
+    "src/headless/ui_tests_editor_selection.rs": {
+      "expect_used": 1
+    },
+    "src/headless/ui_tests_editor_sticky.rs": {
+      "unwrap_used": 2
+    },
+    "src/headless/ui_tests_git_commit.rs": {
+      "expect_used": 2
+    },
+    "src/headless/ui_tests_git_diff.rs": {
+      "unwrap_used": 2
+    },
+    "src/headless/ui_tests_goto_definition.rs": {
+      "expect_used": 2,
+      "unwrap_used": 4
+    },
+    "src/headless/ui_tests_keyboard_panels.rs": {
+      "unwrap_used": 1
+    },
+    "src/headless/ui_tests_layout.rs": {
+      "unnecessary_cast": 3,
+      "unwrap_used": 2
+    },
+    "src/headless/ui_tests_markdown.rs": {
+      "expect_used": 2
+    },
+    "src/headless/ui_tests_panels.rs": {
+      "expect_used": 1,
+      "unwrap_used": 5
+    },
+    "src/headless/ui_tests_problems.rs": {
+      "expect_used": 3
+    },
+    "src/headless/ui_tests_project_search.rs": {
+      "unwrap_used": 1
+    },
+    "src/headless/ui_tests_settings_database.rs": {
+      "type_complexity": 2
+    },
+    "src/headless/ui_tests_settings_help.rs": {
+      "expect_used": 2
+    },
+    "src/headless/ui_tests_tabs_tree.rs": {
+      "double_ended_iterator_last": 1,
+      "unwrap_used": 7
+    },
+    "src/headless/ui_tests_tree_ops.rs": {
+      "unwrap_used": 5
+    },
+    "src/highlighter/highlighter_core.rs": {
+      "collapsible_if": 10,
+      "implicit_saturating_sub": 2,
+      "map_entry": 2,
+      "needless_range_loop": 2,
+      "obfuscated_if_else": 2,
+      "ptr_arg": 2,
+      "question_mark": 2,
+      "string_from_utf8_as_bytes": 4,
+      "too_many_lines": 2,
+      "type_complexity": 2
+    },
+    "src/highlighter/highlighter_worker.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 30,
+      "if_same_then_else": 8,
+      "needless_borrow": 6,
+      "string_from_utf8_as_bytes": 6,
+      "too_many_lines": 2
+    },
+    "src/highlighter_runtime.rs": {
+      "implicit_saturating_sub": 6,
+      "needless_range_loop": 4,
+      "obfuscated_if_else": 2,
+      "unwrap_used": 2
+    },
+    "src/languages/markdown.rs": {
+      "derivable_impls": 2,
+      "needless_lifetimes": 1,
+      "ptr_arg": 2
+    },
+    "src/languages/mod.rs": {
+      "needless_range_loop": 2
+    },
+    "src/languages/python.rs": {
+      "cognitive_complexity": 4,
+      "collapsible_if": 4,
+      "if_same_then_else": 2,
+      "needless_range_loop": 2,
+      "too_many_lines": 4,
+      "type_complexity": 2,
+      "unnecessary_map_or": 2,
+      "unwrap_used": 2
+    },
+    "src/languages/python_tests.rs": {
+      "manual_contains": 5
+    },
+    "src/languages/rust.rs": {
+      "collapsible_if": 2
+    },
+    "src/lsp/dart_workspace.rs": {
+      "cloned_ref_to_slice_refs": 2,
+      "obfuscated_if_else": 2
+    },
+    "src/lsp/hover.rs": {
+      "collapsible_if": 8,
+      "if_same_then_else": 2,
+      "type_complexity": 4,
+      "while_let_loop": 2
+    },
+    "src/lsp/lsp_manager.rs": {
+      "clone_on_copy": 12,
+      "collapsible_if": 2,
+      "collapsible_match": 4,
+      "empty_line_after_doc_comments": 2,
+      "manual_strip": 4,
+      "nonminimal_bool": 4,
+      "ptr_arg": 22,
+      "struct_excessive_bools": 2,
+      "unwrap_or_default": 2,
+      "unwrap_used": 2
+    },
+    "src/lsp/lsp_process.rs": {
+      "collapsible_if": 4,
+      "manual_flatten": 2,
+      "ptr_arg": 14,
+      "too_many_lines": 2
+    },
+    "src/lsp/lsp_tests.rs": {
+      "manual_contains": 3
+    },
+    "src/lsp/protocol/protocol_json_rpc_encoding.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 8,
+      "expect_used": 6,
+      "too_many_lines": 2
+    },
+    "src/lsp/protocol/protocol_value_parsers.rs": {
+      "collapsible_if": 16,
+      "empty_line_after_doc_comments": 2,
+      "manual_map": 2,
+      "manual_range_patterns": 2
+    },
+    "src/lsp/protocol_tests.rs": {
+      "cognitive_complexity": 1,
+      "too_many_lines": 1
+    },
+    "src/lsp/python_hover_tests.rs": {
+      "int_plus_one": 8,
+      "manual_contains": 6,
+      "too_many_lines": 1
+    },
+    "src/lsp/ruff_workspace.rs": {
+      "obfuscated_if_else": 2
+    },
+    "src/main.rs": {
+      "expect_used": 2
+    },
+    "src/platform.rs": {
+      "collapsible_if": 2,
+      "expect_used": 4,
+      "if_same_then_else": 2,
+      "manual_is_multiple_of": 4,
+      "nonminimal_bool": 2
+    },
+    "src/platform/elevated_save.rs": {
+      "needless_return": 2
+    },
+    "src/platform/integration.rs": {
+      "collapsible_if": 1,
+      "needless_return": 4,
+      "unnecessary_sort_by": 2
+    },
+    "src/platform/process.rs": {
+      "needless_return": 8
+    },
+    "src/platform/secret_store.rs": {
+      "needless_return": 6
+    },
+    "src/platform/tests.rs": {
+      "type_complexity": 1
+    },
+    "src/platform/text_file.rs": {
+      "manual_is_multiple_of": 2
+    },
+    "src/queries.rs": {
+      "collapsible_if": 3,
+      "single_component_path_imports": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/api_client_panel/api_client_panel_main_renderer.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/api_client_panel/api_client_panel_overlay_renderer.rs": {
+      "too_many_lines": 2
+    },
+    "src/render_view/api_client_tab.rs": {
+      "needless_lifetimes": 2
+    },
+    "src/render_view/api_client_tab/api_client_tab_auth_renderer.rs": {
+      "too_many_lines": 4
+    },
+    "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/api_client_tab/api_client_tab_python_renderer.rs": {
+      "collapsible_if": 2
+    },
+    "src/render_view/core_text.rs": {
+      "collapsible_if": 8,
+      "items_after_test_module": 1
+    },
+    "src/render_view/database_table_tab.rs": {
+      "assertions_on_constants": 4,
+      "field_reassign_with_default": 2,
+      "manual_clamp": 2,
+      "needless_range_loop": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/database_table_tab_overlay.rs": {
+      "too_many_lines": 2
+    },
+    "src/render_view/editor_text_layer.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 18,
+      "needless_range_loop": 2,
+      "too_many_lines": 2,
+      "unnecessary_map_or": 2,
+      "useless_vec": 1
+    },
+    "src/render_view/hover_overlays.rs": {
+      "collapsible_if": 4,
+      "too_many_lines": 4
+    },
+    "src/render_view/ide_panels/ide_panel_behavior_tests.rs": {
+      "assertions_on_constants": 2
+    },
+    "src/render_view/ide_panels/ide_panel_database_renderer.rs": {
+      "manual_clamp": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/ide_panels/ide_panel_dialog_renderer.rs": {
+      "collapsible_if": 2,
+      "expect_used": 4,
+      "too_many_lines": 4
+    },
+    "src/render_view/ide_panels/ide_panel_git_graph_renderer.rs": {
+      "collapsible_if": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/ide_panels/ide_panel_git_tooltip_renderer.rs": {
+      "too_many_lines": 2
+    },
+    "src/render_view/ide_panels/ide_panel_git_workspace_renderer.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/ide_panels/ide_panel_side_renderer.rs": {
+      "collapsible_if": 6,
+      "too_many_lines": 4,
+      "unnecessary_map_or": 2,
+      "unwrap_used": 2
+    },
+    "src/render_view/lsp_ui.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 2,
+      "int_plus_one": 2,
+      "items_after_test_module": 1,
+      "too_many_lines": 2,
+      "unwrap_used": 2
+    },
+    "src/render_view/markdown_read.rs": {
+      "assertions_on_constants": 1,
+      "if_same_then_else": 2
+    },
+    "src/render_view/markdown_read_interaction.rs": {
+      "unnecessary_lazy_evaluations": 4
+    },
+    "src/render_view/markdown_scroll.rs": {
+      "field_reassign_with_default": 2,
+      "implicit_saturating_sub": 2
+    },
+    "src/render_view/markdown_scroll_review_tests.rs": {
+      "expect_used": 1
+    },
+    "src/render_view/markdown_scroll_transition_review_tests.rs": {
+      "expect_used": 4,
+      "unwrap_used": 12
+    },
+    "src/render_view/markdown_scroll_transition_review_v6_tests.rs": {
+      "expect_used": 1,
+      "unwrap_used": 1
+    },
+    "src/render_view/markdown_scroll_transition_review_v7_tests.rs": {
+      "expect_used": 6,
+      "unwrap_used": 5
+    },
+    "src/render_view/markdown_scroll_transition_stage3_tests.rs": {
+      "cognitive_complexity": 1,
+      "expect_used": 2,
+      "too_many_lines": 1
+    },
+    "src/render_view/minimap_ui.rs": {
+      "collapsible_if": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/root_frame_helpers.rs": {
+      "manual_clamp": 2
+    },
+    "src/render_view/root_frame_overlay_helpers.rs": {
+      "unwrap_used": 2
+    },
+    "src/render_view/root_frame_renderer.rs": {
+      "cognitive_complexity": 2,
+      "if_same_then_else": 16,
+      "too_many_lines": 2
+    },
+    "src/render_view/settings_tool_rows.rs": {
+      "manual_div_ceil": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/settings_ui.rs": {
+      "too_many_lines": 4
+    },
+    "src/render_view/sticky.rs": {
+      "collapsible_if": 4,
+      "needless_range_loop": 4,
+      "too_many_lines": 2
+    },
+    "src/render_view/tabs_ui.rs": {
+      "assertions_on_constants": 4,
+      "collapsible_if": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/terminal_ui.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
+    },
+    "src/render_view/ui.rs": {
+      "collapsible_if": 2,
+      "items_after_test_module": 1,
+      "manual_clamp": 2,
+      "needless_lifetimes": 2,
+      "too_many_lines": 4
+    },
+    "src/render_view/ui/hover_widget.rs": {
+      "cognitive_complexity": 2,
+      "collapsible_if": 8,
+      "missing_const_for_thread_local": 2,
+      "too_many_lines": 4,
+      "unwrap_used": 2
+    },
+    "src/render_view/ui/problems_panel.rs": {
+      "too_many_lines": 2
+    },
+    "src/renderer/renderer_glyph_methods.rs": {
+      "len_zero": 2,
+      "unnecessary_cast": 2
+    },
+    "src/renderer/renderer_init_methods.rs": {
+      "too_many_lines": 2
+    },
+    "src/renderer/renderer_primitives_tests.rs": {
+      "assertions_on_constants": 1
+    },
+    "src/renderer/renderer_types.rs": {
+      "explicit_auto_deref": 2,
+      "struct_excessive_bools": 2,
+      "type_complexity": 2,
+      "unwrap_used": 2
+    },
+    "src/round3_regression_tests.rs": {
+      "field_reassign_with_default": 8
+    },
+    "src/scroll.rs": {
+      "unnecessary_lazy_evaluations": 2
+    },
+    "src/startup_environment.rs": {
+      "disallowed_methods": 2
+    },
+    "src/state_persistence.rs": {
+      "cloned_ref_to_slice_refs": 1,
+      "collapsible_if": 2,
+      "expect_used": 2,
+      "field_reassign_with_default": 4
+    },
+    "src/widgets.rs": {
+      "collapsible_if": 2
+    },
+    "target/debug/build/rriter-cfdeb714e9a33986/out/file_icons_bytes.rs": {
+      "too_many_lines": 4
+    },
+    "target/debug/build/rriter-cfdeb714e9a33986/out/file_icons_map.rs": {
+      "cognitive_complexity": 4,
+      "too_many_lines": 8
+    }
+  },
+  "file_length": {
+    "src/app/api_client.rs": 2194,
+    "src/app/api_client/api_client_app_click_methods.rs": 1626,
+    "src/app/api_client/api_client_app_mock_methods.rs": 2033,
+    "src/app/api_client/api_client_app_request_methods.rs": 1681,
+    "src/app/api_client/api_client_app_text_methods.rs": 2438,
+    "src/app/api_client/api_client_defaults_persist.rs": 1736,
+    "src/app/api_client/api_client_tests.rs": 3218,
+    "src/app/app_behavior_tests/app_behavior_autocomplete_base_cases.rs": 1676,
+    "src/app/app_file_behavior_tests/app_file_ui_git_api_tests.rs": 2517,
+    "src/app/app_state.rs": 1627,
+    "src/app/automation.rs": 3581,
+    "src/app/database/database_app_methods.rs": 1645,
+    "src/app/database/database_grid.rs": 1928,
+    "src/app/database/database_panel.rs": 2247,
+    "src/app/database/database_query.rs": 2740,
+    "src/app/database/database_runtime.rs": 1633,
+    "src/app/database/database_table_edit_methods.rs": 2552,
+    "src/app/events/about.rs": 1716,
+    "src/app/file_tree.rs": 1610,
+    "src/app/git_panel/git_panel_status_tests.rs": 2474,
+    "src/app/keyboard/editor_keys.rs": 1619,
+    "src/app/markdown.rs": 1657,
+    "src/app/mouse/wheel.rs": 1633,
+    "src/app/project_search.rs": 2182,
+    "src/app/tool_installer.rs": 1611,
+    "src/languages/python.rs": 1652,
+    "src/languages/sql_analysis.rs": 1677,
+    "src/lsp/lsp_manager.rs": 2193,
+    "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": 3063,
+    "src/render_view/core_text.rs": 1986,
+    "src/render_view/database_query_tab.rs": 1774,
+    "src/render_view/database_table_tab.rs": 2110,
+    "src/render_view/ide_panels/ide_panel_dialog_renderer.rs": 1635,
+    "src/render_view/markdown_read.rs": 2426,
+    "src/render_view/markdown_read_interaction.rs": 1978,
+    "src/render_view/markdown_scroll_transition_review_tests.rs": 1863,
+    "src/render_view/root_frame_renderer.rs": 1671,
+    "src/render_view/ui/hover_widget.rs": 1924
+  }
+}
