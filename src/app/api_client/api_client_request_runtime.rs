@@ -928,10 +928,48 @@ pub fn append_api_path_display(path: &str, out: &mut String) {
     }
 }
 
+/// How long the spec card shows the fetch/parse timing after a load.
+pub const API_TIMING_VISIBLE_SECS: u64 = 10;
+
 pub fn api_timing_visible_at(last_loaded: Option<u64>, now: u64) -> bool {
     last_loaded
-        .map(|loaded| now.saturating_sub(loaded) < 10)
+        .map(|loaded| now.saturating_sub(loaded) < API_TIMING_VISIBLE_SECS)
         .unwrap_or(false)
+}
+
+impl ApiClientState {
+    /// Expires the timed import-error and spec-timing labels. They are static text, so the
+    /// frame loop wakes once at the returned Unix second instead of redrawing while shown.
+    /// Returns whether a label appeared or expired (one redraw) and the next expiry.
+    pub fn tick_timed_labels(&mut self, now: u64) -> (bool, Option<u64>) {
+        let mut changed = false;
+        let mut wake_at = None;
+        if let Some(at) = self.import_error_at {
+            if now.saturating_sub(at) < 5 {
+                wake_at = Some(at.saturating_add(5));
+            } else {
+                self.import_error = None;
+                self.import_error_at = None;
+                changed = true;
+            }
+        }
+        let timing_deadline = self
+            .specs
+            .iter()
+            .filter_map(|spec| spec.last_loaded)
+            .filter(|&loaded| api_timing_visible_at(Some(loaded), now))
+            .map(|loaded| loaded.saturating_add(API_TIMING_VISIBLE_SECS))
+            .min();
+        if timing_deadline != self.timing_label_deadline {
+            self.timing_label_deadline = timing_deadline;
+            changed = true;
+        }
+        let wake_at = match (wake_at, timing_deadline) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        (changed, wake_at)
+    }
 }
 
 fn line_end_without_newline(editor: &Editor, line_idx: usize) -> usize {

@@ -86,7 +86,9 @@ Rules:
   terminal) reach the UI only through `settle` or `wait`. Script runs are
   reproducible by frame count, not by animation time.
 - `settle` stops after two idle steps in a row or at the budget;
-  `settled=false` is a timeout, not an error.
+  `settled=false` is a timeout, not an error. A pending timer due after the
+  budget (e.g. a label that expires in seconds) ends it at once with
+  `settled=false`: no frame would change before the budget runs out.
 - After an `err` the next command still runs (stdin and `--script` alike);
   the exit code becomes 1. I/O failures read `err io: <error>`. Bad numbers,
   `NaN`/`inf`, wrong argument count and invalid UTF-8 are `err` too.

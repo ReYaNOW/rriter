@@ -1,12 +1,6 @@
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn persist_test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn mock_route_override(
         enabled: bool,
@@ -1217,7 +1211,6 @@ mod tests {
 
     #[test]
     fn api_auth_persist_roundtrip_uses_separate_file() {
-        let _guard = persist_test_lock().lock().expect("lock");
         let _ = std::fs::remove_dir_all(api_config_dir());
 
         let mut auth = ApiAuthStore::default();
@@ -1263,7 +1256,6 @@ mod tests {
 
     #[test]
     fn legacy_plaintext_api_auth_is_loaded_and_rewritten_safely() {
-        let _guard = persist_test_lock().lock().expect("lock");
         let _ = std::fs::remove_dir_all(api_config_dir());
         let mut auth = ApiAuthStore::default();
         auth.entry_mut(ApiSpecId(8), "BearerJwt").access_token = "legacy".to_string();
@@ -2383,7 +2375,6 @@ mod tests {
 
     #[test]
     fn api_specs_persist_roundtrip_keeps_imported_sources_and_selection() {
-        let _guard = persist_test_lock().lock().expect("lock");
         let _ = std::fs::remove_dir_all(api_config_dir());
 
         let mut state = ApiClientState::default();

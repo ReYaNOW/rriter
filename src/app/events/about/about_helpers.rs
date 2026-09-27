@@ -219,6 +219,12 @@ fn suspended_about_wait_plan(now: Instant, database_job_pending: bool) -> AboutW
     }
 }
 
+/// The `Instant` at which the wall clock reaches `epoch_secs` (Unix seconds); `now` if it has.
+fn epoch_secs_wake_at(now: Instant, epoch_secs: u64) -> Instant {
+    let at = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch_secs);
+    now + at.duration_since(std::time::SystemTime::now()).unwrap_or_default()
+}
+
 fn earliest_optional_wake(a: Option<Instant>, b: Option<Instant>) -> Option<Instant> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),

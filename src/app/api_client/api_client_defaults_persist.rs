@@ -1358,10 +1358,10 @@ fn schema_json_literal(kind: ApiSchemaKind, value: &str) -> String {
     }
 }
 
-fn api_config_dir() -> PathBuf {
+pub(crate) fn api_config_dir() -> PathBuf {
     #[cfg(test)]
     {
-        return std::env::temp_dir().join("rriter_api_client_tests");
+        return std::env::temp_dir().join(format!("rriter_api_client_tests-{}", std::process::id()));
     }
     #[cfg(not(test))]
     {

@@ -4,15 +4,12 @@
 //! dialog (`ApiMockPythonManage`), so these tests need `uv` with an installed CPython 3.13.
 
 use crate::headless::tests_support::{
-    click_ui, dump, get_from_mock, has_ui, python_route_session, reset_api_test_state,
+    click_ui, dump, get_from_mock, has_ui, python_route_session,
     set_handler_body, start_mock_server, stop_mock_server_from_ui, wait_for_request_log, wait_until,
-    API_MOCK_TEST_LOCK,
 };
-use crate::headless::HeadlessSession;
 
 #[test]
 fn headless_api_mock_python_handler_result_is_served() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-result");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_handler_body(&mut session, route_idx, r#"return text_response("from-python", status=201)"#);
@@ -27,7 +24,6 @@ fn headless_api_mock_python_handler_result_is_served() {
 
 #[test]
 fn headless_api_mock_python_exception_returns_500_and_shows_in_log() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-raise");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_handler_body(&mut session, route_idx, r#"raise ValueError("boom-from-handler")"#);
@@ -48,7 +44,6 @@ fn headless_api_mock_python_exception_returns_500_and_shows_in_log() {
 
 #[test]
 fn headless_api_mock_python_syntax_error_returns_500() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-syntax");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_handler_body(&mut session, route_idx, "return text_response(");
@@ -64,7 +59,6 @@ fn headless_api_mock_python_syntax_error_returns_500() {
 
 #[test]
 fn headless_api_mock_python_edit_changes_response_after_restart() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-edit-restart");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_handler_body(&mut session, route_idx, r#"return text_response("first", status=201)"#);
@@ -81,7 +75,6 @@ fn headless_api_mock_python_edit_changes_response_after_restart() {
 
 #[test]
 fn headless_api_mock_python_edit_hot_updates_running_server() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-hot-edit");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     let url = start_mock_server(&mut session);

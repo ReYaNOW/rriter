@@ -1,12 +1,10 @@
 //! Headless API Mock Python handler contract regressions.
 
-use crate::app::api_client::ApiMethod;
 use crate::app::api_mock::types::{ApiMockContractField, ApiMockContractFieldKind};
 use crate::headless::tests_support::{
-    click_ui, dump, get_from_mock, has_ui, python_route_session, request_to_mock,
+    click_ui, dump, get_from_mock, python_route_session, request_to_mock,
     reset_api_test_state, run_script, set_contract_handler_body, start_mock_server,
     stop_mock_server_from_ui, wait_for_request_log, wait_until, wheel_until_visible,
-    API_MOCK_TEST_LOCK,
 };
 use crate::headless::HeadlessSession;
 use serde_json::{Value, json};
@@ -65,7 +63,6 @@ fn set_timeout_ms(session: &mut HeadlessSession, route_idx: usize, timeout_ms: u
 
 #[test]
 fn headless_api_mock_python_handler_receives_path_query_and_json_body() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-contract-data");
     set_route_path(&mut session, route_idx, "/items/{item_id}");
     click_ui(&mut session, &format!("ApiMockManualRouteMethod({route_idx})"));
@@ -109,7 +106,6 @@ fn headless_api_mock_python_handler_receives_path_query_and_json_body() {
 
 #[test]
 fn headless_api_mock_python_handler_receives_missing_optional_query_as_none() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-missing-query");
     set_route_path(&mut session, route_idx, "/items/{item_id}");
     {
@@ -142,7 +138,6 @@ fn headless_api_mock_python_handler_receives_missing_optional_query_as_none() {
 
 #[test]
 fn headless_api_mock_python_timeout_returns_500_logs_timeout_and_server_recovers() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session, route_idx) = python_route_session("api-mock-python-timeout");
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_timeout_ms(&mut session, route_idx, 100);

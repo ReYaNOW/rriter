@@ -2,14 +2,14 @@
 
 use crate::app::api_client::ApiClientRouteIdentity;
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script,
+    click_ui, dump, ensure_test_profile_root, reset_api_test_state, run_script,
     scratch_dir, send_request, serve_api_spec, read_http_request, workspace_session,
     install_spec, wait_until, wheel_until_visible,
 };
 use crate::headless::HeadlessSession;
 use std::io::Write;
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 

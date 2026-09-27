@@ -83,6 +83,11 @@ pub(crate) fn settle_loop(budget: Duration, mut step: impl FnMut() -> StepState)
                 }
             }
             StepState::Idle { flow: ControlFlow::WaitUntil(wake_at) } => {
+                // Nothing is due before the budget ends (e.g. a label expiring in
+                // seconds): sleeping to the deadline would change no frame.
+                if wake_at >= deadline {
+                    return (frames, false);
+                }
                 idle_waits = 0;
                 sleep_until(wake_at, deadline);
             }
@@ -227,6 +232,16 @@ mod tests {
         });
         assert_eq!((frames, settled), (0, false));
         assert!(started.elapsed() <= budget + Duration::from_millis(50));
+    }
+
+    #[test]
+    fn headless_frame_settle_returns_at_once_when_the_timer_is_past_the_budget() {
+        let started = Instant::now();
+        let (frames, settled) = settle_loop(Duration::from_secs(5), || StepState::Idle {
+            flow: ControlFlow::WaitUntil(Instant::now() + Duration::from_secs(10)),
+        });
+        assert_eq!((frames, settled), (0, false));
+        assert!(started.elapsed() < Duration::from_secs(1), "slept {:?}", started.elapsed());
     }
 
     #[test]

@@ -18,7 +18,9 @@ MAX_RUSTFLAGS = $(COMMON_RUSTFLAGS) -C lto=fat -C symbol-mangling-version=v0 -C 
 # Настройки тестов
 TEST_FILTER ?=
 TEST ?=
-TEST_THREADS ?= 1
+# Каждый тест — отдельный процесс (-Z panic-abort-tests), cfg(test)-каталоги состояния — по PID,
+# поэтому тесты независимы. Вывод --nocapture перемешивается; для чтения лога по порядку — TEST_THREADS=1.
+TEST_THREADS ?= 8
 BUILD_STD_TEST = $(BUILD_STD)
 
 .PHONY: all fast max bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean

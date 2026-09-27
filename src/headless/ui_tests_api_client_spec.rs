@@ -1,7 +1,7 @@
 use crate::app::api_client::{ApiMethod, ApiSecurityApiKeyLocation, ApiSecuritySchemeKind};
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script, scratch_dir, wait_until,
-    wheel_until_visible, workspace_with_explorer,
+    click_ui, dump, ensure_test_profile_root, has_ui, read_request_before_reply, reset_api_test_state, run_script,
+    scratch_dir, wait_until, wheel_until_visible, workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
 use std::io::Write;
@@ -61,6 +61,7 @@ fn api_session(name: &str) -> (PathBuf, String, HeadlessSession) {
     let url = format!("http://{}/openapi.json", listener.local_addr().expect("fixture address"));
     thread::spawn(move || {
         let (mut stream, _) = listener.accept().expect("accept OpenAPI import");
+        read_request_before_reply(&mut stream);
         write!(
             stream,
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",

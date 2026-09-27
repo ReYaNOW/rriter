@@ -3,12 +3,12 @@
 use crate::app::api_client::{ApiMethod, ApiSpecModel};
 use crate::app::EditorTabKind;
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script,
+    click_ui, dump, ensure_test_profile_root, reset_api_test_state, run_script,
     scratch_dir, send_request, read_http_request, workspace_session, install_spec,
     wait_until, wheel_until_visible,
 };
 use crate::headless::HeadlessSession;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};

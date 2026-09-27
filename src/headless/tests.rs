@@ -9,7 +9,7 @@ pub(crate) mod tests_support {
     use std::path::{Path, PathBuf};
     use std::process::{ChildStdin, Command, Stdio};
     use std::sync::mpsc;
-    use std::sync::{Mutex, OnceLock};
+    use std::sync::OnceLock;
     use std::time::{Duration, Instant};
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -89,12 +89,10 @@ pub(crate) mod tests_support {
             .clone()
     }
 
-    /// Under `cfg(test)` the API client and API Mock state ignore the profile root and live
-    /// in fixed temp dirs shared by every test process (`api_config_dir`, `api_mock_data_dir`).
-    /// App-level API tests persist a URL spec and mock routes there, and `workspace` loads
-    /// them back, so headless tests start from the defaults instead of the last writer.
+    /// API state is shared by sessions in a test process, so reset it before headless tests
+    /// load their workspace from the defaults.
     pub(crate) fn reset_api_test_state() {
-        let api_dir = std::env::temp_dir().join("rriter_api_client_tests");
+        let api_dir = crate::app::api_client::api_config_dir();
         for file in ["api_specs.json", "api_auth.json"] {
             let _ = std::fs::remove_file(api_dir.join(file));
         }
@@ -642,12 +640,20 @@ pub(crate) mod tests_support {
         }
     }
 
+    /// One-shot fixtures must drain the request before replying and closing: closing a
+    /// socket with unread request bytes sends RST, and the client may then lose the reply.
+    pub(crate) fn read_request_before_reply(stream: &mut TcpStream) {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+        let _ = read_http_request(stream);
+    }
+
     pub(crate) fn serve_api_spec(server: &str, paths: serde_json::Value) -> String {
         let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind API spec server");
         let address = listener.local_addr().expect("API spec server address");
         let server = server.to_string();
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept API spec import");
+            read_request_before_reply(&mut stream);
             let spec = serde_json::json!({
                 "openapi": "3.1.0",
                 "info": {"title": "Headless API Client", "version": "1.0.0"},
@@ -709,12 +715,6 @@ pub(crate) mod tests_support {
             })
         });
     }
-
-    /// API Mock headless tests share the fixed-path API state files (`api_mocks.json`,
-    /// `api_specs.json`, see `reset_api_test_state`): each resets them and loads them
-    /// into its session, so the tests hold this lock. The server itself is owned by the
-    /// session's `App` and stops when the session drops.
-    pub(crate) static API_MOCK_TEST_LOCK: Mutex<()> = Mutex::new(());
 
     pub(crate) fn loopback_addr_from_panel_url(url: &str) -> Result<SocketAddr, String> {
         let (_, port) = url
