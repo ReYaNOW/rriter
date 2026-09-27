@@ -465,6 +465,7 @@ impl crate::app::App {
                         script.contract_source = contract_source;
                         self.ide_panel.api.persist();
                         self.invalidate_api_mock_contract_tools(route_idx);
+                        self.refresh_api_mock_server_snapshot();
                     }
                 }
             }
@@ -472,12 +473,14 @@ impl crate::app::App {
                 if let Some(script) = self.api_route_python_script_mut(route_idx) {
                     script.prelude = text;
                     self.ide_panel.api.persist();
+                    self.refresh_api_mock_server_snapshot();
                 }
             }
             ApiFocus::MockBody { route_idx } => {
                 if let Some(script) = self.api_route_python_script_mut(route_idx) {
                     script.body = text;
                     self.ide_panel.api.persist();
+                    self.refresh_api_mock_server_snapshot();
                 }
             }
             ApiFocus::MockSignature { .. } => {}
@@ -506,6 +509,7 @@ impl crate::app::App {
                     };
                     override_route.enabled = was_enabled;
                     self.ide_panel.api.persist();
+                    self.refresh_api_mock_server_snapshot();
                 }
             }
             ApiFocus::MockContractField {

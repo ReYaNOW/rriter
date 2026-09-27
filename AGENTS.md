@@ -30,7 +30,7 @@ Priority order:
 3. Small readable maintainable code
 4. Surgical changes only
 
-No speculative features. No broad refactors unless asked.
+No speculative features. No broad refactors unless asked; removing the cause of the bug class you are fixing (§5 Design) is part of the fix, not a broad refactor.
 
 ## 2. Working style
 
@@ -73,6 +73,7 @@ Allowed shell commands:
 * `code-review-graph detect-changes --brief`
 * `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
+* Subagent finds a bug outside its task (other function/module, not blocking the task): do not fix it — add a `#[ignore = "bug: …"]` test if cheap, and put cause (`file:line`) and repro in the report; the main session decides and dispatches the fix. Fix in place only when the bug sits in the code you are already changing or blocks your task. Reason: side fixes land unreviewed, collide with parallel agents' files, and stretch the task toward its turn limit.
 * Branches, commits, PRs — only the main session; subagents never commit. Decide yourself, and don't shy away from branches:
   * Small change (one-line fix, doc/rule tweak, a test or two, no behaviour change worth reviewing) → commit straight to `master` and push.
   * Substantial change (feature, bug fix with real logic, refactor, multi-file work, iteration of a larger plan) → branch off fresh `master` (`git switch master && git pull && git switch -c <short-name>`), commit and push it (`-u origin <branch>`); at the end of the verified task `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, `git switch master && git pull`. Follow-up work on the current branch stays on it.
@@ -130,6 +131,17 @@ No-edit tasks:
 * Remove only unused code created by change.
 * Mention unrelated dead code. Do not delete it.
 
+### Design
+
+Small diffs must not repeat the defect's shape: a one-line fix that adds another copy of the forgotten call leaves the next bug armed.
+
+* Fields that must change together are changed by one owning method; do not add or call methods that update only part of them. Reason: `close_dialog()` hid the dialog but kept `pending_action`, so Escape re-armed it (27.09).
+* An effect every mutation needs (persist, push to a running server, invalidate a cache, redraw) lives in one commit point, not repeated per `match` arm. Reason: four of five API Mock commit arms forgot to refresh the running server (27.09).
+* Bug of the kind "forgot to call X / reset Y": fix it so it cannot be forgotten when that stays inside the function or module you touch; if it needs more, fix locally and add a Kanri card titled `design debt: …` (Backlog) and name it in the report.
+* New feature logic goes into the feature's own state type (`ApiClientState`, `DatabasePanel`, …) with its own methods; `impl App` only routes events and runs cross-feature effects. Do not add `impl App` methods to `*_click_methods.rs`/`*_text_methods.rs`-style files that group by action kind.
+* No new global mutable state (`static` + `Mutex`/`OnceLock` holding app data); pass it or own it in a struct. Existing globals stay until a card moves them. Reason: they force process-wide test locks and make scenarios untestable without flakes.
+* Entities are identified by their natural key where one exists (source URL, path via `PathKey`), not only by an allocated id. Reason: re-importing one OpenAPI URL created duplicate specs (27.09).
+
 ### File Shape
 
 * Keep source files under 1500 lines when practical.
@@ -170,7 +182,7 @@ In draw/render/frame paths:
 
 * Always reuse already implemented code. Do not copy it, but move to a separate function / class and use it in all places. If you are implementing something, try to search for it in the repo, it MAY be already implemented.
 
-* Hard limit: no source file above 1600 lines; move logic blocks to new files before a file would exceed it. Add new files to the compact file index in `PROJECT_GUIDE.md` §4.
+* Hard limit: no source file above 1600 lines. When you add code to a file already over it, move the behavior unit you touch into its own file in the same change instead of growing the file; if that is larger than the task, add a `design debt:` Kanri card. Add new files to the compact file index in `PROJECT_GUIDE.md` §4. Reason: 55 files passed 1500 lines one small fix at a time (27.09).
 
 ### Platform and filesystem invariants
 

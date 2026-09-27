@@ -230,10 +230,10 @@ fn r2_040_settings_action_rows_fit_available_width() {
         SETTINGS_TOOL_ROWS,
         &[
             "action_count",
-            "action_right",
             "action_left",
             "action_gap",
-            "action_w",
+            "fn tool_row_action_layout",
+            "TOOL_ROW_ACTIONS_MAX_SHARE",
         ],
     );
 }

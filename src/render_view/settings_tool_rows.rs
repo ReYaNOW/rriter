@@ -46,6 +46,43 @@ fn tool_row_units(kind: crate::platform::ToolKind, stacked_actions: bool) -> f32
     }
 }
 
+/// Largest share of a wide tool row the action buttons may take, so the
+/// name/status column on the left always keeps readable room.
+const TOOL_ROW_ACTIONS_MAX_SHARE: f32 = 0.6;
+
+/// Action buttons of a tool row as `(first_x, gap, widths)`; `natural` holds
+/// `[install, pick, clear]` widths, `0.0` for an absent button, `count` is the
+/// number of present buttons. Stacked rows sit under the text and split the
+/// full width evenly; wide rows share the line with the text, so buttons keep
+/// their natural widths, right-aligned and capped by `TOOL_ROW_ACTIONS_MAX_SHARE`.
+fn tool_row_action_layout(
+    content_x: f32,
+    content_w: f32,
+    scale: f32,
+    stacked: bool,
+    natural: [f32; 3],
+    count: usize,
+) -> (f32, f32, [f32; 3]) {
+    let left = content_x + 8.0 * scale;
+    let right = content_x + content_w - 8.0 * scale;
+    let gap = (6.0 * scale).min((right - left).max(0.0) * 0.08);
+    let gaps = gap * count.saturating_sub(1) as f32;
+    if stacked {
+        let each = ((right - left - gaps) / count.max(1) as f32).max(0.0);
+        return (left, gap, natural.map(|w| if w > 0.0 { each } else { 0.0 }));
+    }
+    let natural_total = natural.iter().sum::<f32>();
+    let max_total = (content_w * TOOL_ROW_ACTIONS_MAX_SHARE - gaps).max(0.0);
+    let fit = if natural_total > max_total && natural_total > 0.0 {
+        max_total / natural_total
+    } else {
+        1.0
+    };
+    let widths = natural.map(|w| (w * fit).round());
+    let total = widths.iter().sum::<f32>() + gaps;
+    ((right - total).max(left), gap, widths)
+}
+
 fn dart_status_text(
     state: &crate::app::tool_installer::DartToolState,
     lsp_status: Option<crate::lsp::LspServerStatus>,
@@ -572,19 +609,70 @@ impl Renderer {
             5.0 * scale,
             [0.12, 0.13, 0.17, 1.0],
         );
-        self.draw_string_scaled_stable(
+        let managed = kind.supports_managed_install();
+        let install_text = if tool_installer.is_running_for(kind) {
+            "Отмена"
+        } else if resolution.is_ready() {
+            "Обновить"
+        } else {
+            "Установить"
+        };
+        let action_h = 29.0 * scale;
+        let action_count =
+            usize::from(managed) + 1 + usize::from(configured.is_some());
+        let natural = if stacked_actions {
+            // Stacked rows ignore natural widths; only presence (> 0) matters.
+            [f32::from(u8::from(managed)), 1.0, f32::from(u8::from(configured.is_some()))]
+        } else {
+            let pad = 12.0 * scale;
+            let install_w = if managed {
+                self.measure_ui_width(install_text, 0.68) + pad * 2.0
+            } else {
+                0.0
+            };
+            let clear_w = if configured.is_some() {
+                (self.measure_ui_width("×", 0.92) + pad).max(action_h)
+            } else {
+                0.0
+            };
+            [install_w, self.measure_ui_width("Выбрать", 0.72) + pad * 2.0, clear_w]
+        };
+        let (action_left, action_gap, [install_w, choose_w, clear_w]) = tool_row_action_layout(
+            content_x,
+            content_available_w,
+            scale,
+            stacked_actions,
+            natural,
+            action_count,
+        );
+
+        // Text column: full row width when actions sit below the text, else
+        // everything left of the right-aligned buttons.
+        let text_x = (content_x + 10.0 * scale).round();
+        let row_text_w = (content_available_w - 20.0 * scale).max(0.0);
+        let text_w = if stacked_actions {
+            row_text_w
+        } else {
+            (action_left - 12.0 * scale - text_x).max(0.0)
+        };
+        let mut clip_scratch = String::new();
+        self.draw_tree_label_clipped(
             kind.label(),
-            (content_x + 10.0 * scale).round(),
+            text_x,
             (row_y + (17.0 * scale).round()).round(),
+            text_w,
             [0.88, 0.88, 0.92, 1.0],
             0.88,
+            &mut clip_scratch,
         );
-        self.draw_string_scaled_stable(
+        self.draw_tree_label_clipped(
             &status,
-            (content_x + 10.0 * scale).round(),
+            text_x,
             (row_y + (35.0 * scale).round()).round(),
+            text_w,
             status_color,
             0.70,
+            &mut clip_scratch,
         );
         if kind == crate::platform::ToolKind::Dart {
             let path = dart_tool_state
@@ -592,9 +680,10 @@ impl Renderer {
                 .or_else(|| dart_tool_state.path())
                 .map(|path| super::settings_ui::compact_settings_path(path, 68))
                 .unwrap_or_else(|| "—".to_string());
-            self.draw_string_scaled_stable(
+            // The path line sits below the action buttons in both layouts.
+            self.draw_tree_label_clipped(
                 &format!("Путь: {path}"),
-                (content_x + 10.0 * scale).round(),
+                text_x,
                 (row_y
                     + if stacked_actions {
                         91.0 * scale
@@ -602,8 +691,10 @@ impl Renderer {
                         52.0 * scale
                     })
                 .round(),
+                row_text_w,
                 [0.50, 0.52, 0.60, 1.0],
                 0.64,
+                &mut clip_scratch,
             );
         }
 
@@ -614,38 +705,20 @@ impl Renderer {
                 7.0 * scale
             })
         .round();
-        let action_left = content_x + 8.0 * scale;
-        let action_right = content_x + content_available_w - 8.0 * scale;
-        let action_gap = (6.0 * scale).min((action_right - action_left).max(0.0) * 0.08);
-        let action_count = usize::from(kind.supports_managed_install())
-            + 1
-            + usize::from(configured.is_some());
-        let action_w = ((action_right
-            - action_left
-            - action_gap * action_count.saturating_sub(1) as f32)
-            / action_count.max(1) as f32)
-            .max(0.0);
         let mut action_x = action_left;
 
-        if kind.supports_managed_install() {
+        if managed {
             let install_x = action_x.round();
-            action_x += action_w + action_gap;
+            action_x += install_w + action_gap;
             let install_disabled = tool_installer.is_running()
                 && !tool_installer.is_running_for(kind);
-            let install_text = if tool_installer.is_running_for(kind) {
-                "Отмена"
-            } else if resolution.is_ready() {
-                "Обновить"
-            } else {
-                "Установить"
-            };
             if !install_disabled {
                 ui_registry.register_rect(
                     crate::ui_system::UiId::SettingsToolInstall(kind.index()),
                     install_x,
                     action_y,
-                    action_w,
-                    29.0 * scale,
+                    install_w,
+                    action_h,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
@@ -653,7 +726,7 @@ impl Renderer {
             crate::widgets::ButtonView {
                 x: install_x,
                 y: action_y,
-                w: action_w,
+                w: install_w,
                 h: 29.0 * scale,
                 text: install_text,
                 icon: None,
@@ -670,15 +743,15 @@ impl Renderer {
         }
 
         let choose_x = action_x.round();
-        action_x += action_w + action_gap;
+        action_x += choose_w + action_gap;
         let path_controls_disabled = tool_installer.is_running();
         if !path_controls_disabled {
             ui_registry.register_rect(
                 crate::ui_system::UiId::SettingsToolPick(kind.index()),
                 choose_x,
                 action_y,
-                action_w,
-                29.0 * scale,
+                choose_w,
+                action_h,
                 self.last_mouse_x,
                 self.last_mouse_y,
             );
@@ -686,7 +759,7 @@ impl Renderer {
         crate::widgets::ButtonView {
             x: choose_x,
             y: action_y,
-            w: action_w,
+            w: choose_w,
             h: 29.0 * scale,
             text: "Выбрать",
             icon: None,
@@ -708,8 +781,8 @@ impl Renderer {
                     crate::ui_system::UiId::SettingsToolClear(kind.index()),
                     clear_x,
                     action_y,
-                    action_w,
-                    29.0 * scale,
+                    clear_w,
+                    action_h,
                     self.last_mouse_x,
                     self.last_mouse_y,
                 );
@@ -717,7 +790,7 @@ impl Renderer {
             crate::widgets::ButtonView {
                 x: clear_x,
                 y: action_y,
-                w: action_w,
+                w: clear_w,
                 h: 29.0 * scale,
                 text: "×",
                 icon: None,
@@ -868,7 +941,33 @@ impl Renderer {
 
 #[cfg(test)]
 mod tests {
-    use super::{ctrl_wheel_multiplier_label, editor_ctrl_wheel_layout, tool_row_units};
+    use super::{
+        ctrl_wheel_multiplier_label, editor_ctrl_wheel_layout, tool_row_action_layout,
+        tool_row_units, TOOL_ROW_ACTIONS_MAX_SHARE,
+    };
+
+    #[test]
+    fn wide_tool_row_actions_right_align_at_natural_width() {
+        let (x, gap, widths) =
+            tool_row_action_layout(100.0, 600.0, 1.0, false, [0.0, 80.0, 29.0], 2);
+        assert_eq!(widths, [0.0, 80.0, 29.0]);
+        assert!((x + 80.0 + gap + 29.0 - 692.0).abs() < 0.001);
+
+        let (x, gap, widths) =
+            tool_row_action_layout(100.0, 200.0, 1.0, false, [300.0, 300.0, 0.0], 2);
+        let total = widths.iter().sum::<f32>() + gap;
+        assert!(total <= 200.0 * TOOL_ROW_ACTIONS_MAX_SHARE + 1.0);
+        assert!(x + total <= 292.0 + 0.001);
+    }
+
+    #[test]
+    fn stacked_tool_row_actions_split_full_width() {
+        let (x, gap, widths) =
+            tool_row_action_layout(0.0, 316.0, 1.0, true, [1.0, 1.0, 0.0], 2);
+        assert_eq!(x, 8.0);
+        assert_eq!(widths[2], 0.0);
+        assert!((widths[0] + gap + widths[1] - 300.0).abs() < 0.001);
+    }
 
     #[test]
     fn editor_ctrl_wheel_controls_fit_normal_and_narrow_widths() {

@@ -297,7 +297,7 @@ impl App {
         if self.modal_dialog_open() {
             if key_event.state == ElementState::Pressed {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
-                    self.close_dialog();
+                    self.cancel_pending_action();
                 } else {
                     if let Some(dw) = self.dialog_window.as_ref() {
                         dw.focus_window();
