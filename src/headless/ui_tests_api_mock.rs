@@ -3,14 +3,12 @@
 use crate::app::api_client::ApiMethod;
 use crate::app::api_mock::types::{ApiMockMode, ApiMockResponse, ApiMockServerStatus};
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script,
-    scratch_dir, wait_until, wheel_until_visible, workspace_with_explorer,
+    click_ui, dump, ensure_test_profile_root, get_from_mock, has_ui, loopback_addr_from_panel_url,
+    reset_api_test_state, run_script, scratch_dir, start_mock_server, stop_mock_server_from_ui,
+    wait_until, wheel_until_visible, workspace_with_explorer, API_MOCK_TEST_LOCK,
 };
 use crate::headless::HeadlessSession;
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpStream};
-use std::sync::{mpsc, Mutex};
-use std::thread;
+use std::net::TcpStream;
 use std::time::Duration;
 
 const TEST_WIDTH: u32 = 1280;
@@ -19,16 +17,6 @@ const TEST_SCALE: f32 = 4.0 / 3.0;
 const PANEL_POINT: (f64, f64) = (200.0, 500.0);
 const TAB_POINT: (f64, f64) = (800.0, 500.0);
 const MIN_HITBOX: f64 = 24.0;
-
-static API_MOCK_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-struct MockServerCleanup;
-
-impl Drop for MockServerCleanup {
-    fn drop(&mut self) {
-        crate::app::api_mock::server::stop_api_mock_server();
-    }
-}
 
 fn mock_session(name: &str) -> (std::path::PathBuf, HeadlessSession) {
     ensure_test_profile_root();
@@ -67,105 +55,6 @@ fn edit_manual_route_path(session: &mut HeadlessSession, route_idx: usize, path:
     click_ui(session, &format!("ApiMockManualRouteOpen({route_idx})"));
 }
 
-fn loopback_addr_from_panel_url(url: &str) -> Result<SocketAddr, String> {
-    let authority = url
-        .strip_prefix("http://")
-        .ok_or_else(|| format!("unexpected Mock server URL: {url}"))?;
-    let (_, port) = authority
-        .rsplit_once(':')
-        .ok_or_else(|| format!("Mock server URL has no port: {url}"))?;
-    let port = port
-        .parse::<u16>()
-        .map_err(|error| format!("invalid Mock server port in {url}: {error}"))?;
-    Ok(SocketAddr::from(([127, 0, 0, 1], port)))
-}
-
-fn start_mock_server(session: &mut HeadlessSession) -> (String, SocketAddr, MockServerCleanup) {
-    // Port zero asks the OS for an unused port; the panel reports the actual bound URL.
-    session.app.ide_panel.api.mock.port = 0;
-    click_ui(session, "ApiMockServerToggle");
-    let cleanup = MockServerCleanup;
-    let mut url = None;
-    wait_until(session, 5000, "API Mock server URL", |session| {
-        if let Some(running_url) = session.app.ide_panel.api.mock.server_status.running_url() {
-            url = Some(running_url.to_string());
-            true
-        } else {
-            false
-        }
-    });
-    let url = url.expect("running API Mock URL");
-    let address = loopback_addr_from_panel_url(&url).expect("loopback address from panel URL");
-    (url, address, cleanup)
-}
-
-fn request_mock_server(url: String, path: String) -> mpsc::Receiver<Result<(u16, String), String>> {
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let response = (|| {
-            let address = loopback_addr_from_panel_url(&url)?;
-            let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
-                .map_err(|error| error.to_string())?;
-            stream
-                .set_read_timeout(Some(Duration::from_secs(2)))
-                .map_err(|error| error.to_string())?;
-            stream
-                .set_write_timeout(Some(Duration::from_secs(2)))
-                .map_err(|error| error.to_string())?;
-            write!(
-                stream,
-                "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
-            )
-            .map_err(|error| error.to_string())?;
-            let mut bytes = Vec::new();
-            stream
-                .read_to_end(&mut bytes)
-                .map_err(|error| error.to_string())?;
-            let response = String::from_utf8_lossy(&bytes);
-            let status = response
-                .lines()
-                .next()
-                .and_then(|line| line.split_whitespace().nth(1))
-                .and_then(|status| status.parse::<u16>().ok())
-                .ok_or_else(|| format!("invalid HTTP response: {response}"))?;
-            let body = response
-                .split_once("\r\n\r\n")
-                .map(|(_, body)| body.to_string())
-                .ok_or_else(|| format!("HTTP response has no body separator: {response}"))?;
-            Ok((status, body))
-        })();
-        let _ = sender.send(response);
-    });
-    receiver
-}
-
-fn wait_for_mock_response(
-    session: &mut HeadlessSession,
-    receiver: mpsc::Receiver<Result<(u16, String), String>>,
-    what: &str,
-) -> (u16, String) {
-    let mut response = None;
-    wait_until(session, 5000, what, |_| {
-        if response.is_none() {
-            response = receiver.try_recv().ok();
-        }
-        response.is_some()
-    });
-    response
-        .expect("HTTP worker completed")
-        .unwrap_or_else(|error| panic!("Mock server request failed: {error}"))
-}
-
-fn stop_mock_server_from_ui(session: &mut HeadlessSession) {
-    click_ui(session, "ApiMockServerToggle");
-    wait_until(session, 5000, "API Mock server stop", |session| {
-        matches!(
-            session.app.ide_panel.api.mock.server_status,
-            ApiMockServerStatus::Stopped
-        )
-    });
-}
-
 #[test]
 fn headless_api_mock_manual_route_can_be_edited_in_list() {
     let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -193,12 +82,8 @@ fn headless_api_mock_server_returns_manual_route_response() {
     let lines = run_script(&mut session, format!("key ctrl+a\ntype {body}\n").as_bytes());
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
 
-    let (url, _, _cleanup) = start_mock_server(&mut session);
-    let response = wait_for_mock_response(
-        &mut session,
-        request_mock_server(url, "/mock-1".to_string()),
-        "manual mock HTTP response",
-    );
+    let (url, _cleanup) = start_mock_server(&mut session);
+    let response = get_from_mock(&mut session, &url, "/mock-1");
     assert_eq!(response.0, 200);
     assert!(response.1.contains("rriter-headless"), "{response:?}");
     assert!(matches!(
@@ -224,12 +109,8 @@ fn headless_api_mock_unknown_path_returns_404() {
         click_ui(&mut session, "ApiMockModeSelect");
     }
     assert_eq!(session.app.ide_panel.api.mock.mode, ApiMockMode::MockAll);
-    let (url, _, _cleanup) = start_mock_server(&mut session);
-    let response = wait_for_mock_response(
-        &mut session,
-        request_mock_server(url, "/no-such-route".to_string()),
-        "unmatched mock HTTP response",
-    );
+    let (url, _cleanup) = start_mock_server(&mut session);
+    let response = get_from_mock(&mut session, &url, "/no-such-route");
     assert_eq!(response.0, 404);
     assert!(response.1.contains("mock route not found"), "{response:?}");
     stop_mock_server_from_ui(&mut session);
@@ -240,7 +121,8 @@ fn headless_api_mock_unknown_path_returns_404() {
 fn headless_api_mock_stop_closes_listener() {
     let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-stop");
-    let (_, address, _cleanup) = start_mock_server(&mut session);
+    let (url, _cleanup) = start_mock_server(&mut session);
+    let address = loopback_addr_from_panel_url(&url).expect("loopback address from panel URL");
     assert!(TcpStream::connect_timeout(&address, Duration::from_secs(1)).is_ok());
 
     click_ui(&mut session, "ApiMockServerToggle");

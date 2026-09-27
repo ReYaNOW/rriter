@@ -10,11 +10,15 @@ pub(crate) mod protocol;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_import;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_request;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_spec;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_mock;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_mock_python;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_database_connect;
 #[cfg(all(test, target_os = "linux"))]
@@ -42,6 +46,8 @@ mod ui_tests_git_graph;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_goto_definition;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_keyboard_panels;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_layout;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_markdown;
@@ -62,7 +68,11 @@ mod ui_tests_settings_help;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_ide;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_tools;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_splitters;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_tabs_dirty;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tabs_tree;
 #[cfg(all(test, target_os = "linux"))]

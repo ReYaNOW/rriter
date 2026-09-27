@@ -1458,7 +1458,7 @@ Root:
 * `src/headless/frame.rs` -> headless frame step (`step_frame`: `about_to_wait` + forced/requested frame), `settle_loop`/`StepState`, pbuffer readback (`read_frame_rgba`, `flip_rows_in_place`) and `write_png`.
 * `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
-* `src/headless/tests.rs` `tests_support` UI helpers -> `postgres_fixture()` (spawns `scripts/postgres_fixture.py --port 0`), `connect_postgres_fixture_through_ui`, `add_database_connection_through_ui`, `set_database_dialog_field`, `click_ui_fraction`, `ui_point`.
+* `src/headless/tests.rs` `tests_support` UI helpers -> `postgres_fixture()` (spawns `scripts/postgres_fixture.py --port 0`), `connect_postgres_fixture_through_ui`, `add_database_connection_through_ui`, `set_database_dialog_field`, `click_ui_fraction`, `ui_point`, `dirty_ide_tab`, `terminal_*`, `API_MOCK_TEST_LOCK`, `start_mock_server`/`stop_mock_server`, `get_from_mock`.
 * `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, and long tabs.
 * `src/headless/ui_tests_goto_definition.rs` -> headless UI tests for Ctrl-hover highlighting and same-file/cross-file definition navigation.
 * `src/headless/ui_tests_layout.rs` -> headless UI regression tests for welcome/editor/tree size and scale matrices, resize, and frame benchmarks.
@@ -1481,6 +1481,11 @@ Root:
 * `src/headless/ui_tests_api_mock.rs` -> headless UI tests for API Mock route editing, real HTTP responses, 404 in MockAll, Stop, and Python/contract controls.
 * `src/headless/ui_tests_database_connect.rs` -> headless UI tests for the Database connection form, fixture catalog/table open, and closed-port error.
 * `src/headless/ui_tests_database_query.rs` -> headless UI tests for SQL console SELECT grid, EXPLAIN plan, and server error text with a usable console after it.
+* `src/headless/ui_tests_tabs_dirty.rs` -> headless UI tests for the dirty-tab close dialog: Save (incl. CRLF), Cancel, Escape, outside click, and close after Ctrl+S.
+* `src/headless/ui_tests_keyboard_panels.rs` -> headless UI tests for panel shortcuts Alt+Q/Shift+Alt+Q terminal, F1 in terminal focus, Alt+W Problems, and Ctrl+Shift+F from the terminal.
+* `src/headless/ui_tests_api_client_import.rs` -> headless UI tests for OpenAPI import by URL from a local HTTP server: routes, URL validation, 404/invalid JSON errors, and no duplicate spec on re-import.
+* `src/headless/ui_tests_api_mock_python.rs` -> headless UI tests for API Mock Python handlers: served result, exception/syntax error → 500, edit after restart, and hot update on a running server.
+* `src/headless/ui_tests_settings_tools.rs` -> headless UI tests for Settings tool rows: Refresh, clearing an override, install log copy/close, Dart Restart and LSP log in/outside IDE, and row button layout.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
 * `src/headless/profile.rs` -> headless CLI options (`parse_args`, `HeadlessOptions`) and the isolated profile root (`Profile`: private temp root, explicit dir, or copy of the user's config/data/state; removed on `finish`).

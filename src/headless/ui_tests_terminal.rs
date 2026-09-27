@@ -1,7 +1,8 @@
 //! Headless interaction coverage for the integrated terminal.
 
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, ui_rect, wait_until,
+    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, shell_failed,
+    terminal_has_line, ui_rect, wait_until,
 };
 use crate::headless::HeadlessSession;
 
@@ -28,34 +29,6 @@ fn terminal_session(name: &str) -> (std::path::PathBuf, HeadlessSession) {
     (dir, session)
 }
 
-fn terminal_spawn_failed(session: &HeadlessSession, index: usize) -> bool {
-    session
-        .app
-        .ide_panel
-        .terminals
-        .get(index)
-        .is_some_and(|terminal| {
-            let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-            grid.lines
-                .iter()
-                .flatten()
-                .map(|cell| cell.c)
-                .collect::<String>()
-                .contains("RRiter terminal error:")
-        })
-}
-
-fn terminal_has_line(session: &HeadlessSession, index: usize, expected: &str) -> bool {
-    let Some(terminal) = session.app.ide_panel.terminals.get(index) else {
-        return false;
-    };
-    let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-    grid.scrollback
-        .iter()
-        .chain(grid.lines.iter())
-        .any(|row| row.iter().map(|cell| cell.c).collect::<String>().trim() == expected)
-}
-
 fn run_terminal_command(session: &mut HeadlessSession, command: &str) {
     click_ui(session, "TerminalBody");
     assert!(session.app.ide_panel.terminal_focused);
@@ -66,19 +39,10 @@ fn run_terminal_command(session: &mut HeadlessSession, command: &str) {
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
 }
 
-fn skip_if_shell_failed(session: &HeadlessSession, index: usize) -> bool {
-    if terminal_spawn_failed(session, index) {
-        eprintln!("skip: terminal shell did not start");
-        true
-    } else {
-        false
-    }
-}
-
 #[test]
 fn headless_terminal_types_command_and_shows_its_output() {
     let (dir, mut session) = terminal_session("ui-terminal-command");
-    if skip_if_shell_failed(&session, 0) {
+    if shell_failed(&session, 0) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
@@ -94,7 +58,7 @@ fn headless_terminal_types_command_and_shows_its_output() {
 #[test]
 fn headless_terminal_tabs_add_switch_and_close() {
     let (dir, mut session) = terminal_session("ui-terminal-tabs");
-    if skip_if_shell_failed(&session, 0) {
+    if shell_failed(&session, 0) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
@@ -108,7 +72,7 @@ fn headless_terminal_tabs_add_switch_and_close() {
     wait_until(&mut session, 5000, "second terminal tab", |session| {
         session.app.ide_panel.terminals.len() == 2 && has_ui(&dump(session), "TerminalTab(1)")
     });
-    if skip_if_shell_failed(&session, 1) {
+    if shell_failed(&session, 1) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
@@ -138,7 +102,7 @@ fn headless_terminal_tabs_add_switch_and_close() {
 #[test]
 fn headless_terminal_search_highlights_navigates_and_closes() {
     let (dir, mut session) = terminal_session("ui-terminal-search");
-    if skip_if_shell_failed(&session, 0) {
+    if shell_failed(&session, 0) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
@@ -200,7 +164,7 @@ fn headless_terminal_search_highlights_navigates_and_closes() {
 #[test]
 fn headless_terminal_mouse_selection_copies_selected_text() {
     let (dir, mut session) = terminal_session("ui-terminal-selection");
-    if skip_if_shell_failed(&session, 0) {
+    if shell_failed(&session, 0) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }

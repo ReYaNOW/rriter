@@ -1795,7 +1795,12 @@ impl crate::app::App {
                 return;
             }
         };
-        let id = self.ide_panel.api.alloc_spec_id();
+        // Re-importing a known URL reloads that spec instead of adding a duplicate.
+        let existing = self.ide_panel.api.specs.iter().find_map(|entry| match &entry.source {
+            ApiSpecSource::Url(known) if *known == url => Some(entry.id),
+            _ => None,
+        });
+        let id = existing.unwrap_or_else(|| self.ide_panel.api.alloc_spec_id());
         self.ide_panel.api.import_error = None;
         self.ide_panel.api.import_error_at = None;
         self.ide_panel.api.import_url_open = false;

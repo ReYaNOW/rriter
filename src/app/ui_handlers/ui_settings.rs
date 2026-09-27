@@ -336,6 +336,10 @@ impl App {
                 self.restart_dart_server();
             }
             UiId::SettingsDartOpenLog => {
+                // The LSP panel is drawn only in IDE mode.
+                if !self.is_ide_mode {
+                    self.enter_ide_mode();
+                }
                 self.ide_panel.open(crate::app::PanelId::LspServers);
                 if let Some(info) = self
                     .ide_panel

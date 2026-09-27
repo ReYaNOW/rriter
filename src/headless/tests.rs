@@ -4,11 +4,12 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
-    use std::io::{BufRead, BufReader, Cursor};
+    use std::io::{BufRead, BufReader, Cursor, Read, Write};
+    use std::net::{SocketAddr, TcpStream};
     use std::path::{Path, PathBuf};
     use std::process::{ChildStdin, Command, Stdio};
     use std::sync::mpsc;
-    use std::sync::OnceLock;
+    use std::sync::{Mutex, OnceLock};
     use std::time::{Duration, Instant};
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
@@ -437,6 +438,149 @@ pub(crate) mod tests_support {
         let payload = line.strip_prefix("ok ").unwrap_or_else(|| panic!("not ok: {line}"));
         serde_json::from_str(payload).expect("json payload")
     }
+
+    /// IDE workspace with one open tab of `content` in `dirty.txt`, edited to
+    /// `"changed" + content`: the tab is dirty, so Ctrl+4 asks before closing it.
+    pub(crate) fn dirty_ide_tab(name: &str, content: &[u8]) -> (PathBuf, PathBuf, HeadlessSession) {
+        let dir = scratch_dir(name);
+        let file = dir.join("dirty.txt");
+        std::fs::write(&file, content).expect("write dirty tab file");
+        let mut session = session_for_test(1280, 800);
+        let script = format!(
+            "workspace {}\nsettle 2000\nopen {}\nsettle 2000\ntype changed\nsettle 1000\n",
+            dir.display(),
+            file.display()
+        );
+        let lines = run_script(&mut session, script.as_bytes());
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        let state = dump(&mut session);
+        assert_eq!(state["tabs"][0]["modified"], true, "{state}");
+        (dir, file, session)
+    }
+
+    /// Rows of terminal `index`, scrollback first; `None` until that terminal exists.
+    pub(crate) fn terminal_text(session: &HeadlessSession, index: usize) -> Option<Vec<String>> {
+        let terminal = session.app.ide_panel.terminals.get(index)?;
+        let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
+        Some(
+            grid.scrollback
+                .iter()
+                .chain(grid.lines.iter())
+                .map(|row| row.iter().map(|cell| cell.c).collect::<String>())
+                .collect(),
+        )
+    }
+
+    /// True when the shell of terminal `index` did not start (sandbox without a PTY or
+    /// shell); callers skip the rest of the test.
+    pub(crate) fn shell_failed(session: &HeadlessSession, index: usize) -> bool {
+        let failed = terminal_text(session, index)
+            .is_some_and(|rows| rows.iter().any(|row| row.contains("RRiter terminal error:")));
+        if failed {
+            eprintln!("skip: terminal shell did not start");
+        }
+        failed
+    }
+
+    pub(crate) fn terminal_has_line(session: &HeadlessSession, index: usize, expected: &str) -> bool {
+        terminal_text(session, index).is_some_and(|rows| rows.iter().any(|row| row.trim() == expected))
+    }
+
+    /// The API Mock server and its Python worker are process-wide singletons: every
+    /// headless test that starts the server holds this lock.
+    pub(crate) static API_MOCK_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Stops the API Mock server when a test ends, including by panic.
+    pub(crate) struct MockServerCleanup;
+
+    impl Drop for MockServerCleanup {
+        fn drop(&mut self) {
+            crate::app::api_mock::server::stop_api_mock_server();
+        }
+    }
+
+    pub(crate) fn loopback_addr_from_panel_url(url: &str) -> Result<SocketAddr, String> {
+        let (_, port) = url
+            .strip_prefix("http://")
+            .and_then(|authority| authority.rsplit_once(':'))
+            .ok_or_else(|| format!("unexpected Mock server URL: {url}"))?;
+        let port = port
+            .parse::<u16>()
+            .map_err(|error| format!("invalid Mock server port in {url}: {error}"))?;
+        Ok(SocketAddr::from(([127, 0, 0, 1], port)))
+    }
+
+    /// Starts the API Mock server from its panel toggle and returns the bound URL.
+    pub(crate) fn start_mock_server(session: &mut HeadlessSession) -> (String, MockServerCleanup) {
+        // Port zero asks the OS for an unused port; the panel reports the actual bound URL.
+        session.app.ide_panel.api.mock.port = 0;
+        click_ui(session, "ApiMockServerToggle");
+        let cleanup = MockServerCleanup;
+        let mut url = None;
+        wait_until(session, 5000, "API Mock server URL", |session| {
+            url = session.app.ide_panel.api.mock.server_status.running_url().map(str::to_string);
+            url.is_some()
+        });
+        (url.expect("running API Mock URL"), cleanup)
+    }
+
+    pub(crate) fn stop_mock_server_from_ui(session: &mut HeadlessSession) {
+        click_ui(session, "ApiMockServerToggle");
+        wait_until(session, 5000, "API Mock server stop", |session| {
+            matches!(
+                session.app.ide_panel.api.mock.server_status,
+                crate::app::api_mock::types::ApiMockServerStatus::Stopped
+            )
+        });
+    }
+
+    /// GETs `path` on a worker thread while the session keeps drawing frames, so the
+    /// server events reach the panel log. Returns the status code and body.
+    pub(crate) fn get_from_mock(session: &mut HeadlessSession, url: &str, path: &str) -> (u16, String) {
+        let (sender, receiver) = mpsc::channel();
+        let (url, path) = (url.to_string(), path.to_string());
+        std::thread::spawn(move || {
+            let response = (|| {
+                let address = loopback_addr_from_panel_url(&url)?;
+                let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(2))
+                    .map_err(|error| error.to_string())?;
+                // A Python route's first request starts its worker through uv.
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(10)))
+                    .map_err(|error| error.to_string())?;
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(2)))
+                    .map_err(|error| error.to_string())?;
+                write!(stream, "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n")
+                    .map_err(|error| error.to_string())?;
+                let mut bytes = Vec::new();
+                stream.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+                let response = String::from_utf8_lossy(&bytes);
+                let status = response
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .and_then(|status| status.parse::<u16>().ok())
+                    .ok_or_else(|| format!("invalid HTTP response: {response}"))?;
+                let body = response
+                    .split_once("\r\n\r\n")
+                    .map(|(_, body)| body.to_string())
+                    .ok_or_else(|| format!("HTTP response has no body separator: {response}"))?;
+                Ok::<_, String>((status, body))
+            })();
+            let _ = sender.send(response);
+        });
+        let mut response = None;
+        wait_until(session, 10_000, "API Mock HTTP response", |_| {
+            if response.is_none() {
+                response = receiver.try_recv().ok();
+            }
+            response.is_some()
+        });
+        response
+            .expect("HTTP worker completed")
+            .unwrap_or_else(|error| panic!("Mock server request failed: {error}"))
+    }
 }
 
 mod postgres_fixture_cases {
@@ -467,11 +611,10 @@ mod postgres_fixture_cases {
 
 mod session_cases {
     use crate::headless::tests_support::{
-        dump, long_file, ok_json, run_script, sample_file, scratch_dir, session_for_test,
-        ui_center,
+        dirty_ide_tab, dump, long_file, ok_json, run_script, sample_file, scratch_dir,
+        session_for_test, ui_center,
     };
     use crate::app::events::host_loop::HostLoop;
-    use crate::headless::HeadlessSession;
     use std::io::{self, Cursor, Write};
     use std::path::PathBuf;
 
@@ -626,17 +769,6 @@ mod session_cases {
         assert_eq!(lines[1], "ok frames=0 settled=true", "{lines:?}");
     }
 
-    /// Workspace with one dirty file tab, in IDE mode where Ctrl+4 asks before closing.
-    fn dirty_ide_tab(name: &str) -> (PathBuf, PathBuf, HeadlessSession) {
-        let dir = scratch_dir(name);
-        let file = sample_file(&dir);
-        let mut session = session_for_test(1280, 800);
-        let script = format!("workspace {}\nopen {}\ntype xyz\n", dir.display(), file.display());
-        let lines = run_script(&mut session, script.as_bytes());
-        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-        (dir, file, session)
-    }
-
     #[test]
     fn headless_dump_has_all_keys_and_welcome_mode() {
         let mut session = session_for_test(640, 400);
@@ -713,7 +845,7 @@ mod session_cases {
 
     #[test]
     fn headless_dialog_cancel_then_discard_close_tab() {
-        let (dir, file, mut session) = dirty_ide_tab("dialog-discard");
+        let (dir, file, mut session) = dirty_ide_tab("dialog-discard", b"original\n");
         let shot = dir.join("before.png");
         run_script(&mut session, format!("screenshot {}\nkey ctrl+4\n", shot.display()).as_bytes());
         let open = dump(&mut session);
@@ -742,17 +874,17 @@ mod session_cases {
         let discarded = dump(&mut session);
         assert_eq!(discarded["dialog"], serde_json::Value::Null);
         assert!(discarded["tabs"].as_array().unwrap().iter().all(|tab| tab["path"] != file.display().to_string()));
-        assert!(!std::fs::read_to_string(&file).unwrap().contains("xyz"));
+        assert_eq!(std::fs::read(&file).unwrap(), b"original\n");
         assert_eq!(session.exit_code(), 0);
         let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn headless_dialog_save_writes_file() {
-        let (dir, file, mut session) = dirty_ide_tab("dialog-save");
+        let (dir, file, mut session) = dirty_ide_tab("dialog-save", b"original\n");
         assert_eq!(run_script(&mut session, b"key ctrl+4\ndialog save\n"), ["ok", "ok"]);
         assert_eq!(dump(&mut session)["dialog"], serde_json::Value::Null);
-        assert!(std::fs::read_to_string(&file).unwrap().contains("xyz"));
+        assert_eq!(std::fs::read(&file).unwrap(), b"changedoriginal\n");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_ui_y_integral, click_ui, dump, git_fixture, has_ui, run_script, sample_file, scratch_dir,
-    session_for_test, ui_center, wait_until,
+    session_for_test, shell_failed, ui_center, wait_until,
 };
 
 fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
@@ -546,11 +546,7 @@ fn headless_terminal_scroll_returns_to_bottom_after_output() {
         has_ui(&dump(session), "TerminalBody")
     });
     let state = dump(&mut session);
-    let terminal_spawn_failed = session.app.ide_panel.terminals.first().is_some_and(|terminal| {
-        let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
-        grid.lines.iter().flatten().map(|cell| cell.c).collect::<String>().contains("RRiter terminal error:")
-    });
-    if terminal_spawn_failed {
+    if shell_failed(&session, 0) {
         let _ = std::fs::remove_dir_all(dir);
         return;
     }
