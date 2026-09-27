@@ -19,6 +19,8 @@ pub struct ApiMockState {
     pub uv: ApiPythonRuntimeState,
     pub route_overrides: Vec<ApiMockRouteOverride>,
     pub manual_routes: Vec<ApiManualRoute>,
+    #[serde(skip)]
+    pub server: super::server::ApiMockServer,
 }
 
 impl Default for ApiMockState {
@@ -34,6 +36,7 @@ impl Default for ApiMockState {
             uv: ApiPythonRuntimeState::default(),
             route_overrides: Vec::new(),
             manual_routes: Vec::new(),
+            server: Default::default(),
         }
     }
 }

@@ -100,6 +100,7 @@ src/app/api_client.rs
 src/app/api_client/api_client_loading_parser.rs
 src/app/api_client/api_client_request_runtime.rs
 src/app/api_client/api_client_defaults_persist.rs
+src/app/api_client/api_client_mock_config.rs
 src/app/api_client/api_client_app_text_methods.rs
 src/app/api_mock/server.rs
 src/app/api_mock/persist.rs
@@ -1560,6 +1561,7 @@ Entrypoints/state:
 * `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
 * `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
 * `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
+* `src/app/api_client/api_client_mock_config.rs` -> `commit_mock_config`: the single "mock config changed" point (persist + hot-update of the running mock server).
 * `src/app/api_client/*` -> API client request runtime, layout/input, App methods, parser/loading, persistence, and tests.
 * `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
 * `src/app/api_mock/contract.rs` -> Python mock contract builder for signature, classes, worker arg plan, defaults, OpenAPI schema pieces.

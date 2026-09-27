@@ -710,18 +710,11 @@ pub(crate) mod tests_support {
         });
     }
 
-    /// The API Mock server and its Python worker are process-wide singletons: every
-    /// headless test that starts the server holds this lock.
+    /// API Mock headless tests share the fixed-path API state files (`api_mocks.json`,
+    /// `api_specs.json`, see `reset_api_test_state`): each resets them and loads them
+    /// into its session, so the tests hold this lock. The server itself is owned by the
+    /// session's `App` and stops when the session drops.
     pub(crate) static API_MOCK_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    /// Stops the API Mock server when a test ends, including by panic.
-    pub(crate) struct MockServerCleanup;
-
-    impl Drop for MockServerCleanup {
-        fn drop(&mut self) {
-            crate::app::api_mock::server::stop_api_mock_server();
-        }
-    }
 
     pub(crate) fn loopback_addr_from_panel_url(url: &str) -> Result<SocketAddr, String> {
         let (_, port) = url
@@ -735,17 +728,16 @@ pub(crate) mod tests_support {
     }
 
     /// Starts the API Mock server from its panel toggle and returns the bound URL.
-    pub(crate) fn start_mock_server(session: &mut HeadlessSession) -> (String, MockServerCleanup) {
+    pub(crate) fn start_mock_server(session: &mut HeadlessSession) -> String {
         // Port zero asks the OS for an unused port; the panel reports the actual bound URL.
         session.app.ide_panel.api.mock.port = 0;
         click_ui(session, "ApiMockServerToggle");
-        let cleanup = MockServerCleanup;
         let mut url = None;
         wait_until(session, 5000, "API Mock server URL", |session| {
             url = session.app.ide_panel.api.mock.server_status.running_url().map(str::to_string);
             url.is_some()
         });
-        (url.expect("running API Mock URL"), cleanup)
+        url.expect("running API Mock URL")
     }
 
     pub(crate) fn stop_mock_server_from_ui(session: &mut HeadlessSession) {

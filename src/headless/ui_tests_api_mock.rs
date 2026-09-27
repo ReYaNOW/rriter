@@ -82,7 +82,7 @@ fn headless_api_mock_server_returns_manual_route_response() {
     let lines = run_script(&mut session, format!("key ctrl+a\ntype {body}\n").as_bytes());
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
 
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
     let response = get_from_mock(&mut session, &url, "/mock-1");
     assert_eq!(response.0, 200);
     assert!(response.1.contains("rriter-headless"), "{response:?}");
@@ -109,7 +109,7 @@ fn headless_api_mock_unknown_path_returns_404() {
         click_ui(&mut session, "ApiMockModeSelect");
     }
     assert_eq!(session.app.ide_panel.api.mock.mode, ApiMockMode::MockAll);
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
     let response = get_from_mock(&mut session, &url, "/no-such-route");
     assert_eq!(response.0, 404);
     assert!(response.1.contains("mock route not found"), "{response:?}");
@@ -121,7 +121,7 @@ fn headless_api_mock_unknown_path_returns_404() {
 fn headless_api_mock_stop_closes_listener() {
     let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-stop");
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
     let address = loopback_addr_from_panel_url(&url).expect("loopback address from panel URL");
     assert!(TcpStream::connect_timeout(&address, Duration::from_secs(1)).is_ok());
 

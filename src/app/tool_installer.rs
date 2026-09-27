@@ -1598,7 +1598,7 @@ impl crate::app::App {
                 self.ide_panel.lsp_servers = lsp.servers_info();
             }
             if persist_api_runtime {
-                self.ide_panel.api.persist();
+                self.ide_panel.api.commit_mock_config();
             }
             changed = true;
         }

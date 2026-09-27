@@ -9,13 +9,18 @@ use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 const PYTHON_WORKER_SHUTDOWN_GRACE: Duration = Duration::from_millis(300);
 const PYTHON_STDERR_LIMIT: usize = 64 * 1024;
 
-static WORKER: LazyLock<Mutex<Option<PythonWorker>>> = LazyLock::new(|| Mutex::new(None));
+/// Python worker process of one running API Mock server; started on the first Python
+/// route request and restarted when the runtime config changes.
+#[derive(Default)]
+pub struct PythonWorkerSlot {
+    worker: Mutex<Option<PythonWorker>>,
+}
 
 pub struct PythonMockRequest {
     pub method: String,
@@ -53,41 +58,45 @@ struct WorkerOutput {
     text: Option<String>,
 }
 
-pub fn call_python_route(
-    runtime: &ApiPythonRuntimeConfig,
-    script: &ApiMockPythonScript,
-    request: PythonMockRequest,
-) -> Result<PythonMockResponse, String> {
-    let mut guard = WORKER
-        .lock()
-        .map_err(|_| "Python worker lock failed".to_string())?;
-    let needs_start = guard
-        .as_ref()
-        .is_none_or(|worker| worker.runtime != *runtime);
-    if needs_start {
-        *guard = Some(start_worker(runtime)?);
-    }
-    let worker = guard
-        .as_mut()
-        .ok_or_else(|| "Python worker missing".to_string())?;
-    match worker.call(script, request) {
-        Ok(response) => Ok(response),
-        Err(error) => {
-            let detail = worker.stderr_text();
-            *guard = None;
-            if detail.is_empty() {
-                Err(error)
-            } else {
-                Err(format!("{error}\nPython stderr:\n{detail}"))
+impl PythonWorkerSlot {
+    pub fn call_route(
+        &self,
+        runtime: &ApiPythonRuntimeConfig,
+        script: &ApiMockPythonScript,
+        request: PythonMockRequest,
+    ) -> Result<PythonMockResponse, String> {
+        let mut guard = self
+            .worker
+            .lock()
+            .map_err(|_| "Python worker lock failed".to_string())?;
+        let needs_start = guard
+            .as_ref()
+            .is_none_or(|worker| worker.runtime != *runtime);
+        if needs_start {
+            *guard = Some(start_worker(runtime)?);
+        }
+        let worker = guard
+            .as_mut()
+            .ok_or_else(|| "Python worker missing".to_string())?;
+        match worker.call(script, request) {
+            Ok(response) => Ok(response),
+            Err(error) => {
+                let detail = worker.stderr_text();
+                *guard = None;
+                if detail.is_empty() {
+                    Err(error)
+                } else {
+                    Err(format!("{error}\nPython stderr:\n{detail}"))
+                }
             }
         }
     }
-}
 
-pub fn stop_python_worker() {
-    let mut guard = crate::platform::lock_recover(&WORKER);
-    if let Some(mut worker) = guard.take() {
-        let _ = worker.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
+    pub fn stop(&self) {
+        let mut guard = crate::platform::lock_recover(&self.worker);
+        if let Some(mut worker) = guard.take() {
+            let _ = worker.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
+        }
     }
 }
 

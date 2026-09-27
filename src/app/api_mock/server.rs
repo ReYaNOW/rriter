@@ -1,5 +1,5 @@
 use super::merge::{api_mock_path_params, resolve_api_mock_route};
-use super::python_worker::{PythonMockRequest, call_python_route, stop_python_worker};
+use super::python_worker::{PythonMockRequest, PythonWorkerSlot};
 use super::types::{
     ApiMockContractField, ApiMockContractFieldKind, ApiMockRouteDecision, ApiMockRuntimeRoute,
     ApiMockServerEvent, ApiMockServerSnapshot, ApiMockServerStatus,
@@ -14,27 +14,42 @@ use axum::routing::any;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Receiver;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::mpsc::{Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tokio::sync::oneshot;
 
-static SERVER: LazyLock<Mutex<Option<ApiMockServerHandle>>> = LazyLock::new(|| Mutex::new(None));
-static EVENTS: LazyLock<Mutex<Vec<ApiMockServerEvent>>> = LazyLock::new(|| Mutex::new(Vec::new()));
-static SERVER_STOPPING: AtomicBool = AtomicBool::new(false);
+/// Bound on waiting for the server thread in `ApiMockServer::stop`.
+const API_MOCK_STOP_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// API Mock server owned by `ApiMockState`. Dropping it stops the server the same
+/// bounded way as `stop`.
+#[derive(Default)]
+pub struct ApiMockServer {
+    handle: Option<ApiMockServerHandle>,
+    /// A stop timed out and the live handle is retained until its thread finishes.
+    stopping: bool,
+    /// Created on the first start; the sender is cloned into every server thread.
+    events: Option<(Sender<ApiMockServerEvent>, Receiver<ApiMockServerEvent>)>,
+}
 
 struct ApiMockServerHandle {
     shutdown: Option<oneshot::Sender<()>>,
     snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
+    python: Arc<PythonWorkerSlot>,
     finished: Receiver<()>,
     thread: Option<JoinHandle<()>>,
 }
 
 #[derive(Clone)]
+struct ApiMockEventSink(Sender<ApiMockServerEvent>);
+
+#[derive(Clone)]
 struct ApiMockAxumState {
     snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
+    python: Arc<PythonWorkerSlot>,
+    events: ApiMockEventSink,
     proxy_client: reqwest::Client,
 }
 
@@ -49,80 +64,149 @@ enum MultipartValue {
     },
 }
 
-pub fn drain_api_mock_server_events() -> Vec<ApiMockServerEvent> {
-    crate::platform::lock_recover(&EVENTS).drain(..).collect()
+impl ApiMockServer {
+    pub fn drain_events(&self) -> Vec<ApiMockServerEvent> {
+        self.events
+            .as_ref()
+            .map(|(_, events)| events.try_iter().collect())
+            .unwrap_or_default()
+    }
+
+    pub fn start(&mut self, snapshot: ApiMockServerSnapshot) -> Result<(), String> {
+        self.reap_finished();
+        if self.stopping {
+            return Err("Mock server is still stopping".to_string());
+        }
+        if self.handle.is_some() {
+            return Ok(());
+        }
+
+        let (events, _) = self.events.get_or_insert_with(std::sync::mpsc::channel);
+        let events = ApiMockEventSink(events.clone());
+        let python = Arc::new(PythonWorkerSlot::default());
+        let (shutdown_tx, shutdown_rx) = oneshot::channel();
+        let snapshot = Arc::new(Mutex::new(snapshot));
+        let thread_snapshot = Arc::clone(&snapshot);
+        let thread_python = Arc::clone(&python);
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let thread = std::thread::Builder::new()
+            .name("rriter-api-mock".to_string())
+            .spawn(move || {
+                run_server_thread(thread_snapshot, thread_python, events, shutdown_rx);
+                let _ = finished_tx.send(());
+            })
+            .map_err(|err| err.to_string())?;
+        self.handle = Some(ApiMockServerHandle {
+            shutdown: Some(shutdown_tx),
+            snapshot,
+            python,
+            finished: finished_rx,
+            thread: Some(thread),
+        });
+        Ok(())
+    }
+
+    /// True while a server thread exists (running, starting, or still stopping).
+    pub fn is_live(&mut self) -> bool {
+        self.reap_finished();
+        self.handle.is_some()
+    }
+
+    /// Hot-updates the live server's config; returns whether it changed.
+    pub fn update_snapshot(&mut self, snapshot: ApiMockServerSnapshot) -> bool {
+        self.reap_finished();
+        let Some(handle) = self.handle.as_ref() else {
+            return false;
+        };
+        let mut current = crate::platform::lock_recover(&handle.snapshot);
+        if *current == snapshot {
+            return false;
+        }
+        *current = snapshot;
+        drop(current);
+        if let Some((events, _)) = self.events.as_ref() {
+            ApiMockEventSink(events.clone()).log("server config hot-updated");
+        }
+        true
+    }
+
+    #[cfg(test)]
+    pub fn snapshot(&self) -> Option<ApiMockServerSnapshot> {
+        self.handle
+            .as_ref()
+            .map(|handle| crate::platform::lock_recover(&handle.snapshot).clone())
+    }
+
+    /// Graceful shutdown bounded by `API_MOCK_STOP_TIMEOUT`; on timeout the live handle
+    /// is retained and `start` refuses until its thread finishes.
+    pub fn stop(&mut self) {
+        self.reap_finished();
+        if self.stopping {
+            return;
+        }
+        let Some(mut handle) = self.handle.take() else {
+            return;
+        };
+        if let Some(shutdown) = handle.shutdown.take() {
+            let _ = shutdown.send(());
+        }
+        let finished = !matches!(
+            handle.finished.recv_timeout(API_MOCK_STOP_TIMEOUT),
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+        );
+        handle.python.stop();
+        self.stopping = retain_or_join_stopping_server(&mut self.handle, handle, finished);
+    }
+
+    fn reap_finished(&mut self) {
+        let finished = self.handle.as_ref().is_some_and(|handle| {
+            !matches!(
+                handle.finished.try_recv(),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+            )
+        });
+        if !finished {
+            return;
+        }
+        if let Some(mut handle) = self.handle.take()
+            && let Some(thread) = handle.thread.take()
+        {
+            let _ = thread.join();
+        }
+        self.stopping = false;
+    }
 }
 
-pub fn start_api_mock_server(snapshot: ApiMockServerSnapshot) -> Result<(), String> {
-    let mut server = crate::platform::lock_recover(&SERVER);
-    reap_finished_server(&mut server);
-    if SERVER_STOPPING.load(Ordering::Acquire) {
-        return Err("Mock server is still stopping".to_string());
+impl Drop for ApiMockServer {
+    fn drop(&mut self) {
+        self.stop();
     }
-    if server.is_some() {
-        return Ok(());
-    }
-
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    let snapshot = Arc::new(Mutex::new(snapshot));
-    let thread_snapshot = Arc::clone(&snapshot);
-    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
-    let thread = std::thread::Builder::new()
-        .name("rriter-api-mock".to_string())
-        .spawn(move || {
-            run_server_thread(thread_snapshot, shutdown_rx);
-            let _ = finished_tx.send(());
-        })
-        .map_err(|err| err.to_string())?;
-    *server = Some(ApiMockServerHandle {
-        shutdown: Some(shutdown_tx),
-        snapshot,
-        finished: finished_rx,
-        thread: Some(thread),
-    });
-    Ok(())
 }
 
-pub fn update_api_mock_server_snapshot(snapshot: ApiMockServerSnapshot) -> Result<bool, String> {
-    let mut server = crate::platform::lock_recover(&SERVER);
-    reap_finished_server(&mut server);
-    let Some(handle) = server.as_ref() else {
-        return Ok(false);
-    };
-    let mut current = crate::platform::lock_recover(&handle.snapshot);
-    if *current == snapshot {
-        return Ok(false);
+/// A clone never owns the running server: it has a single owner, so a clone is stopped.
+impl Clone for ApiMockServer {
+    fn clone(&self) -> Self {
+        Self::default()
     }
-    *current = snapshot;
-    push_log_event("server config hot-updated");
-    Ok(true)
 }
 
-pub fn stop_api_mock_server() {
-    if SERVER_STOPPING.swap(true, Ordering::AcqRel) {
-        return;
+/// Runtime handle, not config: every server compares equal so `ApiMockState`
+/// equality stays about the persisted config.
+impl PartialEq for ApiMockServer {
+    fn eq(&self, _: &Self) -> bool {
+        true
     }
-    let mut server = crate::platform::lock_recover(&SERVER);
-    reap_finished_server(&mut server);
-    let Some(mut handle) = server.take() else {
-        SERVER_STOPPING.store(false, Ordering::Release);
-        drop(server);
-        stop_python_worker();
-        return;
-    };
-    if let Some(shutdown) = handle.shutdown.take() {
-        let _ = shutdown.send(());
+}
+
+impl Eq for ApiMockServer {}
+
+impl std::fmt::Debug for ApiMockServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ApiMockServer")
+            .field("live", &self.handle.is_some())
+            .field("stopping", &self.stopping)
+            .finish()
     }
-    let finished = !matches!(
-        handle.finished.recv_timeout(Duration::from_secs(2)),
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-    );
-    let still_stopping = retain_or_join_stopping_server(&mut server, handle, finished);
-    if !still_stopping {
-        SERVER_STOPPING.store(false, Ordering::Release);
-    }
-    drop(server);
-    stop_python_worker();
 }
 
 fn retain_or_join_stopping_server(
@@ -141,25 +225,6 @@ fn retain_or_join_stopping_server(
     }
 }
 
-fn reap_finished_server(server: &mut Option<ApiMockServerHandle>) -> bool {
-    let finished = server.as_ref().is_some_and(|handle| {
-        !matches!(
-            handle.finished.try_recv(),
-            Err(std::sync::mpsc::TryRecvError::Empty)
-        )
-    });
-    if !finished {
-        return false;
-    }
-    if let Some(mut handle) = server.take()
-        && let Some(thread) = handle.thread.take()
-    {
-        let _ = thread.join();
-    }
-    SERVER_STOPPING.store(false, Ordering::Release);
-    true
-}
-
 pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiMockServerEvent) {
     match event {
         ApiMockServerEvent::Running { url } => *status = ApiMockServerStatus::Running { url },
@@ -172,9 +237,11 @@ pub fn apply_api_mock_server_event(status: &mut ApiMockServerStatus, event: ApiM
 
 fn run_server_thread(
     snapshot: Arc<Mutex<ApiMockServerSnapshot>>,
+    python: Arc<PythonWorkerSlot>,
+    events: ApiMockEventSink,
     shutdown_rx: oneshot::Receiver<()>,
 ) {
-    push_log_event("tokio runtime: creating multi-thread runtime");
+    events.log("tokio runtime: creating multi-thread runtime");
     let runtime = match tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -182,26 +249,26 @@ fn run_server_thread(
     {
         Ok(runtime) => runtime,
         Err(err) => {
-            push_event(ApiMockServerEvent::Failed(err.to_string()));
+            events.push(ApiMockServerEvent::Failed(err.to_string()));
             return;
         }
     };
 
     runtime.block_on(async move {
-        push_log_event("bind address: resolving");
+        events.log("bind address: resolving");
         let bind_snapshot = crate::platform::lock_recover(&snapshot).clone();
         let addr = match socket_addr(&bind_snapshot.bind_host, bind_snapshot.port) {
             Ok(addr) => addr,
             Err(err) => {
-                push_event(ApiMockServerEvent::Failed(err));
+                events.push(ApiMockServerEvent::Failed(err));
                 return;
             }
         };
-        push_log_event(&format!("tcp bind: {addr}"));
+        events.log(&format!("tcp bind: {addr}"));
         let listener = match tokio::net::TcpListener::bind(addr).await {
             Ok(listener) => listener,
             Err(err) => {
-                push_event(ApiMockServerEvent::Failed(format_api_mock_bind_error(
+                events.push(ApiMockServerEvent::Failed(format_api_mock_bind_error(
                     addr, &err,
                 )));
                 return;
@@ -209,19 +276,19 @@ fn run_server_thread(
         };
         let local = listener.local_addr().ok();
         if let Some(local) = local {
-            push_log_event(&format!("listener ready: http://{local}"));
-            push_event(ApiMockServerEvent::Running {
+            events.log(&format!("listener ready: http://{local}"));
+            events.push(ApiMockServerEvent::Running {
                 url: format!("http://{}", local),
             });
         }
-        push_log_event("axum router: building fallback router");
+        events.log("axum router: building fallback router");
         let proxy_client = match crate::app::api_client::api_async_client_builder()
             .timeout(Duration::from_secs(30))
             .build()
         {
             Ok(client) => client,
             Err(error) => {
-                push_event(ApiMockServerEvent::Failed(format!(
+                events.push(ApiMockServerEvent::Failed(format!(
                     "Proxy HTTP client initialization failed: {error}"
                 )));
                 return;
@@ -229,21 +296,23 @@ fn run_server_thread(
         };
         let state = ApiMockAxumState {
             snapshot,
+            python,
+            events: events.clone(),
             proxy_client,
         };
         let app = Router::new()
             .fallback(any(handle_mock_request))
             .with_state(state);
-        push_log_event("axum serve: started");
+        events.log("axum serve: started");
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(async {
                 let _ = shutdown_rx.await;
             })
             .await;
         if let Err(err) = result {
-            push_event(ApiMockServerEvent::Failed(err.to_string()));
+            events.push(ApiMockServerEvent::Failed(err.to_string()));
         } else {
-            push_event(ApiMockServerEvent::Stopped);
+            events.push(ApiMockServerEvent::Stopped);
         }
     });
 }
@@ -262,7 +331,7 @@ async fn handle_mock_request(
             "text/plain",
             "method not allowed",
         );
-        push_request_event(
+        state.events.request(
             method.as_str(),
             uri.path(),
             response.status().as_u16(),
@@ -275,7 +344,10 @@ async fn handle_mock_request(
         ApiMockRouteDecision::Mock(route) => {
             if let Some(script) = route.python.as_ref().filter(|script| script.enabled) {
                 let request = python_request(&method, &uri, &headers, &body, route);
-                let response = match call_python_route(&snapshot.python_runtime, script, request) {
+                let response = match state
+                    .python
+                    .call_route(&snapshot.python_runtime, script, request)
+                {
                     Ok(output) => {
                         let status = StatusCode::from_u16(output.status).unwrap_or(StatusCode::OK);
                         let mut builder = Response::builder()
@@ -294,13 +366,14 @@ async fn handle_mock_request(
                     }
                     Err(err) => response_text(StatusCode::INTERNAL_SERVER_ERROR, "text/plain", err),
                 };
-                push_request_event(method.as_str(), path, response.status().as_u16(), "python");
+                let status = response.status().as_u16();
+                state.events.request(method.as_str(), path, status, "python");
                 return response;
             }
             let (status, content_type, text) = route.static_response_text();
             let status = StatusCode::from_u16(status).unwrap_or(StatusCode::OK);
             let response = response_text(status, content_type, text);
-            push_request_event(method.as_str(), path, response.status().as_u16(), "mock");
+            state.events.request(method.as_str(), path, response.status().as_u16(), "mock");
             response
         }
         ApiMockRouteDecision::Proxy => {
@@ -315,7 +388,7 @@ async fn handle_mock_request(
                 body,
             )
             .await;
-            push_request_event(
+            state.events.request(
                 &method_label,
                 &path_label,
                 response.status().as_u16(),
@@ -336,7 +409,7 @@ async fn handle_mock_request(
                     body,
                 )
                 .await;
-                push_request_event(
+                state.events.request(
                     &method_label,
                     &path_label,
                     response.status().as_u16(),
@@ -346,7 +419,7 @@ async fn handle_mock_request(
             }
             let response =
                 response_text(StatusCode::NOT_FOUND, "text/plain", "mock route not found");
-            push_request_event(
+            state.events.request(
                 method.as_str(),
                 path,
                 response.status().as_u16(),
@@ -932,23 +1005,26 @@ fn safe_proxy_header(name: &HeaderName) -> bool {
     )
 }
 
-fn push_event(event: ApiMockServerEvent) {
-    crate::platform::lock_recover(&EVENTS).push(event);
-}
+impl ApiMockEventSink {
+    /// The owner may already be gone during shutdown; a lost event is fine then.
+    fn push(&self, event: ApiMockServerEvent) {
+        let _ = self.0.send(event);
+    }
 
-fn push_request_event(method: &str, path: &str, status: u16, action: &str) {
-    push_event(ApiMockServerEvent::Request {
-        method: method.to_string(),
-        path: path.to_string(),
-        status,
-        action: action.to_string(),
-    });
-}
+    fn request(&self, method: &str, path: &str, status: u16, action: &str) {
+        self.push(ApiMockServerEvent::Request {
+            method: method.to_string(),
+            path: path.to_string(),
+            status,
+            action: action.to_string(),
+        });
+    }
 
-fn push_log_event(text: &str) {
-    push_event(ApiMockServerEvent::Log {
-        text: text.to_string(),
-    });
+    fn log(&self, text: &str) {
+        self.push(ApiMockServerEvent::Log {
+            text: text.to_string(),
+        });
+    }
 }
 
 #[cfg(test)]
@@ -1124,6 +1200,7 @@ mod tests {
         let handle = ApiMockServerHandle {
             shutdown: None,
             snapshot: Arc::new(Mutex::new(snapshot)),
+            python: Arc::new(PythonWorkerSlot::default()),
             finished: finished_rx,
             thread: Some(thread),
         };

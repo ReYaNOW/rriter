@@ -262,7 +262,7 @@ impl crate::app::App {
             return false;
         }
         self.ide_panel.api.mock.proxy_base_url = proxy_base_url;
-        self.ide_panel.api.persist();
+        self.ide_panel.api.commit_mock_config();
         true
     }
 
@@ -285,16 +285,6 @@ impl crate::app::App {
         selected_server
             .as_ref()
             .is_some_and(|server| self.sync_api_mock_proxy_base_to_server(server))
-    }
-
-    pub(crate) fn refresh_api_mock_server_snapshot(&mut self) {
-        let snapshot = self.ide_panel.api.mock_server_snapshot();
-        if let Err(err) = update_api_mock_server_snapshot(snapshot) {
-            push_api_mock_server_log(
-                &mut self.ide_panel.api,
-                format!("server config update failed: {err}"),
-            );
-        }
     }
 
     pub(crate) fn copy_hover_popup_selection_or_diagnostic(&mut self) -> bool {
@@ -987,7 +977,7 @@ impl crate::app::App {
             crate::app::api_mock::types::ApiMockServerStatus::Running { .. }
         ) {
             self.sync_api_mock_proxy_base_to_server(&selected_server);
-            self.refresh_api_mock_server_snapshot();
+            self.ide_panel.api.refresh_mock_server();
         }
         let server = if use_mock_server {
             ApiServer {
@@ -1131,7 +1121,7 @@ impl crate::app::App {
             }
             return;
         }
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.refresh_mock_server();
         let server = ApiServer {
             url: api_mock_lan_url(&self.ide_panel.api.mock),
             description: String::new(),
@@ -1204,7 +1194,7 @@ impl crate::app::App {
                 changed = true;
             }
         }
-        let events = drain_api_mock_server_events();
+        let events = self.ide_panel.api.mock.server.drain_events();
         if !events.is_empty() {
             for event in events {
                 match event {
@@ -1386,7 +1376,7 @@ impl crate::app::App {
                                 );
                             }
                         }
-                        self.ide_panel.api.persist();
+                        self.ide_panel.api.commit_mock_config();
                     }
                     changed = true;
                 }
@@ -1459,7 +1449,7 @@ impl crate::app::App {
                                 );
                             }
                         }
-                        self.ide_panel.api.persist();
+                        self.ide_panel.api.commit_mock_config();
                         changed = true;
                         break;
                     }
@@ -1511,7 +1501,7 @@ impl crate::app::App {
                                 .api
                                 .upsert_loaded(payload, ticket.select_on_success);
                             self.update_api_tabs_after_model_load(id, &previous_routes);
-                            self.refresh_api_mock_server_snapshot();
+                            self.ide_panel.api.refresh_mock_server();
                         }
                         Err(err) => self.ide_panel.api.mark_load_error(result.id, err),
                     }
