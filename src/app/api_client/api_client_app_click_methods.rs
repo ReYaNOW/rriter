@@ -24,6 +24,20 @@ fn api_mock_constraint_menu_contains_ui_id(
 }
 
 impl crate::app::App {
+    /// Pointer position and scale for a scrollbar id, as the click handler needs
+    /// them: the registry rect, the click y and the UI scale.
+    fn api_click_pointer_metrics(
+        &self,
+        id: crate::ui_system::UiId,
+    ) -> Option<((f32, f32, f32, f32), f32, f32)> {
+        let rect = self.ui_registry.rect_for(id)?;
+        let (scale, pointer_y) = match self.renderer.as_ref() {
+            Some(renderer) => (renderer.scale_factor, renderer.last_mouse_y),
+            None => (1.0, rect.1),
+        };
+        Some((rect, pointer_y, scale))
+    }
+
     pub(crate) fn close_active_api_output_example_menu(&mut self) -> bool {
         let Some((meta, state)) = self.active_api_tab() else {
             return false;
@@ -266,9 +280,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockServerDetails => {
                 self.commit_api_focus();
-                self.ide_panel.api.mock_server_detail_open = true;
-                self.ide_panel.api.mock_guide_open = false;
-                self.ide_panel.api.mock_python_runtime_open = false;
+                self.ide_panel.api.open_mock_server_details();
             }
             crate::ui_system::UiId::ApiMockServerCopyUrl => {
                 self.commit_api_focus();
@@ -288,46 +300,15 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockServerLogScrollY => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                if let Some(rect) = self.ui_registry.rect_for(id) {
-                    let scale = self
-                        .renderer
-                        .as_ref()
-                        .map(|renderer| renderer.scale_factor)
-                        .unwrap_or(1.0);
-                    let pointer_y = self
-                        .renderer
-                        .as_ref()
-                        .map(|renderer| renderer.last_mouse_y)
-                        .unwrap_or(rect.1);
-                    if let Some((drag_offset, target)) =
-                        api_mock_server_log_scrollbar_drag_target(
-                            rect,
-                            self.ide_panel.api.mock_server_logs.len(),
-                            self.ide_panel.api.mock_server_log_scroll.current,
-                            pointer_y,
-                            scale,
-                            None,
-                        )
-                    {
-                        let scroll = &mut self.ide_panel.api.mock_server_log_scroll;
-                        crate::app::mouse::apply_scrollbar_drag_target(
-                            scroll, target, drag_offset,
-                        );
-                    }
+                if let Some((rect, pointer_y, scale)) = self.api_click_pointer_metrics(id) {
+                    self.ide_panel
+                        .api
+                        .start_mock_server_log_scroll_drag(rect, pointer_y, scale);
                 }
             }
             crate::ui_system::UiId::ApiMockModeSelect => {
                 self.commit_api_focus();
-                let next_mode = match self.ide_panel.api.mock.mode.canonical() {
-                    crate::app::api_mock::types::ApiMockMode::MockAll => {
-                        crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
-                    }
-                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest
-                    | crate::app::api_mock::types::ApiMockMode::MockSelectedOnly => {
-                        crate::app::api_mock::types::ApiMockMode::MockAll
-                    }
-                };
-                self.ide_panel.api.mock.mode = next_mode;
+                let next_mode = self.ide_panel.api.cycle_mock_mode();
                 if next_mode == crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest {
                     self.sync_api_mock_proxy_base_to_active_server();
                 }
@@ -339,9 +320,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockGuideOpen => {
                 self.commit_api_focus();
-                self.ide_panel.api.mock_guide_open = true;
-                self.ide_panel.api.mock_server_detail_open = false;
-                self.ide_panel.api.mock_python_runtime_open = false;
+                self.ide_panel.api.open_mock_guide();
             }
             crate::ui_system::UiId::ApiMockGuideClose => {
                 self.ide_panel.api.mock_guide_open = false;
@@ -353,84 +332,27 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockGuideScrollY => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                if let Some(rect) = self.ui_registry.rect_for(id) {
-                    let s = self
-                        .renderer
-                        .as_ref()
-                        .map(|renderer| renderer.scale_factor)
-                        .unwrap_or(1.0);
-                    let pointer = self
-                        .renderer
-                        .as_ref()
-                        .map(|renderer| renderer.last_mouse_y)
-                        .unwrap_or(rect.1);
-                    let max_scroll =
-                        crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
-                    let track_start = rect.1 + 7.0 * s;
-                    let track_len = (rect.3 - 14.0 * s).max(0.0);
-                    if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                        track_start,
-                        track_len,
-                        rect.3,
-                        rect.3 + max_scroll,
-                        self.ide_panel.api.mock_guide_scroll.current,
-                        28.0 * s,
-                    ) && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                        pointer,
-                        track_start,
-                        track_len,
-                        thumb,
-                        max_scroll,
-                        Some(thumb.len * 0.5),
-                    ) {
-                        let scroll = &mut self.ide_panel.api.mock_guide_scroll;
-                        crate::app::mouse::apply_scrollbar_drag_target(
-                            scroll, target, drag_offset,
-                        );
-                    }
+                if let Some((rect, pointer_y, scale)) = self.api_click_pointer_metrics(id) {
+                    self.ide_panel
+                        .api
+                        .start_mock_guide_scroll_drag(rect, pointer_y, scale);
                 }
             }
             crate::ui_system::UiId::ApiMockPythonManage => {
                 self.commit_api_focus();
-                clear_legacy_api_python_runtime_message(&mut self.ide_panel.api);
-                self.ide_panel.api.mock_python_runtime_open = true;
-                self.ide_panel.api.mock_guide_open = false;
-                self.ide_panel.api.mock_server_detail_open = false;
-                if matches!(
-                    self.ide_panel.api.mock.uv.mode,
-                    crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged
-                ) && self.ide_panel.api.mock.uv.selected_uv_path().is_none()
-                {
-                    crate::app::api_mock::python_bootstrap::refresh_uv_status(
-                        &mut self.ide_panel.api.mock.uv,
-                    );
-                }
+                self.ide_panel.api.open_mock_python_runtime();
             }
             crate::ui_system::UiId::ApiMockPythonManageClose => {
                 self.commit_api_focus();
-                self.ide_panel.api.mock_python_runtime_open = false;
-                self.ide_panel.api.mock_python_version_picker_open = false;
+                self.ide_panel.api.close_mock_python_runtime();
             }
             crate::ui_system::UiId::ApiMockPythonModeToggle => {
                 self.commit_api_focus();
-                clear_legacy_api_python_runtime_message(&mut self.ide_panel.api);
-                self.ide_panel.api.mock.uv.mode = match self.ide_panel.api.mock.uv.mode {
-                    crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged => {
-                        crate::app::api_mock::types::ApiPythonRuntimeMode::CustomPython
-                    }
-                    crate::app::api_mock::types::ApiPythonRuntimeMode::CustomPython => {
-                        crate::app::api_mock::types::ApiPythonRuntimeMode::UvManaged
-                    }
-                };
-                self.ide_panel.api.mock_python_version_picker_open = false;
-                self.ide_panel.api.commit_mock_config();
+                self.ide_panel.api.toggle_python_runtime_mode();
             }
             crate::ui_system::UiId::ApiMockPythonCheckRuntime => {
                 self.commit_api_focus();
-                crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
-                    &mut self.ide_panel.api.mock.uv,
-                );
-                self.ide_panel.api.commit_mock_config();
+                self.ide_panel.api.check_python_runtime();
             }
             crate::ui_system::UiId::ApiMockPythonPrepareVersion => {
                 self.commit_api_focus();
@@ -446,9 +368,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPythonVersionInput => {
                 self.commit_api_focus();
-                if self.ide_panel.api.mock_python_version_picker_open {
-                    self.ide_panel.api.mock_python_version_picker_open = false;
-                } else {
+                if !self.ide_panel.api.close_mock_python_version_picker() {
                     self.trigger_api_python_version_list();
                 }
             }
@@ -458,12 +378,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockPythonVersionOption(idx) => {
                 self.commit_api_focus();
-                if let Some(row) = self.ide_panel.api.mock_python_versions.get(idx) {
-                    self.ide_panel.api.mock.uv.python_version = row.version.clone();
-                    self.ide_panel.api.mock_python_version_picker_open = false;
-                    self.ide_panel.api.mock_python_versions_scroll.reset();
-                    self.ide_panel.api.commit_mock_config();
-                }
+                self.ide_panel.api.apply_python_version_option(idx);
             }
             crate::ui_system::UiId::ApiMockPythonPickCustomPath => {
                 self.commit_api_focus();
@@ -485,11 +400,8 @@ impl crate::app::App {
                 let Some((meta, _)) = self.active_api_tab() else {
                     return true;
                 };
-                let key = (meta.spec_id, route_idx);
-                if self.ide_panel.api.expanded_mock_routes.contains(&key) {
-                    self.ide_panel.api.expanded_mock_routes.remove(&key);
-                } else {
-                    self.ide_panel.api.expanded_mock_routes.insert(key);
+                let spec_id = meta.spec_id;
+                if self.ide_panel.api.toggle_expanded_mock_route(spec_id, route_idx) {
                     self.start_api_mock_route_tools_now(route_idx);
                 }
             }
@@ -566,14 +478,9 @@ impl crate::app::App {
                 group,
                 field_idx,
             ) => {
-                let current = self.ide_panel.api.mock_contract_constraint_menu;
-                let next = crate::app::api_client::ApiMockContractConstraintMenu {
-                    route_idx,
-                    group,
-                    field_idx,
-                };
-                self.ide_panel.api.mock_contract_constraint_menu =
-                    (current != Some(next)).then_some(next);
+                self.ide_panel
+                    .api
+                    .toggle_mock_contract_constraint_menu(route_idx, group, field_idx);
             }
             crate::ui_system::UiId::ApiMockContractFieldAddConstraintOption(
                 route_idx,
@@ -636,15 +543,7 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiMockManualRouteMethod(manual_idx) => {
                 self.commit_api_focus();
-                if let Some(route) = self.ide_panel.api.mock.manual_routes.get_mut(manual_idx) {
-                    route.method = match route.method {
-                        ApiMethod::Get => ApiMethod::Post,
-                        ApiMethod::Post => ApiMethod::Put,
-                        ApiMethod::Put => ApiMethod::Patch,
-                        ApiMethod::Patch => ApiMethod::Delete,
-                        ApiMethod::Delete => ApiMethod::Get,
-                        ApiMethod::Head | ApiMethod::Options | ApiMethod::Trace => ApiMethod::Get,
-                    };
+                if self.ide_panel.api.cycle_manual_route_method(manual_idx) {
                     self.sync_api_manual_route_tabs();
                     self.ide_panel.api.commit_mock_config();
                 }
@@ -652,8 +551,7 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiMockAddInputField(_)
             | crate::ui_system::UiId::ApiMockAddOutputField(_) => {}
             crate::ui_system::UiId::ApiMockManualRouteRemove(idx) => {
-                if idx < self.ide_panel.api.mock.manual_routes.len() {
-                    self.ide_panel.api.mock.manual_routes.remove(idx);
+                if self.ide_panel.api.remove_manual_route(idx) {
                     self.sync_api_manual_route_tabs();
                     self.ide_panel.api.commit_mock_config();
                 }
@@ -669,48 +567,27 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiSpecRemove(idx) => {
-                if let Some(entry) = self.ide_panel.api.specs.get(idx) {
-                    let source = match &entry.source {
-                        ApiSpecSource::Local(path) => path.to_string_lossy().into_owned(),
-                        ApiSpecSource::Url(url) => url.clone(),
-                    };
-                    self.ide_panel.api.spec_remove_dialog = Some(ApiSpecRemoveDialog {
-                        spec_id: entry.id,
-                        title: entry.title.clone(),
-                        source,
-                    });
-                }
+                self.ide_panel.api.open_spec_remove_dialog(idx);
             }
             crate::ui_system::UiId::ApiSpecRemoveConfirm => {
-                let Some(dialog) = self.ide_panel.api.spec_remove_dialog.take() else {
+                let Some(id) = self.ide_panel.api.take_spec_remove_dialog_id() else {
                     return true;
                 };
-                let Some(idx) = self
-                    .ide_panel
-                    .api
-                    .specs
+                let mut tab_idxs = self
+                    .tabs
                     .iter()
-                    .position(|entry| entry.id == dialog.spec_id)
-                else {
-                    return true;
-                };
-                if let Some(id) = self.ide_panel.api.remove_spec(idx) {
-                    let mut tab_idxs = self
-                        .tabs
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, tab)| match &tab.kind {
-                            crate::app::EditorTabKind::ApiClient(meta, _) if meta.spec_id == id => {
-                                Some(idx)
-                            }
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>();
-                    while let Some(tab_idx) = tab_idxs.pop() {
-                        self.close_tab_at(tab_idx);
-                    }
-                    self.ide_panel.api.refresh_mock_server();
+                    .enumerate()
+                    .filter_map(|(idx, tab)| match &tab.kind {
+                        crate::app::EditorTabKind::ApiClient(meta, _) if meta.spec_id == id => {
+                            Some(idx)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                while let Some(tab_idx) = tab_idxs.pop() {
+                    self.close_tab_at(tab_idx);
                 }
+                self.ide_panel.api.refresh_mock_server();
             }
             crate::ui_system::UiId::ApiSpecRemoveCancel => {
                 self.ide_panel.api.spec_remove_dialog = None;
@@ -721,11 +598,7 @@ impl crate::app::App {
                     self.ide_panel.api.select_spec(id);
                     self.ensure_api_model_loaded(id);
                     if already_selected {
-                        if self.ide_panel.api.collapsed_route_roots.contains(&id) {
-                            self.ide_panel.api.collapsed_route_roots.remove(&id);
-                        } else {
-                            self.ide_panel.api.collapsed_route_roots.insert(id);
-                        }
+                        self.ide_panel.api.toggle_route_root_collapsed(id);
                     }
                     self.ide_panel.api.refresh_mock_server();
                 }
@@ -736,45 +609,20 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiRouteTag(group_idx) => {
-                if let Some(spec_id) = self.ide_panel.api.selected_spec {
-                    let tag = self
-                        .ide_panel
-                        .api
-                        .models
-                        .get(&spec_id)
-                        .and_then(|model| {
-                            let group = model.route_groups.get(group_idx)?;
-                            model.routes.get(group.start)
-                        })
-                        .map(|route| route.tag.clone());
-                    if let Some(tag) = tag {
-                        self.ide_panel
-                            .api
-                            .toggle_tag_collapsed(spec_id, tag.as_str());
-                    }
-                }
+                self.ide_panel
+                    .api
+                    .toggle_selected_route_tag_collapsed(group_idx);
             }
             crate::ui_system::UiId::ApiRoutesRoot => {
                 if let Some(spec_id) = self.ide_panel.api.selected_spec {
-                    if self.ide_panel.api.collapsed_route_roots.contains(&spec_id) {
-                        self.ide_panel.api.collapsed_route_roots.remove(&spec_id);
-                    } else {
-                        self.ide_panel.api.collapsed_route_roots.insert(spec_id);
-                    }
+                    self.ide_panel.api.toggle_route_root_collapsed(spec_id);
                 }
             }
             crate::ui_system::UiId::ApiRouteFilterInput => {
                 self.focus_api_input(ApiFocus::RouteFilter);
             }
             crate::ui_system::UiId::ApiRouteFilterClear => {
-                self.ide_panel.api.route_filter.clear();
-                if matches!(self.ide_panel.api.focused, Some(ApiFocus::RouteFilter)) {
-                    let old_version = self.ide_panel.api.input_editor.version;
-                    self.ide_panel.api.input_editor.set_text_clean("");
-                    self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
-                    self.ide_panel.api.input_editor.cursor = 0;
-                    self.ide_panel.api.input_editor.selection_anchor = None;
-                    self.ide_panel.api.input_scroll_x.reset();
+                if self.ide_panel.api.clear_route_filter() {
                     self.pulse_api_cursor_blink();
                 }
             }
@@ -830,17 +678,9 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                let scheme = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.security_schemes.get(scheme_idx))
-                    .map(|scheme| scheme.name.clone())
-                    .unwrap_or_default();
-                if scheme.is_empty() {
+                let Some(scheme) = self.ide_panel.api.auth_scheme_name(spec_id, scheme_idx) else {
                     return true;
-                }
+                };
                 let focus = match id {
                     crate::ui_system::UiId::ApiAuthUsername(_) => {
                         ApiFocus::AuthUsername { spec_id, scheme }
@@ -873,20 +713,7 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                if let Some(scheme) = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.security_schemes.get(scheme_idx))
-                    .map(|scheme| scheme.name.clone())
-                {
-                    let entry = self.ide_panel.api.auth.entry_mut(spec_id, &scheme);
-                    entry.access_token.clear();
-                    entry.value.clear();
-                    self.ide_panel.api.focused = None;
-                    self.ide_panel.api.persist();
-                }
+                self.ide_panel.api.clear_auth_access(spec_id, scheme_idx);
             }
             crate::ui_system::UiId::ApiAuthRefreshClear(scheme_idx) => {
                 self.commit_api_focus();
@@ -894,23 +721,7 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                if let Some(scheme) = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.security_schemes.get(scheme_idx))
-                    .map(|scheme| scheme.name.clone())
-                {
-                    self.ide_panel
-                        .api
-                        .auth
-                        .entry_mut(spec_id, &scheme)
-                        .refresh_token
-                        .clear();
-                    self.ide_panel.api.focused = None;
-                    self.ide_panel.api.persist();
-                }
+                self.ide_panel.api.clear_auth_refresh(spec_id, scheme_idx);
             }
             crate::ui_system::UiId::ApiAuthClear(scheme_idx) => {
                 self.commit_api_focus();
@@ -918,18 +729,7 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                if let Some(scheme) = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.security_schemes.get(scheme_idx))
-                    .map(|scheme| scheme.name.clone())
-                {
-                    self.ide_panel.api.auth.remove(spec_id, &scheme);
-                    self.ide_panel.api.focused = None;
-                    self.ide_panel.api.persist();
-                }
+                self.ide_panel.api.remove_auth_entry(spec_id, scheme_idx);
             }
             crate::ui_system::UiId::ApiTryRequest => {
                 self.start_active_api_request();
@@ -937,61 +737,32 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiPathParamAllowedValue(route_idx, param_idx, value_idx)
             | crate::ui_system::UiId::ApiQueryParamAllowedValue(route_idx, param_idx, value_idx) => {
                 self.commit_api_focus();
-                let Some((meta, _)) = self.active_api_tab() else {
+                let path = matches!(
+                    id,
+                    crate::ui_system::UiId::ApiPathParamAllowedValue(_, _, _)
+                );
+                let Some((meta, state, api)) = self.active_api_tab_and_state_mut() else {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                let picked = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.routes.get(route_idx))
-                    .and_then(|route| match id {
-                        crate::ui_system::UiId::ApiPathParamAllowedValue(_, _, _) => {
-                            route.path_params.get(param_idx).map(|param| (true, param))
-                        }
-                        _ => route
-                            .query_params
-                            .get(param_idx)
-                            .map(|param| (false, param)),
-                    })
-                    .and_then(|(path, param)| {
-                        let values = if param.enum_values.is_empty() {
-                            &param.examples
-                        } else {
-                            &param.enum_values
-                        };
-                        Some((
-                            path,
-                            param.name.clone(),
-                            matches!(param.primitive_type, ApiPrimitiveType::Array),
-                            values.get(value_idx)?.clone(),
-                        ))
-                    });
-                if let Some((path, name, is_array, value)) = picked
-                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
-                    && state.route_idx == Some(route_idx)
+                let route_shown = state.route_idx == Some(route_idx);
+                if route_shown
+                    && api.apply_param_allowed_value_click(
+                        state,
+                        spec_id,
+                        route_idx,
+                        param_idx,
+                        value_idx,
+                        path,
+                    )
                 {
-                    let values = if path {
-                        &mut state.path_values
-                    } else {
-                        &mut state.query_values
-                    };
-                    if let Some(field) = values.iter_mut().find(|field| field.name == name) {
-                        if is_array {
-                            push_api_array_value(&mut field.value, &value);
-                        } else {
-                            field.value = value;
-                        }
-                    }
-                    self.ide_panel.api.focused = None;
+                    api.focused = None;
                 }
             }
             crate::ui_system::UiId::ApiResponseBodyTab(route_idx)
             | crate::ui_system::UiId::ApiResponseHeadersTab(route_idx)
             | crate::ui_system::UiId::ApiResponseCurlTab(route_idx) => {
-                let Some((meta, state)) = self.active_api_tab() else {
+                let Some((meta, state, _)) = self.active_api_tab_and_state_mut() else {
                     return true;
                 };
                 if state.route_idx != Some(route_idx) {
@@ -999,16 +770,11 @@ impl crate::app::App {
                 }
                 let spec_id = meta.spec_id;
                 let view = match id {
-                    crate::ui_system::UiId::ApiResponseBodyTab(_) => ApiResponseView::Body,
                     crate::ui_system::UiId::ApiResponseHeadersTab(_) => ApiResponseView::Headers,
                     crate::ui_system::UiId::ApiResponseCurlTab(_) => ApiResponseView::Curl,
                     _ => ApiResponseView::Body,
                 };
-                if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    state.response_view = view;
-                    state.response_scroll.reset();
-                    state.response_scroll_x.reset();
-                }
+                state.set_response_view(view);
                 self.focus_api_input(ApiFocus::Response { spec_id, route_idx });
             }
             crate::ui_system::UiId::ApiInputExampleTab(route_idx)
@@ -1026,10 +792,7 @@ impl crate::app::App {
                 };
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    state.input_doc_view = view;
-                    state.input_schema_menu_open = false;
-                    state.body_scroll.reset();
-                    state.body_scroll_x.reset();
+                    state.select_input_doc_view(view);
                 }
                 if matches!(view, ApiInputDocView::Schema) {
                     self.focus_api_input(ApiFocus::InputSchema { spec_id, route_idx });
@@ -1058,10 +821,7 @@ impl crate::app::App {
                 let spec_id = meta.spec_id;
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    state.input_schema_idx = media_idx;
-                    state.input_schema_menu_open = false;
-                    state.body_scroll.reset();
-                    state.body_scroll_x.reset();
+                    state.select_input_schema_media(media_idx);
                 }
             }
             crate::ui_system::UiId::ApiOutputExampleTab(route_idx)
@@ -1079,12 +839,7 @@ impl crate::app::App {
                 };
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    state.output_doc_view = view;
-                    state.output_scroll.reset();
-                    state.output_scroll_x.reset();
-                    if view != ApiOutputDocView::Example {
-                        state.output_schema_menu_open = false;
-                    }
+                    state.select_output_doc_view(view);
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -1106,13 +861,7 @@ impl crate::app::App {
                 let spec_id = meta.spec_id;
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    state.output_status_idx = status_idx;
-                    state.output_example_idx = 0;
-                    state.output_schema_idx = 0;
-                    state.output_schema_menu_open = false;
-                    state.output_schema_menu_scroll.reset();
-                    state.output_scroll.reset();
-                    state.output_scroll_x.reset();
+                    state.select_output_status(status_idx);
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -1150,12 +899,7 @@ impl crate::app::App {
                         > 1;
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    if can_open {
-                        state.output_schema_menu_open = !state.output_schema_menu_open;
-                        state.output_schema_menu_scroll.reset();
-                    } else {
-                        state.output_schema_menu_open = false;
-                    }
+                    state.toggle_output_schema_menu(can_open);
                 }
             }
             crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx) => {
@@ -1171,14 +915,7 @@ impl crate::app::App {
                 let spec_id = meta.spec_id;
                 self.commit_api_focus();
                 if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-                    if state.output_doc_view == ApiOutputDocView::Example {
-                        state.output_example_idx = media_idx;
-                    } else {
-                        state.output_schema_idx = media_idx;
-                    }
-                    state.output_schema_menu_open = false;
-                    state.output_scroll.reset();
-                    state.output_scroll_x.reset();
+                    state.select_output_media(media_idx);
                 }
                 if matches!(
                     self.ide_panel.api.focused,
@@ -1206,38 +943,21 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiInputSchemaFold(route_idx, line_idx) => {
-                let toggle = {
-                    let Some((meta, state)) = self.active_api_tab() else {
-                        return true;
-                    };
-                    if state.route_idx != Some(route_idx) {
-                        return true;
-                    }
-                    self.ide_panel
-                        .api
-                        .models
-                        .get(&meta.spec_id)
-                        .and_then(|model| {
-                            model.routes.get(route_idx).and_then(|route| {
-                                api_route_input_schema_fold_key_at_line(
-                                    route,
-                                    model,
-                                    state.input_schema_idx,
-                                    &state.input_schema_collapsed,
-                                    line_idx,
-                                )
-                            })
-                        })
-                        .map(|key| (meta.spec_id, key))
+                let Some((meta, state)) = self.active_api_tab() else {
+                    return true;
                 };
-                if let Some((spec_id, key)) = toggle
+                if state.route_idx != Some(route_idx) {
+                    return true;
+                }
+                let spec_id = meta.spec_id;
+                let key = self
+                    .ide_panel
+                    .api
+                    .input_schema_fold_key(state, spec_id, route_idx, line_idx);
+                if let Some(key) = key
                     && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                 {
-                    state.focused_schema_pane =
-                        Some(crate::app::api_client::ApiSchemaPaneFocus::Input);
-                    if !state.input_schema_collapsed.remove(&key) {
-                        state.input_schema_collapsed.insert(key);
-                    }
+                    state.apply_input_schema_fold(key);
                 }
             }
             crate::ui_system::UiId::ApiOutputSchemaBody(route_idx) => {
@@ -1256,39 +976,21 @@ impl crate::app::App {
                 }
             }
             crate::ui_system::UiId::ApiOutputSchemaFold(route_idx, line_idx) => {
-                let toggle = {
-                    let Some((meta, state)) = self.active_api_tab() else {
-                        return true;
-                    };
-                    if state.route_idx != Some(route_idx) {
-                        return true;
-                    }
-                    self.ide_panel
-                        .api
-                        .models
-                        .get(&meta.spec_id)
-                        .and_then(|model| {
-                            model.routes.get(route_idx).and_then(|route| {
-                                api_route_output_schema_fold_key_at_line(
-                                    route,
-                                    model,
-                                    state.output_status_idx,
-                                    state.output_schema_idx,
-                                    &state.output_schema_collapsed,
-                                    line_idx,
-                                )
-                            })
-                        })
-                        .map(|key| (meta.spec_id, key))
+                let Some((meta, state)) = self.active_api_tab() else {
+                    return true;
                 };
-                if let Some((spec_id, key)) = toggle
+                if state.route_idx != Some(route_idx) {
+                    return true;
+                }
+                let spec_id = meta.spec_id;
+                let key = self
+                    .ide_panel
+                    .api
+                    .output_schema_fold_key(state, spec_id, route_idx, line_idx);
+                if let Some(key) = key
                     && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
                 {
-                    state.focused_schema_pane =
-                        Some(crate::app::api_client::ApiSchemaPaneFocus::Output);
-                    if !state.output_schema_collapsed.remove(&key) {
-                        state.output_schema_collapsed.insert(key);
-                    }
+                    state.apply_output_schema_fold(key);
                 }
             }
             crate::ui_system::UiId::ApiResponseUseAccessToken(route_idx, scheme_idx) => {
@@ -1393,65 +1095,11 @@ impl crate::app::App {
             }
             crate::ui_system::UiId::ApiBodyAllowedValue(route_idx, prop_idx, value_idx) => {
                 self.commit_api_focus();
-                let Some((meta, _)) = self.active_api_tab() else {
+                let Some((meta, state, api)) = self.active_api_tab_and_state_mut() else {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                let picked = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.routes.get(route_idx).map(|route| (model, route)))
-                    .and_then(|(model, route)| {
-                        let root = route.request_body.as_ref()?.schema?;
-                        let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
-                        let schema = model.schema_arena.get(prop.schema.0)?;
-                        let allowed = api_schema_allowed_values(schema, model);
-                        let values = if allowed.is_empty() {
-                            schema.examples.as_slice()
-                        } else {
-                            allowed
-                        };
-                        Some((
-                            prop.name.clone(),
-                            api_schema_is_array_input(schema),
-                            values.get(value_idx)?.clone(),
-                        ))
-                    });
-                let mut applied = None;
-                if let Some((name, is_array, value)) = picked
-                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
-                    && let Some(field) = state
-                        .body_values
-                        .iter_mut()
-                        .find(|field| field.name == name)
-                {
-                    if is_array {
-                        push_api_array_value(&mut field.value, &value);
-                    } else {
-                        field.value = value.clone();
-                    }
-                    state.body_file_paths.remove(&name);
-                    applied = Some((field.name.clone(), field.value.clone(), is_array));
-                }
-                if let Some((field_name, value, _)) = &applied
-                    && matches!(
-                        self.ide_panel.api.focused,
-                        Some(ApiFocus::BodyField {
-                            spec_id: f_spec,
-                            route_idx: f_route,
-                            ref name,
-                        }) if f_spec == spec_id && f_route == route_idx && name == field_name
-                    )
-                {
-                    let old_version = self.ide_panel.api.input_editor.version;
-                    self.ide_panel.api.input_editor.set_text_clean(value);
-                    self.ide_panel.api.input_editor.version = crate::editor::next_editor_version(old_version);
-                }
-                if applied.is_some_and(|(_, _, is_array)| is_array) {
-                    self.ide_panel.api.focused = None;
-                }
+                api.apply_body_allowed_value_click(state, spec_id, route_idx, prop_idx, value_idx);
             }
             crate::ui_system::UiId::ApiBodyFilePick(route_idx, prop_idx) => {
                 self.commit_api_focus();
@@ -1459,22 +1107,9 @@ impl crate::app::App {
                     return true;
                 };
                 let spec_id = meta.spec_id;
-                let picked = self
-                    .ide_panel
-                    .api
-                    .models
-                    .get(&spec_id)
-                    .and_then(|model| model.routes.get(route_idx).map(|route| (model, route)))
-                    .and_then(|(model, route)| {
-                        let root = route.request_body.as_ref()?.schema?;
-                        let prop = model.schema_arena.get(root.0)?.properties.get(prop_idx)?;
-                        let schema = model.schema_arena.get(prop.schema.0)?;
-                        Some((
-                            prop.name.clone(),
-                            api_schema_is_multi_file_input(schema, model),
-                        ))
-                    });
-                if let Some((name, multi)) = picked {
+                if let Some((name, multi)) =
+                    self.ide_panel.api.body_file_pick_target(spec_id, route_idx, prop_idx)
+                {
                     self.trigger_api_body_file_picker(spec_id, route_idx, name, multi);
                 }
             }
@@ -1491,12 +1126,8 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiTabBody => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                let active_spec_id = self.active_api_tab().map(|(meta, _)| meta.spec_id);
-                if let Some(spec_id) = active_spec_id
-                    && let Some((_, state)) = self.active_api_tab_mut_for(spec_id)
-                {
-                    state.focused_schema_pane = None;
-                    state.route_text_selection = None;
+                if let Some((_, state, _)) = self.active_api_tab_and_state_mut() {
+                    state.clear_focus_marks();
                 }
             }
             _ => return false,

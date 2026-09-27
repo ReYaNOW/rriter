@@ -84,6 +84,38 @@ impl crate::app::api_client::ApiClientState {
             .then_some(dialog.route_idx)
     }
 
+    pub(crate) fn api_mock_contract_field_delete_target_exists(
+        &self,
+        active: Option<&ApiActiveRoute>,
+    ) -> bool {
+        let Some(dialog) = self.mock_contract_field_delete_dialog.as_ref() else {
+            return false;
+        };
+        self.api_mock_contract_field_exists(active, dialog.route_idx, dialog.group, dialog.field_idx)
+    }
+
+    fn api_mock_contract_field_exists(
+        &self,
+        active: Option<&ApiActiveRoute>,
+        route_idx: usize,
+        group: crate::ui_system::ApiMockContractFieldGroup,
+        field_idx: usize,
+    ) -> bool {
+        let Some((_, _, route, model)) = self.api_mock_route_context(active, route_idx) else {
+            return false;
+        };
+        let Some(script) = self.api_route_python_script(active, route_idx) else {
+            return false;
+        };
+        let contract = crate::app::api_mock::types::api_mock_effective_contract(
+            script, &route, &model,
+        );
+        Self::api_mock_contract_class(&contract, group)
+            .fields
+            .get(field_idx)
+            .is_some()
+    }
+
     pub(crate) fn api_mock_contract_source_for_route(
         &self,
         active: Option<&ApiActiveRoute>,
@@ -262,7 +294,6 @@ impl crate::app::api_client::ApiClientState {
         field_idx: usize,
         prop: crate::ui_system::ApiMockContractFieldProp,
     ) -> bool {
-        self.mock_contract_constraint_menu = None;
         match prop {
             crate::ui_system::ApiMockContractFieldProp::Required => {
                 self.mutate_api_mock_contract_no_commit(active, route_idx, |contract| {
@@ -288,6 +319,10 @@ impl crate::app::api_client::ApiClientState {
             // Value props are edited through an input the App router focuses.
             _ => false,
         }
+    }
+
+    pub(crate) fn close_api_mock_contract_constraint_menu(&mut self) {
+        self.mock_contract_constraint_menu = None;
     }
 
     fn invalidate_api_mock_contract_tools(&mut self, route_idx: usize) {
@@ -434,19 +469,7 @@ impl crate::app::api_client::ApiClientState {
         group: crate::ui_system::ApiMockContractFieldGroup,
         field_idx: usize,
     ) -> bool {
-        let Some((_, _, route, model)) = self.api_mock_route_context(active, route_idx) else {
-            return false;
-        };
-        let Some(script) = self.api_route_python_script(active, route_idx) else {
-            return false;
-        };
-        let contract =
-            crate::app::api_mock::types::api_mock_effective_contract(script, &route, &model);
-        if Self::api_mock_contract_class(&contract, group)
-            .fields
-            .get(field_idx)
-            .is_none()
-        {
+        if !self.api_mock_contract_field_exists(active, route_idx, group, field_idx) {
             return false;
         }
         self.mock_contract_constraint_menu = None;

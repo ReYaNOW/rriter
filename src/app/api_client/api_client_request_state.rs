@@ -1,4 +1,206 @@
 impl ApiClientState {
+    fn insert_api_client_text(
+        &mut self,
+        text: &str,
+        is_body: bool,
+        is_array: bool,
+        paired: bool,
+    ) -> String {
+        let clean = if is_body {
+            text.to_string()
+        } else if is_array {
+            text.replace('\r', "")
+        } else {
+            text.replace(['\n', '\r'], "")
+        };
+        if !clean.is_empty() {
+            let (insert_text, move_inside_pair) = if paired {
+                crate::app::keyboard::paired_editor_insert_text(&clean)
+            } else {
+                (clean.as_str(), false)
+            };
+            self.input_editor.insert_str(insert_text);
+            if move_inside_pair {
+                self.input_editor.move_left(false);
+            }
+        }
+        clean
+    }
+
+    fn api_mock_python_vertical_target(
+        &self,
+        route_idx: usize,
+        part: ApiMockSourcePart,
+        down: bool,
+        shift: bool,
+    ) -> Option<ApiFocus> {
+        if shift || !api_editor_at_vertical_edge(&self.input_editor, down) {
+            return None;
+        }
+        api_mock_adjacent_python_part(part, down)
+            .and_then(|next_part| api_mock_focus_for_part(route_idx, next_part))
+    }
+
+    fn poll_body_json_validation(&mut self) -> bool {
+        let Some(rx) = self.body_json_validation_rx.take() else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(result) => {
+                if self.body_json_validation_pending
+                    == Some((result.spec_id, result.route_idx, result.version))
+                {
+                    self.body_json_validation_pending = None;
+                }
+                self.body_json_validation = Some(ApiJsonValidationState {
+                    spec_id: result.spec_id,
+                    route_idx: result.route_idx,
+                    version: result.version,
+                    valid: result.valid,
+                });
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.handle_json_validation_disconnect();
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.body_json_validation_rx = Some(rx);
+                false
+            }
+        }
+    }
+
+    fn poll_python_path_pick(&mut self) -> bool {
+        let Some(rx) = self.python_path_pick_rx.take() else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(result) => {
+                if let Some(path) = result.path {
+                    match result.kind {
+                        ApiPythonPathPickKind::Uv => {
+                            self.mock.uv.configured_path = Some(path);
+                            crate::app::api_mock::python_bootstrap::refresh_uv_status(&mut self.mock.uv);
+                        }
+                        ApiPythonPathPickKind::CustomPython => {
+                            self.mock.uv.custom_python_path = Some(path);
+                            crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
+                                &mut self.mock.uv,
+                            );
+                        }
+                    }
+                    self.commit_mock_config();
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.python_path_pick_rx = Some(rx);
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.handle_python_path_disconnect();
+                true
+            }
+        }
+    }
+
+    fn poll_python_version_list(&mut self) -> bool {
+        let Some(rx) = self.python_version_list_rx.take() else {
+            return false;
+        };
+        match rx.try_recv() {
+            Ok(result) => {
+                self.mock_python_versions_loading = false;
+                self.python_version_list_cancel = None;
+                if let Some(error) = result.error {
+                    self.mock.uv.last_error = error;
+                } else {
+                    self.mock_python_versions = result.rows;
+                    self.mock.uv.last_error.clear();
+                }
+                true
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                self.python_version_list_rx = Some(rx);
+                false
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.handle_python_versions_disconnect();
+                true
+            }
+        }
+    }
+
+    fn poll_python_install(&mut self) -> bool {
+        let Some(rx) = self.python_install_rx.take() else {
+            return false;
+        };
+        let mut changed = false;
+        let mut keep = true;
+        loop {
+            match rx.try_recv() {
+                Ok(ApiPythonInstallEvent::Line(line)) => {
+                    push_api_python_install_log(self, line);
+                    changed = true;
+                }
+                Ok(ApiPythonInstallEvent::Done(result)) => {
+                    self.mock_python_install_running = false;
+                    self.python_install_cancel = None;
+                    keep = false;
+                    match result {
+                        Ok(()) => {
+                            self.mock.uv.status =
+                                crate::app::api_mock::types::ApiPythonRuntimeStatus::Ready;
+                            self.mock.uv.last_error.clear();
+                            push_api_python_install_log(
+                                self,
+                                ApiPythonInstallLogLine {
+                                    text: "Готово".to_string(),
+                                    kind: ApiPythonInstallLogKind::Ok,
+                                },
+                            );
+                        }
+                        Err(err) => {
+                            self.mock.uv.status =
+                                crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
+                            self.mock.uv.last_error = err.clone();
+                            push_api_python_install_log(
+                                self,
+                                ApiPythonInstallLogLine {
+                                    text: err,
+                                    kind: ApiPythonInstallLogKind::Error,
+                                },
+                            );
+                        }
+                    }
+                    self.commit_mock_config();
+                    changed = true;
+                    break;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.handle_python_install_disconnect();
+                    keep = false;
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        if keep && self.mock_python_install_running {
+            self.python_install_rx = Some(rx);
+            changed = true;
+        }
+        changed
+    }
+
+    fn poll_python_receivers(&mut self) -> bool {
+        let mut changed = self.poll_python_path_pick();
+        changed |= self.poll_python_version_list();
+        changed |= self.poll_python_install();
+        changed
+    }
+
     fn api_mock_request_wants_server(&self, spec_id: ApiSpecId, route_idx: usize) -> bool {
         let route_override = self.api_route_override(spec_id, route_idx);
         api_mock_route_wants_server(self.mock.mode, route_override)
@@ -203,6 +405,113 @@ impl ApiClientState {
             return (true, None);
         }
         (false, None)
+    }
+}
+
+impl ApiClientTabState {
+    fn update_after_model_load(
+        &mut self,
+        meta: &mut ApiClientTabMeta,
+        previous_routes: &[(ApiMethod, String)],
+        model: &ApiSpecModel,
+    ) {
+        self.remap_route_memories(previous_routes, model);
+        if model.routes.is_empty() {
+            self.reset_route_content(None);
+            self.tab_scroll.reset();
+            meta.route_identity = None;
+            meta.route_method = None;
+            meta.route_path.clear();
+            return;
+        }
+
+        let previous_identity = meta
+            .route_method
+            .map(|method| (method, meta.route_path.as_str()))
+            .filter(|(_, path)| !path.is_empty())
+            .or_else(|| {
+                self.route_idx
+                    .and_then(|route_idx| previous_routes.get(route_idx))
+                    .map(|(method, path)| (*method, path.as_str()))
+            });
+        let remapped_route_idx = previous_identity
+            .and_then(|(method, path)| api_route_index_by_identity(model, method, path));
+        let route_idx = remapped_route_idx.unwrap_or(0);
+        if remapped_route_idx.is_some() {
+            self.route_idx = Some(route_idx);
+        } else {
+            self.reset_route_content(Some(route_idx));
+            fill_api_tab_inputs(self, &model.routes[route_idx], model);
+        }
+
+        if !self.auth_view {
+            let route = &model.routes[route_idx];
+            meta.route_identity = Some(ApiClientRouteIdentity::OpenApi {
+                spec_id: meta.spec_id,
+                route_idx,
+            });
+            meta.route_method = Some(route.method);
+            meta.route_path = route.path.clone();
+        }
+    }
+
+    fn apply_request_disconnect(&mut self, spec_id: ApiSpecId, request_id: u64) -> bool {
+        if self.pending_request_id == Some(request_id) {
+            let route_idx = self.route_idx.unwrap_or(0);
+            self.pending = false;
+            self.pending_request_id = None;
+            self.response_scroll.reset();
+            self.response_scroll_x.reset();
+            self.response = Some(api_request_disconnect_response(request_id, spec_id, route_idx));
+            return true;
+        }
+        let Some(saved) = self
+            .route_states
+            .iter_mut()
+            .find(|saved| saved.pending_request_id == Some(request_id))
+        else {
+            return false;
+        };
+        saved.pending = false;
+        saved.pending_request_id = None;
+        saved.response = Some(api_request_disconnect_response(
+            request_id,
+            spec_id,
+            saved.route_idx,
+        ));
+        true
+    }
+
+    fn remap_route_memories(
+        &mut self,
+        previous_routes: &[(ApiMethod, String)],
+        model: &ApiSpecModel,
+    ) {
+        self.route_states = self
+            .route_states
+            .drain(..)
+            .filter_map(|mut saved| {
+                let (method, path) = previous_routes.get(saved.route_idx)?;
+                saved.route_idx = api_route_index_by_identity(model, *method, path)?;
+                Some(saved)
+            })
+            .collect();
+        self.view_scrolls = self
+            .view_scrolls
+            .drain(..)
+            .filter_map(|mut saved| {
+                if let Some(route_idx) = saved.route_idx {
+                    let (method, path) = previous_routes.get(route_idx)?;
+                    saved.route_idx = Some(api_route_index_by_identity(model, *method, path)?);
+                }
+                Some(saved)
+            })
+            .collect();
+    }
+
+    fn mark_request_pending(&mut self, request_id: u64) {
+        self.pending = true;
+        self.pending_request_id = Some(request_id);
     }
 }
 

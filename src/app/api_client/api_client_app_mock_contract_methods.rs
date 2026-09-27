@@ -85,6 +85,17 @@ impl crate::app::App {
         if self.ide_panel.api.mock_contract_field_delete_dialog.is_none() {
             return;
         }
+        let active = self.api_active_route();
+        if !self
+            .ide_panel
+            .api
+            .api_mock_contract_field_delete_target_exists(active.as_ref())
+        {
+            self.ide_panel
+                .api
+                .confirm_api_mock_contract_field_delete(active.as_ref());
+            return;
+        }
         self.commit_api_focus();
         let active = self.api_active_route();
         if let Some(route_idx) = self
@@ -108,6 +119,7 @@ impl crate::app::App {
             crate::ui_system::ApiMockContractFieldProp::Required
                 | crate::ui_system::ApiMockContractFieldProp::Nullable
         ) {
+            self.ide_panel.api.close_api_mock_contract_constraint_menu();
             return self.edit_api_mock_contract(route_idx, |api, active| {
                 api.add_api_mock_contract_field_constraint(active, route_idx, group, field_idx, prop)
             });
@@ -134,30 +146,6 @@ impl crate::app::App {
         self.ide_panel
             .api
             .api_mock_signature_for_route(active.as_ref(), route_idx)
-    }
-
-    fn api_mock_contract_field_prop_text(
-        &self,
-        route_idx: usize,
-        group: crate::ui_system::ApiMockContractFieldGroup,
-        field_idx: usize,
-        prop: crate::ui_system::ApiMockContractFieldProp,
-    ) -> String {
-        let active = self.api_active_route();
-        self.ide_panel.api.api_mock_contract_field_prop_text(
-            active.as_ref(),
-            route_idx,
-            group,
-            field_idx,
-            prop,
-        )
-    }
-
-    fn api_mock_generated_preview(&self, route_idx: usize) -> Option<String> {
-        let active = self.api_active_route();
-        self.ide_panel
-            .api
-            .api_mock_generated_preview(active.as_ref(), route_idx)
     }
 }
 

@@ -48,37 +48,6 @@ fn api_mock_ty_disconnect_status(
     })
 }
 
-fn apply_api_request_disconnect_to_state(
-    state: &mut ApiClientTabState,
-    spec_id: ApiSpecId,
-    request_id: u64,
-) -> bool {
-    if state.pending_request_id == Some(request_id) {
-        let route_idx = state.route_idx.unwrap_or(0);
-        state.pending = false;
-        state.pending_request_id = None;
-        state.response_scroll.reset();
-        state.response_scroll_x.reset();
-        state.response = Some(api_request_disconnect_response(request_id, spec_id, route_idx));
-        return true;
-    }
-    let Some(saved) = state
-        .route_states
-        .iter_mut()
-        .find(|saved| saved.pending_request_id == Some(request_id))
-    else {
-        return false;
-    };
-    saved.pending = false;
-    saved.pending_request_id = None;
-    saved.response = Some(api_request_disconnect_response(
-        request_id,
-        spec_id,
-        saved.route_idx,
-    ));
-    true
-}
-
 fn api_editor_at_vertical_edge(editor: &Editor, down: bool) -> bool {
     let line_idx = editor
         .line_offsets
@@ -164,33 +133,6 @@ fn api_route_index_by_identity(
         .routes
         .iter()
         .position(|route| route.method == method && route.path == path)
-}
-
-fn remap_api_route_memories(
-    state: &mut ApiClientTabState,
-    previous_routes: &[(ApiMethod, String)],
-    model: &ApiSpecModel,
-) {
-    state.route_states = state
-        .route_states
-        .drain(..)
-        .filter_map(|mut saved| {
-            let (method, path) = previous_routes.get(saved.route_idx)?;
-            saved.route_idx = api_route_index_by_identity(model, *method, path)?;
-            Some(saved)
-        })
-        .collect();
-    state.view_scrolls = state
-        .view_scrolls
-        .drain(..)
-        .filter_map(|mut saved| {
-            if let Some(route_idx) = saved.route_idx {
-                let (method, path) = previous_routes.get(route_idx)?;
-                saved.route_idx = Some(api_route_index_by_identity(model, *method, path)?);
-            }
-            Some(saved)
-        })
-        .collect();
 }
 
 impl crate::app::App {
@@ -414,27 +356,17 @@ impl crate::app::App {
             .focused
             .as_ref()
             .is_some_and(|focus| self.ide_panel.api.api_focus_is_array_input(focus));
-        let clean = if is_body {
-            text.to_string()
-        } else if is_array {
-            text.replace('\r', "")
-        } else {
-            text.replace(['\n', '\r'], "")
-        };
+        let input_version_before = self.ide_panel.api.input_editor.version;
+        let clean = self.ide_panel.api.insert_api_client_text(
+            text,
+            is_body,
+            is_array,
+            mock_python_target.is_some(),
+        );
         if clean.is_empty() {
             return true;
         }
 
-        let input_version_before = self.ide_panel.api.input_editor.version;
-        let (insert_text, move_inside_pair) = if mock_python_target.is_some() {
-            crate::app::keyboard::paired_editor_insert_text(&clean)
-        } else {
-            (clean.as_str(), false)
-        };
-        self.ide_panel.api.input_editor.insert_str(insert_text);
-        if move_inside_pair {
-            self.ide_panel.api.input_editor.move_left(false);
-        }
         self.finish_api_text_edit(
             input_version_before,
             mock_python_target,
@@ -617,14 +549,12 @@ impl crate::app::App {
             }
             winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::KeyV) if ctrl => {
                 if !is_readonly && let Some(text) = self.get_clipboard_text() {
-                    let clean = if is_body {
-                        text
-                    } else if is_array {
-                        text.replace('\r', "")
-                    } else {
-                        text.replace('\n', "").replace('\r', "")
-                    };
-                    let _ = self.ide_panel.api.input_editor.insert_str(&clean);
+                    let clean = self.ide_panel.api.insert_api_client_text(
+                        &text,
+                        is_body,
+                        is_array,
+                        false,
+                    );
                     typed_text = Some(clean);
                 }
             }
@@ -734,22 +664,12 @@ impl crate::app::App {
                     .as_ref()
                     .and_then(|s| (!s.is_empty()).then_some(s))
                 {
-                    let clean = if is_body {
-                        text.to_string()
-                    } else if is_array {
-                        text.replace('\r', "")
-                    } else {
-                        text.replace('\n', "").replace('\r', "")
-                    };
-                    let (insert_text, move_inside_pair) = if mock_python_target.is_some() {
-                        crate::app::keyboard::paired_editor_insert_text(&clean)
-                    } else {
-                        (clean.as_str(), false)
-                    };
-                    let _ = self.ide_panel.api.input_editor.insert_str(insert_text);
-                    if move_inside_pair {
-                        self.ide_panel.api.input_editor.move_left(false);
-                    }
+                    let clean = self.ide_panel.api.insert_api_client_text(
+                        text,
+                        is_body,
+                        is_array,
+                        mock_python_target.is_some(),
+                    );
                     typed_text = Some(clean);
                 }
             }
@@ -771,13 +691,11 @@ impl crate::app::App {
         down: bool,
         shift: bool,
     ) -> bool {
-        if shift || !api_editor_at_vertical_edge(&self.ide_panel.api.input_editor, down) {
-            return false;
-        }
-        let Some(next_part) = api_mock_adjacent_python_part(part, down) else {
-            return false;
-        };
-        let Some(next_focus) = api_mock_focus_for_part(route_idx, next_part) else {
+        let Some(next_focus) = self
+            .ide_panel
+            .api
+            .api_mock_python_vertical_target(route_idx, part, down, shift)
+        else {
             return false;
         };
         self.focus_api_input(next_focus);
@@ -908,8 +826,7 @@ impl crate::app::App {
         let request_id = self.allocate_api_request_id();
         job.request_id = request_id;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
-            state.pending = true;
-            state.pending_request_id = Some(request_id);
+            state.mark_request_pending(request_id);
         }
         self.api_request_rx
             .push((request_id, spawn_api_request(job)));
@@ -1005,8 +922,7 @@ impl crate::app::App {
         job.request_id = request_id;
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.route_idx = Some(manual_idx);
-            state.pending = true;
-            state.pending_request_id = Some(request_id);
+            state.mark_request_pending(request_id);
         }
         self.api_request_rx
             .push((request_id, spawn_api_request(job)));
@@ -1141,31 +1057,7 @@ impl crate::app::App {
                 }
             }
         }
-        if let Some(rx) = self.ide_panel.api.body_json_validation_rx.take() {
-            match rx.try_recv() {
-                Ok(result) => {
-                    if self.ide_panel.api.body_json_validation_pending
-                        == Some((result.spec_id, result.route_idx, result.version))
-                    {
-                        self.ide_panel.api.body_json_validation_pending = None;
-                    }
-                    self.ide_panel.api.body_json_validation = Some(ApiJsonValidationState {
-                        spec_id: result.spec_id,
-                        route_idx: result.route_idx,
-                        version: result.version,
-                        valid: result.valid,
-                    });
-                    changed = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.ide_panel.api.handle_json_validation_disconnect();
-                    changed = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    self.ide_panel.api.body_json_validation_rx = Some(rx);
-                }
-            }
-        }
+        changed |= self.ide_panel.api.poll_body_json_validation();
         match crate::platform::poll_optional_receiver(&mut self.api_import_file_rx) {
             crate::platform::ReceiverPoll::Item(result) => {
                 if let Some(path) = result {
@@ -1194,115 +1086,7 @@ impl crate::app::App {
                 changed = true;
             }
         }
-        if let Some(rx) = self.ide_panel.api.python_path_pick_rx.take() {
-            match rx.try_recv() {
-                Ok(result) => {
-                    if let Some(path) = result.path {
-                        match result.kind {
-                            ApiPythonPathPickKind::Uv => {
-                                self.ide_panel.api.mock.uv.configured_path = Some(path);
-                                crate::app::api_mock::python_bootstrap::refresh_uv_status(
-                                    &mut self.ide_panel.api.mock.uv,
-                                );
-                            }
-                            ApiPythonPathPickKind::CustomPython => {
-                                self.ide_panel.api.mock.uv.custom_python_path = Some(path);
-                                crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
-                                    &mut self.ide_panel.api.mock.uv,
-                                );
-                            }
-                        }
-                        self.ide_panel.api.commit_mock_config();
-                    }
-                    changed = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    self.ide_panel.api.python_path_pick_rx = Some(rx);
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.ide_panel.api.handle_python_path_disconnect();
-                    changed = true;
-                }
-            }
-        }
-        if let Some(rx) = self.ide_panel.api.python_version_list_rx.take() {
-            match rx.try_recv() {
-                Ok(result) => {
-                    self.ide_panel.api.mock_python_versions_loading = false;
-                    self.ide_panel.api.python_version_list_cancel = None;
-                    if let Some(error) = result.error {
-                        self.ide_panel.api.mock.uv.last_error = error;
-                    } else {
-                        self.ide_panel.api.mock_python_versions = result.rows;
-                        self.ide_panel.api.mock.uv.last_error.clear();
-                    }
-                    changed = true;
-                }
-                Err(std::sync::mpsc::TryRecvError::Empty) => {
-                    self.ide_panel.api.python_version_list_rx = Some(rx);
-                }
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    self.ide_panel.api.handle_python_versions_disconnect();
-                    changed = true;
-                }
-            }
-        }
-        if let Some(rx) = self.ide_panel.api.python_install_rx.take() {
-            let mut keep = true;
-            loop {
-                match rx.try_recv() {
-                    Ok(ApiPythonInstallEvent::Line(line)) => {
-                        push_api_python_install_log(&mut self.ide_panel.api, line);
-                        changed = true;
-                    }
-                    Ok(ApiPythonInstallEvent::Done(result)) => {
-                        self.ide_panel.api.mock_python_install_running = false;
-                        self.ide_panel.api.python_install_cancel = None;
-                        keep = false;
-                        match result {
-                            Ok(()) => {
-                                self.ide_panel.api.mock.uv.status =
-                                    crate::app::api_mock::types::ApiPythonRuntimeStatus::Ready;
-                                self.ide_panel.api.mock.uv.last_error.clear();
-                                push_api_python_install_log(
-                                    &mut self.ide_panel.api,
-                                    ApiPythonInstallLogLine {
-                                        text: "Готово".to_string(),
-                                        kind: ApiPythonInstallLogKind::Ok,
-                                    },
-                                );
-                            }
-                            Err(err) => {
-                                self.ide_panel.api.mock.uv.status =
-                                    crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
-                                self.ide_panel.api.mock.uv.last_error = err.clone();
-                                push_api_python_install_log(
-                                    &mut self.ide_panel.api,
-                                    ApiPythonInstallLogLine {
-                                        text: err,
-                                        kind: ApiPythonInstallLogKind::Error,
-                                    },
-                                );
-                            }
-                        }
-                        self.ide_panel.api.commit_mock_config();
-                        changed = true;
-                        break;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        self.ide_panel.api.handle_python_install_disconnect();
-                        keep = false;
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-            if keep && self.ide_panel.api.mock_python_install_running {
-                self.ide_panel.api.python_install_rx = Some(rx);
-                changed = true;
-            }
-        }
+        changed |= self.ide_panel.api.poll_python_receivers();
 
         let mut idx = 0usize;
         while idx < self.api_load_rx.len() {
@@ -1368,7 +1152,7 @@ impl crate::app::App {
                         let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind else {
                             continue;
                         };
-                        if apply_api_request_disconnect_to_state(state, meta.spec_id, request_id) {
+                        if state.apply_request_disconnect(meta.spec_id, request_id) {
                             break;
                         }
                     }
@@ -1405,47 +1189,7 @@ impl crate::app::App {
                 meta.title = title.clone();
                 tab.base_title = title.clone();
             }
-
-            remap_api_route_memories(state, previous_routes, model);
-            if model.routes.is_empty() {
-                state.reset_route_content(None);
-                state.tab_scroll.reset();
-                meta.route_identity = None;
-                meta.route_method = None;
-                meta.route_path.clear();
-                continue;
-            }
-
-            let previous_identity = meta
-                .route_method
-                .map(|method| (method, meta.route_path.as_str()))
-                .filter(|(_, path)| !path.is_empty())
-                .or_else(|| {
-                    state
-                        .route_idx
-                        .and_then(|route_idx| previous_routes.get(route_idx))
-                        .map(|(method, path)| (*method, path.as_str()))
-                });
-            let remapped_route_idx = previous_identity.and_then(|(method, path)| {
-                api_route_index_by_identity(model, method, path)
-            });
-            let route_idx = remapped_route_idx.unwrap_or(0);
-            if remapped_route_idx.is_some() {
-                state.route_idx = Some(route_idx);
-            } else {
-                state.reset_route_content(Some(route_idx));
-                fill_api_tab_inputs(state, &model.routes[route_idx], model);
-            }
-
-            if !state.auth_view {
-                let route = &model.routes[route_idx];
-                meta.route_identity = Some(ApiClientRouteIdentity::OpenApi {
-                    spec_id: id,
-                    route_idx,
-                });
-                meta.route_method = Some(route.method);
-                meta.route_path = route.path.clone();
-            }
+            state.update_after_model_load(meta, previous_routes, model);
         }
     }
 

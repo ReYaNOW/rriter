@@ -102,9 +102,19 @@ src/app/api_client/api_client_request_runtime.rs
 src/app/api_client/api_client_defaults_persist.rs
 src/app/api_client/api_client_mock_config.rs
 src/app/api_client/api_client_app_text_methods.rs
+src/app/api_client/api_client_app_tabs.rs
+src/app/api_client/api_client_click_state.rs
+src/app/api_client/api_client_input_state.rs
+src/app/api_client/api_client_request_state.rs
+src/app/api_client/api_client_text_state.rs
+src/app/api_client/api_mock_contract_state.rs
+src/app/api_client/api_mock_editor_state.rs
+src/app/api_client/api_mock_routes_state.rs
 src/app/api_mock/server.rs
 src/app/api_mock/persist.rs
 ```
+
+`App` methods in `api_client_app_*` files route UI and tab/import events; `api_client_app_tabs.rs` owns API tab opening/import entry points. State transition methods live in the `*_state.rs` chunks on `ApiClientState`, `ApiMockState`, or `ApiClientTabState`, so related state changes stay together.
 
 Blocking API requests, the asynchronous API Mock proxy, and tool bootstrap share platform builders that apply the same trust roots and proxy policy. Direct server-reach timing uses a bounded TCP connect instead of platform-specific `ping`; it is suppressed when proxy routing is active because a direct probe would be misleading.
 
@@ -471,8 +481,9 @@ Headless app tests are split between `src/app/app_behavior_tests.rs` and `src/ap
 
 Large app files use thin include shells to keep source chunks small:
 
-* `src/app/api_client/*` -> API client loading/parsing, shared native-root/proxy HTTP builders, native upload paths, cancelable Python runtime tasks, request runtime, layout/input helpers, protected auth persistence, and tests.
-* `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and async OpenAPI export entrypoint.
+* `src/app/api_client/*` -> API client loading/parsing, shared native-root/proxy HTTP builders, native upload paths, cancelable Python runtime tasks, request runtime, layout/input helpers, protected auth persistence, and tests; `App` routes actions while state chunks own transitions.
+* `src/app/api_client/api_client_app_tabs.rs` -> App routers for API spec import and API tab opening.
+* `src/app/api_client/api_client_*_state.rs`, `api_mock_*_state.rs` -> API Client and API Mock state transitions owned by their state types.
 * `src/app/api_mock/contract.rs` -> structured Python mock contract builder for handler signature, locked classes, runtime args, defaults, and schema export.
 * `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON patch/synthesis for selected spec plus manual mock routes.
 * `src/app/autocomplete/*` -> detail helpers, detail request/merge flow, Ty autocomplete flow, popup/apply flow.
@@ -1562,8 +1573,15 @@ Entrypoints/state:
 * `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
 * `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
 * `src/app/api_client/api_client_mock_config.rs` -> `commit_mock_config`: the single "mock config changed" point (persist + hot-update of the running mock server).
-* `src/app/api_client/*` -> API client request runtime, layout/input, App methods, parser/loading, persistence, and tests.
-* `src/app/api_client/api_client_app_mock_contract_methods.rs` -> API mock contract toggles and OpenAPI export trigger.
+* `src/app/api_client/api_client_app_tabs.rs` -> App routers for OpenAPI import and API spec/auth/route tab opening.
+* `src/app/api_client/api_client_click_state.rs` -> response/schema selections, API Mock controls, auth actions, and click-driven tab state transitions.
+* `src/app/api_client/api_client_input_state.rs` -> focus text commit/navigation, API input focus, and Python runtime scroll state.
+* `src/app/api_client/api_client_request_state.rs` -> API request construction/results, async task polling, model-load updates, and route-memory remapping.
+* `src/app/api_client/api_client_text_state.rs` -> API editor text, UI text/scroll mapping, selections, and text-scroll state.
+* `src/app/api_client/api_mock_contract_state.rs` -> API Mock contract field edits, toggles, reset/delete dialogs, and export snapshots.
+* `src/app/api_client/api_mock_editor_state.rs` -> API Mock Python editor focus/completion, LSP edit mapping, and hover/highlight state.
+* `src/app/api_client/api_mock_routes_state.rs` -> API Mock route/Python state, type-check scheduling, runtime overlay, and server lifecycle.
+* `src/app/api_client/*` -> API client request runtime, layout/input, parser/loading, persistence, and tests; App routes actions while state chunks own transitions.
 * `src/app/api_mock/contract.rs` -> Python mock contract builder for signature, classes, worker arg plan, defaults, OpenAPI schema pieces.
 * `src/app/api_mock/openapi_export.rs` -> OpenAPI JSON export patch/synthesis for selected spec and manual mock routes.
 * `src/app/autocomplete.rs` -> include shell for `App` autocomplete detail/request/update/apply behavior.

@@ -7,7 +7,7 @@ use crate::app::api_mock::ty_check::{
 use crate::app::api_mock::types::ApiMockServerEvent;
 use crate::app::api_mock::types::{
     ApiMockFieldConstraints, ApiMockState, default_api_mock_python_body,
-    default_api_mock_python_script, default_contract_from_route, is_legacy_api_mock_python_body,
+    default_api_mock_python_script, is_legacy_api_mock_python_body,
 };
 use crate::app::api_mock::{merge::build_api_mock_routes, types::ApiMockServerSnapshot};
 use crate::editor::Editor;
@@ -2184,6 +2184,7 @@ include!("api_client/api_client_loading_parser.rs");
 include!("api_client/api_client_layout_input.rs");
 include!("api_client/api_client_request_runtime.rs");
 include!("api_client/api_client_app_text_methods.rs");
+include!("api_client/api_client_app_tabs.rs");
 include!("api_client/api_client_app_focus_methods.rs");
 include!("api_client/api_client_app_click_methods.rs");
 include!("api_client/api_client_app_mock_contract_methods.rs");
@@ -2194,6 +2195,7 @@ include!("api_client/api_client_defaults_persist.rs");
 include!("api_client/api_client_input_state.rs");
 include!("api_client/api_client_request_state.rs");
 include!("api_client/api_client_text_state.rs");
+include!("api_client/api_client_click_state.rs");
 include!("api_client/api_mock_contract_state.rs");
 include!("api_client/api_mock_editor_state.rs");
 include!("api_client/api_mock_routes_state.rs");

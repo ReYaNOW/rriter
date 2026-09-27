@@ -31,6 +31,75 @@ fn api_mock_lsp_edit_to_input_op(
 }
 
 impl ApiClientState {
+    pub(crate) fn set_api_mock_hover_request(&mut self, request: ApiMockHoverRequest) {
+        self.mock_hover_request = Some(request);
+    }
+
+    pub(crate) fn take_api_mock_hover_request(
+        &mut self,
+        request_id: i32,
+    ) -> Option<ApiMockHoverRequest> {
+        if self
+            .mock_hover_request
+            .as_ref()
+            .is_some_and(|request| request.request_id == request_id)
+        {
+            self.mock_hover_request.take()
+        } else {
+            None
+        }
+    }
+
+    pub(crate) fn accept_api_mock_hover_target(
+        &mut self,
+        target: ApiMockHoverTarget,
+        clear_request: bool,
+    ) {
+        self.mock_hover_target = Some(target);
+        if clear_request {
+            self.mock_hover_request = None;
+        }
+    }
+
+    pub(crate) fn apply_api_mock_completion(
+        &mut self,
+        active: Option<&ApiActiveRoute>,
+        route_idx: usize,
+        part: ApiMockSourcePart,
+        edit_text: &str,
+        plan: crate::app::CompletionApplyPlan,
+        prelude_imports: Vec<String>,
+    ) {
+        crate::app::apply_completion_plan_to_editor(&mut self.input_editor, plan);
+        if prelude_imports.is_empty() {
+            return;
+        }
+        if part == ApiMockSourcePart::Prelude {
+            let cursor_after_apply = self.input_editor.cursor;
+            let mut insert = String::new();
+            if !edit_text.trim().is_empty() && !edit_text.ends_with('\n') {
+                insert.push('\n');
+            }
+            for text in prelude_imports {
+                insert.push_str(&text);
+                insert.push('\n');
+            }
+            let end = self.input_editor.len();
+            let _ = self.input_editor.replace_range(end, end, &insert);
+            self.input_editor.cursor = cursor_after_apply.min(self.input_editor.len());
+            self.input_editor.selection_anchor = None;
+        } else if let Some(script) = self.api_route_python_script_mut(active, route_idx) {
+            for text in prelude_imports {
+                if !script.prelude.trim().is_empty() && !script.prelude.ends_with('\n') {
+                    script.prelude.push('\n');
+                }
+                script.prelude.push_str(&text);
+                script.prelude.push('\n');
+            }
+            self.commit_mock_config();
+        }
+    }
+
     fn previous_api_mock_python_focus(
         route_idx: usize,
         part: ApiMockSourcePart,

@@ -26,16 +26,6 @@ impl crate::app::App {
         self.ide_panel.api.start_api_mock_server();
     }
 
-    fn api_route_override(
-        &self,
-        route_idx: usize,
-    ) -> Option<&crate::app::api_mock::types::ApiMockRouteOverride> {
-        let (meta, _) = self.active_api_tab()?;
-        self.ide_panel
-            .api
-            .api_route_override(meta.spec_id, route_idx)
-    }
-
     /// Active API tab identity passed to `ApiClientState` mock route lookups.
     pub(crate) fn api_active_route(&self) -> Option<ApiActiveRoute> {
         let (meta, state) = self.active_api_tab()?;
@@ -50,43 +40,6 @@ impl crate::app::App {
         })
     }
 
-    fn active_manual_mock_route(
-        &self,
-        route_idx: usize,
-    ) -> Option<&crate::app::api_mock::types::ApiManualRoute> {
-        let active = self.api_active_route();
-        self.ide_panel
-            .api
-            .active_manual_mock_route(active.as_ref(), route_idx)
-    }
-
-    fn active_manual_mock_route_mut(
-        &mut self,
-        route_idx: usize,
-    ) -> Option<&mut crate::app::api_mock::types::ApiManualRoute> {
-        let active = self.api_active_route();
-        self.ide_panel
-            .api
-            .active_manual_mock_route_mut(active.as_ref(), route_idx)
-    }
-
-    fn api_route_override_mut(
-        &mut self,
-        route_idx: usize,
-    ) -> Option<&mut crate::app::api_mock::types::ApiMockRouteOverride> {
-        let (meta, _) = self.active_api_tab()?;
-        self.ide_panel.api.api_route_override_mut(meta.spec_id, route_idx)
-    }
-
-    fn ensure_api_route_override(&mut self, route_idx: usize) {
-        let Some((meta, _)) = self.active_api_tab() else {
-            return;
-        };
-        self.ide_panel
-            .api
-            .ensure_api_route_override(meta.spec_id, route_idx);
-    }
-
     fn api_route_python_script(
         &self,
         route_idx: usize,
@@ -95,16 +48,6 @@ impl crate::app::App {
         self.ide_panel
             .api
             .api_route_python_script(active.as_ref(), route_idx)
-    }
-
-    fn api_route_python_script_mut(
-        &mut self,
-        route_idx: usize,
-    ) -> Option<&mut crate::app::api_mock::types::ApiMockPythonScript> {
-        let active = self.api_active_route();
-        self.ide_panel
-            .api
-            .api_route_python_script_mut(active.as_ref(), route_idx)
     }
 
     fn focus_previous_api_mock_python_part(
@@ -475,10 +418,9 @@ impl crate::app::App {
             return true;
         }
         target.edit_byte = stable_target_byte;
-        self.ide_panel.api.mock_hover_target = Some(target.clone());
-        if clear_mock_hover_request {
-            self.ide_panel.api.mock_hover_request = None;
-        }
+        self.ide_panel
+            .api
+            .accept_api_mock_hover_target(target, clear_mock_hover_request);
         true
     }
 
@@ -555,7 +497,7 @@ impl crate::app::App {
             return false;
         };
         let target_edit_byte = target.edit_byte;
-        self.ide_panel.api.mock_hover_request = Some(ApiMockHoverRequest {
+        self.ide_panel.api.set_api_mock_hover_request(ApiMockHoverRequest {
             request_id,
             target,
             source,
@@ -576,13 +518,9 @@ impl crate::app::App {
         request_id: i32,
         text: Option<String>,
     ) -> bool {
-        let Some(request) = self.ide_panel.api.mock_hover_request.clone() else {
+        let Some(request) = self.ide_panel.api.take_api_mock_hover_request(request_id) else {
             return false;
         };
-        if request.request_id != request_id {
-            return false;
-        }
-        self.ide_panel.api.mock_hover_request = None;
         let target = request.target;
         let module_path = self.api_mock_hover_module_path(target.route_idx);
         let mut editor = Editor::new(request.source.len().saturating_add(512));
@@ -667,7 +605,7 @@ impl crate::app::App {
             && focused_route == route_idx
         {
             self.refresh_api_mock_python_highlight(route_idx, part);
-            self.ide_panel.api.mock_ty_due = Some(Instant::now() + Duration::from_millis(450));
+            self.ide_panel.api.queue_api_mock_ty_check(Instant::now() + Duration::from_millis(450));
         }
     }
 
@@ -708,7 +646,7 @@ impl crate::app::App {
         let Some(version) = self.api_mock_route_tools_version(route_idx) else {
             return false;
         };
-        self.ide_panel.api.mock_ty_due = None;
+        self.ide_panel.api.clear_api_mock_ty_due();
         self.start_api_mock_ty_check_now(route_idx, version);
         true
     }
@@ -773,227 +711,13 @@ impl crate::app::App {
         let Some((meta, _)) = self.active_api_tab() else {
             return;
         };
-        let spec_id = meta.spec_id;
-        let Some(entry) = self
-            .ide_panel
-            .api
-            .specs
-            .iter()
-            .find(|entry| entry.id == spec_id)
-            .cloned()
-        else {
-            return;
-        };
-        let Some(route) = self
-            .ide_panel
-            .api
-            .models
-            .get(&spec_id)
-            .and_then(|model| model.routes.get(route_idx))
-            .cloned()
-        else {
-            return;
-        };
-        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
-        let focused_this_route = self.ide_panel.api.api_mock_python_focus_target()
-            .is_some_and(|(focused_route, _)| focused_route == route_idx);
-        let mut disabled_active_script = false;
-        let enabled_route;
-        if let Some(override_route) =
-            self.ide_panel
-                .api
-                .mock
-                .route_overrides
-                .iter_mut()
-                .find(|item| {
-                    item.source_key == source_key
-                        && item.method == route.method
-                        && item.path == route.path
-                })
-        {
-            let will_enable = !override_route.enabled;
-            override_route.enabled = will_enable;
-            override_route.proxy_when_disabled = !will_enable;
-            enabled_route = will_enable;
-            if !will_enable && let Some(script) = override_route.python.as_mut() {
-                disabled_active_script = script.enabled;
-                script.enabled = false;
-            }
-        } else {
-            self.ide_panel.api.mock.route_overrides.push(
-                crate::app::api_mock::types::ApiMockRouteOverride {
-                    source_key,
-                    method: route.method,
-                    path: route.path,
-                    enabled: true,
-                    proxy_when_disabled: false,
-                    response: crate::app::api_mock::types::ApiMockResponse::Generated,
-                    python: None,
-                    extra_input_fields: Vec::new(),
-                    extra_output_fields: Vec::new(),
-                },
-            );
-            enabled_route = true;
-        }
-        if enabled_route {
-            self.ide_panel.api.mock.mode =
-                crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
-        }
-        if disabled_active_script && focused_this_route {
-            self.ide_panel.api.stash_active_api_mock_editor();
-            self.ide_panel.api.focused = None;
-        }
-        self.ide_panel.api.commit_mock_config();
+        self.ide_panel.api.toggle_api_route_mock(meta.spec_id, route_idx);
     }
 
     pub fn toggle_api_route_python(&mut self, route_idx: usize) -> bool {
         self.commit_api_focus();
-        if self.active_manual_mock_route(route_idx).is_some() {
-            let default_contract = self
-                .active_manual_mock_route(route_idx)
-                .map(|route| {
-                    crate::app::api_mock::types::default_contract_for_manual_route(&route.path)
-                })
-                .unwrap_or_default();
-            let focused_this_route = self.ide_panel.api.api_mock_python_focus_target()
-                .is_some_and(|(focused_route, _)| focused_route == route_idx);
-            let mut disabled_active_script = false;
-            let mut enabled_script = false;
-            if let Some(route) = self.active_manual_mock_route_mut(route_idx) {
-                route.enabled = true;
-                if let Some(script) = route.python.as_mut() {
-                    if script.contract.is_empty() {
-                        script.contract = default_contract.clone();
-                    } else if !script.contract.response.enabled
-                        && script.contract.response.fields.is_empty()
-                    {
-                        script.contract.response = default_contract.response.clone();
-                    }
-                    let will_enable = !script.enabled;
-                    if will_enable && is_legacy_api_mock_python_body(&script.body) {
-                        script.body = api_mock_default_handler_body(&script.contract);
-                    }
-                    script.enabled = will_enable;
-                    disabled_active_script = !script.enabled;
-                    enabled_script = script.enabled;
-                } else {
-                    let mut script = default_api_mock_python_script();
-                    script.contract = default_contract;
-                    script.body = api_mock_default_handler_body(&script.contract);
-                    route.python = Some(script);
-                    enabled_script = true;
-                }
-            }
-            if disabled_active_script && focused_this_route {
-                self.ide_panel.api.stash_active_api_mock_editor();
-                self.ide_panel.api.focused = None;
-            }
-            if enabled_script {
-                self.ide_panel.api.mock.mode =
-                    crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
-            }
-            self.ide_panel.api.commit_mock_config();
-            return enabled_script;
-        }
-        let Some((meta, _)) = self.active_api_tab() else {
-            return false;
-        };
-        let spec_id = meta.spec_id;
-        let Some(entry) = self
-            .ide_panel
-            .api
-            .specs
-            .iter()
-            .find(|entry| entry.id == spec_id)
-            .cloned()
-        else {
-            return false;
-        };
-        let Some(model) = self.ide_panel.api.models.get(&spec_id).cloned() else {
-            return false;
-        };
-        let Some(route) = model.routes.get(route_idx).cloned() else {
-            return false;
-        };
-        let default_contract = default_contract_from_route(&route, &model);
-        let source_key = crate::app::api_mock::types::api_mock_source_key(&entry);
-        let idx = if let Some(idx) =
-            self.ide_panel
-                .api
-                .mock
-                .route_overrides
-                .iter()
-                .position(|item| {
-                    item.source_key == source_key
-                        && item.method == route.method
-                        && item.path == route.path
-                }) {
-            idx
-        } else {
-            self.ide_panel.api.mock.route_overrides.push(
-                crate::app::api_mock::types::ApiMockRouteOverride {
-                    source_key,
-                    method: route.method,
-                    path: route.path,
-                    enabled: false,
-                    proxy_when_disabled: false,
-                    response: crate::app::api_mock::types::ApiMockResponse::Generated,
-                    python: None,
-                    extra_input_fields: Vec::new(),
-                    extra_output_fields: Vec::new(),
-                },
-            );
-            self.ide_panel
-                .api
-                .mock
-                .route_overrides
-                .len()
-                .saturating_sub(1)
-        };
-        let focused_this_route = self.ide_panel.api.api_mock_python_focus_target()
-            .is_some_and(|(focused_route, _)| focused_route == route_idx);
-        let mut disabled_active_script = false;
-        let mut enabled_script = false;
-        if let Some(override_route) = self.ide_panel.api.mock.route_overrides.get_mut(idx) {
-            if let Some(script) = override_route.python.as_mut() {
-                if script.contract.is_empty() {
-                    script.contract = default_contract.clone();
-                } else if !script.contract.response.enabled
-                    && script.contract.response.fields.is_empty()
-                {
-                    script.contract.response = default_contract.response.clone();
-                }
-                let will_enable = !script.enabled;
-                if will_enable && is_legacy_api_mock_python_body(&script.body) {
-                    script.body = api_mock_default_handler_body(&script.contract);
-                }
-                script.enabled = will_enable;
-                disabled_active_script = !script.enabled;
-                enabled_script = script.enabled;
-                if will_enable {
-                    override_route.enabled = true;
-                    override_route.proxy_when_disabled = false;
-                }
-            } else {
-                let mut script = default_api_mock_python_script();
-                script.contract = default_contract;
-                script.body = api_mock_default_handler_body(&script.contract);
-                override_route.python = Some(script);
-                override_route.enabled = true;
-                override_route.proxy_when_disabled = false;
-                enabled_script = true;
-            }
-        }
-        if disabled_active_script && focused_this_route {
-            self.ide_panel.api.stash_active_api_mock_editor();
-            self.ide_panel.api.focused = None;
-        }
-        if enabled_script {
-            self.ide_panel.api.mock.mode =
-                crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
-        }
-        self.ide_panel.api.commit_mock_config();
-        enabled_script
+        let active = self.api_active_route();
+        self.ide_panel.api.toggle_api_route_python(active.as_ref(), route_idx)
     }
 
     pub fn reset_api_route_python_part(&mut self, route_idx: usize, part: ApiMockSourcePart) {
@@ -1006,32 +730,16 @@ impl crate::app::App {
         } else {
             None
         };
-        let Some(script) = self.api_route_python_script_mut(route_idx) else {
+        let active = self.api_active_route();
+        let Some(focused) = self.ide_panel.api.reset_api_route_python_part(
+            active.as_ref(),
+            route_idx,
+            part,
+            default_contract,
+        ) else {
             return;
         };
-        match part {
-            ApiMockSourcePart::Contract => {
-                script.contract = default_contract.unwrap_or_default();
-                script.contract_source.clear();
-            }
-            ApiMockSourcePart::Prelude => script.prelude.clear(),
-            ApiMockSourcePart::Signature => return,
-            ApiMockSourcePart::Body => {
-                script.body = api_mock_default_handler_body(&script.contract)
-            }
-        }
-        self.ide_panel
-            .api
-            .mock_python_editors
-            .remove(&(route_idx, part));
-        self.ide_panel
-            .api
-            .mock_highlight_cache
-            .retain(|(cached_route, _), _| *cached_route != route_idx);
-        self.ide_panel.api.mock_highlight_target = None;
-        self.ide_panel.api.mock_highlight_spans.clear();
-        self.ide_panel.api.mock_ty_diagnostics.clear();
-        if self.ide_panel.api.api_mock_python_focus_target() == Some((route_idx, part)) {
+        if focused {
             let text = match part {
                 ApiMockSourcePart::Contract => self
                     .api_mock_contract_source_for_route(route_idx)
@@ -1055,31 +763,8 @@ impl crate::app::App {
 
     pub fn add_api_manual_route(&mut self) {
         self.commit_api_focus();
-        self.ide_panel.api.mock.mode =
-            crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
-        let next = self
-            .ide_panel
-            .api
-            .mock
-            .manual_routes
-            .len()
-            .saturating_add(1);
-        self.ide_panel
-            .api
-            .mock
-            .manual_routes
-            .push(crate::app::api_mock::types::ApiManualRoute {
-                stable_id: format!("manual-{}-{}", now_epoch_secs(), next),
-                method: ApiMethod::Get,
-                path: format!("/mock-{}", next),
-                enabled: true,
-                response: crate::app::api_mock::types::ApiMockResponse::Generated,
-                python: None,
-                input_fields: Vec::new(),
-                output_fields: Vec::new(),
-            });
-        self.ide_panel.api.commit_mock_config();
-        self.open_api_manual_route(next.saturating_sub(1));
+        let route_idx = self.ide_panel.api.add_api_manual_route(now_epoch_secs());
+        self.open_api_manual_route(route_idx);
     }
 
     fn start_api_mock_ty_check_now(&mut self, route_idx: usize, version: u64) {
@@ -1089,10 +774,7 @@ impl crate::app::App {
         let Some(script) = self.api_mock_script_for_tools(route_idx) else {
             return;
         };
-        self.ide_panel.api.mock.check_status =
-            crate::app::api_mock::types::ApiMockCheckStatus::Pending { route_idx, version };
-        self.ide_panel.api.mock_ty_diagnostics.clear();
-        self.ide_panel.api.mock_ty_pending = Some((route_idx, version));
+        self.ide_panel.api.begin_api_mock_ty_check(route_idx, version);
         let runtime = self.ide_panel.api.mock.uv.runtime_config();
         self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
             route_idx, version, runtime, method, path, route, model, script,
@@ -1227,8 +909,12 @@ impl crate::app::App {
         let target_cursor = ops
             .first()
             .map(|op| op.start.saturating_add(op.new_text.len()));
-        crate::app::apply_completion_plan_to_editor(
-            &mut self.ide_panel.api.input_editor,
+        let active = self.api_active_route();
+        self.ide_panel.api.apply_api_mock_completion(
+            active.as_ref(),
+            route_idx,
+            part,
+            &edit_text,
             crate::app::CompletionApplyPlan {
                 ops,
                 primary_start,
@@ -1236,38 +922,8 @@ impl crate::app::App {
                 fallback_insert: selected,
                 fallback_prefix_len: prefix_len,
             },
+            prelude_imports,
         );
-        if !prelude_imports.is_empty() {
-            if part == ApiMockSourcePart::Prelude {
-                let cursor_after_apply = self.ide_panel.api.input_editor.cursor;
-                let mut insert = String::new();
-                if !edit_text.trim().is_empty() && !edit_text.ends_with('\n') {
-                    insert.push('\n');
-                }
-                for text in prelude_imports {
-                    insert.push_str(&text);
-                    insert.push('\n');
-                }
-                let end = self.ide_panel.api.input_editor.len();
-                let _ = self
-                    .ide_panel
-                    .api
-                    .input_editor
-                    .replace_range(end, end, &insert);
-                self.ide_panel.api.input_editor.cursor =
-                    cursor_after_apply.min(self.ide_panel.api.input_editor.len());
-                self.ide_panel.api.input_editor.selection_anchor = None;
-            } else if let Some(script) = self.api_route_python_script_mut(route_idx) {
-                for text in prelude_imports {
-                    if !script.prelude.trim().is_empty() && !script.prelude.ends_with('\n') {
-                        script.prelude.push('\n');
-                    }
-                    script.prelude.push_str(&text);
-                    script.prelude.push('\n');
-                }
-                self.ide_panel.api.commit_mock_config();
-            }
-        }
         self.commit_api_focus();
         self.queue_api_mock_python_tools(route_idx);
         self.close_autocomplete();

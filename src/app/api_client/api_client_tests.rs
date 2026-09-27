@@ -2165,7 +2165,7 @@ mod tests {
         state.tab_scroll.target = 22.0;
         state.remember_view_scroll();
 
-        remap_api_route_memories(&mut state, &previous_routes, &reordered);
+        state.remap_route_memories(&previous_routes, &reordered);
 
         assert_eq!(
             state
@@ -3011,11 +3011,7 @@ fn request_worker_disconnect_is_attached_to_the_pending_response() {
     state.response_scroll.current = 20.0;
     state.response_scroll_x.current = 12.0;
 
-    assert!(apply_api_request_disconnect_to_state(
-        &mut state,
-        ApiSpecId(8),
-        77
-    ));
+    assert!(state.apply_request_disconnect(ApiSpecId(8), 77));
     assert!(!state.pending);
     assert_eq!(state.pending_request_id, None);
     assert_eq!(state.response_scroll.current, 0.0);
