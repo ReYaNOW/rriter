@@ -1,5 +1,6 @@
 use crate::app::App;
-use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
+use crate::render_view::editor_scroll_content_height;
+use crate::render_view::minimap_ui::{minimap_thumb_height, minimap_view_metrics};
 use crate::renderer::VisualLine;
 use crate::ui_system::UiId;
 use super::UiClickFlow;
@@ -323,30 +324,27 @@ impl App {
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
 
                     if max_scroll > 0.0 {
-                        let total_lines_f32 = self.editor.line_offsets.len() as f32;
-                        let bottom_blank_lines =
-                            editor_bottom_blank_lines(editor_height, r.line_height);
-                        let visible_minimap_lines = total_lines_f32.min(900.0);
-                        let minimap_line_h = (editor_height
-                            / (visible_minimap_lines + bottom_blank_lines).max(1.0))
-                        .max(1.5);
-                        let max_minimap_scroll = ((total_lines_f32 + bottom_blank_lines)
-                            * minimap_line_h
-                            - editor_height)
-                            .max(0.0);
+                        // Same geometry as `draw_minimap`, so the click targets the line
+                        // drawn under the pointer.
+                        let minimap = minimap_view_metrics(
+                            r.minimap_total_visual_lines(&self.editor),
+                            editor_height,
+                            r.line_height,
+                            self.scroll_y.current.min(max_scroll),
+                            max_scroll,
+                        );
+                        let minimap_line_h = minimap.line_height;
 
                         let scroll_ratio_y = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
-                        let current_minimap_scroll = scroll_ratio_y * max_minimap_scroll;
-
-                        let visible_lines = editor_height / r.line_height;
-                        let thumb_h = (visible_lines * minimap_line_h).max(4.0);
+                        let thumb_h =
+                            minimap_thumb_height(editor_height, r.line_height, minimap_line_h);
                         let viewport_y = tab_bar_h + scroll_ratio_y * (editor_height - thumb_h);
 
                         if my >= viewport_y && my <= viewport_y + thumb_h {
                             self.scroll_y.drag_offset = my - viewport_y;
                         } else {
                             let minimap_y = my - tab_bar_h;
-                            let abs_minimap_y = minimap_y + current_minimap_scroll;
+                            let abs_minimap_y = minimap_y + minimap.scroll;
                             let target_line = abs_minimap_y / minimap_line_h;
 
                             let target_scroll = target_line * r.line_height - editor_height / 2.0;

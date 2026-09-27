@@ -1458,6 +1458,7 @@ Root:
 * `src/headless/frame.rs` -> headless frame step (`step_frame`: `about_to_wait` + forced/requested frame), `settle_loop`/`StepState`, pbuffer readback (`read_frame_rgba`, `flip_rows_in_place`) and `write_png`.
 * `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
+* `src/headless/tests.rs` `tests_support` UI helpers -> `postgres_fixture()` (spawns `scripts/postgres_fixture.py --port 0`), `connect_postgres_fixture_through_ui`, `add_database_connection_through_ui`, `set_database_dialog_field`, `click_ui_fraction`, `ui_point`.
 * `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, and long tabs.
 * `src/headless/ui_tests_goto_definition.rs` -> headless UI tests for Ctrl-hover highlighting and same-file/cross-file definition navigation.
 * `src/headless/ui_tests_layout.rs` -> headless UI regression tests for welcome/editor/tree size and scale matrices, resize, and frame benchmarks.
@@ -1472,6 +1473,14 @@ Root:
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
 * `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
+* `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
+* `src/headless/ui_tests_editor_selection.rs` -> headless UI tests for double-click word, Shift+Home/End, Ctrl+A, Ctrl+Shift+arrows, and typing over a selection.
+* `src/headless/ui_tests_editor_shortcuts.rs` -> headless UI tests for Home/End, word navigation/deletion, file edges, Enter auto-indent, and Tab indentation.
+* `src/headless/ui_tests_editor_folding_minimap.rs` -> headless UI tests for folded rows and cursor skipping, sibling folds, minimap thumb drag/click, and thumb geometry.
+* `src/headless/ui_tests_splitters.rs` -> headless UI tests for bottom/side panel splitter drag and bounds, and status bar placement.
+* `src/headless/ui_tests_api_mock.rs` -> headless UI tests for API Mock route editing, real HTTP responses, 404 in MockAll, Stop, and Python/contract controls.
+* `src/headless/ui_tests_database_connect.rs` -> headless UI tests for the Database connection form, fixture catalog/table open, and closed-port error.
+* `src/headless/ui_tests_database_query.rs` -> headless UI tests for SQL console SELECT grid, EXPLAIN plan, and server error text with a usable console after it.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
 * `src/headless/profile.rs` -> headless CLI options (`parse_args`, `HeadlessOptions`) and the isolated profile root (`Profile`: private temp root, explicit dir, or copy of the user's config/data/state; removed on `finish`).

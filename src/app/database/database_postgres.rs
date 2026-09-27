@@ -99,7 +99,11 @@ impl fmt::Display for DatabaseBackendError {
         match self {
             Self::InvalidConfiguration(message) => f.write_str(message),
             Self::Io(error) => write!(f, "{error}"),
-            Self::Postgres(error) => write!(f, "PostgreSQL error: {error}"),
+            // tokio-postgres renders server errors as a bare "db error"; show the server message.
+            Self::Postgres(error) => match error.as_db_error() {
+                Some(db_error) => write!(f, "PostgreSQL error: {db_error}"),
+                None => write!(f, "PostgreSQL error: {error}"),
+            },
             Self::Ssh(error) => write!(f, "{error}"),
             Self::SshFallback {
                 system_error,

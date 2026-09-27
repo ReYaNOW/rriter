@@ -14,11 +14,23 @@ mod ui_tests_api_client_request;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_spec;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_mock;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_database_connect;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_database_query;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_completion;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_editor_folding_minimap;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_search;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_editor_selection;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_editor_shortcuts;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_sticky;
 #[cfg(all(test, target_os = "linux"))]
@@ -46,7 +58,11 @@ mod ui_tests_settings_database;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_general;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_help;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_ide;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_splitters;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tabs_tree;
 #[cfg(all(test, target_os = "linux"))]
