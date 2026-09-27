@@ -262,6 +262,38 @@ impl App {
             return true;
         }
 
+        if self.settings_general_scroll.is_dragging {
+            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsGeneralScrollY) {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                crate::app::mouse::update_scrollbar_drag(
+                    &mut self.settings_general_scroll,
+                    position.y as f32,
+                    rect.1,
+                    rect.3,
+                    self.settings_general_max_scroll,
+                    40.0 * s,
+                );
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return true;
+        }
+
+        if self.settings_database_scroll.is_dragging {
+            if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsDatabaseScrollY) {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                crate::app::mouse::update_scrollbar_drag(
+                    &mut self.settings_database_scroll,
+                    position.y as f32,
+                    rect.1,
+                    rect.3,
+                    self.settings_database_max_scroll,
+                    40.0 * s,
+                );
+            }
+            self.window.as_ref().unwrap().request_redraw();
+            return true;
+        }
+
         if self.tool_installer.log_scroll_is_dragging() {
             if let Some(rect) = self
                 .ui_registry

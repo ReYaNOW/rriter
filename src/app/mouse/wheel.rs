@@ -736,16 +736,16 @@ impl App {
             );
 
             if max_scroll > 0.0 {
-                self.settings_ide_scroll.anim_speed = 7.0;
-                self.settings_ide_scroll.scroll_by(dy);
-                self.settings_ide_scroll.clamp_target(0.0, max_scroll);
+                crate::render_view::settings_ui::scroll_settings_content(
+                    &mut self.settings_ide_scroll,
+                    dy,
+                    max_scroll,
+                );
                 self.window.as_ref().unwrap().request_redraw();
             }
             return;
         }
         if self.show_settings && self.settings_tab == 4 {
-            self.settings_scroll.anim_speed = 7.0;
-            self.settings_scroll.scroll_by(dy);
             let window_size = self.window.as_ref().unwrap().inner_size();
             let layout = crate::render_view::settings_ui::animated_settings_modal_layout(
                 window_size.width as f32,
@@ -760,7 +760,29 @@ impl App {
                 .as_mut()
                 .unwrap()
                 .get_faq_max_scroll(&self.faq_editor, viewport_h);
-            self.settings_scroll.clamp_target(0.0, max_scroll);
+            crate::render_view::settings_ui::scroll_settings_content(
+                &mut self.settings_scroll,
+                dy,
+                max_scroll,
+            );
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if self.show_settings && self.settings_tab == 1 {
+            crate::render_view::settings_ui::scroll_settings_content(
+                &mut self.settings_general_scroll,
+                dy,
+                self.settings_general_max_scroll,
+            );
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if self.show_settings && self.settings_tab == 5 {
+            crate::render_view::settings_ui::scroll_settings_content(
+                &mut self.settings_database_scroll,
+                dy,
+                self.settings_database_max_scroll,
+            );
             self.window.as_ref().unwrap().request_redraw();
             return;
         }

@@ -373,6 +373,18 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     if app.show_settings && app.settings_tab == 4 && app.settings_scroll.update(dt) {
         needs_redraw = true;
     }
+    if app.show_settings
+        && app.settings_tab == 1
+        && app.settings_general_scroll.update(dt)
+    {
+        needs_redraw = true;
+    }
+    if app.show_settings
+        && app.settings_tab == 5
+        && app.settings_database_scroll.update(dt)
+    {
+        needs_redraw = true;
+    }
 
     let markdown_read = app.markdown_mode() == crate::app::MarkdownMode::Read;
     let mut shared_scroll_updated = false;
