@@ -1449,6 +1449,8 @@ Root:
 * `build.rs` -> generated Windows DPI/long-path/application manifest linker setup.
 * `scripts/build_windows.py` -> MSVC discovery, PE resources, tests/build, portable ZIP, Inno installer, signing, and launch.
 * `scripts/build_macos.py` -> native/Universal 2 build, `.app`, ICNS, signing, notarization, DMG, and launch.
+* `scripts/lint_changed.py` -> changed-file Clippy and pattern gate against `scripts/lint_baseline.json`; `--update-baseline` refreshes the committed baseline.
+* `scripts/lint_baseline.json` -> Clippy warning counts by file/lint and ceilings for files over 1600 lines.
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.

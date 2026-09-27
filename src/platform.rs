@@ -1,3 +1,5 @@
+#![allow(clippy::disallowed_methods)]
+
 #[cfg(any(windows, test))]
 use std::ffi::OsStr;
 use std::ffi::OsString;

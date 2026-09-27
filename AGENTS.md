@@ -7,6 +7,7 @@ Read on demand, not upfront:
 * `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
 * `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
 * `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
+* `docs/agents/subagent-rules.md` — common rules for every subagent; a brief points to it instead of repeating them. Reason: the same ~1k-character block was copied into each brief (27.09).
 * UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make codex_test` once at the end (§4). Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
 * Delegating UI-test work: size each agent by scenarios, not by file — 3–5 scenarios (~10 min of driver probes) per agent, at most 6–8 agents in parallel, the rest in waves; each agent writes its scenarios to its own file or the main session merges them into the shared `ui_tests_*.rs` afterwards (never two agents editing one file at once). Reason: one agent given all tree-ops scenarios ran three times longer than its siblings with one or two, and the whole batch waited for it (26.09).
 * Headless tests wait for async results (git, terminal, LSP, file save) with `tests_support::wait_until(session, timeout_ms, what, |s| condition)`, not a fixed `wait N`; the timeout keeps the old pause length. A fixed `wait` is only for real delays (hover dwell, animation) and negative checks ("HEAD unchanged"), where the pause gives the async action time to land. Reason: fixed `wait 8000` in 13 git tests cost 195 s of a 608 s `make codex_test` (27.09).
@@ -102,6 +103,8 @@ Primary success check after edits:
 ```bash
 make codex_test
 ```
+
+`make codex_test` starts with `scripts/lint_changed.py`: clippy and pattern checks on files changed vs master, against `scripts/lint_baseline.json`. A warning in code you touched gets a real fix, or — when the fix is larger than the task — stays in the baseline plus a `design debt:` Kanri card. Never add `#[allow]` or split a function just to satisfy a lint; never regenerate the baseline to hide new warnings (`make lint-baseline` only when a stage removes warnings). Reason: the gate exists to stop the code getting worse one small fix at a time (27.09).
 
 Always run `make codex_test` at the end of task if ANY file related to RRiter changed.
 

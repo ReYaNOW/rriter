@@ -1,0 +1,11 @@
+too-many-lines-threshold = 200
+cognitive-complexity-threshold = 40
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+disallowed-methods = [
+    { path = "std::process::Command::spawn", reason = "route through src/platform (ManagedChild / run_command_output / ToolPaths)" },
+    { path = "std::process::Command::output", reason = "route through src/platform (ManagedChild / run_command_output / ToolPaths)" },
+    { path = "std::process::Command::status", reason = "route through src/platform (ManagedChild / run_command_output / ToolPaths)" },
+    { path = "std::env::set_var", reason = "route through src/platform (ManagedChild / run_command_output / ToolPaths)" },
+    { path = "std::env::remove_var", reason = "route through src/platform (ManagedChild / run_command_output / ToolPaths)" },
+]
