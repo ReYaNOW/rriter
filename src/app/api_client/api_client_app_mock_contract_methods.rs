@@ -113,7 +113,7 @@ impl crate::app::App {
         script.contract_source =
             crate::app::api_mock::contract::api_mock_contract_state_text(&script.contract);
         self.invalidate_api_mock_contract_tools(route_idx);
-        self.ide_panel.api.persist();
+        self.ide_panel.api.commit_mock_config();
         if !self.start_api_mock_route_tools_now(route_idx) {
             self.ide_panel.api.mock_ty_due =
                 Some(std::time::Instant::now() + std::time::Duration::from_millis(450));

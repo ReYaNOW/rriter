@@ -1991,7 +1991,7 @@ impl crate::app::App {
     pub fn open_api_spec_tab(&mut self, id: ApiSpecId) {
         self.ide_panel.api.select_spec(id);
         self.ensure_api_model_loaded(id);
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.refresh_mock_server();
 
         if let Some(idx) = self.tabs.iter().position(|tab| {
             matches!(
@@ -2010,7 +2010,7 @@ impl crate::app::App {
     pub fn open_api_auth_tab(&mut self, id: ApiSpecId) {
         self.ide_panel.api.select_spec(id);
         self.ensure_api_model_loaded(id);
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.refresh_mock_server();
         let title = self
             .ide_panel
             .api
@@ -2083,7 +2083,7 @@ impl crate::app::App {
     ) {
         self.ide_panel.api.select_spec(spec_id);
         self.ensure_api_model_loaded(spec_id);
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.refresh_mock_server();
         if force_new_tab {
             self.open_new_api_spec_tab(spec_id);
         } else if let Some(idx) = self.last_api_route_tab_idx(spec_id) {

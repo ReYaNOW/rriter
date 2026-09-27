@@ -428,8 +428,7 @@ impl crate::app::App {
                 if next_mode == crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest {
                     self.sync_api_mock_proxy_base_to_active_server();
                 }
-                self.ide_panel.api.persist();
-                self.refresh_api_mock_server_snapshot();
+                self.ide_panel.api.commit_mock_config();
             }
             crate::ui_system::UiId::ApiMockProxyBaseInput => {
                 self.focus_api_input(ApiFocus::MockProxyBase);
@@ -521,14 +520,14 @@ impl crate::app::App {
                     }
                 };
                 self.ide_panel.api.mock_python_version_picker_open = false;
-                self.ide_panel.api.persist();
+                self.ide_panel.api.commit_mock_config();
             }
             crate::ui_system::UiId::ApiMockPythonCheckRuntime => {
                 self.commit_api_focus();
                 crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
                     &mut self.ide_panel.api.mock.uv,
                 );
-                self.ide_panel.api.persist();
+                self.ide_panel.api.commit_mock_config();
             }
             crate::ui_system::UiId::ApiMockPythonPrepareVersion => {
                 self.commit_api_focus();
@@ -560,7 +559,7 @@ impl crate::app::App {
                     self.ide_panel.api.mock.uv.python_version = row.version.clone();
                     self.ide_panel.api.mock_python_version_picker_open = false;
                     self.ide_panel.api.mock_python_versions_scroll.reset();
-                    self.ide_panel.api.persist();
+                    self.ide_panel.api.commit_mock_config();
                 }
             }
             crate::ui_system::UiId::ApiMockPythonPickCustomPath => {
@@ -728,8 +727,7 @@ impl crate::app::App {
                         ApiMethod::Head | ApiMethod::Options | ApiMethod::Trace => ApiMethod::Get,
                     };
                     self.sync_api_manual_route_tabs();
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
+                    self.ide_panel.api.commit_mock_config();
                 }
             }
             crate::ui_system::UiId::ApiMockAddInputField(_)
@@ -738,8 +736,7 @@ impl crate::app::App {
                 if idx < self.ide_panel.api.mock.manual_routes.len() {
                     self.ide_panel.api.mock.manual_routes.remove(idx);
                     self.sync_api_manual_route_tabs();
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
+                    self.ide_panel.api.commit_mock_config();
                 }
             }
             crate::ui_system::UiId::ApiSpecOpen(idx) => {
@@ -793,7 +790,7 @@ impl crate::app::App {
                     while let Some(tab_idx) = tab_idxs.pop() {
                         self.close_tab_at(tab_idx);
                     }
-                    self.refresh_api_mock_server_snapshot();
+                    self.ide_panel.api.refresh_mock_server();
                 }
             }
             crate::ui_system::UiId::ApiSpecRemoveCancel => {
@@ -811,7 +808,7 @@ impl crate::app::App {
                             self.ide_panel.api.collapsed_route_roots.insert(id);
                         }
                     }
-                    self.refresh_api_mock_server_snapshot();
+                    self.ide_panel.api.refresh_mock_server();
                 }
             }
             crate::ui_system::UiId::ApiAuthRoot => {
@@ -903,7 +900,7 @@ impl crate::app::App {
                 }
                 if let Some(server) = selected_server {
                     self.sync_api_mock_proxy_base_to_server(&server);
-                    self.refresh_api_mock_server_snapshot();
+                    self.ide_panel.api.refresh_mock_server();
                 }
             }
             crate::ui_system::UiId::ApiAuthValue(scheme_idx)

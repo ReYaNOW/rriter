@@ -372,6 +372,9 @@ impl crate::app::App {
         if self.api_focus_is_array_input(&focus) {
             text = split_api_array_values(&text).join("\n");
         }
+        // Mock arms only set this; `commit_mock_config` after the match persists and
+        // hot-updates the running server once.
+        let mut mock_changed = false;
         match focus {
             ApiFocus::ImportUrl => {}
             ApiFocus::RouteFilter => {
@@ -379,11 +382,11 @@ impl crate::app::App {
             }
             ApiFocus::MockProxyBase => {
                 self.ide_panel.api.mock.proxy_base_url = text.trim().to_string();
-                self.ide_panel.api.persist();
+                mock_changed = true;
             }
             ApiFocus::MockPythonUvPath => {
                 self.ide_panel.api.mock.uv.configured_path = non_empty_path(&text);
-                self.ide_panel.api.persist();
+                mock_changed = true;
             }
             ApiFocus::MockPythonVersion => {
                 let version = text.trim();
@@ -392,11 +395,11 @@ impl crate::app::App {
                 } else {
                     version.to_string()
                 };
-                self.ide_panel.api.persist();
+                mock_changed = true;
             }
             ApiFocus::MockPythonCustomPath => {
                 self.ide_panel.api.mock.uv.custom_python_path = non_empty_path(&text);
-                self.ide_panel.api.persist();
+                mock_changed = true;
             }
             ApiFocus::MockManualPath { manual_idx } => {
                 let mut path = text.trim().to_string();
@@ -429,11 +432,10 @@ impl crate::app::App {
                         contract_path_changed = true;
                     }
                     self.sync_api_manual_route_tabs();
-                    self.ide_panel.api.persist();
                     if contract_path_changed {
                         self.invalidate_api_mock_contract_tools(manual_idx);
                     }
-                    self.refresh_api_mock_server_snapshot();
+                    mock_changed = true;
                 }
             }
             ApiFocus::MockContract { route_idx } => {
@@ -463,24 +465,21 @@ impl crate::app::App {
                     if changed {
                         script.contract = contract;
                         script.contract_source = contract_source;
-                        self.ide_panel.api.persist();
                         self.invalidate_api_mock_contract_tools(route_idx);
-                        self.refresh_api_mock_server_snapshot();
+                        mock_changed = true;
                     }
                 }
             }
             ApiFocus::MockPrelude { route_idx } => {
                 if let Some(script) = self.api_route_python_script_mut(route_idx) {
                     script.prelude = text;
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
+                    mock_changed = true;
                 }
             }
             ApiFocus::MockBody { route_idx } => {
                 if let Some(script) = self.api_route_python_script_mut(route_idx) {
                     script.body = text;
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
+                    mock_changed = true;
                 }
             }
             ApiFocus::MockSignature { .. } => {}
@@ -495,21 +494,19 @@ impl crate::app::App {
                     } else {
                         crate::app::api_mock::types::ApiMockResponse::Json(text)
                     };
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
-                    return;
-                }
-                self.ensure_api_route_override(route_idx);
-                if let Some(override_route) = self.api_route_override_mut(route_idx) {
-                    let was_enabled = override_route.enabled;
-                    override_route.response = if text.trim() == generated.trim() {
-                        crate::app::api_mock::types::ApiMockResponse::Generated
-                    } else {
-                        crate::app::api_mock::types::ApiMockResponse::Json(text)
-                    };
-                    override_route.enabled = was_enabled;
-                    self.ide_panel.api.persist();
-                    self.refresh_api_mock_server_snapshot();
+                    mock_changed = true;
+                } else {
+                    self.ensure_api_route_override(route_idx);
+                    if let Some(override_route) = self.api_route_override_mut(route_idx) {
+                        let was_enabled = override_route.enabled;
+                        override_route.response = if text.trim() == generated.trim() {
+                            crate::app::api_mock::types::ApiMockResponse::Generated
+                        } else {
+                            crate::app::api_mock::types::ApiMockResponse::Json(text)
+                        };
+                        override_route.enabled = was_enabled;
+                        mock_changed = true;
+                    }
                 }
             }
             ApiFocus::MockContractField {
@@ -518,6 +515,7 @@ impl crate::app::App {
                 field_idx,
                 prop,
             } => {
+                // Commits through `mutate_api_mock_contract_no_commit`.
                 self.commit_api_mock_contract_field_prop(route_idx, group, field_idx, prop, &text);
             }
             ApiFocus::AuthValue { spec_id, scheme } => {
@@ -586,6 +584,9 @@ impl crate::app::App {
             }
             ApiFocus::InputSchema { .. } | ApiFocus::OutputSchema { .. } => {}
             ApiFocus::Response { .. } => {}
+        }
+        if mock_changed {
+            self.ide_panel.api.commit_mock_config();
         }
     }
 

@@ -395,7 +395,7 @@ impl App {
         }
         self.ide_panel.api.shutdown_background_tasks();
         self.shutdown_database_runtime();
-        crate::app::api_mock::server::stop_api_mock_server();
+        self.ide_panel.api.mock.server.stop();
     }
 
     pub(crate) fn save_current_config(&self) {
@@ -448,6 +448,9 @@ impl App {
             self.text_file_format = crate::platform::TextFileFormat::default();
         }
 
+        // Re-entering IDE mode (Welcome after closing a file) must not stop a running mock server.
+        let mock_server = std::mem::take(&mut self.ide_panel.api.mock.server);
+        let mock_server_status = self.ide_panel.api.mock.server_status.clone();
         if self.is_automation_mode() {
             self.ide_panel = crate::app::IdePanelState::default();
         } else {
@@ -455,6 +458,8 @@ impl App {
             self.ide_panel.api = crate::app::api_client::ApiClientState::load_persisted();
             self.load_database_panel_state();
         }
+        self.ide_panel.api.mock.server = mock_server;
+        self.ide_panel.api.mock.server_status = mock_server_status;
         self.ide_panel.enforce_single_open_per_group();
 
         if self.ide_panel.is_open(PanelId::Database) {

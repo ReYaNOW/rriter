@@ -92,7 +92,7 @@ fn headless_api_mock_python_handler_receives_path_query_and_json_body() {
         "return json_response({\"item_id\": item_id, \"q\": query.q, \"label\": body.label})",
     );
 
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
     let response = post_to_mock(
         &mut session,
         &url,
@@ -130,7 +130,7 @@ fn headless_api_mock_python_handler_receives_missing_optional_query_as_none() {
         "return json_response({\"item_id\": item_id, \"q\": query.q})",
     );
 
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
     let response = get_from_mock(&mut session, &url, "/items/42");
     assert_eq!(response.0, 200, "{response:?}");
     let response_json: Value = serde_json::from_str(&response.1).expect("JSON handler response");
@@ -147,7 +147,7 @@ fn headless_api_mock_python_timeout_returns_500_logs_timeout_and_server_recovers
     let path = session.app.ide_panel.api.mock.manual_routes[route_idx].path.clone();
     set_timeout_ms(&mut session, route_idx, 100);
     set_contract_handler_body(&mut session, route_idx, "while True: pass");
-    let (url, _cleanup) = start_mock_server(&mut session);
+    let url = start_mock_server(&mut session);
 
     let timed_out = get_from_mock(&mut session, &url, &path);
     assert_eq!(timed_out.0, 500, "{timed_out:?}");

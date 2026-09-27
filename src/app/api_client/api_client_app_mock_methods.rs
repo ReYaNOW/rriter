@@ -117,7 +117,7 @@ impl crate::app::App {
             self.ide_panel.api.mock.server_status =
                 crate::app::api_mock::types::ApiMockServerStatus::Stopping;
             push_api_mock_server_log(&mut self.ide_panel.api, "server stop requested".to_string());
-            stop_api_mock_server();
+            self.ide_panel.api.mock.server.stop();
             return;
         }
         self.sync_api_mock_proxy_base_to_active_server();
@@ -131,7 +131,7 @@ impl crate::app::App {
                 snapshot.bind_host, snapshot.port
             ),
         );
-        if let Err(err) = start_api_mock_server(snapshot) {
+        if let Err(err) = self.ide_panel.api.mock.server.start(snapshot) {
             self.ide_panel.api.mock.server_status =
                 crate::app::api_mock::types::ApiMockServerStatus::Failed(err.clone());
             push_api_mock_server_log(
@@ -1459,8 +1459,7 @@ impl crate::app::App {
             self.stash_active_api_mock_editor();
             self.ide_panel.api.focused = None;
         }
-        self.ide_panel.api.persist();
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.commit_mock_config();
     }
 
     pub fn toggle_api_route_python(&mut self, route_idx: usize) -> bool {
@@ -1510,8 +1509,7 @@ impl crate::app::App {
                 self.ide_panel.api.mock.mode =
                     crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
             }
-            self.ide_panel.api.persist();
-            self.refresh_api_mock_server_snapshot();
+            self.ide_panel.api.commit_mock_config();
             return enabled_script;
         }
         let Some((meta, _)) = self.active_api_tab() else {
@@ -1612,8 +1610,7 @@ impl crate::app::App {
             self.ide_panel.api.mock.mode =
                 crate::app::api_mock::types::ApiMockMode::MockSelectedProxyRest;
         }
-        self.ide_panel.api.persist();
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.commit_mock_config();
         enabled_script
     }
 
@@ -1645,8 +1642,7 @@ impl crate::app::App {
             self.ide_panel.api.mock_ty_diagnostics.clear();
             self.ide_panel.api.mock_contract_constraint_menu = None;
             self.reset_api_mock_hover_tracking();
-            self.ide_panel.api.persist();
-            self.refresh_api_mock_server_snapshot();
+            self.ide_panel.api.commit_mock_config();
             return;
         }
         let Some((meta, _)) = self.active_api_tab() else {
@@ -1720,8 +1716,7 @@ impl crate::app::App {
             self.ide_panel.api.mock_ty_pending = None;
         }
         self.reset_api_mock_hover_tracking();
-        self.ide_panel.api.persist();
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.commit_mock_config();
     }
 
     pub fn reset_api_route_python_part(&mut self, route_idx: usize, part: ApiMockSourcePart) {
@@ -1777,8 +1772,7 @@ impl crate::app::App {
             self.ide_panel.api.input_editor.selection_anchor =
                 Some(self.ide_panel.api.input_editor.cursor);
         }
-        self.ide_panel.api.persist();
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.commit_mock_config();
         self.queue_api_mock_python_tools(route_idx);
     }
 
@@ -1807,8 +1801,7 @@ impl crate::app::App {
                 input_fields: Vec::new(),
                 output_fields: Vec::new(),
             });
-        self.ide_panel.api.persist();
-        self.refresh_api_mock_server_snapshot();
+        self.ide_panel.api.commit_mock_config();
         self.open_api_manual_route(next.saturating_sub(1));
     }
 
@@ -2020,6 +2013,7 @@ impl crate::app::App {
                     script.prelude.push_str(&text);
                     script.prelude.push('\n');
                 }
+                self.ide_panel.api.commit_mock_config();
             }
         }
         self.commit_api_focus();

@@ -56,6 +56,7 @@ impl From<ApiMockPersist> for ApiMockState {
             uv: saved.uv,
             route_overrides: saved.route_overrides,
             manual_routes: saved.manual_routes,
+            server: Default::default(),
         }
     }
 }
