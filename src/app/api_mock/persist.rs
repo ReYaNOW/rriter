@@ -115,7 +115,8 @@ pub fn api_mocks_path() -> PathBuf {
 fn api_mock_data_dir() -> PathBuf {
     #[cfg(test)]
     {
-        return std::env::temp_dir().join("rriter_api_mock_tests");
+        return std::env::temp_dir()
+            .join(format!("rriter_api_mock_tests-{}", std::process::id()));
     }
     #[cfg(not(test))]
     {

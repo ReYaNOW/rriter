@@ -5,7 +5,7 @@ use crate::app::api_mock::types::{ApiMockMode, ApiMockResponse, ApiMockServerSta
 use crate::headless::tests_support::{
     click_ui, dump, ensure_test_profile_root, get_from_mock, has_ui, loopback_addr_from_panel_url,
     reset_api_test_state, run_script, scratch_dir, start_mock_server, stop_mock_server_from_ui,
-    wait_until, wheel_until_visible, workspace_with_explorer, API_MOCK_TEST_LOCK,
+    wait_until, wheel_until_visible, workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
 use std::net::TcpStream;
@@ -57,7 +57,6 @@ fn edit_manual_route_path(session: &mut HeadlessSession, route_idx: usize, path:
 
 #[test]
 fn headless_api_mock_manual_route_can_be_edited_in_list() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-route-edit");
     let route_idx = add_manual_route(&mut session);
     edit_manual_route_path(&mut session, route_idx, "/products/42");
@@ -74,7 +73,6 @@ fn headless_api_mock_manual_route_can_be_edited_in_list() {
 
 #[test]
 fn headless_api_mock_server_returns_manual_route_response() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-request");
     let route_idx = add_manual_route(&mut session);
     let body = r#"{"source":"rriter-headless"}"#;
@@ -96,7 +94,6 @@ fn headless_api_mock_server_returns_manual_route_response() {
 
 #[test]
 fn headless_api_mock_unknown_path_returns_404() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-not-found");
     // The default "mock selected, proxy the rest" mode proxies unmatched paths (502 without
     // a proxy URL); only "mock all" answers them with 404.
@@ -119,7 +116,6 @@ fn headless_api_mock_unknown_path_returns_404() {
 
 #[test]
 fn headless_api_mock_stop_closes_listener() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-stop");
     let url = start_mock_server(&mut session);
     let address = loopback_addr_from_panel_url(&url).expect("loopback address from panel URL");
@@ -137,7 +133,6 @@ fn headless_api_mock_stop_closes_listener() {
 
 #[test]
 fn headless_api_mock_python_contract_controls_follow_route_path() {
-    let _test_guard = API_MOCK_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let (dir, mut session) = mock_session("api-mock-python-contract");
     let route_idx = add_manual_route(&mut session);
     click_ui(&mut session, &format!("ApiMockRoutePythonToggle({route_idx})"));
