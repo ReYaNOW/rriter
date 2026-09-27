@@ -10,6 +10,10 @@ pub(crate) mod protocol;
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_request;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_spec;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_completion;
@@ -24,9 +28,17 @@ mod ui_tests_git_diff;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_graph;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_goto_definition;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_layout;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_markdown;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_problems;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_project_search;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_appearance;
 #[cfg(all(test, target_os = "linux"))]
@@ -38,7 +50,11 @@ mod ui_tests_settings_ide;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tabs_tree;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_terminal;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tree_ops;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_welcome;
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use tests::tests_support;
 

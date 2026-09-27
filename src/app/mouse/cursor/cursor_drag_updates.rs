@@ -4,6 +4,57 @@ use super::*;
 use crate::render_view::{editor_bottom_blank_lines, editor_scroll_content_height};
 
 impl App {
+    pub(crate) fn terminal_selection_cell(&mut self, px: f32, py: f32) -> Option<(usize, usize)> {
+        let (s, line_height, char_w) = {
+            let renderer = self.renderer.as_mut()?;
+            (
+                renderer.scale_factor,
+                renderer.line_height,
+                renderer.char_advance('A')
+                    * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE,
+            )
+        };
+        let (terminal_panel_x, content_y, _, content_h, _) =
+            super::app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
+        let (term_content_y, term_content_h) =
+            crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
+        let char_h = line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
+        let panel_x = terminal_panel_x + 10.0 * s;
+        let term = self.ide_panel.terminals.get(self.ide_panel.active_terminal)?;
+        let grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+        let scrollback_len = if grid.is_alt {
+            0
+        } else {
+            grid.scrollback.len()
+        };
+        let total_lines = scrollback_len + grid.lines.len();
+        let max_scroll = if grid.is_alt {
+            0.0
+        } else {
+            crate::render_view::terminal_ui::terminal_max_scroll(
+                total_lines,
+                char_h,
+                term_content_h,
+                s,
+            )
+        };
+        let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
+            term.scroll_y.current,
+            max_scroll,
+            grid.is_alt,
+        );
+        let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(s);
+        let offset_from_bottom =
+            (term_content_y + term_content_h - bottom_pad - py + scroll_offset) / char_h;
+        let cell_y = total_lines
+            .saturating_sub(1)
+            .saturating_sub(offset_from_bottom.max(0.0).floor() as usize)
+            .min(total_lines.saturating_sub(1));
+        let cell_x = (((px - panel_x) / char_w).floor() as usize)
+            .min(grid.cols.saturating_sub(1));
+        Some((cell_x, cell_y))
+    }
+
     /// IDE panel DnD, tab drags, panel resize and git panel scrollbars; `true` = handled.
     #[inline]
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -701,60 +752,18 @@ impl App {
             }
         } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
             let active = self.ide_panel.active_terminal;
-            let s = self.renderer.as_ref().unwrap().scale_factor;
-            let (terminal_panel_x, content_y, _, content_h, _) =
-                super::app_panel_scroll_rect(self, crate::app::PanelId::Terminal, s);
-            let (term_content_y, term_content_h) =
-                crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, s);
-            let lh = self.renderer.as_ref().unwrap().line_height;
-            let char_h = lh * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-            let char_w = self.renderer.as_mut().unwrap().char_advance('A')
-                * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-            let panel_x = terminal_panel_x + 10.0 * s;
-            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
-                let py = position.y as f32;
-                let px = position.x as f32;
-
-                let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
-                let scrollback_len = if grid.is_alt {
-                    0
-                } else {
-                    grid.scrollback.len()
-                };
-                let total_lines = scrollback_len + grid.lines.len();
-                let max_scroll = if grid.is_alt {
-                    0.0
-                } else {
-                    crate::render_view::terminal_ui::terminal_max_scroll(
-                        total_lines,
-                        char_h,
-                        term_content_h,
-                        s,
-                    )
-                };
-
-                let scroll_offset = crate::render_view::terminal_ui::terminal_render_scroll_offset(
-                    term.scroll_y.current,
-                    max_scroll,
-                    grid.is_alt,
-                );
-                let (_, bottom_pad) = crate::render_view::terminal_ui::terminal_text_padding(s);
-                let offset_from_bottom =
-                    (term_content_y + term_content_h - bottom_pad - py + scroll_offset) / char_h;
-                let mut cell_y = total_lines
-                    .saturating_sub(1)
-                    .saturating_sub(offset_from_bottom.max(0.0).floor() as usize);
-                let mut cell_x = ((px - panel_x) / char_w).floor() as usize;
-
-                cell_y = cell_y.min(total_lines.saturating_sub(1));
-                cell_x = cell_x.min(grid.cols.saturating_sub(1));
-
-                if let Some((sx, sy, _, _)) = grid.selection {
-                    grid.selection = Some((sx, sy, cell_x, cell_y));
-                } else {
-                    grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+            if let Some((cell_x, cell_y)) =
+                self.terminal_selection_cell(position.x as f32, position.y as f32)
+            {
+                if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+                    let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+                    if let Some((sx, sy, _, _)) = grid.selection {
+                        grid.selection = Some((sx, sy, cell_x, cell_y));
+                    } else {
+                        grid.selection = Some((cell_x, cell_y, cell_x, cell_y));
+                    }
+                    self.window.as_ref().unwrap().request_redraw();
                 }
-                self.window.as_ref().unwrap().request_redraw();
             }
         } else if self.is_dragging && !self.ide_panel.is_dragging_terminal && !self.show_settings {
             let last_mouse_x = self.renderer.as_ref().unwrap().last_mouse_x;

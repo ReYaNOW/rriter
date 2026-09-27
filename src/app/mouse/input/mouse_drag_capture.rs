@@ -97,8 +97,25 @@ impl App {
     pub(super) fn finish_panel_drags_on_release(
         &mut self,
         state: ElementState,
+        button: winit::event::MouseButton,
     ) -> bool {
         if state == ElementState::Released {
+            if button == winit::event::MouseButton::Left && self.ide_panel.is_dragging_terminal {
+                if let Some(term) = self
+                    .ide_panel
+                    .terminals
+                    .get(self.ide_panel.active_terminal)
+                {
+                    let mut grid = crate::app::terminal::lock_terminal_grid(&term.grid);
+                    if !grid.mouse_tracking
+                        && grid
+                            .selection
+                            .is_some_and(|(sx, sy, ex, ey)| sx == ex && sy == ey)
+                    {
+                        grid.selection = None;
+                    }
+                }
+            }
             // Завершаем DnD и ресайз IDE-панелей
             if self.is_ide_mode {
                 if let Some(drag) = self.ide_panel.file_tree_drag.take() {

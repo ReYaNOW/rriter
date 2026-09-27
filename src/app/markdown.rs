@@ -601,7 +601,7 @@ impl App {
         let max_scroll = (content_height - frame.3).max(0.0);
         if !max_scroll.is_finite()
             || max_scroll <= 0.0
-            || (stored_max_scroll - max_scroll).abs() > 0.01
+            || (stored_max_scroll - max_scroll).abs() > 1.0
         {
             return None;
         }

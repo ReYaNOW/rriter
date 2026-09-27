@@ -163,6 +163,11 @@ impl App {
                     }
                 }
                 if tracking {
+                    let selection_cell = if state == ElementState::Pressed {
+                        self.terminal_selection_cell(mx, my)
+                    } else {
+                        None
+                    };
                     let btn_code = terminal_mouse_button_code(button);
                     let is_pressed = state == ElementState::Pressed;
                     let s = self.renderer.as_ref().unwrap().scale_factor;
@@ -216,10 +221,19 @@ impl App {
                         );
 
                         if is_pressed {
-                            grid.selection = None;
+                            if let Some((selection_x, selection_y)) = selection_cell {
+                                grid.selection = Some((
+                                    selection_x,
+                                    selection_y,
+                                    selection_x,
+                                    selection_y,
+                                ));
+                            }
                         } else if let Some((sx, sy, ex, ey)) = grid.selection {
                             if sx != ex || sy != ey {
                                 is_drag = true;
+                            } else {
+                                grid.selection = None;
                             }
                         }
                     }

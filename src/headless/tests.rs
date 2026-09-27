@@ -31,7 +31,7 @@ pub(crate) mod tests_support {
     /// in fixed temp dirs shared by every test process (`api_config_dir`, `api_mock_data_dir`).
     /// App-level API tests persist a URL spec and mock routes there, and `workspace` loads
     /// them back, so headless tests start from the defaults instead of the last writer.
-    fn reset_api_test_state() {
+    pub(crate) fn reset_api_test_state() {
         let api_dir = std::env::temp_dir().join("rriter_api_client_tests");
         for file in ["api_specs.json", "api_auth.json"] {
             let _ = std::fs::remove_file(api_dir.join(file));
@@ -239,6 +239,34 @@ pub(crate) mod tests_support {
 
     pub(crate) fn has_ui(dump: &serde_json::Value, id: &str) -> bool {
         dump["ui"].as_array().is_some_and(|ui| ui.iter().any(|element| element["id"] == id))
+    }
+
+    /// Scrolls down one wheel line at a time with the cursor at (`x`, `y`) until `id` is
+    /// registered with a hitbox at least `min_height` px tall (an element clipped by the
+    /// viewport edge registers only a sliver). `settle` lets the smooth scroll finish, so
+    /// the next click is not dropped by panels that disable interactions while scrolling.
+    pub(crate) fn wheel_until_visible(
+        session: &mut HeadlessSession,
+        (x, y): (f64, f64),
+        id: &str,
+        min_height: f64,
+        max_steps: usize,
+    ) -> bool {
+        for step in 0..=max_steps {
+            let state = dump(session);
+            if has_ui(&state, id) && ui_rect(&state, id)[3] >= min_height {
+                return true;
+            }
+            if step == max_steps {
+                break;
+            }
+            let lines = run_script(
+                session,
+                format!("mouse_move {x} {y}\nwheel 0 -1\nsettle 2000\n").as_bytes(),
+            );
+            assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        }
+        false
     }
 
     pub(crate) fn long_file(dir: &Path) -> PathBuf {
