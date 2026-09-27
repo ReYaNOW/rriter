@@ -277,6 +277,10 @@ impl App {
             settings_y: 10000.0,
             settings_tab: 0,
             settings_ide_scroll: crate::scroll::ScrollState::new(7.0),
+            settings_general_scroll: crate::scroll::ScrollState::new(7.0),
+            settings_database_scroll: crate::scroll::ScrollState::new(7.0),
+            settings_general_max_scroll: 0.0,
+            settings_database_max_scroll: 0.0,
 
             ide_panel: crate::app::IdePanelState::default(),
             database_runtime: None,

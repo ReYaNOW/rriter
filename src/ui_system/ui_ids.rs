@@ -47,6 +47,8 @@ pub enum UiId {
     SettingsIdeIgnoreInput,
     SettingsIdeScrollY,
     SettingsFaqScrollY,
+    SettingsGeneralScrollY,
+    SettingsDatabaseScrollY,
 
     // Settings platform/tooling
     SettingsToolPick(usize),

@@ -407,6 +407,8 @@ impl App {
                 self.is_dragging_lsp_log = false;
                 self.settings_scroll.end_drag();
                 self.settings_ide_scroll.end_drag();
+                self.settings_general_scroll.end_drag();
+                self.settings_database_scroll.end_drag();
             } else if state == ElementState::Pressed {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let window_size = self.window.as_ref().unwrap().inner_size();

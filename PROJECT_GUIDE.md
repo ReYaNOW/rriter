@@ -1463,6 +1463,7 @@ Root:
 * `src/headless/ui_tests_panels.rs` -> headless UI regression tests for IDE sidebar panels, Git, project search, Database, API Mock, LSP, and compact hitboxes.
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
+* `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
 * `src/headless/profile.rs` -> headless CLI options (`parse_args`, `HeadlessOptions`) and the isolated profile root (`Profile`: private temp root, explicit dir, or copy of the user's config/data/state; removed on `finish`).

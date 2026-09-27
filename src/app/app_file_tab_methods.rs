@@ -578,6 +578,8 @@ impl App {
             self.is_dragging_settings_ignore = false;
             self.settings_scroll.end_drag();
             self.settings_ide_scroll.end_drag();
+            self.settings_general_scroll.end_drag();
+            self.settings_database_scroll.end_drag();
         }
     }
 

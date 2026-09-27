@@ -28,6 +28,14 @@ mod ui_tests_layout;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_appearance;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_database;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_general;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_settings_ide;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tabs_tree;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tree_ops;

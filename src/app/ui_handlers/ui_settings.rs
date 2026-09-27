@@ -152,6 +152,34 @@ impl App {
                     );
                 }
             }
+            UiId::SettingsGeneralScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsGeneralScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    crate::app::mouse::begin_scrollbar_drag(
+                        &mut self.settings_general_scroll,
+                        pointer,
+                        rect.1,
+                        rect.3,
+                        self.settings_general_max_scroll,
+                        40.0 * s,
+                    );
+                }
+            }
+            UiId::SettingsDatabaseScrollY => {
+                if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsDatabaseScrollY) {
+                    let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
+                    let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
+                    crate::app::mouse::begin_scrollbar_drag(
+                        &mut self.settings_database_scroll,
+                        pointer,
+                        rect.1,
+                        rect.3,
+                        self.settings_database_max_scroll,
+                        40.0 * s,
+                    );
+                }
+            }
             UiId::SettingsToolPick(idx) => {
                 if !self.tool_installer.is_running()
                     && let Some(kind) = crate::platform::ToolKind::from_index(idx)

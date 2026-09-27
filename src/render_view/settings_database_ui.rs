@@ -39,6 +39,13 @@ fn database_settings_vertical_layout(content_y: f32, scale: f32) -> DatabaseSett
     }
 }
 
+pub(crate) fn database_settings_content_bottom(content_y: f32, scale: f32) -> f32 {
+    let vertical = database_settings_vertical_layout(content_y, scale);
+    vertical.first_row_y
+        + (DATABASE_SETTINGS_ROW_COUNT.saturating_sub(1) as f32 * vertical.row_step)
+        + vertical.control_h
+}
+
 fn database_settings_control_layout(
     content_x: f32,
     content_w: f32,
@@ -164,11 +171,12 @@ impl Renderer {
         content_x: f32,
         content_w: f32,
         content_y: f32,
+        scroll_y: f32,
         ui_registry: &mut UiRegistry,
     ) {
         let s = self.scale_factor;
         let content_x = content_x.round();
-        let content_y = content_y.round();
+        let content_y = (content_y - scroll_y.round()).round();
         let vertical = database_settings_vertical_layout(content_y, s);
         self.draw_string_scaled_pixel_snapped(
             "Все ограничения применяются к PostgreSQL и SQL-консолям без перезапуска RRiter.",

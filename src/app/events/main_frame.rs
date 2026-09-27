@@ -535,6 +535,10 @@ impl App {
                         self.settings_tab,
                         &self.faq_editor,
                         self.settings_scroll.current,
+                        self.settings_general_scroll.current,
+                        self.settings_database_scroll.current,
+                        &mut self.settings_general_max_scroll,
+                        &mut self.settings_database_max_scroll,
                         &self.ide_workspaces,
                         &self.ide_ignore_patterns,
                         &self.settings_ignore_editor,
@@ -555,6 +559,11 @@ impl App {
                         self.ctrl_wheel_multiplier,
                         &mut self.ui_registry,
                     );
+                    // Window resizes shrink the max; keep the scroll target inside it.
+                    self.settings_general_scroll
+                        .clamp_target(0.0, self.settings_general_max_scroll);
+                    self.settings_database_scroll
+                        .clamp_target(0.0, self.settings_database_max_scroll);
                     if settings_cursor_mode == 1 {
                         wants_pointer = true;
                     }
