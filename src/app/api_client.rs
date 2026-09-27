@@ -7,7 +7,7 @@ use crate::app::api_mock::ty_check::{
 use crate::app::api_mock::types::ApiMockServerEvent;
 use crate::app::api_mock::types::{
     ApiMockFieldConstraints, ApiMockState, default_api_mock_python_body,
-    default_api_mock_python_script, default_contract_from_route, is_legacy_api_mock_python_body,
+    default_api_mock_python_script, is_legacy_api_mock_python_body,
 };
 use crate::app::api_mock::{merge::build_api_mock_routes, types::ApiMockServerSnapshot};
 use crate::editor::Editor;
@@ -1653,42 +1653,6 @@ impl ApiClientState {
         self.body_json_validation_pending = Some((spec_id, route_idx, version));
     }
 
-    pub(crate) fn handle_json_validation_disconnect(&mut self) {
-        self.body_json_validation_pending = None;
-        self.body_json_validation = None;
-        self.body_json_validation_rx = None;
-        self.import_error = Some("Проверка JSON неожиданно завершилась".to_string());
-    }
-
-    pub(crate) fn handle_python_path_disconnect(&mut self) {
-        self.python_path_pick_rx = None;
-        self.mock.uv.last_error = "Окно выбора Python/uv неожиданно завершилось".to_string();
-    }
-
-    pub(crate) fn handle_python_versions_disconnect(&mut self) {
-        self.python_version_list_rx = None;
-        self.mock_python_versions_loading = false;
-        self.python_version_list_cancel = None;
-        self.mock_python_versions.clear();
-        self.mock.uv.last_error = "Загрузка списка Python неожиданно завершилась".to_string();
-    }
-
-    pub(crate) fn handle_python_install_disconnect(&mut self) {
-        self.python_install_rx = None;
-        self.mock_python_install_running = false;
-        self.python_install_cancel = None;
-        self.mock.uv.status = crate::app::api_mock::types::ApiPythonRuntimeStatus::Invalid;
-        let message = "Установка Python неожиданно завершилась".to_string();
-        self.mock.uv.last_error = message.clone();
-        push_api_python_install_log(
-            self,
-            ApiPythonInstallLogLine {
-                text: message,
-                kind: ApiPythonInstallLogKind::Error,
-            },
-        );
-    }
-
     pub(crate) fn handle_load_disconnect(&mut self, id: ApiSpecId, generation: u64) -> bool {
         if self.finish_load(id, generation).is_none() {
             return false;
@@ -2184,6 +2148,7 @@ include!("api_client/api_client_loading_parser.rs");
 include!("api_client/api_client_layout_input.rs");
 include!("api_client/api_client_request_runtime.rs");
 include!("api_client/api_client_app_text_methods.rs");
+include!("api_client/api_client_app_tabs.rs");
 include!("api_client/api_client_app_focus_methods.rs");
 include!("api_client/api_client_app_click_methods.rs");
 include!("api_client/api_client_app_mock_contract_methods.rs");
@@ -2191,4 +2156,11 @@ include!("api_client/api_client_app_mock_methods.rs");
 include!("api_client/api_client_mock_config.rs");
 include!("api_client/api_client_app_request_methods.rs");
 include!("api_client/api_client_defaults_persist.rs");
+include!("api_client/api_client_input_state.rs");
+include!("api_client/api_client_request_state.rs");
+include!("api_client/api_client_text_state.rs");
+include!("api_client/api_client_click_state.rs");
+include!("api_client/api_mock_contract_state.rs");
+include!("api_client/api_mock_editor_state.rs");
+include!("api_client/api_mock_routes_state.rs");
 include!("api_client/api_client_tests.rs");

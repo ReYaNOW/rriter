@@ -17,13 +17,16 @@
       "too_many_lines": 2
     },
     "src/app/api_client/api_client_app_focus_methods.rs": {
-      "too_many_lines": 4
+      "too_many_lines": 2
     },
     "src/app/api_client/api_client_app_request_methods.rs": {
       "cognitive_complexity": 4,
       "collapsible_if": 2,
       "collapsible_str_replace": 4,
       "too_many_lines": 6
+    },
+    "src/app/api_client/api_client_input_state.rs": {
+      "too_many_lines": 2
     },
     "src/app/api_client/api_client_defaults_persist.rs": {
       "needless_return": 1

@@ -200,7 +200,7 @@ impl App {
             return true;
         }
 
-        if self.api_python_runtime_overlay_active() {
+        if self.ide_panel.api.api_python_runtime_overlay_active() {
             clear_hover_popup(self.renderer.as_mut());
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();

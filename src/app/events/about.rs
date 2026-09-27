@@ -1647,7 +1647,7 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         hover_poll_pending,
         !app.api_request_rx.is_empty()
             || app.api_mock_ty_rx.is_some()
-            || app.api_runtime_poll_pending(),
+            || app.ide_panel.api.api_runtime_poll_pending(),
     ) {
         AboutWaitPlan::Wait => {
             // Headless has no compositor pacing: an idle `Wait` must not spin frames.

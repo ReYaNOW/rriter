@@ -103,9 +103,9 @@ mod tests {
 
     #[test]
     fn api_mock_virtual_path_is_unique_per_spec_and_route() {
-        let a = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 0);
-        let b = crate::app::App::api_mock_virtual_path_for(ApiSpecId(2), 0);
-        let c = crate::app::App::api_mock_virtual_path_for(ApiSpecId(1), 1);
+        let a = ApiClientState::api_mock_virtual_path_for(ApiSpecId(1), 0);
+        let b = ApiClientState::api_mock_virtual_path_for(ApiSpecId(2), 0);
+        let c = ApiClientState::api_mock_virtual_path_for(ApiSpecId(1), 1);
 
         assert_ne!(a, b);
         assert_ne!(a, c);
@@ -681,7 +681,7 @@ mod tests {
     fn api_mock_autocomplete_anchor_uses_cursor_baseline_and_scroll_x() {
         let rect = (100.0, 200.0, 300.0, 120.0);
         let text = "seed\n    Response";
-        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+        let (x, y) = ApiClientState::api_mock_autocomplete_anchor_for_text(
             crate::ui_system::UiId::ApiMockBodyInput(0),
             rect,
             1.0,
@@ -699,7 +699,7 @@ mod tests {
     fn api_mock_signature_autocomplete_anchor_uses_registered_left_edge() {
         let rect = (140.0, 80.0, 360.0, 32.0);
         let text = "def handler";
-        let (x, y) = crate::app::App::api_mock_autocomplete_anchor_for_text(
+        let (x, y) = ApiClientState::api_mock_autocomplete_anchor_for_text(
             crate::ui_system::UiId::ApiMockSignatureInput(0),
             rect,
             1.0,
@@ -2165,7 +2165,7 @@ mod tests {
         state.tab_scroll.target = 22.0;
         state.remember_view_scroll();
 
-        remap_api_route_memories(&mut state, &previous_routes, &reordered);
+        state.remap_route_memories(&previous_routes, &reordered);
 
         assert_eq!(
             state
@@ -3011,11 +3011,7 @@ fn request_worker_disconnect_is_attached_to_the_pending_response() {
     state.response_scroll.current = 20.0;
     state.response_scroll_x.current = 12.0;
 
-    assert!(apply_api_request_disconnect_to_state(
-        &mut state,
-        ApiSpecId(8),
-        77
-    ));
+    assert!(state.apply_request_disconnect(ApiSpecId(8), 77));
     assert!(!state.pending);
     assert_eq!(state.pending_request_id, None);
     assert_eq!(state.response_scroll.current, 0.0);

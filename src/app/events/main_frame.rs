@@ -455,7 +455,8 @@ impl App {
                             popup.offset_y = Some(popup_y - line_top_y);
                             popup.anim_progress = detail_anim_progress;
                             let selection = self.autocomplete_detail_selection();
-                            let use_api_detail_editor = self.api_mock_completion_focus().is_some();
+                            let use_api_detail_editor =
+                                self.ide_panel.api.api_mock_completion_focus().is_some();
                             let detail_editor = if use_api_detail_editor {
                                 &self.ide_panel.api.input_editor
                             } else {
@@ -669,7 +670,7 @@ impl App {
                     })
                 {
                     winit::window::CursorIcon::EwResize
-                } else if self.api_python_runtime_overlay_active() {
+                } else if self.ide_panel.api.api_python_runtime_overlay_active() {
                     let (mx, my) = {
                         let r = self.renderer.as_ref().unwrap();
                         (r.last_mouse_x, r.last_mouse_y)
@@ -677,7 +678,11 @@ impl App {
                     match self
                         .ui_registry
                         .find_overlay_at(mx, my)
-                        .filter(|id| crate::app::App::ui_id_is_api_python_runtime_overlay(*id))
+                        .filter(|id| {
+                            crate::app::api_client::ApiClientState::ui_id_is_api_python_runtime_overlay(
+                                *id,
+                            )
+                        })
                     {
                         Some(crate::ui_system::UiId::ApiMockPythonUvPathInput)
                         | Some(crate::ui_system::UiId::ApiMockPythonCustomPathInput) => {
