@@ -241,7 +241,13 @@ fn database_ddl_captures_left_click(app: &App) -> Option<(f32, f32, f32, f32)> {
 fn preserve_main_vertical_scroll_for_click(app: &App, mx: f32, my: f32) -> bool {
     !project_search_help_captures_pressed_click(app)
         && database_ddl_captures_left_click(app).is_none()
-        && app.ui_registry.find_at(mx, my) == Some(crate::ui_system::UiId::MarkdownModeToggle)
+        && matches!(
+            app.ui_registry.find_at(mx, my),
+            Some(
+                crate::ui_system::UiId::MarkdownModeToggle
+                    | crate::ui_system::UiId::EditorScrollbarY
+            )
+        )
 }
 
 /// Autocomplete list scrollbar for the popup `rect`: 14 px lane at the right edge (the press

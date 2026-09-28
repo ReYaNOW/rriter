@@ -1,4 +1,31 @@
-use crate::headless::tests_support::{click_ui, dump, has_ui, long_file, ok_json, open_file_session, run_script, sample_file, scratch_dir, session_for_test, ui_center};
+use crate::headless::tests_support::{click_ui, dump, has_ui, long_file, ok_json, open_file_session, run_script, sample_file, scratch_dir, session_for_test, ui_center, ui_rect, wait_until, workspace_with_explorer};
+
+fn editor_vertical_scrollbar_geometry(
+    session: &mut crate::headless::HeadlessSession,
+    offset: f32,
+) -> crate::render_view::scrollbar_widget::ScrollbarGeometry {
+    let lane = ui_rect(&dump(session), "EditorScrollbarY");
+    let viewport_h = lane[3] as f32;
+    let visible_lines = session.app.editor.get_visible_lines_count();
+    let (scale, line_height, max_scroll) = {
+        let editor = &session.app.editor;
+        let renderer = session.app.renderer.as_mut().expect("editor renderer");
+        let line_height = renderer.line_height;
+        (
+            renderer.scale_factor,
+            line_height,
+            renderer.get_max_scroll(editor, viewport_h),
+        )
+    };
+    crate::render_view::editor_vertical_scrollbar(
+        (lane[0] as f32, lane[1] as f32, lane[2] as f32, viewport_h),
+        crate::render_view::editor_scroll_content_height(visible_lines, line_height, viewport_h),
+        max_scroll,
+        offset,
+    )
+    .geometry(scale)
+    .expect("visible editor vertical scrollbar")
+}
 
 #[test]
 fn headless_editor_selection_and_cursor_at_multiple_scales() {
@@ -425,5 +452,137 @@ fn headless_editor_idle_without_input_sleeps_and_draws_nothing() {
             "redraw_requested": false,
         }),
     );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_vertical_scrollbar_drag_is_proportional() {
+    let dir = scratch_dir("ui-editor-scrollbar-drag");
+    let file = long_file(&dir);
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    wait_until(&mut session, 5000, "initial editor scroll", |session| {
+        session.app.scroll_y.is_settled()
+    });
+
+    let initial_offset = session.app.scroll_y.current;
+    let geometry = editor_vertical_scrollbar_geometry(&mut session, initial_offset);
+    let lane_x = geometry.lane.0 + geometry.lane.2 * 0.5;
+    let press_y = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let grab_offset = press_y - geometry.thumb.start;
+    let drag_y = (press_y + 100.0).min(geometry.track_start + geometry.track_len - 1.0);
+    let travel = (geometry.track_len - geometry.thumb.len).max(1.0);
+    let expected = ((drag_y - grab_offset - geometry.track_start) / travel)
+        .clamp(0.0, 1.0)
+        * geometry.max_scroll;
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {lane_x} {press_y}\nclick left down\nmouse_move {lane_x} {drag_y}\nclick left up\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    wait_until(&mut session, 5000, "editor scrollbar drag settle", |session| {
+        session.app.scroll_y.is_settled()
+    });
+    assert!(
+        (session.app.scroll_y.current - expected).abs() <= 30.0,
+        "settled offset {} should be near proportional offset {expected}",
+        session.app.scroll_y.current
+    );
+    assert!(session.app.scroll_y.current > 0.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_scrollbar_press_without_motion_preserves_offset_and_target() {
+    let dir = scratch_dir("ui-editor-scrollbar-press");
+    let file = long_file(&dir);
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    let initial = session.app.scroll_y.current;
+    let geometry = editor_vertical_scrollbar_geometry(&mut session, initial);
+    let lane_x = geometry.lane.0 + geometry.lane.2 * 0.5;
+    let thumb_y = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {lane_x} {thumb_y}\nclick left down\nclick left up\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert_eq!(session.app.scroll_y.current, initial);
+    assert_eq!(session.app.scroll_y.target, initial);
+
+    let lines = run_script(&mut session, b"mouse_move 400 200\nwheel 0 -10\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    let wheel_target = session.app.scroll_y.target;
+    assert!(wheel_target > session.app.scroll_y.current);
+    assert!(!session.app.scroll_y.is_settled());
+    let current_offset = session.app.scroll_y.current;
+    let geometry = editor_vertical_scrollbar_geometry(&mut session, current_offset);
+    let thumb_y = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {lane_x} {thumb_y}\nclick left down\nclick left up\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert_eq!(session.app.scroll_y.target, wheel_target);
+    wait_until(&mut session, 5000, "wheel scroll after scrollbar press", |session| {
+        session.app.scroll_y.is_settled()
+    });
+    assert!((session.app.scroll_y.current - wheel_target).abs() <= 1.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_file_tree_scrollbar_drag_scrolls() {
+    let dir = scratch_dir("ui-file-tree-scrollbar-drag");
+    for index in 0..160 {
+        std::fs::write(dir.join(format!("entry-{index:03}.txt")), "entry\n")
+            .expect("write tree fixture entry");
+    }
+    let mut session = workspace_with_explorer(900, 600, 1.0, &dir);
+    wait_until(&mut session, 5000, "file tree scrollbar", |session| {
+        session.app.ide_panel.file_tree_nodes.len() >= 100
+            && has_ui(&dump(session), "FileTreeScrollY")
+    });
+
+    let state = dump(&mut session);
+    let lane = ui_rect(&state, "FileTreeScrollY");
+    let scroll = session.app.ide_panel.explorer_scroll.current;
+    let bar = crate::app::file_tree::file_tree_scrollbar(
+        lane[0] as f32,
+        lane[1] as f32 - 4.0,
+        lane[2] as f32,
+        lane[3] as f32 + 8.0,
+        1.0,
+        session.app.ide_panel.file_tree_nodes.len(),
+        scroll,
+    )
+    .expect("visible file tree scrollbar");
+    let geometry = bar.geometry(1.0).expect("file tree scrollbar geometry");
+    let lane_x = geometry.lane.0 + geometry.lane.2 * 0.5;
+    let press_y = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let grab_offset = press_y - geometry.thumb.start;
+    let drag_y = (press_y + 100.0).min(geometry.track_start + geometry.track_len - 1.0);
+    let travel = (geometry.track_len - geometry.thumb.len).max(1.0);
+    let expected = ((drag_y - grab_offset - geometry.track_start) / travel)
+        .clamp(0.0, 1.0)
+        * geometry.max_scroll;
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {lane_x} {press_y}\nclick left down\nmouse_move {lane_x} {drag_y}\nclick left up\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    wait_until(&mut session, 5000, "file tree scrollbar drag settle", |session| {
+        session.app.ide_panel.explorer_scroll.is_settled()
+    });
+    assert!(
+        (session.app.ide_panel.explorer_scroll.current - expected).abs() <= 30.0,
+        "settled tree offset {} should be near proportional offset {expected}",
+        session.app.ide_panel.explorer_scroll.current
+    );
+    assert!(session.app.ide_panel.explorer_scroll.current > 0.0);
     let _ = std::fs::remove_dir_all(dir);
 }
