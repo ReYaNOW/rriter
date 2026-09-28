@@ -1265,7 +1265,7 @@ class _FixtureSession:
             if match is None:
                 raise _UnsupportedSql("fixture supports CREATE TABLE public.<name> (...)")
             if match.group(1) != "ddl_probe":
-                raise _UnsupportedSql("fixture does not support this CREATE TABLE statement")
+                raise _UnsupportedSql("unsupported fixture CREATE TABLE statement")
             with self.fixture._lock:
                 self.fixture._created_tables.add(match.group(1))
             return _ExecutionResult((), (), "CREATE TABLE")
