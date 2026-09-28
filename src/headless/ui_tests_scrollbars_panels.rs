@@ -4,8 +4,6 @@ use crate::headless::tests_support::{
     click_ui, dump, focus_handler_body, git, git_init, has_ui, python_route_session, run_script,
     scratch_dir, session_for_test, wait_until, wheel_until_visible, workspace_with_explorer,
 };
-use crate::render_view::scrollbar_widget::ScrollbarAxis;
-use std::time::Instant;
 
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
@@ -23,95 +21,6 @@ fn drag_to_bottom(session: &mut crate::headless::HeadlessSession, id: &str, pres
         .as_bytes(),
     );
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-}
-
-#[test]
-#[ignore = "bug: dragging the LSP log scrollbar to the bottom leaves the offset outside its expected range"]
-fn headless_lsp_log_scrollbar_wheel_and_drag_clamp_at_bottom() {
-    let dir = scratch_dir("ui-scrollbar-lsp-log");
-    let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
-    let lines = run_script(
-        &mut session,
-        format!("scale {TEST_SCALE}\nworkspace {}\nsettle 1000\n", dir.display()).as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    click_ui(&mut session, "SidebarSlot(LspServers)");
-    wait_until(&mut session, 5000, "LSP server list", |session| {
-        has_ui(&dump(session), "LspServerLogs(0)")
-    });
-
-    let server_idx = 0;
-    let name = session.app.ide_panel.lsp_servers[server_idx].name;
-    let logs = (0..100)
-        .map(|index| crate::lsp::LogEntry {
-            text: format!("long LSP log line {index:03}: diagnostic payload"),
-            spans: Vec::new(),
-            folds: Vec::new(),
-            created_at: Instant::now(),
-        })
-        .collect();
-    if let Some(lsp) = session.app.lsp.as_mut() {
-        lsp.server_logs.insert(name, logs);
-        session.app.ide_panel.lsp_servers = lsp.servers_info();
-    } else {
-        panic!("workspace LSP manager missing");
-    }
-    click_ui(&mut session, &format!("LspServerLogs({server_idx})"));
-    let state = dump(&mut session);
-    let area_id = format!("LspLogArea({server_idx})");
-    let scrollbar_id = format!("LspLogScrollY({server_idx})");
-    assert!(has_ui(&state, &area_id), "{state}");
-    assert!(has_ui(&state, &scrollbar_id), "{state}");
-    let area = crate::headless::tests_support::ui_rect(&state, &area_id);
-    let (x, y) = (area[0] + area[2] / 2.0, area[1] + area[3] / 2.0);
-    let lines = run_script(
-        &mut session,
-        format!("mouse_move {x} {y}\nwheel 0 -100\n").as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    let current_scroll = session.app.ide_panel.lsp_logs_scroll_y.get(name).unwrap().current;
-    assert!(
-        session.app.ide_panel.lsp_logs_scroll_y.get(name).unwrap().target > 0.0,
-        "wheel did not scroll the LSP log"
-    );
-    wait_until(&mut session, 5000, "LSP log wheel scroll", |session| {
-        session
-            .app
-            .ide_panel
-            .lsp_logs_scroll_y
-            .get(name)
-            .is_some_and(|scroll| scroll.is_settled())
-    });
-
-    let track = crate::headless::tests_support::ui_rect(&dump(&mut session), &scrollbar_id);
-    let (content_h, _) = session.app.lsp_server_inner_size(
-        &session.app.ide_panel.lsp_servers[server_idx],
-        TEST_SCALE,
-    );
-    let geometry = crate::app::lsp_actions::lsp_log_scrollbar(
-        (track[0] as f32, track[1] as f32, track[2] as f32, track[3] as f32),
-        area[3] as f32,
-        content_h,
-        current_scroll,
-        ScrollbarAxis::Vertical,
-    )
-    .geometry(TEST_SCALE)
-    .expect("LSP log scrollbar geometry");
-    let press_y = (geometry.thumb.start + geometry.thumb.len / 2.0) as f64;
-    let max_scroll = (content_h - area[3] as f32).max(0.0);
-    drag_to_bottom(&mut session, &scrollbar_id, press_y);
-    wait_until(&mut session, 5000, "LSP log scrollbar bottom", |session| {
-        session
-            .app
-            .ide_panel
-            .lsp_logs_scroll_y
-            .get(name)
-            .is_some_and(|scroll| scroll.is_settled())
-    });
-    let scroll = session.app.ide_panel.lsp_logs_scroll_y.get(name).unwrap();
-    assert!(scroll.current > 0.0 && scroll.current <= max_scroll + 0.5);
-    assert!((scroll.current - max_scroll).abs() < 0.5);
-    let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]

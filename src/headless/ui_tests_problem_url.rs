@@ -84,7 +84,20 @@ fn headless_problems_click_opens_diagnostic_url_in_external_request_log() {
         .expect("diagnostic URL row");
     assert!(has_ui(&dump(&mut session), &problem_url_id));
 
-    click_ui(&mut session, &problem_url_id);
+    let [x, y, width, height] = crate::headless::tests_support::ui_rect(
+        &dump(&mut session),
+        &problem_url_id,
+    );
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {} {}\n", x + width / 2.0, y + height / 2.0).as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    wait_until(&mut session, 3000, "hovered diagnostic URL", |session| {
+        dump(session)["hover"]["ui"] == problem_url_id
+    });
+    let lines = run_script(&mut session, b"click\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     assert_eq!(
         session.app.external_requests.take(),
         Some(ExternalRequest::OpenUrl(DIAGNOSTIC_URL.to_string()))

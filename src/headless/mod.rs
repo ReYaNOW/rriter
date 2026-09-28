@@ -66,6 +66,8 @@ mod ui_tests_markdown;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_pickers;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_problem_url;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_problems;

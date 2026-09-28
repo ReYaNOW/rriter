@@ -1231,15 +1231,15 @@ mod session_cases {
 
     #[test]
     fn headless_external_requests_stay_in_their_session() {
-        // Seeded: tests never set the process-wide headless policy (it would block writes in
-        // every later test), so a picker would open for real; record through the session's
-        // own sink the way the intercepting platform functions do.
+        // Tests never set the process-wide headless policy, so the session's own App must
+        // intercept: otherwise a picker, browser, or pkexec prompt reaches the user's desktop.
         let mut first = session_for_test(320, 200);
         let mut second = session_for_test(320, 200);
-        let policy = Some(crate::platform::HeadlessPolicy { allow_writes: false });
+        assert!(crate::platform::headless_policy().is_none());
+        assert!(!first.app.protected_saves.elevation_allowed());
         let sink = first.app.external_requests.sink().clone();
         assert!(crate::platform::intercept_external(
-            policy,
+            None,
             &sink,
             crate::platform::ExternalRequest::PickFolder
         ));

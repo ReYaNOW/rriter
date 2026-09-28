@@ -32,6 +32,9 @@ pub enum ExternalRequest {
 pub struct ExternalRequestSink {
     sender: std::sync::mpsc::Sender<ExternalRequest>,
     picker_answers: Arc<Mutex<VecDeque<Vec<PathBuf>>>>,
+    /// Set for a headless `App`: its requests never reach the desktop, even in
+    /// cargo tests, where the process-wide headless policy is not installed.
+    intercept: bool,
 }
 
 /// The requests an `App` would have sent to the desktop, recorded in headless
@@ -44,17 +47,22 @@ pub struct ExternalRequestLog {
 
 impl Default for ExternalRequestLog {
     fn default() -> Self {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let picker_answers = Arc::new(Mutex::new(VecDeque::new()));
-        Self {
-            sink: ExternalRequestSink { sender: tx, picker_answers },
-            rx,
-            last: None,
-        }
+        Self::new(false)
     }
 }
 
 impl ExternalRequestLog {
+    /// `intercept`: record every request of this `App` instead of touching the desktop.
+    pub fn new(intercept: bool) -> Self {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let picker_answers = Arc::new(Mutex::new(VecDeque::new()));
+        Self {
+            sink: ExternalRequestSink { sender: tx, picker_answers, intercept },
+            rx,
+            last: None,
+        }
+    }
+
     pub fn sink(&self) -> &ExternalRequestSink {
         &self.sink
     }
@@ -90,7 +98,7 @@ pub(crate) fn intercept_external(
     sink: &ExternalRequestSink,
     request: ExternalRequest,
 ) -> bool {
-    if policy.is_none() {
+    if policy.is_none() && !sink.intercept {
         return false;
     }
     // The log lives as long as its `App`; a send after it is gone has no reader.
