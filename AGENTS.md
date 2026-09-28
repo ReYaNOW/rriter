@@ -73,6 +73,7 @@ Allowed shell commands:
   * Small change (one-line fix, doc/rule tweak, a test or two, no behaviour change worth reviewing) → commit straight to `master` and push; several small changes of one session go in one push after one `make codex_test`.
   * Substantial change (feature, bug fix with real logic, refactor, multi-file work, iteration of a larger plan) → branch off fresh `master` (`git switch master && git pull && git switch -c <short-name>`), commit and push it (`-u origin <branch>`); at the end of the verified task `gh pr create --base master` (body ends with `🤖 Generated with [Claude Code](https://claude.com/claude-code)`), `gh pr merge --squash --delete-branch`, `git switch master && git pull`. Follow-up work on the current branch stays on it.
   * Either way, only after the task is finished and verified (`make codex_test` green) — no WIP or red tests on `master`, don't merge a branch the user asked to keep open, and say in the final report what was pushed or which PR was merged. Reason: the user had to ask for push and merge after every task (26.09, 27.09).
+  * Push, `gh pr create` and `gh pr merge` — each its own Bash call (PR body via `--body-file`), never chained with `&&`. Reason: the permission check denied the chained push+PR+merge, separate calls passed (28.09).
 
 Forbidden unless user explicitly asks:
 
