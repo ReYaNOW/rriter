@@ -1306,8 +1306,14 @@ impl App {
             self.shift_current_python_inlay_hints_for_edits(&edits);
             let (invalidate_start_byte, invalidate_end_byte) =
                 crate::highlighter::sync_edit_invalidation_byte_range(&edits);
-            self.highlighter
-                .apply_edits(self.editor.version, edits, None, None);
+            self.highlighter.apply_document_edits(
+                self.editor.version,
+                edits,
+                None,
+                None,
+                self.editor.len(),
+                || self.editor.get_full_text(),
+            );
             self.highlighter.sync_highlight_after_edit(
                 self.editor.version,
                 None,

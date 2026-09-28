@@ -161,6 +161,7 @@ fn highlighter_sync_parse_after_seed_colors_python_constant_immediately() {
     assert!(highlighter.sync_tree.is_some());
 
     highlighter.shift_insert(1, 1, Some("S"));
+    highlighter.apply_edits(2, vec![SyncEdit::Insert { offset: 1, text: "S".to_string() }], Some(0), Some(2));
     assert!(highlighter.sync_highlight_after_edit(
         2,
         Some(0),
@@ -186,6 +187,8 @@ fn highlighter_sync_parse_keeps_python_parameters_colored() {
 
     let insert_at = source.find("    BoxRepository").unwrap();
     highlighter.shift_insert(insert_at, 7, Some("    if\n"));
+    let insert = SyncEdit::Insert { offset: insert_at, text: "    if\n".to_string() };
+    highlighter.apply_edits(2, vec![insert], Some(insert_at), Some(insert_at + 7));
     assert!(highlighter.sync_highlight_after_edit(
         2,
         Some(insert_at),
@@ -210,6 +213,7 @@ fn highlighter_sync_parse_clears_stale_python_self_color_after_delete() {
     assert!(highlighter.wait_for_first_result(1, std::time::Duration::from_secs(2)));
 
     highlighter.shift_delete(3, 1);
+    highlighter.apply_edits(2, vec![SyncEdit::Delete { offset: 3, len: 1 }], Some(0), Some(3));
     assert!(highlighter.sync_highlight_after_edit(
         2,
         Some(0),
