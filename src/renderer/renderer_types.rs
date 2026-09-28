@@ -177,6 +177,16 @@ pub struct GitGraphTooltipHover {
     pub h: f32,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct GitTooltipTimer {
+    pub kind: u8,
+    pub workspace_idx: usize,
+    pub item_idx: usize,
+    pub start: std::time::Instant,
+    pub anchor_x: f32,
+    pub anchor_y: f32,
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct GitGraphTooltipTextRow {
     pub x: f32,
@@ -411,6 +421,8 @@ pub struct Renderer {
     pub icon_logo: Option<glow::Texture>,
     /// Кэш SVG-иконок для дерева файлов. Ключ = &'static str из file_icons_map.
     pub file_icon_cache: rustc_hash::FxHashMap<&'static str, IconAtlasEntry>,
+    pub(crate) rasterized_file_icons:
+        rustc_hash::FxHashMap<&'static str, crate::app::file_tree::RasterizedIconState>,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub phys_to_visual_editor_version: u64,
@@ -444,6 +456,7 @@ pub struct Renderer {
     pub(crate) git_logs_selecting: bool,
     pub(crate) git_workspace_scrollbar: Option<crate::render_view::scrollbar_widget::Scrollbar>,
     pub git_tooltip_waiting: bool,
+    pub(crate) git_tooltip_timer: Option<GitTooltipTimer>,
 
     pub was_empty_ide: bool,
     pub empty_ide_art_idx: usize,

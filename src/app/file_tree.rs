@@ -696,6 +696,12 @@ impl App {
                                 }
                                 updated = true;
                             }
+                            crate::app::file_tree::FileTreeScanMessage::Icon(key, state) => {
+                                if let Some(renderer) = self.renderer.as_mut() {
+                                    renderer.rasterized_file_icons.insert(key, state);
+                                }
+                                updated = true;
+                            }
                             crate::app::file_tree::FileTreeScanMessage::IconsReady => {
                                 updated = true;
                             }

@@ -533,33 +533,19 @@ impl Renderer {
     fn upload_file_icon_from_pending_raster(
         &mut self,
         key: &'static str,
-        is_folder: bool,
     ) -> Option<IconAtlasEntry> {
         use crate::app::file_tree::RasterizedIconState;
 
-        let mut cache = crate::platform::recover_poisoned(
-            crate::app::file_tree::RASTERIZED_ICONS
-                .lock()
-                .map_err(std::sync::PoisonError::into_inner),
-        );
-
-        if let Some(state) = cache.remove(key) {
-            match state {
-                RasterizedIconState::Ready(data) => {
-                    drop(cache);
-                    let entry = self.upload_icon_rgba(64, 64, &data)?;
-                    self.file_icon_cache.insert(key, entry);
-                    Some(entry)
-                }
-                state @ (RasterizedIconState::Pending | RasterizedIconState::Missing) => {
-                    cache.insert(key, state);
-                    None
-                }
+        match self.rasterized_file_icons.remove(key) {
+            Some(RasterizedIconState::Ready(data)) => {
+                let entry = self.upload_icon_rgba(64, 64, &data)?;
+                self.file_icon_cache.insert(key, entry);
+                Some(entry)
             }
-        } else {
-            drop(cache);
-            crate::app::file_tree::request_rasterized_icon(key, is_folder);
-            None
+            Some(RasterizedIconState::Missing) => {
+                None
+            }
+            None => None,
         }
     }
 
@@ -568,7 +554,7 @@ impl Renderer {
     pub fn draw_file_icon(
         &mut self,
         key: &'static str,
-        is_folder: bool,
+        _is_folder: bool,
         x: f32,
         y: f32,
         size: f32,
@@ -576,7 +562,7 @@ impl Renderer {
         let entry = if let Some(&entry) = self.file_icon_cache.get(key) {
             entry
         } else {
-            let Some(entry) = self.upload_file_icon_from_pending_raster(key, is_folder) else {
+            let Some(entry) = self.upload_file_icon_from_pending_raster(key) else {
                 return;
             };
             entry
