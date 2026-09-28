@@ -141,6 +141,7 @@ impl Renderer {
         scroll_x: f32,
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
         clip_rect: Option<(f32, f32, f32, f32)>,
         mx: f32,
         my: f32,
@@ -148,8 +149,8 @@ impl Renderer {
         let Some(editor) = source_editor else {
             return false;
         };
-        let should_draw = crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
+        let should_draw = {
+            let state = &*hover;
             let target_matches = ide_panel.api.mock_hover_target.as_ref().is_some_and(|target| {
                 state.byte_offset == Some(target.edit_byte)
                     || state
@@ -169,7 +170,7 @@ impl Renderer {
                     || state
                         .popup_safe_area_contains(mx, my, self.width, self.scale_factor)
                         .0)
-        });
+        };
         if !should_draw {
             return false;
         }
@@ -217,25 +218,20 @@ impl Renderer {
                 target.edit_byte,
                 render_scroll_y,
             );
-            crate::app::mouse::HOVER_STATE.with(|state| {
-                let mut state = state.borrow_mut();
-                if let Some(popup) = state.popup.as_mut() {
-                    if popup.byte_offset == target.edit_byte
-                        && (popup.offset_x.is_none() || popup.offset_y.is_none())
-                    {
-                        popup.anchor_x = anchor_x;
-                        popup.anchor_y = anchor_y;
-                    }
+            if let Some(popup) = hover.popup.as_mut() {
+                if popup.byte_offset == target.edit_byte
+                    && (popup.offset_x.is_none() || popup.offset_y.is_none())
+                {
+                    popup.anchor_x = anchor_x;
+                    popup.anchor_y = anchor_y;
                 }
-            });
+            }
         }
-        let hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            state.hovered_diag_type_target
-        });
+        let hovered_diag_type_target = hover.hovered_diag_type_target;
 
         let mut wants_pointer = false;
         self.draw_hover_overlays(
+            hover,
             editor,
             &lsp_diagnostic_refs,
             ide_panel,

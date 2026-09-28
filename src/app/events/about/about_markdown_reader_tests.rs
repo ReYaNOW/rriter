@@ -196,12 +196,12 @@
             renderer.last_mouse_x = body.0 + 40.0;
             renderer.last_mouse_y = body.1 + body.3 * 0.5;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| state.borrow_mut().byte_offset = Some(0));
+        app.hover.byte_offset = Some(0);
         let before = app.scroll_y.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(app.scroll_y.target > before, "first reader wheel notch must scroll");
     }
 
@@ -219,8 +219,8 @@
             renderer.last_mouse_x = 140.0;
             renderer.last_mouse_y = 100.0;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut app.hover;
             state.rect = Some((100.0, 60.0, 240.0, 120.0));
             state.popup = Some(crate::app::mouse::HoverPopup {
                 text: "value: int".to_string(),
@@ -236,14 +236,14 @@
                 scroll: crate::scroll::ScrollState::new(15.0),
                 layout_cache: None,
             });
-        });
+        }
 
         let before = app.scroll_y.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
 
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(
             app.scroll_y.target > before,
             "clearing an invisible hover must not swallow the same editor wheel event"
@@ -264,16 +264,14 @@
             renderer.last_mouse_x = 140.0;
             renderer.last_mouse_y = 100.0;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow_mut().interaction_rect = Some((100.0, 60.0, 240.0, 120.0));
-        });
+        app.hover.interaction_rect = Some((100.0, 60.0, 240.0, 120.0));
 
         let before = app.scroll_y.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
 
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(
             app.scroll_y.target > before,
             "a stale interaction rect without popup/diagnostic target must pass the wheel downstream"
@@ -295,8 +293,8 @@
             renderer.last_mouse_x = 140.0;
             renderer.last_mouse_y = 145.0;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut app.hover;
             state.rect = Some((100.0, 160.0, 240.0, 40.0));
             state.diag_rect = Some((100.0, 100.0, 240.0, 30.0, 120.0, 180.0, 120.0));
             state.interaction_rect = Some((100.0, 100.0, 240.0, 100.0));
@@ -315,20 +313,16 @@
                 scroll: crate::scroll::ScrollState::new(15.0),
                 layout_cache: None,
             });
-        });
+        }
 
         let before_reader = app.scroll_y.target;
-        let before_diag = crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow().diag_scroll.target
-        });
+        let before_diag = app.hover.diag_scroll.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
 
-        let after_diag = crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow().diag_scroll.target
-        });
-        crate::app::mouse::clear_hover_popup(None);
+        let after_diag = app.hover.diag_scroll.target;
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert_eq!(after_diag, before_diag, "outer-frame gap must not scroll diagnostics");
         assert!(
             app.scroll_y.target > before_reader,
@@ -351,8 +345,8 @@
             renderer.last_mouse_x = 180.0;
             renderer.last_mouse_y = 130.0;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut app.hover;
             state.rect = Some((100.0, 80.0, 240.0, 70.0));
             state.diag_rect = Some((100.0, 40.0, 240.0, 40.0, 120.0, 160.0, 60.0));
             state.interaction_rect = Some((100.0, 40.0, 240.0, 20.0));
@@ -371,14 +365,14 @@
                 scroll: crate::scroll::ScrollState::new(15.0),
                 layout_cache: None,
             });
-        });
+        }
 
         let before = app.scroll_y.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
 
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(
             app.scroll_y.target > before,
             "the hidden exterior of a combined hover must pass the wheel to Reader"
@@ -398,8 +392,8 @@
             renderer.last_mouse_x = 140.0;
             renderer.last_mouse_y = 100.0;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut app.hover;
             state.rect = Some((100.0, 80.0, 240.0, 120.0));
             state.interaction_rect = Some((100.0, 80.0, 120.0, 40.0));
             state.max_scroll = 200.0;
@@ -417,22 +411,20 @@
                 scroll: crate::scroll::ScrollState::new(15.0),
                 layout_cache: None,
             });
-        });
+        }
 
         let editor_before = app.scroll_y.target;
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
-        let popup_target = crate::app::mouse::HOVER_STATE.with(|state| {
-            state
-                .borrow()
-                .popup
-                .as_ref()
-                .map(|popup| popup.scroll.target)
-                .unwrap_or_default()
-        });
+        let popup_target = app
+            .hover
+            .popup
+            .as_ref()
+            .map(|popup| popup.scroll.target)
+            .unwrap_or_default();
 
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(popup_target > 0.0, "visible hover must receive wheel delta");
         assert_eq!(app.scroll_y.target, editor_before);
     }
@@ -450,8 +442,8 @@
             crate::render_view::reviewer_stage2_integration::fixture(&source, 900.0, 1.0);
         app.set_markdown_mode(crate::app::MarkdownMode::Edit);
         let byte = source.find("handler").expect("hover symbol") + 3;
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut app.hover;
             state.reset_diagnostic_popup();
             state.byte_offset = None;
             // Cleared up front so the assertions below can only come from the frame.
@@ -470,7 +462,7 @@
                 scroll: crate::scroll::ScrollState::new(15.0),
                 layout_cache: None,
             });
-        });
+        }
         {
             let renderer = app.renderer.as_mut().unwrap();
             renderer.last_mouse_x = 300.0;
@@ -479,10 +471,7 @@
 
         crate::render_view::reviewer_stage2_integration::review_v3_root_frame(&mut app);
 
-        let (content_rect, interaction_rect) = crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            (state.rect, state.interaction_rect)
-        });
+        let (content_rect, interaction_rect) = (app.hover.rect, app.hover.interaction_rect);
         let content_rect = content_rect.expect("the drawn popup reports its content rect");
         let interaction_rect =
             interaction_rect.expect("the drawn popup writes its interaction rect");
@@ -518,17 +507,12 @@
 
         // The popup keeps its state while its animation collapses the painted frame to
         // zero size; the renderer must then stop owning the wheel through that frame.
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            if let Some(popup) = state.borrow_mut().popup.as_mut() {
-                popup.anim_progress = 0.0;
-            }
-        });
+        if let Some(popup) = app.hover.popup.as_mut() {
+            popup.anim_progress = 0.0;
+        }
         crate::render_view::reviewer_stage2_integration::review_v3_root_frame(&mut app);
 
-        let (popup_kept, collapsed_rect) = crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            (state.popup.is_some(), state.interaction_rect)
-        });
+        let (popup_kept, collapsed_rect) = (app.hover.popup.is_some(), app.hover.interaction_rect);
         assert!(popup_kept, "the collapsed popup stays in hover state");
         assert!(
             collapsed_rect.is_none(),
@@ -538,7 +522,7 @@
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(0.0, -36.0),
         ));
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
         assert!(
             app.scroll_y.target > editor_before,
             "the wheel must reach the editor once the hover frame is not drawn"

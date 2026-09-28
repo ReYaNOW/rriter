@@ -796,8 +796,9 @@
             None,
             (12.0, 24.0),
         );
-        install_automation_hover_popup(0, popup);
-        assert!(crate::app::mouse::clear_hover_popup(None));
+        let mut installed = crate::app::mouse::HoverState::default();
+        install_automation_hover_popup(&mut installed, 0, popup);
+        assert!(crate::app::mouse::clear_hover_popup(&mut installed));
 
         let mut transient = ready;
         transient.external_changes_idle = false;
@@ -848,15 +849,12 @@
             None,
             (12.0, 24.0),
         );
-        install_automation_hover_popup(0, popup);
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let state = state.borrow();
-            assert_eq!(state.request_id, None);
-            assert_eq!(state.definition_request_id, None);
-            assert_eq!(state.byte_offset, Some(0));
-            assert!(state.popup.is_some());
-        });
-        crate::app::mouse::clear_hover_popup(None);
+        let mut state = crate::app::mouse::HoverState::default();
+        install_automation_hover_popup(&mut state, 0, popup);
+        assert_eq!(state.request_id, None);
+        assert_eq!(state.definition_request_id, None);
+        assert_eq!(state.byte_offset, Some(0));
+        assert!(state.popup.is_some());
     }
 
     #[test]

@@ -1216,7 +1216,7 @@ impl App {
             while let Ok(_) = self.highlighter.rx.try_recv() {}
             self.reset_highlighter_with_text(self.editor.get_full_text(), false);
             self.wait_for_current_highlight();
-            crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+            crate::app::mouse::clear_hover_popup(&mut self.hover);
             self.lsp_actions_menu = None;
             self.last_sent_version = self.editor.version;
         }
@@ -1374,7 +1374,7 @@ impl App {
         if active_reloaded {
             while self.highlighter.rx.try_recv().is_ok() {}
             self.reset_highlighter_with_text(self.editor.get_full_text(), false);
-            crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+            crate::app::mouse::clear_hover_popup(&mut self.hover);
             self.lsp_actions_menu = None;
             self.last_sent_version = self.editor.version;
         }

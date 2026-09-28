@@ -356,7 +356,7 @@ impl App {
             return;
         }
 
-        crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+        crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
         let (deleted, inserted_len) = self.editor.insert_str(text);
         if let Some((offset, len)) = deleted {
             self.highlighter.shift_delete(offset, len);
@@ -1087,7 +1087,7 @@ impl App {
         }
 
         if is_edit {
-            crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+            crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
             let git_diff_undo = matches!(physical_key, PhysicalKey::Code(KeyCode::KeyZ)) && ctrl;
             if self.finish_editor_edit_after_input(
                 is_git_diff_tab,

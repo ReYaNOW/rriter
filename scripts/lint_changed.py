@@ -15,7 +15,8 @@ BASELINE_PATH = ROOT / "scripts/lint_baseline.json"
 MAX_LINES = 1600
 CLIPPY_COMMAND = ["cargo", "+nightly", "clippy", "--all-targets", "--message-format=json"]
 PATTERNS = (
-    ("global-lock", re.compile(r"\bstatic(?:\s+mut)?\s+\w+\s*:\s*[^;]*(?:Mutex|RwLock|OnceLock|LazyLock)\b")),
+    ("global-lock", re.compile(r"\bstatic(?:\s+mut)?\s+\w+\s*:\s*[^;]*(?:Mutex|RwLock|OnceLock|Lazy|LazyLock)\b")),
+    ("thread-local", re.compile(r"\bthread_local!\s*\{")),
     ("app-methods-impl", re.compile(r"\bimpl\s+(?:\w+::)*App(?:\s*<[^>]+>)?\s*\{?")),
     ("git-command", re.compile(r"\bCommand\s*::\s*new\s*\(\s*\"git\"")),
 )
@@ -148,12 +149,14 @@ def parse_clippy_output(output):
 
 
 def write_baseline(counts, lengths):
+    patterns = load_baseline().get("patterns", {})
     value = {
         "clippy": {
             path: {lint: count for (file, lint), count in sorted(counts.items()) if file == path}
             for path in sorted({file for file, _ in counts})
         },
         "file_length": {path: size for path, size in sorted(lengths.items()) if size > MAX_LINES},
+        "patterns": patterns,
     }
     BASELINE_PATH.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -192,15 +195,31 @@ def main():
             violations.append((path, 1, "file-length", f"{size} lines exceeds the 1600-line limit"))
 
     untracked = set(run(["git", "ls-files", "--others", "--exclude-standard"]).stdout.splitlines())
+    pattern_counts = {}
+    pattern_locations = {}
     for path, line_no, text in added_lines(base, untracked):
-        if path.startswith("src/app/") and PATTERNS[0][1].search(text):
-            violations.append((path, line_no, PATTERNS[0][0], "new global static holds a lock"))
-        if path.rsplit("/", 1)[-1].endswith("_methods.rs") and PATTERNS[1][1].search(text):
-            violations.append((path, line_no, PATTERNS[1][0], "App implementation belongs in its feature state or routing module"))
+        if path.startswith("src/"):
+            for index in (0, 1):
+                if PATTERNS[index][1].search(text):
+                    key = (path, PATTERNS[index][0])
+                    pattern_counts[key] = pattern_counts.get(key, 0) + 1
+                    pattern_locations.setdefault(key, line_no)
+            filename = path.rsplit("/", 1)[-1]
+            if (filename.endswith("_click_methods.rs") or filename.endswith("_text_methods.rs")) and PATTERNS[2][1].search(text):
+                key = (path, PATTERNS[2][0])
+                pattern_counts[key] = pattern_counts.get(key, 0) + 1
+                pattern_locations.setdefault(key, line_no)
         if path.startswith("src/render_view/") and RENDER_ACCUMULATION.search(text) and ".round()" not in text:
             violations.append((path, line_no, "fractional-baseline", "avoid accumulating scaled text baselines"))
-        if path != "src/app/git_panel/git_process.rs" and PATTERNS[2][1].search(text):
-            violations.append((path, line_no, PATTERNS[2][0], "route Git CLI work through git_process.rs"))
+        if path != "src/app/git_panel/git_process.rs" and PATTERNS[3][1].search(text):
+            violations.append((path, line_no, PATTERNS[3][0], "route Git CLI work through git_process.rs"))
+
+    pattern_baseline = baseline.get("patterns", {})
+    for (path, rule), count in sorted(pattern_counts.items()):
+        previous = pattern_baseline.get(path, {}).get(rule, 0)
+        if count > previous:
+            message = "new global state pattern" if rule in {"global-lock", "thread-local"} else "App implementation belongs in its feature state or routing module"
+            violations.append((path, pattern_locations[(path, rule)], rule, message))
 
     clippy_baseline = baseline.get("clippy", {})
     for (path, lint), count in sorted(counts.items()):

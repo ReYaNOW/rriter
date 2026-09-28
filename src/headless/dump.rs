@@ -138,7 +138,7 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         .map_or("none", |slot| panel_name(slot.id));
     let open_panels: Vec<&str> =
         panel.slots.iter().filter(|slot| slot.open).map(|slot| panel_name(slot.id)).collect();
-    let hover_popup = crate::app::mouse::HOVER_STATE.with(|state| state.borrow().popup.is_some());
+    let hover_popup = app.hover.popup.is_some();
     let clipboard = app.clipboard.as_ref().map_or_else(
         || json!({"mode": "disabled", "text": null}),
         |clipboard| {

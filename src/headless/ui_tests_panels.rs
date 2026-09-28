@@ -103,14 +103,14 @@ fn wait_for_hover(session: &mut crate::headless::HeadlessSession) {
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 }
 
-fn current_hover_popup_text() -> Option<String> {
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        state.borrow().popup.as_ref().map(|popup| popup.text.clone())
-    })
+fn current_hover_popup_text(session: &crate::headless::HeadlessSession) -> Option<String> {
+    session.app.hover.popup.as_ref().map(|popup| popup.text.clone())
 }
 
-fn current_hover_popup_rect() -> Option<(f32, f32, f32, f32)> {
-    crate::app::mouse::HOVER_STATE.with(|state| state.borrow().rect)
+fn current_hover_popup_rect(
+    session: &crate::headless::HeadlessSession,
+) -> Option<(f32, f32, f32, f32)> {
+    session.app.hover.rect
 }
 
 fn hover_source_with_docs(detail_lines: usize) -> String {
@@ -309,20 +309,20 @@ fn headless_lsp_hover_popup_shows_symbol_and_dismisses_on_mouse_or_escape() {
 
     let target = source.find("hover_subject").unwrap();
     mouse_move_to_source_offset(&mut session, target);
-    assert!(current_hover_popup_text().is_none(), "hover popup appeared before the delay");
+    assert!(current_hover_popup_text(&session).is_none(), "hover popup appeared before the delay");
     wait_for_hover(&mut session);
-    let text = current_hover_popup_text().expect("hover response popup missing");
+    let text = current_hover_popup_text(&session).expect("hover response popup missing");
     assert!(!text.trim().is_empty(), "hover response was empty");
     assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
 
     run_script(&mut session, b"mouse_move 1270 710\nwait 400\n");
-    assert!(current_hover_popup_text().is_none(), "moving away must hide the hover popup");
+    assert!(current_hover_popup_text(&session).is_none(), "moving away must hide the hover popup");
 
     mouse_move_to_source_offset(&mut session, target);
     wait_for_hover(&mut session);
-    assert!(current_hover_popup_text().is_some(), "hover popup did not reopen");
+    assert!(current_hover_popup_text(&session).is_some(), "hover popup did not reopen");
     run_script(&mut session, b"key escape\n");
-    assert!(current_hover_popup_text().is_none(), "Escape must hide the hover popup");
+    assert!(current_hover_popup_text(&session).is_none(), "Escape must hide the hover popup");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -354,7 +354,7 @@ fn headless_lsp_hover_popup_stays_inside_window_at_right_and_bottom_edges() {
         assert!(mouse_x > w as f32 * 0.7, "hover target was not near the right edge: {mouse_x}");
         assert!(mouse_y > h as f32 * 0.8, "hover target was not near the bottom edge: {mouse_y}");
         wait_for_hover(&mut session);
-        let (x, y, popup_w, popup_h) = current_hover_popup_rect().expect("hover popup bounds missing");
+        let (x, y, popup_w, popup_h) = current_hover_popup_rect(&session).expect("hover popup bounds missing");
         assert!(
             x >= 0.0 && y >= 0.0,
             "popup starts outside {w}x{h}: {:?}",
@@ -384,17 +384,17 @@ fn headless_lsp_hover_popup_scrolls_long_documentation() {
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);
-    let text = current_hover_popup_text().expect("long hover popup missing");
+    let text = current_hover_popup_text(&session).expect("long hover popup missing");
     assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
-    let before = crate::app::mouse::HOVER_STATE.with(|state| {
-        let state = state.borrow();
+    let before = {
+        let state = &session.app.hover;
         assert!(
             state.max_scroll > 0.0,
             "long hover response did not scroll: {}",
             text.lines().count()
         );
         state.popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
-    });
+    };
     let state = dump(&mut session);
     assert!(has_ui(&state, "HoverPopupScroll"), "hover scrollbar missing: {state}");
     let (scroll_x, scroll_y) = ui_center(&state, "HoverPopupScroll");
@@ -403,9 +403,8 @@ fn headless_lsp_hover_popup_scrolls_long_documentation() {
         format!("mouse_move {scroll_x} {scroll_y}\nwheel 0 -3\nwait 300\n").as_bytes(),
     );
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    let after = crate::app::mouse::HOVER_STATE.with(|state| {
-        state.borrow().popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0)
-    });
+    let after =
+        session.app.hover.popup.as_ref().map(|popup| popup.scroll.current).unwrap_or(0.0);
     assert!((after - before).abs() > 0.1, "hover content did not scroll: {before} -> {after}");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -437,7 +436,7 @@ fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist()
 
     mouse_move_to_source_offset(&mut session, source.find("missing_hover_name").unwrap());
     wait_for_hover(&mut session);
-    let diagnostic_text = crate::app::mouse::HOVER_STATE.with(|state| state.borrow().diag_text.clone());
+    let diagnostic_text = session.app.hover.diag_text.clone();
     assert!(!diagnostic_text.trim().is_empty(), "diagnostic hover popup text was empty");
     assert!(
         diagnostic_text.contains("missing_hover_name"),
@@ -475,7 +474,7 @@ fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);
-    let text = current_hover_popup_text().expect("hover popup missing");
+    let text = current_hover_popup_text(&session).expect("hover popup missing");
     assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
     let state = dump(&mut session);
     let popup_y = state["ui"]
@@ -505,9 +504,9 @@ fn headless_bug_typing_hides_lsp_hover_popup() {
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);
-    assert!(current_hover_popup_text().is_some(), "hover popup missing before typing");
+    assert!(current_hover_popup_text(&session).is_some(), "hover popup missing before typing");
     run_script(&mut session, b"type x\n");
-    assert!(current_hover_popup_text().is_none(), "typing must hide the hover popup");
+    assert!(current_hover_popup_text(&session).is_none(), "typing must hide the hover popup");
     let _ = std::fs::remove_dir_all(dir);
 }
 

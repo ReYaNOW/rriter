@@ -312,6 +312,7 @@ impl Renderer {
         ide_panel: &crate::app::IdePanelState,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         layout: RootFramePanelLayout<'_>,
         viewport: RootFrameViewport,
@@ -472,26 +473,23 @@ impl Renderer {
             );
         let file_tree_overlay_open =
             crate::app::file_tree::file_tree_overlay_active_for_panel(ide_panel);
-        if hover_blocked_by_status_bar {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if hover_blocked_by_bottom_panel {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if hover_blocked_by_inline_git {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if hover_blocked_by_database_query_results {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if file_tree_overlay_open {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if ide_panel.database.modal_open() || database_query_modal_open {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if ide_panel.project_search.help_open {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if ide_panel.api.mock_guide_open || ide_panel.api.mock_server_detail_open {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if ide_panel.api.mock_python_runtime_open {
-            crate::app::mouse::clear_hover_popup(Some(self));
-        } else if !is_ui_disabled {
+        // A blocked hover is cleared by `App::render_main_frame` after the frame
+        // (`editor_hover_blocked`), so this phase does not reset hover state itself.
+        let hover_blocked = hover_blocked_by_status_bar
+            || hover_blocked_by_bottom_panel
+            || hover_blocked_by_inline_git
+            || hover_blocked_by_database_query_results
+            || file_tree_overlay_open
+            || ide_panel.database.modal_open()
+            || database_query_modal_open
+            || ide_panel.project_search.help_open
+            || ide_panel.api.mock_guide_open
+            || ide_panel.api.mock_server_detail_open
+            || ide_panel.api.mock_python_runtime_open;
+        self.editor_hover_blocked = hover_blocked;
+        if !hover_blocked && !is_ui_disabled {
             self.draw_hover_overlays(
+                hover,
                 editor,
                 lsp_diagnostics,
                 ide_panel,

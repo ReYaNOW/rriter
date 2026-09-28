@@ -8,6 +8,7 @@ impl Renderer {
         manual_mock: Option<&crate::app::api_mock::types::ApiManualRoute>,
         mock_override: Option<&crate::app::api_mock::types::ApiMockRouteOverride>,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
     ) -> f32 {
         let ApiTabRouteCtx {
             x, pad, content_w, s, mx, my, blink_alpha, tab_clip, route_idx, route, model, tab_meta,
@@ -309,6 +310,7 @@ impl Renderer {
                     manual_mock,
                     mock_override,
                     ui_registry,
+                    hover,
                 );
             }
         }
@@ -352,6 +354,7 @@ impl Renderer {
         manual_mock: Option<&crate::app::api_mock::types::ApiManualRoute>,
         mock_override: Option<&crate::app::api_mock::types::ApiMockRouteOverride>,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
     ) -> f32 {
         let ApiTabRouteCtx {
             x, pad, content_w, s, mx, my, blink_alpha, tab_clip, route_idx, route, model, ide_panel,
@@ -771,6 +774,7 @@ impl Renderer {
                                     0.0,
                                     ide_panel,
                                     ui_registry,
+                                    hover,
                                     Some(viewport_visible_clip),
                                     mx,
                                     my,
@@ -806,6 +810,7 @@ impl Renderer {
                                 input_scroll_x,
                                 ide_panel,
                                 ui_registry,
+                                hover,
                                 Some(viewport_visible_clip),
                                 mx,
                                 my,

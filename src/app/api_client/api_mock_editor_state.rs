@@ -259,39 +259,47 @@ impl ApiClientState {
         }
     }
 
+    /// Drops the API mock hover target and request. The editor hover popup lives in
+    /// `App::hover`, out of reach here, so the old target is parked in
+    /// `released_mock_hover_target`; `App::release_api_mock_hover` clears the popup it owns.
     fn reset_api_mock_hover_tracking(&mut self) {
         let old_target = self.mock_hover_target.take();
         self.mock_hover_request = None;
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            let owns_hover = old_target.as_ref().is_some_and(|target| {
-                state.byte_offset == Some(target.edit_byte)
-                    || state
-                        .popup
-                        .as_ref()
-                        .is_some_and(|popup| popup.byte_offset == target.edit_byte)
-                    || state
-                        .pending_popup
-                        .as_ref()
-                        .is_some_and(|popup| popup.byte_offset == target.edit_byte)
-                    || state.hovered_diag_type_target == Some(target.edit_byte)
-                    || state.popup_diag_type_target == Some(target.edit_byte)
-            });
-            if owns_hover {
-                state.request_id = None;
-                state.definition_request_id = None;
-                state.popup = None;
-                state.pending_popup = None;
-                state.timer = 0.0;
-                state.byte_offset = None;
-                state.rect = None;
-                state.max_scroll = 0.0;
-                state.selection_anchor = None;
-                state.selection_cursor = None;
-                state.selecting = false;
-                state.reset_diagnostic_popup();
-            }
-        });
+        if old_target.is_some() {
+            self.released_mock_hover_target = old_target;
+        }
+    }
+
+    /// Clears `state` when it still shows the hover of `target` (a released API mock target).
+    pub(crate) fn release_api_mock_hover_state(
+        state: &mut crate::app::mouse::HoverState,
+        target: &ApiMockHoverTarget,
+    ) {
+        let owns_hover = state.byte_offset == Some(target.edit_byte)
+            || state
+                .popup
+                .as_ref()
+                .is_some_and(|popup| popup.byte_offset == target.edit_byte)
+            || state
+                .pending_popup
+                .as_ref()
+                .is_some_and(|popup| popup.byte_offset == target.edit_byte)
+            || state.hovered_diag_type_target == Some(target.edit_byte)
+            || state.popup_diag_type_target == Some(target.edit_byte);
+        if owns_hover {
+            state.request_id = None;
+            state.definition_request_id = None;
+            state.popup = None;
+            state.pending_popup = None;
+            state.timer = 0.0;
+            state.byte_offset = None;
+            state.rect = None;
+            state.max_scroll = 0.0;
+            state.selection_anchor = None;
+            state.selection_cursor = None;
+            state.selecting = false;
+            state.reset_diagnostic_popup();
+        }
     }
 
     #[allow(clippy::too_many_arguments)]

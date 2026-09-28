@@ -43,7 +43,7 @@ impl App {
         }
 
         if self.update_database_dialog_scroll_drag(py) {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -115,7 +115,7 @@ impl App {
         }
 
         if !self.autocomplete_detail_selecting && self.autocomplete_window_contains(px, py) {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -131,7 +131,7 @@ impl App {
             if let Some(target_idx) = self.database_dialog_input_index_at(field, px) {
                 self.set_database_dialog_input_cursor(field, target_idx, true);
             }
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -141,7 +141,7 @@ impl App {
             if let Some(target_index) = self.database_table_modal_input_index_at(px, py) {
                 self.set_database_table_modal_input_cursor(target_index, true);
             }
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -155,14 +155,14 @@ impl App {
             if let Some(target_index) = self.database_table_input_index_at(target, px) {
                 self.set_database_table_input_cursor(target, target_index, true);
             }
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }
 
         if self.database_blocking_modal_open() {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -175,14 +175,14 @@ impl App {
                 }
             }
             self.ide_panel.file_tree_hovered_idx = None;
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }
 
         if self.ide_panel.api.api_python_runtime_overlay_active() {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -202,7 +202,7 @@ impl App {
         if self.inline_git_popup.is_some()
             && inline_git_popup_blocks_hover(self.ui_registry.find_at(px, py))
         {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -235,7 +235,7 @@ impl App {
                     px >= rx && px <= rx + rw && py >= ry && py <= ry + rh
                 });
             if in_detail {
-                clear_hover_popup(self.renderer.as_mut());
+                clear_hover_popup(&mut self.hover);
                 self.window.as_ref().unwrap().request_redraw();
                 return true;
             }
@@ -274,7 +274,7 @@ impl App {
             }
 
             if px >= rx && px <= rx + rw && py >= ry && py <= ry + rh {
-                clear_hover_popup(self.renderer.as_mut());
+                clear_hover_popup(&mut self.hover);
                 self.autocomplete_hovered_idx = autocomplete_hovered_index(
                     px,
                     py,

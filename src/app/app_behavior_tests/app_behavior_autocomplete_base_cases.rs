@@ -221,6 +221,7 @@ pub(crate) fn test_app() -> Option<App> {
         python_inlay_hint_pending_version: 0,
         python_inlay_hint_cache: rustc_hash::FxHashMap::default(),
         ui_registry: crate::ui_system::UiRegistry::new(),
+        hover: crate::app::mouse::HoverState::default(),
         tabs: Vec::new(),
         active_tab: 0,
         run_ide_on_startup: false,

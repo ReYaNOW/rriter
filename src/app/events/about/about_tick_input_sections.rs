@@ -68,8 +68,8 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
         needs_redraw = true;
     }
 
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut s = state.borrow_mut();
+    {
+        let s = &mut app.hover;
         if s.diag_rect.is_some() && s.diag_anim_progress < 1.0 {
             s.diag_anim_progress =
                 crate::app::mouse::advance_hover_anim_progress(s.diag_anim_progress, dt);
@@ -82,7 +82,7 @@ fn about_to_wait_overlay_animations(app: &mut App, dt: f32, now: Instant) -> boo
                 needs_redraw = true;
             }
         }
-    });
+    }
 
     let s = app.renderer.as_ref().map(|r| r.scale_factor).unwrap_or(1.0);
     let window_height = app.window.as_ref().unwrap().inner_size().height as f32;

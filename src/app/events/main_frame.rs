@@ -71,6 +71,19 @@ impl App {
 
                 // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
+                // Apply API mock hover releases queued by `ApiClientState` before the
+                // frame reads `self.hover`.
+                self.release_api_mock_hover();
+                // Database query consoles keep their own hover context; switching it
+                // resets the hover (`HoverState::set_database_query_hover_context`).
+                let query_hover_context =
+                    self.tabs.get(self.active_tab).and_then(|tab| match &tab.kind {
+                        crate::app::EditorTabKind::DatabaseQuery(meta, _) => {
+                            Some(meta.console_id.0)
+                        }
+                        _ => None,
+                    });
+                self.hover.set_database_query_hover_context(query_hover_context);
 
                 let query_problem = self
                     .tabs
@@ -143,6 +156,7 @@ impl App {
                     self.show_settings,
                     self.lsp.as_ref(),
                     &mut self.ui_registry,
+                    &mut self.hover,
                     self.tab_scroll.current.round(),
                     &self.highlighter.syntax_errors,
                     ctrl_definition_range,
@@ -155,12 +169,17 @@ impl App {
                 );
 
                 self.target_sticky_lines = target_sticky;
+                if self
+                    .renderer
+                    .as_ref()
+                    .is_some_and(|renderer| renderer.editor_hover_blocked)
+                {
+                    crate::app::mouse::clear_hover_popup(&mut self.hover);
+                }
 
                 // Продолжаем рендерить пока tooltip ещё не показан
-                let diag_timer_active = crate::app::mouse::HOVER_STATE.with(|state| {
-                    let state = state.borrow();
-                    state.diag_hover_timer > 0.0 && state.diag_hover_timer < 0.2
-                });
+                let diag_timer_active =
+                    self.hover.diag_hover_timer > 0.0 && self.hover.diag_hover_timer < 0.2;
                 let git_tooltip_waiting = self
                     .renderer
                     .as_ref()
@@ -170,9 +189,7 @@ impl App {
                 }
 
                 // Сбрасываем иконку копирования когда popup диагностики закрывается
-                let no_hovered_diags =
-                    crate::app::mouse::HOVER_STATE.with(|s| s.borrow().hovered_diags.is_empty());
-                if no_hovered_diags {
+                if self.hover.hovered_diags.is_empty() {
                     self.ide_panel.diag_copied_idx = None;
                 }
 
@@ -277,7 +294,7 @@ impl App {
                         && my >= rect.1
                         && my <= rect.1 + rect.3
                     {
-                        crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                        crate::app::mouse::clear_hover_popup(&mut self.hover);
                     }
                     let perf_refresh_start = perf_enabled.then(Instant::now);
                     if self.autocomplete_detail_popup.is_none()
@@ -414,6 +431,7 @@ impl App {
                                 selection,
                                 detail_editor,
                                 ui_registry,
+                                Some(&mut self.hover),
                                 mx,
                                 my,
                                 render_scroll_y,
@@ -427,7 +445,7 @@ impl App {
                             }
                             self.autocomplete_detail_rect = Some((bx, by, bw, bh));
                             if mx >= bx && mx <= bx + bw && my >= by && my <= by + bh {
-                                crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                                crate::app::mouse::clear_hover_popup(&mut self.hover);
                             }
                             self.autocomplete_detail_max_scroll = max_scroll;
                             self.autocomplete_detail_popup = Some(popup);
@@ -743,8 +761,9 @@ impl App {
                     let s = r.scale_factor;
                     let scrollbar_w = if max_scroll > 0.0 { 10.0 * s } else { 0.0 };
 
-                    let diag_popup_hovered = crate::app::mouse::HOVER_STATE
-                        .with(|state| state.borrow().diag_rect)
+                    let diag_popup_hovered = self
+                        .hover
+                        .diag_rect
                         .map(|(rx, ry, rw, rh, _, _, _)| {
                             mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh
                         })
@@ -824,13 +843,11 @@ impl App {
                         }
                     }
 
-                    let hover_popup_hovered = crate::app::mouse::HOVER_STATE.with(|state| {
-                        if let Some((x, y, w, h)) = state.borrow().rect {
-                            mx >= x && mx <= x + w && my >= y && my <= y + h
-                        } else {
-                            false
-                        }
-                    });
+                    let hover_popup_hovered = if let Some((x, y, w, h)) = self.hover.rect {
+                        mx >= x && mx <= x + w && my >= y && my <= y + h
+                    } else {
+                        false
+                    };
                     if hover_popup_hovered {
                         winit::window::CursorIcon::Default
                     } else if self.modifiers.control_key() && self.ctrl_definition.target.is_some()

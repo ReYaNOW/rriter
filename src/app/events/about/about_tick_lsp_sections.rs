@@ -222,9 +222,8 @@ fn about_to_wait_lsp_hover_response(app: &mut App, request_id: i32, text: Option
     if app.apply_api_mock_hover_response(request_id, text.clone()) {
         return;
     }
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if state.request_id == Some(request_id) {
+    {
+        if app.hover.request_id == Some(request_id) {
             if crate::render_view::hover_trace_enabled() {
                 println!(
                     "[HOVER DEBUG] Received response for req id: {}. Has text: {}",
@@ -232,7 +231,7 @@ fn about_to_wait_lsp_hover_response(app: &mut App, request_id: i32, text: Option
                     text.is_some()
                 );
             }
-            if let Some(bo) = state.byte_offset {
+            if let Some(bo) = app.hover.byte_offset {
                 let current_mod = app.file_path.as_ref().and_then(|p| {
                     module_path_from_definition_path(p, &app.ide_workspaces)
                 });
@@ -264,7 +263,7 @@ fn about_to_wait_lsp_hover_response(app: &mut App, request_id: i32, text: Option
                     })
                 };
                 if apply_source_hover_response_to_state(
-                    &mut state,
+                    &mut app.hover,
                     request_id,
                     &app.editor,
                     bo,
@@ -280,7 +279,7 @@ fn about_to_wait_lsp_hover_response(app: &mut App, request_id: i32, text: Option
                 }
             }
         }
-    });
+    }
 }
 
 /// Definition response: Ctrl+click target or hover popup enrichment.
@@ -306,8 +305,8 @@ fn about_to_wait_lsp_definition_response(
         }
         return;
     }
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
+    {
+        let state = &mut app.hover;
         if state.definition_request_id == Some(request_id) {
             state.definition_request_id = None;
             let mut popup = state.pending_popup.take();
@@ -399,7 +398,7 @@ fn about_to_wait_lsp_definition_response(
                 }
             }
         }
-    });
+    }
 }
 
 /// Syncs LSP server status and log editors into the IDE panel.

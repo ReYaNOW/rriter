@@ -354,11 +354,13 @@ mod tests {
             item_idx: 3,
         };
         let now = std::time::Instant::now();
+        let mut timer = None;
 
-        git_tooltip_reset();
-        assert_eq!(git_tooltip_anchor(target, 10.0, 20.0, now), None);
+        git_tooltip_reset(&mut timer);
+        assert_eq!(git_tooltip_anchor(&mut timer, target, 10.0, 20.0, now), None);
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 30.0,
                 40.0,
@@ -368,6 +370,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 50.0,
                 60.0,
@@ -377,6 +380,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 70.0,
                 80.0,
@@ -386,6 +390,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 other_target,
                 90.0,
                 100.0,
@@ -395,6 +400,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 other_target,
                 110.0,
                 120.0,
@@ -404,6 +410,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 130.0,
                 140.0,
@@ -413,6 +420,7 @@ mod tests {
         );
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 150.0,
                 160.0,
@@ -420,7 +428,7 @@ mod tests {
             ),
             Some((130.0, 140.0))
         );
-        git_tooltip_reset();
+        git_tooltip_reset(&mut timer);
     }
 
     #[test]
@@ -431,11 +439,13 @@ mod tests {
             item_idx: 2,
         };
         let now = std::time::Instant::now();
+        let mut timer = None;
 
-        git_tooltip_reset();
-        assert_eq!(git_tooltip_anchor(target, 10.0, 20.0, now), None);
+        git_tooltip_reset(&mut timer);
+        assert_eq!(git_tooltip_anchor(&mut timer, target, 10.0, 20.0, now), None);
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 10.0,
                 20.0,
@@ -444,9 +454,10 @@ mod tests {
             Some((10.0, 20.0))
         );
 
-        git_tooltip_reset();
+        git_tooltip_reset(&mut timer);
         assert_eq!(
             git_tooltip_anchor(
+                &mut timer,
                 target,
                 10.0,
                 20.0,
@@ -454,7 +465,7 @@ mod tests {
             ),
             None
         );
-        git_tooltip_reset();
+        git_tooltip_reset(&mut timer);
     }
 
     #[test]

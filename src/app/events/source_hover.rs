@@ -128,15 +128,11 @@ fn module_path_from_definition_path_for_platform(
 }
 
 pub(super) const HOVER_MODULE_PREFIX: &str = "[[MODULE]] ";
-static HOVER_FOLDER_ICON_PREWARM: std::sync::Once = std::sync::Once::new();
 
 pub(crate) fn prepend_hover_module_path(
     popup: &mut crate::app::mouse::HoverPopup,
     module_path: &str,
 ) {
-    HOVER_FOLDER_ICON_PREWARM.call_once(|| {
-        crate::app::file_tree::pre_rasterize_icon("folder", true);
-    });
     let legacy_header = format!("{}{}", HOVER_MODULE_PREFIX, module_path);
     if popup.text.starts_with(module_path) || popup.text.starts_with(&legacy_header) {
         return;

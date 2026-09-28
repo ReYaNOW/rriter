@@ -429,7 +429,7 @@ impl App {
                 self.is_dragging = false;
                 self.is_editor_drag_pending = true;
                 self.focus_document_text_surface();
-                crate::app::mouse::clear_hover_popup(self.renderer.as_mut());
+                crate::app::mouse::clear_hover_popup(&mut self.hover);
                 self.scroll_y.anim_speed = 15.0;
                 self.scroll_y.stop_anim();
 

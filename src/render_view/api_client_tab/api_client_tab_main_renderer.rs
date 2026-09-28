@@ -507,6 +507,7 @@ impl Renderer {
         tab_meta: &crate::app::api_client::ApiClientTabMeta,
         tab_state: &crate::app::api_client::ApiClientTabState,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
         mx: f32,
         my: f32,
         blink_alpha: f32,
@@ -623,7 +624,7 @@ impl Renderer {
             ide_panel,
         };
         cy = self.draw_api_client_tab_route_header(ctx, cy, ui_registry);
-        cy = self.draw_api_client_tab_mock(ctx, cy, manual_mock, mock_override, ui_registry);
+        cy = self.draw_api_client_tab_mock(ctx, cy, manual_mock, mock_override, ui_registry, hover);
         cy = self.draw_api_client_tab_route_auth(ctx, cy, ui_registry);
         cy = self.draw_api_client_tab_input_tabs(ctx, cy, ui_registry);
         if tab_state.input_doc_view == ApiInputDocView::Schema {

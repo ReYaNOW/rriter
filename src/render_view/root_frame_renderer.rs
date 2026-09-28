@@ -152,6 +152,9 @@ impl Renderer {
         show_settings: bool,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        // Owned by `App::hover`; the frame writes back only hit-test/layout outputs
+        // (popup rects, hovered diagnostics, dwell timers), like `ui_registry`.
+        hover: &mut crate::app::mouse::HoverState,
         tab_scroll_x: f32,
         _syntax_errors: &[(usize, usize)],
         ctrl_definition_range: Option<(usize, usize)>,
@@ -162,6 +165,7 @@ impl Renderer {
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
+        self.editor_hover_blocked = false;
         self.sync_current_python_inlay_hints(python_inlay_hints);
 
         let frame_now = Instant::now();
@@ -273,6 +277,7 @@ impl Renderer {
                 ide_panel,
                 lsp,
                 ui_registry,
+                hover,
                 ide_workspaces,
                 layout,
                 viewport,
@@ -443,6 +448,7 @@ impl Renderer {
             lsp_diagnostics,
             ide_panel,
             ui_registry,
+            hover,
             active_tab,
             layout,
             viewport,
@@ -504,6 +510,7 @@ impl Renderer {
             ide_panel,
             lsp,
             ui_registry,
+            hover,
             inline_git_popup,
             layout,
             viewport,

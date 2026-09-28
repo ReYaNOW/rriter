@@ -607,6 +607,7 @@ impl Renderer {
                 selection,
                 editor,
                 ui_registry,
+                None,
                 mx,
                 my,
                 0.0,

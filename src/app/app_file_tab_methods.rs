@@ -246,9 +246,7 @@ impl App {
                 self.wait_for_current_highlight();
             }
             self.clear_ctrl_definition();
-            crate::app::mouse::HOVER_STATE.with(|state| {
-                *state.borrow_mut() = crate::app::mouse::HoverState::default();
-            });
+            self.hover = crate::app::mouse::HoverState::default();
         } else {
             self.notify_lsp_tab_close(closing_lsp);
             self.tabs.remove(idx);

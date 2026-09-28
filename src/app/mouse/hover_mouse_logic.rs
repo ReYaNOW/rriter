@@ -1,9 +1,5 @@
 use super::{HoverPopup, HoverState};
 
-thread_local! {
-    pub static HOVER_STATE: std::cell::RefCell<HoverState> = std::cell::RefCell::new(HoverState::default());
-}
-
 pub const HOVER_REQUEST_DELAY_SEC: f32 = 0.34;
 pub const HOVER_POPUP_ANIM_SPEED: f32 = 8.0;
 pub const HOVER_POPUP_ANIM_SNAP_EPS: f32 = 0.0005;
@@ -111,39 +107,37 @@ pub(crate) fn diagnostic_hover_target_byte_on_line(
         .map(|(_, _, type_target)| type_target)
 }
 
-pub fn clear_hover_popup(_renderer: Option<&mut crate::renderer::Renderer>) -> bool {
-    HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let had_popup = state.popup.is_some()
-            || state.request_id.is_some()
-            || state.definition_request_id.is_some()
-            || state.byte_offset.is_some()
-            || state.rect.is_some()
-            || state.diag_rect.is_some();
-        state.request_id = None;
-        state.definition_request_id = None;
-        state.popup = None;
-        state.pending_popup = None;
-        state.timer = 0.0;
-        state.byte_offset = None;
-        state.rect = None;
-        state.interaction_rect = None;
-        state.max_scroll = 0.0;
-        state.selection_anchor = None;
-        state.selection_cursor = None;
-        state.selecting = false;
-        state.diag_selection_anchor = None;
-        state.diag_selection_cursor = None;
-        state.diag_selecting = false;
-        state.reset_diagnostic_popup();
-        had_popup
-    })
+pub fn clear_hover_popup(state: &mut HoverState) -> bool {
+    let had_popup = state.popup.is_some()
+        || state.request_id.is_some()
+        || state.definition_request_id.is_some()
+        || state.byte_offset.is_some()
+        || state.rect.is_some()
+        || state.diag_rect.is_some();
+    state.request_id = None;
+    state.definition_request_id = None;
+    state.popup = None;
+    state.pending_popup = None;
+    state.timer = 0.0;
+    state.byte_offset = None;
+    state.rect = None;
+    state.interaction_rect = None;
+    state.max_scroll = 0.0;
+    state.selection_anchor = None;
+    state.selection_cursor = None;
+    state.selecting = false;
+    state.diag_selection_anchor = None;
+    state.diag_selection_cursor = None;
+    state.diag_selecting = false;
+    state.reset_diagnostic_popup();
+    had_popup
 }
 
 pub fn suppress_hover_popup_until_mouse_move(
+    state: &mut HoverState,
     renderer: Option<&mut crate::renderer::Renderer>,
 ) -> bool {
-    let had_popup = clear_hover_popup(None);
+    let had_popup = clear_hover_popup(state);
     if let Some(renderer) = renderer {
         renderer.suppress_popups_until_next_mouse_move();
     }

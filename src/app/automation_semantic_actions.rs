@@ -139,7 +139,7 @@ fn step_failure_context(
             step_progress,
             hover_last_anchor,
         ),
-        AutomationStep::ScrollHoverTimed { .. } => hover_state_diagnostics(),
+        AutomationStep::ScrollHoverTimed { .. } => hover_state_diagnostics(&app.hover),
         AutomationStep::Dart(DartAutomationStep::WaitClosingHints { minimum_count }) => {
             crate::app::automation_dart::diagnostics(app, *minimum_count)
         }
@@ -290,21 +290,18 @@ fn hover_progress_action(
     }
 }
 
-fn hover_state_diagnostics() -> String {
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let state = state.borrow();
-        format!(
-            "popup={} pending={} rect={:?} byte_offset={:?} request_id={:?} definition_request_id={:?} timer={:.3} max_scroll={:.1}",
-            state.popup.is_some(),
-            state.pending_popup.is_some(),
-            state.rect,
-            state.byte_offset,
-            state.request_id,
-            state.definition_request_id,
-            state.timer,
-            state.max_scroll,
-        )
-    })
+fn hover_state_diagnostics(state: &crate::app::mouse::HoverState) -> String {
+    format!(
+        "popup={} pending={} rect={:?} byte_offset={:?} request_id={:?} definition_request_id={:?} timer={:.3} max_scroll={:.1}",
+        state.popup.is_some(),
+        state.pending_popup.is_some(),
+        state.rect,
+        state.byte_offset,
+        state.request_id,
+        state.definition_request_id,
+        state.timer,
+        state.max_scroll,
+    )
 }
 
 fn hover_highlight_is_current(
@@ -402,7 +399,7 @@ fn hover_failure_diagnostics(
         target_byte_offset,
         install_attempts,
         derived_anchor,
-        hover_state_diagnostics(),
+        hover_state_diagnostics(&app.hover),
         renderer,
         hover_blocker_diagnostics(app),
     )
@@ -435,14 +432,15 @@ fn prepare_automation_hover_pointer(app: &mut App, byte_offset: usize) -> Option
     Some(anchor)
 }
 
-fn install_automation_hover_popup(byte_offset: usize, popup: crate::app::mouse::HoverPopup) {
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        *state = crate::app::mouse::HoverState::default();
-        state.byte_offset = Some(byte_offset);
-        state.timer = 1.0;
-        state.popup = Some(popup);
-    });
+fn install_automation_hover_popup(
+    state: &mut crate::app::mouse::HoverState,
+    byte_offset: usize,
+    popup: crate::app::mouse::HoverPopup,
+) {
+    *state = crate::app::mouse::HoverState::default();
+    state.byte_offset = Some(byte_offset);
+    state.timer = 1.0;
+    state.popup = Some(popup);
 }
 
 fn show_hover_semantic(
@@ -468,8 +466,7 @@ fn show_hover_semantic(
         return StepResult::Failed(format!("hover target was not found: {needle}"));
     };
 
-    let popup_status = crate::app::mouse::HOVER_STATE
-        .with(|state| hover_popup_status(&state.borrow(), byte_offset));
+    let popup_status = hover_popup_status(&app.hover, byte_offset);
     match hover_progress_action(prerequisites, popup_status, *install_attempts) {
         HoverProgressAction::WaitStable => StepResult::Pending,
         HoverProgressAction::Done => StepResult::Done,
@@ -497,7 +494,7 @@ fn show_hover_semantic(
                 anchor,
             );
             popup.anim_progress = 1.0;
-            install_automation_hover_popup(byte_offset, popup);
+            install_automation_hover_popup(&mut app.hover, byte_offset, popup);
             println!(
                 "PGO_AUTOMATION_HOVER install_attempt={} target={} byte_offset={} derived_anchor=({:.1},{:.1}) {}",
                 *install_attempts,

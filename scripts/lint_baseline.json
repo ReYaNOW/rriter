@@ -944,5 +944,24 @@
       "too_many_lines": 8
     }
   },
-  "file_length": {}
+  "file_length": {},
+  "patterns": {
+    "src/platform.rs": {"global-lock": 3},
+    "src/platform/offscreen_gl.rs": {"global-lock": 1},
+    "src/platform/integration.rs": {"global-lock": 5},
+    "src/headless/ui_tests_settings_database.rs": {"global-lock": 1},
+    "src/app/git_panel/git_process.rs": {"global-lock": 1},
+    "src/app/api_client.rs": {"global-lock": 1},
+    "src/app/file_tree_scan.rs": {"global-lock": 1},
+    "src/app/database/database_postgres.rs": {"global-lock": 1},
+    "src/app/autocomplete/autocomplete_detail_helpers.rs": {"global-lock": 1},
+    "src/languages/python.rs": {"thread-local": 1},
+    "src/languages/dart.rs": {"thread-local": 1},
+    "src/render_view/root_helpers.rs": {"thread-local": 1},
+    "src/render_view/ui/hover_widget.rs": {"thread-local": 1},
+    "src/render_view/database_query_tab.rs": {"thread-local": 1},
+    "src/app/events.rs": {"thread-local": 1},
+    "src/app/api_client/api_client_app_click_methods.rs": {"app-methods-impl": 1},
+    "src/app/api_client/api_client_app_text_methods.rs": {"app-methods-impl": 1}
+  }
 }

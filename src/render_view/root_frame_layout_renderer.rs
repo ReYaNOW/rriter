@@ -63,17 +63,13 @@ impl Renderer {
             .partition_point(|&o| o <= editor.cursor)
             .saturating_sub(1);
 
-        let query_hover_source = tabs.get(active_tab).and_then(|tab| match &tab.kind {
-            crate::app::EditorTabKind::DatabaseQuery(meta, state) => {
-                Some((meta.console_id.0, state.editor_diagnostics.as_slice()))
+        // The matching hover context is set on `App::hover` before the frame
+        // (`App::render_main_frame`), so this phase only reads diagnostics.
+        let query_diagnostics = tabs.get(active_tab).and_then(|tab| match &tab.kind {
+            crate::app::EditorTabKind::DatabaseQuery(_, state) => {
+                Some(state.editor_diagnostics.as_slice())
             }
             _ => None,
-        });
-        let query_diagnostics = query_hover_source.map(|(_, diagnostics)| diagnostics);
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            state
-                .borrow_mut()
-                .set_database_query_hover_context(query_hover_source.map(|(id, _)| id));
         });
         let (diag_version, instant_raw, stale_instant_diagnostics) =
             if let Some(diagnostics) = query_diagnostics {

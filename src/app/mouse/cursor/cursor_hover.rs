@@ -22,7 +22,7 @@ impl App {
             self.markdown_mode() == crate::app::MarkdownMode::Read,
         );
         if suppress_editor_hover {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
         }
 
@@ -37,14 +37,12 @@ impl App {
         }
 
         let s = self.renderer.as_ref().unwrap().scale_factor;
-        let (in_hover_popup, in_hover_source_line) = HOVER_STATE.with(|state| {
-            state.borrow().popup_safe_area_contains(
-                position.x as f32,
-                position.y as f32,
-                self.renderer.as_ref().unwrap().width,
-                s,
-            )
-        });
+        let (in_hover_popup, in_hover_source_line) = self.hover.popup_safe_area_contains(
+            position.x as f32,
+            position.y as f32,
+            self.renderer.as_ref().unwrap().width,
+            s,
+        );
         if self.update_api_mock_hover_from_cursor(
             position.x as f32,
             position.y as f32,
@@ -78,7 +76,7 @@ impl App {
             );
 
         if in_blocking_bottom_panel || in_database_query_results {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
         }
 
@@ -181,12 +179,13 @@ impl App {
                 false
             };
             let cleared_inlay_hover = if hover_on_inlay_hint {
-                clear_hover_popup(self.renderer.as_mut())
+                clear_hover_popup(&mut self.hover)
             } else {
                 false
             };
-            let in_diag_popup = HOVER_STATE
-                .with(|s| s.borrow().diag_rect)
+            let in_diag_popup = self
+                .hover
+                .diag_rect
                 .map(|(rx, ry, rw, rh, _, _, _)| {
                     position.x as f32 >= rx
                         && position.x as f32 <= rx + rw
@@ -205,13 +204,13 @@ impl App {
             };
 
             let mut clear_diag_popup = false;
-            HOVER_STATE.with(|state| {
-                let mut state = state.borrow_mut();
+            {
+                let state = &mut self.hover;
                 let keep_visible_popup = state.popup.is_some();
                 let old_byte = state.byte_offset;
                 if let Some(should_clear_diag) =
                     crate::app::mouse::update_editor_hover_state_for_cursor(
-                        &mut state,
+                        state,
                         &self.editor,
                         byte_offset,
                         diag_hover_byte,
@@ -226,9 +225,9 @@ impl App {
                     }
                     clear_diag_popup = should_clear_diag;
                 }
-            });
+            }
             if clear_diag_popup {
-                HOVER_STATE.with(|s| s.borrow_mut().reset_diagnostic_popup());
+                self.hover.reset_diagnostic_popup();
             }
             self.update_ctrl_definition_hover(ctrl_definition_byte);
             if cleared_inlay_hover {

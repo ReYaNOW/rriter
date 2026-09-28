@@ -832,14 +832,6 @@ struct GitTooltipTarget {
     item_idx: usize,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct GitTooltipTimer {
-    target: GitTooltipTarget,
-    start: std::time::Instant,
-    anchor_x: f32,
-    anchor_y: f32,
-}
-
 const GIT_TOOLTIP_DELAY_SECS: f32 = 0.4;
 const GIT_TOOLTIP_FILE: u8 = 0;
 const GIT_TOOLTIP_ROLLBACK: u8 = 1;
@@ -847,72 +839,81 @@ const GIT_TOOLTIP_STAGE_ALL: u8 = 2;
 const GIT_TOOLTIP_UNSTAGE_ALL: u8 = 3;
 const GIT_TOOLTIP_GRAPH_COMMIT: u8 = 4;
 
-thread_local! {
-    static GIT_TOOLTIP_TIMER: std::cell::RefCell<Option<GitTooltipTimer>> = const { std::cell::RefCell::new(None) };
-}
-
 fn git_tooltip_anchor(
+    timer: &mut Option<crate::renderer::GitTooltipTimer>,
     target: GitTooltipTarget,
     mouse_x: f32,
     mouse_y: f32,
     now: std::time::Instant,
 ) -> Option<(f32, f32)> {
-    GIT_TOOLTIP_TIMER.with(|timer| {
-        let mut timer = timer.borrow_mut();
-        let reset = timer.as_ref().is_none_or(|state| state.target != target);
-        if reset {
-            *timer = Some(GitTooltipTimer {
-                target,
-                start: now,
-                anchor_x: mouse_x,
-                anchor_y: mouse_y,
-            });
-            return None;
-        }
+    let reset = timer.as_ref().is_none_or(|state| {
+        (state.kind, state.workspace_idx, state.item_idx)
+            != (target.kind, target.workspace_idx, target.item_idx)
+    });
+    if reset {
+        *timer = Some(crate::renderer::GitTooltipTimer {
+            kind: target.kind,
+            workspace_idx: target.workspace_idx,
+            item_idx: target.item_idx,
+            start: now,
+            anchor_x: mouse_x,
+            anchor_y: mouse_y,
+        });
+        return None;
+    }
 
-        timer.as_ref().and_then(|state| {
-            (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
-                .then_some((state.anchor_x, state.anchor_y))
-        })
+    timer.as_ref().and_then(|state| {
+        (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
+            .then_some((state.anchor_x, state.anchor_y))
     })
 }
 
 fn git_graph_tooltip_anchor(
+    timer: &mut Option<crate::renderer::GitTooltipTimer>,
     target: GitTooltipTarget,
     anchor_x: f32,
     anchor_y: f32,
     now: std::time::Instant,
 ) -> Option<(f32, f32)> {
-    GIT_TOOLTIP_TIMER.with(|timer| {
-        let mut timer = timer.borrow_mut();
-        if let Some(state) = timer.as_ref()
-            && state.target != target
-            && now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS
-        {
-            *timer = Some(GitTooltipTimer {
-                target,
-                start: now - std::time::Duration::from_millis(500),
-                anchor_x,
-                anchor_y,
-            });
-            return Some((anchor_x, anchor_y));
-        }
-        let reset = timer.as_ref().is_none_or(|state| state.target != target);
-        if reset {
-            *timer = Some(GitTooltipTimer {
-                target,
-                start: now,
-                anchor_x,
-                anchor_y,
-            });
-            return None;
-        }
+    if let Some(state) = timer.as_ref()
+        && (state.kind, state.workspace_idx, state.item_idx)
+            != (target.kind, target.workspace_idx, target.item_idx)
+        && now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS
+    {
+        *timer = Some(crate::renderer::GitTooltipTimer {
+            kind: target.kind,
+            workspace_idx: target.workspace_idx,
+            item_idx: target.item_idx,
+            start: now - std::time::Duration::from_millis(500),
+            anchor_x,
+            anchor_y,
+        });
+        return Some((anchor_x, anchor_y));
+    }
+    let reset = timer.as_ref().is_none_or(|state| {
+        (state.kind, state.workspace_idx, state.item_idx)
+            != (target.kind, target.workspace_idx, target.item_idx)
+    });
+    if reset {
+        *timer = Some(crate::renderer::GitTooltipTimer {
+            kind: target.kind,
+            workspace_idx: target.workspace_idx,
+            item_idx: target.item_idx,
+            start: now,
+            anchor_x,
+            anchor_y,
+        });
+        return None;
+    }
 
-        timer.as_ref().and_then(|state| {
-            (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
-                .then_some((state.anchor_x, state.anchor_y))
-        })
+    timer.as_ref().and_then(|state| {
+        (now.duration_since(state.start).as_secs_f32() > GIT_TOOLTIP_DELAY_SECS)
+            .then_some((state.anchor_x, state.anchor_y))
     })
+}
+
+fn git_tooltip_reset(timer: &mut Option<crate::renderer::GitTooltipTimer>) {
+    *timer = None;
 }
 
 fn git_graph_tooltip_branch_counts(
@@ -927,10 +928,6 @@ fn git_graph_tooltip_branch_counts(
         commit_idx.saturating_add(1),
         total.saturating_sub(commit_idx).max(1),
     )
-}
-
-fn git_tooltip_reset() {
-    GIT_TOOLTIP_TIMER.with(|timer| *timer.borrow_mut() = None);
 }
 
 fn git_graph_selection_range(renderer: &Renderer) -> Option<(usize, usize)> {

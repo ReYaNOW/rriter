@@ -1330,6 +1330,10 @@ pub struct App {
 
     /// Декларативная система UI для автоматической обработки кликов
     pub ui_registry: crate::ui_system::UiRegistry,
+    /// Editor LSP hover/diagnostic popup state. Event and tick code mutate it through
+    /// `&mut self`; `Renderer::draw` receives it next to `ui_registry` and writes back
+    /// only its per-frame hit-test/layout outputs (rects, hovered diagnostics, anim).
+    pub hover: crate::app::mouse::HoverState,
 
     pub tabs: Vec<EditorTab>,
     pub active_tab: usize,

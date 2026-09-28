@@ -112,7 +112,13 @@ impl Renderer {
                     return;
                 }
                 if let Some((anchor_x, anchor_y)) =
-                    git_graph_tooltip_anchor(target, mouse_x, mouse_y, std::time::Instant::now())
+                    git_graph_tooltip_anchor(
+                        &mut self.git_tooltip_timer,
+                        target,
+                        mouse_x,
+                        mouse_y,
+                        std::time::Instant::now(),
+                    )
                 {
                     let mut scratch = std::mem::take(&mut self.scratch_buffer);
                     self.draw_git_graph_tooltip(
@@ -138,7 +144,7 @@ impl Renderer {
                 return;
             }
 
-            git_tooltip_reset();
+            git_tooltip_reset(&mut self.git_tooltip_timer);
             self.git_graph_tooltip_hover = None;
             self.git_graph_tooltip_text.clear();
             self.git_graph_tooltip_text_rows.clear();
@@ -152,7 +158,13 @@ impl Renderer {
         }
 
         if let Some((anchor_x, anchor_y)) =
-            git_tooltip_anchor(target, mouse_x, mouse_y, std::time::Instant::now())
+            git_tooltip_anchor(
+                &mut self.git_tooltip_timer,
+                target,
+                mouse_x,
+                mouse_y,
+                std::time::Instant::now(),
+            )
         {
             self.draw_git_file_tooltip(&tooltip, anchor_x, anchor_y, s);
         } else {
@@ -170,7 +182,7 @@ impl Renderer {
         self.git_graph_tooltip_stable_w = 0.0;
         self.clear_git_graph_tooltip_selection();
         self.git_tooltip_waiting = false;
-        git_tooltip_reset();
+        git_tooltip_reset(&mut self.git_tooltip_timer);
         self.reset_delayed_tooltip_anchor();
     }
 

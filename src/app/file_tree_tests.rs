@@ -263,6 +263,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
         vec![root.join("missing"), root.clone()],
         expanded,
         vec!["skip*".to_string()],
+        FxHashSet::default(),
         &crate::ui_waker::UiWaker::counting(),
     );
 
@@ -270,15 +271,19 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
     assert!(!first_message.is_terminal());
     let first = match first_message {
         FileTreeScanMessage::Nodes(nodes) => nodes,
+        FileTreeScanMessage::Icon(_, _) => panic!("scan must send nodes before icon data"),
         FileTreeScanMessage::IconsReady => panic!("scan must send nodes before icon signal"),
         FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
     };
-    let second = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
-
     let names: Vec<_> = first.iter().map(|node| node.name.as_str()).collect();
-
-    assert!(second.is_terminal());
-    assert!(matches!(second, FileTreeScanMessage::IconsReady));
+    loop {
+        let message = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();
+        if message.is_terminal() {
+            assert!(matches!(message, FileTreeScanMessage::IconsReady));
+            break;
+        }
+        assert!(matches!(message, FileTreeScanMessage::Icon(_, _)));
+    }
     assert!(matches!(
         rx.recv_timeout(std::time::Duration::from_millis(50)),
         Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
@@ -289,6 +294,53 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
     assert!(!names.contains(&"skip_dir"));
     assert!(!names.contains(&"skip.py"));
     assert!(first.iter().all(|node| node.path.exists()));
+
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
+fn second_file_tree_scan_skips_known_icon_keys() {
+    let root = test_root("known_icons_scan");
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("known.rs"), "known").unwrap();
+
+    let mut expanded = FxHashSet::default();
+    expanded.insert(root.clone());
+    let scan = |known_icons| {
+        spawn_scan(
+            vec![root.clone()],
+            expanded.clone(),
+            Vec::new(),
+            known_icons,
+            &crate::ui_waker::UiWaker::counting(),
+        )
+    };
+    let first = scan(FxHashSet::default());
+    let mut known_icons = FxHashSet::default();
+    loop {
+        match first.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            FileTreeScanMessage::Nodes(_) => {}
+            FileTreeScanMessage::Icon(key, _) => {
+                known_icons.insert(key);
+            }
+            FileTreeScanMessage::IconsReady => break,
+            FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
+        }
+    }
+    assert!(!known_icons.is_empty());
+
+    let second = scan(known_icons.clone());
+    loop {
+        match second.recv_timeout(std::time::Duration::from_secs(5)).unwrap() {
+            FileTreeScanMessage::Nodes(_) => {}
+            FileTreeScanMessage::Icon(key, _) => {
+                assert!(!known_icons.contains(key));
+            }
+            FileTreeScanMessage::IconsReady => break,
+            FileTreeScanMessage::Failed(error) => panic!("scan failed: {error}"),
+        }
+    }
 
     let _ = std::fs::remove_dir_all(&root);
 }

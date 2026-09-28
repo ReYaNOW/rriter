@@ -312,6 +312,7 @@ impl Renderer {
 
     pub fn draw_diagnostic_popup(
         &mut self,
+        hover: &mut crate::app::mouse::HoverState,
         lsp_diagnostics: &[&Diagnostic],
         ide_panel: &IdePanelState,
         ui_registry: &mut UiRegistry,
@@ -322,29 +323,21 @@ impl Renderer {
         my: f32,
         wants_pointer: &mut bool,
     ) {
-        let hovered_diags_cache = crate::app::mouse::HOVER_STATE.with(|s| {
-            let s = s.borrow();
-            s.diagnostic_popup_cache().to_vec()
-        });
+        let hovered_diags_cache = hover.diagnostic_popup_cache().to_vec();
         let hovered_diags_cache =
             valid_diagnostic_popup_cache(hovered_diags_cache, lsp_diagnostics);
         if hovered_diags_cache.is_empty() {
-            crate::app::mouse::HOVER_STATE.with(|state| {
-                state.borrow_mut().reset_diagnostic_popup();
-            });
+            hover.reset_diagnostic_popup();
             return;
         }
 
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.diag_copy_texts.clear();
-            state
-                .diag_copy_texts
-                .resize(lsp_diagnostics.len(), String::new());
-            for &(idx, _, _, _, _) in &hovered_diags_cache {
-                state.diag_copy_texts[idx] = diagnostic_copy_text(lsp_diagnostics[idx]);
-            }
-        });
+        hover.diag_copy_texts.clear();
+        hover
+            .diag_copy_texts
+            .resize(lsp_diagnostics.len(), String::new());
+        for &(idx, _, _, _, _) in &hovered_diags_cache {
+            hover.diag_copy_texts[idx] = diagnostic_copy_text(lsp_diagnostics[idx]);
+        }
 
         let s = self.scale_factor;
         let pad = 12.0 * s;
@@ -360,10 +353,7 @@ impl Renderer {
         let mut popup_text = String::new();
 
         DIAG_CHARS.with(|c| c.borrow_mut().clear());
-        let (sel_anchor, sel_cursor) = crate::app::mouse::HOVER_STATE.with(|s| {
-            let s = s.borrow();
-            (s.diag_selection_anchor, s.diag_selection_cursor)
-        });
+        let (sel_anchor, sel_cursor) = (hover.diag_selection_anchor, hover.diag_selection_cursor);
         let sel_start = sel_anchor.unwrap_or(0).min(sel_cursor.unwrap_or(0));
         let sel_end = sel_anchor.unwrap_or(0).max(sel_cursor.unwrap_or(0));
         let has_sel = sel_anchor.is_some() && sel_cursor.is_some() && sel_start != sel_end;
@@ -455,22 +445,20 @@ impl Renderer {
         let total_h = total_content_h
             .min(self.height * 0.30)
             .min(self.height - 60.0 * s);
-        let scroll_y = crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.diag_max_scroll = (total_content_h - total_h).max(0.0);
-            let max_scroll = state.diag_max_scroll;
-            state.diag_scroll.clamp_target(0.0, max_scroll);
-            state.diag_text = popup_text;
-            state.diag_scroll.current.round()
-        });
+        let scroll_y = {
+            hover.diag_max_scroll = (total_content_h - total_h).max(0.0);
+            let max_scroll = hover.diag_max_scroll;
+            hover.diag_scroll.clamp_target(0.0, max_scroll);
+            hover.diag_text = popup_text;
+            hover.diag_scroll.current.round()
+        };
         let mut box_w = global_max_w.max(attached_hover_w);
         let combined_hover_h = attached_hover_h;
 
         let (_, first_diag_x, first_line_y_top, first_diag_y_bottom, first_diag_x_end) =
             hovered_diags_cache[0];
 
-        let popup_anchor_x =
-            crate::app::mouse::HOVER_STATE.with(|s| s.borrow().popup.as_ref().map(|p| p.anchor_x));
+        let popup_anchor_x = hover.popup.as_ref().map(|p| p.anchor_x);
 
         box_w = box_w.round();
         let combined_h = total_h + combined_hover_h;
@@ -487,17 +475,15 @@ impl Renderer {
             popup_anchor_x,
         );
 
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow_mut().diag_rect = Some((
-                bx,
-                by,
-                box_w,
-                total_h,
-                first_diag_x,
-                first_diag_x_end,
-                (first_line_y_top + first_diag_y_bottom) * 0.5,
-            ));
-        });
+        hover.diag_rect = Some((
+            bx,
+            by,
+            box_w,
+            total_h,
+            first_diag_x,
+            first_diag_x_end,
+            (first_line_y_top + first_diag_y_bottom) * 0.5,
+        ));
 
         ui_registry.register_blocker(
             crate::ui_system::UiId::BottomPanelBody,
@@ -514,7 +500,7 @@ impl Renderer {
             ui_registry.reset_cursor_state();
         }
 
-        let anim_progress = crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress);
+        let anim_progress = hover.diag_anim_progress;
         let source_anchor_x = popup_anchor_x.unwrap_or((first_diag_x + first_diag_x_end) * 0.5);
         let source_anchor_y = (first_line_y_top + first_diag_y_bottom) * 0.5;
         let (anim_mx, anim_my) =
@@ -566,11 +552,9 @@ impl Renderer {
             6.0 * s,
             (2.0 * s).round().max(1.0),
         );
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow_mut().interaction_rect = (frame_surface.outer_rect.2 > 0.0
-                && frame_surface.outer_rect.3 > 0.0)
-                .then_some(frame_surface.outer_rect);
-        });
+        hover.interaction_rect = (frame_surface.outer_rect.2 > 0.0
+            && frame_surface.outer_rect.3 > 0.0)
+            .then_some(frame_surface.outer_rect);
         let base_fill_color = [
             self.theme.minimap_bg[0],
             self.theme.minimap_bg[1],
@@ -756,10 +740,7 @@ impl Renderer {
                     );
                     if sfx_hovered {
                         *wants_pointer = true;
-                        crate::app::mouse::HOVER_STATE.with(|state| {
-                            state.borrow_mut().diag_href =
-                                diag.code_href.as_ref().map(|href| href.to_string());
-                        });
+                        hover.diag_href = diag.code_href.as_ref().map(|href| href.to_string());
                     }
 
                     ui_registry.register_rect(
@@ -1010,6 +991,10 @@ impl Renderer {
         selection: Option<(usize, usize)>,
         editor: &crate::editor::Editor,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        // Editor LSP hover state (`App::hover`): supplies the attached diagnostic's
+        // animation and receives the popup's wheel `interaction_rect`. `None` for
+        // popups that are not the LSP hover (Database DDL).
+        mut hover: Option<&mut crate::app::mouse::HoverState>,
         mx: f32,
         my: f32,
         render_scroll_y: f32,
@@ -1110,7 +1095,9 @@ impl Renderer {
 
         let anim_progress = popup.anim_progress;
         let attached_anim_progress = if attached_diag.is_some() {
-            crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_anim_progress)
+            hover
+                .as_ref()
+                .map_or(anim_progress, |hover| hover.diag_anim_progress)
         } else {
             anim_progress
         };
@@ -1163,11 +1150,11 @@ impl Renderer {
                 6.0 * s,
                 (2.0 * s).round().max(1.0),
             );
-            crate::app::mouse::HOVER_STATE.with(|state| {
-                state.borrow_mut().interaction_rect = (frame_surface.outer_rect.2 > 0.0
+            if let Some(hover) = hover {
+                hover.interaction_rect = (frame_surface.outer_rect.2 > 0.0
                     && frame_surface.outer_rect.3 > 0.0)
                     .then_some(frame_surface.outer_rect);
-            });
+            }
             let fill_color = fade_hover_color(self.theme.minimap_bg, opacity);
             let border_color = fade_hover_color(self.theme.sel, opacity);
             self.push_hover_popup_frame(

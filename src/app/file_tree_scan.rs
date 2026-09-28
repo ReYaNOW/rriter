@@ -7,16 +7,11 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-pub static RASTERIZED_ICONS: once_cell::sync::Lazy<
-    std::sync::Mutex<rustc_hash::FxHashMap<&'static str, RasterizedIconState>>,
-> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
-const RASTERIZED_ICON_CACHE_LIMIT: usize = 256;
-const RASTERIZED_ICON_READY_BYTE_LIMIT: usize = 1024 * 1024;
 const GITIGNORE_CACHE_LIMIT: usize = 32;
 const FILE_TREE_PARALLEL_ENTRY_THRESHOLD: usize = 512;
 
+#[derive(Debug)]
 pub enum RasterizedIconState {
-    Pending,
     Missing,
     Ready(Box<[u8]>),
 }
@@ -36,52 +31,6 @@ struct GitignoreCacheEntry {
 static GITIGNORE_CACHE: once_cell::sync::Lazy<
     std::sync::Mutex<rustc_hash::FxHashMap<crate::platform::PathKey, GitignoreCacheEntry>>,
 > = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
-
-fn trim_rasterized_icon_cache(
-    cache: &mut rustc_hash::FxHashMap<&'static str, RasterizedIconState>,
-    keep_key: &'static str,
-) {
-    while cache.len() > RASTERIZED_ICON_CACHE_LIMIT {
-        let victim = cache.iter().find_map(|(&key, value)| {
-            (key != keep_key
-                && matches!(
-                    value,
-                    RasterizedIconState::Pending | RasterizedIconState::Missing
-                ))
-            .then_some(key)
-        });
-        let victim = victim.or_else(|| {
-            cache.iter().find_map(|(&key, value)| {
-                (key != keep_key && matches!(value, RasterizedIconState::Ready(_))).then_some(key)
-            })
-        });
-        let Some(victim) = victim else {
-            break;
-        };
-        cache.remove(&victim);
-    }
-
-    let mut ready_bytes = cache
-        .values()
-        .map(|value| match value {
-            RasterizedIconState::Ready(data) => data.len(),
-            RasterizedIconState::Pending | RasterizedIconState::Missing => 0,
-        })
-        .sum::<usize>();
-    while ready_bytes > RASTERIZED_ICON_READY_BYTE_LIMIT {
-        let victim = cache.iter().find_map(|(&key, value)| match value {
-            RasterizedIconState::Ready(data) if key != keep_key => Some((key, data.len())),
-            RasterizedIconState::Ready(_)
-            | RasterizedIconState::Pending
-            | RasterizedIconState::Missing => None,
-        });
-        let Some((victim, bytes)) = victim else {
-            break;
-        };
-        cache.remove(&victim);
-        ready_bytes = ready_bytes.saturating_sub(bytes);
-    }
-}
 
 fn gitignore_fingerprint(gitignore_path: &Path) -> GitignoreFingerprint {
     match std::fs::metadata(gitignore_path) {
@@ -148,47 +97,10 @@ pub(super) fn gitignore_for_root(root: &Path) -> Arc<ignore::gitignore::Gitignor
     gitignore
 }
 
-pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) {
-    if !reserve_rasterized_icon(key) {
-        return;
-    }
-    finish_reserved_rasterized_icon(key, is_folder);
-}
-
-pub fn request_rasterized_icon(key: &'static str, is_folder: bool) {
-    if reserve_rasterized_icon(key)
-        && let Err(err) = crate::platform::spawn_named("rriter-file-icon", move || {
-            finish_reserved_rasterized_icon(key, is_folder);
-        })
-    {
-        eprintln!("RRiter: не удалось запустить rasterize icon worker: {err}");
-        finish_reserved_rasterized_icon(key, is_folder);
-    }
-}
-
-fn reserve_rasterized_icon(key: &'static str) -> bool {
-    let Ok(mut cache) = RASTERIZED_ICONS.lock() else {
-        return false;
-    };
-    if cache.contains_key(key) {
-        return false;
-    }
-    cache.insert(key, RasterizedIconState::Pending);
-    trim_rasterized_icon_cache(&mut cache, key);
-    true
-}
-
-fn store_rasterized_icon_state(key: &'static str, state: RasterizedIconState) {
-    let mut cache = crate::platform::lock_recover(&RASTERIZED_ICONS);
-    cache.insert(key, state);
-    trim_rasterized_icon_cache(&mut cache, key);
-}
-
-fn finish_reserved_rasterized_icon(key: &'static str, is_folder: bool) {
+pub fn pre_rasterize_icon(key: &'static str, is_folder: bool) -> RasterizedIconState {
     let svg_bytes = crate::app::file_icons::svg_for_key(key, is_folder);
     if svg_bytes.is_empty() {
-        store_rasterized_icon_state(key, RasterizedIconState::Missing);
-        return;
+        return RasterizedIconState::Missing;
     }
     let opt = resvg::usvg::Options::default();
     let svg_str = String::from_utf8_lossy(svg_bytes).replace("currentColor", "#ffffff");
@@ -212,13 +124,12 @@ fn finish_reserved_rasterized_icon(key: &'static str, is_folder: bool) {
                     px[2] = ((px[2] as u32 * 255) / a).min(255) as u8;
                 }
             }
-            store_rasterized_icon_state(key, RasterizedIconState::Ready(data.into_boxed_slice()));
+            return RasterizedIconState::Ready(data.into_boxed_slice());
         } else {
-            store_rasterized_icon_state(key, RasterizedIconState::Missing);
+            return RasterizedIconState::Missing;
         }
-    } else {
-        store_rasterized_icon_state(key, RasterizedIconState::Missing);
     }
+    RasterizedIconState::Missing
 }
 
 pub(super) fn read_children(dir: &PathBuf) -> (Vec<(String, PathBuf)>, Vec<(String, PathBuf)>) {
@@ -453,6 +364,7 @@ fn push_file_nodes(
 #[derive(Debug)]
 pub enum FileTreeScanMessage {
     Nodes(Vec<FileNode>),
+    Icon(&'static str, RasterizedIconState),
     IconsReady,
     Failed(String),
 }
@@ -468,6 +380,7 @@ pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
     user_patterns: Vec<String>,
+    known_icons: FxHashSet<&'static str>,
     ui_waker: &crate::ui_waker::UiWaker,
 ) -> mpsc::Receiver<FileTreeScanMessage> {
     let (tx, rx) = ui_waker.channel();
@@ -505,6 +418,7 @@ pub fn spawn_scan(
         for node in &full_nodes {
             needed_icons.insert((node.icon_key, node.is_dir));
         }
+        needed_icons.retain(|(key, _)| !known_icons.contains(key));
 
         // Отправляем полное дерево немедленно (текст появится мгновенно)
         let _ = worker_tx.send(FileTreeScanMessage::Nodes(full_nodes));
@@ -512,11 +426,13 @@ pub fn spawn_scan(
         // STEP 2: Параллельная растеризация иконок без блокировки UI
         if needed_icons.len() >= FILE_TREE_PARALLEL_ENTRY_THRESHOLD {
             needed_icons.into_par_iter().for_each(|(key, is_dir)| {
-                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+                let state = crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+                let _ = worker_tx.send(FileTreeScanMessage::Icon(key, state));
             });
         } else {
             for (key, is_dir) in needed_icons {
-                crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+                let state = crate::app::file_tree::pre_rasterize_icon(key, is_dir);
+                let _ = worker_tx.send(FileTreeScanMessage::Icon(key, state));
             }
         }
 

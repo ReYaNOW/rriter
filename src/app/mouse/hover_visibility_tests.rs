@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use super::super::{
-    HOVER_STATE, HoverState, advance_hover_anim_progress, clear_hover_popup,
+    HoverState, advance_hover_anim_progress, clear_hover_popup,
     compute_hover_visibility, compute_hover_visibility_from_matches,
     diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
     diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,
@@ -182,8 +182,10 @@ fn hover_visibility_combines_offsets_inside_same_identifier() {
 
 #[test]
 fn hover_state_resets_all_diagnostic_popup_fields() {
-    let mut state = HoverState::default();
-    state.diag_rect = Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0));
+    let mut state = HoverState {
+        diag_rect: Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0)),
+        ..HoverState::default()
+    };
     state.diag_scroll.current = 12.0;
     state.diag_scroll.target = 24.0;
     state.diag_max_scroll = 99.0;
@@ -225,67 +227,60 @@ fn hover_state_resets_all_diagnostic_popup_fields() {
 }
 
 #[test]
-fn clear_hover_popup_reports_and_resets_thread_local_state() {
-    assert!(!clear_hover_popup(None));
+fn clear_hover_popup_reports_and_resets_hover_state() {
+    let mut state = HoverState::default();
+    assert!(!clear_hover_popup(&mut state));
 
-    HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.request_id = Some(11);
-        state.definition_request_id = Some(12);
-        state.byte_offset = Some(9);
-        state.rect = Some((1.0, 2.0, 3.0, 4.0));
-        state.interaction_rect = Some((1.0, 2.0, 2.0, 2.0));
-        state.diag_rect = Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0));
-        state.max_scroll = 20.0;
-        state.selection_anchor = Some(1);
-        state.selection_cursor = Some(2);
-        state.selecting = true;
-        state.diag_selection_anchor = Some(3);
-        state.diag_selection_cursor = Some(4);
-        state.diag_selecting = true;
-        state.diag_text.push_str("diag");
-    });
+    state = HoverState {
+        request_id: Some(11),
+        definition_request_id: Some(12),
+        byte_offset: Some(9),
+        rect: Some((1.0, 2.0, 3.0, 4.0)),
+        interaction_rect: Some((1.0, 2.0, 2.0, 2.0)),
+        diag_rect: Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0)),
+        max_scroll: 20.0,
+        selection_anchor: Some(1),
+        selection_cursor: Some(2),
+        selecting: true,
+        diag_selection_anchor: Some(3),
+        diag_selection_cursor: Some(4),
+        diag_selecting: true,
+        diag_text: "diag".to_string(),
+        ..HoverState::default()
+    };
 
-    assert!(clear_hover_popup(None));
+    assert!(clear_hover_popup(&mut state));
 
-    HOVER_STATE.with(|state| {
-        let state = state.borrow();
-        assert!(state.request_id.is_none());
-        assert!(state.definition_request_id.is_none());
-        assert!(state.byte_offset.is_none());
-        assert!(state.rect.is_none());
-        assert!(state.interaction_rect.is_none());
-        assert!(state.diag_rect.is_none());
-        assert_eq!(state.max_scroll, 0.0);
-        assert!(state.selection_anchor.is_none());
-        assert!(state.selection_cursor.is_none());
-        assert!(!state.selecting);
-        assert!(state.diag_selection_anchor.is_none());
-        assert!(state.diag_selection_cursor.is_none());
-        assert!(!state.diag_selecting);
-        assert!(state.diag_text.is_empty());
-    });
+    assert!(state.request_id.is_none());
+    assert!(state.definition_request_id.is_none());
+    assert!(state.byte_offset.is_none());
+    assert!(state.rect.is_none());
+    assert!(state.interaction_rect.is_none());
+    assert!(state.diag_rect.is_none());
+    assert_eq!(state.max_scroll, 0.0);
+    assert!(state.selection_anchor.is_none());
+    assert!(state.selection_cursor.is_none());
+    assert!(!state.selecting);
+    assert!(state.diag_selection_anchor.is_none());
+    assert!(state.diag_selection_cursor.is_none());
+    assert!(!state.diag_selecting);
+    assert!(state.diag_text.is_empty());
 }
 
 #[test]
 fn keyboard_suppression_clears_hover_timer_and_target() {
-    HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.timer = 0.33;
-        state.byte_offset = Some(42);
-        state.request_id = Some(7);
-        state.definition_request_id = Some(8);
-    });
+    let mut state = HoverState::default();
+    state.timer = 0.33;
+    state.byte_offset = Some(42);
+    state.request_id = Some(7);
+    state.definition_request_id = Some(8);
 
-    assert!(suppress_hover_popup_until_mouse_move(None));
+    assert!(suppress_hover_popup_until_mouse_move(&mut state, None));
 
-    HOVER_STATE.with(|state| {
-        let state = state.borrow();
-        assert_eq!(state.timer, 0.0);
-        assert!(state.byte_offset.is_none());
-        assert!(state.request_id.is_none());
-        assert!(state.definition_request_id.is_none());
-    });
+    assert_eq!(state.timer, 0.0);
+    assert!(state.byte_offset.is_none());
+    assert!(state.request_id.is_none());
+    assert!(state.definition_request_id.is_none());
 }
 
 #[test]

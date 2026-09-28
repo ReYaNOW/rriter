@@ -840,7 +840,7 @@ mod markdown_code_scroll_gl_tests {
         app.handle_main_mouse_wheel(winit::event::MouseScrollDelta::PixelDelta(
             winit::dpi::PhysicalPosition::new(dx, dy),
         ));
-        crate::app::mouse::clear_hover_popup(None);
+        crate::app::mouse::clear_hover_popup(&mut app.hover);
     }
 
     #[test]
