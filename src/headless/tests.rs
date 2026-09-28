@@ -166,6 +166,39 @@ pub(crate) mod tests_support {
         (dir, session)
     }
 
+    pub(crate) fn terminal_session(name: &str) -> (PathBuf, HeadlessSession) {
+        const TEST_WIDTH: u32 = 1280;
+        const TEST_HEIGHT: u32 = 720;
+        const TEST_SCALE: f32 = 4.0 / 3.0;
+
+        let dir = scratch_dir(name);
+        let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
+        let lines = run_script(
+            &mut session,
+            format!("scale {TEST_SCALE}\nworkspace {}\n", dir.display()).as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+
+        if !session.app.ide_panel.is_open(crate::app::PanelId::Terminal) {
+            click_ui(&mut session, "SidebarSlot(Terminal)");
+        }
+        wait_until(&mut session, 8000, "terminal body", |session| {
+            let state = dump(session);
+            has_ui(&state, "TerminalBody") && !session.app.ide_panel.terminals.is_empty()
+        });
+        (dir, session)
+    }
+
+    pub(crate) fn run_terminal_command(session: &mut HeadlessSession, command: &str) {
+        click_ui(session, "TerminalBody");
+        assert!(session.app.ide_panel.terminal_focused);
+        let lines = run_script(
+            session,
+            format!("type {command}\nkey enter\n").as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    }
+
     pub(crate) fn panel_open(state: &serde_json::Value, panel: &str) -> bool {
         state["ide_panel"]["open"]
             .as_array()

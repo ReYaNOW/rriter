@@ -66,11 +66,17 @@ mod ui_tests_markdown;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_panels;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_problem_url;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_problems;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_problems_groups;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_project_search;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_protected_save;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_scrollbars_panels;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_settings_appearance;
 #[cfg(all(test, target_os = "linux"))]
@@ -91,6 +97,8 @@ mod ui_tests_tabs_dirty;
 mod ui_tests_tabs_tree;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_terminal;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_terminal_scrollbar;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_tree_ops;
 #[cfg(all(test, target_os = "linux"))]
@@ -387,6 +395,10 @@ impl HeadlessSession {
             Command::Screenshot(path) => self.screenshot(&path),
             Command::Quit => Response::Ok(None),
             Command::Dump(path) => self.dump(path.as_deref()),
+            Command::PickerAnswer(paths) => {
+                self.app.external_requests.queue_picker_answer(paths);
+                Response::Ok(None)
+            }
             Command::Dialog(answer) => {
                 if !self.app.confirm_dialog.drawn_in_frame() {
                     return Response::Err("no dialog".to_string());

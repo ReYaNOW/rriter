@@ -11,7 +11,7 @@ mod autocomplete;
 mod confirm_dialog;
 pub use confirm_dialog::{ConfirmDialog, PendingAction};
 mod protected_save;
-pub(crate) use protected_save::{ProtectedSaveCompletion, ProtectedSaves, SaveOutcome};
+pub(crate) use protected_save::{ProtectedSaveCompletion, ProtectedSaves, ProtectedWriter, SaveOutcome};
 pub mod automation;
 mod automation_dart;
 mod automation_database;

@@ -561,7 +561,7 @@ impl App {
             // Refused elevation falls through to the plain write-error path below.
             Err(error)
                 if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+                    && self.protected_saves.elevation_allowed() =>
             {
                 self.start_protected_save(path, content)
             }
@@ -694,11 +694,11 @@ impl App {
             // Refused elevation falls through to the plain write-error path below.
             Err(error)
                 if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+                    && self.protected_saves.elevation_allowed() =>
             {
                 // Save As stays synchronous: the document identity changes only
                 // after the write, which a background save cannot promise here.
-                crate::platform::write_text_file_elevated(
+                self.protected_saves.write_synchronously(
                     path,
                     content,
                     self.text_file_format,

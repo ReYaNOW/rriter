@@ -75,6 +75,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `screenshot <out.png>` | Draw one frame and save a PNG; the directory is created. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
+| `picker_answer [<path> ...]` | Queue the paths for the next native picker (`picker_answer` alone answers cancel). | `ok` |
 | `bench <frames> [csv=<path>] [action]` | Measure frame cost (see Bench). | `ok <json summary>` |
 | `record <frames> <dir> [action]` | `bench` plus a PNG per frame (see Bench). `dir` is one token. | `ok <json summary>` |
 | `info` | Refresh rate, frame budget, GL strings, policy, profile root. | `ok <json>` |

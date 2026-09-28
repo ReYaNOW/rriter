@@ -12,6 +12,8 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 #[cfg(not(target_os = "macos"))]
 use std::process::Command;
 
@@ -27,7 +29,10 @@ pub enum ExternalRequest {
 
 /// Sending half of one `ExternalRequestLog`; cloned into picker worker threads.
 #[derive(Clone)]
-pub struct ExternalRequestSink(std::sync::mpsc::Sender<ExternalRequest>);
+pub struct ExternalRequestSink {
+    sender: std::sync::mpsc::Sender<ExternalRequest>,
+    picker_answers: Arc<Mutex<VecDeque<Vec<PathBuf>>>>,
+}
 
 /// The requests an `App` would have sent to the desktop, recorded in headless
 /// only. One per `App`, so parallel sessions never see each other's requests.
@@ -40,8 +45,9 @@ pub struct ExternalRequestLog {
 impl Default for ExternalRequestLog {
     fn default() -> Self {
         let (tx, rx) = std::sync::mpsc::channel();
+        let picker_answers = Arc::new(Mutex::new(VecDeque::new()));
         Self {
-            sink: ExternalRequestSink(tx),
+            sink: ExternalRequestSink { sender: tx, picker_answers },
             rx,
             last: None,
         }
@@ -53,6 +59,13 @@ impl ExternalRequestLog {
         &self.sink
     }
 
+    /// Queues the paths returned by the next intercepted native picker call.
+    pub fn queue_picker_answer(&self, paths: Vec<PathBuf>) {
+        if let Ok(mut answers) = self.sink.picker_answers.lock() {
+            answers.push_back(paths);
+        }
+    }
+
     /// Returns the last intercepted request and clears it (read by `dump`).
     pub fn take(&mut self) -> Option<ExternalRequest> {
         while let Ok(request) = self.rx.try_recv() {
@@ -60,6 +73,14 @@ impl ExternalRequestLog {
         }
         self.last.take()
     }
+}
+
+pub(crate) fn take_picker_answer(sink: &ExternalRequestSink) -> Option<Vec<PathBuf>> {
+    sink.picker_answers.lock().ok()?.pop_front()
+}
+
+fn take_picker_path(sink: &ExternalRequestSink) -> Option<PathBuf> {
+    take_picker_answer(sink)?.into_iter().next()
 }
 
 /// `true` when the caller must not touch the desktop: headless records the
@@ -73,13 +94,13 @@ pub(crate) fn intercept_external(
         return false;
     }
     // The log lives as long as its `App`; a send after it is gone has no reader.
-    let _ = sink.0.send(request);
+    let _ = sink.sender.send(request);
     true
 }
 
 pub fn pick_file(requests: &ExternalRequestSink, title: &str) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::PickFile) {
-        return None;
+        return take_picker_path(requests);
     }
     rfd::FileDialog::new().set_title(title).pick_file()
 }
@@ -91,7 +112,7 @@ pub fn pick_file_with_filter(
     extensions: &[&str],
 ) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::PickFile) {
-        return None;
+        return take_picker_path(requests);
     }
     rfd::FileDialog::new()
         .set_title(title)
@@ -101,7 +122,7 @@ pub fn pick_file_with_filter(
 
 pub fn pick_files(requests: &ExternalRequestSink, title: &str) -> Vec<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::PickFiles) {
-        return Vec::new();
+        return take_picker_answer(requests).unwrap_or_default();
     }
     rfd::FileDialog::new()
         .set_title(title)
@@ -111,14 +132,14 @@ pub fn pick_files(requests: &ExternalRequestSink, title: &str) -> Vec<PathBuf> {
 
 pub fn pick_folder(requests: &ExternalRequestSink, title: &str) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::PickFolder) {
-        return None;
+        return take_picker_path(requests);
     }
     rfd::FileDialog::new().set_title(title).pick_folder()
 }
 
 pub fn save_file(requests: &ExternalRequestSink, title: &str, file_name: &str) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::SaveFile) {
-        return None;
+        return take_picker_path(requests);
     }
     rfd::FileDialog::new()
         .set_title(title)
@@ -134,7 +155,7 @@ pub fn save_file_with_filter(
     extensions: &[&str],
 ) -> Option<PathBuf> {
     if intercept_external(headless_policy(), requests, ExternalRequest::SaveFile) {
-        return None;
+        return take_picker_path(requests);
     }
     rfd::FileDialog::new()
         .set_title(title)

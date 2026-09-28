@@ -85,14 +85,17 @@ pub(crate) struct ProtectedSaves {
     slots: Vec<PathSlot>,
     next_id: ProtectedSaveId,
     writer: ProtectedWriter,
+    writer_injected: bool,
     awaiting_action: Option<ProtectedSaveId>,
 }
 
 impl Default for ProtectedSaves {
     fn default() -> Self {
-        Self::with_writer(Arc::new(|path, text, format, cancel| {
+        let mut saves = Self::with_writer(Arc::new(|path, text, format, cancel| {
             crate::platform::write_text_file_elevated(path, text, format, cancel)
-        }))
+        }));
+        saves.writer_injected = false;
+        saves
     }
 }
 
@@ -102,8 +105,23 @@ impl ProtectedSaves {
             slots: Vec::new(),
             next_id: 1,
             writer,
+            writer_injected: true,
             awaiting_action: None,
         }
+    }
+
+    pub(crate) fn elevation_allowed(&self) -> bool {
+        self.writer_injected || crate::platform::elevation_allowed(crate::platform::headless_policy())
+    }
+
+    pub(crate) fn write_synchronously(
+        &self,
+        path: &Path,
+        text: &str,
+        format: TextFileFormat,
+        cancel: &AtomicBool,
+    ) -> io::Result<()> {
+        (self.writer)(path, text, format, cancel)
     }
 
     pub(crate) fn has_pending(&self) -> bool {
