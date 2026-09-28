@@ -573,6 +573,7 @@ pub(crate) mod reviewer_stage2_integration {
             app.show_settings,
             None,
             &mut app.ui_registry,
+            &mut app.hover,
             app.tab_scroll.current,
             &[],
             None,

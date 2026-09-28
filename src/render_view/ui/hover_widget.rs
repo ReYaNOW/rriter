@@ -1094,9 +1094,12 @@ impl Renderer {
         let scroll_y = popup.scroll.current.round();
 
         let anim_progress = popup.anim_progress;
-        let attached_anim_progress = match (attached_diag, hover.as_deref()) {
-            (Some(_), Some(hover)) => hover.diag_anim_progress,
-            _ => anim_progress,
+        let attached_anim_progress = if attached_diag.is_some() {
+            hover
+                .as_ref()
+                .map_or(anim_progress, |hover| hover.diag_anim_progress)
+        } else {
+            anim_progress
         };
         let (anim_mx, anim_my) = stable_hover_animation_mouse(
             mx,
@@ -1147,7 +1150,7 @@ impl Renderer {
                 6.0 * s,
                 (2.0 * s).round().max(1.0),
             );
-            if let Some(hover) = hover.as_deref_mut() {
+            if let Some(hover) = hover {
                 hover.interaction_rect = (frame_surface.outer_rect.2 > 0.0
                     && frame_surface.outer_rect.3 > 0.0)
                     .then_some(frame_surface.outer_rect);

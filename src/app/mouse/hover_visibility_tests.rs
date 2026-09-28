@@ -229,20 +229,23 @@ fn clear_hover_popup_reports_and_resets_hover_state() {
     let mut state = HoverState::default();
     assert!(!clear_hover_popup(&mut state));
 
-    state.request_id = Some(11);
-    state.definition_request_id = Some(12);
-    state.byte_offset = Some(9);
-    state.rect = Some((1.0, 2.0, 3.0, 4.0));
-    state.interaction_rect = Some((1.0, 2.0, 2.0, 2.0));
-    state.diag_rect = Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0));
-    state.max_scroll = 20.0;
-    state.selection_anchor = Some(1);
-    state.selection_cursor = Some(2);
-    state.selecting = true;
-    state.diag_selection_anchor = Some(3);
-    state.diag_selection_cursor = Some(4);
-    state.diag_selecting = true;
-    state.diag_text.push_str("diag");
+    state = HoverState {
+        request_id: Some(11),
+        definition_request_id: Some(12),
+        byte_offset: Some(9),
+        rect: Some((1.0, 2.0, 3.0, 4.0)),
+        interaction_rect: Some((1.0, 2.0, 2.0, 2.0)),
+        diag_rect: Some((5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0)),
+        max_scroll: 20.0,
+        selection_anchor: Some(1),
+        selection_cursor: Some(2),
+        selecting: true,
+        diag_selection_anchor: Some(3),
+        diag_selection_cursor: Some(4),
+        diag_selecting: true,
+        diag_text: "diag".to_string(),
+        ..HoverState::default()
+    };
 
     assert!(clear_hover_popup(&mut state));
 
