@@ -586,6 +586,35 @@ impl App {
             action => action,
         };
 
+        if commit_transaction {
+            let Some(task_tx) = task_tx else { return; };
+            let worker_runtime_tx = runtime_tx.clone();
+            let job = crate::platform::spawn_named("rriter-git-commit", move || {
+                let outcome = run_git_action(action, worker_runtime_tx.as_ref());
+                let mut branch_ahead_cache = branch_ahead_cache;
+                let snapshot = collect_git_status_with_cache(&workspaces, &mut branch_ahead_cache);
+                let _ = task_tx.send(GitPanelTaskResult {
+                    event: GitPanelEvent {
+                        request_id,
+                        snapshot,
+                        notice: outcome.notice,
+                        preserve_snapshot_on_empty: false,
+                        clear_message: outcome.clear_message,
+                        refresh_graph: outcome.refresh_graph,
+                        transaction_failed: outcome.transaction_failed,
+                    },
+                    branch_ahead_cache,
+                });
+            });
+            if job.is_err() {
+                self.ide_panel.git.handle_status_disconnect(request_id);
+                if refresh {
+                    self.ide_panel.git.finish_status_refresh();
+                }
+            }
+            return;
+        }
+
         let worker_runtime_tx = runtime_tx.clone();
         let job = self.ui_waker.spawn_one_shot("rriter-git-action", move || {
             let outcome = run_git_action(action, worker_runtime_tx.as_ref());
@@ -613,9 +642,8 @@ impl App {
                 refresh,
                 status_mutation,
             }),
-            Err(err) => {
+            Err(_err) => {
                 self.ide_panel.git.handle_status_disconnect(request_id);
-                self.ide_panel.git.notice = Some(format!("Не удалось запустить Git worker: {err}"));
                 if refresh {
                     self.ide_panel.git.finish_status_refresh();
                 }

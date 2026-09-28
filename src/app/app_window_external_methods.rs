@@ -360,8 +360,7 @@ impl App {
                 self.request_main_redraw();
             }
             SaveOutcome::Pending(id) => {
-                // The question closes; the action runs once the protected save is
-                // confirmed (`resume_pending_action_after_protected_save`).
+                // The question closes; the action runs in `apply_protected_save_completion`.
                 self.confirm_dialog.begin_save_as(Vec::new());
                 self.protected_saves.await_for_action(id);
                 self.request_main_redraw();
@@ -381,6 +380,13 @@ impl App {
     fn continue_pending_tab_saves(&mut self) {
         loop {
             let Some(index) = self.confirm_dialog.save_as_target() else {
+                if self.pending_action_has_dirty_text() {
+                    let action = self.confirm_dialog.action();
+                    self.confirm_dialog.abort_save_as();
+                    self.confirm_dialog.request(action);
+                    self.request_main_redraw();
+                    return;
+                }
                 self.confirm_dialog.mark_ready();
                 return;
             };
@@ -398,7 +404,7 @@ impl App {
             match self.save_current_file_outcome() {
                 SaveOutcome::Saved => {}
                 SaveOutcome::Pending(id) => {
-                    // Resumed by `resume_pending_action_after_protected_save`; the
+                    // Resumed by `apply_protected_save_completion`; the
                     // tab is then clean (or dirty again and saved once more).
                     self.protected_saves.await_for_action(id);
                     return;
@@ -409,6 +415,18 @@ impl App {
                 }
             }
             self.confirm_dialog.finish_save_as_target(index);
+        }
+    }
+
+    fn pending_action_has_dirty_text(&self) -> bool {
+        match self.confirm_dialog.action() {
+            PendingAction::CloseTab(index) => self.tab_text_is_dirty(index),
+            PendingAction::Quit | PendingAction::CloseAllTabs if self.is_ide_mode => {
+                (0..self.tabs.len()).any(|index| self.tab_text_is_dirty(index))
+            }
+            PendingAction::Quit | PendingAction::CloseAllTabs => self.editor.is_dirty(),
+            PendingAction::CloseFile | PendingAction::OpenFile => self.editor.is_dirty(),
+            PendingAction::None => false,
         }
     }
 
@@ -661,6 +679,14 @@ impl App {
 
     fn write_current_text_to_path(&mut self, path: &Path, content: &str) -> bool {
         if self.headless_write_blocked() {
+            return false;
+        }
+        if self
+            .protected_saves
+            .is_pending(&crate::platform::PathKey::new(path))
+        {
+            self.ide_panel.file_tree_error =
+                Some("Защищённое сохранение этого файла ещё выполняется".to_string());
             return false;
         }
         let result = match crate::platform::write_text_file(path, content, self.text_file_format) {
@@ -1398,5 +1424,134 @@ mod app_window_failure_regression_tests {
         assert_eq!(after_error.trim(), "self.cancel_pending_action();");
         assert!(!source.contains("make_current(gl_surface).unwrap"));
         assert!(!source.contains("swap_buffers(gl_context).unwrap"));
+    }
+}
+
+#[cfg(test)]
+mod protected_save_app_regression_tests {
+    use super::*;
+    use crate::app::app_behavior_tests::{editor_with, tab_with, test_app};
+    use crate::app::protected_save::ProtectedWriter;
+    use crate::platform::TextFileFormat;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, mpsc};
+    use std::time::{Duration, Instant};
+
+    fn blocked_writer() -> (ProtectedWriter, mpsc::Sender<()>, Arc<AtomicUsize>) {
+        let (release, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let writer: ProtectedWriter = {
+            let release_rx = Arc::clone(&release_rx);
+            let calls = Arc::clone(&calls);
+            Arc::new(move |_path, _text, _format, _cancel| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                if let Ok(receiver) = release_rx.lock() {
+                    let _ = receiver.recv();
+                }
+                Ok(())
+            })
+        };
+        (writer, release, calls)
+    }
+
+    fn wait_for_calls(calls: &AtomicUsize, expected: usize) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while calls.load(Ordering::SeqCst) < expected {
+            assert!(Instant::now() < deadline, "writer was not called {expected} times");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    fn wait_for_protected_saves(app: &mut App, expected_calls: usize, calls: &AtomicUsize) {
+        wait_for_calls(calls, expected_calls);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while app.protected_saves.has_pending() {
+            app.poll_protected_saves();
+            assert!(Instant::now() < deadline, "protected save did not finish");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn edit_during_pending_action_save_reopens_confirmation() {
+        let Some(mut app) = test_app() else { return; };
+        let path = PathBuf::from("/protected/pending-action.txt");
+        app.file_path = Some(path.clone());
+        app.file_key = Some(crate::platform::PathKey::new(&path));
+        app.editor = editor_with("base");
+        let _ = app.editor.insert_str(" edit");
+        let (writer, release, calls) = blocked_writer();
+        app.protected_saves = crate::app::ProtectedSaves::with_writer(writer);
+        app.protected_saves
+            .enqueue(&app.ui_waker, path, "first".into(), TextFileFormat::default())
+            .unwrap();
+        wait_for_calls(&calls, 1);
+
+        assert!(app.confirm_dialog.request(PendingAction::CloseFile));
+        app.confirm_dialog.attach_frame();
+        app.begin_pending_action_save();
+        let _ = app.editor.insert_str(" changed while saving");
+        release.send(()).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while calls.load(Ordering::SeqCst) < 2 {
+            app.poll_protected_saves();
+            assert!(Instant::now() < deadline, "queued writer was not started");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        release.send(()).unwrap();
+        wait_for_protected_saves(&mut app, 2, &calls);
+
+        assert_eq!(app.confirm_dialog.needs_window(), Some(PendingAction::CloseFile));
+        assert!(app.editor.is_dirty());
+    }
+
+    #[test]
+    fn save_as_to_path_with_pending_protected_save_shows_error_without_write() {
+        let Some(mut app) = test_app() else { return; };
+        let path = PathBuf::from("/protected/save-as-pending.txt");
+        let (writer, release, calls) = blocked_writer();
+        app.protected_saves = crate::app::ProtectedSaves::with_writer(writer);
+        app.protected_saves
+            .enqueue(&app.ui_waker, path.clone(), "existing".into(), TextFileFormat::default())
+            .unwrap();
+        wait_for_calls(&calls, 1);
+
+        assert!(!app.save_current_file_as(path));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            app.ide_panel.file_tree_error.as_deref(),
+            Some("Защищённое сохранение этого файла ещё выполняется")
+        );
+        release.send(()).unwrap();
+        wait_for_protected_saves(&mut app, 1, &calls);
+    }
+
+    #[test]
+    fn clean_tab_with_pending_protected_save_still_asks_before_close() {
+        let Some(mut app) = test_app() else { return; };
+        let path = "/protected/clean-pending.txt";
+        app.is_ide_mode = true;
+        app.file_path = Some(PathBuf::from(path));
+        app.file_key = Some(crate::platform::PathKey::new(std::path::Path::new(path)));
+        app.editor = editor_with("clean");
+        app.tabs = vec![tab_with("clean-pending.txt", Some(path), "clean")];
+        app.active_tab = 0;
+        let (writer, release, calls) = blocked_writer();
+        app.protected_saves = crate::app::ProtectedSaves::with_writer(writer);
+        app.protected_saves
+            .enqueue(&app.ui_waker, PathBuf::from(path), "clean".into(), TextFileFormat::default())
+            .unwrap();
+        wait_for_calls(&calls, 1);
+
+        app.close_tab_at(0);
+        assert_eq!(app.confirm_dialog.action(), PendingAction::CloseTab(0));
+        app.confirm_dialog.attach_frame();
+        app.begin_pending_action_save();
+        assert!(app.confirm_dialog.waiting_for_save_as());
+        release.send(()).unwrap();
+        wait_for_protected_saves(&mut app, 1, &calls);
+        assert_eq!(app.confirm_dialog.take_ready(), Some(PendingAction::CloseTab(0)));
     }
 }

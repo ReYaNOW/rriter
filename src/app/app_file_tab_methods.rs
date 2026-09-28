@@ -184,11 +184,11 @@ impl App {
     pub(crate) fn tab_text_is_dirty(&self, idx: usize) -> bool {
         self.tabs.get(idx).is_some_and(|tab| {
             matches!(tab.kind, EditorTabKind::Normal)
-                && if idx == self.active_tab {
+                && (if idx == self.active_tab {
                     self.editor.is_dirty()
                 } else {
                     tab.editor.is_dirty()
-                }
+                } || tab.file_key.as_ref().is_some_and(|key| self.protected_saves.is_pending(key)))
         })
     }
 
@@ -208,6 +208,7 @@ impl App {
                 || (0..self.tabs.len()).any(|index| self.tab_text_is_dirty(index))
         } else {
             self.editor.is_dirty()
+                || self.file_key.as_ref().is_some_and(|key| self.protected_saves.is_pending(key))
         }
     }
 
