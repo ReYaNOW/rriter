@@ -45,7 +45,9 @@ impl App {
                 self.focus_document_text_surface();
                 let _ = self.begin_markdown_read_selection_at(mx, my);
             }
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
         if clicked_id == crate::ui_system::UiId::GitWorkspaceScroll
@@ -65,7 +67,9 @@ impl App {
                 );
             }
             self.handle_ui_click(clicked_id);
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
         if let crate::ui_system::UiId::ApiMockCombinedScrollY(route_idx) = clicked_id
@@ -107,7 +111,9 @@ impl App {
                 let _ = crate::app::mouse::press_scrollbar(scroll, geometry, mx, my);
             }
             self.handle_ui_click(clicked_id);
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return;
         }
         if matches!(
@@ -271,12 +277,12 @@ impl App {
         } else if clicked_id == crate::ui_system::UiId::GitLogsScroll {
             if state == ElementState::Pressed
                 && button == winit::event::MouseButton::Left
-                && let Some(metrics) = self
-                    .renderer
-                    .as_ref()
-                    .and_then(|renderer| renderer.git_logs_layout_metrics())
+                && let Some((metrics, s)) = self.renderer.as_ref().and_then(|renderer| {
+                    renderer
+                        .git_logs_layout_metrics()
+                        .map(|metrics| (metrics, renderer.scale_factor))
+                })
             {
-                let s = self.renderer.as_ref().unwrap().scale_factor;
                 let scroll = &mut self.ide_panel.git.logs_scroll;
                 let geometry = metrics.scrollbar(scroll.current).geometry(s);
                 if crate::app::mouse::press_scrollbar(scroll, geometry, mx, my).is_some() {

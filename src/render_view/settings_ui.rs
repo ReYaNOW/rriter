@@ -387,7 +387,7 @@ impl Renderer {
                     kbd_w + 2.0,
                     kbd_h + 2.0,
                     4.0 * s,
-                    [0.306, 0.318, 0.341, 1.0],
+                    [0.306, 0.3176, 0.341, 1.0],
                 );
                 self.push_rounded_rect(x, kbd_y, kbd_w, kbd_h, 4.0 * s, [0.224, 0.231, 0.251, 1.0]);
                 self.draw_string_scaled(
@@ -663,7 +663,7 @@ impl Renderer {
                     item_w + 2.0,
                     item_h + 2.0,
                     6.0 * s,
-                    [0.306, 0.318, 0.341, 1.0],
+                    [0.306, 0.3176, 0.341, 1.0],
                 );
                 self.push_rounded_rect(
                     content_x,

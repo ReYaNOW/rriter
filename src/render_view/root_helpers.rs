@@ -146,8 +146,11 @@ fn decimal_usize_buf(buf: &mut [u8; 20], mut n: usize) -> &str {
 
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
-    false && TELEMETRY_ENABLED.load(Ordering::Relaxed)
+    HOVER_TRACE && TELEMETRY_ENABLED.load(Ordering::Relaxed)
 }
+
+/// Hover tracing is off even with telemetry on; flip locally when debugging hover.
+const HOVER_TRACE: bool = false;
 
 #[inline(always)]
 pub(crate) fn editor_bottom_blank_lines(viewport_height: f32, line_height: f32) -> f32 {

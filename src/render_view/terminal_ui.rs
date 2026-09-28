@@ -244,7 +244,7 @@ pub(crate) fn terminal_scrollbar(
             terminal_max_scroll(total_lines, char_h, term_h, scale),
             current_scroll,
         )
-        .from_end(),
+        .with_from_end(),
     }
 }
 

@@ -55,7 +55,9 @@ impl App {
         }
         if left_released && self.ide_panel.git.scroll.is_dragging {
             self.ide_panel.git.scroll.end_drag();
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return true;
         }
         false
@@ -88,7 +90,9 @@ impl App {
                 }
             }
             if finished_mock_scroll {
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return true;
             }
             if let Some(popup) = &mut self.autocomplete_detail_popup {

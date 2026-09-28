@@ -152,11 +152,12 @@ impl App {
                 let geometry = self.ui_registry.rect_for(UiId::LspScrollY).and_then(|rect| {
                     let renderer = self.renderer.as_ref()?;
                     let s = renderer.scale_factor;
-                    Some(crate::app::lsp_actions::lsp_panel_scrollbar(
+                    crate::app::lsp_actions::lsp_panel_scrollbar(
                         rect,
                         self.lsp_panel_total_h(s),
                         self.ide_panel.lsp_scroll_y.current,
-                    ).geometry(s)?)
+                    )
+                    .geometry(s)
                 });
                 let pointer_y = self.renderer.as_ref().map_or(f32::NAN, |r| r.last_mouse_y);
                 let _ = crate::app::mouse::press_scrollbar(
@@ -180,7 +181,7 @@ impl App {
                             let s = renderer.scale_factor;
                             let (content_len, _) = self
                                 .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
-                            Some(crate::app::lsp_actions::lsp_log_scrollbar(
+                            crate::app::lsp_actions::lsp_log_scrollbar(
                                 rect,
                                 rect.3,
                                 content_len,
@@ -188,7 +189,8 @@ impl App {
                                     .get(&name)
                                     .map_or(0.0, |scroll| scroll.current),
                                 crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
-                            ).geometry(s)?)
+                            )
+                            .geometry(s)
                         });
                     let scroll = self
                         .ide_panel
@@ -210,7 +212,7 @@ impl App {
                             let s = renderer.scale_factor;
                             let (_, max_line_w) = self
                                 .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
-                            Some(crate::app::lsp_actions::lsp_log_scrollbar(
+                            crate::app::lsp_actions::lsp_log_scrollbar(
                                 rect,
                                 rect.2,
                                 max_line_w + 20.0 * s,
@@ -218,7 +220,8 @@ impl App {
                                     .get(&name)
                                     .map_or(0.0, |scroll| scroll.current),
                                 crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
-                            ).geometry(s)?)
+                            )
+                            .geometry(s)
                         });
                     let scroll = self
                         .ide_panel

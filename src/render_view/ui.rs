@@ -1271,7 +1271,7 @@ impl Renderer {
         let hint_y = content_y + content_h - 30.0 * scale;
 
         let kbd_bg = [0.224, 0.231, 0.251, 1.0];
-        let kbd_border = [0.306, 0.318, 0.341, 1.0];
+        let kbd_border = [0.306, 0.3176, 0.341, 1.0];
         let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
 
         let kbd_h = 22.0 * scale;

@@ -156,7 +156,9 @@ impl App {
                     px,
                     py,
                 );
-                self.window.as_ref().unwrap().request_redraw();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
                 return true;
             }
 
@@ -260,7 +262,9 @@ impl App {
                     position.y as f32,
                 );
             }
-            self.window.as_ref().unwrap().request_redraw();
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
             return true;
         }
 

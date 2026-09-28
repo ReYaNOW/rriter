@@ -136,7 +136,7 @@ impl ScrollbarExtent {
         Self::new(viewport, viewport + max_scroll, offset)
     }
 
-    pub(crate) fn from_end(self) -> Self {
+    pub(crate) fn with_from_end(self) -> Self {
         Self {
             from_end: true,
             ..self
@@ -460,7 +460,7 @@ mod tests {
     fn from_end_extent_maps_back_to_callers_offset() {
         let bar = vertical(
             (0.0, 0.0, 8.0, 200.0),
-            ScrollbarExtent::with_max(200.0, 300.0, 0.0).from_end(),
+            ScrollbarExtent::with_max(200.0, 300.0, 0.0).with_from_end(),
         );
         let g = bar.geometry(1.0).expect("bar");
         // Offset 0 from the end: thumb sits at the bottom of the track.
