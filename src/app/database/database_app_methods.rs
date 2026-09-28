@@ -1,6 +1,6 @@
 use crate::app::database::{
-    DatabaseBackendNotice, DatabaseCommand, DatabaseConnectionDialog, DatabaseConnectionId,
-    DatabaseConnectionNode, DatabaseConnectionStatus, DatabaseContextAction, DatabaseContextMenu,
+    DatabaseBackendNotice, DatabaseCommand, DatabaseConnectionId, DatabaseConnectionNode,
+    DatabaseContextAction, DatabaseContextMenu,
     DatabaseContextTarget, DatabaseDatabaseNode, DatabaseDeletePrompt, DatabaseDdlHoverState,
     DatabaseEvent, DatabaseHostKeyPrompt, DatabaseJobOwner, DatabasePanelState,
     DatabasePendingJob, DatabasePendingJobKind, DatabaseQueryTabMeta, DatabaseQueryTabState,
@@ -9,25 +9,6 @@ use crate::app::database::{
 };
 use crate::scroll::ScrollState;
 use std::io;
-
-fn database_command_should_queue(
-    has_pending: bool,
-    host_key_prompt_open: bool,
-    transaction_review_open: bool,
-    can_finish_transaction: bool,
-) -> bool {
-    has_pending
-        || host_key_prompt_open
-        || (transaction_review_open && !can_finish_transaction)
-}
-
-fn database_dialog_scrollbar_hit(
-    track: crate::ui_system::UiClipRect,
-    pointer_x: f32,
-    pointer_y: f32,
-) -> bool {
-    track.contains(pointer_x, pointer_y)
-}
 
 impl App {
     pub(crate) fn database_connection_dialog_scroll_metrics(
@@ -50,9 +31,7 @@ impl App {
         let Some((_, _, max_scroll, _)) = self.database_connection_dialog_scroll_metrics() else {
             return;
         };
-        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
-            dialog.clamp_scroll(max_scroll);
-        }
+        self.ide_panel.database.clamp_dialog_scroll(max_scroll);
     }
 
     pub(crate) fn ensure_database_dialog_focus_visible(&mut self) {
@@ -61,14 +40,7 @@ impl App {
         else {
             return;
         };
-        let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
-            return;
-        };
-        let Some(row) = dialog.focused.and_then(|field| dialog.visible_field_index(field)) else {
-            dialog.clamp_scroll(max_scroll);
-            return;
-        };
-        dialog.ensure_row_visible(row, row_h, form_clip.h, max_scroll);
+        self.ide_panel.database.ensure_dialog_focus_visible(row_h, form_clip.h, max_scroll);
     }
 
     pub(crate) fn start_database_dialog_scroll_drag(
@@ -82,7 +54,7 @@ impl App {
             return false;
         };
         let Some((track, thumb)) = scrollbar else { return false; };
-        if !database_dialog_scrollbar_hit(track, pointer_x, pointer_y) {
+        if !track.contains(pointer_x, pointer_y) {
             return false;
         }
         let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
@@ -190,9 +162,7 @@ impl App {
         target: usize,
         selecting: bool,
     ) {
-        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
-            dialog.focused = Some(field);
-            dialog.input_mut(field).set_cursor(target, selecting);
+        if self.ide_panel.database.set_dialog_input_cursor(field, target, selecting) {
             self.last_action = std::time::Instant::now();
             self.last_blink_state = true;
         }
@@ -231,20 +201,26 @@ impl App {
         let mut save = false;
         let mut focus_moved = false;
 
-        if let Some(dialog) = self.ide_panel.database.dialog.as_mut() {
+        if self.ide_panel.database.dialog.is_some() {
             match key_event.physical_key {
                 PhysicalKey::Code(KeyCode::Escape) => cancel = true,
                 PhysicalKey::Code(KeyCode::Tab) => {
-                    dialog.focus_next(shift);
+                    self.ide_panel.database.focus_next_dialog_field(shift);
                     focus_moved = true;
                 }
                 PhysicalKey::Code(KeyCode::Enter | KeyCode::NumpadEnter) => save = true,
                 physical_key => {
-                    let Some(field) = dialog.focused else {
+                    let Some(field) = self
+                        .ide_panel
+                        .database
+                        .dialog
+                        .as_ref()
+                        .and_then(|dialog| dialog.focused)
+                    else {
                         return true;
                     };
-                    copy_text = crate::app::single_line_input::handle_single_line_input(
-                        dialog.input_mut(field),
+                    copy_text = self.ide_panel.database.edit_dialog_field(
+                        field,
                         physical_key,
                         key_event.logical_text.as_deref(),
                         primary,
@@ -252,10 +228,7 @@ impl App {
                         shift,
                         text_input_allowed,
                         paste_text.as_deref(),
-                        database_dialog_field_max_bytes(field),
                     );
-                    dialog.error = None;
-                    dialog.test_status = None;
                 }
             }
         }
@@ -403,14 +376,6 @@ impl App {
         )
     }
 
-    fn database_command_can_finish_transaction(pending: &DatabasePendingJob) -> bool {
-        matches!(
-            pending.kind,
-            DatabasePendingJobKind::CommitTransaction
-                | DatabasePendingJobKind::RollbackTransaction
-        )
-    }
-
     pub(crate) fn start_database_command_now(
         &mut self,
         command: DatabaseCommand,
@@ -441,11 +406,10 @@ impl App {
         command: DatabaseCommand,
         pending: DatabasePendingJob,
     ) -> bool {
-        let must_wait = database_command_should_queue(
-            self.ide_panel.database.pending_job.is_some(),
+        let must_wait = self.ide_panel.database.command_should_queue(
             self.ide_panel.database.host_key_prompt.is_some(),
             self.database_transaction_review_open(),
-            Self::database_command_can_finish_transaction(&pending),
+            &pending,
         );
         if must_wait {
             return match self.ide_panel.database.queue_command(command, pending.clone()) {
@@ -490,40 +454,9 @@ impl App {
         cancelled: bool,
     ) {
         let targets = pending.kind.recovery_targets();
-        if matches!(pending.kind, DatabasePendingJobKind::SaveConnection) {
-            self.ide_panel
-                .database
-                .pending_session_secrets
-                .remove(&pending.connection_id);
-        }
-        if let Some(node) = self.ide_panel.database.connection_mut(pending.connection_id) {
-            if targets.connection_loading {
-                node.loading = false;
-                node.status = if cancelled {
-                    DatabaseConnectionStatus::Disconnected
-                } else {
-                    DatabaseConnectionStatus::Error
-                };
-                node.status_message = (!cancelled).then(|| message.to_string());
-            }
-            if targets.database_loading
-                && let Some(database_name) = pending.database_name.as_deref()
-                && let Some(database) = node
-                    .databases
-                    .iter_mut()
-                    .find(|database| database.name == database_name)
-            {
-                database.loading = false;
-                database.error = (!cancelled).then(|| message.to_string());
-            }
-        }
-
-        if targets.dialog_status
-            && let Some(dialog) = self.ide_panel.database.dialog.as_mut()
-        {
-            dialog.test_status = None;
-            dialog.error = (!cancelled).then(|| message.to_string());
-        }
+        self.ide_panel
+            .database
+            .recover_pending_job_panel_state(pending, message, cancelled);
 
         for tab in &mut self.tabs {
             match &mut tab.kind {
@@ -597,62 +530,25 @@ impl App {
                 _ => {}
             }
         }
-
-        if let Some(DatabaseTableModal::Review { state, .. }) =
-            self.ide_panel.database.table_modal.as_mut()
-            && targets.table_transaction
-        {
-            state.committing = false;
-        }
     }
 
     pub fn open_database_connection_dialog(&mut self) {
-        let color = self.ide_panel.database.settings().default_connection_color;
-        let session_id = self.ide_panel.database.allocate_dialog_id();
-        let mut dialog = DatabaseConnectionDialog::new(color);
-        dialog.session_id = session_id;
-        self.ide_panel.database.dialog = Some(dialog);
-        self.ide_panel.database.context_menu = None;
-        self.ide_panel.database.ddl_hover.borrow_mut().take();
+        self.ide_panel.database.open_connection_dialog();
         crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
     }
 
     pub fn edit_database_connection(&mut self, connection_id: DatabaseConnectionId) {
-        let Some(connection) = self
-            .ide_panel
-            .database
-            .connection(connection_id)
-            .map(|node| node.config.clone())
-        else {
-            return;
-        };
-        let session_id = self.ide_panel.database.allocate_dialog_id();
-        let mut dialog = DatabaseConnectionDialog::from_connection(&connection);
-        dialog.session_id = session_id;
-        self.ide_panel.database.dialog = Some(dialog);
-        self.ide_panel.database.context_menu = None;
-        self.ide_panel.database.ddl_hover.borrow_mut().take();
+        self.ide_panel.database.edit_connection_dialog(connection_id);
         crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
     }
 
     pub(crate) fn cancel_database_owner(&mut self, owner: DatabaseJobOwner) {
-        let removed = self.ide_panel.database.remove_queued_owner(owner);
-        for pending in removed {
-            if matches!(pending.kind, DatabasePendingJobKind::SaveConnection) {
-                self.ide_panel.database.pending_session_secrets.remove(&pending.connection_id);
-            }
-        }
+        self.ide_panel.database.remove_queued_owner_and_secrets(owner);
         let active = self
             .ide_panel
             .database
-            .pending_job
-            .as_ref()
-            .filter(|pending| pending.owner == owner)
-            .cloned();
+            .mark_owner_job_cancelled(owner, std::time::Instant::now());
         if let Some(pending) = active {
-            self.ide_panel
-                .database
-                .mark_job_cancelled(pending.id, std::time::Instant::now());
             self.recover_database_pending_job(&pending, "Операция отменена", true);
             let cancel_sent = self
                 .database_runtime
@@ -671,33 +567,33 @@ impl App {
     }
 
     pub fn cancel_database_dialog(&mut self) {
-        let Some(session_id) = self.ide_panel.database.dialog.as_ref().map(|dialog| dialog.session_id) else {
+        let Some(owner) = self.ide_panel.database.dialog_owner() else {
             return;
         };
-        let owner = DatabaseJobOwner::Dialog(session_id);
         self.cancel_database_owner(owner);
-        self.ide_panel.database.dialog = None;
+        self.ide_panel.database.close_dialog();
     }
 
     pub fn test_database_dialog_connection(&mut self) {
-        let (connection, secrets, dialog_session_id) = {
-            let panel = &mut self.ide_panel.database;
-            let Some(dialog) = panel.dialog.as_mut() else {
-                return;
-            };
-            let fallback_id = dialog
-                .editing_connection_id
-                .unwrap_or_else(|| DatabaseConnectionId(panel.next_connection_id));
-            let connection = match dialog.build_config(fallback_id) {
-                Ok(connection) => connection,
-                Err(error) => {
-                    dialog.error = Some(error);
-                    return;
-                }
-            };
-            dialog.error = None;
-            dialog.test_status = Some("Проверка подключения…".to_string());
-            (connection, dialog.secret_bundle(), dialog.session_id)
+        let Some(fallback_id) = self
+            .ide_panel
+            .database
+            .dialog
+            .as_ref()
+            .map(|dialog| {
+                dialog
+                    .editing_connection_id
+                    .unwrap_or(DatabaseConnectionId(self.ide_panel.database.next_connection_id))
+            })
+        else {
+            return;
+        };
+        let Some((connection, secrets, dialog_session_id)) = self
+            .ide_panel
+            .database
+            .validate_dialog_config(fallback_id, "Проверка подключения…")
+        else {
+            return;
         };
         let job_id = self.ide_panel.database.allocate_job_id();
         let pending = DatabasePendingJob {
@@ -726,29 +622,24 @@ impl App {
             dialog.editing_connection_id.is_none() && dialog.reserved_connection_id.is_none()
         });
         let allocated_id = needs_connection_id.then(|| self.ide_panel.database.allocate_connection_id());
-        let (connection, secrets, dialog_session_id) = {
-            let panel = &mut self.ide_panel.database;
-            let Some(dialog) = panel.dialog.as_mut() else {
+        let fallback_id = {
+            let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
                 return;
             };
             if dialog.reserved_connection_id.is_none() {
                 dialog.reserved_connection_id = dialog.editing_connection_id.or(allocated_id);
             }
-            let fallback_id = dialog
+            dialog
                 .editing_connection_id
                 .or(dialog.reserved_connection_id)
-                .unwrap_or(DatabaseConnectionId(1));
-            let connection = match dialog.build_config(fallback_id) {
-                Ok(connection) => connection,
-                Err(error) => {
-                    dialog.error = Some(error);
-                    return;
-                }
-            };
-            let secrets = dialog.secret_bundle();
-            dialog.error = None;
-            dialog.test_status = Some("Сохранение…".to_string());
-            (connection, secrets, dialog.session_id)
+                .unwrap_or(DatabaseConnectionId(1))
+        };
+        let Some((connection, secrets, dialog_session_id)) = self
+            .ide_panel
+            .database
+            .validate_dialog_config(fallback_id, "Сохранение…")
+        else {
+            return;
         };
         let job_id = self.ide_panel.database.allocate_job_id();
         let pending = DatabasePendingJob {
@@ -771,8 +662,7 @@ impl App {
         ) {
             self.ide_panel
                 .database
-                .pending_session_secrets
-                .insert(connection_id, session_secrets);
+                .stage_pending_session_secrets(connection_id, session_secrets);
         }
     }
 
@@ -822,16 +712,15 @@ impl App {
     }
 
     pub fn cancel_delete_database_connection(&mut self) {
-        self.ide_panel.database.delete_prompt = None;
+        self.ide_panel.database.cancel_delete_prompt();
     }
 
     pub fn select_database_connection(&mut self, connection_id: DatabaseConnectionId) {
-        self.ide_panel.database.selected_connection = Some(connection_id);
-        self.ide_panel.database.selected_database = None;
+        self.ide_panel.database.select_connection(connection_id);
     }
 
     pub fn toggle_database_connection(&mut self, connection_id: DatabaseConnectionId) {
-        self.select_database_connection(connection_id);
+        self.ide_panel.database.select_connection(connection_id);
         let should_load = self
             .ide_panel
             .database
@@ -854,24 +743,13 @@ impl App {
     }
 
     pub fn toggle_database_node(&mut self, connection_id: DatabaseConnectionId, database_idx: usize) {
-        let (selected_name, database_name) = {
-            let Some(connection) = self.ide_panel.database.connection_mut(connection_id) else {
-                return;
-            };
-            let Some(database) = connection.databases.get_mut(database_idx) else {
-                return;
-            };
-            database.expanded = !database.expanded;
-            let selected_name = database.name.clone();
-            let load_name = if database.expanded && !database.tables_loaded && !database.loading {
-                Some(selected_name.clone())
-            } else {
-                None
-            };
-            (selected_name, load_name)
+        let Some((_, database_name)) = self
+            .ide_panel
+            .database
+            .toggle_database_node_selection(connection_id, database_idx)
+        else {
+            return;
         };
-        self.ide_panel.database.selected_connection = Some(connection_id);
-        self.ide_panel.database.selected_database = Some((connection_id, selected_name));
         if let Some(database_name) = database_name {
             self.load_public_database_tables(
                 connection_id,
@@ -882,11 +760,7 @@ impl App {
     }
 
     fn connection_job_secrets(&self, connection_id: DatabaseConnectionId) -> Option<DatabaseSecretBundle> {
-        self.ide_panel
-            .database
-            .session_secrets
-            .get(&connection_id)
-            .map(DatabaseSecretBundle::clone_for_job)
+        self.ide_panel.database.connection_job_secrets(connection_id)
     }
 
     fn load_connection_databases(
@@ -894,41 +768,14 @@ impl App {
         connection_id: DatabaseConnectionId,
         host_key_policy: SshHostKeyPolicy,
     ) {
-        let Some(connection) = self
+        let Some((command, pending)) = self
             .ide_panel
             .database
-            .connection(connection_id)
-            .map(|node| node.config.clone())
+            .prepare_load_databases(connection_id, host_key_policy)
         else {
             return;
         };
-        if let Some(node) = self.ide_panel.database.connection_mut(connection_id) {
-            node.loading = true;
-            node.catalog_load_attempted = true;
-            node.status = DatabaseConnectionStatus::Connecting;
-            node.status_message = None;
-        }
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob {
-            id: job_id,
-            kind: DatabasePendingJobKind::LoadDatabases,
-            owner: DatabaseJobOwner::Connection(connection_id),
-            connection_id,
-            database_name: None,
-            table_name: None,
-        };
-        let settings = self.ide_panel.database.settings().clone();
-        let secrets = self.connection_job_secrets(connection_id);
-        self.send_database_command(
-            DatabaseCommand::LoadDatabases {
-                job_id,
-                connection,
-                secrets,
-                settings,
-                ssh_options: crate::app::database::host_key_options(host_key_policy),
-            },
-            pending,
-        );
+        self.send_database_command(command, pending);
     }
 
     fn load_public_database_tables(
@@ -937,42 +784,14 @@ impl App {
         database_name: &str,
         host_key_policy: SshHostKeyPolicy,
     ) {
-        let Some(connection) = self
+        let Some((command, pending)) = self
             .ide_panel
             .database
-            .connection(connection_id)
-            .map(|node| node.config.clone())
+            .prepare_load_public_tables(connection_id, database_name, host_key_policy)
         else {
             return;
         };
-        if let Some(node) = self.ide_panel.database.connection_mut(connection_id)
-            && let Some(database) = node.databases.iter_mut().find(|db| db.name == database_name)
-        {
-            database.loading = true;
-            database.error = None;
-        }
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob {
-            id: job_id,
-            kind: DatabasePendingJobKind::LoadTables,
-            owner: DatabaseJobOwner::Connection(connection_id),
-            connection_id,
-            database_name: Some(database_name.to_string()),
-            table_name: None,
-        };
-        let settings = self.ide_panel.database.settings().clone();
-        let secrets = self.connection_job_secrets(connection_id);
-        self.send_database_command(
-            DatabaseCommand::LoadPublicTables {
-                job_id,
-                connection,
-                database_name: database_name.to_string(),
-                secrets,
-                settings,
-                ssh_options: crate::app::database::host_key_options(host_key_policy),
-            },
-            pending,
-        );
+        self.send_database_command(command, pending);
     }
 
     pub fn open_database_context_menu(
@@ -982,25 +801,7 @@ impl App {
         y: f32,
     ) {
         self.ide_panel.file_tree_context_menu = None;
-        let entries = match target {
-            DatabaseContextTarget::Connection(_) => vec![
-                DatabaseContextAction::Refresh,
-                DatabaseContextAction::TestConnection,
-                DatabaseContextAction::EditConnection,
-                DatabaseContextAction::DeleteConnection,
-            ],
-            DatabaseContextTarget::Database(_, _) => vec![
-                DatabaseContextAction::OpenSql,
-                DatabaseContextAction::NewSqlConsole,
-                DatabaseContextAction::Refresh,
-                DatabaseContextAction::CloseConnection,
-            ],
-            DatabaseContextTarget::Table(_, _, _) => vec![
-                DatabaseContextAction::ShowDdl,
-                DatabaseContextAction::EditData,
-                DatabaseContextAction::OpenSql,
-            ],
-        };
+        let entries = DatabasePanelState::context_menu_entries(target);
         let scale = self
             .renderer
             .as_ref()
@@ -1048,14 +849,7 @@ impl App {
                 }
             }
             (DatabaseContextTarget::Database(id, _), DatabaseContextAction::CloseConnection) => {
-                if let Some(connection) = self.ide_panel.database.connection_mut(id) {
-                    connection.status = DatabaseConnectionStatus::Disconnected;
-                    connection.status_message = Some("Соединение закрыто".to_string());
-                    connection.loading = false;
-                    for database in &mut connection.databases {
-                        database.loading = false;
-                    }
-                }
+                self.ide_panel.database.close_connection(id);
             }
             (DatabaseContextTarget::Database(id, database_idx), DatabaseContextAction::OpenSql)
             | (DatabaseContextTarget::Database(id, database_idx), DatabaseContextAction::NewSqlConsole) => {
@@ -1110,37 +904,14 @@ impl App {
         table_name: &str,
         host_key_policy: SshHostKeyPolicy,
     ) {
-        let Some(connection) = self
+        let Some((command, pending)) = self
             .ide_panel
             .database
-            .connection(connection_id)
-            .map(|node| node.config.clone())
+            .prepare_load_ddl(connection_id, database_name, table_name, host_key_policy)
         else {
             return;
         };
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob {
-            id: job_id,
-            kind: DatabasePendingJobKind::LoadDdl,
-            owner: DatabaseJobOwner::Connection(connection_id),
-            connection_id,
-            database_name: Some(database_name.to_string()),
-            table_name: Some(table_name.to_string()),
-        };
-        let settings = self.ide_panel.database.settings().clone();
-        let secrets = self.connection_job_secrets(connection_id);
-        self.send_database_command(
-            DatabaseCommand::LoadDdl {
-                job_id,
-                connection,
-                database_name: database_name.to_string(),
-                table_name: table_name.to_string(),
-                secrets,
-                settings,
-                ssh_options: crate::app::database::host_key_options(host_key_policy),
-            },
-            pending,
-        );
+        self.send_database_command(command, pending);
     }
 
     pub fn open_database_table_tab(
@@ -1190,11 +961,10 @@ impl App {
         meta: &DatabaseTableTabMeta,
         host_key_policy: SshHostKeyPolicy,
     ) {
-        let Some(connection) = self
+        let Some((command, pending)) = self
             .ide_panel
             .database
-            .connection(meta.connection_id)
-            .map(|node| node.config.clone())
+            .prepare_load_table_metadata(meta, host_key_policy)
         else {
             if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
                 state.loading = false;
@@ -1205,29 +975,7 @@ impl App {
             }
             return;
         };
-        let job_id = self.ide_panel.database.allocate_job_id();
-        let pending = DatabasePendingJob {
-            id: job_id,
-            kind: DatabasePendingJobKind::LoadMetadata,
-            owner: DatabaseJobOwner::Table(meta.tab_id),
-            connection_id: meta.connection_id,
-            database_name: Some(meta.database_name.clone()),
-            table_name: Some(meta.table_name.clone()),
-        };
-        let settings = self.ide_panel.database.settings().clone();
-        let secrets = self.connection_job_secrets(meta.connection_id);
-        self.send_database_command(
-            DatabaseCommand::LoadMetadata {
-                job_id,
-                connection,
-                database_name: meta.database_name.clone(),
-                table_name: meta.table_name.clone(),
-                secrets,
-                settings,
-                ssh_options: crate::app::database::host_key_options(host_key_policy),
-            },
-            pending,
-        );
+        self.send_database_command(command, pending);
     }
 
     pub fn open_database_query_tab(
@@ -1560,43 +1308,6 @@ mod round3_database_console_tests {
     use super::*;
 
     #[test]
-    fn database_dialog_scrollbar_drag_requires_pointer_inside_track_on_both_axes() {
-        let track = crate::ui_system::UiClipRect::new(760.0, 100.0, 8.0, 240.0);
-        assert!(database_dialog_scrollbar_hit(track, 764.0, 220.0));
-        assert!(!database_dialog_scrollbar_hit(track, 300.0, 220.0));
-        assert!(!database_dialog_scrollbar_hit(track, 764.0, 360.0));
-    }
-
-    #[test]
-    fn database_dialog_scrollbar_drag_sets_target_without_teleporting_current() {
-        let track = crate::ui_system::UiClipRect::new(760.0, 100.0, 8.0, 240.0);
-        let max_scroll = 480.0;
-        let current = 160.0;
-        let thumb = crate::scroll::scrollbar_thumb(
-            track.y, track.h, track.h, track.h + max_scroll, current, 28.0,
-        )
-        .expect("dialog thumb");
-        let pointer = thumb.start + 6.0;
-        let (offset, _) = crate::scroll::scrollbar_drag_target(
-            pointer, track.y, track.h, thumb, max_scroll, None,
-        )
-        .expect("dialog drag starts");
-        let (_, target) = crate::scroll::scrollbar_drag_target(
-            pointer + 30.0, track.y, track.h, thumb, max_scroll, Some(offset),
-        )
-        .expect("dialog drag moves");
-
-        let mut scroll = crate::scroll::ScrollState::new(7.0);
-        scroll.jump_to(current);
-        assert!(crate::app::mouse::apply_scrollbar_drag_target(
-            &mut scroll, target, offset,
-        ));
-        assert_eq!(scroll.current, current);
-        assert_eq!(scroll.target, target);
-        assert_eq!(scroll.drag_offset, offset);
-    }
-
-    #[test]
     fn r3_107_unreadable_sql_console_does_not_become_empty_editable_text() {
         let error = database_console_initial_text(
             Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied")),
@@ -1606,10 +1317,6 @@ mod round3_database_console_tests {
         assert!(error.contains("Не удалось открыть SQL-консоль"));
         assert!(error.contains("denied"));
     }
-}
-
-fn database_dialog_field_max_bytes(field: crate::app::database::DatabaseFormField) -> usize {
-    if field.is_secret() { 4096 } else { 8192 }
 }
 
 fn database_tab(

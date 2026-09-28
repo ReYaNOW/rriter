@@ -31,7 +31,14 @@ const API_STATE: &str = include_str!("app/api_client.rs");
 const API_REQUESTS: &str = include_str!("app/api_client/api_client_app_request_methods.rs");
 const API_TABS: &str = include_str!("app/api_client/api_client_app_tabs.rs");
 const FILE_TREE_SCAN: &str = include_str!("app/file_tree_scan.rs");
-const PROJECT_SEARCH: &str = include_str!("app/project_search.rs");
+// project_search.rs include!s its matcher/engine/input-state parts; the worker spawn
+// and its messages live in project_search_engine.rs since the stage-4 split.
+const PROJECT_SEARCH: &str = concat!(
+    include_str!("app/project_search.rs"),
+    include_str!("app/project_search_matcher.rs"),
+    include_str!("app/project_search_engine.rs"),
+    include_str!("app/project_search_input_state.rs"),
+);
 const PROJECT_PREVIEW: &str = include_str!("app/project_search_preview.rs");
 const TERMINAL_PROCESS: &str = include_str!("app/terminal_process.rs");
 const GIT_DIFF: &str = include_str!("app/git_diff.rs");

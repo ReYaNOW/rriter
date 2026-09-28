@@ -185,12 +185,16 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
         let grid = crate::app::terminal::lock_terminal_grid(&terminal.grid);
         let scrollback_len = if grid.is_alt { 0 } else { grid.scrollback.len() };
         let total_lines = scrollback_len + grid.lines.len();
-        let row = grid
+        // The shell may pad the output row, so select from the column where the text starts.
+        let (row, col) = grid
             .scrollback
             .iter()
             .chain(grid.lines.iter())
-            .position(|line| {
-                line.iter().map(|cell| cell.c).collect::<String>().trim() == "marker"
+            .enumerate()
+            .find_map(|(row, line)| {
+                let text = line.iter().map(|cell| cell.c).collect::<String>();
+                (text.trim() == "marker")
+                    .then(|| (row, text.chars().take_while(|c| c.is_whitespace()).count()))
             })
             .expect("echo output row");
         let max_scroll = crate::render_view::terminal_ui::terminal_max_scroll(
@@ -210,7 +214,7 @@ fn headless_terminal_mouse_selection_copies_selected_text() {
             - char_h
             - offset_from_bottom as f32 * char_h
             + scroll_offset;
-        let text_x = body[0] as f32 + 10.0 * scale;
+        let text_x = body[0] as f32 + 10.0 * scale + col as f32 * char_w;
         (text_x + char_w * 0.25, text_x + char_w * 5.75, text_top + char_h * 0.5)
     };
     let lines = run_script(

@@ -1,126 +1,8 @@
 use crate::app::database::{
-    DatabaseCellEditorKind, DatabaseCellEditorState, DatabaseCellPosition, DatabaseCellValue,
-    DatabaseChangePlanOperation, DatabaseGeneration, DatabaseGridCell, DatabaseGridRow,
-    DatabaseRowState, DatabaseTableInputTarget, DatabaseTableModal, DatabaseTableReloadAction,
-    DatabaseTableViewKey, DatabaseTableViewState,
+    DatabaseCellEditorKind, DatabaseCellEditorState, DatabaseCellPosition,
+    DatabaseChangePlanOperation, DatabaseGeneration, DatabaseTableInputTarget,
+    DatabaseTableModal, DatabaseTableReloadAction, DatabaseTableViewKey, DatabaseTableViewState,
 };
-
-fn database_filter_completion_context(
-    target: DatabaseTableInputTarget,
-    text: &str,
-    cursor: usize,
-) -> crate::languages::sql_analysis::SqlCompletionContext {
-    let prefix = match target {
-        DatabaseTableInputTarget::Where => "SELECT * FROM __rriter_table WHERE ",
-        DatabaseTableInputTarget::OrderBy => "SELECT * FROM __rriter_table ORDER BY ",
-        DatabaseTableInputTarget::Cell => "",
-    };
-    let mut source = String::with_capacity(prefix.len() + text.len());
-    source.push_str(prefix);
-    source.push_str(text);
-    let prefix_len = prefix.len();
-    let mut context = crate::languages::sql_analysis::completion_context(
-        &source,
-        prefix_len + cursor.min(text.len()),
-    );
-    context.replace_range.start = context.replace_range.start.saturating_sub(prefix_len).min(text.len());
-    context.replace_range.end = context.replace_range.end.saturating_sub(prefix_len).min(text.len());
-    context.scope = 0..text.len();
-    context
-}
-
-fn database_filter_completion_words(
-    metadata: &crate::app::database::DatabaseTableMetadata,
-    target: DatabaseTableInputTarget,
-    context: &crate::languages::sql_analysis::SqlCompletionContext,
-) -> Vec<(crate::app::AutocompleteItem, Vec<usize>)> {
-    use crate::languages::sql_analysis::SqlCompletionKind;
-    let mut words: Vec<(String, String, crate::highlighter::SymbolKind)> = Vec::new();
-    match context.kind {
-        SqlCompletionKind::Column => {
-            words.extend(metadata.columns.iter().map(|column| {
-                (
-                    column.name.clone(),
-                    crate::app::database::quote_pg_identifier(&column.name),
-                    crate::highlighter::SymbolKind::Property,
-                )
-            }));
-        }
-        SqlCompletionKind::Operator if target == DatabaseTableInputTarget::Where => {
-            for word in ["=", "<>", "!=", "<", ">", "<=", ">=", "IS NULL", "IS NOT NULL", "LIKE", "ILIKE", "IN", "BETWEEN"] {
-                words.push((word.to_string(), word.to_string(), crate::highlighter::SymbolKind::Keyword));
-            }
-        }
-        SqlCompletionKind::Value if target == DatabaseTableInputTarget::Where => {
-            for word in ["NULL", "TRUE", "FALSE", "CURRENT_DATE", "CURRENT_TIMESTAMP"] {
-                words.push((word.to_string(), word.to_string(), crate::highlighter::SymbolKind::Builtin));
-            }
-            for column in &metadata.columns {
-                if column.type_kind == crate::app::database::DatabaseTypeKind::Enum {
-                    for value in &column.enum_values {
-                        let inserted = format!("'{}'", value.replace('\'', "''"));
-                        words.push((value.clone(), inserted, crate::highlighter::SymbolKind::Builtin));
-                    }
-                }
-            }
-        }
-        SqlCompletionKind::Direction if target == DatabaseTableInputTarget::OrderBy => {
-            for word in ["ASC", "DESC"] {
-                words.push((word.to_string(), word.to_string(), crate::highlighter::SymbolKind::Keyword));
-            }
-        }
-        SqlCompletionKind::NullOrdering if target == DatabaseTableInputTarget::OrderBy => {
-            for word in ["NULLS FIRST", "NULLS LAST"] {
-                words.push((word.to_string(), word.to_string(), crate::highlighter::SymbolKind::Keyword));
-            }
-        }
-        SqlCompletionKind::Keyword if target == DatabaseTableInputTarget::Where => {
-            for word in ["AND", "OR", "NOT"] {
-                words.push((word.to_string(), word.to_string(), crate::highlighter::SymbolKind::Keyword));
-            }
-        }
-        _ => {}
-    }
-    let prefix = context.prefix.trim_matches('"').to_ascii_lowercase();
-    words
-        .into_iter()
-        .filter_map(|(word, insert_text, kind)| {
-            let lower = word.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
-            if !prefix.is_empty() && !lower.contains(&prefix) {
-                return None;
-            }
-            let indices = if prefix.is_empty() {
-                Vec::new()
-            } else {
-                lower
-                    .match_indices(&prefix)
-                    .next()
-                    .map(|(start, _)| (start..start + prefix.len()).collect())
-                    .unwrap_or_default()
-            };
-            Some((
-                crate::app::AutocompleteItem {
-                    word,
-                    kind,
-                    scope_start: context.scope.start,
-                    scope_end: context.scope.end,
-                    module: None,
-                    module_path: None,
-                    detail: Some(match kind {
-                        crate::highlighter::SymbolKind::Property => "column".to_string(),
-                        crate::highlighter::SymbolKind::Builtin => "value".to_string(),
-                        _ => "PostgreSQL".to_string(),
-                    }),
-                    insert_text: Some(insert_text),
-                    text_edit: None,
-                    additional_text_edits: Vec::new(),
-                },
-                indices,
-            ))
-        })
-        .take(64)
-        .collect()
-}
 
 pub(crate) fn database_table_input_padding(ui_scale: f32, cell_editor: bool) -> f32 {
     if cell_editor {
@@ -169,12 +51,18 @@ impl App {
         };
         let text = input.text().to_string();
         let cursor = input.cursor;
-        let context = database_filter_completion_context(target, &text, cursor);
+        let context =
+            crate::app::database::database_table_view_state::database_table_filter_completion_context(
+                target, &text, cursor,
+            );
         if !explicit && !context.automatic {
             self.close_autocomplete();
             return;
         }
-        let words = database_filter_completion_words(metadata, target, &context);
+        let words =
+            crate::app::database::database_table_view_state::database_table_filter_completion_words(
+                metadata, target, &context,
+            );
         if words.is_empty() {
             self.close_autocomplete();
             return;
@@ -277,19 +165,7 @@ impl App {
             .clone()
             .unwrap_or_else(|| selected_item.word.clone());
         if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            let input = match target {
-                DatabaseTableInputTarget::Where => &mut state.grid.where_input,
-                DatabaseTableInputTarget::OrderBy => &mut state.grid.order_by_input,
-                DatabaseTableInputTarget::Cell => unreachable!(),
-            };
-            let context = database_filter_completion_context(target, input.text(), input.cursor);
-            input.replace_range(
-                context.replace_range.start,
-                context.replace_range.end,
-                &selected,
-                64 * 1024,
-            );
-            state.grid.filter_error = None;
+            state.apply_filter_autocomplete(target, &selected);
         }
         self.close_autocomplete();
         true
@@ -306,23 +182,8 @@ impl App {
             database_name: database_name.to_string(),
             table_name: table_name.to_string(),
         };
-        if let Some(view) = self
-            .ide_panel
-            .database
-            .persisted
-            .table_views
-            .iter()
-            .find(|view| view.key == key)
-        {
-            return view.clone();
-        }
-        let view = DatabaseTableViewState {
-            key,
-            limit: self.ide_panel.database.settings().default_table_limit,
-            ..DatabaseTableViewState::default()
-        };
-        self.ide_panel.database.persisted.table_views.push(view.clone());
-        view
+        let default_limit = self.ide_panel.database.settings().default_table_limit;
+        self.ide_panel.database.table_view_snapshot(key, default_limit)
     }
 
     pub(crate) fn persist_database_table_view(
@@ -341,18 +202,7 @@ impl App {
         else {
             return;
         };
-        if let Some(existing) = self
-            .ide_panel
-            .database
-            .persisted
-            .table_views
-            .iter_mut()
-            .find(|existing| existing.key == view.key)
-        {
-            *existing = view;
-        } else {
-            self.ide_panel.database.persisted.table_views.push(view);
-        }
+        self.ide_panel.database.upsert_table_view(view);
         self.save_database_panel_state();
     }
 
@@ -396,50 +246,16 @@ impl App {
         }
     }
 
-    fn fail_database_table_reload(
-        &mut self,
-        tab_id: crate::app::database::DatabaseTabId,
-        message: String,
-    ) {
-        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
-            return;
-        };
-        state.grid.loading_count = false;
-        state.grid.loading_chunk = false;
-        state.grid.in_flight_chunk = None;
-        state.grid.desired_chunk = None;
-        state.grid.finish_refresh();
-        state.grid.abort_pending_view();
-        state.error = Some(message);
-    }
-
     pub(crate) fn queue_database_table_initial_load(
         &mut self,
         tab_id: crate::app::database::DatabaseTabId,
     ) {
-        let Some((meta, state)) = self.database_table_meta_state_mut(tab_id) else {
+        let prepared = self.database_table_meta_state_mut(tab_id).and_then(|(meta, state)| {
+            state.prepare_initial_view_load(meta)
+        });
+        let Some((meta, generation)) = prepared else {
             return;
         };
-        if state.metadata.is_none() {
-            return;
-        }
-        state.generation = state.generation.next();
-        let had_rows = !state.grid.chunks.is_empty();
-        if had_rows {
-            state.grid.loading_chunk = false;
-            state.grid.in_flight_chunk = None;
-            state.grid.desired_chunk = None;
-            state.grid.refreshing = true;
-            state.grid.refresh_started = Some(std::time::Instant::now());
-        } else {
-            state.grid.clear_loaded_rows();
-            state.grid.count = None;
-        }
-        state.grid.count_error = None;
-        state.grid.pending_count = None;
-        state.grid.loading_count = true;
-        let generation = state.generation;
-        let meta = meta.clone();
         self.queue_database_table_count(meta, generation);
     }
 
@@ -454,20 +270,18 @@ impl App {
             .connection(meta.connection_id)
             .map(|node| node.config.clone())
         else {
-            self.fail_database_table_reload(
-                meta.tab_id,
-                "Подключение к базе данных недоступно".to_string(),
-            );
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.fail_view_reload("Подключение к базе данных недоступно".to_string());
+            }
             return;
         };
         let Some((_, state)) = self.database_table_meta_state(meta.tab_id) else {
             return;
         };
         let Some(metadata) = state.metadata.clone() else {
-            self.fail_database_table_reload(
-                meta.tab_id,
-                "Метаданные таблицы недоступны".to_string(),
-            );
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.fail_view_reload("Метаданные таблицы недоступны".to_string());
+            }
             return;
         };
         let where_clause = state.grid.request_view().where_clause.clone();
@@ -509,7 +323,9 @@ impl App {
                 .global_error
                 .clone()
                 .unwrap_or_else(|| "Не удалось запустить обновление таблицы".to_string());
-            self.fail_database_table_reload(meta.tab_id, message);
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.fail_view_reload(message);
+            }
         }
     }
 
@@ -556,10 +372,9 @@ impl App {
             .connection(meta.connection_id)
             .map(|node| node.config.clone())
         else {
-            self.fail_database_table_reload(
-                meta.tab_id,
-                "Подключение к базе данных недоступно".to_string(),
-            );
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.fail_view_reload("Подключение к базе данных недоступно".to_string());
+            }
             return;
         };
         let settings = self.ide_panel.database.settings().clone();
@@ -604,7 +419,9 @@ impl App {
                 .global_error
                 .clone()
                 .unwrap_or_else(|| "Не удалось загрузить данные таблицы".to_string());
-            self.fail_database_table_reload(meta.tab_id, message);
+            if let Some((_, state)) = self.database_table_meta_state_mut(meta.tab_id) {
+                state.fail_view_reload(message);
+            }
         }
     }
 
@@ -641,20 +458,7 @@ impl App {
             return;
         };
         if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            state.grid.pending_count = Some(result.count);
-            state.grid.loading_count = false;
-            state.grid.count_error = None;
-            let request_view = state
-                .grid
-                .pending_view
-                .as_mut()
-                .unwrap_or(&mut state.grid.view);
-            let last_page = if result.count == 0 {
-                0
-            } else {
-                (result.count as usize - 1) / request_view.limit
-            };
-            request_view.current_page = request_view.current_page.min(last_page);
+            state.commit_view_count(result.count);
         }
         let target_chunk = self.database_table_meta_state(tab_id).map_or(0, |(_, state)| {
             let relative_row = (state.grid.scroll_y.target.max(state.grid.scroll_y.current).max(0.0)
@@ -681,29 +485,16 @@ impl App {
         let Some(tab_id) = tab_id else {
             return;
         };
-        let mut committed_view = false;
-        let next = if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            if state.grid.refreshing {
-                state.grid.clear_loaded_rows();
-                state.grid.finish_refresh();
-            }
-            committed_view = state.grid.commit_pending_view();
-            state.grid.insert_chunk(result.chunk);
-            if let Some(metadata) = state.metadata.clone() {
-                state.grid.restore_pending_selection(&metadata);
-            }
-            state.grid.post_commit_refresh_pending = false;
-            state.error = None;
-            state.grid.filter_error = None;
-            state.clear_notice();
-            state.grid.desired_chunk.take()
-        } else {
-            None
+        let Some(transition) = self
+            .database_table_meta_state_mut(tab_id)
+            .map(|(_, state)| state.commit_view_chunk(result.chunk))
+        else {
+            return;
         };
-        if committed_view {
+        if transition.committed_view {
             self.persist_database_table_view(tab_id);
         }
-        if let Some(next) = next {
+        if let Some(next) = transition.next_chunk {
             self.queue_database_table_chunk(tab_id, next);
         }
     }
@@ -713,20 +504,21 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
         action: DatabaseTableReloadAction,
     ) {
-        let dirty = self
-            .database_table_meta_state(tab_id)
-            .is_some_and(|(_, state)| state.grid.dirty());
-        if dirty {
-            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-                state.grid.pending_reload = Some(action);
-            }
-            self.ide_panel.database.table_modal = Some(DatabaseTableModal::RefreshPrompt {
-                tab_id,
-                close_after_save: false,
-            });
+        let Some(apply) = self
+            .database_table_meta_state_mut(tab_id)
+            .map(|(_, state)| state.request_view_reload(action))
+        else {
             return;
+        };
+        match apply {
+            Some(action) => self.apply_database_table_reload(tab_id, action),
+            None => {
+                self.ide_panel.database.table_modal = Some(DatabaseTableModal::RefreshPrompt {
+                    tab_id,
+                    close_after_save: false,
+                });
+            }
         }
-        self.apply_database_table_reload(tab_id, action);
     }
 
     pub(crate) fn apply_database_table_reload(
@@ -734,40 +526,10 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
         action: DatabaseTableReloadAction,
     ) {
-        if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            match action {
-                DatabaseTableReloadAction::Refresh => {}
-                DatabaseTableReloadAction::ApplyView(view) => {
-                    let vertical_context_changed = state.grid.view.current_page != view.current_page
-                        || state.grid.view.limit != view.limit
-                        || state.grid.view.where_clause != view.where_clause
-                        || state.grid.view.order_by != view.order_by;
-                    state.grid.where_input.set_text(view.where_clause.clone());
-                    state.grid.order_by_input.set_text(view.order_by.clone());
-                    state.grid.begin_pending_view(view, false, false);
-                    if vertical_context_changed {
-                        state.grid.scroll_y.reset();
-                    }
-                }
-                DatabaseTableReloadAction::ApplyFilterView(view) => {
-                    let vertical_context_changed = state.grid.view.current_page != view.current_page
-                        || state.grid.view.limit != view.limit
-                        || state.grid.view.where_clause != view.where_clause
-                        || state.grid.view.order_by != view.order_by;
-                    let where_changed = state.grid.view.where_clause != view.where_clause;
-                    let order_by_changed = state.grid.view.order_by != view.order_by;
-                    state
-                        .grid
-                        .begin_pending_view(view, where_changed, order_by_changed);
-                    if vertical_context_changed {
-                        state.grid.scroll_y.reset();
-                    }
-                }
-            }
-            state.grid.pending_reload = None;
-            state.error = None;
-            state.clear_notice();
-        }
+        let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
+            return;
+        };
+        state.apply_view_reload(action);
         self.queue_database_table_initial_load(tab_id);
     }
 
@@ -776,17 +538,7 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
     ) {
         if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            state.grid.added_rows.clear();
-            for chunk in state.grid.chunks.values_mut() {
-                for row in &mut chunk.rows {
-                    row.state = DatabaseRowState::Clean;
-                    for cell in &mut row.cells {
-                        cell.undo();
-                    }
-                }
-            }
-            state.grid.cell_editor = None;
-            state.grid.focused_input = None;
+            state.discard_local_changes();
         }
     }
 
@@ -794,46 +546,19 @@ impl App {
         &mut self,
         tab_id: crate::app::database::DatabaseTabId,
     ) {
-        let validation = self.database_table_meta_state(tab_id).and_then(|(_, state)| {
-            crate::app::database::validate_table_fragment(state.grid.where_input.text(), "WHERE")
-                .err()
-                .map(|error| (DatabaseTableInputTarget::Where, error))
-                .or_else(|| {
-                    crate::app::database::validate_table_fragment(
-                        state.grid.order_by_input.text(),
-                        "ORDER BY",
-                    )
-                    .err()
-                    .map(|error| (DatabaseTableInputTarget::OrderBy, error))
-                })
-        });
-        if let Some(error) = validation {
-            if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-                state.grid.filter_error = Some(error);
-                state.error = None;
+        let result = self
+            .database_table_meta_state_mut(tab_id)
+            .map(|(_, state)| state.validate_and_prepare_filter_view());
+        match result {
+            Some(Ok(action)) => self.request_database_table_reload(tab_id, action),
+            Some(Err((target, error))) => {
+                if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
+                    state.grid.filter_error = Some((target, error));
+                    state.error = None;
+                }
             }
-            return;
+            None => {}
         }
-        let Some(mut view) = self
-            .database_table_meta_state(tab_id)
-            .map(|(_, state)| state.grid.view.clone())
-        else {
-            return;
-        };
-        if let Some((_, state)) = self.database_table_meta_state(tab_id) {
-            view.where_clause = state.grid.where_input.text().to_string();
-            view.order_by = state.grid.order_by_input.text().to_string();
-        }
-        if let Some((_, state)) = self.database_table_meta_state_mut(tab_id) {
-            state.grid.filter_error = None;
-        }
-        view.sorted_column = None;
-        view.sort_direction = None;
-        view.current_page = 0;
-        self.request_database_table_reload(
-            tab_id,
-            DatabaseTableReloadAction::ApplyFilterView(view),
-        );
     }
 
     pub fn database_table_page_first(&mut self, tab_id: crate::app::database::DatabaseTabId) {
@@ -846,36 +571,38 @@ impl App {
     ) {
         let page = self
             .database_table_meta_state(tab_id)
-            .map(|(_, state)| state.grid.view.current_page.saturating_sub(1))
-            .unwrap_or(0);
-        self.set_database_table_page(tab_id, page);
+            .and_then(|(_, state)| {
+                state.table_page_target(
+                    crate::app::database::database_table_view_state::DatabaseTablePageStep::Previous,
+                )
+            });
+        if let Some(page) = page {
+            self.set_database_table_page(tab_id, page);
+        }
     }
 
     pub fn database_table_page_next(&mut self, tab_id: crate::app::database::DatabaseTabId) {
         let page = self
             .database_table_meta_state(tab_id)
-            .map(|(_, state)| {
-                if !state.grid.can_page_next() {
-                    return state.grid.view.current_page;
-                }
-                match state.grid.count {
-                    Some(count) => {
-                        let last = (count as usize).saturating_sub(1) / state.grid.view.limit;
-                        state.grid.view.current_page.saturating_add(1).min(last)
-                    }
-                    None => state.grid.view.current_page.saturating_add(1),
-                }
-            })
-            .unwrap_or(0);
-        self.set_database_table_page(tab_id, page);
+            .and_then(|(_, state)| {
+                state.table_page_target(
+                    crate::app::database::database_table_view_state::DatabaseTablePageStep::Next,
+                )
+            });
+        if let Some(page) = page {
+            self.set_database_table_page(tab_id, page);
+        }
     }
 
     pub fn database_table_page_last(&mut self, tab_id: crate::app::database::DatabaseTabId) {
-        let Some(page) = self.database_table_meta_state(tab_id).and_then(|(_, state)| {
-            state.grid.count.map(|count| {
-                (count as usize).saturating_sub(1) / state.grid.view.limit
+        let Some(page) = self
+            .database_table_meta_state(tab_id)
+            .and_then(|(_, state)| {
+                state.table_page_target(
+                    crate::app::database::database_table_view_state::DatabaseTablePageStep::Last,
+                )
             })
-        }) else {
+        else {
             return;
         };
         self.set_database_table_page(tab_id, page);
@@ -886,21 +613,12 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
         page: usize,
     ) {
-        let Some(mut view) = self
+        let action = self
             .database_table_meta_state(tab_id)
-            .map(|(_, state)| state.grid.view.clone())
-        else {
-            return;
-        };
-        if view.current_page == page
-            && self
-                .database_table_meta_state(tab_id)
-                .is_some_and(|(_, state)| !state.grid.chunks.is_empty())
-        {
-            return;
+            .and_then(|(_, state)| state.set_table_page(page));
+        if let Some(action) = action {
+            self.request_database_table_reload(tab_id, action);
         }
-        view.current_page = page;
-        self.request_database_table_reload(tab_id, DatabaseTableReloadAction::ApplyView(view));
     }
 
     pub fn open_database_table_limit_dialog(
@@ -911,42 +629,19 @@ impl App {
             .database_table_meta_state(tab_id)
             .map(|(_, state)| state.grid.view.limit)
             .unwrap_or(crate::app::database::DEFAULT_TABLE_LIMIT);
-        self.ide_panel.database.table_modal = Some(DatabaseTableModal::CustomLimit {
-            tab_id,
-            input: crate::app::database::DatabaseDialogInput::new(limit.to_string()),
-            error: None,
-        });
+        self.ide_panel.database.open_custom_table_limit(tab_id, limit);
     }
 
     pub fn apply_database_table_limit_dialog(&mut self) {
-        let Some(DatabaseTableModal::CustomLimit { tab_id, input, .. }) =
-            self.ide_panel.database.table_modal.as_ref()
-        else {
+        let Some(Ok((tab_id, limit))) = self.ide_panel.database.take_custom_table_limit() else {
             return;
         };
-        let tab_id = *tab_id;
-        let parsed = input.text().trim().parse::<usize>();
-        let limit = match parsed {
-            Ok(value) if (1..=crate::app::database::MAX_CUSTOM_TABLE_LIMIT).contains(&value) => value,
-            _ => {
-                if let Some(DatabaseTableModal::CustomLimit { error, .. }) =
-                    self.ide_panel.database.table_modal.as_mut()
-                {
-                    *error = Some("Лимит должен быть от 1 до 10000".to_string());
-                }
-                return;
-            }
-        };
-        self.ide_panel.database.table_modal = None;
-        let Some(mut view) = self
+        let action = self
             .database_table_meta_state(tab_id)
-            .map(|(_, state)| state.grid.view.clone())
-        else {
-            return;
-        };
-        view.limit = limit;
-        view.current_page = 0;
-        self.request_database_table_reload(tab_id, DatabaseTableReloadAction::ApplyView(view));
+            .map(|(_, state)| state.set_table_limit(limit));
+        if let Some(action) = action {
+            self.request_database_table_reload(tab_id, action);
+        }
     }
 
     pub fn cycle_database_table_sort(
@@ -954,73 +649,20 @@ impl App {
         tab_id: crate::app::database::DatabaseTabId,
         column_index: usize,
     ) {
-        let Some((column, mut view)) = self.database_table_meta_state(tab_id).and_then(|(_, state)| {
-            let column = state.metadata.as_ref()?.columns.get(column_index)?.clone();
-            Some((column, state.grid.view.clone()))
-        }) else {
+        let action = self
+            .database_table_meta_state(tab_id)
+            .and_then(|(_, state)| state.sorted_table_view(column_index));
+        let Some(action) = action else {
             return;
         };
-        match (view.sorted_column.as_deref(), view.sort_direction) {
-            (Some(name), Some(crate::app::database::DatabaseSortDirection::Asc))
-                if name == column.name =>
-            {
-                view.sort_direction = Some(crate::app::database::DatabaseSortDirection::Desc);
-                view.order_by = format!(
-                    "{} DESC",
-                    crate::app::database::quote_pg_identifier(&column.name)
-                );
-            }
-            (Some(name), Some(crate::app::database::DatabaseSortDirection::Desc))
-                if name == column.name =>
-            {
-                view.sorted_column = None;
-                view.sort_direction = None;
-                view.order_by.clear();
-            }
-            _ => {
-                view.sorted_column = Some(column.name.clone());
-                view.sort_direction = Some(crate::app::database::DatabaseSortDirection::Asc);
-                view.order_by = format!(
-                    "{} ASC",
-                    crate::app::database::quote_pg_identifier(&column.name)
-                );
-            }
-        }
-        view.current_page = 0;
-        self.request_database_table_reload(tab_id, DatabaseTableReloadAction::ApplyView(view));
+        self.request_database_table_reload(tab_id, action);
     }
 
     pub fn add_database_table_row(&mut self, tab_id: crate::app::database::DatabaseTabId) {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        let Some(metadata) = state.metadata.as_ref() else {
-            return;
-        };
-        if !metadata.editable {
-            state.error = metadata.read_only_reason.clone();
-            return;
-        }
-        let absolute_index = state.grid.next_added_row_index();
-        let cells = metadata
-            .columns
-            .iter()
-            .map(|column| {
-                let value = if column.identity || column.generated || column.default_expression.is_some() {
-                    DatabaseCellValue::Default
-                } else {
-                    DatabaseCellValue::Null
-                };
-                DatabaseGridCell::new(value)
-            })
-            .collect();
-        state.grid.added_rows.push(DatabaseGridRow {
-            absolute_index,
-            cells,
-            xmin: None,
-            state: DatabaseRowState::Added,
-        });
-        state.grid.select_row(absolute_index, false, false);
+        state.add_local_row();
     }
 
     pub fn delete_database_table_selection(
@@ -1030,44 +672,7 @@ impl App {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        if !state.metadata.as_ref().is_some_and(|metadata| metadata.editable) {
-            state.error = state
-                .metadata
-                .as_ref()
-                .and_then(|metadata| metadata.read_only_reason.clone());
-            return;
-        }
-        let mut rows = state.grid.selection.selected_rows.clone();
-        if rows.is_empty()
-            && let Some((start, end)) = state.grid.selection.cell_range()
-        {
-            rows.extend(state.grid.row_indices_between(start.row, end.row));
-        }
-        rows.sort_unstable();
-        rows.dedup();
-        let removed_added: std::collections::HashSet<_> = state
-            .grid
-            .added_rows
-            .iter()
-            .filter_map(|row| rows.contains(&row.absolute_index).then_some(row.absolute_index))
-            .collect();
-        state
-            .grid
-            .added_rows
-            .retain(|row| !removed_added.contains(&row.absolute_index));
-        for row_index in rows.iter().copied() {
-            if removed_added.contains(&row_index) {
-                continue;
-            }
-            if let Some(row) = state.grid.row_mut(row_index) {
-                row.state = if row.state == DatabaseRowState::Deleted {
-                    DatabaseRowState::Clean
-                } else {
-                    DatabaseRowState::Deleted
-                };
-            }
-        }
-        state.grid.selection.clear();
+        state.delete_local_selection();
     }
 
     pub fn undo_database_table_selection(
@@ -1077,160 +682,13 @@ impl App {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        if !state.grid.selection.selected_rows.is_empty() {
-            let rows = state.grid.selection.selected_rows.clone();
-            let added: std::collections::HashSet<_> = state
-                .grid
-                .added_rows
-                .iter()
-                .filter_map(|row| rows.contains(&row.absolute_index).then_some(row.absolute_index))
-                .collect();
-            state
-                .grid
-                .added_rows
-                .retain(|row| !added.contains(&row.absolute_index));
-            for row_index in rows {
-                if added.contains(&row_index) {
-                    continue;
-                }
-                if let Some(row) = state.grid.row_mut(row_index) {
-                    row.state = DatabaseRowState::Clean;
-                    for cell in &mut row.cells {
-                        cell.undo();
-                    }
-                }
-            }
-            state.grid.selection.clear();
-            return;
-        }
-        if let Some((start, end)) = state.grid.selection.cell_range() {
-            for row_index in state.grid.row_indices_between(start.row, end.row) {
-                if let Some(row) = state.grid.row_mut(row_index) {
-                    for column in start.column..=end.column {
-                        if let Some(cell) = row.cells.get_mut(column) {
-                            cell.undo();
-                        }
-                    }
-                }
-            }
-        }
+        state.undo_local_selection();
     }
 }
 
 #[cfg(test)]
 mod database_table_app_tests {
     use super::*;
-
-    fn metadata() -> crate::app::database::DatabaseTableMetadata {
-        crate::app::database::DatabaseTableMetadata {
-            database_name: "db".to_string(),
-            table_name: "items".to_string(),
-            columns: vec![
-                crate::app::database::DatabaseColumnInfo {
-                    ordinal: 1,
-                    name: "id".to_string(),
-                    type_name: "integer".to_string(),
-                    type_oid: 23,
-                    type_kind: crate::app::database::DatabaseTypeKind::Other,
-                    nullable: false,
-                    default_expression: None,
-                    identity: false,
-                    generated: false,
-                    primary_key: true,
-                    enum_values: Vec::new(),
-                },
-                crate::app::database::DatabaseColumnInfo {
-                    ordinal: 2,
-                    name: "User ID".to_string(),
-                    type_name: "text".to_string(),
-                    type_oid: 25,
-                    type_kind: crate::app::database::DatabaseTypeKind::Other,
-                    nullable: true,
-                    default_expression: None,
-                    identity: false,
-                    generated: false,
-                    primary_key: false,
-                    enum_values: Vec::new(),
-                },
-            ],
-            primary_key_columns: vec!["id".to_string()],
-            editable: true,
-            read_only_reason: None,
-            notices: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn page_math_stays_inside_count() {
-        let count = 201usize;
-        let limit = 100usize;
-        assert_eq!(count.saturating_sub(1) / limit, 2);
-        assert_eq!(0usize.saturating_sub(1) / limit, 0);
-    }
-
-    #[test]
-    fn filter_completion_reuses_columns_and_quotes_complex_identifiers() {
-        let context = database_filter_completion_context(
-            DatabaseTableInputTarget::Where,
-            "Us",
-            2,
-        );
-        assert_eq!(
-            context.kind,
-            crate::languages::sql_analysis::SqlCompletionKind::Column
-        );
-        let options = database_filter_completion_words(
-            &metadata(),
-            DatabaseTableInputTarget::Where,
-            &context,
-        );
-        assert_eq!(options.len(), 1);
-        assert_eq!(options[0].0.word, "User ID");
-        assert_eq!(options[0].0.insert_text.as_deref(), Some("\"User ID\""));
-    }
-
-    #[test]
-    fn order_by_completion_includes_directions() {
-        let context = crate::languages::sql_analysis::SqlCompletionContext {
-            kind: crate::languages::sql_analysis::SqlCompletionKind::Direction,
-            prefix: "DE".to_string(),
-            replace_range: 5..7,
-            scope: 0..7,
-            automatic: true,
-            ..crate::languages::sql_analysis::SqlCompletionContext::default()
-        };
-        let options = database_filter_completion_words(
-            &metadata(),
-            DatabaseTableInputTarget::OrderBy,
-            &context,
-        );
-        assert!(options.iter().any(|(item, _)| item.word == "DESC"));
-    }
-
-    #[test]
-    fn where_completion_after_operator_waits_for_a_value() {
-        let context = database_filter_completion_context(
-            DatabaseTableInputTarget::Where,
-            "\"id\" = ",
-            7,
-        );
-        assert_eq!(
-            context.kind,
-            crate::languages::sql_analysis::SqlCompletionKind::Value
-        );
-        assert!(!context.automatic);
-    }
-
-    #[test]
-    fn filter_completion_replaces_only_current_sql_word() {
-        let context = database_filter_completion_context(
-            DatabaseTableInputTarget::Where,
-            "id = Us",
-            7,
-        );
-        assert_eq!(context.replace_range, 5..7);
-        assert_eq!(context.prefix, "Us");
-    }
 
     #[test]
     fn filter_completion_anchor_uses_scrolled_visible_cursor_and_shared_padding() {

@@ -467,11 +467,8 @@ impl App {
         let Some((path, ext)) = identity else {
             return;
         };
-        if !matches!(ext.as_str(), "py" | "pyi") {
-            return;
-        }
         if let Some(lsp) = &mut self.lsp {
-            lsp.notify_close(&path, &ext);
+            lsp.notify_python_tab_close(&path, &ext);
         }
     }
 

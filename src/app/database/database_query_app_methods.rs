@@ -3,9 +3,7 @@ use crate::app::database::{
     analyze_database_query_sql, completion_words_for_context,
     database_query_editor_diagnostics,
     database_query_completion_context, format_database_sql, history_started_now,
-    query_execution_target, sanitize_history_sql,
 };
-use crate::languages::sql_analysis::SqlDiagnosticSeverity;
 
 impl App {
     pub(crate) fn jump_to_active_database_query_diagnostic(&mut self, index: usize) {
@@ -362,7 +360,6 @@ impl App {
             );
             return;
         }
-        let metadata = state.completion.clone();
         let meta = meta.clone();
         let text = self.editor.get_full_text();
         let selection = self
@@ -374,53 +371,32 @@ impl App {
                 let end = anchor.max(self.editor.cursor);
                 (start, end)
             });
-        let Some((sql, source_offset)) =
-            query_execution_target(&text, selection, self.editor.cursor)
-        else {
+        let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id) else {
+            return;
+        };
+        let plan = match &mut self.tabs[index].kind {
+            EditorTabKind::DatabaseQuery(_, state) => state.database_query_prepare_execution(
+                &text,
+                selection,
+                self.editor.cursor,
+                self.editor.version,
+                &self.editor.line_offsets,
+            ),
+            _ => None,
+        };
+        let Some(plan) = plan else {
             self.ide_panel.database.global_error = Some("SQL-консоль пуста".to_string());
             return;
         };
-        let mut analysis = analyze_database_query_sql(&metadata, &sql);
-        for diagnostic in &mut analysis.diagnostics {
-            diagnostic.range.start = diagnostic.range.start.saturating_add(source_offset);
-            diagnostic.range.end = diagnostic.range.end.saturating_add(source_offset);
+        self.tabs[index].syntax_errors = plan.error_ranges.clone();
+        if index == self.active_tab {
+            self.highlighter.syntax_errors = plan.error_ranges;
         }
-        let error_ranges = analysis_error_ranges(&analysis);
-        let editor_diagnostics = database_query_editor_diagnostics(
-            &analysis,
-            None,
-            &text,
-            &self.editor.line_offsets,
-        );
-        let has_errors = analysis
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.severity == SqlDiagnosticSeverity::Error);
-        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
-            && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
-        {
-            state.analysis = analysis;
-            state.analysis_editor_version = Some(self.editor.version);
-            state.editor_diagnostics = editor_diagnostics;
-            if has_errors {
-                state.running = false;
-                state.error = Some(
-                    "SQL-анализатор обнаружил ошибки. Исправьте их перед выполнением."
-                        .to_string(),
-                );
-                state.messages.clear();
-                state.result_view.invalidate_review_message_layout();
-                state.result_view.active_result = state.results.len();
-                state.result_view.reset_scroll();
-            }
-            self.tabs[index].syntax_errors = error_ranges.clone();
-            if index == self.active_tab {
-                self.highlighter.syntax_errors = error_ranges;
-            }
-        }
-        if has_errors {
+        if plan.has_errors {
             return;
         }
+        let sql = plan.sql;
+        let source_offset = plan.source_offset;
         let Some(connection) = self
             .ide_panel
             .database
@@ -568,13 +544,10 @@ impl App {
         let Some((meta, _)) = self.active_database_query_meta_state() else {
             return;
         };
-        let key = (meta.connection_id, meta.console_id);
-        if let Some(index) = self.database_query_tab_index(key.0, key.1)
+        if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
             && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
         {
-            state.history_open = !state.history_open;
-            state.history_selected = 0;
-            state.result_view.reset_scroll();
+            state.database_query_toggle_history();
         }
     }
 
@@ -585,9 +558,7 @@ impl App {
         if let Some(tab_index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
             && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[tab_index].kind
         {
-            state.history_open = false;
-            state.result_view.active_result = index.min(state.results.len());
-            state.result_view.reset_scroll();
+            state.database_query_select_result(index);
         }
     }
 
@@ -598,18 +569,11 @@ impl App {
         let connection_id = meta.connection_id;
         let console_id = meta.console_id;
         let database_name = meta.database_name.clone();
-        let entry = self
-            .ide_panel
-            .database
-            .persisted
-            .query_history
-            .iter()
-            .rev()
-            .filter(|entry| {
-                entry.connection_id == connection_id && entry.database_name == database_name
-            })
-            .nth(visible_index)
-            .cloned();
+        let entry = self.ide_panel.database.database_query_history_entry(
+            connection_id,
+            &database_name,
+            visible_index,
+        );
         let Some(entry) = entry else { return; };
         let len = self.editor.len();
         self.editor.replace_range(0, len, &entry.sql);
@@ -627,16 +591,10 @@ impl App {
         let Some((meta, _)) = self.active_database_query_meta_state() else {
             return 0;
         };
-        self.ide_panel
-            .database
-            .persisted
-            .query_history
-            .iter()
-            .filter(|entry| {
-                entry.connection_id == meta.connection_id
-                    && entry.database_name == meta.database_name
-            })
-            .count()
+        self.ide_panel.database.database_query_history_len(
+            meta.connection_id,
+            &meta.database_name,
+        )
     }
 
     pub(crate) fn move_active_database_query_history_selection(&mut self, delta: i32) {
@@ -650,14 +608,7 @@ impl App {
         if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
             && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
         {
-            state.history_selected = if delta < 0 {
-                state.history_selected.saturating_sub(delta.unsigned_abs() as usize)
-            } else {
-                state
-                    .history_selected
-                    .saturating_add(delta as usize)
-                    .min(len - 1)
-            };
+            state.database_query_move_history_selection(delta, len);
         }
     }
 
@@ -669,7 +620,7 @@ impl App {
         if let Some(index) = self.database_query_tab_index(meta.connection_id, meta.console_id)
             && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
         {
-            state.history_selected = if last { len.saturating_sub(1) } else { 0 };
+            state.database_query_set_history_selection(last, len);
         }
     }
 
@@ -680,26 +631,11 @@ impl App {
 
     pub(crate) fn record_database_query_history(
         &mut self,
-        mut entry: DatabaseQueryHistoryEntry,
+        entry: DatabaseQueryHistoryEntry,
     ) {
-        entry.sql = sanitize_history_sql(&entry.sql);
-        if let Some(error) = entry.error_summary.as_mut() {
-            *error = sanitize_history_sql(error);
+        if !self.ide_panel.database.database_query_record_history(entry) {
+            return;
         }
-        entry.normalize();
-        let limit = self
-            .ide_panel
-            .database
-            .settings()
-            .sql_history_limit
-            .min(crate::app::database::MAX_SQL_HISTORY_ENTRIES);
-        let history = &mut self.ide_panel.database.persisted.query_history;
-        history.push(entry);
-        crate::app::database::trim_database_query_history(
-            history,
-            limit,
-            crate::app::database::MAX_SQL_HISTORY_BYTES,
-        );
         for tab in &mut self.tabs {
             if let EditorTabKind::DatabaseQuery(_, state) = &mut tab.kind {
                 state.result_view.invalidate_history_layout();
@@ -709,46 +645,13 @@ impl App {
     }
 
     pub(crate) fn adjust_database_setting(&mut self, setting: usize, delta: i32) {
-        let settings = &mut self.ide_panel.database.persisted.settings;
-        match setting {
-            0 => adjust_u64(&mut settings.transaction_review_timeout_seconds, delta, 30),
-            1 => adjust_u64(&mut settings.statement_timeout_seconds, delta, 1),
-            2 => adjust_u64(&mut settings.lock_timeout_seconds, delta, 1),
-            3 => adjust_u64(&mut settings.connect_timeout_seconds, delta, 1),
-            4 => adjust_u64(&mut settings.ssh_startup_timeout_seconds, delta, 1),
-            5 => adjust_usize(&mut settings.default_table_limit, delta, 10),
-            6 => adjust_usize(&mut settings.result_row_limit, delta, 1_000),
-            7 => adjust_usize(&mut settings.result_memory_limit_bytes, delta, 1024 * 1024),
-            8 => adjust_usize(&mut settings.sql_history_limit, delta, 10),
-            9 => {
-                settings.default_connection_color = if delta >= 0 {
-                    match settings.default_connection_color {
-                        crate::app::database::DatabaseConnectionColor::Blue => crate::app::database::DatabaseConnectionColor::Green,
-                        crate::app::database::DatabaseConnectionColor::Green => crate::app::database::DatabaseConnectionColor::Yellow,
-                        crate::app::database::DatabaseConnectionColor::Yellow => crate::app::database::DatabaseConnectionColor::Orange,
-                        crate::app::database::DatabaseConnectionColor::Orange => crate::app::database::DatabaseConnectionColor::Red,
-                        crate::app::database::DatabaseConnectionColor::Red => crate::app::database::DatabaseConnectionColor::Purple,
-                        crate::app::database::DatabaseConnectionColor::Purple => crate::app::database::DatabaseConnectionColor::Cyan,
-                        crate::app::database::DatabaseConnectionColor::Cyan => crate::app::database::DatabaseConnectionColor::Gray,
-                        crate::app::database::DatabaseConnectionColor::Gray => crate::app::database::DatabaseConnectionColor::Blue,
-                    }
-                } else {
-                    match settings.default_connection_color {
-                        crate::app::database::DatabaseConnectionColor::Blue => crate::app::database::DatabaseConnectionColor::Gray,
-                        crate::app::database::DatabaseConnectionColor::Green => crate::app::database::DatabaseConnectionColor::Blue,
-                        crate::app::database::DatabaseConnectionColor::Yellow => crate::app::database::DatabaseConnectionColor::Green,
-                        crate::app::database::DatabaseConnectionColor::Orange => crate::app::database::DatabaseConnectionColor::Yellow,
-                        crate::app::database::DatabaseConnectionColor::Red => crate::app::database::DatabaseConnectionColor::Orange,
-                        crate::app::database::DatabaseConnectionColor::Purple => crate::app::database::DatabaseConnectionColor::Red,
-                        crate::app::database::DatabaseConnectionColor::Cyan => crate::app::database::DatabaseConnectionColor::Purple,
-                        crate::app::database::DatabaseConnectionColor::Gray => crate::app::database::DatabaseConnectionColor::Cyan,
-                    }
-                };
-            }
-            _ => return,
+        if self
+            .ide_panel
+            .database
+            .database_query_adjust_setting(setting, delta)
+        {
+            self.save_database_panel_state();
         }
-        settings.normalize();
-        self.save_database_panel_state();
     }
     pub(crate) fn scroll_active_database_query_review_messages_to_pointer(&mut self) {
         let Some(rect) = self
@@ -797,10 +700,9 @@ impl App {
     }
 
     pub(crate) fn start_database_query_result_resize(&mut self) {
-        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
-            return;
-        };
-        state.result_view.is_resizing_height = true;
+        if let Some((_, state)) = self.active_database_query_meta_state_mut() {
+            state.database_query_start_result_resize();
+        }
     }
 
     fn update_database_query_result_resize(&mut self, mouse_y: f32) -> bool {
@@ -834,40 +736,19 @@ impl App {
             panel_bottom_height,
             scale,
         ) / scale;
-        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
+        let Some(tab) = self.tabs.get_mut(self.active_tab) else {
             return false;
         };
-        state.result_view.preferred_height = preferred_height;
+        let EditorTabKind::DatabaseQuery(_, state) = &mut tab.kind else {
+            return false;
+        };
+        state.database_query_set_result_height(preferred_height);
         true
     }
 
     pub(crate) fn auto_size_active_database_query_column(&mut self, column_index: usize) {
-        let width_and_name = self.active_database_query_meta_state().and_then(|(_, state)| {
-            let result = state.results.get(state.result_view.active_result)?;
-            let column_name = result.columns.get(column_index)?;
-            let mut max_chars = column_name.chars().count().saturating_add(3);
-            for row in result.rows.iter().take(100) {
-                if let Some(cell) = row.get(column_index) {
-                    max_chars = max_chars.max(cell.display_text().chars().count().min(160));
-                }
-            }
-            Some((
-                column_name.clone(),
-                (max_chars as f32 * 8.0 + 24.0).clamp(
-                    crate::app::database::DATABASE_GRID_MIN_COLUMN_WIDTH,
-                    crate::app::database::DATABASE_GRID_MAX_COLUMN_WIDTH,
-                ),
-            ))
-        });
-        let Some((column_name, width)) = width_and_name else {
-            return;
-        };
         if let Some((_, state)) = self.active_database_query_meta_state_mut() {
-            crate::app::database::set_database_column_width(
-                &mut state.result_view.column_widths,
-                &column_name,
-                width,
-            );
+            state.database_query_auto_size_column(column_index);
         }
     }
 
@@ -876,20 +757,9 @@ impl App {
         column_index: usize,
         mouse_x: f32,
     ) {
-        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
-            return;
-        };
-        let Some(result) = state.results.get(state.result_view.active_result) else {
-            return;
-        };
-        let Some(column_name) = result.columns.get(column_index) else {
-            return;
-        };
-        let width = crate::app::database::database_column_width(
-            &state.result_view.column_widths,
-            column_name,
-        );
-        state.result_view.column_resize = Some((column_index, mouse_x, width));
+        if let Some((_, state)) = self.active_database_query_meta_state_mut() {
+            state.database_query_start_column_resize(column_index, mouse_x);
+        }
     }
 
     pub(crate) fn start_database_query_scroll_drag(&mut self, horizontal: bool) {
@@ -985,25 +855,10 @@ impl App {
         if self.update_database_query_result_resize(mouse_y) {
             return true;
         }
-        let resize = self
-            .active_database_query_meta_state()
-            .and_then(|(_, state)| state.result_view.column_resize);
-        if let Some((column_index, start_x, start_width)) = resize {
-            let column_name = self
-                .active_database_query_meta_state()
-                .and_then(|(_, state)| state.results.get(state.result_view.active_result))
-                .and_then(|result| result.columns.get(column_index))
-                .cloned();
-            if let Some(column_name) = column_name
-                && let Some((_, state)) = self.active_database_query_meta_state_mut()
-            {
-                crate::app::database::set_database_column_width(
-                    &mut state.result_view.column_widths,
-                    &column_name,
-                    start_width + mouse_x - start_x,
-                );
-                return true;
-            }
+        if let Some((_, state)) = self.active_database_query_meta_state_mut()
+            && state.database_query_update_column_resize(mouse_x)
+        {
+            return true;
         }
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let review_scroll_rect = self
@@ -1142,14 +997,9 @@ impl App {
     }
 
     pub(crate) fn finish_database_query_scroll_drag(&mut self) {
-        let Some((_, state)) = self.active_database_query_meta_state_mut() else {
-            return;
-        };
-        state.result_view.scroll_x.end_drag();
-        state.result_view.scroll_y.end_drag();
-        state.result_view.review_message_scroll_y.end_drag();
-        state.result_view.is_resizing_height = false;
-        state.result_view.column_resize = None;
+        if let Some((_, state)) = self.active_database_query_meta_state_mut() {
+            state.database_query_finish_scroll_drag();
+        }
     }
 }
 
@@ -1204,22 +1054,6 @@ fn database_query_diagnostic_is_stale(
     editor_version: u64,
 ) -> bool {
     diagnostic_version.is_some_and(|version| version != editor_version)
-}
-
-fn adjust_u64(value: &mut u64, delta: i32, step: u64) {
-    if delta >= 0 {
-        *value = value.saturating_add(step.saturating_mul(delta as u64));
-    } else {
-        *value = value.saturating_sub(step.saturating_mul(delta.unsigned_abs() as u64));
-    }
-}
-
-fn adjust_usize(value: &mut usize, delta: i32, step: usize) {
-    if delta >= 0 {
-        *value = value.saturating_add(step.saturating_mul(delta as usize));
-    } else {
-        *value = value.saturating_sub(step.saturating_mul(delta.unsigned_abs() as usize));
-    }
 }
 
 #[cfg(test)]
@@ -1436,22 +1270,6 @@ mod database_query_app_method_tests {
             ),
             (500.0, 290.0),
         );
-    }
-
-    #[test]
-    fn setting_adjusters_saturate() {
-        let mut value = 1u64;
-        adjust_u64(&mut value, -2, 10);
-        assert_eq!(value, 0);
-        let mut value = 2usize;
-        adjust_usize(&mut value, 3, 4);
-        assert_eq!(value, 14);
-    }
-
-    #[test]
-    fn query_history_entry_is_sanitized_before_persistence() {
-        let clean = sanitize_history_sql("ALTER ROLE x PASSWORD 'secret'");
-        assert!(!clean.contains("secret"));
     }
 
     #[test]
