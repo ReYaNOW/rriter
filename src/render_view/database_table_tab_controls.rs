@@ -253,7 +253,10 @@ fn draw_database_refresh_overlay(
     let dot = (4.0 * s).round().max(2.0);
     let phase = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |duration| (duration.as_millis() % 800) as usize / 100);
+        .map_or(0, |duration| {
+            (duration.as_millis() / crate::app::database::DATABASE_REFRESH_INDICATOR_STEP_MS % 8)
+                as usize
+        });
     const OFFSETS: [(f32, f32); 8] = [
         (0.0, -1.0), (0.707, -0.707), (1.0, 0.0), (0.707, 0.707),
         (0.0, 1.0), (-0.707, 0.707), (-1.0, 0.0), (-0.707, -0.707),

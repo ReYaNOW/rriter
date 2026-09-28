@@ -681,32 +681,21 @@ fn run_supervisor(
             continue 'outer;
         }
 
-        // Ждём ответ на initialize (простой polling цикл)
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        let mut initialized = false;
-        while std::time::Instant::now() < deadline {
-            if stop.load(Ordering::Acquire) {
-                shutdown_spawned_process(&mut proc, &event_tx, def.program);
-                return;
-            }
-            // Проверяем crash
-            match proc.child.try_wait() {
-                Ok(Some(_)) => continue 'outer,
-                Ok(None) => {}
-                Err(_) => continue 'outer,
-            }
-            // Ждём немного - initialize ответ придёт через reader тред в event_tx
-            // Но нам нужно знать когда сервер готов — используем специальный подход:
-            // просто ждём 200мс (ruff server стартует быстро), потом шлём initialized
-            if !wait_interruptibly(&stop, Duration::from_millis(200)) {
-                shutdown_spawned_process(&mut proc, &event_tx, def.program);
-                return;
-            }
-            initialized = true;
-            break;
+        // Ждём ответ на initialize: он придёт через reader тред в event_tx, а момент
+        // готовности не отслеживаем — ждём 200мс (ruff server стартует быстро).
+        if stop.load(Ordering::Acquire) {
+            shutdown_spawned_process(&mut proc, &event_tx, def.program);
+            return;
         }
-        if !initialized {
-            continue 'outer;
+        // Проверяем crash
+        match proc.child.try_wait() {
+            Ok(Some(_)) => continue 'outer,
+            Ok(None) => {}
+            Err(_) => continue 'outer,
+        }
+        if !wait_interruptibly(&stop, Duration::from_millis(200)) {
+            shutdown_spawned_process(&mut proc, &event_tx, def.program);
+            return;
         }
 
         // Шлём initialized notification

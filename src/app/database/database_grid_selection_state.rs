@@ -204,6 +204,7 @@ pub struct DatabaseTableGridState {
     pub pending_reload: Option<DatabaseTableReloadAction>,
     pub post_commit_refresh_pending: bool,
     pub refresh_started: Option<std::time::Instant>,
+    pub refresh_indicator_last_drawn_step: Option<u64>,
     pub refreshing: bool,
     pub restore_selection_keys: Vec<Vec<String>>,
     pub restore_selection_column: Option<usize>,
@@ -241,6 +242,7 @@ impl PartialEq for DatabaseTableGridState {
             && self.pending_close_after_save == other.pending_close_after_save
             && self.pending_reload == other.pending_reload
             && self.post_commit_refresh_pending == other.post_commit_refresh_pending
+            && self.refresh_indicator_last_drawn_step == other.refresh_indicator_last_drawn_step
             && self.refreshing == other.refreshing
             && self.restore_selection_keys == other.restore_selection_keys
             && self.restore_selection_column == other.restore_selection_column
@@ -283,6 +285,7 @@ impl DatabaseTableGridState {
             pending_reload: None,
             post_commit_refresh_pending: false,
             refresh_started: None,
+            refresh_indicator_last_drawn_step: None,
             refreshing: false,
             restore_selection_keys: Vec::new(),
             restore_selection_column: None,
@@ -730,9 +733,47 @@ impl DatabaseTableGridState {
         !self.refreshing && self.chunks.contains_key(&chunk_index)
     }
 
+    pub fn start_refresh(&mut self, started: std::time::Instant) {
+        self.refreshing = true;
+        self.refresh_started = Some(started);
+        self.refresh_indicator_last_drawn_step = None;
+    }
+
+    pub fn refresh_indicator_tick(
+        &mut self,
+        now: std::time::Instant,
+        wall_ms: u128,
+    ) -> (bool, Option<std::time::Instant>) {
+        if !self.refreshing {
+            return (false, None);
+        }
+        let Some(started) = self.refresh_started else {
+            return (false, None);
+        };
+        if now.checked_duration_since(started).unwrap_or_default()
+            < super::DATABASE_REFRESH_INDICATOR_DELAY
+        {
+            return (
+                false,
+                started.checked_add(super::DATABASE_REFRESH_INDICATOR_DELAY),
+            );
+        }
+
+        let step = (wall_ms / super::DATABASE_REFRESH_INDICATOR_STEP_MS) as u64;
+        let needs_redraw = self.refresh_indicator_last_drawn_step != Some(step);
+        self.refresh_indicator_last_drawn_step = Some(step);
+        let step_remaining_ms = super::DATABASE_REFRESH_INDICATOR_STEP_MS
+            - wall_ms % super::DATABASE_REFRESH_INDICATOR_STEP_MS;
+        (
+            needs_redraw,
+            now.checked_add(std::time::Duration::from_millis(step_remaining_ms as u64)),
+        )
+    }
+
     pub fn finish_refresh(&mut self) {
         self.refreshing = false;
         self.refresh_started = None;
+        self.refresh_indicator_last_drawn_step = None;
     }
 
     pub fn clear_loaded_rows(&mut self) {

@@ -562,8 +562,14 @@ fn about_to_wait_panel_scrolls(app: &mut App, dt: f32) -> bool {
 
 /// Per-tab API client / database scrolls, database modals and LSP log scrolls.
 #[cfg_attr(coverage_nightly, coverage(off))]
-fn about_to_wait_tab_content_scrolls(app: &mut App, dt: f32) -> bool {
+fn about_to_wait_tab_content_scrolls(
+    app: &mut App,
+    dt: f32,
+    now: Instant,
+    wall_ms: u128,
+) -> (bool, Option<Instant>) {
     let mut needs_redraw = false;
+    let mut database_refresh_wake_at: Option<Instant> = None;
     for tab in &mut app.tabs {
         if let crate::app::EditorTabKind::ApiClient(_, state) = &mut tab.kind {
             if state.tab_scroll.update(dt) {
@@ -622,9 +628,14 @@ fn about_to_wait_tab_content_scrolls(app: &mut App, dt: f32) -> bool {
                 if state.grid.scroll_y.update(dt) {
                     needs_redraw = true;
                 }
-                if state.grid.refreshing {
-                    needs_redraw = true;
-                }
+                let (refresh_redraw, refresh_wake) =
+                    state.grid.refresh_indicator_tick(now, wall_ms);
+                needs_redraw |= refresh_redraw;
+                database_refresh_wake_at = match (database_refresh_wake_at, refresh_wake) {
+                    (Some(current), Some(next)) => Some(current.min(next)),
+                    (Some(current), None) => Some(current),
+                    (None, next) => next,
+                };
             }
             crate::app::EditorTabKind::DatabaseQuery(_, state) => {
                 if state.result_view.scroll_x.update(dt) {
@@ -683,5 +694,5 @@ fn about_to_wait_tab_content_scrolls(app: &mut App, dt: f32) -> bool {
             needs_redraw = true;
         }
     }
-    needs_redraw
+    (needs_redraw, database_refresh_wake_at)
 }

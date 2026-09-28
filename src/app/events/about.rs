@@ -148,6 +148,9 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     }
 
     let now = Instant::now();
+    let wall_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
     let automation_running = if app.automation.is_some() {
         match app.advance_automation(event_loop, now) {
             Some(crate::app::automation::AutomationTick::Exit) => {
@@ -205,7 +208,9 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     needs_redraw |= polls_redraw;
     needs_redraw |= about_to_wait_file_watcher(app);
     needs_redraw |= about_to_wait_panel_scrolls(app, dt);
-    needs_redraw |= about_to_wait_tab_content_scrolls(app, dt);
+    let (tab_content_redraw, database_refresh_wake_at) =
+        about_to_wait_tab_content_scrolls(app, dt, now, wall_ms);
+    needs_redraw |= tab_content_redraw;
     needs_redraw |= about_to_wait_terminals(app, dt);
     needs_redraw |= about_to_wait_overlay_animations(app, dt, now);
     needs_redraw |= about_to_wait_selection_drag_autoscroll(app, dt);
@@ -243,18 +248,6 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             || app.ide_panel.api.api_runtime_poll_pending()
             || app.ide_panel.database.pending_job.is_some(),
     );
-    let database_refresh_wake_at = app
-        .tabs
-        .iter()
-        .filter_map(|tab| match &tab.kind {
-            crate::app::EditorTabKind::DatabaseTable(_, state) if state.grid.refreshing => state
-                .grid
-                .refresh_started
-                .and_then(|started| started.checked_add(crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY))
-                .filter(|at| *at > now),
-            _ => None,
-        })
-        .fold(None, |earliest, at| earliest_optional_wake(earliest, Some(at)));
     let deadline_wake_at = earliest_optional_wake(
         hover_wake_at,
         earliest_optional_wake(

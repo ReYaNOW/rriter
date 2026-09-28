@@ -139,7 +139,7 @@ fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) 
         .databases
         .iter()
         .position(|database| database.name == fixture.database)
-        .expect("fixture database in catalog");
+        .unwrap_or_else(|| panic!("fixture database in catalog"));
     click_ui(session, &format!("DatabaseArrow({connection_index}, {database_index})"));
     wait_until(session, 5000, "fixture table catalog", |session| {
         session.app.ide_panel.database.connections[connection_index].databases[database_index]
@@ -150,7 +150,7 @@ fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) 
         .tables
         .iter()
         .position(|table| table.name == "pgo_items")
-        .expect("fixture table in catalog");
+        .unwrap_or_else(|| panic!("fixture table in catalog"));
     let table_row = format!("DatabaseTableRow({connection_index}, {database_index}, {table_index})");
     let (x, y) = ui_center(&dump(session), &table_row);
     let lines = run_script(session, format!("mouse_move {x} {y}\ndblclick\n").as_bytes());
@@ -166,7 +166,7 @@ fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) 
 /// its indicator with no input, so the event loop has to arm a wake-up for that moment.
 #[test]
 fn headless_database_table_slow_refresh_draws_indicator_without_input() {
-    const CHUNK_DELAY_MS: u64 = 400;
+    const CHUNK_DELAY_MS: u64 = 1300;
     let fixture = crate::headless::tests_support::postgres_fixture_with_args(&[
         "--table-chunk-delay-ms",
         &CHUNK_DELAY_MS.to_string(),
@@ -188,14 +188,16 @@ fn headless_database_table_slow_refresh_draws_indicator_without_input() {
     let mut indicator_frame = false;
     let due = started + delay;
     let budget = std::time::Instant::now() + std::time::Duration::from_millis(CHUNK_DELAY_MS + 3000);
-    while active_table_state(&session).is_some_and(|state| state.grid.refreshing) {
+    while active_table_state(&session).is_some_and(|state| state.grid.refreshing)
+        && !indicator_frame
+    {
         let left = budget.saturating_duration_since(std::time::Instant::now());
         assert!(!left.is_zero(), "refresh did not finish; wake-ups: {causes:?}");
         let wake = session.native_wake(left);
         *causes.entry(wake.cause.name()).or_default() += 1;
         // The frame renders after `stepped_at`; `refreshing` only changes inside that pass.
         let refreshing = active_table_state(&session).is_some_and(|state| state.grid.refreshing);
-        indicator_frame |= wake.frame
+        indicator_frame = wake.frame
             && refreshing
             && wake.stepped_at.is_some_and(|at| at >= due);
         if !refreshing || indicator_frame || wake.frame {
@@ -222,6 +224,19 @@ fn headless_database_table_slow_refresh_draws_indicator_without_input() {
     assert!(
         indicator_frame,
         "no frame drew the refresh indicator between {delay:?} and the result; wake-ups: {causes:?}"
+    );
+    let idle = run_script(&mut session, b"idle 500\n");
+    let frames = idle
+        .first()
+        .and_then(|line| line.strip_prefix("ok frames="))
+        .and_then(|line| line.split_whitespace().next())
+        .and_then(|frames| frames.parse::<u32>().ok())
+        .unwrap_or_else(|| panic!("invalid idle result: {idle:?}"));
+    // Five 100 ms spinner steps plus one frame per delayed row chunk that
+    // arrives meanwhile; a redraw every frame would give 30+ at 60 Hz.
+    assert!(
+        frames <= 14,
+        "refresh indicator requested too many frames in 500ms: {frames}; idle result: {idle:?}"
     );
     let _ = std::fs::remove_dir_all(dir);
 }
