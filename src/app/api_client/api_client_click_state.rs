@@ -257,15 +257,12 @@ impl ApiClientState {
     ) {
         let geometry = api_mock_guide_scrollbar(rect, self.mock_guide_scroll.current, scale)
             .geometry(scale);
-        if let Some((drag_offset, target)) =
-            geometry.and_then(|geometry| geometry.press_target(pointer_y))
-        {
-            crate::app::mouse::apply_scrollbar_drag_target(
-                &mut self.mock_guide_scroll,
-                target,
-                drag_offset,
-            );
-        }
+        let _ = crate::app::mouse::press_scrollbar(
+            &mut self.mock_guide_scroll,
+            geometry,
+            0.0,
+            pointer_y,
+        );
     }
 
     /// Cycles the method of a manual mock route; `false` when the index is gone

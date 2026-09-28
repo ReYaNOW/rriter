@@ -160,26 +160,13 @@ impl App {
                 .ui_registry
                 .rect_for(crate::ui_system::UiId::ApiMockGuideScrollY)
             {
-                use crate::render_view::scrollbar_widget::{
-                    Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
-                };
                 let s = self.renderer.as_ref().unwrap().scale_factor;
                 let scroll = &mut self.ide_panel.api.mock_guide_scroll;
-                // Same track as the guide panel bar: the registered lane inset 7 px.
-                let geometry = Scrollbar {
-                    style: ScrollbarStyle {
-                        track_pad: 7.0,
-                        min_thumb: 28.0,
-                        ..ScrollbarStyle::BASE
-                    },
-                    axis: ScrollbarAxis::Vertical,
-                    lane: rect,
-                    extent: ScrollbarExtent::with_max(
-                        rect.3,
-                        crate::app::api_client::api_mock_guide_max_scroll(rect.3, s),
-                        scroll.current,
-                    ),
-                }
+                let geometry = crate::app::api_client::api_mock_guide_scrollbar(
+                    rect,
+                    scroll.current,
+                    s,
+                )
                 .geometry(s);
                 let _ = crate::app::mouse::drag_scrollbar(scroll, geometry, px, py);
             }

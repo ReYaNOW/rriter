@@ -250,10 +250,10 @@ impl Scrollbar {
             Some(gap) => cross_start + cross_len - (gap * scale).round() - thickness,
             None => cross_start + ((cross_len - thickness) * 0.5).round(),
         };
-        let thumb_rect = match self.axis {
+        let thumb_rect = round_rect(match self.axis {
             ScrollbarAxis::Vertical => (cross0, thumb_start, thickness, thumb_end - thumb_start),
             ScrollbarAxis::Horizontal => (thumb_start, cross0, thumb_end - thumb_start, thickness),
-        };
+        });
         Some(ScrollbarGeometry {
             axis: self.axis,
             lane,
@@ -286,7 +286,12 @@ impl ScrollbarGeometry {
 
     #[inline]
     pub(crate) fn on_thumb(&self, pointer: f32) -> bool {
-        pointer >= self.thumb.start && pointer <= self.thumb.start + self.thumb.len
+        let (x, y, w, h) = self.thumb_rect;
+        let (start, len) = match self.axis {
+            ScrollbarAxis::Vertical => (y, h),
+            ScrollbarAxis::Horizontal => (x, w),
+        };
+        pointer >= start && pointer <= start + len
     }
 
     /// Content offset that puts the thumb `grab_offset` px before `pointer` (drag update).
@@ -307,7 +312,7 @@ impl ScrollbarGeometry {
     }
 
     /// Press on the lane: `(grab_offset, target)`. On the thumb the grab keeps the pointer's
-    /// place and the offset stays; on the track the thumb centre jumps under the pointer.
+    /// place and offset; on the track the thumb centre jumps under the pointer.
     pub(crate) fn press_target(&self, pointer: f32) -> Option<(f32, f32)> {
         if !pointer.is_finite() {
             return None;
@@ -422,6 +427,33 @@ mod tests {
         assert_eq!(grab, 40.0);
         assert_eq!(target, 300.0);
         assert_eq!(g.drag_target(95.0, 35.0), Some(150.0));
+    }
+
+    #[test]
+    fn thumb_press_preserves_running_scroll_target() {
+        let bar = vertical((0.0, 0.0, 10.0, 200.0), ScrollbarExtent::with_max(200.0, 300.0, 100.0));
+        let geometry = bar.geometry(1.0);
+        let mut scroll = crate::scroll::ScrollState::new(7.0);
+        scroll.current = 100.0;
+        scroll.target = 180.0;
+
+        assert_eq!(crate::app::mouse::press_scrollbar(&mut scroll, geometry, 5.0, 75.0), Some(180.0));
+        assert_eq!(scroll.target, 180.0);
+        assert_eq!(scroll.drag_offset, 35.0);
+        assert!(scroll.is_dragging);
+    }
+
+    #[test]
+    fn rounded_thumb_edge_is_hit_at_fractional_scale() {
+        let bar = vertical((0.3, 0.2, 10.0, 200.1), ScrollbarExtent::with_max(200.0, 300.0, 123.4));
+        let geometry = bar.geometry(1.333).expect("bar");
+        let (_, y, _, _) = geometry.thumb_rect;
+
+        assert_ne!(y, geometry.thumb.start);
+        assert!(geometry.on_thumb(y));
+        let (grab_offset, target) = geometry.press_target(y).expect("thumb edge press");
+        assert!((grab_offset - (y - geometry.thumb.start)).abs() < f32::EPSILON);
+        assert_eq!(target, geometry.offset);
     }
 
     #[test]

@@ -527,24 +527,11 @@ impl App {
         } else if self.ide_panel.lsp_scroll_y.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some((_, cy, _, ch)) = self.lsp_panel_bounds() {
-                use crate::render_view::scrollbar_widget::{
-                    Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
-                };
-                // Same track as the LSP panel bar (inset 5 px); input only, so no lane width.
-                let geometry = Scrollbar {
-                    style: ScrollbarStyle {
-                        track_pad: 5.0,
-                        min_thumb: 40.0,
-                        ..ScrollbarStyle::BASE
-                    },
-                    axis: ScrollbarAxis::Vertical,
-                    lane: (0.0, cy, 0.0, ch),
-                    extent: ScrollbarExtent::new(
-                        ch,
-                        self.lsp_panel_total_h(s),
-                        self.ide_panel.lsp_scroll_y.current,
-                    ),
-                }
+                let geometry = crate::app::lsp_actions::lsp_panel_scrollbar(
+                    (0.0, cy, 0.0, ch),
+                    self.lsp_panel_total_h(s),
+                    self.ide_panel.lsp_scroll_y.current,
+                )
                 .geometry(s);
                 let _ = crate::app::mouse::drag_scrollbar(
                     &mut self.ide_panel.lsp_scroll_y,

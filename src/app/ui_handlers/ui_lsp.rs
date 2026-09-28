@@ -149,32 +149,22 @@ impl App {
                 self.window.as_ref().unwrap().request_redraw();
             }
             UiId::LspScrollY => {
-                let started = self
-                    .ui_registry
-                    .rect_for(UiId::LspScrollY)
-                    .and_then(|rect| {
-                        let renderer = self.renderer.as_ref()?;
-                        let s = renderer.scale_factor;
-                        let content_len = self.lsp_panel_total_h(s);
-                        crate::app::lsp_actions::lsp_panel_scrollbar(
-                            rect,
-                            content_len,
-                            self.ide_panel.lsp_scroll_y.current,
-                        )
-                        .geometry(s)?
-                        .press_target(
-                            renderer.last_mouse_y,
-                        )
-                    });
-                if let Some((drag_offset, target)) = started {
-                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                        &mut self.ide_panel.lsp_scroll_y,
-                        target,
-                        drag_offset,
-                    );
-                } else {
-                    self.ide_panel.lsp_scroll_y.end_drag();
-                }
+                let geometry = self.ui_registry.rect_for(UiId::LspScrollY).and_then(|rect| {
+                    let renderer = self.renderer.as_ref()?;
+                    let s = renderer.scale_factor;
+                    Some(crate::app::lsp_actions::lsp_panel_scrollbar(
+                        rect,
+                        self.lsp_panel_total_h(s),
+                        self.ide_panel.lsp_scroll_y.current,
+                    ).geometry(s)?)
+                });
+                let pointer_y = self.renderer.as_ref().map_or(f32::NAN, |r| r.last_mouse_y);
+                let _ = crate::app::mouse::press_scrollbar(
+                    &mut self.ide_panel.lsp_scroll_y,
+                    geometry,
+                    0.0,
+                    pointer_y,
+                );
             }
             UiId::LspScrollX => {
                 self.ide_panel.lsp_scroll_x.is_dragging = true;
@@ -182,7 +172,7 @@ impl App {
             UiId::LspLogScrollY(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
-                    let target = self
+                    let geometry = self
                         .ui_registry
                         .rect_for(UiId::LspLogScrollY(server_idx))
                         .and_then(|rect| {
@@ -190,7 +180,7 @@ impl App {
                             let s = renderer.scale_factor;
                             let (content_len, _) = self
                                 .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
-                            crate::app::lsp_actions::lsp_log_scrollbar_target(
+                            Some(crate::app::lsp_actions::lsp_log_scrollbar(
                                 rect,
                                 rect.3,
                                 content_len,
@@ -198,31 +188,21 @@ impl App {
                                     .get(&name)
                                     .map_or(0.0, |scroll| scroll.current),
                                 crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
-                                renderer.last_mouse_y,
-                                None,
-                                s,
-                            )
+                            ).geometry(s)?)
                         });
                     let scroll = self
                         .ide_panel
                         .lsp_logs_scroll_y
                         .entry(name)
                         .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
-                    if let Some((drag_offset, target)) = target {
-                        let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                            scroll,
-                            target,
-                            drag_offset,
-                        );
-                    } else {
-                        scroll.end_drag();
-                    }
+                    let pointer_y = self.renderer.as_ref().map_or(f32::NAN, |r| r.last_mouse_y);
+                    let _ = crate::app::mouse::press_scrollbar(scroll, geometry, 0.0, pointer_y);
                 }
             }
             UiId::LspLogScrollX(server_idx) => {
                 if server_idx < self.ide_panel.lsp_servers.len() {
                     let name = self.ide_panel.lsp_servers[server_idx].name.to_string();
-                    let target = self
+                    let geometry = self
                         .ui_registry
                         .rect_for(UiId::LspLogScrollX(server_idx))
                         .and_then(|rect| {
@@ -230,7 +210,7 @@ impl App {
                             let s = renderer.scale_factor;
                             let (_, max_line_w) = self
                                 .lsp_server_inner_size(&self.ide_panel.lsp_servers[server_idx], s);
-                            crate::app::lsp_actions::lsp_log_scrollbar_target(
+                            Some(crate::app::lsp_actions::lsp_log_scrollbar(
                                 rect,
                                 rect.2,
                                 max_line_w + 20.0 * s,
@@ -238,25 +218,15 @@ impl App {
                                     .get(&name)
                                     .map_or(0.0, |scroll| scroll.current),
                                 crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
-                                renderer.last_mouse_x,
-                                None,
-                                s,
-                            )
+                            ).geometry(s)?)
                         });
                     let scroll = self
                         .ide_panel
                         .lsp_logs_scroll_x
                         .entry(name)
                         .or_insert_with(|| crate::scroll::ScrollState::new(15.0));
-                    if let Some((drag_offset, target)) = target {
-                        let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                            scroll,
-                            target,
-                            drag_offset,
-                        );
-                    } else {
-                        scroll.end_drag();
-                    }
+                    let pointer_x = self.renderer.as_ref().map_or(f32::NAN, |r| r.last_mouse_x);
+                    let _ = crate::app::mouse::press_scrollbar(scroll, geometry, pointer_x, 0.0);
                 }
             }
             UiId::LspLogsFilterInput(server_idx) => {

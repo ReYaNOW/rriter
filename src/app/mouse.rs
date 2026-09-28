@@ -127,12 +127,27 @@ pub(crate) fn press_scrollbar(
     x: f32,
     y: f32,
 ) -> Option<f32> {
-    let pressed = geometry.and_then(|g| g.press_target(g.pointer(x, y)));
-    let Some((grab_offset, target)) = pressed else {
+    let Some(geometry) = geometry else {
         scroll.end_drag();
         return None;
     };
-    apply_scrollbar_drag_target(scroll, target, grab_offset).then_some(target)
+    let pointer = geometry.pointer(x, y);
+    let on_thumb = geometry.on_thumb(pointer);
+    let Some((grab_offset, target)) = geometry.press_target(pointer) else {
+        scroll.end_drag();
+        return None;
+    };
+    if on_thumb {
+        if !grab_offset.is_finite() {
+            scroll.end_drag();
+            return None;
+        }
+        scroll.drag_offset = grab_offset;
+        scroll.is_dragging = true;
+        Some(scroll.target)
+    } else {
+        apply_scrollbar_drag_target(scroll, target, grab_offset).then_some(target)
+    }
 }
 
 /// Drag update for a bar started by `press_scrollbar`: keeps the grab offset. Returns the new
