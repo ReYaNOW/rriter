@@ -9,7 +9,9 @@ fn editor_vertical_scrollbar_geometry(
     let visible_lines = session.app.editor.get_visible_lines_count();
     let (scale, line_height, max_scroll) = {
         let editor = &session.app.editor;
-        let renderer = session.app.renderer.as_mut().expect("editor renderer");
+        let Some(renderer) = session.app.renderer.as_mut() else {
+            panic!("editor renderer");
+        };
         let line_height = renderer.line_height;
         (
             renderer.scale_factor,
@@ -17,14 +19,17 @@ fn editor_vertical_scrollbar_geometry(
             renderer.get_max_scroll(editor, viewport_h),
         )
     };
-    crate::render_view::editor_vertical_scrollbar(
+    let geometry = crate::render_view::editor_vertical_scrollbar(
         (lane[0] as f32, lane[1] as f32, lane[2] as f32, viewport_h),
         crate::render_view::editor_scroll_content_height(visible_lines, line_height, viewport_h),
         max_scroll,
         offset,
     )
-    .geometry(scale)
-    .expect("visible editor vertical scrollbar")
+    .geometry(scale);
+    let Some(geometry) = geometry else {
+        panic!("visible editor vertical scrollbar");
+    };
+    geometry
 }
 
 #[test]
