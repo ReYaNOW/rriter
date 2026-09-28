@@ -28,6 +28,7 @@ const UI_SYSTEM: &str = concat!(
     include_str!("ui_system/ui_registry.rs"),
 );
 const API_STATE: &str = include_str!("app/api_client.rs");
+const API_RUNTIME_STATE: &str = include_str!("app/api_client/api_client_runtime_state.rs");
 const API_REQUESTS: &str = include_str!("app/api_client/api_client_app_request_methods.rs");
 const API_TABS: &str = include_str!("app/api_client/api_client_app_tabs.rs");
 const FILE_TREE_SCAN: &str = include_str!("app/file_tree_scan.rs");
@@ -512,7 +513,7 @@ fn r2_075_first_old_refresh_does_not_clear_current_loading() {
 #[test]
 fn r2_076_removing_spec_removes_its_load_ticket() {
     has_all(
-        API_STATE,
+        API_RUNTIME_STATE,
         &["self.loading.remove(&id)", "self.load_tickets.remove(&id)"],
     );
 }
@@ -560,7 +561,7 @@ fn r2_079_request_id_allocator_wraps_and_checks_active_ids() {
 #[test]
 fn r2_080_spec_persistence_error_is_stored_logged_and_rendered() {
     has_all(
-        API_STATE,
+        API_RUNTIME_STATE,
         &[
             "persistence_error = result.err()",
             "eprintln!(\"RRiter: {error}\")",
@@ -572,7 +573,7 @@ fn r2_080_spec_persistence_error_is_stored_logged_and_rendered() {
 #[test]
 fn r2_081_auth_persistence_error_reaches_shared_error_state() {
     has_all(
-        API_STATE,
+        API_RUNTIME_STATE,
         &["save_api_auth(&self.auth)", "API credentials не сохранены"],
     );
 }
@@ -580,7 +581,7 @@ fn r2_081_auth_persistence_error_reaches_shared_error_state() {
 #[test]
 fn r2_082_mock_persistence_error_reaches_shared_error_state() {
     has_all(
-        API_STATE,
+        API_RUNTIME_STATE,
         &[
             "save_api_mocks(&self.mock)",
             "API mock configuration не сохранена",
