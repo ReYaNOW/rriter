@@ -147,7 +147,7 @@ impl UiWaker {
                 let result = job();
                 let _ = tx.send(result);
             })?;
-        Ok(OneShot { rx: Some(rx) })
+        Ok(rx)
     }
 
     pub(crate) fn one_shot_channel<T>(&self) -> (WakeSender<T>, OneShot<T>) {
@@ -436,20 +436,12 @@ mod tests {
     }
 
     #[test]
-    fn one_shot_panicking_job_closes() {
-        let mut job = UiWaker::counting()
-            .spawn_one_shot("rriter-test-one-shot-panic", || -> () { panic!("worker panic") })
-            .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        loop {
-            match job.poll() {
-                OneShotState::Closed => break,
-                OneShotState::Pending if std::time::Instant::now() < deadline => {
-                    std::thread::yield_now();
-                }
-                _ => panic!("panicking one-shot did not close"),
-            }
-        }
+    fn one_shot_dropped_sender_closes() {
+        // Builds use panic=abort, so a worker that dies without a result is modelled by
+        // dropping the sender unsent.
+        let (tx, mut job) = UiWaker::counting().one_shot_channel::<()>();
+        assert!(matches!(job.poll(), OneShotState::Pending));
+        drop(tx);
         assert!(matches!(job.poll(), OneShotState::Closed));
         assert!(matches!(job.poll(), OneShotState::Closed));
     }

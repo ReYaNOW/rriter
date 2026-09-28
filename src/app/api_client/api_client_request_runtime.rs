@@ -66,7 +66,7 @@ pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &s
 pub fn spawn_api_request(
     job: ApiJobRequest,
     ui_waker: &crate::ui_waker::UiWaker,
-) -> Result<crate::ui_waker::OneShot<ApiJobResponse>, ApiJobResponse> {
+) -> Result<crate::ui_waker::OneShot<ApiJobResponse>, Box<ApiJobResponse>> {
     let mut spawn_error_response = ApiJobResponse {
         request_id: job.request_id,
         spec_id: job.spec_id,
@@ -90,7 +90,7 @@ pub fn spawn_api_request(
                 ApiLoadErrorKind::Io,
                 format!("не удалось запустить API request worker: {err}"),
             ));
-            Err(spawn_error_response)
+            Err(Box::new(spawn_error_response))
         }
     }
 }

@@ -455,6 +455,7 @@ fn about_to_wait_file_watcher(app: &mut App) -> bool {
     if app.poll_external_changes() {
         needs_redraw = true;
     }
+    needs_redraw |= app.poll_protected_saves();
     if app.refresh_markdown_read_model_if_stale() {
         needs_redraw = true;
     }

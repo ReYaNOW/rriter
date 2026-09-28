@@ -1478,7 +1478,7 @@ fn r3_095_ruff_workspace_disconnect_clears_stale_diagnostics() {
         diag_arc(vec![test_diag("stale", DiagSeverity::Warning, None)]),
     );
     let rx = crate::ui_waker::UiWaker::counting()
-        .spawn_one_shot("test-ruff-disconnect", || -> super::super::ruff_workspace::RuffWorkspaceResult {
+        .spawn_one_shot("test-ruff-disconnect", || -> super::ruff_workspace::RuffWorkspaceResult {
             panic!("test worker panic")
         })
         .unwrap();

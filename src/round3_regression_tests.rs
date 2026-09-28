@@ -318,28 +318,28 @@ fn r3_034_http_disconnect_produces_a_visible_request_error() {
 
 #[test]
 fn r3_035_second_openapi_picker_is_rejected_while_first_is_active() {
-    let (_tx, rx) = std::sync::mpsc::channel::<Option<std::path::PathBuf>>();
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().one_shot_channel::<Option<std::path::PathBuf>>();
     assert!(!crate::app::api_client::native_picker_can_start(&Some(rx)));
 }
 
 #[test]
 fn r3_036_second_body_picker_is_rejected_while_first_is_active() {
-    let (_tx, rx) = std::sync::mpsc::channel::<Vec<std::path::PathBuf>>();
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().one_shot_channel::<Vec<std::path::PathBuf>>();
     assert!(!crate::app::api_client::native_picker_can_start(&Some(rx)));
 }
 
 #[test]
 fn r3_037_second_python_path_picker_is_rejected_while_first_is_active() {
-    let (_tx, rx) = std::sync::mpsc::channel::<()>();
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().one_shot_channel::<()>();
     assert!(!crate::app::api_client::native_picker_can_start(&Some(rx)));
-    let none: Option<std::sync::mpsc::Receiver<()>> = None;
+    let none: Option<crate::ui_waker::OneShot<()>> = None;
     assert!(crate::app::api_client::native_picker_can_start(&none));
 }
 
 #[test]
 fn r3_038_openapi_receiver_keeps_id_and_generation_for_disconnect_cleanup() {
     use crate::app::api_client::{ApiLoadReceiver, ApiLoadResult, ApiSpecId};
-    let (_tx, rx) = std::sync::mpsc::channel::<ApiLoadResult>();
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().one_shot_channel::<ApiLoadResult>();
     let receiver = ApiLoadReceiver {
         id: ApiSpecId(8),
         generation: 77,

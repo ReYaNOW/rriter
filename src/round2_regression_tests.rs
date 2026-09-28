@@ -651,7 +651,7 @@ fn r2_086_terminal_io_threads_propagate_spawn_failure() {
 #[test]
 fn r2_087_git_workers_use_fallible_spawns_and_error_events() {
     for source in [GIT_DIFF, GIT_ACTIONS] {
-        assert!(source.contains("spawn_named"));
+        assert!(source.contains("spawn_one_shot"));
         assert!(!source.contains("std::thread::spawn"));
     }
     has_all(

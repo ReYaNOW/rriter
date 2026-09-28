@@ -490,73 +490,8 @@ impl App {
             return;
         }
 
-        if let GitAction::LoadGraph {
-            workspace_idx,
-            repo_root,
-            offset,
-            limit,
-            reset_scroll,
-            activate,
-        } = action
-        {
-            let request_id = self.ide_panel.git.allocate_graph_request_id();
-            self.ide_panel
-                .git
-                .graph_latest_request_by_root
-                .insert(crate::platform::PathKey::new(&repo_root), request_id);
-            self.ide_panel
-                .git
-                .graph_pending_roots
-                .insert(crate::platform::PathKey::new(&repo_root));
-            if activate {
-                self.ide_panel.git.graph_pending = true;
-                self.ide_panel.git.graph_notice = None;
-                self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
-                self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
-                self.ide_panel.git.graph_commit_limit = limit;
-            } else if self
-                .ide_panel
-                .git
-                .graph_repo_root
-                .as_ref()
-                .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
-            {
-                self.ide_panel.git.graph_pending = true;
-            }
-
-            let worker_repo_root = repo_root.clone();
-            let job = self.ui_waker.spawn_one_shot("rriter-git-graph", move || {
-                let (commits, lane_count, has_more, notice) =
-                    match collect_git_graph(workspace_idx, &worker_repo_root, offset, limit) {
-                        Ok((commits, lane_count, has_more)) => {
-                            (commits, lane_count, has_more, None)
-                        }
-                        Err(err) => (Vec::new(), 1, false, Some(err)),
-                    };
-                GitGraphEvent {
-                    request_id,
-                    workspace_idx,
-                    repo_root: worker_repo_root,
-                    commits,
-                    lane_count,
-                    notice,
-                    limit,
-                    offset,
-                    has_more,
-                    reset_scroll,
-                }
-            });
-            match job {
-                Ok(rx) => self.ide_panel.git.graph_rx.push(GitGraphReceiver {
-                    rx,
-                    request_id,
-                    repo_root,
-                }),
-                Err(_) => self
-                    .ide_panel
-                    .git
-                    .handle_graph_disconnect(&repo_root, request_id),
-            }
+        if matches!(&action, GitAction::LoadGraph { .. }) {
+            self.spawn_git_graph_task(action);
             return;
         }
 
@@ -685,6 +620,76 @@ impl App {
                     self.ide_panel.git.finish_status_refresh();
                 }
             }
+        }
+    }
+
+    fn spawn_git_graph_task(&mut self, action: GitAction) {
+        let GitAction::LoadGraph {
+            workspace_idx,
+            repo_root,
+            offset,
+            limit,
+            reset_scroll,
+            activate,
+        } = action
+        else {
+            return;
+        };
+        let request_id = self.ide_panel.git.allocate_graph_request_id();
+        self.ide_panel
+            .git
+            .graph_latest_request_by_root
+            .insert(crate::platform::PathKey::new(&repo_root), request_id);
+        self.ide_panel
+            .git
+            .graph_pending_roots
+            .insert(crate::platform::PathKey::new(&repo_root));
+        if activate {
+            self.ide_panel.git.graph_pending = true;
+            self.ide_panel.git.graph_notice = None;
+            self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
+            self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
+            self.ide_panel.git.graph_commit_limit = limit;
+        } else if self
+            .ide_panel
+            .git
+            .graph_repo_root
+            .as_ref()
+            .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
+        {
+            self.ide_panel.git.graph_pending = true;
+        }
+
+        let worker_repo_root = repo_root.clone();
+        let job = self.ui_waker.spawn_one_shot("rriter-git-graph", move || {
+            let (commits, lane_count, has_more, notice) =
+                match collect_git_graph(workspace_idx, &worker_repo_root, offset, limit) {
+                    Ok((commits, lane_count, has_more)) => (commits, lane_count, has_more, None),
+                    Err(err) => (Vec::new(), 1, false, Some(err)),
+                };
+            GitGraphEvent {
+                request_id,
+                workspace_idx,
+                repo_root: worker_repo_root,
+                commits,
+                lane_count,
+                notice,
+                limit,
+                offset,
+                has_more,
+                reset_scroll,
+            }
+        });
+        match job {
+            Ok(rx) => self.ide_panel.git.graph_rx.push(GitGraphReceiver {
+                rx,
+                request_id,
+                repo_root,
+            }),
+            Err(_) => self
+                .ide_panel
+                .git
+                .handle_graph_disconnect(&repo_root, request_id),
         }
     }
 }

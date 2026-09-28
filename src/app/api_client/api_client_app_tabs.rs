@@ -46,10 +46,9 @@ impl crate::app::App {
         }
         let requests = self.external_requests.sink().clone();
         match self.ui_waker.spawn_one_shot("rriter-api-file-picker", move || {
-            let file = crate::platform::pick_file_with_filter(
+            crate::platform::pick_file_with_filter(
                 &requests, "Импорт openapi.json", "OpenAPI JSON", &["json"],
-            );
-            file
+            )
         }) {
             Ok(job) => self.api_import_file_rx = Some(job),
             Err(err) => self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор OpenAPI: {err}")),

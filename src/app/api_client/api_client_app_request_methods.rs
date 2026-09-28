@@ -830,7 +830,7 @@ impl crate::app::App {
         }
         match spawn_api_request(job, &self.ui_waker) {
             Ok(rx) => self.api_request_rx.push((request_id, rx)),
-            Err(response) => self.apply_api_job_response(response),
+            Err(response) => self.apply_api_job_response(*response),
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -928,7 +928,7 @@ impl crate::app::App {
         }
         match spawn_api_request(job, &self.ui_waker) {
             Ok(rx) => self.api_request_rx.push((request_id, rx)),
-            Err(response) => self.apply_api_job_response(response),
+            Err(response) => self.apply_api_job_response(*response),
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();

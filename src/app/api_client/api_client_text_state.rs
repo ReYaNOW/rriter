@@ -680,7 +680,7 @@ impl ApiClientState {
                 API_PYTHON_LIST_TIMEOUT,
                 &cancel,
             );
-            let payload = match result {
+            match result {
                 Ok(output) if output.status.success() => ApiPythonVersionListResult {
                     rows: parse_uv_python_list(&String::from_utf8_lossy(&output.stdout)),
                     error: None,
@@ -708,8 +708,7 @@ impl ApiClientState {
                     rows: Vec::new(),
                     error: Some(format!("Ошибка запуска uv: {err}")),
                 },
-            };
-            payload
+            }
         });
         match spawn {
             Ok(job) => self.python_version_list_rx = Some(job),

@@ -90,7 +90,9 @@ pub(crate) struct ProtectedSaves {
 
 impl Default for ProtectedSaves {
     fn default() -> Self {
-        Self::with_writer(Arc::new(crate::platform::write_text_file_elevated))
+        Self::with_writer(Arc::new(|path, text, format, cancel| {
+            crate::platform::write_text_file_elevated(path, text, format, cancel)
+        }))
     }
 }
 

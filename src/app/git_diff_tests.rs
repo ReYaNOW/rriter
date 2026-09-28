@@ -288,11 +288,11 @@ fn git_diff_staged_loader_reads_index_instead_of_worktree() {
 fn pending_inline_git_popup_does_not_force_a_busy_redraw_loop() {
     let source = include_str!("git_diff.rs");
     let empty_branch = source
-        .split("Err(mpsc::TryRecvError::Empty) => {")
+        .split("crate::ui_waker::OneShotState::Pending => {")
         .nth(1)
         .expect("inline Git popup empty branch");
     let branch = empty_branch
-        .split("Err(mpsc::TryRecvError::Disconnected)")
+        .split("crate::ui_waker::OneShotState::Closed => {")
         .next()
         .expect("empty branch body");
     assert!(branch.contains("self.inline_git_diff_rx = Some(rx);"));

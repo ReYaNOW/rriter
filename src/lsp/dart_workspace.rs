@@ -1,6 +1,7 @@
 use super::{DART_SERVER, DiagSeverity, Diagnostic, LogEntry, LspManager, LspProcess};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
