@@ -18,7 +18,7 @@ use std::time::Instant;
 mod project_search_grep;
 #[path = "project_search_preview.rs"]
 mod project_search_preview;
-pub(crate) use project_search_preview::project_search_scrollbar_thumb;
+pub(crate) use project_search_preview::project_search_scrollbar;
 #[cfg(test)]
 pub(crate) use project_search_preview::{
     ProjectSearchPreviewKey, ProjectSearchPreviewRequest, ProjectSearchPreviewWorkerMessage,
@@ -512,12 +512,13 @@ pub(crate) fn project_search_line_end(text: &str, line_start: usize, mut line_en
     line_end
 }
 
-pub(crate) fn project_search_query_scrollbar_thumb(
+pub(crate) fn project_search_query_scrollbar(
     rect: ProjectSearchRect,
     state: &ProjectSearchState,
     axis: ProjectSearchQueryScrollAxis,
     scale: f32,
-) -> Option<ProjectSearchRect> {
+) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
     let viewport = project_search_query_viewport(rect, scale);
     let thickness = (5.0 * scale).round().max(2.0);
     let min_thumb = (18.0 * scale).round().max(8.0);
@@ -525,35 +526,41 @@ pub(crate) fn project_search_query_scrollbar_thumb(
         ProjectSearchQueryScrollAxis::Vertical => {
             let content_h = state.query_editor.line_offsets.len() as f32
                 * project_search_query_line_height(scale);
-            let thumb = crate::scroll::scrollbar_thumb(
-                viewport.vertical_track.y,
-                viewport.vertical_track.h,
-                viewport.text.h,
-                content_h,
-                state.query_scroll_y.current,
-                min_thumb,
-            )?;
-            Some(ProjectSearchRect {
-                x: viewport.vertical_track.x + (viewport.vertical_track.w - thickness) * 0.5,
-                y: thumb.start,
-                w: thickness,
-                h: thumb.len,
+            Some(Scrollbar {
+                style: ScrollbarStyle {
+                    thumb_thickness: thickness,
+                    edge_gap: None,
+                    track_pad: 0.0,
+                    min_thumb,
+                    radius: Some(3.0 * scale),
+                    track_color: Some([1.0, 1.0, 1.0, 0.035]),
+                    thumb_color: [0.48, 0.48, 0.56, 0.68],
+                },
+                axis: ScrollbarAxis::Vertical,
+                lane: (viewport.vertical_track.x, viewport.vertical_track.y,
+                    viewport.vertical_track.w, viewport.vertical_track.h),
+                extent: ScrollbarExtent::new(
+                    viewport.text.h, content_h, state.query_scroll_y.current,
+                ),
             })
         }
         ProjectSearchQueryScrollAxis::Horizontal => {
-            let thumb = crate::scroll::scrollbar_thumb(
-                viewport.horizontal_track.x,
-                viewport.horizontal_track.w,
-                viewport.text.w,
-                state.query_content_width,
-                state.query_scroll_x.current,
-                min_thumb,
-            )?;
-            Some(ProjectSearchRect {
-                x: thumb.start,
-                y: viewport.horizontal_track.y + (viewport.horizontal_track.h - thickness) * 0.5,
-                w: thumb.len,
-                h: thickness,
+            Some(Scrollbar {
+                style: ScrollbarStyle {
+                    thumb_thickness: thickness,
+                    edge_gap: None,
+                    track_pad: 0.0,
+                    min_thumb,
+                    radius: Some(3.0 * scale),
+                    track_color: Some([1.0, 1.0, 1.0, 0.035]),
+                    thumb_color: [0.48, 0.48, 0.56, 0.68],
+                },
+                axis: ScrollbarAxis::Horizontal,
+                lane: (viewport.horizontal_track.x, viewport.horizontal_track.y,
+                    viewport.horizontal_track.w, viewport.horizontal_track.h),
+                extent: ScrollbarExtent::new(
+                    viewport.text.w, state.query_content_width, state.query_scroll_x.current,
+                ),
             })
         }
     }
@@ -568,30 +575,14 @@ fn project_search_query_scrollbar_drag_target(
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
     let viewport = project_search_query_viewport(rect, scale);
-    let thumb_rect = project_search_query_scrollbar_thumb(rect, state, axis, scale)?;
+    let geometry = project_search_query_scrollbar(rect, state, axis, scale)?.geometry(1.0)?;
     match axis {
-        ProjectSearchQueryScrollAxis::Vertical => crate::scroll::scrollbar_drag_target(
-            pointer,
-            viewport.vertical_track.y,
-            viewport.vertical_track.h,
-            crate::scroll::ScrollbarThumb {
-                start: thumb_rect.y,
-                len: thumb_rect.h,
-            },
-            state.query_max_scroll_y(rect, scale),
-            drag_offset,
-        ),
-        ProjectSearchQueryScrollAxis::Horizontal => crate::scroll::scrollbar_drag_target(
-            pointer,
-            viewport.horizontal_track.x,
-            viewport.horizontal_track.w,
-            crate::scroll::ScrollbarThumb {
-                start: thumb_rect.x,
-                len: thumb_rect.w,
-            },
-            state.query_max_scroll_x(rect, scale),
-            drag_offset,
-        ),
+        ProjectSearchQueryScrollAxis::Vertical | ProjectSearchQueryScrollAxis::Horizontal => {
+            let grab_offset = drag_offset.unwrap_or_else(|| {
+                geometry.press_target(pointer).map_or(0.0, |(offset, _)| offset)
+            });
+            geometry.drag_target(pointer, grab_offset).map(|target| (grab_offset, target))
+        }
     }
 }
 

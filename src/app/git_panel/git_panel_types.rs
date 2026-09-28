@@ -259,58 +259,35 @@ pub(crate) fn git_graph_max_scroll(commit_count: usize, view_h: f32, scale: f32)
     (total_h - view_h).max(0.0)
 }
 
-pub(crate) fn git_graph_scroll_thumb_h(commit_count: usize, rows_h: f32, scale: f32) -> f32 {
-    if commit_count == 0 || rows_h <= 0.0 {
-        return 0.0;
-    }
-    let total_h = commit_count as f32 * GIT_GRAPH_ROW_H * scale;
-    let track_h = (rows_h - 8.0 * scale).max(1.0);
-    let min_thumb_h = 10.0 * scale;
-    if track_h <= min_thumb_h {
-        track_h
-    } else {
-        (rows_h / total_h * track_h).clamp(min_thumb_h, track_h)
+/// Git graph scrollbar shared by the renderer and the press/drag handlers: 10 px lane 9 px
+/// from the panel's right edge over the graph rows, track inset 4 px top and bottom.
+pub(crate) fn git_graph_scrollbar(
+    panel_x: f32,
+    panel_w: f32,
+    rows_y: f32,
+    rows_h: f32,
+    commit_count: usize,
+    scroll: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let lane_w = 10.0 * scale;
+    Scrollbar {
+        style: ScrollbarStyle::GIT_GRAPH,
+        axis: ScrollbarAxis::Vertical,
+        lane: (panel_x + panel_w - lane_w - 9.0 * scale, rows_y, lane_w, rows_h),
+        extent: ScrollbarExtent::new(
+            rows_h,
+            commit_count as f32 * GIT_GRAPH_ROW_H * scale,
+            scroll,
+        ),
     }
 }
 
 pub(crate) fn git_graph_near_load_more(scroll_target: f32, max_scroll: f32, scale: f32) -> bool {
     scroll_target >= (max_scroll - GIT_GRAPH_ROW_H * scale * 14.0).max(0.0)
-}
-
-pub(crate) fn apply_git_graph_scroll_drag(
-    scroll: &mut crate::scroll::ScrollState,
-    target: f32,
-    drag_offset: f32,
-) {
-    let _ = crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
-}
-
-pub(crate) fn git_graph_scroll_drag_target(
-    pointer_y: f32,
-    rows_y: f32,
-    rows_h: f32,
-    commit_count: usize,
-    current_scroll: f32,
-    drag_offset: Option<f32>,
-    scale: f32,
-) -> Option<(f32, f32)> {
-    let max_scroll = git_graph_max_scroll(commit_count, rows_h, scale);
-    if max_scroll <= 0.0 || rows_h <= 1.0 {
-        return None;
-    }
-    let track_h = (rows_h - 8.0 * scale).max(1.0);
-    let thumb_h = git_graph_scroll_thumb_h(commit_count, rows_h, scale);
-    let thumb_y =
-        rows_y + 4.0 * scale + (current_scroll / max_scroll).clamp(0.0, 1.0) * (track_h - thumb_h);
-    let offset = drag_offset.unwrap_or_else(|| {
-        if pointer_y >= thumb_y && pointer_y <= thumb_y + thumb_h {
-            pointer_y - thumb_y
-        } else {
-            thumb_h / 2.0
-        }
-    });
-    let ratio = (pointer_y - rows_y - 4.0 * scale - offset) / (track_h - thumb_h).max(1.0);
-    Some((offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
 }
 
 #[cfg(test)]

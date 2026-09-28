@@ -69,21 +69,42 @@ fn clamp_code_scroll_offset(scroll_x: f32, max_scroll: f32) -> f32 {
     scroll_x.clamp(0.0, max_scroll).round()
 }
 
-/// Один thumb для draw и drag: иначе захват смещался бы относительно нарисованного.
+/// One bar for draw, hitbox and drag, so a grab never shifts against the drawn thumb. The lane
+/// is the track plus `CODE_HSCROLLBAR_HIT_PAD` above and below; the thumb fills the track.
 #[inline]
-fn code_scroll_thumb(
+fn code_scrollbar(
     g: &CodeScrollGeometry,
     offset: f32,
     scale: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
-    crate::scroll::scrollbar_thumb(
-        g.track_x,
-        g.track_w,
-        g.view_w,
-        g.content_w,
-        offset,
-        (CODE_HSCROLLBAR_MIN_THUMB * scale).round(),
-    )
+    thumb_color: [f32; 4],
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let hit_pad = (CODE_HSCROLLBAR_HIT_PAD * scale).round();
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: CODE_HSCROLLBAR_TRACK_H,
+            min_thumb: CODE_HSCROLLBAR_MIN_THUMB,
+            thumb_color,
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Horizontal,
+        lane: (g.track_x, g.track_y - hit_pad, g.track_w, g.track_h + 2.0 * hit_pad),
+        extent: ScrollbarExtent {
+            max_scroll: g.max_scroll,
+            ..ScrollbarExtent::new(g.view_w, g.content_w, offset)
+        },
+    }
+}
+
+#[inline]
+fn code_scrollbar_geometry(
+    g: &CodeScrollGeometry,
+    offset: f32,
+    scale: f32,
+) -> Option<crate::render_view::scrollbar_widget::ScrollbarGeometry> {
+    code_scrollbar(g, offset, scale, [0.0; 4]).geometry(scale)
 }
 
 fn code_line_pixel_width<F: FnMut(char, bool, Option<f32>) -> f32>(
@@ -274,16 +295,8 @@ impl Renderer {
         self.flush();
         self.set_markdown_read_scissor(clip_x, clip_y, clip_w, clip_h);
 
-        if let Some(thumb) = code_scroll_thumb(&g, sx, self.scale_factor) {
-            self.push_rounded_rect(
-                thumb.start.round(),
-                g.track_y,
-                thumb.len.round(),
-                g.track_h,
-                g.track_h * 0.5,
-                faded(self.theme.fg, 0.32),
-            );
-        }
+        let bar = code_scrollbar(&g, sx, self.scale_factor, faded(self.theme.fg, 0.32));
+        let _ = self.draw_scrollbar(&bar, self.scale_factor, 1.0, None);
     }
 
     /// Трек горизонтального скроллбара: blocker (стрелка, не I-beam), только при переполнении.
@@ -305,19 +318,16 @@ impl Renderer {
             block.bottom + offset_y,
             self.scale_factor,
         );
-        if g.max_scroll <= 0.0 {
-            return;
+        // The lane does not depend on the offset; 0 only asks whether the block overflows.
+        if let Some(geometry) = code_scrollbar_geometry(&g, 0.0, self.scale_factor) {
+            geometry.register(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::MarkdownCodeScrollbarX(block.source_range.start),
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: true,
+            });
         }
-        let hit_pad = (CODE_HSCROLLBAR_HIT_PAD * self.scale_factor).round();
-        ui_registry.register_blocker(
-            crate::ui_system::UiId::MarkdownCodeScrollbarX(block.source_range.start),
-            g.track_x,
-            g.track_y - hit_pad,
-            g.track_w,
-            g.track_h + 2.0 * hit_pad,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
     }
 }
 
@@ -396,19 +406,8 @@ impl MarkdownTabState {
         let state = self.code_scroll_state_mut(block_id);
         state.clamp_current(0.0, g.max_scroll);
         let offset = clamp_code_scroll_offset(state.current, g.max_scroll);
-        let Some((drag_offset, target)) = code_scroll_thumb(g, offset, scale).and_then(|thumb| {
-            crate::scroll::scrollbar_drag_target(
-                pointer_x,
-                g.track_x,
-                g.track_w,
-                thumb,
-                g.max_scroll,
-                None,
-            )
-        }) else {
-            return false;
-        };
-        if !crate::app::mouse::apply_scrollbar_drag_target(state, target, drag_offset) {
+        let geometry = code_scrollbar_geometry(g, offset, scale);
+        if crate::app::mouse::press_scrollbar(state, geometry, pointer_x, 0.0).is_none() {
             return false;
         }
         self.code_scroll_drag = Some(block_id);
@@ -427,29 +426,12 @@ impl MarkdownTabState {
         };
         let state = self.code_scroll_state_mut(block_id);
         state.clamp_current(0.0, g.max_scroll);
-        let drag_offset = state.drag_offset;
         let offset = clamp_code_scroll_offset(state.current, g.max_scroll);
-        let target = state
-            .is_dragging
-            .then(|| code_scroll_thumb(g, offset, scale))
-            .flatten()
-            .and_then(|thumb| {
-                crate::scroll::scrollbar_drag_target(
-                    pointer_x,
-                    g.track_x,
-                    g.track_w,
-                    thumb,
-                    g.max_scroll,
-                    Some(drag_offset),
-                )
-            });
-        match target {
-            Some((_, target))
-                if crate::app::mouse::apply_scrollbar_drag_target(state, target, drag_offset) =>
-            {
-                true
-            }
-            _ => self.end_code_scroll_drag(),
+        let geometry = code_scrollbar_geometry(g, offset, scale);
+        if crate::app::mouse::drag_scrollbar(state, geometry, pointer_x, 0.0).is_some() {
+            true
+        } else {
+            self.end_code_scroll_drag()
         }
     }
 
@@ -751,7 +733,7 @@ mod markdown_code_scroll_tests {
             track_h: 4.0,
         };
         md.code_scroll_state_mut(6).jump_to(500.0);
-        let thumb = code_scroll_thumb(&g, 100.0, 1.0).expect("thumb");
+        let thumb = code_scrollbar_geometry(&g, 100.0, 1.0).expect("thumb").thumb;
         assert!(md.begin_code_scroll_drag(6, &g, thumb.start + thumb.len * 0.5, 1.0));
         assert_eq!(md.code_scroll_state_mut(6).current, 100.0);
         md.code_scroll_state_mut(6).current = 400.0;

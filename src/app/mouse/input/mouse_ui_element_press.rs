@@ -48,6 +48,68 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
+        if clicked_id == crate::ui_system::UiId::GitWorkspaceScroll
+            && button == winit::event::MouseButton::Left
+        {
+            if state == ElementState::Pressed {
+                let geometry = self.renderer.as_ref().and_then(|renderer| {
+                    let mut bar = renderer.git_workspace_scrollbar?;
+                    bar.extent.offset = self.ide_panel.git.scroll.current;
+                    bar.geometry(renderer.scale_factor)
+                });
+                let _ = crate::app::mouse::press_scrollbar(
+                    &mut self.ide_panel.git.scroll,
+                    geometry,
+                    mx,
+                    my,
+                );
+            }
+            self.handle_ui_click(clicked_id);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
+        if let crate::ui_system::UiId::ApiMockCombinedScrollY(route_idx) = clicked_id
+            && button == winit::event::MouseButton::Left
+        {
+            if state == ElementState::Pressed {
+                let geometry = self
+                    .ui_registry
+                    .rect_for(clicked_id)
+                    .and_then(|lane| {
+                        let renderer = self.renderer.as_ref()?;
+                        let viewport = self
+                            .ui_registry
+                            .rect_for(crate::ui_system::UiId::ApiMockCombinedPython(route_idx))?;
+                        let scale = renderer.scale_factor;
+                        let max_scroll = self.ide_panel.api.api_mock_combined_max_scroll_for_route(
+                            self.api_active_route().as_ref(),
+                            route_idx,
+                            scale,
+                        );
+                        crate::app::api_client::api_mock_combined_editor_scrollbar(
+                            lane,
+                            viewport.3,
+                            viewport.3 + max_scroll,
+                            self.ide_panel
+                                .api
+                                .mock_python_scrolls
+                                .get(&(route_idx, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+                                .map_or(0.0, |scroll| scroll.current),
+                        )
+                        .geometry(scale)
+                    });
+                let scroll = self
+                    .ide_panel
+                    .api
+                    .mock_python_scrolls
+                    .entry((route_idx, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+                    .or_insert_with(|| crate::scroll::ScrollState::new(7.0));
+                let _ = crate::app::mouse::press_scrollbar(scroll, geometry, mx, my);
+            }
+            self.handle_ui_click(clicked_id);
+            self.window.as_ref().unwrap().request_redraw();
+            return;
+        }
         if matches!(
             clicked_id,
             crate::ui_system::UiId::EditorTab(_)
@@ -123,22 +185,19 @@ impl App {
                 if let Some(rect) = state.rect {
                     let max_scroll = state.max_scroll;
                     if let Some(popup) = &mut state.popup {
-                        if let Some((drag_offset, target)) =
-                            crate::app::mouse::hover_popup_scrollbar_drag_target(
-                                rect,
-                                max_scroll,
-                                popup.scroll.current,
-                                my,
-                                s,
-                                None,
-                            )
-                        {
-                            let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                                &mut popup.scroll,
-                                target,
-                                drag_offset,
-                            );
-                        }
+                        let geometry = crate::app::mouse::hover_popup_scrollbar(
+                            rect,
+                            max_scroll,
+                            popup.scroll.current,
+                            s,
+                        )
+                        .geometry(s);
+                        let _ = crate::app::mouse::press_scrollbar(
+                            &mut popup.scroll,
+                            geometry,
+                            mx,
+                            my,
+                        );
                     }
                 }
             });
@@ -201,23 +260,13 @@ impl App {
             self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::FileTreeScrollY {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            if let Some(layout) = super::explorer_scrollbar_layout(self, s)
-                && let Some((drag_offset, target)) =
-                    crate::scroll::scrollbar_drag_target(
-                        my,
-                        layout.track_y,
-                        layout.track_h,
-                        layout.thumb,
-                        layout.max_scroll,
-                        None,
-                    )
-            {
-                let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut self.ide_panel.explorer_scroll,
-                    target,
-                    drag_offset,
-                );
-            }
+            let geometry = super::explorer_scrollbar_geometry(self, s);
+            let _ = crate::app::mouse::press_scrollbar(
+                &mut self.ide_panel.explorer_scroll,
+                geometry,
+                mx,
+                my,
+            );
             self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::GitLogsScroll {
             if state == ElementState::Pressed
@@ -227,16 +276,10 @@ impl App {
                     .as_ref()
                     .and_then(|renderer| renderer.git_logs_layout_metrics())
             {
-                let (_, track_y, _, track_h) = metrics.track_rect;
-                let min_thumb_len = 10.0 * self.renderer.as_ref().unwrap().scale_factor;
-                if crate::app::mouse::begin_scrollbar_drag(
-                    &mut self.ide_panel.git.logs_scroll,
-                    my,
-                    track_y,
-                    track_h,
-                    metrics.max_scroll,
-                    min_thumb_len,
-                ) {
+                let s = self.renderer.as_ref().unwrap().scale_factor;
+                let scroll = &mut self.ide_panel.git.logs_scroll;
+                let geometry = metrics.scrollbar(scroll.current).geometry(s);
+                if crate::app::mouse::press_scrollbar(scroll, geometry, mx, my).is_some() {
                     self.ide_panel
                         .git
                         .refresh_git_logs_follow_tail(metrics.max_scroll);
@@ -263,52 +306,24 @@ impl App {
             self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::GitGraphScroll {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            if let Some((rows_y, rows_h)) = super::git_graph_rows_bounds(self, s)
-                && let Some((drag_offset, target)) =
-                    crate::app::git_panel::git_graph_scroll_drag_target(
-                        my,
-                        rows_y,
-                        rows_h,
-                        self.ide_panel.git.graph_snapshot.len(),
-                        self.ide_panel.git.graph_scroll.current,
-                        None,
-                        s,
-                    )
+            let geometry = super::git_graph_scrollbar_geometry(self, s);
+            let max_scroll = geometry.map_or(0.0, |g| g.max_scroll);
+            if let Some(target) = crate::app::mouse::press_scrollbar(
+                &mut self.ide_panel.git.graph_scroll,
+                geometry,
+                mx,
+                my,
+            ) && self.ide_panel.git.graph_has_more
+                && crate::app::git_panel::git_graph_near_load_more(target, max_scroll, s)
             {
-                crate::app::git_panel::apply_git_graph_scroll_drag(
-                    &mut self.ide_panel.git.graph_scroll,
-                    target,
-                    drag_offset,
-                );
-                let max_scroll = crate::app::git_panel::git_graph_max_scroll(
-                    self.ide_panel.git.graph_snapshot.len(),
-                    rows_h,
-                    s,
-                );
-                if self.ide_panel.git.graph_has_more
-                    && crate::app::git_panel::git_graph_near_load_more(
-                        target, max_scroll, s,
-                    )
-                {
-                    self.load_more_git_graph_commits();
-                }
+                self.load_more_git_graph_commits();
             }
             self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::TerminalScrollY {
-            let layout = active_terminal_scrollbar_layout(self);
+            let geometry = active_terminal_scrollbar_geometry(self);
             let active = self.ide_panel.active_terminal;
-            if let (Some(layout), Some(term)) =
-                (layout, self.ide_panel.terminals.get_mut(active))
-                && let Some((drag_offset, target)) =
-                    crate::render_view::terminal_ui::terminal_scrollbar_drag_target(
-                        my, layout, None,
-                    )
-            {
-                let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut term.scroll_y,
-                    target,
-                    drag_offset,
-                );
+            if let Some(term) = self.ide_panel.terminals.get_mut(active) {
+                let _ = crate::app::mouse::press_scrollbar(&mut term.scroll_y, geometry, mx, my);
             }
             self.handle_ui_click(clicked_id);
         } else {

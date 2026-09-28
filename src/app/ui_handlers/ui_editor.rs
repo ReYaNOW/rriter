@@ -5,6 +5,8 @@ use crate::renderer::VisualLine;
 use crate::ui_system::UiId;
 use super::UiClickFlow;
 
+/// Press on the editor horizontal bar: `(grab_offset, target)`. Input only needs the
+/// along-axis span, so the lane has no height.
 fn scrollbar_x_click_target(
     mouse_x: f32,
     track_x: f32,
@@ -13,21 +15,13 @@ fn scrollbar_x_click_target(
     max_scroll: f32,
     scale: f32,
 ) -> Option<(f32, f32)> {
-    if track_w <= 0.0 || max_scroll <= 0.0 {
-        return None;
-    }
-    let thumb_w = (track_w / (max_scroll + track_w).max(1.0) * track_w)
-        .max(40.0 * scale)
-        .min(track_w.max(0.0));
-    let scroll_ratio = (current_scroll / max_scroll).clamp(0.0, 1.0);
-    let thumb_x = track_x + scroll_ratio * (track_w - thumb_w);
-    if mouse_x >= thumb_x && mouse_x <= thumb_x + thumb_w {
-        Some((mouse_x - thumb_x, current_scroll))
-    } else {
-        let drag_offset = thumb_w / 2.0;
-        let ratio = (mouse_x - track_x - drag_offset) / (track_w - thumb_w).max(0.0001);
-        Some((drag_offset, (ratio * max_scroll).clamp(0.0, max_scroll)))
-    }
+    crate::render_view::editor_horizontal_scrollbar(
+        (track_x, 0.0, track_w, 0.0),
+        max_scroll,
+        current_scroll,
+    )
+    .geometry(scale)?
+    .press_target(mouse_x)
 }
 
 pub(crate) fn repeated_ui_click(
@@ -256,36 +250,40 @@ impl App {
                         s,
                     );
                     let max_scroll = r.get_max_scroll(&self.editor, editor_height);
-
-                    if max_scroll > 0.0 {
-                        let total_content_height = editor_scroll_content_height(
+                    let scrollbar_w = 10.0 * s;
+                    let geometry = crate::render_view::editor_vertical_scrollbar(
+                        (
+                            r.width - r.minimap_width - scrollbar_w,
+                            tab_bar_h,
+                            scrollbar_w,
+                            editor_height,
+                        ),
+                        editor_scroll_content_height(
                             self.editor.get_visible_lines_count(),
                             r.line_height,
                             editor_height,
-                        );
-                        let thumb_h = (editor_height / total_content_height.max(editor_height)
-                            * editor_height)
-                            .max(20.0 * s);
-                        let track_h = editor_height;
+                        ),
+                        max_scroll,
+                        self.scroll_y.current,
+                    )
+                    .geometry(s);
+                    let pressed = geometry
+                        .and_then(|g| Some((g.press_target(my)?, g.on_thumb(my))));
 
-                        let scroll_ratio = (self.scroll_y.current / max_scroll).clamp(0.0, 1.0);
-                        let thumb_y = tab_bar_h + scroll_ratio * (track_h - thumb_h);
-
-                        if my >= thumb_y && my <= thumb_y + thumb_h {
-                            self.scroll_y.drag_offset = my - thumb_y;
+                    match pressed {
+                        Some(((grab_offset, _), true)) => {
+                            self.scroll_y.drag_offset = grab_offset;
                             self.last_click_time = std::time::Instant::now();
-                        } else {
-                            self.scroll_y.drag_offset = thumb_h / 2.0;
-                            let new_ratio = (my - tab_bar_h - self.scroll_y.drag_offset)
-                                / (track_h - thumb_h).max(0.0001);
-                            self.scroll_y.target =
-                                (new_ratio * max_scroll).clamp(0.0, max_scroll).round();
+                        }
+                        Some(((grab_offset, target), false)) => {
+                            // Track click: jump now; the drag branch then follows at once.
+                            self.scroll_y.drag_offset = grab_offset;
+                            self.scroll_y.target = target.round();
                             self.scroll_y.anim_speed = 15.0;
                             self.last_click_time =
                                 std::time::Instant::now() - std::time::Duration::from_millis(200);
                         }
-                    } else {
-                        self.last_click_time = std::time::Instant::now();
+                        None => self.last_click_time = std::time::Instant::now(),
                     }
                 }
                 self.window.as_ref().unwrap().request_redraw();

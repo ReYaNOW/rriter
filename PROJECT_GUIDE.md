@@ -1298,6 +1298,7 @@ Likely files:
 ```text
 src/app/mouse/wheel.rs
 src/scroll.rs
+src/render_view/scrollbar_widget.rs (scrollbar look, hitbox, press/drag mapping)
 src/render_view/*
 ```
 
@@ -1701,6 +1702,7 @@ Rendering:
 * `src/render_view/search.rs` -> search panel UI.
 * `src/render_view/settings_ui.rs` -> tool executable configuration and managed install controls/logs, native directory actions, graphics diagnostics, and appearance settings UI.
 * `src/render_view/minimap_ui.rs` -> minimap content/viewport. Hot path.
+* `src/render_view/scrollbar_widget.rs` -> the one scrollbar widget: `Scrollbar` (style preset + axis + lane + extent) -> `geometry` (pixel-rounded, shared by render and input), `Renderer::draw_scrollbar` (paint + optional hitbox, returns geometry), `ScrollbarGeometry::{press_target, drag_target}`; App-side wrappers `app::mouse::{press_scrollbar, drag_scrollbar}`. New or changed scrollbars go through it. Hot path.
 * `src/render_view/sticky.rs` -> sticky headers.
 * `src/render_view/terminal_ui.rs` -> terminal grid/panel render. Hot path.
 * `src/render_view/lsp_ui.rs` -> LSP server panel/action menu visuals.

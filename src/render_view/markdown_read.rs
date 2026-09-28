@@ -1129,25 +1129,15 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        if scrollbar_w > 0.0
-            && let Some(thumb) = markdown_read_scrollbar_thumb(
-                y,
-                h,
+        if scrollbar_w > 0.0 {
+            let bar = markdown_read_scrollbar(
+                (x, y, w, h),
                 markdown.read_layout.content_height(),
                 scroll_y,
                 self.scale_factor,
-            )
-        {
-            let bar_w = scrollbar_w;
-            let track_x = (x + w - bar_w).round();
-            self.push_rounded_rect(
-                track_x + self.scale_factor,
-                thumb.start,
-                (bar_w - 2.0 * self.scale_factor).max(2.0),
-                thumb.len,
-                (bar_w * 0.4).max(2.0),
                 faded(self.theme.fg, 0.45),
             );
+            let _ = self.draw_scrollbar(&bar, self.scale_factor, 1.0, None);
         }
     }
 

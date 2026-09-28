@@ -664,39 +664,20 @@ impl App {
             .renderer
             .as_ref()
             .map_or(rect.1, |renderer| renderer.last_mouse_y);
-        let scale = self
-            .renderer
-            .as_ref()
-            .map_or(1.0, |renderer| renderer.scale_factor);
+        let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
+        let max_scroll = self.active_database_query_meta_state()
+            .map_or(0.0, |(_, state)| state.result_view.review_message_max_scroll.get());
+        let current = self.active_database_query_meta_state()
+            .map_or(0.0, |(_, state)| state.result_view.review_message_scroll_y.current);
+        let bar = crate::renderer::Renderer::database_query_scrollbar(
+            rect, rect.3, max_scroll, current, false,
+        );
+        let geometry = bar.geometry(scale);
         let Some((_, state)) = self.active_database_query_meta_state_mut() else {
             return;
         };
-        let max_scroll = state.result_view.review_message_max_scroll.get();
-        if max_scroll <= 0.0 || rect.3 <= 0.0 {
-            return;
-        }
-        let Some(thumb) = crate::scroll::scrollbar_thumb(
-            rect.1,
-            rect.3,
-            rect.3,
-            rect.3 + max_scroll,
-            state.result_view.review_message_scroll_y.current,
-            (28.0 * scale).round(),
-        ) else {
-            return;
-        };
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer,
-            rect.1,
-            rect.3,
-            thumb,
-            max_scroll,
-            None,
-        ) else {
-            return;
-        };
         let scroll = &mut state.result_view.review_message_scroll_y;
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
+        crate::app::mouse::press_scrollbar(scroll, geometry, 0.0, pointer);
     }
 
     pub(crate) fn start_database_query_result_resize(&mut self) {
@@ -794,48 +775,16 @@ impl App {
             viewport_h,
             scale,
         );
-        let (rect, pointer, viewport, max_scroll, current, min_thumb) = if horizontal {
-            (
-                horizontal_rect,
-                mouse.0,
-                viewport_w,
-                max_x,
-                state.result_view.scroll_x.current,
-                (36.0 * scale).round(),
-            )
+        let (rect, pointer, viewport, max_scroll, current) = if horizontal {
+            (horizontal_rect, mouse.0, viewport_w, max_x, state.result_view.scroll_x.current)
         } else {
-            (
-                vertical_rect,
-                mouse.1,
-                viewport_h,
-                max_y,
-                state.result_view.scroll_y.current,
-                (28.0 * scale).round(),
-            )
+            (vertical_rect, mouse.1, viewport_h, max_y, state.result_view.scroll_y.current)
         };
         let Some(rect) = rect else { return; };
-        let track_start = if horizontal { rect.0 } else { rect.1 };
-        let track_len = if horizontal { rect.2 } else { rect.3 };
-        let Some(thumb) = crate::scroll::scrollbar_thumb(
-            track_start,
-            track_len,
-            viewport,
-            viewport + max_scroll,
-            current,
-            min_thumb,
-        ) else {
-            return;
-        };
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer,
-            track_start,
-            track_len,
-            thumb,
-            max_scroll,
-            None,
-        ) else {
-            return;
-        };
+        let bar = crate::renderer::Renderer::database_query_scrollbar(
+            rect, viewport, max_scroll, current, horizontal,
+        );
+        let geometry = bar.geometry(scale);
         let Some((_, state)) = self.active_database_query_meta_state_mut() else {
             return;
         };
@@ -844,7 +793,10 @@ impl App {
         } else {
             &mut state.result_view.scroll_y
         };
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
+        crate::app::mouse::press_scrollbar(
+            scroll, geometry, if horizontal { pointer } else { 0.0 },
+            if horizontal { 0.0 } else { pointer },
+        );
     }
 
     pub(crate) fn update_database_query_scroll_drag(
@@ -867,36 +819,20 @@ impl App {
         if let Some((_, state)) = self.active_database_query_meta_state()
             && state.result_view.review_message_scroll_y.is_dragging
         {
-            let Some((_, track_y, _, track_h)) = review_scroll_rect else {
+            let Some(rect) = review_scroll_rect else {
                 return false;
             };
             let max_scroll = state.result_view.review_message_max_scroll.get();
-            let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_y,
-                track_h,
-                track_h,
-                track_h + max_scroll,
-                state.result_view.review_message_scroll_y.current,
-                (28.0 * scale).round(),
-            ) else {
-                return false;
-            };
-            let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                mouse_y,
-                track_y,
-                track_h,
-                thumb,
-                max_scroll,
-                Some(state.result_view.review_message_scroll_y.drag_offset),
-            ) else {
-                return false;
-            };
+            let bar = crate::renderer::Renderer::database_query_scrollbar(
+                rect, rect.3, max_scroll,
+                state.result_view.review_message_scroll_y.current, false,
+            );
+            let geometry = bar.geometry(scale);
             let Some((_, state)) = self.active_database_query_meta_state_mut() else {
                 return false;
             };
             let scroll = &mut state.result_view.review_message_scroll_y;
-            crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
-            return true;
+            return crate::app::mouse::drag_scrollbar(scroll, geometry, 0.0, mouse_y).is_some();
         }
         let body_rect = self
             .ui_registry
@@ -932,51 +868,25 @@ impl App {
         let offset_y = state.result_view.scroll_y.drag_offset;
         let offset_x = state.result_view.scroll_x.drag_offset;
         let target = if dragging_y {
-            let Some((_, track_y, _, track_h)) = vertical_rect else {
+            let Some(rect) = vertical_rect else {
                 return false;
             };
-            let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_y,
-                track_h,
-                viewport_h,
-                viewport_h + max_y,
-                current_y,
-                (28.0 * scale).round(),
-            ) else {
-                return false;
-            };
-            crate::scroll::scrollbar_drag_target(
-                mouse_y,
-                track_y,
-                track_h,
-                thumb,
-                max_y,
-                Some(offset_y),
-            )
-            .map(|(_, target)| (false, target))
+            let bar = crate::renderer::Renderer::database_query_scrollbar(
+                rect, viewport_h, max_y, current_y, false,
+            );
+            bar.geometry(scale)
+                .and_then(|geometry| geometry.drag_target(mouse_y, offset_y))
+                .map(|target| (false, target))
         } else if dragging_x {
-            let Some((track_x, _, track_w, _)) = horizontal_rect else {
+            let Some(rect) = horizontal_rect else {
                 return false;
             };
-            let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_x,
-                track_w,
-                viewport_w,
-                viewport_w + max_x,
-                current_x,
-                (36.0 * scale).round(),
-            ) else {
-                return false;
-            };
-            crate::scroll::scrollbar_drag_target(
-                mouse_x,
-                track_x,
-                track_w,
-                thumb,
-                max_x,
-                Some(offset_x),
-            )
-            .map(|(_, target)| (true, target))
+            let bar = crate::renderer::Renderer::database_query_scrollbar(
+                rect, viewport_w, max_x, current_x, true,
+            );
+            bar.geometry(scale)
+                .and_then(|geometry| geometry.drag_target(mouse_x, offset_x))
+                .map(|target| (true, target))
         } else {
             None
         };
@@ -1190,39 +1100,23 @@ mod database_query_app_method_tests {
 
     #[test]
     fn query_result_and_review_scrollbar_drag_are_target_only() {
-        for (track_start, track_len, viewport, max_scroll, min_thumb) in [
-            (10.0, 220.0, 220.0, 540.0, 28.0),
-            (20.0, 320.0, 320.0, 900.0, 36.0),
+        for (track_start, track_len, viewport, max_scroll, horizontal) in [
+            (10.0, 220.0, 220.0, 540.0, false),
+            (20.0, 320.0, 320.0, 900.0, true),
         ] {
             let current = max_scroll * 0.4;
-            let thumb = crate::scroll::scrollbar_thumb(
-                track_start,
-                track_len,
-                viewport,
-                viewport + max_scroll,
-                current,
-                min_thumb,
-            )
-            .expect("query thumb");
-            let pointer = thumb.start + 5.0;
-            let (offset, _) = crate::scroll::scrollbar_drag_target(
-                pointer,
-                track_start,
-                track_len,
-                thumb,
-                max_scroll,
-                None,
-            )
-            .expect("query drag starts");
-            let (_, target) = crate::scroll::scrollbar_drag_target(
-                pointer + 30.0,
-                track_start,
-                track_len,
-                thumb,
-                max_scroll,
-                Some(offset),
-            )
-            .expect("query drag moves");
+            let lane = if horizontal {
+                (track_start, 0.0, track_len, 0.0)
+            } else {
+                (0.0, track_start, 0.0, track_len)
+            };
+            let bar = crate::renderer::Renderer::database_query_scrollbar(
+                lane, viewport, max_scroll, current, horizontal,
+            );
+            let geometry = bar.geometry(1.0).expect("query geometry");
+            let pointer = geometry.thumb.start + 5.0;
+            let (offset, _) = geometry.press_target(pointer).expect("query drag starts");
+            let target = geometry.drag_target(pointer + 30.0, offset).expect("query drag moves");
             let mut scroll = crate::scroll::ScrollState::new(7.0);
             scroll.jump_to(current);
             assert!(crate::app::mouse::apply_scrollbar_drag_target(

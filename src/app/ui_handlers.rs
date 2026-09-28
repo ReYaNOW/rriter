@@ -230,6 +230,7 @@ impl App {
             | UiId::ApiMockStaticResponseScrollY(_)
             | UiId::ApiMockStaticResponseScrollX(_)
             | UiId::ApiMockCombinedPython(_)
+            | UiId::ApiMockCombinedScrollY(_)
             | UiId::ApiMockContractInput(_)
             | UiId::ApiMockSignatureInput(_)
             | UiId::ApiMockPreludeInput(_)

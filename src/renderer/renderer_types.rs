@@ -277,6 +277,22 @@ pub(crate) struct GitLogsLayoutMetrics {
     pub(crate) render_scroll: f32,
 }
 
+impl GitLogsLayoutMetrics {
+    /// Git logs scrollbar shared by the renderer and the press/drag handlers; the lane is
+    /// `track_rect` and, as before, the thumb treats the track as the viewport.
+    pub(crate) fn scrollbar(&self, scroll: f32) -> crate::render_view::scrollbar_widget::Scrollbar {
+        use crate::render_view::scrollbar_widget::{
+            Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+        };
+        Scrollbar {
+            style: ScrollbarStyle::GIT_LOGS,
+            axis: ScrollbarAxis::Vertical,
+            lane: self.track_rect,
+            extent: ScrollbarExtent::with_max(self.track_rect.3, self.max_scroll, scroll),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct GitLogVisualRow {
     pub(crate) line: crate::app::git_panel::GitLogDisplayLineId,
@@ -426,6 +442,7 @@ pub struct Renderer {
     pub(crate) git_graph_tooltip_visible_copied: Option<(usize, usize)>,
     pub(crate) git_logs_layout_cache: GitLogsLayoutCache,
     pub(crate) git_logs_selecting: bool,
+    pub(crate) git_workspace_scrollbar: Option<crate::render_view::scrollbar_widget::Scrollbar>,
     pub git_tooltip_waiting: bool,
 
     pub was_empty_ide: bool,

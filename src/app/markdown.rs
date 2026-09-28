@@ -577,7 +577,7 @@ impl App {
 
     fn markdown_read_scrollbar_geometry(
         &self,
-    ) -> Option<(crate::scroll::ScrollbarThumb, f32, f32, f32)> {
+    ) -> Option<crate::render_view::scrollbar_widget::ScrollbarGeometry> {
         if self.markdown_mode() != MarkdownMode::Read
             || self.markdown.read_document(self.editor.version).is_none()
         {
@@ -605,24 +605,21 @@ impl App {
         {
             return None;
         }
-        let thumb = crate::render_view::markdown_read::markdown_read_scrollbar_thumb(
-            frame.1,
-            frame.3,
+        crate::render_view::markdown_read::markdown_read_scrollbar(
+            frame,
             content_height,
             self.scroll_y.current.round(),
             renderer.scale_factor,
-        )?;
-        Some((thumb, max_scroll, frame.1, frame.3))
+            [0.0; 4],
+        )
+        .geometry(renderer.scale_factor)
     }
 
     pub(crate) fn begin_markdown_read_scrollbar_drag_at(&mut self, pointer_y: f32) -> bool {
-        let Some((thumb, max_scroll, track_y, track_h)) = self.markdown_read_scrollbar_geometry()
+        let Some((drag_offset, target)) = self
+            .markdown_read_scrollbar_geometry()
+            .and_then(|geometry| geometry.press_target(pointer_y))
         else {
-            return false;
-        };
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer_y, track_y, track_h, thumb, max_scroll, None,
-        ) else {
             return false;
         };
 
@@ -644,20 +641,11 @@ impl App {
         if self.markdown_mode() != MarkdownMode::Read || !self.scroll_y.is_dragging {
             return false;
         }
-        let Some((thumb, max_scroll, track_y, track_h)) = self.markdown_read_scrollbar_geometry()
-        else {
-            self.scroll_y.end_drag();
-            return true;
-        };
         let drag_offset = self.scroll_y.drag_offset;
-        let Some((_, target)) = crate::scroll::scrollbar_drag_target(
-            pointer_y,
-            track_y,
-            track_h,
-            thumb,
-            max_scroll,
-            Some(drag_offset),
-        ) else {
+        let Some(target) = self
+            .markdown_read_scrollbar_geometry()
+            .and_then(|geometry| geometry.drag_target(pointer_y, drag_offset))
+        else {
             self.scroll_y.end_drag();
             return true;
         };

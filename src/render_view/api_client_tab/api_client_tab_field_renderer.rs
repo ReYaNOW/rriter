@@ -1203,11 +1203,26 @@ impl Renderer {
         }
         let track_w = (4.0 * s).max(3.0);
         self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
-        let content_h = h + max_scroll;
-        let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
-        let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
-        self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
-        ui_registry.register_rect(id, x - 5.0 * s, y, 13.0 * s, h, mx, my);
+        let scrollbar = crate::app::api_client::api_text_scrollbar(
+            (x - 5.0 * s, y, 13.0 * s, h),
+            h,
+            max_scroll,
+            scroll_y,
+            s,
+            crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id,
+                mx,
+                my,
+                blocker: false,
+            }),
+        );
     }
 
     fn draw_api_schema_scrollbar(
@@ -1230,11 +1245,26 @@ impl Renderer {
         }
         let track_w = (4.0 * s).max(3.0);
         self.push_rect(x, y, track_w, h, [0.52, 0.54, 0.60, 0.36]);
-        let content_h = h + max_scroll;
-        let thumb_h = (h / content_h * h).max(22.0 * s).min(h);
-        let thumb_y = y + (scroll_y.clamp(0.0, max_scroll) / max_scroll) * (h - thumb_h);
-        self.push_rect(x, thumb_y, track_w, thumb_h, [0.70, 0.72, 0.80, 0.88]);
-        ui_registry.register_rect(id, x - 5.0 * s, y, 13.0 * s, h, mx, my);
+        let scrollbar = crate::app::api_client::api_text_scrollbar(
+            (x - 5.0 * s, y, 13.0 * s, h),
+            h,
+            max_scroll,
+            scroll_y,
+            s,
+            crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id,
+                mx,
+                my,
+                blocker: false,
+            }),
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1251,18 +1281,33 @@ impl Renderer {
         mx: f32,
         my: f32,
     ) {
+        let s = self.scale_factor;
         let max_scroll = api_text_area_max_scroll_x(text, visible_w, |line| {
             self.measure_ui_width(line, API_BODY_TEXT_SCALE)
         });
         if max_scroll <= 0.5 {
             return;
         }
-        let track_h = 3.0_f32.max(2.0);
-        self.push_rect(x, y, track_w, track_h, [0.52, 0.54, 0.60, 0.22]);
-        let content_w = track_w + max_scroll;
-        let thumb_w = (track_w / content_w * track_w).max(28.0).min(track_w);
-        let thumb_x = x + (scroll_x.clamp(0.0, max_scroll) / max_scroll) * (track_w - thumb_w);
-        self.push_rect(thumb_x, y, thumb_w, track_h, [0.64, 0.66, 0.72, 0.70]);
-        ui_registry.register_rect(id, x, y - 5.0, track_w, 13.0, mx, my);
+        self.push_rect(x, y, track_w, 3.0, [0.52, 0.54, 0.60, 0.22]);
+        let scrollbar = crate::app::api_client::api_text_scrollbar(
+            (x, y - 5.0, track_w, 13.0),
+            track_w,
+            max_scroll,
+            scroll_x,
+            s,
+            crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id,
+                mx,
+                my,
+                blocker: false,
+            }),
+        );
     }
 }

@@ -32,22 +32,19 @@ impl App {
                             self.autocomplete_detail_rect,
                             self.autocomplete_detail_popup.as_mut(),
                         ) {
-                            if let Some((drag_offset, target)) =
-                                crate::app::mouse::hover_popup_scrollbar_drag_target(
-                                    rect,
-                                    max_scroll,
-                                    popup.scroll.current,
-                                    my,
-                                    s,
-                                    None,
-                                )
-                            {
-                                let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                                    &mut popup.scroll,
-                                    target,
-                                    drag_offset,
-                                );
-                            }
+                            let geometry = crate::app::mouse::hover_popup_scrollbar(
+                                rect,
+                                max_scroll,
+                                popup.scroll.current,
+                                s,
+                            )
+                            .geometry(s);
+                            let _ = crate::app::mouse::press_scrollbar(
+                                &mut popup.scroll,
+                                geometry,
+                                mx,
+                                my,
+                            );
                         }
                         self.window.as_ref().unwrap().request_redraw();
                         return true;
@@ -73,21 +70,19 @@ impl App {
                 if in_main {
                     if let Some(rect) = self.autocomplete_rect {
                         let s = self.renderer.as_ref().unwrap().scale_factor;
-                        if mx >= rect.0 + rect.2 - 14.0 * s {
-                            if let Some((drag_offset, target)) = autocomplete_scroll_click_target(
+                        let bar = autocomplete_scrollbar(
+                            rect,
+                            self.autocomplete_options.len(),
+                            self.autocomplete_scroll.current,
+                            s,
+                        );
+                        if mx >= bar.lane.0 {
+                            let _ = crate::app::mouse::press_scrollbar(
+                                &mut self.autocomplete_scroll,
+                                bar.geometry(s),
+                                mx,
                                 my,
-                                rect.1,
-                                rect.3,
-                                self.autocomplete_scroll.current,
-                                self.autocomplete_options.len(),
-                                s,
-                            ) {
-                                apply_autocomplete_scroll_drag(
-                                    &mut self.autocomplete_scroll,
-                                    target,
-                                    drag_offset,
-                                );
-                            }
+                            );
                             self.window.as_ref().unwrap().request_redraw();
                             return true;
                         }

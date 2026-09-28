@@ -13,8 +13,6 @@ pub(crate) struct DatabaseTextModalScrollSnapshot {
     pub(crate) current_y: f32,
     pub(crate) dragging_x: bool,
     pub(crate) dragging_y: bool,
-    pub(crate) offset_x: f32,
-    pub(crate) offset_y: f32,
     pub(crate) line_count: usize,
     pub(crate) max_line_width: f32,
 }
@@ -43,8 +41,6 @@ pub(crate) fn text_modal_scroll_snapshot(
         current_y: scroll_y.current,
         dragging_x: scroll_x.is_dragging,
         dragging_y: scroll_y.is_dragging,
-        offset_x: scroll_x.drag_offset,
-        offset_y: scroll_y.drag_offset,
         line_count: layout_cache.line_count(),
         max_line_width: layout_cache.max_line_width(),
     })
@@ -145,58 +141,6 @@ pub(crate) fn move_read_only_cursor(
     *cursor = target;
 }
 
-pub(crate) fn text_modal_scroll_drag_start(
-    horizontal: bool,
-    pointer: f32,
-    horizontal_rect: Option<(f32, f32, f32, f32)>,
-    vertical_rect: Option<(f32, f32, f32, f32)>,
-    viewport_w: f32,
-    viewport_h: f32,
-    max_x: f32,
-    max_y: f32,
-    current_x: f32,
-    current_y: f32,
-    scale: f32,
-) -> Option<(f32, f32)> {
-    let (rect, viewport, max_scroll, current, min_thumb) = if horizontal {
-        (horizontal_rect?, viewport_w, max_x, current_x, (36.0 * scale).round())
-    } else {
-        (vertical_rect?, viewport_h, max_y, current_y, (28.0 * scale).round())
-    };
-    let track_start = if horizontal { rect.0 } else { rect.1 };
-    let track_len = if horizontal { rect.2 } else { rect.3 };
-    let thumb = crate::scroll::scrollbar_thumb(track_start, track_len, viewport, viewport + max_scroll, current, min_thumb)?;
-    crate::scroll::scrollbar_drag_target(pointer, track_start, track_len, thumb, max_scroll, None)
-}
-
-pub(crate) fn text_modal_scroll_drag_update(
-    snapshot: DatabaseTextModalScrollSnapshot,
-    mouse_x: f32,
-    mouse_y: f32,
-    vertical_rect: Option<(f32, f32, f32, f32)>,
-    horizontal_rect: Option<(f32, f32, f32, f32)>,
-    viewport_w: f32,
-    viewport_h: f32,
-    max_x: f32,
-    max_y: f32,
-    scale: f32,
-) -> Option<(bool, f32, f32)> {
-    let target = if snapshot.dragging_y {
-        let (_, track_y, _, track_h) = vertical_rect?;
-        let thumb = crate::scroll::scrollbar_thumb(track_y, track_h, viewport_h, viewport_h + max_y, snapshot.current_y, (28.0 * scale).round())?;
-        crate::scroll::scrollbar_drag_target(mouse_y, track_y, track_h, thumb, max_y, Some(snapshot.offset_y))
-            .map(|(_, target)| (false, target, snapshot.offset_y))
-    } else if snapshot.dragging_x {
-        let (track_x, _, track_w, _) = horizontal_rect?;
-        let thumb = crate::scroll::scrollbar_thumb(track_x, track_w, viewport_w, viewport_w + max_x, snapshot.current_x, (36.0 * scale).round())?;
-        crate::scroll::scrollbar_drag_target(mouse_x, track_x, track_w, thumb, max_x, Some(snapshot.offset_x))
-            .map(|(_, target)| (true, target, snapshot.offset_x))
-    } else {
-        None
-    }?;
-    Some(target)
-}
-
 pub(crate) fn scroll_text_modal(
     modal: &mut Option<crate::app::database::DatabaseTableModal>,
     dx: f32,
@@ -257,12 +201,23 @@ mod database_table_modal_state_tests {
 
     #[test]
     fn database_modal_scrollbar_drag_is_target_only_for_both_axes() {
-        for (track_start, track_len, viewport, max_scroll, pointer_delta) in [(20.0, 240.0, 180.0, 420.0, 28.0), (40.0, 360.0, 280.0, 760.0, 44.0)] {
+        for (track_start, track_len, viewport, max_scroll, pointer_delta, horizontal) in [
+            (20.0, 240.0, 180.0, 420.0, 28.0, false),
+            (40.0, 360.0, 280.0, 760.0, 44.0, true),
+        ] {
             let current = max_scroll * 0.35;
-            let thumb = crate::scroll::scrollbar_thumb(track_start, track_len, viewport, viewport + max_scroll, current, 28.0).expect("modal thumb");
-            let pointer = thumb.start + 6.0;
-            let (offset, _) = crate::scroll::scrollbar_drag_target(pointer, track_start, track_len, thumb, max_scroll, None).expect("modal drag starts");
-            let (_, target) = crate::scroll::scrollbar_drag_target(pointer + pointer_delta, track_start, track_len, thumb, max_scroll, Some(offset)).expect("modal drag moves");
+            let lane = if horizontal {
+                (track_start, 0.0, track_len, 0.0)
+            } else {
+                (0.0, track_start, 0.0, track_len)
+            };
+            let bar = crate::render_view::database_table_tab_overlay::database_table_modal_scrollbar(
+                lane, viewport, viewport + max_scroll, current, horizontal,
+            );
+            let geometry = bar.geometry(1.0).expect("modal geometry");
+            let pointer = geometry.thumb.start + 6.0;
+            let (offset, _) = geometry.press_target(pointer).expect("modal drag starts");
+            let target = geometry.drag_target(pointer + pointer_delta, offset).expect("modal drag moves");
             let mut scroll = crate::scroll::ScrollState::new(7.0);
             scroll.jump_to(current);
             assert!(crate::app::mouse::apply_scrollbar_drag_target(&mut scroll, target, offset));

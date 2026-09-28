@@ -480,17 +480,9 @@ pub(crate) fn file_tree_row_index_at(
     (idx < total_nodes).then_some(idx)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct FileTreeScrollbarLayout {
-    pub track_x: f32,
-    pub track_y: f32,
-    pub track_w: f32,
-    pub track_h: f32,
-    pub thumb: crate::scroll::ScrollbarThumb,
-    pub max_scroll: f32,
-}
-
-pub(crate) fn file_tree_scrollbar_layout(
+/// Explorer scrollbar shared by the renderer and the press/drag handlers: 12 px lane at the
+/// panel's right edge, inset 4 px top and bottom; the viewport is the whole panel.
+pub(crate) fn file_tree_scrollbar(
     panel_x: f32,
     panel_y: f32,
     panel_w: f32,
@@ -498,7 +490,10 @@ pub(crate) fn file_tree_scrollbar_layout(
     scale: f32,
     total_nodes: usize,
     current_scroll: f32,
-) -> Option<FileTreeScrollbarLayout> {
+) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
     if !panel_x.is_finite()
         || !panel_y.is_finite()
         || !panel_w.is_finite()
@@ -510,25 +505,17 @@ pub(crate) fn file_tree_scrollbar_layout(
     {
         return None;
     }
-    let row_h = crate::render_view::tree_ui::TREE_ROW_H * scale;
-    let content_h = total_nodes as f32 * row_h;
-    let track_y = panel_y + 4.0 * scale;
-    let track_h = (panel_h - 8.0 * scale).max(0.0);
-    let thumb = crate::scroll::scrollbar_thumb(
-        track_y,
-        track_h,
-        panel_h,
-        content_h,
-        current_scroll,
-        20.0 * scale,
-    )?;
-    Some(FileTreeScrollbarLayout {
-        track_x: panel_x + panel_w - 12.0 * scale,
-        track_y,
-        track_w: 12.0 * scale,
-        track_h,
-        thumb,
-        max_scroll: (content_h - panel_h).max(0.0),
+    let content_h = total_nodes as f32 * crate::render_view::tree_ui::TREE_ROW_H * scale;
+    Some(Scrollbar {
+        style: ScrollbarStyle::FILE_TREE,
+        axis: ScrollbarAxis::Vertical,
+        lane: (
+            panel_x + panel_w - 12.0 * scale,
+            panel_y + 4.0 * scale,
+            12.0 * scale,
+            (panel_h - 8.0 * scale).max(0.0),
+        ),
+        extent: ScrollbarExtent::new(panel_h, content_h, current_scroll),
     })
 }
 

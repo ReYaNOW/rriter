@@ -114,17 +114,6 @@ pub(crate) fn terminal_search_geometry(
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct TerminalScrollbarLayout {
-    pub track_x: f32,
-    pub track_y: f32,
-    pub track_w: f32,
-    pub track_h: f32,
-    pub thumb_y: f32,
-    pub thumb_h: f32,
-    pub max_scroll: f32,
-}
-
 pub(crate) fn terminal_body_rect(content_y: f32, content_h: f32, scale: f32) -> (f32, f32) {
     let tab_top_pad = 6.0 * scale;
     let tab_h = 32.0 * scale;
@@ -223,7 +212,9 @@ pub(crate) fn terminal_render_scroll_offset(
     }
 }
 
-pub(crate) fn terminal_scrollbar_layout(
+/// Terminal scrollback bar shared by the renderer and the press/drag handlers: 8 px lane
+/// inset 4 px from the focus frame; `current_scroll` counts lines up from the bottom.
+pub(crate) fn terminal_scrollbar(
     panel_x: f32,
     panel_w: f32,
     term_y: f32,
@@ -232,57 +223,29 @@ pub(crate) fn terminal_scrollbar_layout(
     char_h: f32,
     total_lines: usize,
     current_scroll: f32,
-) -> Option<TerminalScrollbarLayout> {
-    let max_scroll = terminal_max_scroll(total_lines, char_h, term_h, scale);
-    if max_scroll <= 0.0 {
-        return None;
-    }
-
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
     let frame_inset = 4.0 * scale;
     let track_w = 8.0 * scale;
-    let track_x = panel_x + panel_w - frame_inset - track_w;
-    let track_y = term_y + frame_inset;
-    let track_h = (term_h - frame_inset * 2.0).max(1.0);
     let viewport_h = terminal_text_viewport_height(term_h, scale);
-    let content_h = total_lines as f32 * char_h;
-    let scroll_from_top = max_scroll - current_scroll.clamp(0.0, max_scroll);
-    let thumb = crate::scroll::scrollbar_thumb(
-        track_y,
-        track_h,
-        viewport_h,
-        content_h,
-        scroll_from_top,
-        20.0 * scale,
-    )?;
-    Some(TerminalScrollbarLayout {
-        track_x,
-        track_y,
-        track_w,
-        track_h,
-        thumb_y: thumb.start,
-        thumb_h: thumb.len,
-        max_scroll,
-    })
-}
-
-pub(crate) fn terminal_scrollbar_drag_target(
-    pointer_y: f32,
-    layout: TerminalScrollbarLayout,
-    drag_offset: Option<f32>,
-) -> Option<(f32, f32)> {
-    let thumb = crate::scroll::ScrollbarThumb {
-        start: layout.thumb_y,
-        len: layout.thumb_h,
-    };
-    let (offset, scroll_from_top) = crate::scroll::scrollbar_drag_target(
-        pointer_y,
-        layout.track_y,
-        layout.track_h,
-        thumb,
-        layout.max_scroll,
-        drag_offset,
-    )?;
-    Some((offset, layout.max_scroll - scroll_from_top))
+    Scrollbar {
+        style: ScrollbarStyle::TERMINAL,
+        axis: ScrollbarAxis::Vertical,
+        lane: (
+            panel_x + panel_w - frame_inset - track_w,
+            term_y + frame_inset,
+            track_w,
+            (term_h - frame_inset * 2.0).max(1.0),
+        ),
+        extent: ScrollbarExtent::with_max(
+            viewport_h,
+            terminal_max_scroll(total_lines, char_h, term_h, scale),
+            current_scroll,
+        )
+        .from_end(),
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -815,33 +778,25 @@ impl Renderer {
                 );
             }
 
-            if presentation_visible && let Some(scrollbar) = terminal_scrollbar_layout(
-                panel_x,
-                panel_w,
-                term_content_y,
-                term_content_h,
-                s,
-                char_h,
-                total_lines,
-                term.scroll_y.current,
-            ) {
-                self.push_rounded_rect(
-                    scrollbar.track_x,
-                    scrollbar.thumb_y,
-                    scrollbar.track_w,
-                    scrollbar.thumb_h,
-                    scrollbar.track_w / 2.0,
-                    [0.7, 0.33, 0.54, 0.8],
+            if presentation_visible {
+                let bar = terminal_scrollbar(
+                    panel_x,
+                    panel_w,
+                    term_content_y,
+                    term_content_h,
+                    s,
+                    char_h,
+                    total_lines,
+                    term.scroll_y.current,
                 );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::TerminalScrollY,
-                    scrollbar.track_x,
-                    scrollbar.track_y,
-                    scrollbar.track_w,
-                    scrollbar.track_h,
+                let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: ui_registry,
+                    id: crate::ui_system::UiId::TerminalScrollY,
                     mx,
                     my,
-                );
+                    blocker: false,
+                };
+                let _ = self.draw_scrollbar(&bar, s, 1.0, Some(hit));
             }
 
             self.flush();
@@ -1363,28 +1318,22 @@ mod tests {
 
     #[test]
     fn terminal_scrollbar_is_inset_from_focus_frame_and_drags_without_jumping() {
-        let layout = terminal_scrollbar_layout(
-            48.0, 952.0, 400.0, 300.0, 1.0, 26.0, 40, 260.0,
-        )
-        .expect("scrollbar");
-        assert!(layout.track_x > 48.0);
-        assert!(layout.track_x + layout.track_w < 1000.0 - 2.0);
-        assert!(layout.track_y > 400.0 + 2.0);
-        assert!(layout.track_y + layout.track_h < 700.0 - 2.0);
+        let layout = terminal_scrollbar(48.0, 952.0, 400.0, 300.0, 1.0, 26.0, 40, 260.0)
+            .geometry(1.0)
+            .expect("scrollbar");
+        let (track_x, track_y, track_w, track_h) = layout.lane;
+        assert!(track_x > 48.0);
+        assert!(track_x + track_w < 1000.0 - 2.0);
+        assert!(track_y > 400.0 + 2.0);
+        assert!(track_y + track_h < 700.0 - 2.0);
 
-        let pointer = layout.thumb_y + layout.thumb_h * 0.25;
-        let (offset, target) = terminal_scrollbar_drag_target(pointer, layout, None).unwrap();
-        assert!((offset - layout.thumb_h * 0.25).abs() < 0.001);
+        let pointer = layout.thumb.start + layout.thumb.len * 0.25;
+        let (offset, target) = layout.press_target(pointer).unwrap();
+        assert!((offset - layout.thumb.len * 0.25).abs() < 0.001);
         assert!((target - 260.0).abs() < 0.001);
 
-        let (_, top_target) =
-            terminal_scrollbar_drag_target(layout.track_y, layout, Some(0.0)).unwrap();
-        let (_, bottom_target) = terminal_scrollbar_drag_target(
-            layout.track_y + layout.track_h,
-            layout,
-            Some(layout.thumb_h),
-        )
-        .unwrap();
+        let top_target = layout.drag_target(track_y, 0.0).unwrap();
+        let bottom_target = layout.drag_target(track_y + track_h, layout.thumb.len).unwrap();
         assert!((top_target - layout.max_scroll).abs() < 0.001);
         assert!(bottom_target.abs() < 0.001);
 

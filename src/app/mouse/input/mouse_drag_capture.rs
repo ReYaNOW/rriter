@@ -53,6 +53,11 @@ impl App {
             }
             return true;
         }
+        if left_released && self.ide_panel.git.scroll.is_dragging {
+            self.ide_panel.git.scroll.end_drag();
+            self.window.as_ref().unwrap().request_redraw();
+            return true;
+        }
         false
     }
 
@@ -75,6 +80,17 @@ impl App {
             self.window.as_ref().unwrap().request_redraw();
         }
         if state == ElementState::Released {
+            let mut finished_mock_scroll = false;
+            for scroll in self.ide_panel.api.mock_python_scrolls.values_mut() {
+                if scroll.is_dragging {
+                    scroll.end_drag();
+                    finished_mock_scroll = true;
+                }
+            }
+            if finished_mock_scroll {
+                self.window.as_ref().unwrap().request_redraw();
+                return true;
+            }
             if let Some(popup) = &mut self.autocomplete_detail_popup {
                 popup.scroll.end_drag();
             }

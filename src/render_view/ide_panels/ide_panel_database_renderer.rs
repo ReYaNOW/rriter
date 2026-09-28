@@ -847,25 +847,8 @@ impl Renderer {
             }
         }
 
-        if let Some(track) = layout.scrollbar_track
-            && let Some(thumb) = database_connection_dialog_scrollbar_thumb(&layout, scroll_y)
-        {
-            self.push_rounded_rect(
-                track.x,
-                track.y,
-                track.w,
-                track.h,
-                track.w * 0.5,
-                [0.20, 0.21, 0.25, 0.55],
-            );
-            self.push_rounded_rect(
-                track.x,
-                thumb.start,
-                track.w,
-                thumb.len,
-                track.w * 0.5,
-                [0.48, 0.50, 0.58, 0.90],
-            );
+        if let Some(bar) = database_connection_dialog_scrollbar(&layout, scroll_y) {
+            self.draw_scrollbar(&bar, s, 1.0, None);
         }
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };

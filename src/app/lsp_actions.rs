@@ -65,6 +65,77 @@ pub(crate) fn lsp_log_scrollbar_drag_target(
     )
 }
 
+pub(crate) fn lsp_log_scrollbar(
+    lane: (f32, f32, f32, f32),
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    axis: crate::render_view::scrollbar_widget::ScrollbarAxis,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(4.0),
+            track_pad: 7.0,
+            min_thumb: 20.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.22],
+            ..ScrollbarStyle::BASE
+        },
+        axis,
+        lane,
+        extent: ScrollbarExtent::new(viewport_len, content_len, current_scroll),
+    }
+}
+
+pub(crate) fn lsp_log_scrollbar_target(
+    lane: (f32, f32, f32, f32),
+    viewport_len: f32,
+    content_len: f32,
+    current_scroll: f32,
+    axis: crate::render_view::scrollbar_widget::ScrollbarAxis,
+    pointer: f32,
+    drag_offset: Option<f32>,
+    scale: f32,
+) -> Option<(f32, f32)> {
+    let geometry = lsp_log_scrollbar(
+        lane,
+        viewport_len,
+        content_len,
+        current_scroll,
+        axis,
+    )
+    .geometry(scale)?;
+    if let Some(offset) = drag_offset {
+        Some((offset, geometry.drag_target(pointer, offset)?))
+    } else {
+        geometry.press_target(pointer)
+    }
+}
+
+pub(crate) fn lsp_panel_scrollbar(
+    lane: (f32, f32, f32, f32),
+    content_h: f32,
+    current_scroll: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            track_pad: 5.0,
+            min_thumb: 40.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.22],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::new(lane.3, content_h, current_scroll),
+    }
+}
+
 pub(crate) fn lsp_log_inner_size_by<F>(
     log_editor: &crate::editor::Editor,
     scale: f32,

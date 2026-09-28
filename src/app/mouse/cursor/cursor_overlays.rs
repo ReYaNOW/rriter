@@ -1,7 +1,5 @@
 //! Cursor-move phases: modal overlays, database text drags, autocomplete popups.
-use super::cursor_helpers::{
-    autocomplete_drag_target, autocomplete_hovered_index, inline_git_popup_blocks_hover,
-};
+use super::cursor_helpers::{autocomplete_hovered_index, inline_git_popup_blocks_hover};
 use super::*;
 
 impl App {
@@ -60,24 +58,14 @@ impl App {
             && state.popup.scroll.is_dragging
             && let Some(rect) = state.rect
         {
-            if let Some((drag_offset, target)) =
-                crate::app::mouse::hover_popup_scrollbar_drag_target(
-                    rect,
-                    state.max_scroll,
-                    state.popup.scroll.current,
-                    py,
-                    ddl_scale,
-                    Some(state.popup.scroll.drag_offset),
-                )
-            {
-                crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut state.popup.scroll,
-                    target,
-                    drag_offset,
-                );
-            } else {
-                state.popup.scroll.end_drag();
-            }
+            let geometry = crate::app::mouse::hover_popup_scrollbar(
+                rect,
+                state.max_scroll,
+                state.popup.scroll.current,
+                ddl_scale,
+            )
+            .geometry(ddl_scale);
+            let _ = crate::app::mouse::drag_scrollbar(&mut state.popup.scroll, geometry, px, py);
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -111,22 +99,15 @@ impl App {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some(rect) = self.autocomplete_detail_rect {
                 let max_scroll = self.autocomplete_detail_max_scroll;
-                if let Some(popup) = &mut self.autocomplete_detail_popup
-                    && let Some((drag_offset, target)) =
-                        crate::app::mouse::hover_popup_scrollbar_drag_target(
-                            rect,
-                            max_scroll,
-                            popup.scroll.current,
-                            py,
-                            s,
-                            Some(popup.scroll.drag_offset),
-                        )
-                {
-                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                        &mut popup.scroll,
-                        target,
-                        drag_offset,
-                    );
+                if let Some(popup) = &mut self.autocomplete_detail_popup {
+                    let geometry = crate::app::mouse::hover_popup_scrollbar(
+                        rect,
+                        max_scroll,
+                        popup.scroll.current,
+                        s,
+                    )
+                    .geometry(s);
+                    let _ = crate::app::mouse::drag_scrollbar(&mut popup.scroll, geometry, px, py);
                 }
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -275,19 +256,18 @@ impl App {
             let py = position.y as f32;
 
             if self.autocomplete_scroll.is_dragging {
-                let drag_offset = self.autocomplete_scroll.drag_offset;
-                let target = autocomplete_drag_target(
-                    py,
-                    ry,
-                    rh,
-                    drag_offset,
+                let geometry = super::input::autocomplete_scrollbar(
+                    (rx, ry, rw, rh),
                     self.autocomplete_options.len(),
+                    self.autocomplete_scroll.current,
                     s,
-                );
-                super::input::apply_autocomplete_scroll_drag(
+                )
+                .geometry(s);
+                let _ = crate::app::mouse::drag_scrollbar(
                     &mut self.autocomplete_scroll,
-                    target,
-                    drag_offset,
+                    geometry,
+                    px,
+                    py,
                 );
                 self.window.as_ref().unwrap().request_redraw();
                 return true;

@@ -3,6 +3,42 @@ fn editor_horizontal_track_color(bg: [f32; 4]) -> [f32; 4] {
     [bg[0], bg[1], bg[2], 1.0]
 }
 
+/// 14 px lane of the editor horizontal scrollbar from the text left edge to the vertical
+/// bar (`track_right`), ending at `bottom` (above the status bar in IDE mode).
+pub(crate) fn editor_horizontal_scrollbar_lane(
+    track_x: f32,
+    track_right: f32,
+    bottom: f32,
+    is_ide_mode: bool,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::ScrollbarRect {
+    let status_bar_h = if is_ide_mode {
+        ide_status_bar_height(scale)
+    } else {
+        0.0
+    };
+    let lane_h = 14.0 * scale;
+    (track_x, bottom - status_bar_h - lane_h, track_right - track_x, lane_h)
+}
+
+/// Editor horizontal scrollbar shared by the renderer and the `EditorScrollbarX`
+/// press/drag handlers; the track is its own viewport, as the text width is.
+pub(crate) fn editor_horizontal_scrollbar(
+    lane: crate::render_view::scrollbar_widget::ScrollbarRect,
+    max_scroll_x: f32,
+    scroll_x: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle::EDITOR_X,
+        axis: ScrollbarAxis::Horizontal,
+        lane,
+        extent: ScrollbarExtent::with_max(lane.2, max_scroll_x, scroll_x),
+    }
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     fn draw_ide_context_overlays(
@@ -281,41 +317,16 @@ impl Renderer {
         real_height: f32,
         s: f32,
     ) {
-        if self.max_scroll_x <= 0.0 {
-            return;
-        }
-        let track_w = scrollbar_x - self.left_padding;
-        let track_h_bg = 14.0 * s;
-        let status_bar_h = if is_ide_mode {
-            ide_status_bar_height(s)
-        } else {
-            0.0
-        };
-        let track_y_bg = real_height - editor_bottom_h - status_bar_h - track_h_bg;
-
-        self.push_rect(
+        let lane = editor_horizontal_scrollbar_lane(
             self.left_padding,
-            track_y_bg,
-            track_w,
-            track_h_bg,
-            editor_horizontal_track_color(self.theme.bg),
+            scrollbar_x,
+            real_height - editor_bottom_h,
+            is_ide_mode,
+            s,
         );
-
-        let thumb_w = (track_w / (self.max_scroll_x + track_w).max(1.0) * track_w).max(40.0 * s).min(track_w.max(0.0));
-        let scroll_ratio_x = (render_scroll_x / self.max_scroll_x).clamp(0.0, 1.0);
-        let thumb_x = self.left_padding + scroll_ratio_x * (track_w - thumb_w);
-
-        let thumb_h = 6.0 * s;
-        let thumb_y = track_y_bg + (track_h_bg - thumb_h) / 2.0;
-
-        self.push_rounded_rect(
-            thumb_x,
-            thumb_y,
-            thumb_w,
-            thumb_h,
-            3.0 * s,
-            [0.7, 0.33, 0.54, 1.0],
-        );
+        let mut bar = editor_horizontal_scrollbar(lane, self.max_scroll_x, render_scroll_x);
+        bar.style.track_color = Some(editor_horizontal_track_color(self.theme.bg));
+        let _ = self.draw_scrollbar(&bar, s, 1.0, None);
     }
 
     fn register_root_resize_blockers(
@@ -395,24 +406,23 @@ impl Renderer {
         real_height: f32,
         s: f32,
     ) {
-        if self.max_scroll_x <= 0.0 {
-            return;
-        }
-        let track_w = scrollbar_x - self.left_padding;
-        let status_bar_h = if is_ide_mode {
-            ide_status_bar_height(s)
-        } else {
-            0.0
-        };
-        ui_registry.register_rect(
-            crate::ui_system::UiId::EditorScrollbarX,
+        let lane = editor_horizontal_scrollbar_lane(
             self.left_padding,
-            real_height - editor_bottom_h - status_bar_h - 14.0 * s,
-            track_w,
-            14.0 * s,
-            self.last_mouse_x,
-            self.last_mouse_y,
+            scrollbar_x,
+            real_height - editor_bottom_h,
+            is_ide_mode,
+            s,
         );
+        if let Some(geometry) = editor_horizontal_scrollbar(lane, self.max_scroll_x, 0.0).geometry(s)
+        {
+            geometry.register(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::EditorScrollbarX,
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: false,
+            });
+        }
     }
 
     fn draw_search_panel_if_visible(

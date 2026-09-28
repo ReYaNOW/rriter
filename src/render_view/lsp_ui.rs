@@ -1159,67 +1159,59 @@ impl Renderer {
                         self.flush();
 
                         if inner_total_h > log_bg_h {
-                            let track_h = (log_bg_h - 14.0 * s).max(0.0);
-                            if let Some(thumb) =
-                                crate::app::lsp_actions::lsp_log_scrollbar_thumb(
-                                    log_bg_y + 7.0 * s,
-                                    track_h,
-                                    log_bg_h,
-                                    inner_total_h,
-                                    inner_scroll_y,
-                                    s,
-                                )
-                            {
-                                self.push_rounded_rect(
-                                    log_bg_x + log_bg_w - 8.0 * s,
-                                    thumb.start,
-                                    4.0 * s,
-                                    thumb.len,
-                                    2.0 * s,
-                                    [1.0, 1.0, 1.0, 0.22],
-                                );
-                                ui_registry.register_rect(
-                                    crate::ui_system::UiId::LspLogScrollY(server_idx),
+                            let id = crate::ui_system::UiId::LspLogScrollY(server_idx);
+                            let scrollbar = crate::app::lsp_actions::lsp_log_scrollbar(
+                                (
                                     log_bg_x + log_bg_w - 14.0 * s,
                                     log_bg_y,
                                     14.0 * s,
                                     log_bg_h,
+                                ),
+                                log_bg_h,
+                                inner_total_h,
+                                inner_scroll_y,
+                                crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+                            );
+                            let _ = self.draw_scrollbar(
+                                &scrollbar,
+                                s,
+                                1.0,
+                                Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                                    ui: ui_registry,
+                                    id,
                                     mx,
                                     my,
-                                );
-                            }
+                                    blocker: false,
+                                }),
+                            );
                         }
 
                         if inner_max_w + 20.0 * s > log_bg_w {
-                            let track_w = (log_bg_w - 14.0 * s).max(0.0);
-                            if let Some(thumb) =
-                                crate::app::lsp_actions::lsp_log_scrollbar_thumb(
-                                    log_bg_x + 7.0 * s,
-                                    track_w,
-                                    log_bg_w,
-                                    inner_max_w + 20.0 * s,
-                                    inner_scroll_x,
-                                    s,
-                                )
-                            {
-                                self.push_rounded_rect(
-                                    thumb.start,
-                                    log_bg_y + log_bg_h - 8.0 * s,
-                                    thumb.len,
-                                    4.0 * s,
-                                    2.0 * s,
-                                    [1.0, 1.0, 1.0, 0.22],
-                                );
-                                ui_registry.register_rect(
-                                    crate::ui_system::UiId::LspLogScrollX(server_idx),
+                            let id = crate::ui_system::UiId::LspLogScrollX(server_idx);
+                            let scrollbar = crate::app::lsp_actions::lsp_log_scrollbar(
+                                (
                                     log_bg_x,
                                     log_bg_y + log_bg_h - 14.0 * s,
                                     log_bg_w,
                                     14.0 * s,
+                                ),
+                                log_bg_w,
+                                inner_max_w + 20.0 * s,
+                                inner_scroll_x,
+                                crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
+                            );
+                            let _ = self.draw_scrollbar(
+                                &scrollbar,
+                                s,
+                                1.0,
+                                Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                                    ui: ui_registry,
+                                    id,
                                     mx,
                                     my,
-                                );
-                            }
+                                    blocker: false,
+                                }),
+                            );
                         }
 
                         ui_registry.pop_clip();
@@ -1240,26 +1232,23 @@ impl Renderer {
 
         let max_scroll_y = (total_h - content_h).max(0.0);
         if max_scroll_y > 0.0 {
-            let ratio = (scroll_y / max_scroll_y).clamp(0.0, 1.0);
-            let track_h = content_h - 10.0 * s;
-            let thumb_h = (content_h / total_h * track_h).max(40.0 * s).min(track_h.max(0.0));
-            let thumb_y = content_y + 5.0 * s + ratio * (track_h - thumb_h);
-            self.push_rounded_rect(
-                content_x + content_w - 12.0 * s,
-                thumb_y,
-                10.0 * s,
-                thumb_h,
-                5.0 * s,
-                [1.0, 1.0, 1.0, 0.22],
+            let id = crate::ui_system::UiId::LspScrollY;
+            let scrollbar = crate::app::lsp_actions::lsp_panel_scrollbar(
+                (content_x + content_w - 12.0 * s, content_y, 10.0 * s, content_h),
+                total_h,
+                scroll_y,
             );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::LspScrollY,
-                content_x + content_w - 12.0 * s,
-                content_y,
-                10.0 * s,
-                content_h,
-                mx,
-                my,
+            let _ = self.draw_scrollbar(
+                &scrollbar,
+                s,
+                1.0,
+                Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: ui_registry,
+                    id,
+                    mx,
+                    my,
+                    blocker: false,
+                }),
             );
         }
 

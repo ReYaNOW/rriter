@@ -1,37 +1,22 @@
-pub(crate) fn hover_popup_scrollbar_thumb(
+/// Scrollbar of a hover-style popup `rect` (hover, autocomplete detail, DDL): 12 px lane at
+/// the right edge, track inset 8 px; shared by the renderer and the press/drag handlers.
+pub(crate) fn hover_popup_scrollbar(
     rect: (f32, f32, f32, f32),
     max_scroll: f32,
     current_scroll: f32,
     scale: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
-    let (_, y, _, height) = rect;
-    crate::scroll::scrollbar_thumb(
-        y + 8.0 * scale,
-        (height - 16.0 * scale).max(0.0),
-        height,
-        height + max_scroll.max(0.0),
-        current_scroll,
-        20.0 * scale,
-    )
-}
-
-pub(crate) fn hover_popup_scrollbar_drag_target(
-    rect: (f32, f32, f32, f32),
-    max_scroll: f32,
-    current_scroll: f32,
-    pointer_y: f32,
-    scale: f32,
-    drag_offset: Option<f32>,
-) -> Option<(f32, f32)> {
-    let thumb = hover_popup_scrollbar_thumb(rect, max_scroll, current_scroll, scale)?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_y,
-        rect.1 + 8.0 * scale,
-        (rect.3 - 16.0 * scale).max(0.0),
-        thumb,
-        max_scroll.max(0.0),
-        drag_offset,
-    )
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let (x, y, w, h) = rect;
+    let lane_w = 12.0 * scale;
+    Scrollbar {
+        style: ScrollbarStyle::HOVER_POPUP,
+        axis: ScrollbarAxis::Vertical,
+        lane: (x + w - lane_w, y, lane_w, h),
+        extent: ScrollbarExtent::with_max(h, max_scroll, current_scroll),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -749,29 +734,17 @@ mod scrollbar_tests {
         let rect = (20.0, 40.0, 320.0, 180.0);
         let max_scroll = 420.0;
         let current = 140.0;
-        let thumb = hover_popup_scrollbar_thumb(rect, max_scroll, current, 1.0).unwrap();
+        let geometry = hover_popup_scrollbar(rect, max_scroll, current, 1.0)
+            .geometry(1.0)
+            .unwrap();
+        let thumb = geometry.thumb;
         let pointer_offset = thumb.len * 0.4;
-        let (offset, target) = hover_popup_scrollbar_drag_target(
-            rect,
-            max_scroll,
-            current,
-            thumb.start + pointer_offset,
-            1.0,
-            None,
-        )
-        .unwrap();
+        let (offset, target) = geometry.press_target(thumb.start + pointer_offset).unwrap();
         assert!((offset - pointer_offset).abs() < 0.001);
         assert!((target - current).abs() < 0.001);
+        assert_eq!(geometry.lane, (328.0, 40.0, 12.0, 180.0));
 
-        let (_, moved_target) = hover_popup_scrollbar_drag_target(
-            rect,
-            max_scroll,
-            current,
-            rect.1 + rect.3 * 0.8,
-            1.0,
-            Some(offset),
-        )
-        .unwrap();
+        let moved_target = geometry.drag_target(rect.1 + rect.3 * 0.8, offset).unwrap();
         let mut scroll = crate::scroll::ScrollState::new(7.0);
         scroll.current = current;
         scroll.target = current;

@@ -3,8 +3,8 @@ pub(crate) const SEARCH_ACTIVE_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.6, 0.0, 0.5];
 pub(crate) const SEARCH_HIGHLIGHT_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 0.35];
 
 pub mod core_text;
-mod database_table_tab;
-mod database_query_tab;
+pub(crate) mod database_table_tab;
+pub(crate) mod database_query_tab;
 pub(crate) mod database_table_tab_overlay;
 pub mod api_client_panel;
 pub mod api_client_tab;
@@ -17,6 +17,7 @@ mod ide_panels;
 pub(crate) use ide_panels::intersect_scissor_boxes;
 pub mod lsp_ui;
 pub mod minimap_ui;
+pub(crate) mod scrollbar_widget;
 pub mod search;
 pub mod settings_ui;
 mod settings_tool_rows;

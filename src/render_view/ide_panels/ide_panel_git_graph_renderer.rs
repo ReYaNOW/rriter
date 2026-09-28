@@ -422,31 +422,23 @@ impl Renderer {
             self.gl.disable(glow::SCISSOR_TEST);
         }
 
-        let max_scroll = crate::app::git_panel::git_graph_max_scroll(commits.len(), rows_h, s);
-        if max_scroll > 0.0 {
-            let ratio = (scroll / max_scroll).clamp(0.0, 1.0);
-            let thumb_h = crate::app::git_panel::git_graph_scroll_thumb_h(commits.len(), rows_h, s);
-            let thumb_y = rows_y + 4.0 * s + ratio * (rows_h - 8.0 * s - thumb_h);
-            let track_w = 10.0 * s;
-            let track_x = panel_x + panel_w - track_w - 9.0 * s;
-            ui_registry.register_rect(
-                crate::ui_system::UiId::GitGraphScroll,
-                track_x,
-                rows_y,
-                track_w,
-                rows_h,
-                mx,
-                my,
-            );
-            self.push_rounded_rect(
-                track_x + 2.0 * s,
-                thumb_y,
-                6.0 * s,
-                thumb_h,
-                3.0 * s,
-                [1.0, 1.0, 1.0, 0.22],
-            );
-        }
+        let bar = crate::app::git_panel::git_graph_scrollbar(
+            panel_x,
+            panel_w,
+            rows_y,
+            rows_h,
+            commits.len(),
+            scroll,
+            s,
+        );
+        let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: ui_registry,
+            id: crate::ui_system::UiId::GitGraphScroll,
+            mx,
+            my,
+            blocker: false,
+        };
+        let _ = self.draw_scrollbar(&bar, s, 1.0, Some(hit));
 
         let mouse_in_commit_area =
             mx >= panel_x && mx <= panel_x + panel_w && my >= rows_y && my <= rows_y + rows_h;
@@ -1124,35 +1116,14 @@ impl Renderer {
             );
         }
 
-        if max_scroll > 0.0 {
-            ui_registry.register_rect(
-                crate::ui_system::UiId::GitLogsScroll,
-                track_x,
-                track_y,
-                track_w,
-                track_h,
-                mx,
-                my,
-            );
-            if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_y,
-                track_h,
-                track_h,
-                track_h + max_scroll,
-                scroll,
-                10.0 * s,
-            ) {
-                let bar_w = (3.0 * s).round().max(2.0);
-                self.push_rounded_rect(
-                    track_x + ((track_w - bar_w) / 2.0).round(),
-                    thumb.start,
-                    bar_w,
-                    thumb.len,
-                    (bar_w / 2.0).max(1.0),
-                    [1.0, 1.0, 1.0, 0.22],
-                );
-            }
-        }
+        let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: ui_registry,
+            id: crate::ui_system::UiId::GitLogsScroll,
+            mx,
+            my,
+            blocker: false,
+        };
+        let _ = self.draw_scrollbar(&metrics.scrollbar(scroll), s, 1.0, Some(hit));
     }
 }
 

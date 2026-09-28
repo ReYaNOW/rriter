@@ -178,12 +178,10 @@ impl ProjectSearchState {
         mouse_y: f32,
         scale: f32,
     ) -> bool {
-        let Some((drag_offset, target)) =
-            project_search_scrollbar_drag_target(mouse_y, layout, self, scale, None)
-        else {
-            return false;
-        };
-        crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll, target, drag_offset)
+        let Some(geometry) = project_search_scrollbar(layout, self, scale)
+            .and_then(|bar| bar.geometry(scale))
+        else { return false; };
+        crate::app::mouse::press_scrollbar(&mut self.scroll, Some(geometry), 0.0, mouse_y).is_some()
     }
 
     pub fn drag_scrollbar_to(
@@ -192,20 +190,10 @@ impl ProjectSearchState {
         mouse_y: f32,
         scale: f32,
     ) -> bool {
-        let Some((_, target)) = project_search_scrollbar_drag_target(
-            mouse_y,
-            layout,
-            self,
-            scale,
-            Some(self.scroll.drag_offset),
-        ) else {
-            return false;
-        };
-        if (self.scroll.target - target).abs() < 0.5 {
-            return false;
-        }
-        let drag_offset = self.scroll.drag_offset;
-        crate::app::mouse::apply_scrollbar_drag_target(&mut self.scroll, target, drag_offset)
+        let Some(geometry) = project_search_scrollbar(layout, self, scale)
+            .and_then(|bar| bar.geometry(scale))
+        else { return false; };
+        crate::app::mouse::drag_scrollbar(&mut self.scroll, Some(geometry), 0.0, mouse_y).is_some()
     }
 }
 
@@ -335,11 +323,12 @@ fn visible_preview_row_range(
     start..end
 }
 
-pub fn project_search_scrollbar_thumb(
+pub fn project_search_scrollbar(
     layout: &ProjectSearchLayout,
     state: &ProjectSearchState,
     scale: f32,
-) -> Option<ProjectSearchRect> {
+) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
     if !state.has_run || state.running_generation.is_some() {
         return None;
     }
@@ -348,47 +337,25 @@ pub fn project_search_scrollbar_thumb(
     if total_h <= layout.list.h || layout.list.h <= 0.0 {
         return None;
     }
-    let thumb = crate::scroll::scrollbar_thumb(
-        layout.list.y,
-        layout.list.h,
-        layout.list.h,
-        total_h,
-        state.scroll.current,
-        22.0 * scale,
-    )?;
-    Some(ProjectSearchRect {
-        x: layout.list.x + layout.list.w - 10.0 * scale,
-        y: thumb.start,
-        w: 5.0 * scale,
-        h: thumb.len,
-    })
-}
-
-fn project_search_scrollbar_drag_target(
-    mouse_y: f32,
-    layout: &ProjectSearchLayout,
-    state: &ProjectSearchState,
-    scale: f32,
-    drag_offset: Option<f32>,
-) -> Option<(f32, f32)> {
-    let thumb = project_search_scrollbar_thumb(layout, state, scale)?;
-    let row_h = PROJECT_SEARCH_ROW_H * scale;
-    let total_h = state.flat_rows.len() as f32 * row_h;
-    let max_scroll = (total_h - layout.list.h).max(0.0);
-    if max_scroll <= 0.0 {
-        return None;
-    }
-    crate::scroll::scrollbar_drag_target(
-        mouse_y,
-        layout.list.y,
-        layout.list.h,
-        crate::scroll::ScrollbarThumb {
-            start: thumb.y,
-            len: thumb.h,
+    Some(Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 5.0,
+            edge_gap: Some(3.0),
+            track_pad: 0.0,
+            min_thumb: 22.0,
+            radius: Some(3.0),
+            track_color: None,
+            thumb_color: [0.48, 0.48, 0.56, 0.55],
         },
-        max_scroll,
-        drag_offset,
-    )
+        axis: ScrollbarAxis::Vertical,
+        lane: (
+            layout.list.x + layout.list.w - 14.0 * scale,
+            layout.list.y,
+            12.0 * scale,
+            layout.list.h,
+        ),
+        extent: ScrollbarExtent::new(layout.list.h, total_h, state.scroll.current),
+    })
 }
 
 #[cfg(test)]
@@ -554,11 +521,11 @@ mod tests {
                 h: 240.0,
             },
         };
-        let Some((offset, target)) =
-            project_search_scrollbar_drag_target(100.0, &layout, &state, 1.0, None)
-        else {
+        let Some(geometry) = project_search_scrollbar(&layout, &state, 1.0)
+            .and_then(|bar| bar.geometry(1.0)) else {
             panic!("scrollbar should be visible");
         };
+        let (offset, target) = geometry.press_target(100.0).expect("press target");
         assert!(offset >= 0.0);
         assert!(target >= 0.0);
     }

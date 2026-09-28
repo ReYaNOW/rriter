@@ -873,6 +873,28 @@ pub(crate) fn problems_scroll_content_height(visible_rows: usize, item_h: f32) -
     visible_rows as f32 * item_h
 }
 
+/// Problems list scrollbar shared by `draw_problems_panel` and the press/drag handlers:
+/// 12 px lane at the right edge of the panel `content` rect, below the 40 px tab header.
+pub(crate) fn problems_scrollbar(
+    content: (f32, f32, f32, f32),
+    total_h: f32,
+    scroll: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let (x, y, w, h) = content;
+    let lane_w = 12.0 * scale;
+    let track_h = (h - 40.0 * scale).max(0.0);
+    Scrollbar {
+        style: ScrollbarStyle::PROBLEMS,
+        axis: ScrollbarAxis::Vertical,
+        lane: (x + w - lane_w, y + 40.0 * scale, lane_w, track_h),
+        extent: ScrollbarExtent::new(track_h, total_h, scroll),
+    }
+}
+
 #[inline(always)]
 pub(super) fn fuzzy_match(pattern: &str, target: &str) -> Option<Vec<usize>> {
     let mut p_chars = pattern.chars().peekable();

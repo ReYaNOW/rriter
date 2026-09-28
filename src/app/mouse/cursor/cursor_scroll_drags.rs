@@ -13,22 +13,13 @@ impl App {
     ) -> bool {
         if self.ide_panel.explorer_scroll.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            if let Some(layout) = super::explorer_scrollbar_layout(self, s)
-                && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                    py,
-                    layout.track_y,
-                    layout.track_h,
-                    layout.thumb,
-                    layout.max_scroll,
-                    Some(self.ide_panel.explorer_scroll.drag_offset),
-                )
-            {
-                let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut self.ide_panel.explorer_scroll,
-                    target,
-                    drag_offset,
-                );
-            }
+            let geometry = super::explorer_scrollbar_geometry(self, s);
+            let _ = crate::app::mouse::drag_scrollbar(
+                &mut self.ide_panel.explorer_scroll,
+                geometry,
+                px,
+                py,
+            );
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }
@@ -169,30 +160,28 @@ impl App {
                 .ui_registry
                 .rect_for(crate::ui_system::UiId::ApiMockGuideScrollY)
             {
+                use crate::render_view::scrollbar_widget::{
+                    Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+                };
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let max_scroll = crate::app::api_client::api_mock_guide_max_scroll(rect.3, s);
-                let track_start = rect.1 + 7.0 * s;
-                let track_len = (rect.3 - 14.0 * s).max(0.0);
-                if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                    track_start,
-                    track_len,
-                    rect.3,
-                    rect.3 + max_scroll,
-                    self.ide_panel.api.mock_guide_scroll.current,
-                    28.0 * s,
-                ) && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                    position.y as f32,
-                    track_start,
-                    track_len,
-                    thumb,
-                    max_scroll,
-                    Some(self.ide_panel.api.mock_guide_scroll.drag_offset),
-                ) {
-                    let scroll = &mut self.ide_panel.api.mock_guide_scroll;
-                    crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
-                } else {
-                    self.ide_panel.api.mock_guide_scroll.end_drag();
+                let scroll = &mut self.ide_panel.api.mock_guide_scroll;
+                // Same track as the guide panel bar: the registered lane inset 7 px.
+                let geometry = Scrollbar {
+                    style: ScrollbarStyle {
+                        track_pad: 7.0,
+                        min_thumb: 28.0,
+                        ..ScrollbarStyle::BASE
+                    },
+                    axis: ScrollbarAxis::Vertical,
+                    lane: rect,
+                    extent: ScrollbarExtent::with_max(
+                        rect.3,
+                        crate::app::api_client::api_mock_guide_max_scroll(rect.3, s),
+                        scroll.current,
+                    ),
                 }
+                .geometry(s);
+                let _ = crate::app::mouse::drag_scrollbar(scroll, geometry, px, py);
             }
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -225,13 +214,13 @@ impl App {
                     }),
                     s,
                 );
-                crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_ide_scroll,
-                    position.y as f32,
-                    rect.1,
-                    rect.3,
-                    max_scroll,
-                    40.0 * s,
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, max_scroll, self.settings_ide_scroll.current,
+                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                );
+                let geometry = bar.geometry(s);
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.settings_ide_scroll, geometry, 0.0, position.y as f32,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -249,13 +238,13 @@ impl App {
                     .as_mut()
                     .unwrap()
                     .get_faq_max_scroll(&self.faq_editor, rect.3);
-                crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_scroll,
-                    position.y as f32,
-                    rect.1,
-                    rect.3,
-                    max_scroll,
-                    40.0 * s,
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, max_scroll, self.settings_scroll.current,
+                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                );
+                let geometry = bar.geometry(s);
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.settings_scroll, geometry, 0.0, position.y as f32,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -265,13 +254,14 @@ impl App {
         if self.settings_general_scroll.is_dragging {
             if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsGeneralScrollY) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_general_scroll,
-                    position.y as f32,
-                    rect.1,
-                    rect.3,
-                    self.settings_general_max_scroll,
-                    40.0 * s,
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, self.settings_general_max_scroll,
+                    self.settings_general_scroll.current, 6.0, 40.0,
+                    [0.7, 0.33, 0.54, 1.0],
+                );
+                let geometry = bar.geometry(s);
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.settings_general_scroll, geometry, 0.0, position.y as f32,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();
@@ -281,13 +271,14 @@ impl App {
         if self.settings_database_scroll.is_dragging {
             if let Some(rect) = self.ui_registry.rect_for(crate::ui_system::UiId::SettingsDatabaseScrollY) {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                crate::app::mouse::update_scrollbar_drag(
-                    &mut self.settings_database_scroll,
-                    position.y as f32,
-                    rect.1,
-                    rect.3,
-                    self.settings_database_max_scroll,
-                    40.0 * s,
+                let bar = crate::render_view::settings_ui::settings_scrollbar(
+                    rect, rect.3, self.settings_database_max_scroll,
+                    self.settings_database_scroll.current, 6.0, 40.0,
+                    [0.7, 0.33, 0.54, 1.0],
+                );
+                let geometry = bar.geometry(s);
+                crate::app::mouse::drag_scrollbar(
+                    &mut self.settings_database_scroll, geometry, 0.0, position.y as f32,
                 );
             }
             self.window.as_ref().unwrap().request_redraw();

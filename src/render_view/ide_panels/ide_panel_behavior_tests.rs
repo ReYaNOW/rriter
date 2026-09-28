@@ -643,11 +643,12 @@ mod tests {
     fn dialog_scrollbar_thumb_reaches_both_track_ends() {
         let layout = database_connection_dialog_layout(800.0, 500.0, 1.0, 20);
         let track = layout.scrollbar_track.unwrap();
-        let at_start = database_connection_dialog_scrollbar_thumb(&layout, 0.0).unwrap();
-        let at_end =
-            database_connection_dialog_scrollbar_thumb(&layout, layout.max_scroll).unwrap();
-        assert_eq!(at_start.start, track.y);
-        assert!((at_end.start + at_end.len - (track.y + track.h)).abs() <= 0.5);
+        let at_start = database_connection_dialog_scrollbar(&layout, 0.0)
+            .and_then(|bar| bar.geometry(layout.modal.scale)).unwrap();
+        let at_end = database_connection_dialog_scrollbar(&layout, layout.max_scroll)
+            .and_then(|bar| bar.geometry(layout.modal.scale)).unwrap();
+        assert_eq!(at_start.thumb.start, track.y);
+        assert!((at_end.thumb.start + at_end.thumb.len - (track.y + track.h)).abs() <= 0.5);
     }
 
     #[test]

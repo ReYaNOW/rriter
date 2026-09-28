@@ -235,21 +235,30 @@ pub(crate) fn settings_ide_max_scroll(
         .max(0.0)
 }
 
-pub(crate) fn settings_scrollbar_thumb(
-    track_y: f32,
-    track_h: f32,
+pub(crate) fn settings_scrollbar(
+    lane: (f32, f32, f32, f32),
+    viewport: f32,
     max_scroll: f32,
     current: f32,
-    scale: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
-    crate::scroll::scrollbar_thumb(
-        track_y,
-        track_h,
-        track_h,
-        track_h + max_scroll,
-        current,
-        40.0 * scale,
-    )
+    thumb_thickness: f32,
+    min_thumb: f32,
+    thumb_color: [f32; 4],
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness,
+            edge_gap: Some(5.0),
+            track_pad: 0.0,
+            min_thumb,
+            radius: Some(3.0),
+            track_color: None,
+            thumb_color,
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::with_max(viewport, max_scroll, current),
+    }
 }
 
 pub(crate) fn scroll_settings_content(
@@ -962,32 +971,20 @@ impl Renderer {
                 s,
             );
             let max_scroll = (ide_total_h - ide_content_area_h).max(0.0);
-            if let Some(thumb) = settings_scrollbar_thumb(
-                iy + SETTINGS_IDE_SCROLL_TOP * s,
-                ide_content_area_h,
-                max_scroll,
-                ide_scroll_y,
-                s,
-            ) {
+            if max_scroll > 0.0 {
                 let track_h = ide_content_area_h;
                 let sb_x = (ix + iw - 14.0 * s).round();
-                self.push_rounded_rect(
-                    sb_x,
-                    thumb.start.round(),
-                    6.0 * s,
-                    thumb.len,
-                    3.0 * s,
-                    [0.7, 0.33, 0.54, 1.0],
+                let bar = settings_scrollbar(
+                    (sb_x - 5.0 * s, iy + SETTINGS_IDE_SCROLL_TOP * s, 16.0 * s, track_h),
+                    track_h, max_scroll, ide_scroll_y, 6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
                 );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::SettingsIdeScrollY,
-                    sb_x - 5.0 * s,
-                    iy + SETTINGS_IDE_SCROLL_TOP * s,
-                    16.0 * s,
-                    track_h,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
-                );
+                self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: &mut *ui_registry,
+                    id: crate::ui_system::UiId::SettingsIdeScrollY,
+                    mx: self.last_mouse_x,
+                    my: self.last_mouse_y,
+                    blocker: false,
+                }));
             }
         } else if active_tab == 1 {
             self.draw_settings_general_tab(
@@ -1131,29 +1128,20 @@ impl Renderer {
 
             // Same walk as `get_faq_max_scroll`, without a second pass.
             let max_scroll = ((units + SETTINGS_FAQ_BOTTOM_PAD) * s - text_area_h.max(0.0)).max(0.0);
-            if let Some(thumb) = settings_scrollbar_thumb(
-                text_area_y, text_area_h, max_scroll, scroll_y, s,
-            ) {
+            if max_scroll > 0.0 {
                 let track_h = text_area_h;
                 let scroll_x = (start_x + cw + 5.0 * s).round();
-
-                self.push_rounded_rect(
-                    scroll_x,
-                    thumb.start.round(),
-                    6.0 * s,
-                    thumb.len,
-                    3.0 * s,
-                    [0.7, 0.33, 0.54, 1.0],
+                let bar = settings_scrollbar(
+                    (scroll_x - 5.0 * s, text_area_y, 16.0 * s, track_h),
+                    track_h, max_scroll, scroll_y, 6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
                 );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::SettingsFaqScrollY,
-                    scroll_x - 5.0 * s,
-                    text_area_y,
-                    16.0 * s,
-                    track_h,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
-                );
+                self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: &mut *ui_registry,
+                    id: crate::ui_system::UiId::SettingsFaqScrollY,
+                    mx: self.last_mouse_x,
+                    my: self.last_mouse_y,
+                    blocker: false,
+                }));
             }
         } else if active_tab == 5 {
             // Ten fixed-height rows overflow short windows (1280x720 at 4/3): clip them
@@ -1173,31 +1161,20 @@ impl Renderer {
                 s,
             ) - (iy + ih))
                 .max(0.0);
-            if let Some(thumb) = settings_scrollbar_thumb(
-                settings_content_clip.y,
-                settings_content_clip.h,
-                *database_max_scroll,
-                database_scroll_y,
-                s,
-            ) {
+            if *database_max_scroll > 0.0 {
                 let sb_x = (ix + iw - 14.0 * s).round();
-                self.push_rounded_rect(
-                    sb_x,
-                    thumb.start.round(),
-                    6.0 * s,
-                    thumb.len,
-                    3.0 * s,
-                    [0.7, 0.33, 0.54, 1.0],
+                let bar = settings_scrollbar(
+                    (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
+                    settings_content_clip.h, *database_max_scroll, database_scroll_y,
+                    6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
                 );
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::SettingsDatabaseScrollY,
-                    sb_x - 5.0 * s,
-                    settings_content_clip.y,
-                    16.0 * s,
-                    settings_content_clip.h,
-                    self.last_mouse_x,
-                    self.last_mouse_y,
-                );
+                self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: &mut *ui_registry,
+                    id: crate::ui_system::UiId::SettingsDatabaseScrollY,
+                    mx: self.last_mouse_x,
+                    my: self.last_mouse_y,
+                    blocker: false,
+                }));
             }
             self.end_settings_content_clip(ui_registry);
         }
@@ -1364,31 +1341,18 @@ impl Renderer {
         let content_h = (tool_installer.logs().len().max(1) as f32 * line_h
             + (12.0 * s).round())
         .round();
-        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-            log_y + 6.0 * s,
-            log_h - 12.0 * s,
-            log_h,
-            content_h,
-            scroll,
-            28.0 * s,
-        ) {
-            self.push_rounded_rect(
-                (log_x + log_w - 7.0 * s).round(),
-                thumb.start.round(),
-                4.0 * s,
-                thumb.len,
-                2.0 * s,
-                [0.56, 0.38, 0.70, 0.95],
+        if content_h > log_h {
+            let bar = settings_scrollbar(
+                (log_x + log_w - 16.0 * s, log_y + 6.0 * s, 16.0 * s, log_h - 12.0 * s),
+                log_h, content_h - log_h, scroll, 4.0, 28.0, [0.56, 0.38, 0.70, 0.95],
             );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::SettingsToolInstallLogScrollY,
-                log_x + log_w - 16.0 * s,
-                log_y,
-                16.0 * s,
-                log_h,
-                self.last_mouse_x,
-                self.last_mouse_y,
-            );
+            self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: &mut *ui_registry,
+                id: crate::ui_system::UiId::SettingsToolInstallLogScrollY,
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: false,
+            }));
         }
 
         let button_y = (modal_y + modal_h - 43.0 * s).round();
@@ -1464,7 +1428,7 @@ impl Renderer {
 mod settings_ui_tests {
     use super::{
         clamped_settings_tab, settings_ide_content_height, settings_ide_max_scroll,
-        settings_faq_viewport_height, settings_modal_layout, settings_scrollbar_thumb,
+        settings_faq_viewport_height, settings_modal_layout, settings_scrollbar,
         settings_sidebar_tab_metrics,
     };
 
@@ -1511,11 +1475,14 @@ mod settings_ui_tests {
     }
 
     #[test]
-    fn settings_scrollbar_thumb_matches_shared_scroll_geometry() {
-        let thumb = settings_scrollbar_thumb(50.0, 300.0, 600.0, 300.0, 1.0)
-            .expect("scrollbar should be visible");
-        assert_eq!(thumb.start, 150.0);
-        assert_eq!(thumb.len, 100.0);
+    fn settings_scrollbar_uses_shared_widget_geometry() {
+        let bar = settings_scrollbar(
+            (0.0, 50.0, 16.0, 300.0), 300.0, 600.0, 300.0,
+            6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+        );
+        let geometry = bar.geometry(1.0).expect("scrollbar should be visible");
+        assert_eq!(geometry.thumb.start, 150.0);
+        assert_eq!(geometry.thumb.len, 100.0);
     }
 
     #[test]
@@ -1523,30 +1490,29 @@ mod settings_ui_tests {
         let mut scroll = crate::scroll::ScrollState::new(7.0);
         scroll.current = 300.0;
         scroll.target = 300.0;
-        let thumb = settings_scrollbar_thumb(50.0, 300.0, 600.0, scroll.current, 1.0)
-            .expect("scrollbar should be visible");
-        let pointer = thumb.start + thumb.len * 0.25;
+        let bar = settings_scrollbar(
+            (0.0, 50.0, 16.0, 300.0), 300.0, 600.0, scroll.current,
+            6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+        );
+        let geometry = bar.geometry(1.0).expect("scrollbar should be visible");
+        let pointer = geometry.thumb.start + geometry.thumb.len * 0.25;
 
-        assert!(crate::app::mouse::begin_scrollbar_drag(
+        assert!(crate::app::mouse::press_scrollbar(
             &mut scroll,
+            Some(geometry),
+            0.0,
             pointer,
-            50.0,
-            300.0,
-            600.0,
-            40.0,
-        ));
+        ).is_some());
         assert_eq!(scroll.current, 300.0);
         let drag_offset = scroll.drag_offset;
         let first_target = scroll.target;
 
-        assert!(crate::app::mouse::update_scrollbar_drag(
+        assert!(crate::app::mouse::drag_scrollbar(
             &mut scroll,
+            Some(geometry),
+            0.0,
             pointer + 80.0,
-            50.0,
-            300.0,
-            600.0,
-            40.0,
-        ));
+        ).is_some());
         assert_eq!(scroll.current, 300.0);
         assert_ne!(scroll.target, first_target);
         assert_eq!(scroll.drag_offset, drag_offset);

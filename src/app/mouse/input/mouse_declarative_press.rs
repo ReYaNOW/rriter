@@ -74,47 +74,20 @@ impl App {
                     self,
                     self.renderer.as_ref().unwrap().scale_factor,
                 )
-                && crate::ui_system::point_in_rect(
-                    mx,
-                    my,
-                    (
-                        layout.content_x,
-                        layout.content_y,
-                        layout.content_w,
-                        layout.content_h,
-                    ),
-                )
+                && crate::ui_system::point_in_rect(mx, my, layout.content)
             {
                 let s = self.renderer.as_ref().unwrap().scale_factor;
-                let scroll_x = layout.content_x + layout.content_w - 12.0 * s;
-                if mx >= scroll_x
-                    && let Some(thumb) = crate::scroll::scrollbar_thumb(
-                        layout.list_y,
-                        layout.track_h,
-                        layout.track_h,
-                        layout.total_h,
-                        self.ide_panel.problems_scroll.current,
-                        20.0 * s,
-                    )
+                if let Some(geometry) = layout.bar.geometry(s)
+                    && mx >= geometry.lane.0
                 {
-                    if my < layout.list_y || my > layout.list_y + layout.track_h {
+                    if !geometry.lane_contains(mx, my) {
                         return true;
                     }
-                    let max_scroll = (layout.total_h - layout.track_h).max(0.0);
-                    let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                        my,
-                        layout.list_y,
-                        layout.track_h,
-                        thumb,
-                        max_scroll,
-                        None,
-                    ) else {
-                        return true;
-                    };
-                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                    let _ = crate::app::mouse::press_scrollbar(
                         &mut self.ide_panel.problems_scroll,
-                        target,
-                        drag_offset,
+                        Some(geometry),
+                        mx,
+                        my,
                     );
                     self.window.as_ref().unwrap().request_redraw();
                     return true;

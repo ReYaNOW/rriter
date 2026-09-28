@@ -1034,25 +1034,22 @@ pub(crate) fn api_text_scrollbar_x_drag_target(
     scale: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
-    if max_scroll <= 0.0 || rect.2 <= 0.0 {
-        return None;
-    }
-    let thumb = crate::scroll::scrollbar_thumb(
-        rect.0,
+    let scrollbar = api_text_scrollbar(
+        rect,
         rect.2,
-        rect.2,
-        rect.2 + max_scroll,
-        current,
-        22.0 * scale,
-    )?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_x,
-        rect.0,
-        rect.2,
-        thumb,
         max_scroll,
-        drag_offset,
-    )
+        current,
+        scale,
+        crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
+    );
+    let geometry = scrollbar.geometry(scale)?;
+    let pointer = if let Some(offset) = drag_offset {
+        geometry.drag_target(pointer_x, offset)?
+    } else {
+        let (offset, target) = geometry.press_target(pointer_x)?;
+        return Some((offset, target));
+    };
+    Some((drag_offset.unwrap_or(geometry.thumb.len * 0.5), pointer))
 }
 
 pub(crate) fn api_text_scrollbar_y_drag_target(
@@ -1063,23 +1060,72 @@ pub(crate) fn api_text_scrollbar_y_drag_target(
     scale: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
-    if max_scroll <= 0.0 || rect.3 <= 0.0 {
-        return None;
-    }
-    let thumb = crate::scroll::scrollbar_thumb(
-        rect.1,
+    let scrollbar = api_text_scrollbar(
+        rect,
         rect.3,
-        rect.3,
-        rect.3 + max_scroll,
-        current,
-        22.0 * scale,
-    )?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_y,
-        rect.1,
-        rect.3,
-        thumb,
         max_scroll,
-        drag_offset,
-    )
+        current,
+        scale,
+        crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+    );
+    let geometry = scrollbar.geometry(scale)?;
+    let target = if let Some(offset) = drag_offset {
+        geometry.drag_target(pointer_y, offset)?
+    } else {
+        let (offset, target) = geometry.press_target(pointer_y)?;
+        return Some((offset, target));
+    };
+    Some((drag_offset.unwrap_or(geometry.thumb.len * 0.5), target))
+}
+
+pub(crate) fn api_text_scrollbar(
+    rect: (f32, f32, f32, f32),
+    viewport: f32,
+    max_scroll: f32,
+    current: f32,
+    scale: f32,
+    axis: crate::render_view::scrollbar_widget::ScrollbarAxis,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarExtent, ScrollbarStyle,
+    };
+    let horizontal_scale = if scale.is_finite() && scale > 0.0 {
+        scale
+    } else {
+        1.0
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: match axis {
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical => 4.0,
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal => {
+                    3.0 / horizontal_scale
+                }
+            },
+            edge_gap: Some(match axis {
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical => 4.0,
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal => {
+                    5.0 / horizontal_scale
+                }
+            }),
+            min_thumb: match axis {
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical => 22.0,
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal => {
+                    28.0 / horizontal_scale
+                }
+            },
+            thumb_color: match axis {
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical => {
+                    [0.70, 0.72, 0.80, 0.88]
+                }
+                crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal => {
+                    [0.64, 0.66, 0.72, 0.70]
+                }
+            },
+            ..ScrollbarStyle::BASE
+        },
+        axis,
+        lane: rect,
+        extent: ScrollbarExtent::with_max(viewport, max_scroll, current),
+    }
 }

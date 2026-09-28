@@ -1432,36 +1432,24 @@ impl Renderer {
 
         let scrollbar_alpha = pop.scrollbar_alpha;
         if max_scroll > 0.0 && scrollbar_alpha > 0.0 {
-            let Some(thumb) = crate::app::mouse::hover_popup_scrollbar_thumb(
+            let bar = crate::app::mouse::hover_popup_scrollbar(
                 (bx, by, box_w, box_h),
                 max_scroll,
                 scroll_y,
                 s,
-            ) else {
-                return (bx, by, box_w, box_h, max_scroll);
-            };
+            );
             let thumb_alpha = if fixed_visible_size { 0.34 } else { 0.2 };
             let scrollbar_clipped = clip_rect.is_some();
             if scrollbar_clipped { self.flush(); apply_scissor(&self.gl, self.height, bx, by, box_w, box_h); }
 
-            self.push_rounded_rect(
-                bx + box_w - 8.0 * s,
-                thumb.start.round(),
-                4.0 * s,
-                thumb.len,
-                2.0 * s,
-                [1.0, 1.0, 1.0, thumb_alpha * scrollbar_alpha * opacity],
-            );
-
-            ui_registry.register_rect(
-                crate::ui_system::UiId::HoverPopupScroll,
-                bx + box_w - 12.0 * s,
-                by,
-                12.0 * s,
-                box_h,
+            let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::HoverPopupScroll,
                 mx,
                 my,
-            );
+                blocker: false,
+            };
+            let _ = self.draw_scrollbar(&bar, s, thumb_alpha * scrollbar_alpha * opacity, Some(hit));
             if ui_registry.hovered() == Some(crate::ui_system::UiId::HoverPopupScroll) {
                 ui_registry.reset_cursor_state();
             }

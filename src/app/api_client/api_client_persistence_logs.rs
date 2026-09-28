@@ -160,18 +160,37 @@ pub(crate) fn api_output_schema_menu_scrollbar_drag_target(
     scale: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
+    let geometry = api_output_schema_menu_scrollbar(track_rect, example_count, current, scale)
+        .geometry(scale)?;
+    if let Some(offset) = drag_offset {
+        Some((offset, geometry.drag_target(pointer_y, offset)?))
+    } else {
+        geometry.press_target(pointer_y)
+    }
+}
+
+pub(crate) fn api_output_schema_menu_scrollbar(
+    lane: (f32, f32, f32, f32),
+    example_count: usize,
+    current: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
     let (visible_h, max_scroll) = api_output_schema_menu_scroll_metrics(example_count, scale);
-    let thumb = crate::scroll::scrollbar_thumb(
-        track_rect.1,
-        track_rect.3,
-        visible_h,
-        visible_h + max_scroll,
-        current,
-        22.0 * scale,
-    )?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_y, track_rect.1, track_rect.3, thumb, max_scroll, drag_offset,
-    )
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(4.0),
+            min_thumb: 22.0,
+            thumb_color: [0.70, 0.72, 0.80, 0.88],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::new(visible_h, visible_h + max_scroll, current),
+    }
 }
 
 pub(crate) fn api_python_version_list_max_scroll(
@@ -188,38 +207,6 @@ pub(crate) fn api_python_version_row_height(scale: f32) -> f32 {
     28.0 * scale
 }
 
-pub(crate) fn api_python_scrollbar_metrics(
-    visible_h: f32,
-    max_scroll: f32,
-    scale: f32,
-) -> Option<(f32, f32)> {
-    if max_scroll <= 0.0 {
-        return None;
-    }
-    let track_h = (visible_h - 12.0 * scale).max(0.0);
-    if track_h <= 0.0 {
-        return None;
-    }
-    let desired_thumb_h = track_h * (track_h / (track_h + max_scroll));
-    let min_thumb_h = (18.0 * scale).min(track_h);
-    let thumb_h = desired_thumb_h.clamp(min_thumb_h, track_h);
-    Some((track_h, thumb_h))
-}
-
-pub(crate) fn api_python_scrollbar_thumb(
-    rect: (f32, f32, f32, f32),
-    current: f32,
-    max_scroll: f32,
-    scale: f32,
-) -> Option<(f32, f32, crate::scroll::ScrollbarThumb)> {
-    let (track_h, _) = api_python_scrollbar_metrics(rect.3, max_scroll, scale)?;
-    let track_y = rect.1 + 6.0 * scale;
-    let thumb = crate::scroll::scrollbar_thumb(
-        track_y, track_h, track_h, track_h + max_scroll, current, 18.0 * scale,
-    )?;
-    Some((track_y, track_h, thumb))
-}
-
 pub(crate) fn api_python_scrollbar_drag_target(
     rect: (f32, f32, f32, f32),
     current: f32,
@@ -228,10 +215,42 @@ pub(crate) fn api_python_scrollbar_drag_target(
     scale: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
-    let (track_y, track_h, thumb) = api_python_scrollbar_thumb(rect, current, max_scroll, scale)?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_y, track_y, track_h, thumb, max_scroll, drag_offset,
-    )
+    let geometry = api_python_scrollbar(rect, current, max_scroll, scale).geometry(scale)?;
+    if let Some(offset) = drag_offset {
+        Some((offset, geometry.drag_target(pointer_y, offset)?))
+    } else {
+        geometry.press_target(pointer_y)
+    }
+}
+
+pub(crate) fn api_python_scrollbar(
+    rect: (f32, f32, f32, f32),
+    current: f32,
+    max_scroll: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let track_h = (rect.3 - 12.0 * scale).max(0.0);
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(4.0),
+            track_pad: 0.0,
+            min_thumb: 18.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.36],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane: (
+            rect.0 + rect.2 - 12.0 * scale,
+            rect.1 + 6.0 * scale,
+            12.0 * scale,
+            track_h,
+        ),
+        extent: ScrollbarExtent::with_max(track_h, max_scroll, current),
+    }
 }
 
 pub(crate) fn api_python_install_log_visible(api: &ApiClientState) -> bool {
@@ -323,23 +342,6 @@ pub(crate) fn api_mock_server_log_max_scroll(line_count: usize, visible_h: f32, 
     (line_count as f32 * line_h + 12.0 * s - visible_h).max(0.0)
 }
 
-pub(crate) fn api_mock_server_log_scrollbar_thumb(
-    rect: (f32, f32, f32, f32),
-    line_count: usize,
-    current: f32,
-    scale: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
-    let content_h = line_count as f32 * 20.0 * scale + 12.0 * scale;
-    crate::scroll::scrollbar_thumb(
-        rect.1 + 7.0 * scale,
-        (rect.3 - 14.0 * scale).max(0.0),
-        rect.3,
-        content_h,
-        current,
-        24.0 * scale,
-    )
-}
-
 pub(crate) fn api_mock_server_log_scrollbar_drag_target(
     rect: (f32, f32, f32, f32),
     line_count: usize,
@@ -348,25 +350,93 @@ pub(crate) fn api_mock_server_log_scrollbar_drag_target(
     scale: f32,
     drag_offset: Option<f32>,
 ) -> Option<(f32, f32)> {
-    let max_scroll = api_mock_server_log_max_scroll(line_count, rect.3, scale);
-    let thumb = api_mock_server_log_scrollbar_thumb(
-        rect,
-        line_count,
-        current,
-        scale,
-    )?;
-    crate::scroll::scrollbar_drag_target(
-        pointer_y,
-        rect.1 + 7.0 * scale,
-        (rect.3 - 14.0 * scale).max(0.0),
-        thumb,
-        max_scroll,
-        drag_offset,
-    )
+    let geometry = api_mock_server_log_scrollbar(rect, line_count, current, scale).geometry(scale)?;
+    if let Some(offset) = drag_offset {
+        Some((offset, geometry.drag_target(pointer_y, offset)?))
+    } else {
+        geometry.press_target(pointer_y)
+    }
+}
+
+pub(crate) fn api_mock_server_log_scrollbar(
+    rect: (f32, f32, f32, f32),
+    line_count: usize,
+    current: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let content_h = line_count as f32 * 20.0 * scale + 12.0 * scale;
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(4.0),
+            track_pad: 7.0,
+            min_thumb: 24.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.24],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane: (
+            rect.0 + rect.2 - 14.0 * scale,
+            rect.1,
+            14.0 * scale,
+            rect.3,
+        ),
+        extent: ScrollbarExtent::new(rect.3, content_h, current),
+    }
 }
 
 pub(crate) fn api_mock_guide_max_scroll(visible_h: f32, s: f32) -> f32 {
     (740.0 * s - visible_h).max(0.0)
+}
+
+pub(crate) fn api_mock_guide_scrollbar(
+    lane: (f32, f32, f32, f32),
+    current: f32,
+    scale: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let viewport = lane.3;
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(6.0),
+            track_pad: 7.0,
+            min_thumb: 28.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.28],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::with_max(viewport, api_mock_guide_max_scroll(viewport, scale), current),
+    }
+}
+
+pub(crate) fn api_mock_combined_editor_scrollbar(
+    lane: (f32, f32, f32, f32),
+    viewport_h: f32,
+    content_h: f32,
+    current: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 3.0,
+            min_thumb: 22.0,
+            track_color: Some([0.52, 0.54, 0.60, 0.22]),
+            thumb_color: [0.64, 0.66, 0.72, 0.70],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::new(viewport_h, content_h, current),
+    }
 }
 
 fn api_mock_server_event_text(event: &ApiMockServerEvent) -> String {

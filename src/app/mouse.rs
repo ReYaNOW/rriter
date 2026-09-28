@@ -118,37 +118,40 @@ pub(crate) fn app_panel_scroll_rect(
     (cx, cy, cw, ch, window_h)
 }
 
-pub(crate) fn begin_scrollbar_drag(
+/// Press on a scrollbar lane at pointer `(x, y)`: grabs the thumb (or centres it under the
+/// pointer on a track click) and starts the drag. Returns the new target offset; `None`
+/// ends any drag (no visible bar or invalid pointer).
+pub(crate) fn press_scrollbar(
     scroll: &mut crate::scroll::ScrollState,
-    pointer: f32,
-    track_start: f32,
-    track_len: f32,
-    max_scroll: f32,
-    min_thumb_len: f32,
-) -> bool {
-    let Some(thumb) = crate::scroll::scrollbar_thumb(
-        track_start,
-        track_len,
-        track_len,
-        track_len + max_scroll,
-        scroll.current,
-        min_thumb_len,
-    ) else {
+    geometry: Option<crate::render_view::scrollbar_widget::ScrollbarGeometry>,
+    x: f32,
+    y: f32,
+) -> Option<f32> {
+    let pressed = geometry.and_then(|g| g.press_target(g.pointer(x, y)));
+    let Some((grab_offset, target)) = pressed else {
         scroll.end_drag();
-        return false;
+        return None;
     };
-    let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-        pointer,
-        track_start,
-        track_len,
-        thumb,
-        max_scroll,
-        None,
-    ) else {
+    apply_scrollbar_drag_target(scroll, target, grab_offset).then_some(target)
+}
+
+/// Drag update for a bar started by `press_scrollbar`: keeps the grab offset. Returns the new
+/// target offset; `None` when not dragging, or ends the drag when the bar disappeared.
+pub(crate) fn drag_scrollbar(
+    scroll: &mut crate::scroll::ScrollState,
+    geometry: Option<crate::render_view::scrollbar_widget::ScrollbarGeometry>,
+    x: f32,
+    y: f32,
+) -> Option<f32> {
+    if !scroll.is_dragging {
+        return None;
+    }
+    let grab_offset = scroll.drag_offset;
+    let Some(target) = geometry.and_then(|g| g.drag_target(g.pointer(x, y), grab_offset)) else {
         scroll.end_drag();
-        return false;
+        return None;
     };
-    apply_scrollbar_drag_target(scroll, target, drag_offset)
+    apply_scrollbar_drag_target(scroll, target, grab_offset).then_some(target)
 }
 
 #[inline(always)]
@@ -168,53 +171,16 @@ pub(crate) fn apply_scrollbar_drag_target(
     true
 }
 
-pub(crate) fn update_scrollbar_drag(
-    scroll: &mut crate::scroll::ScrollState,
-    pointer: f32,
-    track_start: f32,
-    track_len: f32,
-    max_scroll: f32,
-    min_thumb_len: f32,
-) -> bool {
-    if !scroll.is_dragging {
-        return false;
-    }
-    let Some(thumb) = crate::scroll::scrollbar_thumb(
-        track_start,
-        track_len,
-        track_len,
-        track_len + max_scroll,
-        scroll.current,
-        min_thumb_len,
-    ) else {
-        scroll.end_drag();
-        return false;
-    };
-    let drag_offset = scroll.drag_offset;
-    let Some((_, target)) = crate::scroll::scrollbar_drag_target(
-        pointer,
-        track_start,
-        track_len,
-        thumb,
-        max_scroll,
-        Some(drag_offset),
-    ) else {
-        scroll.end_drag();
-        return false;
-    };
-    apply_scrollbar_drag_target(scroll, target, drag_offset)
-}
-
-fn explorer_scrollbar_layout(
+fn explorer_scrollbar_geometry(
     app: &App,
     scale: f32,
-) -> Option<crate::app::file_tree::FileTreeScrollbarLayout> {
+) -> Option<crate::render_view::scrollbar_widget::ScrollbarGeometry> {
     if !app.ide_panel.is_open(crate::app::PanelId::Explorer) {
         return None;
     }
     let (panel_x, panel_y, panel_w, panel_h, _) =
         app_panel_scroll_rect(app, crate::app::PanelId::Explorer, scale);
-    crate::app::file_tree::file_tree_scrollbar_layout(
+    crate::app::file_tree::file_tree_scrollbar(
         panel_x,
         panel_y,
         panel_w,
@@ -222,18 +188,14 @@ fn explorer_scrollbar_layout(
         scale,
         app.ide_panel.file_tree_nodes.len(),
         app.ide_panel.explorer_scroll.current,
-    )
+    )?
+    .geometry(scale)
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ProblemsScrollbarLayout {
-    content_x: f32,
-    content_y: f32,
-    content_w: f32,
-    content_h: f32,
-    list_y: f32,
-    track_h: f32,
-    total_h: f32,
+    content: (f32, f32, f32, f32),
+    bar: crate::render_view::scrollbar_widget::Scrollbar,
 }
 
 fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarLayout> {
@@ -242,20 +204,18 @@ fn problems_scrollbar_layout(app: &App, scale: f32) -> Option<ProblemsScrollbarL
     }
     let (content_x, content_y, content_w, content_h, _) =
         app_panel_scroll_rect(app, crate::app::PanelId::Problems, scale);
-    let list_y = content_y + 40.0 * scale;
-    let track_h = (content_h - 40.0 * scale).max(0.0);
     let total_h = crate::app::problems_scroll_content_height(
         app.ide_panel.visible_problem_row_count(app.lsp.as_ref()),
         24.0 * scale,
     );
     Some(ProblemsScrollbarLayout {
-        content_x,
-        content_y,
-        content_w,
-        content_h,
-        list_y,
-        track_h,
-        total_h,
+        content: (content_x, content_y, content_w, content_h),
+        bar: crate::app::problems_scrollbar(
+            (content_x, content_y, content_w, content_h),
+            total_h,
+            app.ide_panel.problems_scroll.current,
+            scale,
+        ),
     })
 }
 
@@ -276,9 +236,28 @@ pub(crate) fn git_graph_rows_bounds(app: &App, scale: f32) -> Option<(f32, f32)>
     Some((rows_y, (graph_h - 34.0 * scale).max(0.0)))
 }
 
-fn active_terminal_scrollbar_layout(
+/// Git graph scrollbar as drawn by `draw_git_graph_panel`.
+fn git_graph_scrollbar_geometry(
     app: &App,
-) -> Option<crate::render_view::terminal_ui::TerminalScrollbarLayout> {
+    scale: f32,
+) -> Option<crate::render_view::scrollbar_widget::ScrollbarGeometry> {
+    let (rows_y, rows_h) = git_graph_rows_bounds(app, scale)?;
+    let (panel_x, _, panel_w, _, _) = app_panel_scroll_rect(app, crate::app::PanelId::Git, scale);
+    crate::app::git_panel::git_graph_scrollbar(
+        panel_x,
+        panel_w,
+        rows_y,
+        rows_h,
+        app.ide_panel.git.graph_snapshot.len(),
+        app.ide_panel.git.graph_scroll.current,
+        scale,
+    )
+    .geometry(scale)
+}
+
+fn active_terminal_scrollbar_geometry(
+    app: &App,
+) -> Option<crate::render_view::scrollbar_widget::ScrollbarGeometry> {
     if !app.ide_panel.is_open(crate::app::PanelId::Terminal) {
         return None;
     }
@@ -297,7 +276,7 @@ fn active_terminal_scrollbar_layout(
     let (term_y, term_h) =
         crate::render_view::terminal_ui::terminal_body_rect(content_y, content_h, scale);
     let char_h = renderer.line_height * crate::render_view::terminal_ui::TERMINAL_TEXT_SCALE;
-    crate::render_view::terminal_ui::terminal_scrollbar_layout(
+    crate::render_view::terminal_ui::terminal_scrollbar(
         panel_x,
         panel_w,
         term_y,
@@ -307,6 +286,7 @@ fn active_terminal_scrollbar_layout(
         total_lines,
         terminal.scroll_y.current,
     )
+    .geometry(scale)
 }
 
 mod cursor;
@@ -319,6 +299,7 @@ mod wheel;
 
 #[cfg(test)]
 pub(crate) use input::stop_click_scroll_anims;
+pub(crate) use input::autocomplete_scrollbar;
 
 #[cfg(test)]
 pub(crate) use hover_mouse_logic::embedded_editor_hover_content_y_at_point;
@@ -344,16 +325,13 @@ pub(crate) use hover_mouse_logic::{
 pub use hover_state_core::{
     HoverLayoutCache, HoverPopup, HoverState, HoverVisualLine, HoveredDiagnostic,
 };
-pub(crate) use hover_state_core::{hover_popup_scrollbar_drag_target, hover_popup_scrollbar_thumb};
+pub(crate) use hover_state_core::hover_popup_scrollbar;
 #[cfg(test)]
 pub use hover_state_core::{hover_source_line_y_band, is_in_hover_popup_or_bridge};
 
 #[cfg(test)]
 mod panel_geometry_tests {
-    use super::{
-        apply_scrollbar_drag_target, begin_scrollbar_drag, ide_root_resize_cursor,
-        ide_root_resize_hover_enabled, panel_scroll_rect, update_scrollbar_drag,
-    };
+    use super::{apply_scrollbar_drag_target, ide_root_resize_cursor, ide_root_resize_hover_enabled, panel_scroll_rect};
 
     #[test]
     fn root_resize_hover_gate_respects_mode_and_blocking_ui() {
@@ -401,102 +379,6 @@ mod panel_geometry_tests {
     }
 
     #[test]
-    fn begin_scrollbar_drag_preserves_current_inside_thumb() {
-        let mut scroll = crate::scroll::ScrollState::new(15.0);
-        scroll.jump_to(100.0);
-        assert!(begin_scrollbar_drag(
-            &mut scroll,
-            75.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-        assert_eq!(scroll.current, 100.0);
-        assert_eq!(scroll.target, 100.0);
-        assert_eq!(scroll.drag_offset, 35.0);
-        assert!(scroll.is_dragging);
-        assert_eq!(scroll.anim_speed, 15.0);
-    }
-
-    #[test]
-    fn track_click_sets_target_without_teleporting_current() {
-        let mut scroll = crate::scroll::ScrollState::new(7.0);
-        scroll.jump_to(100.0);
-
-        assert!(begin_scrollbar_drag(
-            &mut scroll,
-            180.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-
-        assert_eq!(scroll.current, 100.0);
-        assert_eq!(scroll.target, 300.0);
-        assert_eq!(scroll.drag_offset, 40.0);
-        assert_eq!(scroll.anim_speed, 15.0);
-    }
-
-    #[test]
-    fn update_scrollbar_drag_preserves_pointer_offset_and_only_moves_target() {
-        let mut scroll = crate::scroll::ScrollState::new(15.0);
-        scroll.jump_to(100.0);
-        assert!(begin_scrollbar_drag(
-            &mut scroll,
-            75.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-        let offset = scroll.drag_offset;
-
-        assert!(update_scrollbar_drag(
-            &mut scroll,
-            95.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-        assert_eq!(scroll.drag_offset, offset);
-        assert!(scroll.is_dragging);
-        assert_eq!(scroll.current, 100.0);
-        assert_eq!(scroll.target, 150.0);
-        assert_ne!(scroll.current, scroll.target);
-    }
-
-    #[test]
-    fn scroll_update_advances_current_toward_drag_target() {
-        let mut scroll = crate::scroll::ScrollState::new(15.0);
-        scroll.jump_to(100.0);
-        assert!(begin_scrollbar_drag(
-            &mut scroll,
-            75.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-        assert!(update_scrollbar_drag(
-            &mut scroll,
-            95.0,
-            0.0,
-            200.0,
-            300.0,
-            20.0
-        ));
-
-        assert!(scroll.update(0.016));
-        assert!(scroll.current > 100.0);
-        assert!(scroll.current < scroll.target);
-        assert_eq!(scroll.target, 150.0);
-        assert!(scroll.is_dragging);
-    }
-
-    #[test]
     fn end_drag_clears_capture_without_snapping_current() {
         let mut scroll = crate::scroll::ScrollState::new(15.0);
         scroll.current = 112.0;
@@ -508,29 +390,6 @@ mod panel_geometry_tests {
 
         assert_eq!(scroll.current, 112.0);
         assert_eq!(scroll.target, 150.0);
-        assert!(!scroll.is_dragging);
-        assert_eq!(scroll.drag_offset, 0.0);
-    }
-
-    #[test]
-    fn invalid_scrollbar_geometry_clears_drag_without_moving_scroll() {
-        let mut scroll = crate::scroll::ScrollState::new(15.0);
-        scroll.current = 100.0;
-        scroll.target = 180.0;
-        scroll.is_dragging = true;
-        scroll.drag_offset = 9.0;
-
-        assert!(!begin_scrollbar_drag(
-            &mut scroll,
-            75.0,
-            0.0,
-            200.0,
-            0.0,
-            20.0
-        ));
-
-        assert_eq!(scroll.current, 100.0);
-        assert_eq!(scroll.target, 180.0);
         assert!(!scroll.is_dragging);
         assert_eq!(scroll.drag_offset, 0.0);
     }
