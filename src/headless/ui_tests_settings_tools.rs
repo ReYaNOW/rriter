@@ -2,8 +2,8 @@
 
 use crate::app::tool_installer::DartToolStatus;
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, ui_rect, wait_until,
-    workspace_with_explorer,
+    click_ui, dump, has_ui, open_settings_tab, run_script, scratch_dir, session_for_test, ui_rect,
+    wait_until, workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
 use crate::platform::ToolKind;
@@ -13,11 +13,9 @@ const TEST_HEIGHT: u32 = 720;
 const PICKER_BUSY_ERROR: &str = "Окно выбора инструмента уже открыто";
 
 fn open_general_settings(session: &mut HeadlessSession) {
-    let lines = run_script(session, b"scale 1\nkey f1\nwait 900\n");
+    let lines = run_script(session, b"scale 1\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    assert_eq!(dump(session)["overlays"]["settings"], true);
-
-    click_ui(session, "SettingsTab(1)");
+    open_settings_tab(session, 1);
     wait_until(session, 2000, "General settings content", |session| {
         has_ui(&dump(session), "SettingsRefreshTools")
     });

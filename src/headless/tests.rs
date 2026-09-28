@@ -304,6 +304,22 @@ pub(crate) mod tests_support {
         assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     }
 
+    pub(crate) fn open_settings_tab(session: &mut HeadlessSession, tab: usize) {
+        let lines = run_script(session, b"key f1\n");
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        wait_until(session, 5000, "Settings overlay tabs", |session| {
+            let state = dump(session);
+            state["overlays"]["settings"] == true
+                // The slide-in stops within 1.5 px of the open position, short of 1.0.
+                && session.app.settings_anim_progress >= 0.99
+                && has_ui(&state, &format!("SettingsTab({tab})"))
+        });
+        click_ui(session, &format!("SettingsTab({tab})"));
+        wait_until(session, 5000, "selected Settings tab", |session| {
+            session.app.settings_tab == tab
+        });
+    }
+
     /// Point at (`x_fraction`, `y_fraction`) of the `id` hitbox, `(0, 0)` is its top-left.
     pub(crate) fn ui_point(
         dump: &serde_json::Value,

@@ -1,7 +1,8 @@
 //! Headless UI coverage for IDE settings workspace and ignore controls.
 
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, wait_until,
+    click_ui, dump, has_ui, open_settings_tab, run_script, scratch_dir, session_for_test,
+    wait_until,
 };
 use crate::headless::HeadlessSession;
 
@@ -22,12 +23,7 @@ fn settings_ide_session() -> HeadlessSession {
 }
 
 fn open_ide_settings(session: &mut HeadlessSession) {
-    let lines = run_script(session, b"key f1\nsettle 600\n");
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    wait_until(session, 3000, "Settings IDE tab", |session| {
-        has_ui(&dump(session), "SettingsTab(0)")
-    });
-    click_ui(session, "SettingsTab(0)");
+    open_settings_tab(session, 0);
     wait_until(session, 3000, "IDE ignore input", |session| {
         has_ui(&dump(session), "SettingsIdeIgnoreInput")
     });

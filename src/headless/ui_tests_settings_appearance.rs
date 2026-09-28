@@ -1,32 +1,20 @@
 //! Headless settings regressions for the Editor and Appearance tabs.
 
-use crate::headless::tests_support::{click_ui, dump, has_ui, run_script, session_for_test, wait_until};
+use crate::headless::tests_support::{
+    click_ui, dump, has_ui, open_settings_tab, run_script, session_for_test,
+};
 use crate::headless::HeadlessSession;
 
 const TEST_WIDTH: u32 = 1280;
 const TEST_HEIGHT: u32 = 720;
 const TEST_SCALE: f32 = 4.0 / 3.0;
 
-fn open_settings_tab(tab: usize) -> HeadlessSession {
+fn settings_session_with_tab(tab: usize) -> HeadlessSession {
     assert!(matches!(tab, 2 | 3));
     let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
-    let lines = run_script(
-        &mut session,
-        format!("scale {TEST_SCALE}\nkey f1\n").as_bytes(),
-    );
+    let lines = run_script(&mut session, format!("scale {TEST_SCALE}\n").as_bytes());
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-
-    wait_until(&mut session, 5000, "Settings overlay", |session| {
-        let state = dump(session);
-        state["overlays"]["settings"] == true && has_ui(&state, "SettingsTab(0)")
-    });
-
-    let tab_id = format!("SettingsTab({tab})");
-    click_ui(&mut session, &tab_id);
-    wait_until(&mut session, 5000, "selected Settings tab", |session| {
-        let state = dump(session);
-        session.app.settings_tab == tab && has_ui(&state, &tab_id)
-    });
+    open_settings_tab(&mut session, tab);
     session
 }
 
@@ -46,7 +34,7 @@ fn adjust_ctrl_wheel_to(session: &mut HeadlessSession, target: f32) {
 
 #[test]
 fn headless_settings_editor_ctrl_wheel_adjusts_and_restores_multiplier() {
-    let mut session = open_settings_tab(2);
+    let mut session = settings_session_with_tab(2);
     let initial = session.app.ctrl_wheel_multiplier;
     adjust_ctrl_wheel_to(&mut session, crate::CTRL_WHEEL_MULTIPLIER_DEFAULT);
 
@@ -67,7 +55,7 @@ fn headless_settings_editor_ctrl_wheel_adjusts_and_restores_multiplier() {
 
 #[test]
 fn headless_settings_editor_ctrl_wheel_clamps_at_minimum() {
-    let mut session = open_settings_tab(2);
+    let mut session = settings_session_with_tab(2);
     let initial = session.app.ctrl_wheel_multiplier;
     adjust_ctrl_wheel_to(&mut session, crate::CTRL_WHEEL_MULTIPLIER_DEFAULT);
 
@@ -88,7 +76,7 @@ fn headless_settings_editor_ctrl_wheel_clamps_at_minimum() {
 
 #[test]
 fn headless_settings_editor_ctrl_wheel_clamps_at_maximum() {
-    let mut session = open_settings_tab(2);
+    let mut session = settings_session_with_tab(2);
     let initial = session.app.ctrl_wheel_multiplier;
     adjust_ctrl_wheel_to(&mut session, crate::CTRL_WHEEL_MULTIPLIER_DEFAULT);
 

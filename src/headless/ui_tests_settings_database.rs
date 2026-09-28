@@ -1,21 +1,15 @@
 use crate::app::database::{DatabaseConnectionColor, DatabaseSettings, MAX_RESULT_ROWS};
 use crate::headless::tests_support::{
-    assert_ui_rect_inside_window, click_ui, dump, has_ui, run_script, session_for_test, wait_until,
+    assert_ui_rect_inside_window, click_ui, dump, has_ui, open_settings_tab, run_script,
+    session_for_test, wait_until,
 };
 use crate::headless::HeadlessSession;
-use std::sync::Mutex;
-
-static DATABASE_SETTINGS_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn database_settings_session() -> HeadlessSession {
     let mut session = session_for_test(2560, 1440);
-    let lines = run_script(&mut session, b"scale 1.3333333\nkey f1\n");
+    let lines = run_script(&mut session, b"scale 1.3333333\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    wait_until(&mut session, 5000, "Settings tab 5", |session| {
-        let state = dump(session);
-        state["overlays"]["settings"] == true && has_ui(&state, "SettingsTab(5)")
-    });
-    click_ui(&mut session, "SettingsTab(5)");
+    open_settings_tab(&mut session, 5);
     wait_until(&mut session, 5000, "database setting controls", |session| {
         has_ui(&dump(session), "SettingsDatabaseAdjust(9, 1)")
     });
@@ -55,7 +49,6 @@ fn exercise_usize_row(
 
 #[test]
 fn headless_settings_database_timeout_rows_increment_and_restore_through_ui() {
-    let _serial = DATABASE_SETTINGS_TEST_LOCK.lock().unwrap();
     let mut session = database_settings_session();
     let before = session.app.ide_panel.database.settings().clone();
     let rows: [(usize, u64, fn(&DatabaseSettings) -> u64); 5] = [
@@ -75,7 +68,6 @@ fn headless_settings_database_timeout_rows_increment_and_restore_through_ui() {
 
 #[test]
 fn headless_settings_database_limit_rows_decrement_and_restore_through_ui() {
-    let _serial = DATABASE_SETTINGS_TEST_LOCK.lock().unwrap();
     let mut session = database_settings_session();
     let before = session.app.ide_panel.database.settings().clone();
     let rows: [(usize, usize, fn(&DatabaseSettings) -> usize); 4] = [
@@ -94,7 +86,6 @@ fn headless_settings_database_limit_rows_decrement_and_restore_through_ui() {
 
 #[test]
 fn headless_settings_database_adjustments_clamp_at_minimum_and_maximum() {
-    let _serial = DATABASE_SETTINGS_TEST_LOCK.lock().unwrap();
     let mut session = database_settings_session();
     let start_lock_timeout = session
         .app
@@ -149,17 +140,10 @@ fn headless_settings_database_adjustments_clamp_at_minimum_and_maximum() {
 
 #[test]
 fn headless_settings_database_last_row_is_reachable_at_fractional_scale() {
-    let _serial = DATABASE_SETTINGS_TEST_LOCK.lock().unwrap();
     let mut session = session_for_test(1280, 720);
-    let lines = run_script(&mut session, b"scale 1.3333333\nkey f1\n");
+    let lines = run_script(&mut session, b"scale 1.3333333\n");
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    wait_until(&mut session, 5000, "Settings overlay", |session| {
-        let state = dump(session);
-        state["overlays"]["settings"] == true && has_ui(&state, "SettingsTab(5)")
-    });
-    click_ui(&mut session, "SettingsTab(5)");
-    let lines = run_script(&mut session, b"settle 2000\n");
-    assert!(lines.iter().any(|line| line.ends_with("settled=true")), "{lines:?}");
+    open_settings_tab(&mut session, 5);
 
     let id = "SettingsDatabaseAdjust(9, 1)";
     for _ in 0..12 {
@@ -193,7 +177,6 @@ fn headless_settings_database_last_row_is_reachable_at_fractional_scale() {
 
 #[test]
 fn headless_settings_database_default_connection_color_cycles_through_ui() {
-    let _serial = DATABASE_SETTINGS_TEST_LOCK.lock().unwrap();
     let mut session = database_settings_session();
     let before = session.app.ide_panel.database.settings().clone();
     assert_eq!(before.default_connection_color, DatabaseConnectionColor::Blue);
