@@ -70,6 +70,8 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `type <text>` | Commit text as IME input. Escapes `\n`, `\t`, `\\`. | `ok` |
 | `settle [ms]` | Run frames until idle or the budget ends (default 500). | `ok frames=<n> settled=<bool>` |
 | `wait <ms>` | Run frames for real time `ms` (≤ 60000). | `ok frames=<n>` |
+| `wake <ms>` | Strict loop model: block until the native loop would wake, run one `about_to_wait`, draw only if requested (see Strict loop model). | `ok cause=<c> frame=<bool> flow=<f> deadline_ms=<n\|none>` |
+| `idle <ms>` | `wake` repeated for `ms` of input-free time. | `ok frames=<n> redraws=<n> polls=<n> wakes=<n> deadlines=<n> flow=<f> deadline_ms=<n\|none>` |
 | `screenshot <out.png>` | Draw one frame and save a PNG; the directory is created. | `ok <abs path> <w>x<h>` |
 | `dump [out.json]` | UI state as JSON, inline or into a file. | `ok <json>` / `ok <abs path>` |
 | `dialog save\|discard\|cancel` | Answer the unsaved-changes dialog. No dialog → `err no dialog`. | `ok` |
@@ -92,6 +94,24 @@ Rules:
 - After an `err` the next command still runs (stdin and `--script` alike);
   the exit code becomes 1. I/O failures read `err io: <error>`. Bad numbers,
   `NaN`/`inf`, wrong argument count and invalid UTF-8 are `err` too.
+
+### Strict loop model (`wake`, `idle`)
+
+`settle` and `wait` step on the driver's own schedule, so they draw frames the
+real window would never get: a test with them cannot see a missing wake-up.
+`wake`/`idle` step only when the native event loop would run `about_to_wait`
+again (`cause`): `redraw` (the previous pass drew a frame), `poll`
+(`ControlFlow::Poll`), `ui_waker` (a `UiWaker` event arrived), `deadline` (the
+`WaitUntil` instant passed), else `timeout` after `ms` with nothing run. Time
+is real: a deadline is reached by sleeping. A frame is drawn only when the pass
+requests one. Input commands still run as usual. Headless has no cursor blink,
+so an idle app ends in `flow=wait deadline_ms=none`. In Rust tests
+`HeadlessSession::native_wake` returns the same with the pass start time.
+
+`dump` → `event_loop`: `control_flow` (`wait`/`poll`/`wait_until`),
+`deadline_ms` (ms left to the `WaitUntil`, else `null`), `awaiting_background`,
+`wake_pending` (a wake not yet drained), `wake_events` (`UiWaker` events not
+yet taken by the driver), `redraw_requested`.
 
 ### Example script
 

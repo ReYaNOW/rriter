@@ -524,7 +524,7 @@ impl App {
                 self.ide_panel.git.graph_pending = true;
             }
 
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = self.ui_waker.channel();
             self.ide_panel.git.graph_rx.push(GitGraphReceiver {
                 rx,
                 request_id,
@@ -601,12 +601,12 @@ impl App {
         let branch_ahead_cache = self.ide_panel.git.branch_ahead_cache.clone();
         let commit_transaction = matches!(&action, GitAction::Commit { .. });
         let (runtime_tx, runtime_rx) = if commit_transaction {
-            let (runtime_tx, runtime_rx) = mpsc::sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
+            let (runtime_tx, runtime_rx) = self.ui_waker.sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
             (Some(runtime_tx), Some(runtime_rx))
         } else {
             (None, None)
         };
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.ide_panel.git.rx.push(GitPanelReceiver {
             rx,
             runtime_rx,
@@ -689,7 +689,7 @@ fn enqueue_git_stage_operation(
     request_id: u64,
     workspaces: Vec<PathBuf>,
     branch_ahead_cache: BranchAheadCache,
-    tx: mpsc::Sender<GitPanelTaskResult>,
+    tx: crate::ui_waker::WakeSender<GitPanelTaskResult>,
 ) {
     let mut command = GitStageCommand {
         request_id,

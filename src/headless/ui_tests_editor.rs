@@ -399,3 +399,31 @@ fn headless_editor_comment_toggle_single_and_multiple_lines() {
     assert!(!uncommented["tabs"][0]["modified"].as_bool().unwrap());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Strict loop model: with no input and no background job the loop sleeps in a plain
+/// `Wait` (headless has no cursor blink, so no blink deadline) and draws nothing.
+#[test]
+fn headless_editor_idle_without_input_sleeps_and_draws_nothing() {
+    let dir = scratch_dir("ui-editor-idle-loop");
+    let file = sample_file(&dir);
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    let lines = run_script(&mut session, b"idle 400\n");
+    assert_eq!(
+        lines,
+        ["ok frames=0 redraws=0 polls=0 wakes=0 deadlines=0 flow=wait deadline_ms=none"],
+        "an idle loop woke up or drew"
+    );
+    let event_loop = dump(&mut session)["event_loop"].clone();
+    assert_eq!(
+        event_loop,
+        serde_json::json!({
+            "control_flow": "wait",
+            "deadline_ms": null,
+            "awaiting_background": false,
+            "wake_pending": false,
+            "wake_events": 0,
+            "redraw_requested": false,
+        }),
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}

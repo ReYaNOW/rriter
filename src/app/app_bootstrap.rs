@@ -65,6 +65,8 @@ pub(crate) struct AppInitOptions {
     pub(crate) scroll_bench_idx: Option<usize>,
     pub(crate) scroll_bench_seconds: Option<f32>,
     pub headless: bool,
+    /// Background tasks spawned by the App wake the UI through clones of this handle.
+    pub(crate) ui_waker: crate::ui_waker::UiWaker,
 }
 
 impl AppInitOptions {
@@ -82,6 +84,7 @@ impl AppInitOptions {
             scroll_bench_idx: None,
             scroll_bench_seconds: None,
             headless: true,
+            ui_waker: crate::ui_waker::UiWaker::counting(),
         }
     }
 }
@@ -119,6 +122,7 @@ impl App {
         faq_editor.selection_anchor = None;
 
         let highlighter = Highlighter::new();
+        highlighter.bind_ui_waker(&options.ui_waker);
         let show_welcome = !options.has_file_arg && !options.run_ide_on_startup;
         let file_key = options
             .file_path
@@ -307,6 +311,7 @@ impl App {
             active_tab: 0,
             run_ide_on_startup: options.run_ide_on_startup,
             headless_mode: options.headless,
+            ui_waker: options.ui_waker,
         };
 
         if !options.headless {
@@ -375,11 +380,8 @@ mod tests {
                 false,
                 false,
                 false,
-                false,
                 idle_blink,
                 None,
-                false,
-                false,
             ),
             crate::app::events::about::AboutWaitPlan::Wait,
         );

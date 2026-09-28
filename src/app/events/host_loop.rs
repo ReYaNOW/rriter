@@ -5,6 +5,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow};
 pub struct HeadlessLoopState {
     pub exit_requested: AtomicBool,
     pub last_control_flow: Cell<ControlFlow>,
+    /// A background result (highlight, hover, API, Database job) is still expected. The
+    /// native loop just sleeps until the `UiWaker` event; `settle` must not call that idle.
+    pub awaiting_background: Cell<bool>,
 }
 
 impl Default for HeadlessLoopState {
@@ -12,6 +15,7 @@ impl Default for HeadlessLoopState {
         Self {
             exit_requested: AtomicBool::new(false),
             last_control_flow: Cell::new(ControlFlow::Wait),
+            awaiting_background: Cell::new(false),
         }
     }
 }
@@ -37,6 +41,13 @@ impl<'a> HostLoop<'a> {
         match self {
             Self::Native(event_loop) => event_loop.set_control_flow(flow),
             Self::Headless(state) => state.last_control_flow.set(flow),
+        }
+    }
+
+    /// Headless only: the native loop is woken by `UiWaker` and needs no such hint.
+    pub fn set_awaiting_background(&self, awaiting: bool) {
+        if let Self::Headless(state) = self {
+            state.awaiting_background.set(awaiting);
         }
     }
 

@@ -367,12 +367,12 @@ fn git_runtime_unix_secs() -> u64 {
 }
 
 struct GitRuntimeEmitter<'a> {
-    tx: Option<&'a mpsc::SyncSender<GitRuntimeEvent>>,
+    tx: Option<&'a crate::ui_waker::WakeSyncSender<GitRuntimeEvent>>,
     output_dropped: bool,
 }
 
 impl<'a> GitRuntimeEmitter<'a> {
-    fn new(tx: Option<&'a mpsc::SyncSender<GitRuntimeEvent>>) -> Self {
+    fn new(tx: Option<&'a crate::ui_waker::WakeSyncSender<GitRuntimeEvent>>) -> Self {
         Self {
             tx,
             output_dropped: false,
@@ -1411,7 +1411,7 @@ mod git_commit_runtime_tests {
         repo_root: &Path,
         skip_hooks: bool,
     ) -> (Result<(), String>, Vec<GitRuntimeEvent>) {
-        let (tx, rx) = mpsc::sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
+        let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
         let mut emitter = GitRuntimeEmitter::new(Some(&tx));
         let result = commit_repo_with_runtime(repo_root, "test commit", false, skip_hooks, 1, 1, &mut emitter);
         drop(emitter);
@@ -1550,7 +1550,7 @@ mod git_commit_runtime_tests {
         perms.set_mode(0o755);
         std::fs::set_permissions(&hook, perms).unwrap();
 
-        let (tx, rx) = mpsc::sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
+        let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(GIT_RUNTIME_EVENT_CAPACITY);
         let mut emitter = GitRuntimeEmitter::new(Some(&tx));
         push_repo_with_runtime(&root, 1, 1, &mut emitter).unwrap();
         drop(emitter);

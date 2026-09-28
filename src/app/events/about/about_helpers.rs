@@ -139,21 +139,6 @@ fn request_python_inlay_hints_if_needed(app: &mut App) {
     }
 }
 
-fn earliest_wake(base: Instant, a: Option<Instant>, b: Option<Instant>) -> Instant {
-    let mut wake_at = base;
-    if let Some(t) = a {
-        if t < wake_at {
-            wake_at = t;
-        }
-    }
-    if let Some(t) = b {
-        if t < wake_at {
-            wake_at = t;
-        }
-    }
-    wake_at
-}
-
 /// Whether the app itself wants the next frame (as opposed to an idle `Wait`).
 pub(crate) fn wait_plan_wants_frame(needs_redraw: bool, show_welcome: bool, is_ide_mode: bool) -> bool {
     needs_redraw || (show_welcome && is_ide_mode)
@@ -165,37 +150,18 @@ pub(crate) fn compute_about_wait_plan(
     needs_redraw: bool,
     show_welcome: bool,
     is_ide_mode: bool,
-    is_highlighting: bool,
     idle_blink_enabled: bool,
-    hover_wake_at: Option<Instant>,
-    hover_poll_pending: bool,
-    api_poll_pending: bool,
+    deadline_wake_at: Option<Instant>,
 ) -> AboutWaitPlan {
     if wait_plan_wants_frame(needs_redraw, show_welcome, is_ide_mode) {
         return AboutWaitPlan::Wait;
     }
 
-    let hover_poll_wake_at =
-        hover_poll_pending.then_some(now + std::time::Duration::from_millis(16));
-    let api_poll_wake_at = api_poll_pending.then_some(now + std::time::Duration::from_millis(16));
-
-    if is_highlighting {
-        return AboutWaitPlan::WaitUntil(earliest_wake(
-            now + std::time::Duration::from_millis(5),
-            hover_wake_at,
-            earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
-        ));
-    }
-
+    // Background results (highlight, hover, API, Database) wake the loop through
+    // `UiWaker`; only real deadlines (hover dwell, label expiry, cancel timeout) and the
+    // cursor blink are timed here.
     if !idle_blink_enabled {
-        return if let Some(wake_at) = earliest_optional_wake(
-            hover_wake_at,
-            earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
-        ) {
-            AboutWaitPlan::WaitUntil(wake_at)
-        } else {
-            AboutWaitPlan::Wait
-        };
+        return deadline_wake_at.map_or(AboutWaitPlan::Wait, AboutWaitPlan::WaitUntil);
     }
 
     let next_blink = last_action
@@ -203,19 +169,13 @@ pub(crate) fn compute_about_wait_plan(
             (now.duration_since(last_action).as_millis() / 500 + 1) as u64 * 500,
         );
 
-    AboutWaitPlan::WaitUntil(earliest_wake(
-        next_blink,
-        hover_wake_at,
-        earliest_optional_wake(hover_poll_wake_at, api_poll_wake_at),
-    ))
+    AboutWaitPlan::WaitUntil(deadline_wake_at.map_or(next_blink, |at| at.min(next_blink)))
 }
 
-fn suspended_about_wait_plan(now: Instant, database_job_pending: bool) -> AboutWaitPlan {
-    if database_job_pending {
-        AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(100))
-    } else {
-        AboutWaitPlan::Wait
-    }
+/// Hidden window: a Database job completion arrives through `UiWaker`; only the cancel
+/// confirmation timeout needs a timer.
+fn suspended_about_wait_plan(cancel_deadline: Option<Instant>) -> AboutWaitPlan {
+    cancel_deadline.map_or(AboutWaitPlan::Wait, AboutWaitPlan::WaitUntil)
 }
 
 /// The `Instant` at which the wall clock reaches `epoch_secs` (Unix seconds); `now` if it has.

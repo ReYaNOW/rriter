@@ -29,7 +29,8 @@ mod mock_config_tests {
         app.ide_panel.api.mock.bind_host = "127.0.0.1".to_string();
         app.ide_panel.api.mock.port = 0;
         let snapshot = app.ide_panel.api.mock_server_snapshot();
-        app.ide_panel.api.mock.server.start(snapshot).expect("start mock server");
+        let ui_waker = app.ui_waker.clone();
+        app.ide_panel.api.mock.server.start(snapshot, &ui_waker).expect("start mock server");
         app.ide_panel.api.focused = Some(ApiFocus::MockProxyBase);
         app.ide_panel.api.input_editor.set_text_clean(" http://upstream.test ");
 

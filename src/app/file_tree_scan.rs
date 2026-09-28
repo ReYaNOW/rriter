@@ -468,8 +468,9 @@ pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
     user_patterns: Vec<String>,
+    ui_waker: &crate::ui_waker::UiWaker,
 ) -> mpsc::Receiver<FileTreeScanMessage> {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = ui_waker.channel();
     let worker_tx = tx.clone();
     if let Err(err) = crate::platform::spawn_named("rriter-file-tree-scan", move || {
         // STEP 1: Build ordered tree in one reusable buffer.
@@ -622,7 +623,7 @@ pub(crate) fn build_file_tree_watch_paths(
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub fn spawn_watcher(
     paths: Vec<PathBuf>,
-    tx: mpsc::Sender<()>,
+    tx: crate::ui_waker::WakeSender<()>,
     stop_rx: mpsc::Receiver<()>,
 ) -> bool {
     match crate::platform::spawn_named("rriter-file-tree-watcher", move || {

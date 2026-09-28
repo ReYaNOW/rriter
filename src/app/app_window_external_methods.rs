@@ -242,7 +242,7 @@ impl App {
             return;
         }
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.settings_tool_picker_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-tool-picker", move || {
@@ -401,7 +401,7 @@ impl App {
             }
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.open_file_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-file-picker", move || {
@@ -427,7 +427,7 @@ impl App {
             }
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.open_folder_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-folder-picker", move || {
@@ -456,7 +456,7 @@ impl App {
             self.handle_save_as_selection(selected);
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.save_file_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-save-picker", move || {
@@ -1070,7 +1070,7 @@ impl App {
         if clean_tabs.is_empty() {
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         match crate::platform::spawn_named("rriter-external-changes", move || {
             let mut changes = Vec::new();
             for (tab_idx, path) in clean_tabs {

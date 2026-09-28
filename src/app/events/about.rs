@@ -121,12 +121,15 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     if app.run_ide_on_startup {
         app.run_ide_on_startup = false;
         app.enter_ide_mode();
+        // This one-shot pass drains nothing: a wake it consumed must come back.
+        app.ui_waker.redeliver_pending();
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
     }
 
     // `close_tab_at` arms the question without the event loop; the window is created here.
     if let Some(action) = app.confirm_dialog.needs_window() {
         app.show_action_dialog(event_loop, action);
+        app.ui_waker.redeliver_pending();
         return;
     }
 
@@ -145,6 +148,9 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     }
 
     let now = Instant::now();
+    let wall_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
     let automation_running = if app.automation.is_some() {
         match app.advance_automation(event_loop, now) {
             Some(crate::app::automation::AutomationTick::Exit) => {
@@ -160,9 +166,13 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     };
     if app.render_suspended && !automation_running {
         app.last_frame = now;
+        // Reset before draining (see `ui_waker`). Other channels wait for resume: their
+        // results need a frame anyway, and re-waking for them here would spin while hidden.
+        app.ui_waker.begin_drain();
         app.poll_database_runtime();
-        let database_job_pending = app.ide_panel.database.pending_job.is_some();
-        event_loop.set_control_flow(match suspended_about_wait_plan(now, database_job_pending) {
+        event_loop.set_awaiting_background(app.ide_panel.database.pending_job.is_some());
+        let cancel_deadline = app.ide_panel.database.cancel_deadline();
+        event_loop.set_control_flow(match suspended_about_wait_plan(cancel_deadline) {
             AboutWaitPlan::Wait => ControlFlow::Wait,
             AboutWaitPlan::WaitUntil(at) => ControlFlow::WaitUntil(at),
         });
@@ -178,6 +188,10 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
 
     let mut needs_redraw = automation_running;
 
+    // Reset the coalesced wake BEFORE the sections below walk the background channels:
+    // a result sent during the walk then posts a fresh event instead of being stranded.
+    app.ui_waker.begin_drain();
+
     // Each section only ever raises `needs_redraw`, so OR-ing keeps the old semantics.
     let Some(bench_redraw) = about_to_wait_scroll_bench(app, event_loop, now) else {
         return;
@@ -190,11 +204,13 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     needs_redraw |= about_to_wait_settings_scrolls(app, dt);
     needs_redraw |= about_to_wait_main_scroll(app, dt);
     needs_redraw |= about_to_wait_tab_strip_scroll(app, dt);
-    let (polls_redraw, api_label_wake_at) = about_to_wait_background_polls(app, now);
+    let (polls_redraw, background_wake_at) = about_to_wait_background_polls(app, now);
     needs_redraw |= polls_redraw;
     needs_redraw |= about_to_wait_file_watcher(app);
     needs_redraw |= about_to_wait_panel_scrolls(app, dt);
-    needs_redraw |= about_to_wait_tab_content_scrolls(app, dt);
+    let (tab_content_redraw, database_refresh_wake_at) =
+        about_to_wait_tab_content_scrolls(app, dt, now, wall_ms);
+    needs_redraw |= tab_content_redraw;
     needs_redraw |= about_to_wait_terminals(app, dt);
     needs_redraw |= about_to_wait_overlay_animations(app, dt, now);
     needs_redraw |= about_to_wait_selection_drag_autoscroll(app, dt);
@@ -222,19 +238,34 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
     let idle_blink_enabled = idle_blink_enabled(app);
     let autocomplete_animating = app.autocomplete_active && app.autocomplete_anim_progress < 1.0;
     let scroll_animating = !app.scroll_y.is_settled() || !app.scroll_x.is_settled();
+    // Results of these jobs arrive through `UiWaker`; no timer polls for them. Headless
+    // `settle` still needs to know that one is outstanding.
+    event_loop.set_awaiting_background(
+        is_highlighting
+            || hover_poll_pending
+            || !app.api_request_rx.is_empty()
+            || app.api_mock_ty_rx.is_some()
+            || app.ide_panel.api.api_runtime_poll_pending()
+            || app.ide_panel.database.pending_job.is_some(),
+    );
+    let deadline_wake_at = earliest_optional_wake(
+        hover_wake_at,
+        earliest_optional_wake(
+            background_wake_at,
+            earliest_optional_wake(
+                app.ide_panel.database.cancel_deadline(),
+                database_refresh_wake_at,
+            ),
+        ),
+    );
     match compute_about_wait_plan(
         now,
         app.last_action,
         needs_redraw,
         app.show_welcome,
         app.is_ide_mode,
-        is_highlighting,
         idle_blink_enabled,
-        earliest_optional_wake(hover_wake_at, api_label_wake_at),
-        hover_poll_pending,
-        !app.api_request_rx.is_empty()
-            || app.api_mock_ty_rx.is_some()
-            || app.ide_panel.api.api_runtime_poll_pending(),
+        deadline_wake_at,
     ) {
         AboutWaitPlan::Wait => {
             // Headless has no compositor pacing: an idle `Wait` must not spin frames.

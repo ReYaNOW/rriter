@@ -7,7 +7,7 @@ fn git_stage_click_locked(state: &GitPanelState, workspace_idx: usize) -> bool {
 
 fn run_git_action(
     action: GitAction,
-    runtime_tx: Option<&mpsc::SyncSender<GitRuntimeEvent>>,
+    runtime_tx: Option<&crate::ui_waker::WakeSyncSender<GitRuntimeEvent>>,
 ) -> GitActionOutcome {
     match action {
         GitAction::Refresh

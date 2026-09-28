@@ -416,6 +416,7 @@ impl LspManager {
                 &DART_SERVER,
                 vec![root],
                 Some(executable),
+                self.ui_waker.clone(),
             ));
         }
     }
@@ -456,7 +457,7 @@ impl LspManager {
             let generation = state.generation;
             let cancel = Arc::new(AtomicBool::new(false));
             let worker_cancel = cancel.clone();
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = self.ui_waker.channel();
             let spawn = crate::platform::spawn_named("rriter-dart-analyze", move || {
                 let diagnostics = run_dart_workspace_check(&root, &worker_cancel);
                 let _ = tx.send(DartWorkspaceResult {

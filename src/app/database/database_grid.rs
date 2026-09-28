@@ -563,21 +563,57 @@ mod tests {
         });
         assert!(grid.can_reuse_loaded_chunk(0));
 
-        grid.refreshing = true;
-        grid.refresh_started = Some(std::time::Instant::now());
+        grid.start_refresh(std::time::Instant::now());
         assert!(!grid.can_reuse_loaded_chunk(0));
     }
 
     #[test]
     fn finishing_refresh_clears_delayed_overlay_state() {
         let mut grid = grid();
-        grid.refreshing = true;
-        grid.refresh_started = Some(std::time::Instant::now());
+        grid.start_refresh(std::time::Instant::now());
+        grid.refresh_indicator_last_drawn_step = Some(42);
 
         grid.finish_refresh();
 
         assert!(!grid.refreshing);
         assert!(grid.refresh_started.is_none());
+        assert!(grid.refresh_indicator_last_drawn_step.is_none());
+    }
+
+    #[test]
+    fn refresh_indicator_tick_redraws_once_per_visible_step() {
+        let mut grid = grid();
+        let started = std::time::Instant::now();
+        grid.start_refresh(started);
+
+        let (redraw, wake) = grid.refresh_indicator_tick(
+            started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY
+                - std::time::Duration::from_millis(1),
+            1_234,
+        );
+        assert!(!redraw);
+        assert_eq!(wake, Some(started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY));
+
+        let (redraw, wake) = grid.refresh_indicator_tick(
+            started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY,
+            1_234,
+        );
+        assert!(redraw);
+        assert_eq!(wake, Some(started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY + std::time::Duration::from_millis(66)));
+
+        let (redraw, _) = grid.refresh_indicator_tick(
+            started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY
+                + std::time::Duration::from_millis(10),
+            1_235,
+        );
+        assert!(!redraw);
+
+        let (redraw, _) = grid.refresh_indicator_tick(
+            started + crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY
+                + std::time::Duration::from_millis(66),
+            1_300,
+        );
+        assert!(redraw);
     }
 
     #[test]

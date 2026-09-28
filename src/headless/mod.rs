@@ -97,7 +97,7 @@ use crate::app::{App, AppInitOptions};
 use crate::platform::offscreen_gl::OffscreenContext;
 use crate::platform::{self, HeadlessPolicy, HeadlessWindow, WindowHost};
 use crate::renderer::Renderer;
-use frame::StepState;
+use frame::{NativeWake, StepState, WakeCause};
 use profile::{BudgetChoice, HeadlessOptions, Profile};
 use protocol::{ClickPhase, Command, DialogAnswer, MouseButtonArg, Response, WheelUnit};
 use std::ffi::OsString;
@@ -110,11 +110,16 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, MouseButton, MouseScrollDelta};
+use winit::event_loop::ControlFlow;
 
 /// Settle budget after startup and the positional path, before the first command is read.
 const STARTUP_SETTLE: Duration = Duration::from_millis(500);
 /// Pause of `wait` after a step that drew nothing, so it does not spin a core.
 const WAIT_IDLE_SLEEP: Duration = Duration::from_millis(2);
+/// `settle` pause while a background result is outstanding and no `UiWaker` event came yet.
+const AWAIT_BACKGROUND_SLEEP: Duration = Duration::from_millis(2);
+/// Sleep slice of `native_wake` while it models a blocked native loop.
+const NATIVE_WAKE_SLICE: Duration = Duration::from_millis(1);
 
 /// Headless entry point (arguments without the program name). Returns the process exit code:
 /// 0 all `ok`, 1 at least one `err`, 2 arguments, 3 GL context or `Renderer`.
@@ -218,6 +223,9 @@ pub(crate) struct HeadlessSession {
     pub(crate) profile_root: PathBuf,
     /// Readback buffer reused by every `screenshot`.
     frame_buf: Vec<u8>,
+    /// The last step drew a frame, so the native loop runs `about_to_wait` again at once
+    /// (after `RedrawRequested`); read by `native_wake`.
+    drew_last_step: bool,
 }
 
 impl HeadlessSession {
@@ -253,6 +261,7 @@ impl HeadlessSession {
             budget: options.budget,
             profile_root,
             frame_buf: Vec::new(),
+            drew_last_step: false,
         })
     }
 
@@ -357,6 +366,16 @@ impl HeadlessSession {
                 let frames = self.wait(Duration::from_millis(ms));
                 Response::Ok(Some(format!("frames={frames}")))
             }
+            Command::Wake { ms } => {
+                let wake = self.native_wake(Duration::from_millis(ms));
+                Response::Ok(Some(format!(
+                    "cause={} frame={} {}",
+                    wake.cause.name(),
+                    wake.frame,
+                    self.control_flow_text()
+                )))
+            }
+            Command::Idle { ms } => Response::Ok(Some(self.idle(Duration::from_millis(ms)))),
             Command::Screenshot(path) => self.screenshot(&path),
             Command::Quit => Response::Ok(None),
             Command::Dump(path) => self.dump(path.as_deref()),
@@ -455,7 +474,7 @@ impl HeadlessSession {
     }
 
     fn dump(&mut self, path: Option<&Path>) -> Response {
-        let json = dump::dump_json(&mut self.app).to_string();
+        let json = dump::dump_json(&mut self.app, &self.loop_state).to_string();
         let Some(path) = path else {
             return Response::Ok(Some(json));
         };
@@ -471,12 +490,24 @@ impl HeadlessSession {
     }
 
     fn settle(&mut self, budget: Duration) -> (u32, bool) {
-        let Self { app, loop_state, .. } = self;
+        let Self { app, loop_state, drew_last_step, .. } = self;
         frame::settle_loop(budget, || {
-            if frame::step_frame(app, loop_state, false) {
+            *drew_last_step = frame::step_frame(app, loop_state, false);
+            if *drew_last_step {
                 StepState::Redrawn
             } else {
-                StepState::Idle { flow: loop_state.last_control_flow.get() }
+                let flow = loop_state.last_control_flow.get();
+                // A delivered `UiWaker` event is the native loop's next wake-up: step at once.
+                if app.ui_waker.take_events() > 0 {
+                    return StepState::Idle { flow: ControlFlow::Poll };
+                }
+                // The native loop sleeps until the job's wake; settle must not call that idle.
+                if flow == ControlFlow::Wait && loop_state.awaiting_background.get() {
+                    return StepState::Idle {
+                        flow: ControlFlow::WaitUntil(Instant::now() + AWAIT_BACKGROUND_SLEEP),
+                    };
+                }
+                StepState::Idle { flow }
             }
         })
     }
@@ -494,8 +525,79 @@ impl HeadlessSession {
         frames
     }
 
+    /// Strict loop model (`wake`): blocks until the native event loop would run its next
+    /// `about_to_wait` (see `WakeCause`), then runs that one pass and draws only if the app
+    /// requested a frame. Unlike `settle`/`wait` it never steps on its own schedule, so a
+    /// frame the app forgot to ask for (or a wake-up it forgot to arm) stays missing.
+    /// `budget` bounds the block in real time; on `Timeout` nothing runs.
+    pub(crate) fn native_wake(&mut self, budget: Duration) -> NativeWake {
+        let end = Instant::now().checked_add(budget).unwrap_or_else(Instant::now);
+        let cause = loop {
+            if self.drew_last_step {
+                break WakeCause::Redraw;
+            }
+            let wake_at = match self.loop_state.last_control_flow.get() {
+                ControlFlow::Poll => break WakeCause::Poll,
+                ControlFlow::Wait => None,
+                ControlFlow::WaitUntil(at) => Some(at),
+            };
+            if self.app.ui_waker.take_events() > 0 {
+                break WakeCause::UiWaker;
+            }
+            let now = Instant::now();
+            if wake_at.is_some_and(|at| now >= at) {
+                break WakeCause::Deadline;
+            }
+            if now >= end {
+                return NativeWake { cause: WakeCause::Timeout, frame: false, stepped_at: None };
+            }
+            // Short slices: a `UiWaker` event may arrive before the deadline.
+            let slice = wake_at.map_or(end, |at| at.min(end)).min(now + NATIVE_WAKE_SLICE);
+            std::thread::sleep(slice.saturating_duration_since(now));
+        };
+        let stepped_at = Instant::now();
+        let frame = self.step(false);
+        NativeWake { cause, frame, stepped_at: Some(stepped_at) }
+    }
+
+    /// Strict loop model (`idle`): `native_wake` until `budget` runs out, with no input.
+    fn idle(&mut self, budget: Duration) -> String {
+        let end = Instant::now().checked_add(budget).unwrap_or_else(Instant::now);
+        let (mut frames, mut redraws, mut polls, mut wakes, mut deadlines) = (0u32, 0u32, 0u32, 0u32, 0u32);
+        loop {
+            let wake = self.native_wake(end.saturating_duration_since(Instant::now()));
+            let counter = match wake.cause {
+                WakeCause::Timeout => break,
+                WakeCause::Redraw => &mut redraws,
+                WakeCause::Poll => &mut polls,
+                WakeCause::UiWaker => &mut wakes,
+                WakeCause::Deadline => &mut deadlines,
+            };
+            *counter = counter.saturating_add(1);
+            frames = frames.saturating_add(u32::from(wake.frame));
+            if Instant::now() >= end {
+                break;
+            }
+        }
+        format!(
+            "frames={frames} redraws={redraws} polls={polls} wakes={wakes} deadlines={deadlines} {}",
+            self.control_flow_text()
+        )
+    }
+
+    /// `flow=<wait|poll|wait_until> deadline_ms=<n|none>` of the last `about_to_wait`.
+    fn control_flow_text(&self) -> String {
+        let flow = self.loop_state.last_control_flow.get();
+        let (name, deadline_ms) = frame::control_flow_label(flow, Instant::now());
+        match deadline_ms {
+            Some(ms) => format!("flow={name} deadline_ms={ms}"),
+            None => format!("flow={name} deadline_ms=none"),
+        }
+    }
+
     fn step(&mut self, force: bool) -> bool {
-        frame::step_frame(&mut self.app, &self.loop_state, force)
+        self.drew_last_step = frame::step_frame(&mut self.app, &self.loop_state, force);
+        self.drew_last_step
     }
 
     fn frame_ok(&mut self) -> Response {

@@ -301,7 +301,7 @@ impl crate::app::App {
             }
         }
         self.pulse_api_cursor_blink();
-        self.ide_panel.api.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation(&self.ui_waker);
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -829,7 +829,7 @@ impl crate::app::App {
             state.mark_request_pending(request_id);
         }
         self.api_request_rx
-            .push((request_id, spawn_api_request(job)));
+            .push((request_id, spawn_api_request(job, &self.ui_waker)));
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -925,7 +925,7 @@ impl crate::app::App {
             state.mark_request_pending(request_id);
         }
         self.api_request_rx
-            .push((request_id, spawn_api_request(job)));
+            .push((request_id, spawn_api_request(job, &self.ui_waker)));
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }

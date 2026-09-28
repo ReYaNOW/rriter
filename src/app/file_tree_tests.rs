@@ -263,6 +263,7 @@ fn spawn_scan_skips_missing_roots_applies_user_patterns_and_sends_final_tree() {
         vec![root.join("missing"), root.clone()],
         expanded,
         vec!["skip*".to_string()],
+        &crate::ui_waker::UiWaker::counting(),
     );
 
     let first_message = rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap();

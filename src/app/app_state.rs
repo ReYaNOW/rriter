@@ -1313,6 +1313,8 @@ pub struct App {
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,
     pub headless_mode: bool,
+    /// Wakes the event loop when a background task delivers a result (see `ui_waker`).
+    pub(crate) ui_waker: crate::ui_waker::UiWaker,
 }
 
 #[cfg(test)]

@@ -38,6 +38,11 @@ impl HeadlessWindow {
         self.redraw_requested.swap(false, Ordering::AcqRel)
     }
 
+    /// Headless `dump`: `take_redraw_request` without consuming.
+    pub fn redraw_requested(&self) -> bool {
+        self.redraw_requested.load(Ordering::Acquire)
+    }
+
     pub fn set_size(&self, size: PhysicalSize<u32>) {
         *self.size.lock().unwrap_or_else(PoisonError::into_inner) = size;
     }

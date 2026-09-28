@@ -37,10 +37,10 @@ impl crate::app::App {
         ) else {
             return;
         };
-        let (rx, cancel) = start_project_search_worker_cancellable(request);
+        let (rx, cancel) = start_project_search_worker_cancellable(request, &self.ui_waker);
         self.ide_panel.project_search.rx = Some(rx);
         self.ide_panel.project_search.worker_cancel = Some(cancel);
-        self.ide_panel.project_search.start_preview_worker();
+        self.ide_panel.project_search.start_preview_worker(&self.ui_waker);
         self.ide_panel.project_search.dirty = false;
     }
 
@@ -61,7 +61,7 @@ impl crate::app::App {
         };
         self.ide_panel
             .project_search
-            .queue_visible_preview_requests(&layout, renderer.scale_factor)
+            .queue_visible_preview_requests(&layout, renderer.scale_factor, &self.ui_waker)
     }
 
     pub fn project_search_has_pending_previews(&self) -> bool {

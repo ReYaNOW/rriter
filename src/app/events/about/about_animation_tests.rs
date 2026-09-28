@@ -113,127 +113,44 @@
     }
 
     #[test]
-    fn about_wait_plan_prioritizes_redraw_highlight_hover_and_blink() {
+    fn about_wait_plan_prioritizes_redraw_deadlines_and_blink() {
         let now = Instant::now();
         let last_action = now - std::time::Duration::from_millis(1250);
+        let ms = std::time::Duration::from_millis;
 
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                true,
-                false,
-                false,
-                false,
-                true,
-                None,
-                false,
-                false,
-            ),
+            compute_about_wait_plan(now, last_action, true, false, false, true, None),
             AboutWaitPlan::Wait,
         );
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                true,
-                true,
-                false,
-                true,
-                None,
-                false,
-                false,
-            ),
+            compute_about_wait_plan(now, last_action, false, true, true, true, None),
             AboutWaitPlan::Wait,
         );
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                false,
-                false,
-                true,
-                true,
-                None,
-                false,
-                false,
-            ),
-            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(5)),
+            compute_about_wait_plan(now, last_action, false, false, false, true, Some(now + ms(2))),
+            AboutWaitPlan::WaitUntil(now + ms(2)),
         );
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                false,
-                false,
-                true,
-                true,
-                Some(now + std::time::Duration::from_millis(2)),
-                true,
-                false,
-            ),
-            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(2)),
+            compute_about_wait_plan(now, last_action, false, false, false, true, None),
+            AboutWaitPlan::WaitUntil(last_action + ms(1500)),
         );
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                false,
-                false,
-                false,
-                true,
-                None,
-                false,
-                false,
-            ),
-            AboutWaitPlan::WaitUntil(last_action + std::time::Duration::from_millis(1500)),
-        );
-        assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                false,
-                false,
-                false,
-                false,
-                None,
-                false,
-                false,
-            ),
+            compute_about_wait_plan(now, last_action, false, false, false, false, None),
             AboutWaitPlan::Wait,
         );
+        // No 16 ms poll any more: a real deadline is kept as is.
         assert_eq!(
-            compute_about_wait_plan(
-                now,
-                last_action,
-                false,
-                false,
-                false,
-                false,
-                false,
-                Some(now + std::time::Duration::from_millis(20)),
-                true,
-                false,
-            ),
-            AboutWaitPlan::WaitUntil(now + std::time::Duration::from_millis(16)),
+            compute_about_wait_plan(now, last_action, false, false, false, false, Some(now + ms(20))),
+            AboutWaitPlan::WaitUntil(now + ms(20)),
         );
     }
 
     #[test]
-    fn suspended_wait_plan_keeps_waking_only_while_database_job_is_pending() {
+    fn suspended_wait_plan_times_only_the_database_cancel_deadline() {
         let now = Instant::now();
-        assert!(matches!(suspended_about_wait_plan(now, false), AboutWaitPlan::Wait));
-        match suspended_about_wait_plan(now, true) {
-            AboutWaitPlan::WaitUntil(at) => {
-                assert_eq!(at, now + std::time::Duration::from_millis(100));
-            }
-            AboutWaitPlan::Wait => panic!("pending database job must keep polling while suspended"),
-        }
+        assert!(matches!(suspended_about_wait_plan(None), AboutWaitPlan::Wait));
+        let deadline = now + std::time::Duration::from_secs(2);
+        assert_eq!(suspended_about_wait_plan(Some(deadline)), AboutWaitPlan::WaitUntil(deadline));
     }
 
     #[test]

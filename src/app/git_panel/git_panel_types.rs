@@ -1225,7 +1225,7 @@ struct GitStageCommand {
     operation: GitStageOperation,
     workspaces: Vec<PathBuf>,
     branch_ahead_cache: BranchAheadCache,
-    tx: mpsc::Sender<GitPanelTaskResult>,
+    tx: crate::ui_waker::WakeSender<GitPanelTaskResult>,
 }
 
 enum GitAction {

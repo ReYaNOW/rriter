@@ -15,7 +15,7 @@ impl crate::app::App {
             }
             return;
         }
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.api_openapi_export_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-api-openapi-export", move || {

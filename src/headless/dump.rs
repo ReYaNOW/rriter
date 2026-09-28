@@ -1,6 +1,7 @@
 //! Headless confirmation dialog (centered in the main frame instead of a second window)
 //! and the `dump` command: a compact JSON snapshot of the UI state.
 
+use crate::app::events::host_loop::HeadlessLoopState;
 use crate::app::{App, MarkdownMode, PanelGroup, PanelId, PendingAction};
 use crate::editor::Editor;
 use crate::platform::ExternalRequest;
@@ -77,8 +78,27 @@ pub(crate) fn draw_dialog(renderer: &mut Renderer, base_title: &str, w: u32, h: 
     renderer.resize(w, h);
 }
 
+/// The last `about_to_wait` decision of the event loop and what would wake it next.
+fn event_loop_json(app: &App, loop_state: &HeadlessLoopState, now: Instant) -> Value {
+    let (control_flow, deadline_ms) =
+        super::frame::control_flow_label(loop_state.last_control_flow.get(), now);
+    let redraw_requested = app
+        .window
+        .as_ref()
+        .and_then(|window| window.headless())
+        .is_some_and(|window| window.redraw_requested());
+    json!({
+        "control_flow": control_flow,
+        "deadline_ms": deadline_ms,
+        "awaiting_background": loop_state.awaiting_background.get(),
+        "wake_pending": app.ui_waker.is_pending(),
+        "wake_events": app.ui_waker.queued_events(),
+        "redraw_requested": redraw_requested,
+    })
+}
+
 /// JSON snapshot for `dump`. Reading it clears the recorded external request.
-pub(crate) fn dump_json(app: &mut App) -> Value {
+pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value {
     let (w, h) = app
         .window
         .as_ref()
@@ -170,6 +190,7 @@ pub(crate) fn dump_json(app: &mut App) -> Value {
             "ui": app.ui_registry.hovered().map(|id| format!("{id:?}")),
             "popup": hover_popup,
         },
+        "event_loop": event_loop_json(app, loop_state, now),
         "ui": ui,
     })
 }

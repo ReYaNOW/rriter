@@ -63,8 +63,11 @@ pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &s
     }
 }
 
-pub fn spawn_api_request(job: ApiJobRequest) -> Receiver<ApiJobResponse> {
-    let (tx, rx) = mpsc::channel();
+pub fn spawn_api_request(
+    job: ApiJobRequest,
+    ui_waker: &crate::ui_waker::UiWaker,
+) -> Receiver<ApiJobResponse> {
+    let (tx, rx) = ui_waker.channel();
     let spawn_error_response = ApiJobResponse {
         request_id: job.request_id,
         spec_id: job.spec_id,

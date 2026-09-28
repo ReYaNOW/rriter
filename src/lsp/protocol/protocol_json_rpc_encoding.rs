@@ -515,7 +515,7 @@ fn configuration_response_for(
 fn emit_workspace_diagnostic_report(
     uri: &str,
     report: &serde_json::Value,
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
     server: LspServerKind,
 ) {
     let kind = report.get("kind").and_then(|v| v.as_str()).unwrap_or("");
@@ -551,7 +551,7 @@ fn emit_workspace_diagnostic_report(
 
 fn emit_workspace_diagnostics(
     result: &serde_json::Value,
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
     server: LspServerKind,
 ) {
     let Some(items) = result.get("items").and_then(|v| v.as_array()) else {
@@ -589,7 +589,7 @@ fn rpc_reply_id_json(value: Option<&serde_json::Value>) -> Option<String> {
 #[cfg(test)]
 pub(super) fn dispatch_frame(
     body: &[u8],
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
     server_name: &'static str,
     out_tx: &Sender<Vec<u8>>,
     pending_requests: &Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
@@ -600,7 +600,7 @@ pub(super) fn dispatch_frame(
 
 pub(super) fn dispatch_frame_for_server(
     body: &[u8],
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn crate::ui_waker::EventSink<LspEvent>,
     server: LspServerKind,
     server_name: &'static str,
     out_tx: &Sender<Vec<u8>>,

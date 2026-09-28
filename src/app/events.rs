@@ -328,7 +328,7 @@ impl App {
     }
 }
 
-impl ApplicationHandler for App {
+impl ApplicationHandler<crate::ui_waker::AppWake> for App {
     // Coverage rationale: OS window, GL context, swapchain, and renderer
     // initialization are isolated in the window runtime boundary.
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -648,6 +648,10 @@ impl ApplicationHandler for App {
             _ => (),
         }
     }
+
+    /// A background task delivered a result. Nothing to do here: winit runs
+    /// `about_to_wait` after this batch, and that pass drains the channels.
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: crate::ui_waker::AppWake) {}
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {

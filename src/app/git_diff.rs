@@ -689,7 +689,7 @@ impl App {
     }
 
     fn spawn_git_diff_load(&mut self, meta: GitDiffTabMeta, version: u64, staged: bool) {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.git_diff_rx.push(GitDiffReceiver {
             meta: meta.clone(),
             version,
@@ -1177,7 +1177,7 @@ impl App {
         }
 
         if let Some((repo_root, file)) = self.current_git_file_entry() {
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = self.ui_waker.channel();
             self.inline_git_diff_rx = Some(rx);
             let editor_version = self.editor.version;
             let file_extension = self.file_extension.clone();

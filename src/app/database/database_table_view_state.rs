@@ -57,8 +57,7 @@ impl DatabaseTableTabState {
             self.grid.loading_chunk = false;
             self.grid.in_flight_chunk = None;
             self.grid.desired_chunk = None;
-            self.grid.refreshing = true;
-            self.grid.refresh_started = Some(std::time::Instant::now());
+            self.grid.start_refresh(std::time::Instant::now());
         } else {
             self.grid.clear_loaded_rows();
             self.grid.count = None;

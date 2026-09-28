@@ -737,7 +737,7 @@ impl crate::app::App {
             self.sync_api_one_line_scroll_target(true);
         }
         self.pulse_api_cursor_blink();
-        self.ide_panel.api.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation(&self.ui_waker);
     }
 
     pub(crate) fn drag_api_text_cursor_from_last_mouse(&mut self) -> bool {
@@ -831,7 +831,7 @@ impl crate::app::App {
             }
         }
         self.pulse_api_cursor_blink();
-        self.ide_panel.api.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation(&self.ui_waker);
         true
     }
 
@@ -947,7 +947,7 @@ impl crate::app::App {
         self.ide_panel.lsp_log_filter_focused = false;
         self.ide_panel.file_tree_focused = false;
         self.pulse_api_cursor_blink();
-        self.ide_panel.api.queue_api_body_json_validation();
+        self.ide_panel.api.queue_api_body_json_validation(&self.ui_waker);
     }
 
 }

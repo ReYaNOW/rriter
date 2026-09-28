@@ -311,7 +311,7 @@ impl App {
 
     fn ensure_database_runtime(&mut self) -> io::Result<&DatabaseRuntime> {
         if self.database_runtime.is_none() {
-            self.database_runtime = Some(DatabaseRuntime::spawn()?);
+            self.database_runtime = Some(DatabaseRuntime::spawn(&self.ui_waker)?);
         }
         self.database_runtime.as_ref().ok_or_else(|| {
             io::Error::new(io::ErrorKind::Other, "database runtime was not initialized")
@@ -337,7 +337,7 @@ impl App {
         self.ide_panel.database.prune_cancelled_jobs(now);
         let cancel_timed_out = self.ide_panel.database.cancel_timed_out(
             now,
-            std::time::Duration::from_secs(2),
+            crate::app::database::DATABASE_CANCEL_CONFIRM_TIMEOUT,
         );
         if !runtime_alive || cancel_timed_out {
             let message = if runtime_alive {

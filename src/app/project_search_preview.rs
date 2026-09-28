@@ -43,9 +43,11 @@ pub struct ProjectSearchPreviewWorker {
     pub rx: Receiver<ProjectSearchPreviewWorkerMessage>,
 }
 
-pub fn start_project_search_preview_worker() -> std::io::Result<ProjectSearchPreviewWorker> {
+pub fn start_project_search_preview_worker(
+    ui_waker: &crate::ui_waker::UiWaker,
+) -> std::io::Result<ProjectSearchPreviewWorker> {
     let (request_tx, request_rx) = channel::<ProjectSearchPreviewRequest>();
-    let (message_tx, message_rx) = channel::<ProjectSearchPreviewWorkerMessage>();
+    let (message_tx, message_rx) = ui_waker.channel::<ProjectSearchPreviewWorkerMessage>();
     crate::platform::spawn_named("rriter-project-search-preview", move || {
         run_project_search_preview_worker(request_rx, message_tx);
     })?;
@@ -62,9 +64,9 @@ impl ProjectSearchState {
         self.preview_pending.clear();
     }
 
-    pub fn start_preview_worker(&mut self) {
+    pub fn start_preview_worker(&mut self, ui_waker: &crate::ui_waker::UiWaker) {
         self.reset_preview_worker();
-        match start_project_search_preview_worker() {
+        match start_project_search_preview_worker(ui_waker) {
             Ok(worker) => {
                 self.preview_tx = Some(worker.tx);
                 self.preview_rx = Some(worker.rx);
@@ -112,6 +114,7 @@ impl ProjectSearchState {
         &mut self,
         layout: &ProjectSearchLayout,
         scale: f32,
+        ui_waker: &crate::ui_waker::UiWaker,
     ) -> bool {
         if self.flat_rows.is_empty() || self.preview_tx.is_none() {
             return false;
@@ -154,7 +157,7 @@ impl ProjectSearchState {
             let request = preview_request_for_match(self.generation, key, path, mat);
             if tx.send(request).is_err() {
                 self.reset_preview_worker();
-                self.start_preview_worker();
+                self.start_preview_worker(ui_waker);
                 self.error.get_or_insert_with(|| {
                     "Предпросмотр поиска был перезапущен после сбоя".to_string()
                 });
@@ -225,7 +228,7 @@ fn preview_request_for_match(
 
 fn run_project_search_preview_worker(
     rx: Receiver<ProjectSearchPreviewRequest>,
-    tx: Sender<ProjectSearchPreviewWorkerMessage>,
+    tx: crate::ui_waker::WakeSender<ProjectSearchPreviewWorkerMessage>,
 ) {
     let mut cached_path: Option<PathBuf> = None;
     let mut cached_text = String::new();

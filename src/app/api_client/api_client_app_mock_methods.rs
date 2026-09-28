@@ -23,7 +23,7 @@ impl crate::app::App {
             return;
         }
         self.sync_api_mock_proxy_base_to_active_server();
-        self.ide_panel.api.start_api_mock_server();
+        self.ide_panel.api.start_api_mock_server(&self.ui_waker);
     }
 
     /// Active API tab identity passed to `ApiClientState` mock route lookups.
@@ -578,6 +578,8 @@ impl crate::app::App {
         self.ide_panel.api.mock_highlight_target = Some((route_idx, part, version));
         let source = virtual_source.source.clone();
         self.ide_panel.api.mock_highlighter.spans.clear();
+        // `ApiClientState` is rebuilt from disk on IDE entry, so bind at the request site.
+        self.ide_panel.api.mock_highlighter.bind_ui_waker(&self.ui_waker);
         self.ide_panel
             .api
             .mock_highlighter
@@ -777,7 +779,7 @@ impl crate::app::App {
         self.ide_panel.api.begin_api_mock_ty_check(route_idx, version);
         let runtime = self.ide_panel.api.mock.uv.runtime_config();
         self.api_mock_ty_rx = Some(spawn_api_mock_ty_check(
-            route_idx, version, runtime, method, path, route, model, script,
+            route_idx, version, runtime, method, path, route, model, script, &self.ui_waker,
         ));
     }
 

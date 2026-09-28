@@ -664,7 +664,7 @@ impl App {
         let expanded = self.ide_panel.file_tree_expanded.clone();
         let patterns = self.ide_ignore_patterns.clone();
         self.ide_panel.file_tree_error = None;
-        self.file_tree_rx = Some(spawn_scan(roots, expanded, patterns));
+        self.file_tree_rx = Some(spawn_scan(roots, expanded, patterns, &self.ui_waker));
     }
 
     /// Поллит канал результатов фонового скана.
@@ -825,7 +825,7 @@ impl App {
             self.file_tree_watched_dirs.clear();
             return;
         }
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         let (stop_tx, stop_rx) = mpsc::channel();
         self.file_tree_notify_rx = Some(rx);
         self.file_tree_watcher_stop_tx = Some(stop_tx);
