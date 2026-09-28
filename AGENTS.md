@@ -5,11 +5,10 @@ RRiter agent rules. Strict mode. Small patches. Fast UI first. Prefer the most p
 Read on demand, not upfront:
 
 * `PROJECT_GUIDE.md` — architecture (§2), detailed file guide (§3), compact file index (§4). Read only the section you need.
-* `docs/agents/code-review-graph.md` — graph tool manual, when you decide to use the graph.
 * `docs/agents/chat-workflow.md` — only when working without file access (chat, exact-substring patch parser).
 * `docs/agents/subagent-rules.md` — common rules for every subagent; a brief points to it instead of repeating them. Reason: the same ~1k-character block was copied into each brief (27.09).
 * UI checks headless: `python3 scripts/rriter_headless.py shot <file>` prints the PNG path; protocol, `dump`, `bench` — `docs/headless.md`. It drives the prebuilt release binary (`target/x86_64-unknown-linux-gnu/release/rriter`, `make fast` if missing), so real UI behaviour for writing or fixing UI tests is established from `dump`/`shot` on that binary, without cargo; `make codex_test` once at the end (§4). Reason: every `make test` relinks the test binary for minutes, and an agent that re-runs it after each fix spends an hour on a quarter of the work (26.09).
-* Delegating UI-test work: size each agent by scenarios, not by file — 3–5 scenarios (~10 min of driver probes) per agent, at most 6–8 agents in parallel, the rest in waves; each agent writes its scenarios to its own file or the main session merges them into the shared `ui_tests_*.rs` afterwards (never two agents editing one file at once). Reason: one agent given all tree-ops scenarios ran three times longer than its siblings with one or two, and the whole batch waited for it (26.09).
+* Delegating UI-test work: size each agent by scenarios, not by file — 3–5 scenarios (~10 min of driver probes) per agent; extending shared test infrastructure (fixture server, stub) is its own step before the test agents, and a scenario whose UI path is still unknown ("find what X supports") goes to a separate agent; at most 6–8 agents in parallel, the rest in waves; each agent writes its scenarios to its own file or the main session merges them into the shared `ui_tests_*.rs` afterwards (never two agents editing one file at once). Reason: one agent given all tree-ops scenarios ran three times longer than its siblings with one or two, and the whole batch waited for it (26.09); DB fixture extension + console tests + table-edit discovery in one agent took 25 min against 10 for its sibling (28.09).
 * Headless tests wait for async results (git, terminal, LSP, file save) with `tests_support::wait_until(session, timeout_ms, what, |s| condition)`, not a fixed `wait N`; the timeout keeps the old pause length. A fixed `wait` is only for real delays (hover dwell, animation) and negative checks ("HEAD unchanged"), where the pause gives the async action time to land. Reason: fixed `wait 8000` in 13 git tests cost 195 s of a 608 s `make codex_test` (27.09).
 * Tests run in parallel (`TEST_THREADS=8`), each in its own process (`-Z panic-abort-tests`), so a process-wide `Mutex`/lock serializes nothing between tests. Anything a test writes outside the process — state files, temp dirs, ports — must be unique per process: `cfg(test)` dirs carry `std::process::id()` (see `api_config_dir`), servers bind port 0. Reason: three fixed `/tmp/rriter_api_*` dirs kept the suite single-threaded at 11 min; per-PID dirs plus a fixed 10 s redraw loop took the tests from 646 s to 84 s at 8 threads, `make codex_test` from ~13 to ~4 min (28.09).
 
@@ -18,8 +17,7 @@ Search (`rg`-first):
 * Default: `rg -n` for symbols, strings, error text, file names. Start narrow (exact symbol or distinctive string), widen only if empty.
 * The Bash tool runs **zsh**, not bash. Bash-only syntax fails with `bad substitution` (`${var^^}`, `${!var}`, `mapfile`), and an unmatched glob aborts the whole command with `no matches found` instead of passing the pattern through. Keep commands POSIX-ish, or quote the glob and let the tool expand it.
 * Read only the files/ranges the search points to. Always read exact source before editing.
-* `code-review-graph` MCP is optional: use it when `rg` answers poorly — callers of a widely used function before changing its behavior, test ownership, impact of a multi-file change. Never a mandatory first step.
-* Graph output is an index, not source. Rust `include!`-split files can return false `0` callers; verify with `rg`.
+* No code-graph tool: `rg` plus the compiler (`cargo check` errors) answer callers and impact. Reason: the graph went stale after every refactor and gave false `0` callers on `include!`-split files (28.09).
 
 ## 1. Role
 
@@ -69,11 +67,6 @@ Allowed shell commands:
 * `make api-map` if still present
 * `python3 scripts/build_windows.py --self-test`
 * `python3 scripts/build_macos.py --self-test`
-* `code-review-graph status`
-* `code-review-graph update`
-* `code-review-graph update --brief`
-* `code-review-graph detect-changes --brief`
-* `code-review-graph build` only when graph is missing/stale/broken or after structural source changes
 * Read-only inspection commands that stay in project root
 * Subagent finds a bug outside its task (other function/module, not blocking the task): do not fix it — add a `#[ignore = "bug: …"]` test if cheap, and put cause (`file:line`) and repro in the report; the main session decides and dispatches the fix. Fix in place only when the bug sits in the code you are already changing or blocks your task. Reason: side fixes land unreviewed, collide with parallel agents' files, and stretch the task toward its turn limit.
 * Branches, commits, PRs — only the main session; subagents never commit. Decide yourself, and don't shy away from branches:
@@ -97,7 +90,7 @@ Only one agent builds or tests at a time, in the main checkout where `target/` i
 
 If you are in SuperPowers workflow, you can run tests how you like, you can ignore later required make codex_test 
 
-Bug fix path: `rg` (graph optional for callers/impact) -> read exact source -> find root cause -> minimal patch -> focused test -> `make codex_test` at the end.
+Bug fix path: `rg` -> read exact source -> find root cause -> minimal patch -> focused test -> `make codex_test` at the end.
 
 Primary success check after edits:
 
@@ -247,7 +240,7 @@ src/editor_navigation.rs
 
 Before editing hot files:
 
-1. Find callers of the edited function (`rg`, or graph `callers_of` for widely used helpers).
+1. Find callers of the edited function (`rg`).
 2. Check callees if the logic delegates.
 3. Keep the patch allocation-light and run the focused tests for the module.
 

@@ -445,6 +445,8 @@ def _classify_sql(sql: str) -> str | None:
         return "explain"
     if lower.startswith("update public.") and _references_fixture_table(lower) and " returning " in lower:
         return "update_returning"
+    if lower.startswith("create table public."):
+        return "create_table"
     if lower.startswith("select ") and _references_fixture_table(lower):
         return "user_select"
     return None
@@ -547,21 +549,41 @@ def _shape_for_sql(sql: str) -> _StatementShape:
         return _StatementShape(family, (), (_Column("QUERY PLAN", OID_TEXT, -1),))
     if family == "update_returning":
         highest = max((int(value) for value in re.findall(r"\$(\d+)", sql)), default=0)
-        return _StatementShape(
-            family,
-            tuple(OID_TEXT for _ in range(highest)),
-            (
+        returning_match = re.search(
+            r"\breturning\s+(.+)$", normalize_sql(sql), re.IGNORECASE
+        )
+        returning = (
+            [part.strip().strip('"').lower() for part in returning_match.group(1).split(",")]
+            if returning_match
+            else []
+        )
+        columns = (
+            tuple(
+                _Column(
+                    column,
+                    {"id": OID_INT4, "name": OID_TEXT, "active": OID_BOOL}[column],
+                    {"id": 4, "name": -1, "active": 1}[column],
+                )
+                for column in returning
+            )
+            if returning and all(column in {"id", "name", "active"} for column in returning)
+            else (
                 _Column("id", OID_TEXT, -1),
                 _Column("name", OID_TEXT, -1),
                 _Column("active", OID_TEXT, -1),
                 _Column("__rriter_xmin", OID_TEXT, -1),
-            ),
+            )
+        )
+        return _StatementShape(
+            family,
+            tuple(OID_TEXT for _ in range(highest)),
+            columns,
         )
     return _StatementShape(family, (), ())
 
 
 class LocalPostgresFixture:
-    """Loopback PostgreSQL protocol fixture with per-connection deterministic state."""
+    """Loopback PostgreSQL protocol fixture with shared deterministic database state."""
 
     def __init__(
         self,
@@ -583,6 +605,8 @@ class LocalPostgresFixture:
             )
             for index in range(1, row_count + 1)
         )
+        self._rows = {row.id: row for row in self._base_rows}
+        self._created_tables: set[str] = set()
         self._lock = threading.Lock()
         self._stop_event = threading.Event()
         self._listener: socket.socket | None = None
@@ -812,8 +836,9 @@ class _FixtureSession:
         self.transaction_status = "I"
         self.statements: dict[str, _PreparedStatement] = {}
         self.portals: dict[str, _Portal] = {}
-        self.rows = {row.id: row for row in fixture._base_rows}
+        self.rows = fixture._rows
         self.transaction_snapshot: dict[int, _PgoItem] | None = None
+        self.created_tables_snapshot: set[str] | None = None
         self.ignore_until_sync = False
 
     def startup(self) -> bool:
@@ -1125,14 +1150,24 @@ class _FixtureSession:
         family = shape.family
         if family == "rollback":
             if self.transaction_snapshot is not None:
-                self.rows = dict(self.transaction_snapshot)
+                self.rows.clear()
+                self.rows.update(self.transaction_snapshot)
+            if self.created_tables_snapshot is not None:
+                with self.fixture._lock:
+                    self.fixture._created_tables = self.created_tables_snapshot
             self.transaction_snapshot = None
+            self.created_tables_snapshot = None
             self.transaction_status = "I"
             return _ExecutionResult((), (), "ROLLBACK")
         if family == "commit":
             if self.transaction_status == "E" and self.transaction_snapshot is not None:
-                self.rows = dict(self.transaction_snapshot)
+                self.rows.clear()
+                self.rows.update(self.transaction_snapshot)
+            if self.transaction_status == "E" and self.created_tables_snapshot is not None:
+                with self.fixture._lock:
+                    self.fixture._created_tables = self.created_tables_snapshot
             self.transaction_snapshot = None
+            self.created_tables_snapshot = None
             self.transaction_status = "I"
             return _ExecutionResult((), (), "COMMIT")
         if self.transaction_status == "E":
@@ -1141,6 +1176,8 @@ class _FixtureSession:
             if self.transaction_status != "I":
                 raise _UnsupportedSql("nested BEGIN is not supported by the fixture")
             self.transaction_snapshot = dict(self.rows)
+            with self.fixture._lock:
+                self.created_tables_snapshot = set(self.fixture._created_tables)
             self.transaction_status = "T"
             return _ExecutionResult((), (), "BEGIN")
         if family == "set_local":
@@ -1154,7 +1191,9 @@ class _FixtureSession:
             rows = ((self.fixture.database_name,),)
             return _ExecutionResult(shape.columns, rows, "SELECT 1")
         if family == "list_public_tables":
-            rows = ((PGO_TABLE_NAME, False),)
+            with self.fixture._lock:
+                table_names = tuple(sorted({PGO_TABLE_NAME, *self.fixture._created_tables}))
+            rows = tuple((name, False) for name in table_names)
             return _ExecutionResult(shape.columns, rows, "SELECT 1")
         if family == "table_metadata":
             table_name = self._required_text_parameter(parameters, 0)
@@ -1217,6 +1256,19 @@ class _FixtureSession:
             return _ExecutionResult(shape.columns, rows, "EXPLAIN")
         if family == "update_returning":
             return self._execute_update(sql, shape, parameters)
+        if family == "create_table":
+            match = re.match(
+                r"create\s+table\s+(?:if\s+not\s+exists\s+)?public\.\"?([a-z_][a-z0-9_]*)\"?\s*\(",
+                normalize_sql(sql),
+                flags=re.IGNORECASE,
+            )
+            if match is None:
+                raise _UnsupportedSql("fixture supports CREATE TABLE public.<name> (...)")
+            if match.group(1) != "ddl_probe":
+                raise _UnsupportedSql("unsupported fixture CREATE TABLE statement")
+            with self.fixture._lock:
+                self.fixture._created_tables.add(match.group(1))
+            return _ExecutionResult((), (), "CREATE TABLE")
         raise _UnsupportedSql(f"fixture does not execute SQL family {family}")
 
     def _execute_update(
@@ -1236,19 +1288,30 @@ class _FixtureSession:
             flags=re.IGNORECASE,
         )
         if match is None:
-            raise _UnsupportedSql(
-                "fixture supports only name UPDATE with PK+xmin and RETURNING"
+            raw_match = re.search(
+                r"set\s+\"?name\"?\s*=\s*'((?:''|[^'])*)'\s+"
+                r"where\s+\"?id\"?\s*=\s*(\d+)\s+returning\s+",
+                normalized,
+                flags=re.IGNORECASE,
             )
-        name_index, id_index, xmin_index = (int(value) - 1 for value in match.groups())
-        name = self._required_text_parameter(parameters, name_index)
-        row_id_text = self._required_text_parameter(parameters, id_index)
-        xmin = self._required_text_parameter(parameters, xmin_index)
-        try:
-            row_id = int(row_id_text)
-        except ValueError as error:
-            raise _UnsupportedSql("fixture UPDATE id parameter is not integer") from error
+            if raw_match is None:
+                raise _UnsupportedSql(
+                    "fixture supports only name UPDATE with PK+xmin or literal PK and RETURNING"
+                )
+            name = raw_match.group(1).replace("''", "'")
+            row_id = int(raw_match.group(2))
+            xmin = None
+        else:
+            name_index, id_index, xmin_index = (int(value) - 1 for value in match.groups())
+            name = self._required_text_parameter(parameters, name_index)
+            row_id_text = self._required_text_parameter(parameters, id_index)
+            xmin = self._required_text_parameter(parameters, xmin_index)
+            try:
+                row_id = int(row_id_text)
+            except ValueError as error:
+                raise _UnsupportedSql("fixture UPDATE id parameter is not integer") from error
         current = self.rows.get(row_id)
-        if current is None or current.xmin != xmin:
+        if current is None or (xmin is not None and current.xmin != xmin):
             return _ExecutionResult(shape.columns, (), "UPDATE 0")
         try:
             new_xmin = str(int(current.xmin) + 100_000)
@@ -1256,7 +1319,13 @@ class _FixtureSession:
             new_xmin = f"9{current.id:09d}"
         updated = replace(current, name=name, xmin=new_xmin)
         self.rows[row_id] = updated
-        row = (str(updated.id), updated.name, "true" if updated.active else "false", updated.xmin)
+        values = {
+            "id": str(updated.id),
+            "name": updated.name,
+            "active": "true" if updated.active else "false",
+            "__rriter_xmin": updated.xmin,
+        }
+        row = tuple(values[column.name] for column in shape.columns)
         return _ExecutionResult(shape.columns, (row,), "UPDATE 1")
 
     def _table_items_for_sql(self, sql: str, *, apply_limit: bool) -> list[_PgoItem]:

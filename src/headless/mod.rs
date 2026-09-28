@@ -26,6 +26,8 @@ mod ui_tests_api_mock_python;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_database_connect;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_database_edit;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_database_query;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
@@ -53,6 +55,8 @@ mod ui_tests_goto_definition;
 mod ui_tests_keyboard_panels;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_layout;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_lsp_servers;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_markdown;
 #[cfg(all(test, target_os = "linux"))]
