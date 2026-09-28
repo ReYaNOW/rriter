@@ -41,7 +41,10 @@ def record_start() -> None:
 
 def main() -> None:
     record_start()
-    crash_after_initialize = "_crash" in Path(sys.argv[0]).stem
+    mode = Path(sys.argv[0]).stem
+    crash_after_initialize = "_crash" in mode
+    long_hover = "_long" in mode
+    publish_diagnostics = "_diagnostics" in mode
     while message := read_message():
         method = message.get("method")
         request_id = message.get("id")
@@ -50,7 +53,12 @@ def main() -> None:
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "result": {"capabilities": {"hoverProvider": True}},
+                    "result": {
+                        "capabilities": {
+                            "hoverProvider": True,
+                            "inlayHintProvider": True,
+                        }
+                    },
                 }
             )
         elif method == "initialized" and crash_after_initialize:
@@ -60,12 +68,43 @@ def main() -> None:
         elif method == "exit":
             return
         elif method == "textDocument/hover":
+            hover_text = "Fake hover from LSP stub for hover_subject"
+            if long_hover:
+                hover_text = "\n".join(
+                    [hover_text, *(f"Detail {line}: hover_subject documentation." for line in range(32))]
+                )
             write_message(
                 {
                     "jsonrpc": "2.0",
                     "id": request_id,
                     "result": {
-                        "contents": {"kind": "markdown", "value": "Fake hover from LSP stub"}
+                        "contents": {"kind": "markdown", "value": hover_text}
+                    },
+                }
+            )
+        elif method == "textDocument/definition":
+            write_message({"jsonrpc": "2.0", "id": request_id, "result": None})
+        elif method == "textDocument/inlayHint":
+            write_message({"jsonrpc": "2.0", "id": request_id, "result": []})
+        elif method == "textDocument/didOpen" and publish_diagnostics:
+            document = message.get("params", {}).get("textDocument", {})
+            opened_uri = document.get("uri", "")
+            write_message(
+                {
+                    "jsonrpc": "2.0",
+                    "method": "textDocument/publishDiagnostics",
+                    "params": {
+                        "uri": opened_uri,
+                        "diagnostics": [
+                            {
+                                "range": {
+                                    "start": {"line": 1, "character": 11},
+                                    "end": {"line": 1, "character": 29},
+                                },
+                                "message": "Name missing_hover_name is not defined",
+                                "severity": 1,
+                            }
+                        ],
                     },
                 }
             )

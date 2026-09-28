@@ -4,6 +4,7 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
+    use crate::platform::{self, ToolKind};
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
@@ -11,6 +12,27 @@ pub(crate) mod tests_support {
     use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
+
+    pub(crate) fn install_fake_ty(
+        session: &mut HeadlessSession,
+        dir: &Path,
+        basename: &str,
+    ) -> PathBuf {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("fake_lsp_server.py");
+        let executable = dir.join(basename);
+        std::fs::copy(source, &executable)
+            .unwrap_or_else(|err| panic!("copy fake LSP server: {err}"));
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .unwrap_or_else(|err| panic!("make fake LSP server executable: {err}"));
+
+        session.app.tool_paths.set(ToolKind::Ty, Some(executable.clone()));
+        platform::configure_tool_paths(session.app.tool_paths.clone());
+        assert_eq!(platform::resolve_tool_kind(ToolKind::Ty).path, Some(executable.clone()));
+        executable
+    }
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
     const POSTGRES_FIXTURE_DATABASE: &str = "rriter_pgo";

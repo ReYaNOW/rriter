@@ -1218,6 +1218,18 @@ pub struct TrashLayout {
 }
 
 pub fn trash_layout() -> TrashLayout {
+    // Tests run one process each; a per-PID Trash keeps deletions out of the user's real Trash.
+    #[cfg(test)]
+    let root = Some(std::env::temp_dir().join(format!("rriter_trash_tests-{}", std::process::id())));
+    #[cfg(not(test))]
+    let root: Option<PathBuf> = None;
+    if let Some(root) = root {
+        return TrashLayout {
+            files_dir: root.join("files"),
+            info_dir: root.join("info"),
+            freedesktop: matches!(CURRENT_PLATFORM, PlatformKind::Linux),
+        };
+    }
     match CURRENT_PLATFORM {
         PlatformKind::Linux => {
             let data_home = std::env::var_os("XDG_DATA_HOME")
