@@ -1,3 +1,13 @@
+use crate::app::database::database_table_cell_edit_state::{
+    database_multiline_edit_may_change_text, database_table_transaction_finish_allowed,
+    database_vertical_cursor_target, edit_database_table_input, line_end_boundary,
+    line_start_boundary, next_char_boundary, previous_char_boundary,
+};
+use crate::app::database::database_table_modal_state::{
+    database_sql_preview_copy_text, database_sql_preview_scroll_metrics,
+    database_table_modal_input_mut, database_text_modal_scrolls_mut, move_read_only_cursor,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DatabaseDragUpdate {
     None,
@@ -392,98 +402,18 @@ impl App {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        let Some(metadata) = state.metadata.as_ref() else {
-            return;
-        };
-        let Some(column) = metadata.columns.get(position.column).cloned() else {
-            return;
-        };
-        if !metadata.editable || !column.editable() {
-            state.error = Some(if column.primary_key {
-                "Редактирование primary key пока отключено".to_string()
-            } else if column.type_kind == crate::app::database::DatabaseTypeKind::Bytea {
-                "Редактирование bytea отключено".to_string()
-            } else {
-                metadata
-                    .read_only_reason
-                    .clone()
-                    .unwrap_or_else(|| "Ячейка доступна только для чтения".to_string())
-            });
-            return;
-        }
-        let Some(value) = state
-            .grid
-            .row(position.row)
-            .and_then(|row| row.cells.get(position.column))
-            .map(|cell| cell.value.copy_text())
-        else {
-            return;
-        };
-        if column.type_kind == crate::app::database::DatabaseTypeKind::Boolean {
-            if let Some(row) = state.grid.row_mut(position.row)
-                && let Some(cell) = row.cells.get_mut(position.column)
-            {
-                let next = match cell.value {
-                    DatabaseCellValue::Boolean(true) => DatabaseCellValue::Boolean(false),
-                    DatabaseCellValue::Boolean(false) if column.nullable => DatabaseCellValue::Null,
-                    _ => DatabaseCellValue::Boolean(true),
-                };
-                cell.set(next);
-            }
-            return;
-        }
-        let kind = match column.type_kind {
-            crate::app::database::DatabaseTypeKind::Enum => DatabaseCellEditorKind::Enum,
-            crate::app::database::DatabaseTypeKind::Date
-            | crate::app::database::DatabaseTypeKind::Time
-            | crate::app::database::DatabaseTypeKind::Timestamp
-            | crate::app::database::DatabaseTypeKind::TimestampTz => {
-                DatabaseCellEditorKind::DateTime
-            }
-            crate::app::database::DatabaseTypeKind::Json
-            | crate::app::database::DatabaseTypeKind::Jsonb => DatabaseCellEditorKind::Multiline,
-            _ if value.len() > 256 || value.contains('\n') => DatabaseCellEditorKind::Multiline,
-            _ => DatabaseCellEditorKind::Inline,
-        };
-        if kind == DatabaseCellEditorKind::Multiline {
+        if let crate::app::database::database_table_cell_edit_state::DatabaseTableCellEditStart::Multiline {
+            position, text,
+        } = state.start_cell_edit(position) {
             self.ide_panel.database.table_modal_layout_cache.get_mut().invalidate();
             self.ide_panel.database.table_modal = Some(DatabaseTableModal::MultilineEditor {
                 tab_id,
                 position,
-                input: crate::app::database::DatabaseDialogInput::new(value),
+                input: crate::app::database::DatabaseDialogInput::new(text),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 error: None,
             });
-        } else {
-            let (calendar_year, calendar_month) =
-                crate::app::database::database_calendar_year_month(&value).unwrap_or_else(|| {
-                    let days = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map_or(0, |duration| duration.as_secs() / 86_400);
-                    let (year, month, _) =
-                        crate::app::database::civil_date_from_unix_days(days as i64);
-                    (year, month)
-                });
-            let enum_index = if kind == DatabaseCellEditorKind::Enum {
-                column
-                    .enum_values
-                    .iter()
-                    .position(|option| option == &value)
-                    .unwrap_or(0)
-            } else {
-                0
-            };
-            state.grid.cell_editor = Some(DatabaseCellEditorState {
-                position,
-                kind,
-                input: crate::app::database::DatabaseDialogInput::new(value),
-                enum_index,
-                calendar_year,
-                calendar_month,
-                error: None,
-            });
-            state.grid.focused_input = Some(DatabaseTableInputTarget::Cell);
         }
     }
 
@@ -495,33 +425,7 @@ impl App {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        let Some(editor) = state.grid.cell_editor.clone() else {
-            return;
-        };
-        let Some(column) = state
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.columns.get(editor.position.column))
-            .cloned()
-        else {
-            return;
-        };
-        match crate::app::database::parse_editor_value(editor.input.text(), &column, literal) {
-            Ok(value) => {
-                if let Some(row) = state.grid.row_mut(editor.position.row)
-                    && let Some(cell) = row.cells.get_mut(editor.position.column)
-                {
-                    cell.set(value);
-                }
-                state.grid.cell_editor = None;
-                state.grid.focused_input = None;
-            }
-            Err(error) => {
-                if let Some(editor) = state.grid.cell_editor.as_mut() {
-                    editor.error = Some(error);
-                }
-            }
-        }
+        state.commit_cell_edit(literal);
     }
 
     pub fn commit_database_table_multiline_editor(&mut self, literal: bool) {
@@ -586,31 +490,7 @@ impl App {
         let Some((meta, state)) = self.database_table_meta_state(tab_id) else {
             return Err("Вкладка таблицы закрыта".to_string());
         };
-        let metadata = state
-            .metadata
-            .as_ref()
-            .ok_or_else(|| "Metadata таблицы ещё не загружены".to_string())?;
-        let mut operations = Vec::new();
-        for chunk in state.grid.chunks.values() {
-            for row in &chunk.rows {
-                if row.state == DatabaseRowState::Deleted {
-                    operations.push(DatabaseChangePlanOperation::Delete(row.clone()));
-                } else if row.cells.iter().any(|cell| cell.dirty) {
-                    operations.push(DatabaseChangePlanOperation::Update(row.clone()));
-                }
-            }
-        }
-        for row in &state.grid.added_rows {
-            if row.state == DatabaseRowState::Added {
-                operations.push(DatabaseChangePlanOperation::Insert(row.clone()));
-            }
-        }
-        crate::app::database::build_table_change_plan(
-            metadata,
-            &meta.database_name,
-            &meta.table_name,
-            operations,
-        )
+        state.change_plan(meta)
     }
 
     pub fn preview_database_table_changes(
@@ -1391,105 +1271,45 @@ impl App {
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else {
             return;
         };
-        let Some((kind, column_index)) = state
-            .grid
-            .cell_editor
-            .as_ref()
-            .map(|editor| (editor.kind.clone(), editor.position.column))
-        else {
-            return;
-        };
-        if kind != DatabaseCellEditorKind::Enum {
-            return;
-        }
-        let option_count = state
-            .metadata
-            .as_ref()
-            .and_then(|metadata| metadata.columns.get(column_index))
-            .map_or(0, |column| column.enum_values.len());
-        let Some(editor) = state.grid.cell_editor.as_mut() else {
-            return;
-        };
-        let max_start = option_count.saturating_sub(1);
-        editor.enum_index = if next {
-            editor.enum_index.saturating_add(1).min(max_start)
-        } else {
-            editor.enum_index.saturating_sub(1)
-        };
+        state.page_cell_edit_enum_options(next);
     }
 
     pub(crate) fn select_database_table_enum_option(&mut self, option: usize) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
-        let Some(editor) = state.grid.cell_editor.as_mut() else { return; };
-        let Some(column) = state.metadata.as_ref().and_then(|metadata| metadata.columns.get(editor.position.column)) else { return; };
-        let Some(value) = column.enum_values.get(option).cloned() else { return; };
-        editor.input.set_text(value);
-        self.commit_database_table_cell_editor(tab_id, false);
+        let selected = state.select_cell_edit_enum_option(option);
+        if selected {
+            self.commit_database_table_cell_editor(tab_id, false);
+        }
     }
 
     pub(crate) fn shift_database_table_calendar_month(&mut self, delta: i32) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
-        let Some(editor) = state.grid.cell_editor.as_mut() else { return; };
-        let (year, month) = crate::app::database::database_shift_calendar_month(
-            editor.calendar_year,
-            editor.calendar_month,
-            delta,
-        );
-        editor.calendar_year = year;
-        editor.calendar_month = month;
+        state.shift_cell_edit_calendar_month(delta);
     }
 
     pub(crate) fn select_database_table_calendar_day(&mut self, day: u32) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
-        let Some(editor) = state.grid.cell_editor.as_mut() else { return; };
-        if day == 0
-            || day > crate::app::database::database_days_in_month(
-                editor.calendar_year,
-                editor.calendar_month,
-            )
-        {
-            return;
-        }
-        let current = editor.input.text().to_string();
-        let suffix = current.get(10..).filter(|_| {
-            crate::app::database::database_calendar_year_month(&current).is_some()
-        });
-        editor.input.set_text(format!(
-            "{:04}-{:02}-{day:02}{}",
-            editor.calendar_year,
-            editor.calendar_month,
-            suffix.unwrap_or("")
-        ));
+        state.select_cell_edit_calendar_day(day);
     }
 
     pub(crate) fn set_database_table_date_today(&mut self) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
-        let Some(editor) = state.grid.cell_editor.as_mut() else { return; };
         let days = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs() / 86_400);
         let (year, month, day) = crate::app::database::civil_date_from_unix_days(days as i64);
-        let current = editor.input.text().to_string();
-        let suffix = current.get(10..).filter(|_| {
-            crate::app::database::database_calendar_year_month(&current).is_some()
-        });
-        editor.calendar_year = year;
-        editor.calendar_month = month;
-        editor.input.set_text(format!(
-            "{year:04}-{month:02}-{day:02}{}",
-            suffix.unwrap_or("")
-        ));
+        state.set_cell_edit_date(year, month, day);
     }
 
     pub(crate) fn set_database_table_time_now_utc(&mut self) {
         let Some(tab_id) = self.active_database_table_tab_id() else { return; };
         let Some((_, state)) = self.database_table_meta_state_mut(tab_id) else { return; };
         let Some(metadata) = state.metadata.as_ref() else { return; };
-        let Some(editor) = state.grid.cell_editor.as_mut() else { return; };
+        let Some(editor) = state.grid.cell_editor.as_ref() else { return; };
         let Some(column) = metadata.columns.get(editor.position.column) else { return; };
         let seconds = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1500,8 +1320,6 @@ impl App {
         let minute = (seconds_in_day % 3_600) / 60;
         let second = seconds_in_day % 60;
         let (year, month, day) = crate::app::database::civil_date_from_unix_days(days);
-        editor.calendar_year = year;
-        editor.calendar_month = month;
         let text = match column.type_kind {
             crate::app::database::DatabaseTypeKind::Time => {
                 format!("{hour:02}:{minute:02}:{second:02}")
@@ -1513,92 +1331,20 @@ impl App {
                 "{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}"
             ),
         };
-        editor.input.set_text(text);
+        state.set_cell_edit_time_text(text, year, month);
     }
 
     pub(crate) fn start_database_sql_preview_scroll_drag(&mut self, horizontal: bool) {
-        let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| {
-            (renderer.last_mouse_x, renderer.last_mouse_y)
-        });
-        let input_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
-        let vertical_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
-        let horizontal_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
+        let mouse = self.renderer.as_ref().map_or((0.0, 0.0), |r| (r.last_mouse_x, r.last_mouse_y));
+        let input_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
+        let vertical_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
+        let horizontal_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
-            database_text_modal_scroll_snapshot(
-                modal,
-                &self.ide_panel.database.table_modal_layout_cache,
-                scale,
-                self.renderer.as_mut(),
-            )
-        }) else {
-            return;
-        };
-        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
-            snapshot.line_count,
-            snapshot.max_line_width,
-            input_rect,
-            horizontal_rect,
-            vertical_rect,
-            scale,
-        );
-        let (rect, pointer, viewport, max_scroll, current, min_thumb) = if horizontal {
-            (
-                horizontal_rect,
-                mouse.0,
-                viewport_w,
-                max_x,
-                snapshot.current_x,
-                (36.0 * scale).round(),
-            )
-        } else {
-            (
-                vertical_rect,
-                mouse.1,
-                viewport_h,
-                max_y,
-                snapshot.current_y,
-                (28.0 * scale).round(),
-            )
-        };
-        let Some(rect) = rect else { return; };
-        let track_start = if horizontal { rect.0 } else { rect.1 };
-        let track_len = if horizontal { rect.2 } else { rect.3 };
-        let Some(thumb) = crate::scroll::scrollbar_thumb(
-            track_start,
-            track_len,
-            viewport,
-            viewport + max_scroll,
-            current,
-            min_thumb,
-        ) else {
-            return;
-        };
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer,
-            track_start,
-            track_len,
-            thumb,
-            max_scroll,
-            None,
-        ) else {
-            return;
-        };
-        let Some((scroll_x, scroll_y)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_mut()
-            .and_then(database_text_modal_scrolls_mut)
-        else {
-            return;
-        };
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| crate::app::database::database_table_modal_state::text_modal_scroll_snapshot(modal, &self.ide_panel.database.table_modal_layout_cache, scale, self.renderer.as_mut())) else { return; };
+        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(snapshot.line_count, snapshot.max_line_width, input_rect, horizontal_rect, vertical_rect, scale);
+        let pointer = if horizontal { mouse.0 } else { mouse.1 };
+        let Some((drag_offset, target)) = crate::app::database::database_table_modal_state::text_modal_scroll_drag_start(horizontal, pointer, horizontal_rect, vertical_rect, viewport_w, viewport_h, max_x, max_y, snapshot.current_x, snapshot.current_y, scale) else { return; };
+        let Some((scroll_x, scroll_y)) = self.ide_panel.database.table_modal.as_mut().and_then(database_text_modal_scrolls_mut) else { return; };
         let scroll = if horizontal { scroll_x } else { scroll_y };
         crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
     }
@@ -1608,97 +1354,15 @@ impl App {
         mouse_x: f32,
         mouse_y: f32,
     ) -> bool {
-        let input_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
-        let vertical_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
-        let horizontal_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
+        let input_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalInput);
+        let vertical_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
+        let horizontal_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
-            database_text_modal_scroll_snapshot(
-                modal,
-                &self.ide_panel.database.table_modal_layout_cache,
-                scale,
-                self.renderer.as_mut(),
-            )
-        }) else {
-            return false;
-        };
-        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(
-            snapshot.line_count,
-            snapshot.max_line_width,
-            input_rect,
-            horizontal_rect,
-            vertical_rect,
-            scale,
-        );
-        let target = if snapshot.dragging_y {
-            let Some((_, track_y, _, track_h)) = vertical_rect else {
-                return false;
-            };
-            let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_y,
-                track_h,
-                viewport_h,
-                viewport_h + max_y,
-                snapshot.current_y,
-                (28.0 * scale).round(),
-            ) else {
-                return false;
-            };
-            crate::scroll::scrollbar_drag_target(
-                mouse_y,
-                track_y,
-                track_h,
-                thumb,
-                max_y,
-                Some(snapshot.offset_y),
-            )
-            .map(|(_, target)| (false, target))
-        } else if snapshot.dragging_x {
-            let Some((track_x, _, track_w, _)) = horizontal_rect else {
-                return false;
-            };
-            let Some(thumb) = crate::scroll::scrollbar_thumb(
-                track_x,
-                track_w,
-                viewport_w,
-                viewport_w + max_x,
-                snapshot.current_x,
-                (36.0 * scale).round(),
-            ) else {
-                return false;
-            };
-            crate::scroll::scrollbar_drag_target(
-                mouse_x,
-                track_x,
-                track_w,
-                thumb,
-                max_x,
-                Some(snapshot.offset_x),
-            )
-            .map(|(_, target)| (true, target))
-        } else {
-            None
-        };
-        let Some((horizontal, target)) = target else {
-            return false;
-        };
-        let Some((scroll_x, scroll_y)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_mut()
-            .and_then(database_text_modal_scrolls_mut)
-        else {
-            return false;
-        };
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| crate::app::database::database_table_modal_state::text_modal_scroll_snapshot(modal, &self.ide_panel.database.table_modal_layout_cache, scale, self.renderer.as_mut())) else { return false; };
+        let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(snapshot.line_count, snapshot.max_line_width, input_rect, horizontal_rect, vertical_rect, scale);
+        let Some((horizontal, target, drag_offset)) = crate::app::database::database_table_modal_state::text_modal_scroll_drag_update(snapshot, mouse_x, mouse_y, vertical_rect, horizontal_rect, viewport_w, viewport_h, max_x, max_y, scale) else { return false; };
+        let Some((scroll_x, scroll_y)) = self.ide_panel.database.table_modal.as_mut().and_then(database_text_modal_scrolls_mut) else { return false; };
         let scroll = if horizontal { scroll_x } else { scroll_y };
-        let drag_offset = scroll.drag_offset;
         crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
         true
     }
@@ -1709,59 +1373,15 @@ impl App {
         dy: f32,
         shift: bool,
     ) -> bool {
-        let Some(input_rect) = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalInput)
-        else {
-            return false;
-        };
-        let vertical_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
-        let horizontal_rect = self
-            .ui_registry
-            .rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
+        let Some(input_rect) = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalInput) else { return false; };
+        let vertical_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScroll);
+        let horizontal_rect = self.ui_registry.rect_for(crate::ui_system::UiId::DatabaseTableModalScrollX);
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
-        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| {
-            database_text_modal_scroll_snapshot(
-                modal,
-                &self.ide_panel.database.table_modal_layout_cache,
-                scale,
-                self.renderer.as_mut(),
-            )
-        }) else {
-            return false;
-        };
-        let (_, _, max_x, max_y) = database_sql_preview_scroll_metrics(
-            snapshot.line_count,
-            snapshot.max_line_width,
-            Some(input_rect),
-            horizontal_rect,
-            vertical_rect,
-            scale,
-        );
-        let Some((scroll_x, scroll_y)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_mut()
-            .and_then(database_text_modal_scrolls_mut)
-        else {
-            return false;
-        };
-        if shift {
-            scroll_x.anim_speed = 7.0;
-            scroll_x.scroll_by(dy);
-            scroll_x.clamp_target(0.0, max_x);
-        } else {
-            scroll_y.anim_speed = 7.0;
-            scroll_y.scroll_by(dy);
-            scroll_y.clamp_target(0.0, max_y);
-            scroll_x.anim_speed = 7.0;
-            scroll_x.scroll_by(dx);
-            scroll_x.clamp_target(0.0, max_x);
-        }
-        true
+        let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| crate::app::database::database_table_modal_state::text_modal_scroll_snapshot(modal, &self.ide_panel.database.table_modal_layout_cache, scale, self.renderer.as_mut())) else { return false; };
+        let (_, _, max_x, max_y) = database_sql_preview_scroll_metrics(snapshot.line_count, snapshot.max_line_width, Some(input_rect), horizontal_rect, vertical_rect, scale);
+        crate::app::database::database_table_modal_state::scroll_text_modal(
+            &mut self.ide_panel.database.table_modal, dx, dy, shift, max_x, max_y,
+        )
     }
 
     pub(crate) fn start_database_table_scroll_drag(&mut self, horizontal: bool) {
@@ -1848,20 +1468,7 @@ impl App {
     }
 
     pub(crate) fn stop_database_table_modal_scroll_anims(&mut self) {
-        if let Some((scroll_x, scroll_y)) = self
-            .ide_panel
-            .database
-            .table_modal
-            .as_mut()
-            .and_then(database_text_modal_scrolls_mut)
-        {
-            if !scroll_x.is_dragging {
-                scroll_x.stop_anim();
-            }
-            if !scroll_y.is_dragging {
-                scroll_y.stop_anim();
-            }
-        }
+        self.ide_panel.database.stop_table_modal_scroll_anims();
     }
 
     pub(crate) fn finish_database_table_drag(&mut self) {
@@ -1894,392 +1501,9 @@ impl App {
 }
 
 
-#[derive(Clone, Copy, Debug)]
-struct DatabaseTextModalScrollSnapshot {
-    current_x: f32,
-    current_y: f32,
-    dragging_x: bool,
-    dragging_y: bool,
-    offset_x: f32,
-    offset_y: f32,
-    line_count: usize,
-    max_line_width: f32,
-}
-
-fn database_text_modal_scroll_snapshot(
-    modal: &DatabaseTableModal,
-    layout_cache: &std::cell::RefCell<crate::app::database::DatabaseMultilineLayoutCache>,
-    scale: f32,
-    renderer: Option<&mut crate::renderer::Renderer>,
-) -> Option<DatabaseTextModalScrollSnapshot> {
-    let (text, scroll_x, scroll_y) = match modal {
-        DatabaseTableModal::SqlPreview {
-            text,
-            scroll_x,
-            scroll_y,
-            ..
-        } => (text.as_str(), scroll_x, scroll_y),
-        DatabaseTableModal::MultilineEditor {
-            input,
-            scroll_x,
-            scroll_y,
-            ..
-        } => (input.text(), scroll_x, scroll_y),
-        _ => return None,
-    };
-
-    let mut layout_cache = layout_cache.borrow_mut();
-    if let Some(renderer) = renderer {
-        layout_cache.ensure(text, scale, true, |line| {
-            line.chars().map(|ch| renderer.char_advance(ch)).sum()
-        });
-    } else {
-        let fallback_advance = (9.0 * scale).round().max(1.0);
-        layout_cache.ensure(text, scale, false, |line| {
-            line.chars().count() as f32 * fallback_advance
-        });
-    }
-
-    Some(DatabaseTextModalScrollSnapshot {
-        current_x: scroll_x.current,
-        current_y: scroll_y.current,
-        dragging_x: scroll_x.is_dragging,
-        dragging_y: scroll_y.is_dragging,
-        offset_x: scroll_x.drag_offset,
-        offset_y: scroll_y.drag_offset,
-        line_count: layout_cache.line_count(),
-        max_line_width: layout_cache.max_line_width(),
-    })
-}
-
-fn database_text_modal_scrolls_mut(
-    modal: &mut DatabaseTableModal,
-) -> Option<(&mut crate::scroll::ScrollState, &mut crate::scroll::ScrollState)> {
-    match modal {
-        DatabaseTableModal::SqlPreview {
-            scroll_x, scroll_y, ..
-        }
-        | DatabaseTableModal::MultilineEditor {
-            scroll_x, scroll_y, ..
-        } => Some((scroll_x, scroll_y)),
-        _ => None,
-    }
-}
-
-
-fn database_sql_preview_scroll_metrics(
-    line_count: usize,
-    max_line_width: f32,
-    input_rect: Option<(f32, f32, f32, f32)>,
-    horizontal_rect: Option<(f32, f32, f32, f32)>,
-    vertical_rect: Option<(f32, f32, f32, f32)>,
-    scale: f32,
-) -> (f32, f32, f32, f32) {
-    let viewport_w = horizontal_rect
-        .map(|rect| rect.2)
-        .or_else(|| input_rect.map(|rect| rect.2))
-        .unwrap_or(1.0)
-        .max(1.0);
-    let viewport_h = vertical_rect
-        .map(|rect| rect.3)
-        .or_else(|| input_rect.map(|rect| rect.3))
-        .unwrap_or(1.0)
-        .max(1.0);
-    let line_h = (crate::app::database::DATABASE_SQL_PREVIEW_LINE_HEIGHT * scale)
-        .round()
-        .max(1.0);
-    let content_h = line_count as f32 * line_h;
-    let content_w = max_line_width + (18.0 * scale).round();
-    (
-        viewport_w,
-        viewport_h,
-        (content_w - viewport_w).max(0.0),
-        (content_h - viewport_h).max(0.0),
-    )
-}
-
-fn database_sql_preview_copy_text(modal: &DatabaseTableModal) -> Option<String> {
-    let DatabaseTableModal::SqlPreview {
-        text,
-        cursor,
-        selection_anchor,
-        ..
-    } = modal
-    else {
-        return None;
-    };
-    let Some(anchor) = selection_anchor else {
-        return Some(text.clone());
-    };
-    let start = (*anchor).min(*cursor);
-    let end = (*anchor).max(*cursor);
-    if start == end {
-        return Some(text.clone());
-    }
-    text.get(start..end).map(str::to_owned)
-}
-
-fn previous_char_boundary(text: &str, cursor: usize) -> usize {
-    let mut cursor = cursor.min(text.len());
-    if cursor == 0 {
-        return 0;
-    }
-    cursor -= 1;
-    while cursor > 0 && !text.is_char_boundary(cursor) {
-        cursor -= 1;
-    }
-    cursor
-}
-
-fn next_char_boundary(text: &str, cursor: usize) -> usize {
-    let mut cursor = cursor.min(text.len());
-    if cursor >= text.len() {
-        return text.len();
-    }
-    cursor += 1;
-    while cursor < text.len() && !text.is_char_boundary(cursor) {
-        cursor += 1;
-    }
-    cursor
-}
-
-fn database_cursor_line(text: &str, cursor: usize) -> usize {
-    text.as_bytes()[..cursor.min(text.len())]
-        .iter()
-        .filter(|byte| **byte == b'\n')
-        .count()
-}
-
-fn line_start_boundary(text: &str, cursor: usize) -> usize {
-    crate::app::database::database_multiline_lines(text)
-        .nth(database_cursor_line(text, cursor))
-        .map_or(text.len(), |(start, _)| start)
-}
-
-fn line_end_boundary(text: &str, cursor: usize) -> usize {
-    crate::app::database::database_multiline_lines(text)
-        .nth(database_cursor_line(text, cursor))
-        .map_or(text.len(), |(start, line)| start.saturating_add(line.len()))
-}
-
-fn database_vertical_cursor_target(text: &str, cursor: usize, direction: i32) -> usize {
-    let current_line = database_cursor_line(text, cursor);
-    let target_line = if direction < 0 {
-        current_line.saturating_sub(1)
-    } else {
-        current_line
-            .saturating_add(1)
-            .min(crate::app::database::database_multiline_line_count(text).saturating_sub(1))
-    };
-    if target_line == current_line {
-        return cursor.min(text.len());
-    }
-    let Some((current_start, current_text)) =
-        crate::app::database::database_multiline_lines(text).nth(current_line)
-    else {
-        return text.len();
-    };
-    let current_end = current_start.saturating_add(current_text.len());
-    let column = text[current_start..cursor.min(current_end)].chars().count();
-    let Some((target_start, target_text)) =
-        crate::app::database::database_multiline_lines(text).nth(target_line)
-    else {
-        return text.len();
-    };
-    let within_line = target_text
-        .char_indices()
-        .nth(column)
-        .map_or(target_text.len(), |(index, _)| index);
-    target_start.saturating_add(within_line)
-}
-
-fn move_read_only_cursor(
-    cursor: &mut usize,
-    selection_anchor: &mut Option<usize>,
-    target: usize,
-    selecting: bool,
-) {
-    let old_cursor = *cursor;
-    if selecting {
-        if selection_anchor.is_none() {
-            *selection_anchor = Some(old_cursor);
-        }
-    } else {
-        *selection_anchor = None;
-    }
-    *cursor = target;
-}
-
-fn database_table_modal_input_mut(
-    modal: &mut Option<DatabaseTableModal>,
-) -> Option<&mut crate::app::database::DatabaseDialogInput> {
-    match modal.as_mut()? {
-        DatabaseTableModal::CustomLimit { input, .. }
-        | DatabaseTableModal::MultilineEditor { input, .. } => Some(input),
-        _ => None,
-    }
-}
-
-fn database_multiline_edit_may_change_text(
-    physical_key: winit::keyboard::PhysicalKey,
-    logical_text: Option<&str>,
-    primary: bool,
-    text_input_allowed: bool,
-) -> bool {
-    use winit::keyboard::{KeyCode, PhysicalKey};
-    match physical_key {
-        PhysicalKey::Code(KeyCode::KeyX | KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)
-            if primary =>
-        {
-            true
-        }
-        PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete) => true,
-        _ => text_input_allowed && logical_text.is_some_and(|text| !text.is_empty()),
-    }
-}
-
-fn edit_database_table_input(
-    input: &mut crate::app::database::DatabaseDialogInput,
-    physical_key: winit::keyboard::PhysicalKey,
-    logical_text: Option<&str>,
-    primary: bool,
-    word: bool,
-    shift: bool,
-    text_input_allowed: bool,
-    paste_text: Option<String>,
-    max_bytes: usize,
-    multiline: bool,
-) -> Option<String> {
-    use winit::keyboard::{KeyCode, PhysicalKey};
-    if crate::app::single_line_input::handle_input_history_shortcut(
-        input, physical_key, primary, shift,
-    ) {
-        return None;
-    }
-    if !multiline {
-        return crate::app::single_line_input::handle_single_line_input(
-            input,
-            physical_key,
-            logical_text,
-            primary,
-            word,
-            shift,
-            text_input_allowed,
-            paste_text.as_deref(),
-            max_bytes,
-        );
-    }
-    match physical_key {
-        PhysicalKey::Code(KeyCode::KeyA) if primary => {
-            input.select_all();
-            None
-        }
-        PhysicalKey::Code(KeyCode::KeyC) if primary => input.selected_text().map(str::to_owned),
-        PhysicalKey::Code(KeyCode::KeyX) if primary => {
-            let selected = input.selected_text().map(str::to_owned);
-            if selected.is_some() {
-                input.delete_selection();
-            }
-            selected
-        }
-        PhysicalKey::Code(KeyCode::KeyV) if primary => {
-            if let Some(text) = paste_text {
-                input.insert(&text, max_bytes);
-            }
-            None
-        }
-        PhysicalKey::Code(KeyCode::Backspace) => {
-            if word {
-                input.delete_word_backward();
-            } else {
-                input.backspace();
-            }
-            None
-        }
-        PhysicalKey::Code(KeyCode::Delete) => {
-            if word {
-                input.delete_word_forward();
-            } else {
-                input.delete_forward();
-            }
-            None
-        }
-        PhysicalKey::Code(KeyCode::ArrowLeft) => {
-            if word {
-                input.move_word_left(shift);
-            } else {
-                input.move_left(shift);
-            }
-            None
-        }
-        PhysicalKey::Code(KeyCode::ArrowRight) => {
-            if word {
-                input.move_word_right(shift);
-            } else {
-                input.move_right(shift);
-            }
-            None
-        }
-        PhysicalKey::Code(KeyCode::ArrowUp) => {
-            let target = database_vertical_cursor_target(input.text(), input.cursor, -1);
-            input.set_cursor(target, shift);
-            None
-        }
-        PhysicalKey::Code(KeyCode::ArrowDown) => {
-            let target = database_vertical_cursor_target(input.text(), input.cursor, 1);
-            input.set_cursor(target, shift);
-            None
-        }
-        PhysicalKey::Code(KeyCode::Home) => {
-            let target = if primary {
-                0
-            } else {
-                line_start_boundary(input.text(), input.cursor)
-            };
-            input.set_cursor(target, shift);
-            None
-        }
-        PhysicalKey::Code(KeyCode::End) => {
-            let target = if primary {
-                input.text().len()
-            } else {
-                line_end_boundary(input.text(), input.cursor)
-            };
-            input.set_cursor(target, shift);
-            None
-        }
-        _ if text_input_allowed => {
-            if let Some(text) = logical_text {
-                if !text.is_empty() {
-                    input.insert(text, max_bytes);
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
-
-fn database_table_transaction_finish_allowed(committing: bool) -> bool {
-    !committing
-}
-
 #[cfg(test)]
 mod database_table_edit_method_tests {
     use super::*;
-
-    fn sql_preview(text: &str, cursor: usize, anchor: Option<usize>) -> DatabaseTableModal {
-        DatabaseTableModal::SqlPreview {
-            tab_id: crate::app::database::DatabaseTabId(1),
-            text: text.to_string(),
-            cursor,
-            selection_anchor: anchor,
-            spans: Vec::new(),
-            scroll_x: crate::scroll::ScrollState::new(15.0),
-            scroll_y: crate::scroll::ScrollState::new(15.0),
-        }
-    }
 
     #[test]
     fn query_drag_never_requires_a_database_table_tab() {
@@ -2290,109 +1514,6 @@ mod database_table_edit_method_tests {
         let tab_id = crate::app::database::DatabaseTabId(7);
         let table = DatabaseDragUpdate::Table(tab_id);
         assert_eq!(table.table_tab_id(), Some(tab_id));
-    }
-
-    #[test]
-    fn sql_preview_copy_prefers_the_selected_unicode_range() {
-        let text = "SELECT 'Ж';";
-        let start = text.find('Ж').unwrap();
-        let end = start + 'Ж'.len_utf8();
-        let modal = sql_preview(text, end, Some(start));
-        assert_eq!(database_sql_preview_copy_text(&modal).as_deref(), Some("Ж"));
-    }
-
-    #[test]
-    fn sql_preview_copy_without_selection_returns_the_full_query() {
-        let modal = sql_preview("SELECT 1;", 4, None);
-        assert_eq!(
-            database_sql_preview_copy_text(&modal).as_deref(),
-            Some("SELECT 1;")
-        );
-    }
-
-    #[test]
-    fn read_only_cursor_helpers_preserve_utf8_boundaries_and_lines() {
-        let text = "Жx\nSELECT";
-        assert_eq!(next_char_boundary(text, 0), 'Ж'.len_utf8());
-        assert_eq!(previous_char_boundary(text, 'Ж'.len_utf8()), 0);
-        assert_eq!(line_start_boundary(text, text.len()), 4);
-        assert_eq!(line_end_boundary(text, 0), 3);
-    }
-
-    #[test]
-    fn multiline_cursor_navigation_preserves_character_column_and_trailing_line() {
-        let text = "Жx\na\n";
-        let first_line_after_x = "Жx".len();
-        assert_eq!(database_vertical_cursor_target(text, first_line_after_x, 1), 5);
-        assert_eq!(database_vertical_cursor_target(text, 5, 1), text.len());
-        assert_eq!(database_vertical_cursor_target(text, text.len(), -1), 4);
-        assert_eq!(line_start_boundary(text, text.len()), text.len());
-        assert_eq!(line_end_boundary(text, text.len()), text.len());
-    }
-
-    #[test]
-    fn multiline_scroll_metrics_count_the_trailing_empty_line() {
-        let (_, _, _, max_y) = database_sql_preview_scroll_metrics(
-            2,
-            9.0,
-            Some((0.0, 0.0, 100.0, 26.0)),
-            None,
-            None,
-            1.0,
-        );
-        assert_eq!(max_y, 26.0);
-    }
-
-    #[test]
-    fn multiline_layout_invalidation_only_tracks_edit_capable_keys() {
-        use winit::keyboard::{KeyCode, PhysicalKey};
-
-        for key in [
-            KeyCode::ArrowLeft,
-            KeyCode::ArrowRight,
-            KeyCode::ArrowUp,
-            KeyCode::ArrowDown,
-            KeyCode::Home,
-            KeyCode::End,
-        ] {
-            assert!(!database_multiline_edit_may_change_text(
-                PhysicalKey::Code(key),
-                None,
-                false,
-                false,
-            ));
-        }
-        assert!(!database_multiline_edit_may_change_text(
-            PhysicalKey::Code(KeyCode::KeyC),
-            None,
-            true,
-            false,
-        ));
-        for key in [
-            KeyCode::Backspace,
-            KeyCode::Delete,
-        ] {
-            assert!(database_multiline_edit_may_change_text(
-                PhysicalKey::Code(key),
-                None,
-                false,
-                false,
-            ));
-        }
-        for key in [KeyCode::KeyX, KeyCode::KeyV, KeyCode::KeyZ, KeyCode::KeyY] {
-            assert!(database_multiline_edit_may_change_text(
-                PhysicalKey::Code(key),
-                None,
-                true,
-                false,
-            ));
-        }
-        assert!(database_multiline_edit_may_change_text(
-            PhysicalKey::Code(KeyCode::KeyA),
-            Some("Ж"),
-            false,
-            true,
-        ));
     }
 
     #[test]
@@ -2446,107 +1567,6 @@ mod database_table_edit_method_tests {
         scroll.update(1.0 / 60.0);
         assert!(scroll.current > current);
         assert!(scroll.current < target);
-    }
-
-    #[test]
-    fn database_modal_scrollbar_drag_is_target_only_for_both_axes() {
-        for (track_start, track_len, viewport, max_scroll, pointer_delta) in [
-            (20.0, 240.0, 180.0, 420.0, 28.0),
-            (40.0, 360.0, 280.0, 760.0, 44.0),
-        ] {
-            let current = max_scroll * 0.35;
-            let thumb = crate::scroll::scrollbar_thumb(
-                track_start,
-                track_len,
-                viewport,
-                viewport + max_scroll,
-                current,
-                28.0,
-            )
-            .expect("modal thumb");
-            let pointer = thumb.start + 6.0;
-            let (offset, _) = crate::scroll::scrollbar_drag_target(
-                pointer,
-                track_start,
-                track_len,
-                thumb,
-                max_scroll,
-                None,
-            )
-            .expect("modal drag starts");
-            let (_, target) = crate::scroll::scrollbar_drag_target(
-                pointer + pointer_delta,
-                track_start,
-                track_len,
-                thumb,
-                max_scroll,
-                Some(offset),
-            )
-            .expect("modal drag moves");
-            let mut scroll = crate::scroll::ScrollState::new(7.0);
-            scroll.jump_to(current);
-            assert!(crate::app::mouse::apply_scrollbar_drag_target(
-                &mut scroll,
-                target,
-                offset
-            ));
-            assert_eq!(scroll.current, current);
-            assert!(scroll.target > current);
-        }
-    }
-    #[test]
-    fn multiline_modal_reuses_shared_undo_and_redo_shortcuts() {
-        use winit::keyboard::{KeyCode, PhysicalKey};
-
-        let mut input = crate::app::database::DatabaseDialogInput::new("alpha");
-        input.move_end(false);
-        edit_database_table_input(
-            &mut input,
-            PhysicalKey::Code(KeyCode::KeyB),
-            Some("β"),
-            false,
-            false,
-            false,
-            true,
-            None,
-            1024,
-            true,
-        );
-        assert_eq!(input.text(), "alphaβ");
-
-        edit_database_table_input(
-            &mut input,
-            PhysicalKey::Code(KeyCode::KeyZ),
-            None,
-            true,
-            false,
-            false,
-            false,
-            None,
-            1024,
-            true,
-        );
-        assert_eq!(input.text(), "alpha");
-
-        edit_database_table_input(
-            &mut input,
-            PhysicalKey::Code(KeyCode::KeyZ),
-            None,
-            true,
-            false,
-            true,
-            false,
-            None,
-            1024,
-            true,
-        );
-        assert_eq!(input.text(), "alphaβ");
-    }
-
-    #[test]
-    fn bug_59_table_transaction_finish_rejects_duplicate_commit_or_rollback() {
-        assert!(database_table_transaction_finish_allowed(false));
-        assert!(!database_table_transaction_finish_allowed(true));
     }
 
 }

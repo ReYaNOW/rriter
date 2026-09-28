@@ -1507,6 +1507,10 @@ Entrypoints/state:
 * `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
 * `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
 * `src/app/database/database_query_app_methods.rs` -> query Run/Cancel, Explain/Analyze, Format, History, completion, result selection, close guards, transaction Apply/Rollback, and Database-settings mutation.
+* `src/app/database/database_panel_connection_state.rs`, `database_panel_job_state.rs` -> `DatabasePanelState` transitions: connection dialog/tree/context menu; job queue, cancellation, secret staging, recovery, load commands.
+* `src/app/database/database_event_state.rs` -> query/table tab transitions for Database worker events (routed by `apply_database_event`).
+* `src/app/database/database_table_view_state.rs`, `database_table_cell_edit_state.rs`, `database_table_modal_state.rs` -> `DatabaseTableTabState` view/page/filter/sort/reload transitions; cell editor, change plan, transaction finish; table modal input/scroll/copy helpers.
+* `src/app/database/database_query_result_state.rs` -> `DatabaseQueryTabState` execution plan, history and result-selection transitions.
 * `src/render_view/database_table_tab.rs` -> virtualized editable grid, two-axis smooth scrolling, pagination, typed cell editors, selection, and column resizing; render code must never perform database or filesystem I/O.
 * `src/render_view/database_table_tab_overlay.rs` -> full-app-blocking SQL preview, multiline editor, dirty confirmation, custom limit, and transaction review overlays.
 * `src/render_view/database_query_tab.rs` -> SQL toolbar, virtualized result/message/history panes, internal result tabs, and full-app-blocking user-query transaction review; render code must never execute SQL or touch persistence.
@@ -1555,7 +1559,10 @@ Entrypoints/state:
 * `src/app/git_panel/*` -> Git panel chunks split by types, App graph/actions, graph helpers, status/tests.
 * `src/app/git_diff.rs` -> Git diff state/loading and format-preserving worktree writes.
 * `src/app/git_diff_tests.rs` -> Git diff reconstruction, rollback, index/worktree encoding, and invalid-text tests.
-* `src/app/project_search.rs` -> project-wide explicit search state, include/exclude parsing, worker, fallback scanning, and results.
+* `src/app/project_search.rs` -> project-wide explicit search state, results list, filter and layout; includes the pieces below.
+* `src/app/project_search_engine.rs` -> search worker, traversal, decoding, fallback scanning, match collection.
+* `src/app/project_search_matcher.rs` -> pattern planning, include/exclude ignore matching, UTF-16 helpers.
+* `src/app/project_search_input_state.rs` -> `ProjectSearchState` keyboard/field editing, focus, cursor and scroll transitions.
 * `src/app/project_search_grep.rs` -> grep-searcher streaming backend and line-level match building for fast project search.
 * `src/app/project_search_preview.rs` -> lazy visible-row preview worker and project-search scrollbar drag math.
 * `src/app/project_search_app.rs` -> App methods for project search panel focus, worker start/poll, cursor placement, and result jumps.
@@ -1666,7 +1673,9 @@ LSP:
 
 * `src/lsp.rs` -> include shell for server lifecycle, requests, diagnostics, logs, manager state.
 * `src/lsp/lsp_process.rs` -> managed server spawn, protocol shutdown, bounded restart supervisor, and missing-tool state.
-* `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, diagnostics/log state, and explicit retry.
+* `src/lsp/lsp_manager.rs` -> manager facade, platform-aware workspace identity, server control, document notifications, and explicit retry.
+* `src/lsp/lsp_diagnostics_store.rs` -> `LspManager` diagnostics polling, storage/compaction, merged indexes and queries.
+* `src/lsp/lsp_manager_support.rs` -> source actions, shutdown/Drop, LSP text/JSON helpers.
 * `src/lsp/dart_workspace.rs` -> Dart package-root lifecycle, versioned open documents, managed `dart analyze` workspace diagnostics, and Dart-specific manager tests.
 * `src/lsp/ruff_workspace.rs` -> bounded managed `ruff check` workspace diagnostics parser/collector.
 * `src/lsp/lsp_tests.rs` -> LSP manager/process tests.

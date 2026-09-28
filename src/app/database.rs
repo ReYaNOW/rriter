@@ -7,7 +7,14 @@ mod database_runtime;
 mod database_secrets;
 mod database_ssh;
 mod database_ssh_builtin;
+mod database_event_state;
+mod database_panel_connection_state;
+mod database_panel_job_state;
+mod database_query_result_state;
 mod database_table;
+pub(crate) mod database_table_cell_edit_state;
+pub(crate) mod database_table_modal_state;
+pub(crate) mod database_table_view_state;
 
 #[allow(unused_imports)]
 pub use database_catalog::{

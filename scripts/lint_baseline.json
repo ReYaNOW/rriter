@@ -122,14 +122,12 @@
     },
     "src/app/database/database_app_event_methods.rs": {
       "cognitive_complexity": 2,
-      "collapsible_if": 2,
       "too_many_lines": 2
     },
     "src/app/database/database_app_methods.rs": {
       "field_reassign_with_default": 2,
       "io_other_error": 2,
-      "type_complexity": 2,
-      "unnecessary_lazy_evaluations": 2
+      "type_complexity": 2
     },
     "src/app/database/database_catalog.rs": {
       "struct_excessive_bools": 2,
@@ -153,9 +151,11 @@
     "src/app/database/database_table.rs": {
       "field_reassign_with_default": 2
     },
+    "src/app/database/database_table_cell_edit_state.rs": {
+      "collapsible_if": 2
+    },
     "src/app/database/database_table_edit_methods.rs": {
       "cognitive_complexity": 2,
-      "collapsible_if": 2,
       "too_many_lines": 2
     },
     "src/app/events.rs": {
@@ -237,8 +237,8 @@
       "disallowed_methods": 9
     },
     "src/app/keyboard.rs": {
-      "collapsible_if": 10,
-      "collapsible_str_replace": 6,
+      "collapsible_if": 8,
+      "collapsible_str_replace": 2,
       "unwrap_used": 10
     },
     "src/app/keyboard/editor_keys.rs": {
@@ -363,14 +363,22 @@
       "unwrap_used": 160
     },
     "src/app/project_search.rs": {
-      "cloned_ref_to_slice_refs": 1,
-      "collapsible_if": 2,
-      "field_reassign_with_default": 1,
-      "needless_return": 1,
       "obfuscated_if_else": 2,
       "struct_excessive_bools": 2
     },
+    "src/app/project_search_engine.rs": {
+      "collapsible_if": 2,
+      "needless_return": 1
+    },
     "src/app/project_search_grep.rs": {
+      "cloned_ref_to_slice_refs": 1
+    },
+    "src/app/project_search_input_state.rs": {
+      "collapsible_match": 4,
+      "collapsible_str_replace": 4,
+      "field_reassign_with_default": 1
+    },
+    "src/app/project_search_matcher.rs": {
       "cloned_ref_to_slice_refs": 1
     },
     "src/app/project_search_preview.rs": {
@@ -586,16 +594,22 @@
       "type_complexity": 4,
       "while_let_loop": 2
     },
-    "src/lsp/lsp_manager.rs": {
-      "clone_on_copy": 12,
-      "collapsible_if": 2,
+    "src/lsp/lsp_diagnostics_store.rs": {
+      "clone_on_copy": 6,
       "collapsible_match": 4,
+      "ptr_arg": 2,
+      "unwrap_or_default": 2
+    },
+    "src/lsp/lsp_manager.rs": {
+      "clone_on_copy": 6,
+      "nonminimal_bool": 4,
+      "ptr_arg": 20,
+      "struct_excessive_bools": 2
+    },
+    "src/lsp/lsp_manager_support.rs": {
+      "collapsible_if": 2,
       "empty_line_after_doc_comments": 2,
       "manual_strip": 4,
-      "nonminimal_bool": 4,
-      "ptr_arg": 22,
-      "struct_excessive_bools": 2,
-      "unwrap_or_default": 2,
       "unwrap_used": 2
     },
     "src/lsp/lsp_process.rs": {
@@ -887,23 +901,19 @@
     "src/app/app_file_behavior_tests/app_file_ui_git_api_tests.rs": 2517,
     "src/app/app_state.rs": 1627,
     "src/app/automation.rs": 3581,
-    "src/app/database/database_app_methods.rs": 1645,
     "src/app/database/database_grid.rs": 1928,
     "src/app/database/database_panel.rs": 2247,
     "src/app/database/database_query.rs": 2740,
     "src/app/database/database_runtime.rs": 1633,
-    "src/app/database/database_table_edit_methods.rs": 2552,
     "src/app/events/about.rs": 1716,
     "src/app/file_tree.rs": 1610,
     "src/app/git_panel/git_panel_status_tests.rs": 2474,
     "src/app/keyboard/editor_keys.rs": 1619,
     "src/app/markdown.rs": 1657,
     "src/app/mouse/wheel.rs": 1633,
-    "src/app/project_search.rs": 2182,
     "src/app/tool_installer.rs": 1611,
     "src/languages/python.rs": 1652,
     "src/languages/sql_analysis.rs": 1677,
-    "src/lsp/lsp_manager.rs": 2193,
     "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": 3063,
     "src/render_view/core_text.rs": 1986,
     "src/render_view/database_query_tab.rs": 1774,

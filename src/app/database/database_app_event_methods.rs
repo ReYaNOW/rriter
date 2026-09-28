@@ -1,3 +1,5 @@
+use crate::app::database::DatabaseConnectionStatus;
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl App {
     pub fn cancel_database_job(&mut self) {
@@ -160,10 +162,7 @@ impl App {
                         && meta.database_name == result.database_name
                         && meta.table_name == result.table_name
                     {
-                        state.metadata = Some(result.clone());
-                        state.loading = false;
-                        state.error = None;
-                        state.clear_unavailable_selection();
+                        state.apply_metadata_loaded_event(result.clone());
                         loaded_tabs.push(meta.tab_id);
                     }
                 }
@@ -224,10 +223,7 @@ impl App {
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
                 {
-                    state.completion = result.metadata;
-                    state.completion_loaded = true;
-                    state.analysis_editor_version = None;
-                    state.error = None;
+                    state.apply_query_completion_event(result.metadata);
                     refresh_analysis = index == self.active_tab;
                 }
                 self.finish_database_active_job(false);
@@ -238,6 +234,7 @@ impl App {
             }
             DatabaseEvent::QueryTransactionPrepared {
                 connection_id,
+                job_id,
                 transaction_id,
                 database_name,
                 console_id,
@@ -270,57 +267,28 @@ impl App {
                         )
                     };
                     if let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind {
-                        state.running = false;
-                        state.running_sql = None;
-                        state.running_started_unix_ms = 0;
-                        state.error = None;
-                        state.diagnostic = None;
-                        state.diagnostic_editor_version = None;
-                        state.editor_diagnostics =
-                            crate::app::database::database_query_editor_diagnostics(
-                                &state.analysis,
-                                None,
-                                &editor_text,
-                                &line_offsets,
-                            );
-                        state.results = result_sets;
-                        state.messages = messages;
-                        state.result_view.invalidate_review_message_layout();
-                        state.result_view.active_result = 0;
-                        state.result_view.reset_scroll();
-                        state.last_duration_ms = duration_ms;
-                        state.last_returned_rows = returned_rows;
-                        state.last_changed_rows = changed_rows;
-                        if requires_review {
-                            state.review = Some(crate::app::database::DatabaseQueryReviewState {
+                        completed_history = state.apply_query_prepared_event(
+                            DatabaseEvent::QueryTransactionPrepared {
+                                connection_id,
+                                job_id,
                                 transaction_id,
+                                database_name,
+                                console_id,
                                 sql,
                                 source_offset,
                                 started_unix_ms,
+                                result_sets,
+                                messages,
                                 deadline_unix_ms,
                                 duration_ms,
                                 returned_rows,
                                 changed_rows,
+                                requires_review,
                                 mode,
-                                finishing: false,
-                            });
-                        } else {
-                            completed_history = Some(
-                                crate::app::database::DatabaseQueryHistoryEntry {
-                                    connection_id,
-                                    database_name: database_name.clone(),
-                                    console_id,
-                                    sql,
-                                    started_unix_ms,
-                                    duration_ms,
-                                    succeeded: true,
-                                    returned_rows,
-                                    affected_rows: changed_rows,
-                                    error_summary: None,
-                                },
-                            );
-                            state.review = None;
-                        }
+                            },
+                            &editor_text,
+                            &line_offsets,
+                        );
                     }
                     self.tabs[index].syntax_errors.clear();
                     if index == self.active_tab {
@@ -354,27 +322,11 @@ impl App {
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
                 {
-                    if let Some(review) = state.review.take() {
-                        refresh_metadata = crate::languages::sql::scan_statements(&review.sql)
-                            .iter()
-                            .any(|statement| matches!(statement.kind, crate::languages::sql::SqlStatementKind::Definition));
-                        history = Some(crate::app::database::DatabaseQueryHistoryEntry {
-                            connection_id,
-                            database_name: database_name.clone(),
-                            console_id,
-                            sql: review.sql,
-                            started_unix_ms: review.started_unix_ms,
-                            duration_ms: review.duration_ms,
-                            succeeded: true,
-                            returned_rows: review.returned_rows,
-                            affected_rows: review.changed_rows,
-                            error_summary: None,
-                        });
-                    }
-                    state.running = false;
-                    if refresh_metadata {
-                        state.completion_loaded = false;
-                    }
+                    (history, refresh_metadata) = state.apply_query_committed_event(
+                        connection_id,
+                        database_name.clone(),
+                        console_id,
+                    );
                 }
                 if let Some(history) = history {
                     self.record_database_query_history(history);
@@ -394,30 +346,17 @@ impl App {
                 ..
             } => {
                 self.finish_database_active_job(false);
-                let mut history = None;
-                if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
+                let history = if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
                         meta.connection_id == connection_id && meta.console_id == console_id
                     }
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
                 {
-                    if let Some(review) = state.review.take() {
-                        history = Some(crate::app::database::DatabaseQueryHistoryEntry {
-                            connection_id,
-                            database_name,
-                            console_id,
-                            sql: review.sql,
-                            started_unix_ms: review.started_unix_ms,
-                            duration_ms: review.duration_ms,
-                            succeeded: false,
-                            returned_rows: review.returned_rows,
-                            affected_rows: review.changed_rows,
-                            error_summary: Some("Транзакция отменена пользователем".to_string()),
-                        });
-                    }
-                    state.running = false;
-                }
+                    state.apply_query_rolled_back_event(connection_id, database_name, console_id)
+                } else {
+                    None
+                };
                 if let Some(history) = history {
                     self.record_database_query_history(history);
                 }
@@ -428,36 +367,22 @@ impl App {
                 database_name,
                 console_id,
             } => {
-                let mut history = None;
-                if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
+                let history = if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
                         meta.connection_id == connection_id && meta.console_id == console_id
                     }
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
                 {
-                    if database_transaction_matches(
-                        state.review.as_ref().map(|review| review.transaction_id),
+                    state.apply_query_expired_event(
                         transaction_id,
+                        connection_id,
+                        database_name.clone(),
+                        console_id,
                     )
-                        && let Some(review) = state.review.take()
-                    {
-                        history = Some(crate::app::database::DatabaseQueryHistoryEntry {
-                            connection_id,
-                            database_name: database_name.clone(),
-                            console_id,
-                            sql: review.sql,
-                            started_unix_ms: review.started_unix_ms,
-                            duration_ms: review.duration_ms,
-                            succeeded: false,
-                            returned_rows: review.returned_rows,
-                            affected_rows: review.changed_rows,
-                            error_summary: Some("Транзакция автоматически отменена по таймауту".to_string()),
-                        });
-                        state.running = false;
-                        state.error = Some("Транзакция SQL-консоли автоматически отменена по таймауту".to_string());
-                    }
-                }
+                } else {
+                    None
+                };
                 if let Some(history) = history {
                     self.record_database_query_history(history);
                 }
@@ -469,35 +394,23 @@ impl App {
                 console_id,
                 message,
             } => {
-                let mut history = None;
-                if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
+                let history = if let Some(index) = self.tabs.iter().position(|tab| match &tab.kind {
                     EditorTabKind::DatabaseQuery(meta, _) => {
                         meta.connection_id == connection_id && meta.console_id == console_id
                     }
                     _ => false,
                 }) && let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind
-                    && database_transaction_matches(
-                        state.review.as_ref().map(|review| review.transaction_id),
-                        transaction_id,
-                    )
-                    && let Some(review) = state.review.take()
                 {
-                    let error = format!("Не удалось автоматически отменить транзакцию: {message}");
-                    history = Some(crate::app::database::DatabaseQueryHistoryEntry {
+                    state.apply_query_expiry_failed_event(
+                        transaction_id,
                         connection_id,
                         database_name,
                         console_id,
-                        sql: review.sql,
-                        started_unix_ms: review.started_unix_ms,
-                        duration_ms: review.duration_ms,
-                        succeeded: false,
-                        returned_rows: review.returned_rows,
-                        affected_rows: review.changed_rows,
-                        error_summary: Some(error.clone()),
-                    });
-                    state.running = false;
-                    state.error = Some(error);
-                }
+                        message,
+                    )
+                } else {
+                    None
+                };
                 if let Some(history) = history {
                     self.record_database_query_history(history);
                 }
@@ -534,30 +447,17 @@ impl App {
                             self.tabs[index].editor.version
                         }
                     });
-                    let syntax_errors = diagnostic
-                        .as_ref()
-                        .map(|diagnostic| vec![(diagnostic.start_byte, diagnostic.end_byte)])
-                        .unwrap_or_default();
-                    if let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind {
-                        state.running = false;
-                        state.running_sql = None;
-                        state.running_started_unix_ms = 0;
-                        state.error = Some(message.clone());
-                        state.messages.clear();
-                        state.result_view.invalidate_review_message_layout();
-                        state.diagnostic = diagnostic;
-                        state.diagnostic_editor_version = diagnostic_editor_version;
-                        state.editor_diagnostics =
-                            crate::app::database::database_query_editor_diagnostics(
-                                &state.analysis,
-                                state.diagnostic.as_ref(),
-                                &editor_text,
-                                &line_offsets,
-                            );
-                        state.review = None;
-                        state.result_view.active_result = state.results.len();
-                        state.result_view.reset_scroll();
-                    }
+                    let syntax_errors = if let EditorTabKind::DatabaseQuery(_, state) = &mut self.tabs[index].kind {
+                        state.apply_query_failed_event(
+                            &message,
+                            diagnostic,
+                            diagnostic_editor_version,
+                            &editor_text,
+                            &line_offsets,
+                        )
+                    } else {
+                        Vec::new()
+                    };
                     self.tabs[index].syntax_errors = syntax_errors.clone();
                     if index == self.active_tab {
                         self.highlighter.syntax_errors = syntax_errors;
@@ -632,7 +532,7 @@ impl App {
                         && meta.database_name == database_name
                         && meta.table_name == table_name
                     {
-                        state.grid.pending_close_after_save = false;
+                        state.apply_table_transaction_expired_event();
                     }
                 }
                 self.ide_panel.database.global_error = Some(format!(
@@ -660,10 +560,7 @@ impl App {
                         && meta.database_name == database_name
                         && meta.table_name == table_name
                     {
-                        state.grid.pending_close_after_save = false;
-                        state.error = Some(format!(
-                            "Не удалось автоматически отменить транзакцию: {message}"
-                        ));
+                        state.apply_table_transaction_expiry_failed_event(&message);
                     }
                 }
                 self.ide_panel.database.global_error = Some(format!(
@@ -739,65 +636,11 @@ impl App {
                         {
                             continue;
                         }
-                        match pending.kind {
-                            DatabasePendingJobKind::CountRows => {
-                                handled_locally = true;
-                                let filter_target = state.grid.pending_filter_error_target(false);
-                                state.grid.loading_count = false;
-                                state.grid.finish_refresh();
-                                state.grid.count_error = Some(message.clone());
-                                if state.grid.post_commit_refresh_pending {
-                                    state.error = Some(format!(
-                                        "Изменения успешно применены, но обновить данные не удалось: {message}"
-                                    ));
-                                    state.grid.post_commit_refresh_pending = false;
-                                } else if let Some(target) = filter_target {
-                                    state.grid.filter_error = Some((target, message.clone()));
-                                    state.error = None;
-                                } else {
-                                    state.error = Some(message.clone());
-                                }
-                                state.grid.abort_pending_view();
-                            }
-                            DatabasePendingJobKind::LoadChunk => {
-                                handled_locally = true;
-                                let filter_target = state.grid.pending_filter_error_target(true);
-                                state.grid.loading_chunk = false;
-                                state.grid.finish_refresh();
-                                state.grid.in_flight_chunk = None;
-                                state.grid.desired_chunk = None;
-                                if state.grid.post_commit_refresh_pending {
-                                    state.error = Some(format!(
-                                        "Изменения успешно применены, но обновить данные не удалось: {message}"
-                                    ));
-                                    state.grid.post_commit_refresh_pending = false;
-                                } else if let Some(target) = filter_target {
-                                    state.grid.filter_error = Some((target, message.clone()));
-                                    state.error = None;
-                                } else {
-                                    state.error = Some(message.clone());
-                                }
-                                state.grid.abort_pending_view();
-                            }
-                            DatabasePendingJobKind::BeginTableSave => {
-                                handled_locally = true;
-                                state.grid.pending_close_after_save = false;
-                                state.error = Some(message.clone());
-                                self.ide_panel.database.table_modal = None;
-                            }
-                            DatabasePendingJobKind::CommitTransaction
-                            | DatabasePendingJobKind::RollbackTransaction => {
-                                handled_locally = true;
-                                state.grid.pending_close_after_save = false;
-                                state.error = Some(message.clone());
-                            }
-                            DatabasePendingJobKind::LoadMetadata => {
-                                handled_locally = true;
-                                state.loading = false;
-                                state.error = Some(message.clone());
-                                state.set_unavailable_text(message.clone());
-                            }
-                            _ => {}
+                        let (handled, close_table_modal) =
+                            state.apply_table_job_failed_event(pending.kind, &message);
+                        handled_locally |= handled;
+                        if close_table_modal {
+                            self.ide_panel.database.table_modal = None;
                         }
                     }
                     if matches!(pending.kind, DatabasePendingJobKind::LoadQueryCompletion | DatabasePendingJobKind::RunUserSql) {
@@ -807,8 +650,7 @@ impl App {
                                 && pending.database_name.as_deref().is_none_or(|name| name == meta.database_name)
                             {
                                 handled_locally = true;
-                                state.running = false;
-                                state.error = Some(message.clone());
+                                state.apply_query_job_failed_event(&message);
                             }
                         }
                     }
@@ -832,27 +674,8 @@ impl App {
                     for tab in &mut self.tabs {
                         let EditorTabKind::DatabaseTable(meta, state) = &mut tab.kind else { continue; };
                         if meta.connection_id != pending.connection_id { continue; }
-                        match pending.kind {
-                            DatabasePendingJobKind::CountRows => {
-                                state.grid.loading_count = false;
-                                state.grid.finish_refresh();
-                                state.grid.abort_pending_view();
-                            },
-                            DatabasePendingJobKind::LoadChunk => {
-                                state.grid.loading_chunk = false;
-                                state.grid.finish_refresh();
-                                state.grid.in_flight_chunk = None;
-                                state.grid.abort_pending_view();
-                            }
-                            DatabasePendingJobKind::BeginTableSave => {
-                                state.grid.pending_close_after_save = false;
-                                self.ide_panel.database.table_modal = None;
-                            }
-                            DatabasePendingJobKind::CommitTransaction
-                            | DatabasePendingJobKind::RollbackTransaction => {
-                                state.grid.pending_close_after_save = false;
-                            }
-                            _ => {}
+                        if state.apply_table_job_cancelled_event(pending.kind) {
+                            self.ide_panel.database.table_modal = None;
                         }
                     }
                     if matches!(pending.kind, DatabasePendingJobKind::RunUserSql) {
@@ -915,14 +738,7 @@ impl App {
                         {
                             continue;
                         }
-                        state.grid.loading_count = false;
-                        state.grid.loading_chunk = false;
-                        state.grid.in_flight_chunk = None;
-                        state.grid.desired_chunk = None;
-                        state.grid.finish_refresh();
-                        state.grid.abort_pending_view();
-                        state.error = None;
-                        state.show_timed_notice(message.clone());
+                        state.apply_table_busy_event(&message);
                     }
                 }
                 self.ide_panel.database.global_error = None;

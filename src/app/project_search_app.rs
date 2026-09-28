@@ -1,5 +1,5 @@
 use crate::app::project_search::{
-    ProjectSearchField, ProjectSearchLayout, ProjectSearchQueryScrollAxis, ProjectSearchRequest,
+    ProjectSearchField, ProjectSearchLayout, ProjectSearchQueryScrollAxis,
     project_search_layout, project_search_line_end, project_search_query_viewport,
     start_project_search_worker_cancellable,
 };
@@ -20,7 +20,7 @@ pub(crate) fn project_search_field_for_ui_id(
 impl crate::app::App {
     pub fn open_project_search_panel(&mut self) {
         self.ide_panel.open(crate::app::PanelId::Search);
-        self.ide_panel.project_search.focused = Some(ProjectSearchField::Query);
+        self.ide_panel.project_search.set_focused_field(ProjectSearchField::Query);
         self.search_focused = false;
         self.ide_panel.term_search_focused = false;
         self.ide_panel.git.message_focused = false;
@@ -31,39 +31,12 @@ impl crate::app::App {
     }
 
     pub fn start_project_search(&mut self) {
-        let query = self.ide_panel.project_search.query_editor.get_full_text();
-        self.ide_panel.project_search.cancel_running_worker();
-        let generation = self.ide_panel.project_search.advance_generation();
-        self.ide_panel.project_search.has_run = true;
-        self.ide_panel.project_search.error = None;
-        self.ide_panel.project_search.elapsed_ms = None;
-        self.ide_panel.project_search.capped = false;
-        self.ide_panel.project_search.results.clear();
-        self.ide_panel.project_search.flat_rows.clear();
-        self.ide_panel.project_search.collapsed.clear();
-        self.ide_panel.project_search.reset_preview_worker();
-        self.ide_panel.project_search.total_matches = 0;
-        self.ide_panel.project_search.scroll.reset();
-        if self.ide_panel.project_search.focused == Some(ProjectSearchField::Filter) {
-            self.ide_panel.project_search.focused = None;
-            self.ide_panel.project_search.dragging_field = None;
-        }
-        if query.is_empty() {
-            self.ide_panel.project_search.running_generation = None;
-            self.ide_panel.project_search.rx = None;
-            self.ide_panel.project_search.worker_cancel = None;
+        let Some(request) = self.ide_panel.project_search.prepare_search_request(
+            self.ide_workspaces.clone(),
+            self.ide_ignore_patterns.clone(),
+        ) else {
             return;
-        }
-        let request = ProjectSearchRequest {
-            generation,
-            query,
-            include: self.ide_panel.project_search.include_editor.get_full_text(),
-            exclude: self.ide_panel.project_search.exclude_editor.get_full_text(),
-            case_sensitive: self.ide_panel.project_search.case_sensitive,
-            workspaces: self.ide_workspaces.clone(),
-            ignore_patterns: self.ide_ignore_patterns.clone(),
         };
-        self.ide_panel.project_search.running_generation = Some(generation);
         let (rx, cancel) = start_project_search_worker_cancellable(request);
         self.ide_panel.project_search.rx = Some(rx);
         self.ide_panel.project_search.worker_cancel = Some(cancel);
@@ -72,54 +45,11 @@ impl crate::app::App {
     }
 
     pub fn poll_project_search(&mut self) -> bool {
-        let mut messages = Vec::new();
-        let mut disconnected = false;
-        if let Some(rx) = &self.ide_panel.project_search.rx {
-            loop {
-                match rx.try_recv() {
-                    Ok(message) => messages.push(message),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
-                    }
-                }
-            }
-        }
-        let mut updated = false;
-        for message in messages {
-            updated |= self.ide_panel.project_search.apply_message(message);
-        }
-        if disconnected {
-            updated |= self.ide_panel.project_search.handle_worker_disconnect();
-        }
-        updated
+        self.ide_panel.project_search.poll_worker_messages()
     }
 
     pub fn poll_project_search_previews(&mut self) -> bool {
-        let mut messages = Vec::new();
-        let mut disconnected = false;
-        if let Some(rx) = &self.ide_panel.project_search.preview_rx {
-            loop {
-                match rx.try_recv() {
-                    Ok(message) => messages.push(message),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                        disconnected = true;
-                        break;
-                    }
-                }
-            }
-        }
-        let mut updated = false;
-        for message in messages {
-            updated |= self.ide_panel.project_search.apply_preview_message(message);
-        }
-        if disconnected {
-            self.ide_panel.project_search.handle_preview_disconnect();
-            updated = true;
-        }
-        updated
+        self.ide_panel.project_search.poll_preview_messages()
     }
 
     pub fn queue_visible_project_search_previews(&mut self) -> bool {
@@ -271,11 +201,9 @@ impl crate::app::App {
     }
 
     pub fn focus_project_search_field(&mut self, field: ProjectSearchField) {
-        if field == ProjectSearchField::Filter && !self.ide_panel.project_search.filter_enabled() {
-            self.ide_panel.project_search.focused = None;
+        if !self.ide_panel.project_search.set_focused_field(field) {
             return;
         }
-        self.ide_panel.project_search.focused = Some(field);
         self.search_focused = false;
         self.ide_panel.term_search_focused = false;
         self.ide_panel.git.message_focused = false;
@@ -377,35 +305,29 @@ impl crate::app::App {
                 current_x += adv;
             }
         }
-        editor.cursor = target;
-        if reset_anchor || editor.selection_anchor.is_none() {
-            editor.selection_anchor = Some(target);
-        }
+        self.ide_panel
+            .project_search
+            .set_field_cursor(field, target, reset_anchor);
         if field == ProjectSearchField::Query {
             self.sync_project_search_query_scroll(false);
         }
     }
 
     pub fn handle_project_search_match_click(&mut self, file_idx: usize, match_idx: usize) {
-        let Some((path, start_line, start_col, end_line, end_col)) = self
+        let Some(position) = self
             .ide_panel
             .project_search
-            .results
-            .get(file_idx)
-            .and_then(|file| {
-                file.matches.get(match_idx).map(|mat| {
-                    (
-                        file.path.clone(),
-                        mat.start_line,
-                        mat.start_col,
-                        mat.end_line,
-                        mat.end_col,
-                    )
-                })
-            })
+            .selected_match_position(file_idx, match_idx)
         else {
             return;
         };
+        let crate::app::project_search::ProjectSearchMatchPosition {
+            path,
+            start_line,
+            start_col,
+            end_line,
+            end_col,
+        } = position;
         let absolute = self.abs_path_for_workspace(&path);
         let was_active = self
             .current_abs_path()
