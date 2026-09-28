@@ -1,7 +1,23 @@
 pub(crate) fn native_picker_can_start<T>(
-    receiver: &Option<std::sync::mpsc::Receiver<T>>,
+    receiver: &Option<crate::ui_waker::OneShot<T>>,
 ) -> bool {
-    crate::platform::receiver_slot_available(receiver)
+    receiver.as_ref().is_none_or(|job| !job.is_pending())
+}
+
+pub(crate) fn poll_api_one_shot<T>(
+    receiver: &mut Option<crate::ui_waker::OneShot<T>>,
+) -> crate::platform::ReceiverPoll<T> {
+    let Some(mut job) = receiver.take() else {
+        return crate::platform::ReceiverPoll::Empty;
+    };
+    match job.poll() {
+        crate::ui_waker::OneShotState::Ready(value) => crate::platform::ReceiverPoll::Item(value),
+        crate::ui_waker::OneShotState::Pending => {
+            *receiver = Some(job);
+            crate::platform::ReceiverPoll::Empty
+        }
+        crate::ui_waker::OneShotState::Closed => crate::platform::ReceiverPoll::Disconnected,
+    }
 }
 
 impl crate::app::App {

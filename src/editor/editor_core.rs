@@ -572,6 +572,15 @@ impl Editor {
         self.update_modifications();
     }
 
+    /// A background save wrote `snapshot` (the text as it was when the save
+    /// started). That text becomes the saved baseline, so edits made while the
+    /// write was running keep the buffer dirty; `mark_saved` would take the
+    /// current text instead.
+    pub fn mark_saved_as(&mut self, snapshot: &str) {
+        self.saved_hashes = line_hashes_from_text(snapshot);
+        self.update_modifications();
+    }
+
     pub fn is_dirty(&self) -> bool {
         self.is_dirty
     }

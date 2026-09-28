@@ -78,11 +78,11 @@ impl ApiClientState {
     }
 
     fn poll_body_json_validation(&mut self) -> bool {
-        let Some(rx) = self.body_json_validation_rx.take() else {
+        let Some(mut rx) = self.body_json_validation_rx.take() else {
             return false;
         };
-        match rx.try_recv() {
-            Ok(result) => {
+        match rx.poll() {
+            crate::ui_waker::OneShotState::Ready(result) => {
                 if self.body_json_validation_pending
                     == Some((result.spec_id, result.route_idx, result.version))
                 {
@@ -96,11 +96,11 @@ impl ApiClientState {
                 });
                 true
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            crate::ui_waker::OneShotState::Closed => {
                 self.handle_json_validation_disconnect();
                 true
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            crate::ui_waker::OneShotState::Pending => {
                 self.body_json_validation_rx = Some(rx);
                 false
             }
@@ -108,45 +108,49 @@ impl ApiClientState {
     }
 
     fn poll_python_path_pick(&mut self) -> bool {
-        let Some(rx) = self.python_path_pick_rx.take() else {
+        let Some(mut rx) = self.python_path_pick_rx.take() else {
             return false;
         };
-        match rx.try_recv() {
-            Ok(result) => {
-                if let Some(path) = result.path {
-                    match result.kind {
-                        ApiPythonPathPickKind::Uv => {
-                            self.mock.uv.configured_path = Some(path);
-                            crate::app::api_mock::python_bootstrap::refresh_uv_status(&mut self.mock.uv);
-                        }
-                        ApiPythonPathPickKind::CustomPython => {
-                            self.mock.uv.custom_python_path = Some(path);
-                            crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
-                                &mut self.mock.uv,
-                            );
-                        }
-                    }
-                    self.commit_mock_config();
-                }
+        match rx.poll() {
+            crate::ui_waker::OneShotState::Ready(result) => {
+                self.apply_python_path_pick(result);
                 true
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            crate::ui_waker::OneShotState::Pending => {
                 self.python_path_pick_rx = Some(rx);
                 false
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            crate::ui_waker::OneShotState::Closed => {
                 self.handle_python_path_disconnect();
                 true
             }
         }
     }
 
+    pub(crate) fn apply_python_path_pick(&mut self, result: ApiPythonPathPickResult) {
+        if let Some(path) = result.path {
+            match result.kind {
+                ApiPythonPathPickKind::Uv => {
+                    self.mock.uv.configured_path = Some(path);
+                    crate::app::api_mock::python_bootstrap::refresh_uv_status(&mut self.mock.uv);
+                }
+                ApiPythonPathPickKind::CustomPython => {
+                    self.mock.uv.custom_python_path = Some(path);
+                    crate::app::api_mock::python_bootstrap::refresh_python_runtime_status(
+                        &mut self.mock.uv,
+                    );
+                }
+            }
+            self.commit_mock_config();
+        }
+    }
+
     fn poll_python_version_list(&mut self) -> bool {
-        let Some(rx) = self.python_version_list_rx.take() else {
+        let Some(mut rx) = self.python_version_list_rx.take() else {
             return false;
         };
-        match rx.try_recv() {
-            Ok(result) => {
+        match rx.poll() {
+            crate::ui_waker::OneShotState::Ready(result) => {
                 self.mock_python_versions_loading = false;
                 self.python_version_list_cancel = None;
                 if let Some(error) = result.error {
@@ -157,11 +161,11 @@ impl ApiClientState {
                 }
                 true
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            crate::ui_waker::OneShotState::Pending => {
                 self.python_version_list_rx = Some(rx);
                 false
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            crate::ui_waker::OneShotState::Closed => {
                 self.handle_python_versions_disconnect();
                 true
             }

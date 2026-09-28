@@ -14,6 +14,9 @@ use std::path::Path;
 use std::path::PathBuf;
 #[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(target_os = "linux")]
+use std::time::Duration;
 
 #[cfg(any(windows, target_os = "macos", test))]
 #[cfg_attr(test, allow(dead_code))]
@@ -240,29 +243,29 @@ fn encode_elevated_text(text: &str, format: TextFileFormat) -> io::Result<Vec<u8
     encode_text(text, format)
 }
 
-pub fn write_text_file_elevated(path: &Path, text: &str, format: TextFileFormat) -> io::Result<()> {
+/// `ErrorKind::Interrupted`: the caller requested cancellation (app shutdown).
+fn elevated_save_cancelled() -> io::Error {
+    io::Error::new(io::ErrorKind::Interrupted, "elevated save was cancelled")
+}
+
+/// Blocking elevated write; run it off the UI thread. `cancel` is checked before
+/// the elevation prompt starts and, on Linux, while pkexec runs: the managed
+/// process tree then gets a graceful stop and is killed after
+/// `PKEXEC_TERMINATE_GRACE`. The native Windows/macOS helpers are not
+/// interruptible once started.
+pub fn write_text_file_elevated(
+    path: &Path,
+    text: &str,
+    format: TextFileFormat,
+    cancel: &AtomicBool,
+) -> io::Result<()> {
     let bytes = encode_elevated_text(text, format)?;
+    if cancel.load(Ordering::Acquire) {
+        return Err(elevated_save_cancelled());
+    }
     #[cfg(target_os = "linux")]
     {
-        let mut command = Command::new("pkexec");
-        command
-            .arg("tee")
-            .arg(path)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let mut child = command.spawn()?;
-        if let Some(mut stdin) = child.stdin.take() {
-            stdin.write_all(&bytes)?;
-        }
-        let status = child.wait()?;
-        if status.success() {
-            return Ok(());
-        }
-        return Err(io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            "elevated file replacement was rejected",
-        ));
+        return write_with_pkexec(path, bytes, cancel);
     }
     #[cfg(any(windows, target_os = "macos"))]
     {
@@ -275,6 +278,54 @@ pub fn write_text_file_elevated(path: &Path, text: &str, format: TextFileFormat)
             io::ErrorKind::Unsupported,
             "elevated file replacement is not supported on this platform",
         ))
+    }
+}
+
+#[cfg(target_os = "linux")]
+const PKEXEC_POLL_INTERVAL: Duration = Duration::from_millis(50);
+#[cfg(target_os = "linux")]
+const PKEXEC_TERMINATE_GRACE: Duration = Duration::from_millis(500);
+
+#[cfg(target_os = "linux")]
+fn write_with_pkexec(path: &Path, bytes: Vec<u8>, cancel: &AtomicBool) -> io::Result<()> {
+    let mut command = Command::new("pkexec");
+    command
+        .arg("tee")
+        .arg(path)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = super::ManagedChild::spawn(&mut command)?;
+    // pkexec reads stdin only after authentication: a payload larger than the pipe
+    // buffer would block a direct write past a cancel request, so a feeder thread
+    // writes it and closes stdin (EOF for tee) when done.
+    let feeder = match child.take_stdin() {
+        Some(mut stdin) => Some(super::spawn_named("rriter-elevated-save-stdin", move || {
+            stdin.write_all(&bytes)
+        })?),
+        None => None,
+    };
+    let status = loop {
+        if let Some(status) = child.wait_timeout(PKEXEC_POLL_INTERVAL)? {
+            break status;
+        }
+        if cancel.load(Ordering::Acquire) {
+            child.terminate(PKEXEC_TERMINATE_GRACE)?;
+            // The feeder is not joined: a root tee that survived the group signal may
+            // still hold the pipe; the thread ends with the write or with EPIPE.
+            return Err(elevated_save_cancelled());
+        }
+    };
+    if !status.success() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "elevated file replacement was rejected",
+        ));
+    }
+    match feeder.map(|feeder| feeder.join()) {
+        None | Some(Ok(Ok(()))) => Ok(()),
+        Some(Ok(Err(error))) => Err(error),
+        Some(Err(_)) => Err(io::Error::other("elevated save input writer panicked")),
     }
 }
 

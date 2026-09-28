@@ -915,10 +915,18 @@ fn api_request_response_wakes_the_ui_loop() {
         resolved_host: None,
     };
     let ui_waker = crate::ui_waker::UiWaker::counting();
-    let rx = spawn_api_request(job, &ui_waker);
-    let response = rx
-        .recv_timeout(std::time::Duration::from_secs(10))
-        .expect("API worker response");
+    let mut rx = spawn_api_request(job, &ui_waker).expect("API worker starts");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let response = loop {
+        match rx.poll() {
+            crate::ui_waker::OneShotState::Ready(response) => break response,
+            crate::ui_waker::OneShotState::Pending => {
+                assert!(std::time::Instant::now() < deadline, "API worker response");
+                std::thread::yield_now();
+            }
+            crate::ui_waker::OneShotState::Closed => panic!("API worker closed without a response"),
+        }
+    };
     assert_eq!(response.request_id, 9);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while ui_waker.take_events() == 0 {

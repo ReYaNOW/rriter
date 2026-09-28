@@ -442,6 +442,7 @@ Implementation is split through `include!`:
 * `src/app/app_ide_tab_methods.rs` -> IDE mode startup, tab titles, reveal/current tab sync.
 * `src/app/app_file_tab_methods.rs` -> file/tab open, save, switch, highlight wait.
 * `src/app/app_window_external_methods.rs` -> window title, search, close, external file changes.
+* `src/app/protected_save.rs` -> elevated background saves, per-path serialization, completion and shutdown.
 * `src/app/markdown.rs` -> per-tab Markdown mode/semantic/selection state, lazy incremental parser cache, central mode API, and focused shared-scroll regressions.
 * `src/app/markdown_scroll_transition.rs` -> included shared vertical-scroll transition layer: source-anchor rebase, cold-layout pending state, and short-lived carry-over for lossy Read/Edit projections; the authoritative physics remains the tab-owned `App.scroll_y`/`EditorTab.scroll_y`.
 * `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.

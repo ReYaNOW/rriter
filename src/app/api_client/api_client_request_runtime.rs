@@ -66,9 +66,8 @@ pub fn api_response_text(response: &ApiJobResponse, view: ApiResponseView) -> &s
 pub fn spawn_api_request(
     job: ApiJobRequest,
     ui_waker: &crate::ui_waker::UiWaker,
-) -> Receiver<ApiJobResponse> {
-    let (tx, rx) = ui_waker.channel();
-    let spawn_error_response = ApiJobResponse {
+) -> Result<crate::ui_waker::OneShot<ApiJobResponse>, Box<ApiJobResponse>> {
+    let mut spawn_error_response = ApiJobResponse {
         request_id: job.request_id,
         spec_id: job.spec_id,
         route_idx: job.route_idx,
@@ -84,19 +83,16 @@ pub fn spawn_api_request(
         error: None,
         resolved_host: job.resolved_host.clone(),
     };
-    let worker_tx = tx.clone();
-    if let Err(err) = crate::platform::spawn_named("rriter-api-request", move || {
-        let response = run_api_request(job);
-        let _ = worker_tx.send(response);
-    }) {
-        let mut response = spawn_error_response;
-        response.error = Some(ApiLoadError::new(
-            ApiLoadErrorKind::Io,
-            format!("не удалось запустить API request worker: {err}"),
-        ));
-        let _ = tx.send(response);
+    match ui_waker.spawn_one_shot("rriter-api-request", move || run_api_request(job)) {
+        Ok(rx) => Ok(rx),
+        Err(err) => {
+            spawn_error_response.error = Some(ApiLoadError::new(
+                ApiLoadErrorKind::Io,
+                format!("не удалось запустить API request worker: {err}"),
+            ));
+            Err(Box::new(spawn_error_response))
+        }
     }
-    rx
 }
 
 fn send_api_request_body(

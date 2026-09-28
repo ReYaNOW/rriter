@@ -490,82 +490,8 @@ impl App {
             return;
         }
 
-        if let GitAction::LoadGraph {
-            workspace_idx,
-            repo_root,
-            offset,
-            limit,
-            reset_scroll,
-            activate,
-        } = action
-        {
-            let request_id = self.ide_panel.git.allocate_graph_request_id();
-            self.ide_panel
-                .git
-                .graph_latest_request_by_root
-                .insert(crate::platform::PathKey::new(&repo_root), request_id);
-            self.ide_panel
-                .git
-                .graph_pending_roots
-                .insert(crate::platform::PathKey::new(&repo_root));
-            if activate {
-                self.ide_panel.git.graph_pending = true;
-                self.ide_panel.git.graph_notice = None;
-                self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
-                self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
-                self.ide_panel.git.graph_commit_limit = limit;
-            } else if self
-                .ide_panel
-                .git
-                .graph_repo_root
-                .as_ref()
-                .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
-            {
-                self.ide_panel.git.graph_pending = true;
-            }
-
-            let (tx, rx) = self.ui_waker.channel();
-            self.ide_panel.git.graph_rx.push(GitGraphReceiver {
-                rx,
-                request_id,
-                repo_root: repo_root.clone(),
-            });
-            let worker_tx = tx.clone();
-            let worker_repo_root = repo_root.clone();
-            if let Err(err) = crate::platform::spawn_named("rriter-git-graph", move || {
-                let (commits, lane_count, has_more, notice) =
-                    match collect_git_graph(workspace_idx, &worker_repo_root, offset, limit) {
-                        Ok((commits, lane_count, has_more)) => {
-                            (commits, lane_count, has_more, None)
-                        }
-                        Err(err) => (Vec::new(), 1, false, Some(err)),
-                    };
-                let _ = worker_tx.send(GitGraphEvent {
-                    request_id,
-                    workspace_idx,
-                    repo_root: worker_repo_root,
-                    commits,
-                    lane_count,
-                    notice,
-                    limit,
-                    offset,
-                    has_more,
-                    reset_scroll,
-                });
-            }) {
-                let _ = tx.send(GitGraphEvent {
-                    request_id,
-                    workspace_idx,
-                    repo_root,
-                    commits: Vec::new(),
-                    lane_count: 1,
-                    notice: Some(format!("Не удалось запустить загрузку Git Graph: {err}")),
-                    limit,
-                    offset,
-                    has_more: false,
-                    reset_scroll,
-                });
-            }
+        if matches!(&action, GitAction::LoadGraph { .. }) {
+            self.spawn_git_graph_task(action);
             return;
         }
 
@@ -606,18 +532,34 @@ impl App {
         } else {
             (None, None)
         };
-        let (tx, rx) = self.ui_waker.channel();
-        self.ide_panel.git.rx.push(GitPanelReceiver {
-            rx,
-            runtime_rx,
-            request_id,
-            blocking,
-            refresh,
-            status_mutation,
-        });
+        let staged_operation = matches!(
+            &action,
+            GitAction::ToggleStageMany { .. } | GitAction::ReconcileStagedModified { .. }
+        );
+        let task_tx = if commit_transaction || staged_operation {
+            let (tx, rx) = if commit_transaction {
+                let (tx, rx) = self.ui_waker.channel();
+                (tx, GitPanelTaskReceiver::Stream(rx))
+            } else {
+                let (tx, rx) = self.ui_waker.one_shot_channel();
+                (tx, GitPanelTaskReceiver::OneShot(rx))
+            };
+            self.ide_panel.git.rx.push(GitPanelReceiver {
+                rx,
+                runtime_rx,
+                request_id,
+                blocking,
+                refresh,
+                status_mutation,
+            });
+            Some(tx)
+        } else {
+            None
+        };
 
         let action = match action {
             GitAction::ToggleStageMany { files } => {
+                let Some(tx) = task_tx else { return; };
                 self.ide_panel.git.update_stage_reconcile_candidates(&files);
                 enqueue_git_stage_operation(
                     &mut self.ide_panel.git,
@@ -630,6 +572,7 @@ impl App {
                 return;
             }
             GitAction::ReconcileStagedModified { file } => {
+                let Some(tx) = task_tx else { return; };
                 enqueue_git_stage_operation(
                     &mut self.ide_panel.git,
                     GitStageOperation::ReconcileModified(file),
@@ -643,13 +586,42 @@ impl App {
             action => action,
         };
 
-        let worker_tx = tx.clone();
+        if commit_transaction {
+            let Some(task_tx) = task_tx else { return; };
+            let worker_runtime_tx = runtime_tx.clone();
+            let job = crate::platform::spawn_named("rriter-git-commit", move || {
+                let outcome = run_git_action(action, worker_runtime_tx.as_ref());
+                let mut branch_ahead_cache = branch_ahead_cache;
+                let snapshot = collect_git_status_with_cache(&workspaces, &mut branch_ahead_cache);
+                let _ = task_tx.send(GitPanelTaskResult {
+                    event: GitPanelEvent {
+                        request_id,
+                        snapshot,
+                        notice: outcome.notice,
+                        preserve_snapshot_on_empty: false,
+                        clear_message: outcome.clear_message,
+                        refresh_graph: outcome.refresh_graph,
+                        transaction_failed: outcome.transaction_failed,
+                    },
+                    branch_ahead_cache,
+                });
+            });
+            if let Err(err) = job {
+                self.ide_panel.git.handle_status_disconnect(request_id);
+                self.ide_panel.git.notice = Some(format!("Не удалось запустить Git worker: {err}"));
+                if refresh {
+                    self.ide_panel.git.finish_status_refresh();
+                }
+            }
+            return;
+        }
+
         let worker_runtime_tx = runtime_tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-git-action", move || {
+        let job = self.ui_waker.spawn_one_shot("rriter-git-action", move || {
             let outcome = run_git_action(action, worker_runtime_tx.as_ref());
             let mut branch_ahead_cache = branch_ahead_cache;
             let snapshot = collect_git_status_with_cache(&workspaces, &mut branch_ahead_cache);
-            let _ = worker_tx.send(GitPanelTaskResult {
+            GitPanelTaskResult {
                 event: GitPanelEvent {
                     request_id,
                     snapshot,
@@ -660,25 +632,94 @@ impl App {
                     transaction_failed: outcome.transaction_failed,
                 },
                 branch_ahead_cache,
-            });
-        }) {
-            if let Some(runtime_tx) = runtime_tx {
-                let _ = runtime_tx.send(GitRuntimeEvent::Info(format!(
-                    "Не удалось запустить Git worker: {err}"
-                )));
             }
-            let _ = tx.send(GitPanelTaskResult {
-                event: GitPanelEvent {
-                    request_id,
-                    snapshot: GitStatusSnapshot::default(),
-                    notice: Some(format!("Не удалось запустить Git worker: {err}")),
-                    preserve_snapshot_on_empty: true,
-                    clear_message: false,
-                    refresh_graph: false,
-                    transaction_failed: commit_transaction,
-                },
-                branch_ahead_cache: BranchAheadCache::default(),
-            });
+        });
+        match job {
+            Ok(rx) => self.ide_panel.git.rx.push(GitPanelReceiver {
+                rx: GitPanelTaskReceiver::OneShot(rx),
+                runtime_rx: None,
+                request_id,
+                blocking,
+                refresh,
+                status_mutation,
+            }),
+            Err(err) => {
+                self.ide_panel.git.handle_status_disconnect(request_id);
+                self.ide_panel.git.notice = Some(format!("Не удалось запустить Git worker: {err}"));
+                if refresh {
+                    self.ide_panel.git.finish_status_refresh();
+                }
+            }
+        }
+    }
+
+    fn spawn_git_graph_task(&mut self, action: GitAction) {
+        let GitAction::LoadGraph {
+            workspace_idx,
+            repo_root,
+            offset,
+            limit,
+            reset_scroll,
+            activate,
+        } = action
+        else {
+            return;
+        };
+        let request_id = self.ide_panel.git.allocate_graph_request_id();
+        self.ide_panel
+            .git
+            .graph_latest_request_by_root
+            .insert(crate::platform::PathKey::new(&repo_root), request_id);
+        self.ide_panel
+            .git
+            .graph_pending_roots
+            .insert(crate::platform::PathKey::new(&repo_root));
+        if activate {
+            self.ide_panel.git.graph_pending = true;
+            self.ide_panel.git.graph_notice = None;
+            self.ide_panel.git.graph_repo_root = Some(repo_root.clone());
+            self.ide_panel.git.graph_workspace_idx = Some(workspace_idx);
+            self.ide_panel.git.graph_commit_limit = limit;
+        } else if self
+            .ide_panel
+            .git
+            .graph_repo_root
+            .as_ref()
+            .is_some_and(|active| crate::platform::paths_equal(active, &repo_root))
+        {
+            self.ide_panel.git.graph_pending = true;
+        }
+
+        let worker_repo_root = repo_root.clone();
+        let job = self.ui_waker.spawn_one_shot("rriter-git-graph", move || {
+            let (commits, lane_count, has_more, notice) =
+                match collect_git_graph(workspace_idx, &worker_repo_root, offset, limit) {
+                    Ok((commits, lane_count, has_more)) => (commits, lane_count, has_more, None),
+                    Err(err) => (Vec::new(), 1, false, Some(err)),
+                };
+            GitGraphEvent {
+                request_id,
+                workspace_idx,
+                repo_root: worker_repo_root,
+                commits,
+                lane_count,
+                notice,
+                limit,
+                offset,
+                has_more,
+                reset_scroll,
+            }
+        });
+        match job {
+            Ok(rx) => self.ide_panel.git.graph_rx.push(GitGraphReceiver {
+                rx,
+                request_id,
+                repo_root,
+            }),
+            Err(_) => self
+                .ide_panel
+                .git
+                .handle_graph_disconnect(&repo_root, request_id),
         }
     }
 }

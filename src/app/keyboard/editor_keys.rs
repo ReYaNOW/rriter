@@ -637,7 +637,7 @@ impl App {
                         self.close_all_tabs_unchecked();
                     }
                 } else {
-                    if self.editor.is_dirty() {
+                    if self.has_unsaved_changes() {
                         self.show_action_dialog(event_loop, PendingAction::CloseFile);
                     } else {
                         self.close_current_file();

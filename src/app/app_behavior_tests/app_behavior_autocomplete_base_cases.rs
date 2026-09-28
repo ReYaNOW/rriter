@@ -73,6 +73,7 @@ pub(crate) fn test_app() -> Option<App> {
         gl_surface: None,
         window: None,
         confirm_dialog: crate::app::ConfirmDialog::default(),
+        protected_saves: crate::app::ProtectedSaves::default(),
         external_requests: crate::platform::ExternalRequestLog::default(),
         settings_scroll: crate::scroll::ScrollState::new(15.0),
         settings_general_scroll: crate::scroll::ScrollState::new(7.0),

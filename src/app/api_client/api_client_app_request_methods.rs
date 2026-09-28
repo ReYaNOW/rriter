@@ -828,8 +828,10 @@ impl crate::app::App {
         if let Some((_, state)) = self.active_api_tab_mut_for(spec_id) {
             state.mark_request_pending(request_id);
         }
-        self.api_request_rx
-            .push((request_id, spawn_api_request(job, &self.ui_waker)));
+        match spawn_api_request(job, &self.ui_waker) {
+            Ok(rx) => self.api_request_rx.push((request_id, rx)),
+            Err(response) => self.apply_api_job_response(*response),
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -924,8 +926,10 @@ impl crate::app::App {
             state.route_idx = Some(manual_idx);
             state.mark_request_pending(request_id);
         }
-        self.api_request_rx
-            .push((request_id, spawn_api_request(job, &self.ui_waker)));
+        match spawn_api_request(job, &self.ui_waker) {
+            Ok(rx) => self.api_request_rx.push((request_id, rx)),
+            Err(response) => self.apply_api_job_response(*response),
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -933,7 +937,7 @@ impl crate::app::App {
 
     pub fn poll_api_client(&mut self) -> bool {
         let mut changed = false;
-        match crate::platform::poll_optional_receiver(&mut self.api_openapi_export_rx) {
+        match poll_api_one_shot(&mut self.api_openapi_export_rx) {
             crate::platform::ReceiverPoll::Item(Ok(_)) => changed = true,
             crate::platform::ReceiverPoll::Item(Err(error)) => {
                 self.ide_panel.api.persistence_error = Some(error);
@@ -1058,7 +1062,7 @@ impl crate::app::App {
             }
         }
         changed |= self.ide_panel.api.poll_body_json_validation();
-        match crate::platform::poll_optional_receiver(&mut self.api_import_file_rx) {
+        match poll_api_one_shot(&mut self.api_import_file_rx) {
             crate::platform::ReceiverPoll::Item(result) => {
                 if let Some(path) = result {
                     self.start_api_local_import(path);
@@ -1073,7 +1077,7 @@ impl crate::app::App {
                 changed = true;
             }
         }
-        match crate::platform::poll_optional_receiver(&mut self.api_body_file_rx) {
+        match poll_api_one_shot(&mut self.api_body_file_rx) {
             crate::platform::ReceiverPoll::Item(result) => {
                 self.apply_api_body_file_pick(result);
                 changed = true;
@@ -1090,8 +1094,8 @@ impl crate::app::App {
 
         let mut idx = 0usize;
         while idx < self.api_load_rx.len() {
-            match self.api_load_rx[idx].rx.try_recv() {
-                Ok(result) => {
+            match self.api_load_rx[idx].rx.poll() {
+                crate::ui_waker::OneShotState::Ready(result) => {
                     self.api_load_rx.remove(idx);
                     let Some(ticket) = self
                         .ide_panel
@@ -1127,8 +1131,8 @@ impl crate::app::App {
                     }
                     changed = true;
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => idx += 1,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                crate::ui_waker::OneShotState::Pending => idx += 1,
+                crate::ui_waker::OneShotState::Closed => {
                     let failed = self.api_load_rx.remove(idx);
                     self.ide_panel.api.handle_load_disconnect(failed.id, failed.generation);
                     changed = true;
@@ -1139,14 +1143,14 @@ impl crate::app::App {
         let mut idx = 0usize;
         while idx < self.api_request_rx.len() {
             let request_id = self.api_request_rx[idx].0;
-            match self.api_request_rx[idx].1.try_recv() {
-                Ok(result) => {
+            match self.api_request_rx[idx].1.poll() {
+                crate::ui_waker::OneShotState::Ready(result) => {
                     self.api_request_rx.remove(idx);
                     self.apply_api_job_response(result);
                     changed = true;
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => idx += 1,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                crate::ui_waker::OneShotState::Pending => idx += 1,
+                crate::ui_waker::OneShotState::Closed => {
                     self.api_request_rx.remove(idx);
                     for tab in &mut self.tabs {
                         let crate::app::EditorTabKind::ApiClient(meta, state) = &mut tab.kind else {

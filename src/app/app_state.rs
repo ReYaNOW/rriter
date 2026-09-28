@@ -1150,6 +1150,8 @@ pub struct App {
     pub window: Option<std::sync::Arc<WindowHost>>,
     /// Unsaved-changes confirmation flow: dialog surface, armed action, Save-As queue.
     pub confirm_dialog: crate::app::ConfirmDialog,
+    /// Background elevated saves, serialized per path; polled by `App::poll_protected_saves`.
+    pub(crate) protected_saves: crate::app::ProtectedSaves,
     /// Desktop requests (pickers, URLs) intercepted in headless; read by `dump`.
     pub external_requests: crate::platform::ExternalRequestLog,
     pub settings_scroll: crate::scroll::ScrollState,
@@ -1199,14 +1201,14 @@ pub struct App {
 
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
-    pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
+    pub api_import_file_rx: Option<crate::ui_waker::OneShot<Option<PathBuf>>>,
     pub api_body_file_rx:
-        Option<std::sync::mpsc::Receiver<crate::app::api_client::ApiBodyFilePickResult>>,
-    pub api_openapi_export_rx: Option<std::sync::mpsc::Receiver<Result<Option<PathBuf>, String>>>,
+        Option<crate::ui_waker::OneShot<crate::app::api_client::ApiBodyFilePickResult>>,
+    pub api_openapi_export_rx: Option<crate::ui_waker::OneShot<Result<Option<PathBuf>, String>>>,
     pub api_load_rx: Vec<crate::app::api_client::ApiLoadReceiver>,
     pub api_request_rx: Vec<(
         u64,
-        std::sync::mpsc::Receiver<crate::app::api_client::ApiJobResponse>,
+        crate::ui_waker::OneShot<crate::app::api_client::ApiJobResponse>,
     )>,
     pub api_mock_ty_rx:
         Option<std::sync::mpsc::Receiver<crate::app::api_mock::ty_check::ApiMockTyCheckResult>>,
@@ -1305,7 +1307,7 @@ pub struct App {
     pub external_changes_rx: Option<std::sync::mpsc::Receiver<Vec<ExternalFileChange>>>,
     pub git_diff_rx: Vec<crate::app::git_diff::GitDiffReceiver>,
     pub inline_git_diff_rx:
-        Option<std::sync::mpsc::Receiver<crate::app::git_diff::InlineGitDiffEvent>>,
+        Option<crate::ui_waker::OneShot<crate::app::git_diff::InlineGitDiffEvent>>,
     pub inline_git_popup: Option<InlineGitPopup>,
     pub readonly_notice_until: Option<Instant>,
     /// LSP менеджер: стартует лениво при открытии .py в IDE-режиме

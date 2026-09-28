@@ -644,7 +644,7 @@ pub struct GitPanelState {
 }
 
 struct GitPanelReceiver {
-    rx: mpsc::Receiver<GitPanelTaskResult>,
+    rx: GitPanelTaskReceiver,
     runtime_rx: Option<mpsc::Receiver<GitRuntimeEvent>>,
     request_id: u64,
     blocking: bool,
@@ -653,7 +653,7 @@ struct GitPanelReceiver {
 }
 
 struct GitGraphReceiver {
-    rx: mpsc::Receiver<GitGraphEvent>,
+    rx: crate::ui_waker::OneShot<GitGraphEvent>,
     request_id: u64,
     repo_root: PathBuf,
 }
@@ -667,6 +667,22 @@ enum OneShotReceiverPoll<T> {
     Pending,
     Ready(T),
     Disconnected,
+}
+enum GitPanelTaskReceiver {
+    OneShot(crate::ui_waker::OneShot<GitPanelTaskResult>),
+    Stream(mpsc::Receiver<GitPanelTaskResult>),
+}
+impl GitPanelTaskReceiver {
+    fn poll(&mut self) -> OneShotReceiverPoll<GitPanelTaskResult> {
+        match self {
+            Self::OneShot(receiver) => match receiver.poll() {
+                crate::ui_waker::OneShotState::Pending => OneShotReceiverPoll::Pending,
+                crate::ui_waker::OneShotState::Ready(result) => OneShotReceiverPoll::Ready(result),
+                crate::ui_waker::OneShotState::Closed => OneShotReceiverPoll::Disconnected,
+            },
+            Self::Stream(receiver) => poll_one_shot_receiver(receiver),
+        }
+    }
 }
 
 fn poll_one_shot_receiver<T>(rx: &mpsc::Receiver<T>) -> OneShotReceiverPoll<T> {

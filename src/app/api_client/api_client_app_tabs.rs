@@ -3,6 +3,30 @@
 // App routes here; the load/spawn effects stay in `App`.
 
 impl crate::app::App {
+    fn queue_api_load(
+        &mut self,
+        id: ApiSpecId,
+        generation: u64,
+        receiver: std::io::Result<crate::ui_waker::OneShot<ApiLoadResult>>,
+    ) {
+        match receiver {
+            Ok(rx) => self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
+                id,
+                generation,
+                rx,
+            }),
+            Err(err) => {
+                self.ide_panel.api.mark_load_error(
+                    id,
+                    ApiLoadError::new(
+                        ApiLoadErrorKind::Io,
+                        format!("Не удалось запустить загрузку OpenAPI: {err}"),
+                    ),
+                );
+            }
+        }
+    }
+
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn trigger_api_file_picker(&mut self) {
         if !native_picker_can_start(&self.api_import_file_rx) {
@@ -20,18 +44,14 @@ impl crate::app::App {
             }
             return;
         }
-        let (tx, rx) = self.ui_waker.channel();
-        self.api_import_file_rx = Some(rx);
-        let worker_tx = tx.clone();
         let requests = self.external_requests.sink().clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-file-picker", move || {
-            let file = crate::platform::pick_file_with_filter(
+        match self.ui_waker.spawn_one_shot("rriter-api-file-picker", move || {
+            crate::platform::pick_file_with_filter(
                 &requests, "Импорт openapi.json", "OpenAPI JSON", &["json"],
-            );
-            let _ = worker_tx.send(file);
+            )
         }) {
-            self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор OpenAPI: {err}"));
-            self.api_import_file_rx = None;
+            Ok(job) => self.api_import_file_rx = Some(job),
+            Err(err) => self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор OpenAPI: {err}")),
         }
     }
 
@@ -63,24 +83,19 @@ impl crate::app::App {
             });
             return;
         }
-        let (tx, rx) = self.ui_waker.channel();
-        self.api_body_file_rx = Some(rx);
-        let worker_tx = tx.clone();
-        let fallback_name = name.clone();
         let requests = self.external_requests.sink().clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-body-file-picker", move || {
+        match self.ui_waker.spawn_one_shot("rriter-api-body-file-picker", move || {
             let paths = if multi {
                 crate::platform::pick_files(&requests, "Выбрать файл")
             } else {
                 crate::platform::pick_file(&requests, "Выбрать файл").into_iter().collect()
             };
-            let _ = worker_tx.send(ApiBodyFilePickResult {
+            ApiBodyFilePickResult {
                 spec_id, route_idx, name, paths,
-            });
+            }
         }) {
-            self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор body-файла: {err}"));
-            self.api_body_file_rx = None;
-            let _ = (spec_id, route_idx, fallback_name);
+            Ok(job) => self.api_body_file_rx = Some(job),
+            Err(err) => self.ide_panel.api.import_error = Some(format!("Не удалось открыть выбор body-файла: {err}")),
         }
     }
 
@@ -90,25 +105,22 @@ impl crate::app::App {
             self.ide_panel.api.mock.uv.last_error = "Окно выбора Python/uv уже открыто".to_string();
             return;
         }
-        let (tx, rx) = self.ui_waker.channel();
-        self.ide_panel.api.python_path_pick_rx = Some(rx);
         let title = match kind {
             ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
             ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
         };
         if crate::platform::native_dialog_requires_main_thread() {
             let path = crate::platform::pick_file(self.external_requests.sink(), title);
-            let _ = tx.send(ApiPythonPathPickResult { kind, path });
+            self.ide_panel.api.apply_python_path_pick(ApiPythonPathPickResult { kind, path });
             return;
         }
-        let worker_tx = tx.clone();
         let requests = self.external_requests.sink().clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-python-path-picker", move || {
+        match self.ui_waker.spawn_one_shot("rriter-api-python-path-picker", move || {
             let path = crate::platform::pick_file(&requests, title);
-            let _ = worker_tx.send(ApiPythonPathPickResult { kind, path });
+            ApiPythonPathPickResult { kind, path }
         }) {
-            self.ide_panel.api.mock.uv.last_error = format!("Не удалось открыть выбор пути: {err}");
-            self.ide_panel.api.python_path_pick_rx = None;
+            Ok(job) => self.ide_panel.api.python_path_pick_rx = Some(job),
+            Err(err) => self.ide_panel.api.mock.uv.last_error = format!("Не удалось открыть выбор пути: {err}"),
         }
     }
 
@@ -140,11 +152,8 @@ impl crate::app::App {
     pub fn start_api_local_import(&mut self, path: PathBuf) {
         let id = self.ide_panel.api.alloc_spec_id();
         let generation = self.ide_panel.api.begin_load(id, true);
-        self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
-            id,
-            generation,
-            rx: spawn_load_local(id, generation, path, &self.ui_waker),
-        });
+        let receiver = spawn_load_local(id, generation, path, &self.ui_waker);
+        self.queue_api_load(id, generation, receiver);
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -174,11 +183,8 @@ impl crate::app::App {
         self.ide_panel.api.import_url_open = false;
         self.ide_panel.api.focused = None;
         let generation = self.ide_panel.api.begin_load(id, true);
-        self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
-            id,
-            generation,
-            rx: spawn_load_url(id, generation, url, &self.ui_waker),
-        });
+        let receiver = spawn_load_url(id, generation, url, &self.ui_waker);
+        self.queue_api_load(id, generation, receiver);
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -197,20 +203,14 @@ impl crate::app::App {
         };
         let generation = self.ide_panel.api.begin_load(id, false);
         match entry.source {
-            ApiSpecSource::Local(path) => self.api_load_rx.push(
-                crate::app::api_client::ApiLoadReceiver {
-                    id,
-                    generation,
-                    rx: spawn_load_local(id, generation, path, &self.ui_waker),
-                },
-            ),
-            ApiSpecSource::Url(url) => self.api_load_rx.push(
-                crate::app::api_client::ApiLoadReceiver {
-                    id,
-                    generation,
-                    rx: spawn_load_url(id, generation, url, &self.ui_waker),
-                },
-            ),
+            ApiSpecSource::Local(path) => {
+                let receiver = spawn_load_local(id, generation, path, &self.ui_waker);
+                self.queue_api_load(id, generation, receiver);
+            }
+            ApiSpecSource::Url(url) => {
+                let receiver = spawn_load_url(id, generation, url, &self.ui_waker);
+                self.queue_api_load(id, generation, receiver);
+            }
         }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -233,20 +233,14 @@ impl crate::app::App {
         };
         let generation = self.ide_panel.api.begin_load(id, false);
         match entry.source {
-            ApiSpecSource::Local(path) => self.api_load_rx.push(
-                crate::app::api_client::ApiLoadReceiver {
-                    id,
-                    generation,
-                    rx: spawn_load_local(id, generation, path, &self.ui_waker),
-                },
-            ),
-            ApiSpecSource::Url(url) => self.api_load_rx.push(
-                crate::app::api_client::ApiLoadReceiver {
-                    id,
-                    generation,
-                    rx: spawn_load_cached_url(id, generation, url, &self.ui_waker),
-                },
-            ),
+            ApiSpecSource::Local(path) => {
+                let receiver = spawn_load_local(id, generation, path, &self.ui_waker);
+                self.queue_api_load(id, generation, receiver);
+            }
+            ApiSpecSource::Url(url) => {
+                let receiver = spawn_load_cached_url(id, generation, url, &self.ui_waker);
+                self.queue_api_load(id, generation, receiver);
+            }
         }
     }
 

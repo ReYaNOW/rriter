@@ -864,7 +864,7 @@ pub struct ApiLoadResult {
 pub struct ApiLoadReceiver {
     pub id: ApiSpecId,
     pub generation: u64,
-    pub rx: Receiver<ApiLoadResult>,
+    pub rx: crate::ui_waker::OneShot<ApiLoadResult>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
