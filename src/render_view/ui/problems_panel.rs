@@ -421,24 +421,13 @@ impl Renderer {
             }
 
             let total_h = crate::app::problems_scroll_content_height(visible_row_count, item_h);
-            let track_h = (content_h - 40.0 * s).max(0.0);
-            if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                list_y,
-                track_h,
-                track_h,
+            let bar = crate::app::problems_scrollbar(
+                (content_x, content_y, content_w, content_h),
                 total_h,
                 scroll_y,
-                20.0 * s,
-            ) {
-                self.push_rounded_rect(
-                    content_x + content_w - 12.0 * s,
-                    thumb.start.round(),
-                    6.0 * s,
-                    thumb.len,
-                    3.0 * s,
-                    [0.45, 0.45, 0.55, 0.5],
-                );
-            }
+                s,
+            );
+            let _ = self.draw_scrollbar(&bar, s, 1.0, None);
         }
 
         self.flush();

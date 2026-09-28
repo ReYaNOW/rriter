@@ -36,28 +36,27 @@ fn database_table_scroll_drag_target(
     viewport_len: f32,
     content_len: f32,
     current_scroll: f32,
-    min_thumb_len: f32,
     drag_offset: Option<f32>,
+    horizontal: bool,
     scale: f32,
 ) -> Option<(f32, f32)> {
     let scale = scale.max(f32::EPSILON);
-    let max_scroll = (content_len - viewport_len).max(0.0);
-    let thumb = crate::scroll::scrollbar_thumb(
-        track_start,
-        track_len,
-        viewport_len,
-        content_len,
-        current_scroll * scale,
-        min_thumb_len,
-    )?;
-    let (offset, target) = crate::scroll::scrollbar_drag_target(
-        pointer,
-        track_start,
-        track_len,
-        thumb,
-        max_scroll,
-        drag_offset,
-    )?;
+    let lane = if horizontal {
+        (track_start, 0.0, track_len, 0.0)
+    } else {
+        (0.0, track_start, 0.0, track_len)
+    };
+    let bar = crate::render_view::database_table_tab::database_table_scrollbar(
+        lane, viewport_len, content_len,
+        current_scroll * scale, horizontal,
+    );
+    let geometry = bar.geometry(scale)?;
+    let (offset, target) = if let Some(offset) = drag_offset {
+        (offset, geometry.drag_target(pointer, offset)?)
+    } else {
+        let (offset, _) = geometry.press_target(pointer)?;
+        (offset, geometry.drag_target(pointer, offset)?)
+    };
     Some((offset, target / scale))
 }
 
@@ -882,8 +881,8 @@ impl App {
                 rect_h,
                 content_h,
                 state.grid.scroll_y.current,
-                (28.0 * scale).round(),
                 Some(state.grid.scroll_y.drag_offset),
+                false,
                 scale,
             ) else {
                 return DatabaseDragUpdate::None;
@@ -908,8 +907,8 @@ impl App {
                 rect_w,
                 content_w,
                 state.grid.scroll_x.current,
-                (36.0 * scale).round(),
                 Some(state.grid.scroll_x.drag_offset),
+                true,
                 scale,
             ) else {
                 return DatabaseDragUpdate::None;
@@ -1342,11 +1341,20 @@ impl App {
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| crate::app::database::database_table_modal_state::text_modal_scroll_snapshot(modal, &self.ide_panel.database.table_modal_layout_cache, scale, self.renderer.as_mut())) else { return; };
         let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(snapshot.line_count, snapshot.max_line_width, input_rect, horizontal_rect, vertical_rect, scale);
-        let pointer = if horizontal { mouse.0 } else { mouse.1 };
-        let Some((drag_offset, target)) = crate::app::database::database_table_modal_state::text_modal_scroll_drag_start(horizontal, pointer, horizontal_rect, vertical_rect, viewport_w, viewport_h, max_x, max_y, snapshot.current_x, snapshot.current_y, scale) else { return; };
+        let (lane, viewport, max_scroll, current, x, y) = if horizontal {
+            (horizontal_rect, viewport_w, max_x, snapshot.current_x, mouse.0, mouse.1)
+        } else {
+            (vertical_rect, viewport_h, max_y, snapshot.current_y, mouse.0, mouse.1)
+        };
+        let Some((lane_x, lane_y, lane_w, lane_h)) = lane else { return; };
+        let bar = crate::render_view::database_table_tab_overlay::database_table_modal_scrollbar(
+            (lane_x, lane_y, lane_w, lane_h), viewport, viewport + max_scroll,
+            current, horizontal,
+        );
+        let geometry = bar.geometry(scale);
         let Some((scroll_x, scroll_y)) = self.ide_panel.database.table_modal.as_mut().and_then(database_text_modal_scrolls_mut) else { return; };
         let scroll = if horizontal { scroll_x } else { scroll_y };
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
+        crate::app::mouse::press_scrollbar(scroll, geometry, x, y);
     }
 
     fn update_database_sql_preview_scroll_drag(
@@ -1360,11 +1368,24 @@ impl App {
         let scale = self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let Some(snapshot) = self.ide_panel.database.table_modal.as_ref().and_then(|modal| crate::app::database::database_table_modal_state::text_modal_scroll_snapshot(modal, &self.ide_panel.database.table_modal_layout_cache, scale, self.renderer.as_mut())) else { return false; };
         let (viewport_w, viewport_h, max_x, max_y) = database_sql_preview_scroll_metrics(snapshot.line_count, snapshot.max_line_width, input_rect, horizontal_rect, vertical_rect, scale);
-        let Some((horizontal, target, drag_offset)) = crate::app::database::database_table_modal_state::text_modal_scroll_drag_update(snapshot, mouse_x, mouse_y, vertical_rect, horizontal_rect, viewport_w, viewport_h, max_x, max_y, scale) else { return false; };
+        let horizontal = snapshot.dragging_x;
+        if !horizontal && !snapshot.dragging_y { return false; }
+        let (lane, viewport, max_scroll, current) = if horizontal {
+            (horizontal_rect, viewport_w, max_x, snapshot.current_x)
+        } else {
+            (vertical_rect, viewport_h, max_y, snapshot.current_y)
+        };
+        let Some((lane_x, lane_y, lane_w, lane_h)) = lane else { return false; };
+        let bar = crate::render_view::database_table_tab_overlay::database_table_modal_scrollbar(
+            (lane_x, lane_y, lane_w, lane_h), viewport, viewport + max_scroll,
+            current, horizontal,
+        );
+        let geometry = bar.geometry(scale);
         let Some((scroll_x, scroll_y)) = self.ide_panel.database.table_modal.as_mut().and_then(database_text_modal_scrolls_mut) else { return false; };
         let scroll = if horizontal { scroll_x } else { scroll_y };
-        crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
-        true
+        crate::app::mouse::drag_scrollbar(
+            scroll, geometry, mouse_x, mouse_y,
+        ).is_some()
     }
 
     pub(crate) fn scroll_database_text_modal(
@@ -1408,8 +1429,8 @@ impl App {
                 track_w,
                 content_w,
                 state.grid.scroll_x.current,
-                (36.0 * scale).round(),
                 None,
+                true,
                 scale,
             ) else { return; };
             crate::app::mouse::apply_scrollbar_drag_target(
@@ -1426,8 +1447,8 @@ impl App {
                 track_h,
                 content_h,
                 state.grid.scroll_y.current,
-                (28.0 * scale).round(),
                 None,
+                false,
                 scale,
             ) else { return; };
             crate::app::mouse::apply_scrollbar_drag_target(
@@ -1532,8 +1553,8 @@ mod database_table_edit_method_tests {
             viewport,
             content,
             current,
-            20.0,
             None,
+            false,
             scale,
         )
         .expect("scrollbar drag starts");
@@ -1546,8 +1567,8 @@ mod database_table_edit_method_tests {
             viewport,
             content,
             current,
-            20.0,
             Some(offset),
+            false,
             scale,
         )
         .expect("scrollbar drag continues");

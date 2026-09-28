@@ -469,7 +469,7 @@ mod input_state_tests {
             assert!(state.query_scroll_y.current > 0.0);
             assert!(state.query_scroll_x.current > 0.0);
             assert!(
-                project_search_query_scrollbar_thumb(
+                project_search_query_scrollbar(
                     rect,
                     &state,
                     ProjectSearchQueryScrollAxis::Vertical,
@@ -478,7 +478,7 @@ mod input_state_tests {
                 .is_some()
             );
             assert!(
-                project_search_query_scrollbar_thumb(
+                project_search_query_scrollbar(
                     rect,
                     &state,
                     ProjectSearchQueryScrollAxis::Horizontal,

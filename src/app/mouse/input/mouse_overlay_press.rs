@@ -99,21 +99,21 @@ impl App {
                             && let Some(ddl) = ddl.as_mut()
                         {
                             if clicked_id == Some(crate::ui_system::UiId::DatabaseDdlScroll) {
-                                if let Some((drag_offset, target)) =
-                                    crate::app::mouse::hover_popup_scrollbar_drag_target(
-                                        rect,
-                                        ddl.max_scroll,
-                                        ddl.popup.scroll.current,
-                                        my,
-                                        scale,
-                                        None,
-                                    )
+                                let geometry = crate::app::mouse::hover_popup_scrollbar(
+                                    rect,
+                                    ddl.max_scroll,
+                                    ddl.popup.scroll.current,
+                                    scale,
+                                )
+                                .geometry(scale);
+                                if crate::app::mouse::press_scrollbar(
+                                    &mut ddl.popup.scroll,
+                                    geometry,
+                                    mx,
+                                    my,
+                                )
+                                .is_some()
                                 {
-                                    crate::app::mouse::apply_scrollbar_drag_target(
-                                        &mut ddl.popup.scroll,
-                                        target,
-                                        drag_offset,
-                                    );
                                     ddl.selecting = false;
                                 }
                             } else {

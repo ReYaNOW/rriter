@@ -473,25 +473,30 @@ impl Renderer {
                     track_h,
                     [0.52, 0.54, 0.60, 0.36],
                 );
-                if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                    track_y, track_h, menu_h, menu_h + max_scroll, scroll_y, 22.0 * s,
-                ) {
-                    self.push_rect(
-                        track_x,
-                        thumb.start,
-                        track_w,
-                        thumb.len,
-                        [0.70, 0.72, 0.80, 0.88],
-                    );
-                }
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx),
+                let id = crate::ui_system::UiId::ApiOutputSchemaMenuScrollY(route_idx);
+                let lane = (
                     menu_x + menu_w - track_w - track_gap,
                     track_y,
                     track_w + track_gap,
                     track_h,
-                    mx,
-                    my,
+                );
+                let scrollbar = crate::app::api_client::api_output_schema_menu_scrollbar(
+                    lane,
+                    example_count,
+                    scroll_y,
+                    s,
+                );
+                let _ = self.draw_scrollbar(
+                    &scrollbar,
+                    s,
+                    1.0,
+                    Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                        ui: ui_registry,
+                        id,
+                        mx,
+                        my,
+                        blocker: false,
+                    }),
                 );
             }
             self.restore_api_tab_clip(tab_clip);

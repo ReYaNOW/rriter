@@ -421,7 +421,7 @@ impl ApiClientState {
         }
     }
 
-    fn api_mock_combined_max_scroll_for_route(
+    pub(crate) fn api_mock_combined_max_scroll_for_route(
         &self,
         active: Option<&ApiActiveRoute>,
         route_idx: usize,

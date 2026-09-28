@@ -450,31 +450,20 @@ impl Renderer {
         *general_max_scroll = (content_y + general_scroll_y.round() + (12.0 * s).round()
             - (inner.y + inner.h))
             .max(0.0);
-        if let Some(thumb) = super::settings_ui::settings_scrollbar_thumb(
-            settings_content_clip.y,
-            settings_content_clip.h,
-            *general_max_scroll,
-            general_scroll_y,
-            s,
-        ) {
+        if *general_max_scroll > 0.0 {
             let sb_x = (inner.x + inner.w - 14.0 * s).round();
-            self.push_rounded_rect(
-                sb_x,
-                thumb.start.round(),
-                6.0 * s,
-                thumb.len,
-                3.0 * s,
-                [0.7, 0.33, 0.54, 1.0],
+            let bar = super::settings_ui::settings_scrollbar(
+                (sb_x - 5.0 * s, settings_content_clip.y, 16.0 * s, settings_content_clip.h),
+                settings_content_clip.h, *general_max_scroll, general_scroll_y,
+                6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
             );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::SettingsGeneralScrollY,
-                sb_x - 5.0 * s,
-                settings_content_clip.y,
-                16.0 * s,
-                settings_content_clip.h,
-                self.last_mouse_x,
-                self.last_mouse_y,
-            );
+            self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: &mut *ui_registry,
+                id: crate::ui_system::UiId::SettingsGeneralScrollY,
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: false,
+            }));
         }
         self.end_settings_content_clip(ui_registry);
     }

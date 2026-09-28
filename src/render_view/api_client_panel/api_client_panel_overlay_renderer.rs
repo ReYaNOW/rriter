@@ -207,32 +207,23 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-            content_y + 7.0 * s,
-            (content_h - 14.0 * s).max(0.0),
-            content_h,
-            content_h + max_scroll,
+        let scrollbar = crate::app::api_client::api_mock_guide_scrollbar(
+            (box_x + box_w - 18.0 * s, content_y, 16.0 * s, content_h),
             scroll_y,
-            28.0 * s,
-        ) {
-            self.push_rounded_rect(
-                box_x + box_w - 12.0 * s,
-                thumb.start,
-                4.0 * s,
-                thumb.len,
-                2.0 * s,
-                [1.0, 1.0, 1.0, 0.28],
-            );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ApiMockGuideScrollY,
-                box_x + box_w - 18.0 * s,
-                content_y,
-                16.0 * s,
-                content_h,
+            s,
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::ApiMockGuideScrollY,
                 mx,
                 my,
-            );
-        }
+                blocker: false,
+            }),
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -375,30 +366,24 @@ impl Renderer {
         unsafe {
             self.gl.disable(glow::SCISSOR_TEST);
         }
-        if let Some(thumb) = crate::app::api_client::api_mock_server_log_scrollbar_thumb(
+        let scrollbar = crate::app::api_client::api_mock_server_log_scrollbar(
             (log_x, log_y, log_w, log_h),
             api.mock_server_logs.len(),
             scroll_y,
             s,
-        ) {
-            self.push_rounded_rect(
-                log_x + log_w - 8.0 * s,
-                thumb.start,
-                4.0 * s,
-                thumb.len,
-                2.0 * s,
-                [1.0, 1.0, 1.0, 0.24],
-            );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::ApiMockServerLogScrollY,
-                log_x + log_w - 14.0 * s,
-                log_y,
-                14.0 * s,
-                log_h,
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::ApiMockServerLogScrollY,
                 mx,
                 my,
-            );
-        }
+                blocker: false,
+            }),
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -960,23 +945,31 @@ impl Renderer {
         my: f32,
     ) {
         let rect = (x, y, w, h);
-        let Some((track_y, track_h, thumb)) =
-            crate::app::api_client::api_python_scrollbar_thumb(rect, scroll_y, max_scroll, s)
-        else {
+        let scrollbar = crate::app::api_client::api_python_scrollbar(rect, scroll_y, max_scroll, s);
+        let Some(geometry) = scrollbar.geometry(s) else {
             return;
         };
         let track_w = 4.0 * s;
         let track_x = x + w - track_w - 4.0 * s;
-        self.push_rounded_rect(track_x, track_y, track_w, track_h, track_w * 0.5, [1.0, 1.0, 1.0, 0.08]);
-        self.push_rounded_rect(track_x, thumb.start, track_w, thumb.len, track_w * 0.5, [1.0, 1.0, 1.0, 0.36]);
-        ui_registry.register_rect(
-            id,
-            x + w - 12.0 * s,
-            track_y,
-            12.0 * s,
-            track_h,
-            mx,
-            my,
+        self.push_rounded_rect(
+            track_x,
+            geometry.track_start,
+            track_w,
+            geometry.track_len,
+            track_w * 0.5,
+            [1.0, 1.0, 1.0, 0.08],
+        );
+        let _ = self.draw_scrollbar(
+            &scrollbar,
+            s,
+            1.0,
+            Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id,
+                mx,
+                my,
+                blocker: false,
+            }),
         );
     }
 

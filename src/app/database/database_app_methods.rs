@@ -17,7 +17,7 @@ impl App {
         crate::ui_system::UiClipRect,
         f32,
         f32,
-        Option<(crate::ui_system::UiClipRect, crate::scroll::ScrollbarThumb)>,
+        Option<(crate::ui_system::UiClipRect, crate::render_view::scrollbar_widget::ScrollbarGeometry)>,
     )> {
         let renderer = self.renderer.as_ref()?;
         let dialog = self.ide_panel.database.dialog.as_ref()?;
@@ -48,62 +48,35 @@ impl App {
         pointer_x: f32,
         pointer_y: f32,
     ) -> bool {
-        let Some((_, _, max_scroll, scrollbar)) =
+        let Some((_, _, _, scrollbar)) =
             self.database_connection_dialog_scroll_metrics()
         else {
             return false;
         };
-        let Some((track, thumb)) = scrollbar else { return false; };
+        let Some((track, geometry)) = scrollbar else { return false; };
         if !track.contains(pointer_x, pointer_y) {
             return false;
         }
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer_y,
-            track.y,
-            track.h,
-            thumb,
-            max_scroll,
-            None,
-        ) else {
-            return false;
-        };
         let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
             return false;
         };
-        crate::app::mouse::apply_scrollbar_drag_target(
-            &mut dialog.scroll, target, drag_offset,
-        );
-        true
+        crate::app::mouse::press_scrollbar(&mut dialog.scroll, Some(geometry), pointer_x, pointer_y).is_some()
     }
 
     pub(crate) fn update_database_dialog_scroll_drag(&mut self, pointer_y: f32) -> bool {
-        let drag_offset = match self.ide_panel.database.dialog.as_ref() {
-            Some(dialog) if dialog.scroll.is_dragging => dialog.scroll.drag_offset,
-            _ => return false,
-        };
-        let Some((_, _, max_scroll, scrollbar)) =
+        if !self.ide_panel.database.dialog.as_ref().is_some_and(|dialog| dialog.scroll.is_dragging) {
+            return false;
+        }
+        let Some((_, _, _, scrollbar)) =
             self.database_connection_dialog_scroll_metrics()
         else {
             return false;
         };
-        let Some((track, thumb)) = scrollbar else { return false; };
-        let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-            pointer_y,
-            track.y,
-            track.h,
-            thumb,
-            max_scroll,
-            Some(drag_offset),
-        ) else {
-            return false;
-        };
+        let Some((_, geometry)) = scrollbar else { return false; };
         let Some(dialog) = self.ide_panel.database.dialog.as_mut() else {
             return false;
         };
-        crate::app::mouse::apply_scrollbar_drag_target(
-            &mut dialog.scroll, target, drag_offset,
-        );
-        true
+        crate::app::mouse::drag_scrollbar(&mut dialog.scroll, Some(geometry), 0.0, pointer_y).is_some()
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

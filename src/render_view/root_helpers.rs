@@ -3,8 +3,8 @@ pub(crate) const SEARCH_ACTIVE_HIGHLIGHT_COLOR: [f32; 4] = [1.0, 0.6, 0.0, 0.5];
 pub(crate) const SEARCH_HIGHLIGHT_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 0.35];
 
 pub mod core_text;
-mod database_table_tab;
-mod database_query_tab;
+pub(crate) mod database_table_tab;
+pub(crate) mod database_query_tab;
 pub(crate) mod database_table_tab_overlay;
 pub mod api_client_panel;
 pub mod api_client_tab;
@@ -17,6 +17,7 @@ mod ide_panels;
 pub(crate) use ide_panels::intersect_scissor_boxes;
 pub mod lsp_ui;
 pub mod minimap_ui;
+pub(crate) mod scrollbar_widget;
 pub mod search;
 pub mod settings_ui;
 mod settings_tool_rows;
@@ -145,8 +146,11 @@ fn decimal_usize_buf(buf: &mut [u8; 20], mut n: usize) -> &str {
 
 #[inline(always)]
 pub(crate) fn hover_trace_enabled() -> bool {
-    false && TELEMETRY_ENABLED.load(Ordering::Relaxed)
+    HOVER_TRACE && TELEMETRY_ENABLED.load(Ordering::Relaxed)
 }
+
+/// Hover tracing is off even with telemetry on; flip locally when debugging hover.
+const HOVER_TRACE: bool = false;
 
 #[inline(always)]
 pub(crate) fn editor_bottom_blank_lines(viewport_height: f32, line_height: f32) -> f32 {

@@ -144,21 +144,33 @@ impl App {
                 return true;
             }
 
+            if self.ide_panel.git.scroll.is_dragging {
+                let geometry = self.renderer.as_ref().and_then(|renderer| {
+                    let mut bar = renderer.git_workspace_scrollbar?;
+                    bar.extent.offset = self.ide_panel.git.scroll.current;
+                    bar.geometry(s)
+                });
+                let _ = crate::app::mouse::drag_scrollbar(
+                    &mut self.ide_panel.git.scroll,
+                    geometry,
+                    px,
+                    py,
+                );
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return true;
+            }
+
             if self.ide_panel.git.logs_scroll.is_dragging {
                 if let Some(metrics) = self
                     .renderer
                     .as_ref()
                     .and_then(|renderer| renderer.git_logs_layout_metrics())
                 {
-                    let (_, track_y, _, track_h) = metrics.track_rect;
-                    if crate::app::mouse::update_scrollbar_drag(
-                        &mut self.ide_panel.git.logs_scroll,
-                        py,
-                        track_y,
-                        track_h,
-                        metrics.max_scroll,
-                        10.0 * s,
-                    ) {
+                    let scroll = &mut self.ide_panel.git.logs_scroll;
+                    let geometry = metrics.scrollbar(scroll.current).geometry(s);
+                    if crate::app::mouse::drag_scrollbar(scroll, geometry, px, py).is_some() {
                         self.ide_panel
                             .git
                             .refresh_git_logs_follow_tail(metrics.max_scroll);
@@ -169,33 +181,17 @@ impl App {
             }
 
             if self.ide_panel.git.graph_scroll.is_dragging {
-                if let Some((rows_y, rows_h)) = super::git_graph_rows_bounds(self, s)
-                    && let Some((_, target)) = crate::app::git_panel::git_graph_scroll_drag_target(
-                        py,
-                        rows_y,
-                        rows_h,
-                        self.ide_panel.git.graph_snapshot.len(),
-                        self.ide_panel.git.graph_scroll.current,
-                        Some(self.ide_panel.git.graph_scroll.drag_offset),
-                        s,
-                    )
+                let geometry = super::git_graph_scrollbar_geometry(self, s);
+                let max_scroll = geometry.map_or(0.0, |g| g.max_scroll);
+                if let Some(target) = crate::app::mouse::drag_scrollbar(
+                    &mut self.ide_panel.git.graph_scroll,
+                    geometry,
+                    px,
+                    py,
+                ) && self.ide_panel.git.graph_has_more
+                    && crate::app::git_panel::git_graph_near_load_more(target, max_scroll, s)
                 {
-                    let drag_offset = self.ide_panel.git.graph_scroll.drag_offset;
-                    crate::app::git_panel::apply_git_graph_scroll_drag(
-                        &mut self.ide_panel.git.graph_scroll,
-                        target,
-                        drag_offset,
-                    );
-                    let max_scroll = crate::app::git_panel::git_graph_max_scroll(
-                        self.ide_panel.git.graph_snapshot.len(),
-                        rows_h,
-                        s,
-                    );
-                    if self.ide_panel.git.graph_has_more
-                        && crate::app::git_panel::git_graph_near_load_more(target, max_scroll, s)
-                    {
-                        self.load_more_git_graph_commits();
-                    }
+                    self.load_more_git_graph_commits();
                 }
                 self.window.as_ref().unwrap().request_redraw();
                 return true;
@@ -216,6 +212,62 @@ impl App {
         padding: f32,
     ) -> bool {
         let wh = window_size.height as f32;
+        let combined_mock_drag_route = self
+            .ide_panel
+            .api
+            .mock_python_scrolls
+            .iter()
+            .find_map(|(&(route_idx, part), scroll)| {
+                (part == crate::app::api_mock::ty_check::ApiMockSourcePart::Body
+                    && scroll.is_dragging)
+                    .then_some(route_idx)
+            });
+        if let Some(route_idx) = combined_mock_drag_route {
+            let geometry = self
+                .ui_registry
+                .rect_for(crate::ui_system::UiId::ApiMockCombinedScrollY(route_idx))
+                .and_then(|lane| {
+                    let viewport = self
+                        .ui_registry
+                        .rect_for(crate::ui_system::UiId::ApiMockCombinedPython(route_idx))?;
+                    let max_scroll = self.ide_panel.api.api_mock_combined_max_scroll_for_route(
+                        self.api_active_route().as_ref(),
+                        route_idx,
+                        s,
+                    );
+                    let current = self
+                        .ide_panel
+                        .api
+                        .mock_python_scrolls
+                        .get(&(route_idx, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+                        .map_or(0.0, |scroll| scroll.current);
+                    crate::app::api_client::api_mock_combined_editor_scrollbar(
+                        lane,
+                        viewport.3,
+                        viewport.3 + max_scroll,
+                        current,
+                    )
+                    .geometry(s)
+                });
+            if let Some(scroll) = self
+                .ide_panel
+                .api
+                .mock_python_scrolls
+                .get_mut(&(route_idx, crate::app::api_mock::ty_check::ApiMockSourcePart::Body))
+            {
+                let _ = crate::app::mouse::drag_scrollbar(
+                    scroll,
+                    geometry,
+                    position.x as f32,
+                    position.y as f32,
+                );
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+            return true;
+        }
+
         let tab_bar_h = crate::render_view::editor_content_top_inset(
             self.show_welcome,
             self.is_ide_mode,
@@ -417,52 +469,33 @@ impl App {
             .iter()
             .any(|t| t.scroll_y.is_dragging)
         {
-            let layout = active_terminal_scrollbar_layout(self);
+            let geometry = active_terminal_scrollbar_geometry(self);
             let active = self.ide_panel.active_terminal;
-            if let (Some(layout), Some(term)) = (layout, self.ide_panel.terminals.get_mut(active))
-                && let Some((_, target)) =
-                    crate::render_view::terminal_ui::terminal_scrollbar_drag_target(
-                        position.y as f32,
-                        layout,
-                        Some(term.scroll_y.drag_offset),
-                    )
-            {
-                let drag_offset = term.scroll_y.drag_offset;
-                let _ = crate::app::mouse::apply_scrollbar_drag_target(
+            if let Some(term) = self.ide_panel.terminals.get_mut(active)
+                && crate::app::mouse::drag_scrollbar(
                     &mut term.scroll_y,
-                    target,
-                    drag_offset,
-                );
+                    geometry,
+                    position.x as f32,
+                    position.y as f32,
+                )
+                .is_some()
+            {
                 self.window.as_ref().unwrap().request_redraw();
             }
         } else if self.ide_panel.problems_scroll.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            if let Some(layout) = super::problems_scrollbar_layout(self, s)
-                && let Some(thumb) = crate::scroll::scrollbar_thumb(
-                    layout.list_y,
-                    layout.track_h,
-                    layout.track_h,
-                    layout.total_h,
-                    self.ide_panel.problems_scroll.current,
-                    20.0 * s,
-                )
-                && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
-                    position.y as f32,
-                    layout.list_y,
-                    layout.track_h,
-                    thumb,
-                    (layout.total_h - layout.track_h).max(0.0),
-                    Some(self.ide_panel.problems_scroll.drag_offset),
-                )
+            let geometry = super::problems_scrollbar_layout(self, s)
+                .and_then(|layout| layout.bar.geometry(s));
+            if crate::app::mouse::drag_scrollbar(
+                &mut self.ide_panel.problems_scroll,
+                geometry,
+                position.x as f32,
+                position.y as f32,
+            )
+            .is_some()
+                && let Some(window) = self.window.as_ref()
             {
-                let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                    &mut self.ide_panel.problems_scroll,
-                    target,
-                    drag_offset,
-                );
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
+                window.request_redraw();
             }
             return true;
         } else if crate::app::mouse::HOVER_STATE.with(|s| {
@@ -476,21 +509,19 @@ impl App {
                 let mut state = hover_state.borrow_mut();
                 if let Some(rect) = state.rect {
                     let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup
-                        && let Some((drag_offset, target)) =
-                            crate::app::mouse::hover_popup_scrollbar_drag_target(
-                                rect,
-                                max_scroll,
-                                popup.scroll.current,
-                                position.y as f32,
-                                s,
-                                Some(popup.scroll.drag_offset),
-                            )
-                    {
-                        let _ = crate::app::mouse::apply_scrollbar_drag_target(
+                    if let Some(popup) = &mut state.popup {
+                        let geometry = crate::app::mouse::hover_popup_scrollbar(
+                            rect,
+                            max_scroll,
+                            popup.scroll.current,
+                            s,
+                        )
+                        .geometry(s);
+                        let _ = crate::app::mouse::drag_scrollbar(
                             &mut popup.scroll,
-                            target,
-                            drag_offset,
+                            geometry,
+                            position.x as f32,
+                            position.y as f32,
                         );
                     }
                 }
@@ -500,31 +531,18 @@ impl App {
         } else if self.ide_panel.lsp_scroll_y.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             if let Some((_, cy, _, ch)) = self.lsp_panel_bounds() {
-                let total_h = self.lsp_panel_total_h(s);
-                let track_start = cy + 5.0 * s;
-                let track_h = (ch - 10.0 * s).max(0.0);
-                let max_y = (total_h - ch).max(0.0);
-                if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                    track_start,
-                    track_h,
-                    ch,
-                    total_h,
+                let geometry = crate::app::lsp_actions::lsp_panel_scrollbar(
+                    (0.0, cy, 0.0, ch),
+                    self.lsp_panel_total_h(s),
                     self.ide_panel.lsp_scroll_y.current,
-                    40.0 * s,
-                ) && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+                )
+                .geometry(s);
+                let _ = crate::app::mouse::drag_scrollbar(
+                    &mut self.ide_panel.lsp_scroll_y,
+                    geometry,
+                    position.x as f32,
                     position.y as f32,
-                    track_start,
-                    track_h,
-                    thumb,
-                    max_y,
-                    Some(self.ide_panel.lsp_scroll_y.drag_offset),
-                ) {
-                    let _ = crate::app::mouse::apply_scrollbar_drag_target(
-                        &mut self.ide_panel.lsp_scroll_y,
-                        target,
-                        drag_offset,
-                    );
-                }
+                );
             }
         } else if self.ide_panel.lsp_servers.iter().any(|info| {
             self.ide_panel
@@ -589,15 +607,20 @@ impl App {
                         if is_drag_y {
                             let sy = self.ide_panel.lsp_logs_scroll_y.get_mut(&name).unwrap();
                             if let Some((drag_offset, target)) =
-                                crate::app::lsp_actions::lsp_log_scrollbar_drag_target(
-                                    position.y as f32,
-                                    log_bg_y + 7.0 * s,
-                                    (log_bg_h - 14.0 * s).max(0.0),
+                                crate::app::lsp_actions::lsp_log_scrollbar_target(
+                                    (
+                                        log_bg_x + log_bg_w - 14.0 * s,
+                                        log_bg_y,
+                                        14.0 * s,
+                                        log_bg_h,
+                                    ),
                                     log_bg_h,
                                     inner_total_h,
                                     sy.current,
-                                    s,
+                                    crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+                                    position.y as f32,
                                     Some(sy.drag_offset),
+                                    s,
                                 )
                             {
                                 let _ = crate::app::mouse::apply_scrollbar_drag_target(
@@ -609,15 +632,20 @@ impl App {
                         } else if is_drag_x {
                             let sx = self.ide_panel.lsp_logs_scroll_x.get_mut(&name).unwrap();
                             if let Some((drag_offset, target)) =
-                                crate::app::lsp_actions::lsp_log_scrollbar_drag_target(
-                                    position.x as f32,
-                                    log_bg_x + 7.0 * s,
-                                    (log_bg_w - 14.0 * s).max(0.0),
+                                crate::app::lsp_actions::lsp_log_scrollbar_target(
+                                    (
+                                        log_bg_x,
+                                        log_bg_y + log_bg_h - 14.0 * s,
+                                        log_bg_w,
+                                        14.0 * s,
+                                    ),
                                     log_bg_w,
                                     inner_max_w + 20.0 * s,
                                     sx.current,
-                                    s,
+                                    crate::render_view::scrollbar_widget::ScrollbarAxis::Horizontal,
+                                    position.x as f32,
                                     Some(sx.drag_offset),
+                                    s,
                                 )
                             {
                                 let _ = crate::app::mouse::apply_scrollbar_drag_target(
@@ -675,19 +703,18 @@ impl App {
             }
         } else if self.scroll_x.is_dragging {
             let r = self.renderer.as_ref().unwrap();
-            let track_w = scrollbar_x - padding;
-            let max_x = r.max_scroll_x;
-            let thumb_w = (track_w / (max_x + track_w).max(1.0) * track_w)
-                .max(40.0 * s)
-                .min(track_w.max(0.0));
-            let ratio = (position.x as f32 - padding - self.scroll_x.drag_offset)
-                / (track_w - thumb_w).max(0.0001);
-            let target = (ratio * max_x).clamp(0.0, max_x);
-            let drag_offset = self.scroll_x.drag_offset;
-            let _ = crate::app::mouse::apply_scrollbar_drag_target(
+            // Input only needs the along-axis span, so the lane has no height.
+            let geometry = crate::render_view::editor_horizontal_scrollbar(
+                (padding, 0.0, scrollbar_x - padding, 0.0),
+                r.max_scroll_x,
+                self.scroll_x.current,
+            )
+            .geometry(s);
+            let _ = crate::app::mouse::drag_scrollbar(
                 &mut self.scroll_x,
-                target,
-                drag_offset,
+                geometry,
+                position.x as f32,
+                position.y as f32,
             );
         } else if self.scroll_y.is_dragging {
             let now = std::time::Instant::now();
@@ -720,8 +747,8 @@ impl App {
                 let is_minimap_drag = self.last_click_pos.0
                     >= (self.window.as_ref().unwrap().inner_size().width as f32 - minimap_w);
 
-                let track_h = editor_height;
-                let thumb_h = if is_minimap_drag {
+                let last_mouse_y = r.last_mouse_y;
+                let target = if is_minimap_drag {
                     // Same geometry as `draw_minimap` and the minimap click handler.
                     let minimap = minimap_view_metrics(
                         r.minimap_total_visual_lines(&self.editor),
@@ -730,26 +757,29 @@ impl App {
                         self.scroll_y.current.min(max_scroll),
                         max_scroll,
                     );
-                    minimap_thumb_height(editor_height, r.line_height, minimap.line_height)
+                    let thumb_h =
+                        minimap_thumb_height(editor_height, r.line_height, minimap.line_height);
+                    let scroll_ratio = (last_mouse_y - tab_bar_h - self.scroll_y.drag_offset)
+                        / (editor_height - thumb_h).max(0.0001);
+                    Some((scroll_ratio * max_scroll).clamp(0.0, max_scroll))
                 } else {
-                    let total_content_height = editor_scroll_content_height(
-                        self.editor.get_visible_lines_count(),
-                        r.line_height,
-                        editor_height,
-                    );
-                    (editor_height / total_content_height.max(editor_height) * editor_height)
-                        .max(20.0 * s)
-                        .min(track_h.max(0.0))
+                    crate::render_view::editor_vertical_scrollbar(
+                        (scrollbar_x, tab_bar_h, scrollbar_w, editor_height),
+                        editor_scroll_content_height(
+                            self.editor.get_visible_lines_count(),
+                            r.line_height,
+                            editor_height,
+                        ),
+                        max_scroll,
+                        self.scroll_y.current,
+                    )
+                    .geometry(s)
+                    .and_then(|g| g.drag_target(last_mouse_y, self.scroll_y.drag_offset))
                 };
-
-                let track_start_y = tab_bar_h;
-                let last_mouse_y = r.last_mouse_y;
-
-                let scroll_ratio = (last_mouse_y - track_start_y - self.scroll_y.drag_offset)
-                    / (track_h - thumb_h).max(0.0001);
-
-                self.scroll_y.target = (scroll_ratio * max_scroll).clamp(0.0, max_scroll).round();
-                self.scroll_y.anim_speed = 15.0;
+                if let Some(target) = target {
+                    self.scroll_y.target = target.round();
+                    self.scroll_y.anim_speed = 15.0;
+                }
             }
         } else if self.ide_panel.is_dragging_terminal && self.is_dragging && !self.show_settings {
             let active = self.ide_panel.active_terminal;

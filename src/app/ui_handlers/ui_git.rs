@@ -231,7 +231,8 @@ impl App {
             | UiId::GitGraphScroll
             | UiId::GitGraphCommit(_, _)
             | UiId::GitLogsBody
-            | UiId::GitLogsScroll => {
+            | UiId::GitLogsScroll
+            | UiId::GitWorkspaceScroll => {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

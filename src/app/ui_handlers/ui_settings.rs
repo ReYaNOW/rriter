@@ -114,13 +114,13 @@ impl App {
                             }),
                             s,
                         );
-                        crate::app::mouse::begin_scrollbar_drag(
-                            &mut self.settings_ide_scroll,
-                            pointer,
-                            rect.1,
-                            rect.3,
-                            max_scroll,
-                            40.0 * s,
+                        let bar = crate::render_view::settings_ui::settings_scrollbar(
+                            rect, rect.3, max_scroll, self.settings_ide_scroll.current,
+                            6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                        );
+                        let geometry = bar.geometry(s);
+                        crate::app::mouse::press_scrollbar(
+                            &mut self.settings_ide_scroll, geometry, 0.0, pointer,
                         );
                     }
                 }
@@ -142,13 +142,13 @@ impl App {
                         .as_mut()
                         .map(|renderer| renderer.get_faq_max_scroll(&self.faq_editor, rect.3))
                         .unwrap_or(0.0);
-                    crate::app::mouse::begin_scrollbar_drag(
-                        &mut self.settings_scroll,
-                        pointer,
-                        rect.1,
-                        rect.3,
-                        max_scroll,
-                        40.0 * s,
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(
+                        rect, rect.3, max_scroll, self.settings_scroll.current,
+                        6.0, 40.0, [0.7, 0.33, 0.54, 1.0],
+                    );
+                    let geometry = bar.geometry(s);
+                    crate::app::mouse::press_scrollbar(
+                        &mut self.settings_scroll, geometry, 0.0, pointer,
                     );
                 }
             }
@@ -156,13 +156,14 @@ impl App {
                 if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsGeneralScrollY) {
                     let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
                     let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
-                    crate::app::mouse::begin_scrollbar_drag(
-                        &mut self.settings_general_scroll,
-                        pointer,
-                        rect.1,
-                        rect.3,
-                        self.settings_general_max_scroll,
-                        40.0 * s,
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(
+                        rect, rect.3, self.settings_general_max_scroll,
+                        self.settings_general_scroll.current, 6.0, 40.0,
+                        [0.7, 0.33, 0.54, 1.0],
+                    );
+                    let geometry = bar.geometry(s);
+                    crate::app::mouse::press_scrollbar(
+                        &mut self.settings_general_scroll, geometry, 0.0, pointer,
                     );
                 }
             }
@@ -170,13 +171,14 @@ impl App {
                 if let Some(rect) = self.ui_registry.rect_for(UiId::SettingsDatabaseScrollY) {
                     let s = self.renderer.as_ref().map(|renderer| renderer.scale_factor).unwrap_or(1.0);
                     let pointer = self.renderer.as_ref().map(|renderer| renderer.last_mouse_y).unwrap_or(rect.1);
-                    crate::app::mouse::begin_scrollbar_drag(
-                        &mut self.settings_database_scroll,
-                        pointer,
-                        rect.1,
-                        rect.3,
-                        self.settings_database_max_scroll,
-                        40.0 * s,
+                    let bar = crate::render_view::settings_ui::settings_scrollbar(
+                        rect, rect.3, self.settings_database_max_scroll,
+                        self.settings_database_scroll.current, 6.0, 40.0,
+                        [0.7, 0.33, 0.54, 1.0],
+                    );
+                    let geometry = bar.geometry(s);
+                    crate::app::mouse::press_scrollbar(
+                        &mut self.settings_database_scroll, geometry, 0.0, pointer,
                     );
                 }
             }

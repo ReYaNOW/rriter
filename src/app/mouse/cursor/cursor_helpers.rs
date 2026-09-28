@@ -90,34 +90,6 @@ pub(super) fn diagnostic_hover_byte_at<'a>(
     None
 }
 
-pub(super) fn autocomplete_drag_target(
-    py: f32,
-    rect_y: f32,
-    rect_h: f32,
-    drag_offset: f32,
-    total_items: usize,
-    scale: f32,
-) -> f32 {
-    let step = 36.0 * scale;
-    let total_items = total_items as f32;
-    let visible_items = total_items.min(7.0);
-
-    let track_margin = autocomplete_scrollbar_track_margin(scale);
-    let track_h = (rect_h - track_margin * 2.0).max(1.0);
-    let total_h = total_items * step;
-    let thumb_h = (rect_h / total_h * track_h)
-        .max(20.0 * scale)
-        .min(track_h.max(0.0));
-    let max_scroll = ((total_items - visible_items) * step).max(0.0);
-
-    let ratio = (py - rect_y - track_margin - drag_offset) / (track_h - thumb_h).max(1.0);
-    (ratio * max_scroll).clamp(0.0, max_scroll)
-}
-
-fn autocomplete_scrollbar_track_margin(scale: f32) -> f32 {
-    3.0 * scale
-}
-
 pub(super) fn autocomplete_hovered_index(
     px: f32,
     py: f32,
@@ -193,11 +165,16 @@ mod tests {
 
     #[test]
     fn autocomplete_drag_target_clamps_to_available_scroll() {
-        assert_eq!(autocomplete_scrollbar_track_margin(1.0), 3.0);
-        assert_eq!(autocomplete_drag_target(0.0, 10.0, 200.0, 0.0, 4, 1.0), 0.0);
+        let geometry = |items: usize| {
+            crate::app::mouse::input::autocomplete_scrollbar((0.0, 10.0, 200.0, 200.0), items, 0.0, 1.0)
+                .geometry(1.0)
+        };
+        assert!(geometry(4).is_none());
+        let bar = geometry(12).expect("12 items overflow the popup");
+        assert_eq!(bar.track_start, 13.0);
 
-        let mid = autocomplete_drag_target(100.0, 10.0, 200.0, 0.0, 12, 1.0);
-        let max = autocomplete_drag_target(999.0, 10.0, 200.0, 0.0, 12, 1.0);
+        let mid = bar.drag_target(100.0, 0.0).expect("drag");
+        let max = bar.drag_target(999.0, 0.0).expect("drag");
 
         assert!(mid > 0.0);
         assert_eq!(max, (12.0 - 7.0) * 36.0);

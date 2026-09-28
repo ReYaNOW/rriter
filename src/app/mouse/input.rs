@@ -241,48 +241,45 @@ fn database_ddl_captures_left_click(app: &App) -> Option<(f32, f32, f32, f32)> {
 fn preserve_main_vertical_scroll_for_click(app: &App, mx: f32, my: f32) -> bool {
     !project_search_help_captures_pressed_click(app)
         && database_ddl_captures_left_click(app).is_none()
-        && app.ui_registry.find_at(mx, my) == Some(crate::ui_system::UiId::MarkdownModeToggle)
+        && matches!(
+            app.ui_registry.find_at(mx, my),
+            Some(
+                crate::ui_system::UiId::MarkdownModeToggle
+                    | crate::ui_system::UiId::EditorScrollbarY
+            )
+        )
 }
 
-fn autocomplete_scroll_click_target(
-    mouse_y: f32,
-    rect_y: f32,
-    rect_h: f32,
-    current_scroll: f32,
+/// Autocomplete list scrollbar for the popup `rect`: 14 px lane at the right edge (the press
+/// zone), track inset 3 px, 6 px thumb; at most 7 rows are visible. Shared by the press and
+/// drag handlers and the list renderer, so both use the same geometry.
+pub(crate) fn autocomplete_scrollbar(
+    rect: (f32, f32, f32, f32),
     total_items: usize,
+    current_scroll: f32,
     scale: f32,
-) -> Option<(f32, f32)> {
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
     let step = 36.0 * scale;
     let total_items = total_items as f32;
-    let visible_items = total_items.min(7.0);
-    let total_h = total_items * step;
-    if total_h <= rect_h {
-        return None;
+    let (x, y, w, h) = rect;
+    let lane_w = 14.0 * scale;
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 6.0,
+            track_pad: 3.0,
+            thumb_color: [0.7, 0.33, 0.54, 1.0],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane: (x + w - lane_w, y, lane_w, h),
+        extent: ScrollbarExtent {
+            max_scroll: ((total_items - total_items.min(7.0)) * step).max(0.0),
+            ..ScrollbarExtent::new(h, total_items * step, current_scroll)
+        },
     }
-
-    let max_scroll = ((total_items - visible_items) * step).max(0.0);
-    let scroll_ratio = (current_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
-    let track_margin = 3.0 * scale;
-    let track_h = (rect_h - track_margin * 2.0).max(1.0);
-    let thumb_h = (rect_h / total_h * track_h).max(20.0 * scale);
-    let thumb_start_y = rect_y + track_margin + scroll_ratio * (track_h - thumb_h);
-
-    if mouse_y >= thumb_start_y && mouse_y <= thumb_start_y + thumb_h {
-        Some((mouse_y - thumb_start_y, current_scroll))
-    } else {
-        let drag_offset = thumb_h / 2.0;
-        let new_ratio =
-            (mouse_y - rect_y - track_margin - drag_offset) / (track_h - thumb_h).max(1.0);
-        Some((drag_offset, (new_ratio * max_scroll).clamp(0.0, max_scroll)))
-    }
-}
-
-pub(super) fn apply_autocomplete_scroll_drag(
-    scroll: &mut crate::scroll::ScrollState,
-    target: f32,
-    drag_offset: f32,
-) {
-    let _ = crate::app::mouse::apply_scrollbar_drag_target(scroll, target, drag_offset);
 }
 
 #[cfg(test)]
@@ -352,6 +349,7 @@ impl App {
         self.ide_panel.api.mock_python_versions_scroll.end_drag();
         self.ide_panel.api.mock_python_install_log_scroll.end_drag();
         self.ide_panel.problems_scroll.end_drag();
+        self.ide_panel.git.scroll.end_drag();
         self.ide_panel.git.graph_scroll.end_drag();
         self.ide_panel.git.logs_scroll.end_drag();
         for scroll in self.ide_panel.lsp_logs_scroll_y.values_mut() {

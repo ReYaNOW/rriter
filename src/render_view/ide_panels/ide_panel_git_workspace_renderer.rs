@@ -13,6 +13,37 @@ pub(crate) fn git_message_input_geometry(
     )
 }
 
+fn git_workspace_scrollbar(
+    panel_x: f32,
+    panel_w: f32,
+    list_y: f32,
+    list_h: f32,
+    total_h: f32,
+    offset: f32,
+    scale: f32,
+) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
+    let max_scroll = (total_h - list_h).max(0.0);
+    if max_scroll <= 0.0 {
+        return None;
+    }
+    Some(crate::render_view::scrollbar_widget::Scrollbar {
+        style: crate::render_view::scrollbar_widget::ScrollbarStyle {
+            thumb_thickness: 3.0,
+            edge_gap: Some(5.0),
+            track_pad: 4.0,
+            min_thumb: 20.0,
+            radius: Some(1.5),
+            track_color: None,
+            thumb_color: [1.0, 1.0, 1.0, 0.22],
+        },
+        axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+        lane: (panel_x + panel_w - 8.0 * scale, list_y, 8.0 * scale, list_h),
+        extent: crate::render_view::scrollbar_widget::ScrollbarExtent::with_max(
+            list_h, max_scroll, offset,
+        ),
+    })
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -1281,19 +1312,24 @@ impl Renderer {
         }
 
         let total_h = (y + scroll - list_y).max(0.0);
-        if total_h > list_h {
-            let max_s = (total_h - list_h).max(1.0);
-            let ratio = (scroll / max_s).clamp(0.0, 1.0);
-            let thumb_h = (list_h / total_h * (list_h - 8.0 * s)).max(20.0 * s);
-            let thumb_y = list_y + 4.0 * s + ratio * (list_h - 8.0 * s - thumb_h);
-            self.push_rounded_rect(
-                panel_x + panel_w - 5.0 * s,
-                thumb_y,
-                3.0 * s,
-                thumb_h,
-                1.5 * s,
-                [1.0, 1.0, 1.0, 0.22],
+        if let Some(bar) = git_workspace_scrollbar(
+            panel_x, panel_w, list_y, list_h, total_h, scroll, s,
+        ) {
+            self.git_workspace_scrollbar = Some(bar);
+            self.draw_scrollbar(
+                &bar,
+                s,
+                1.0,
+                Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: ui_registry,
+                    id: crate::ui_system::UiId::GitWorkspaceScroll,
+                    mx,
+                    my,
+                    blocker: false,
+                }),
             );
+        } else {
+            self.git_workspace_scrollbar = None;
         }
 
         if ide_panel.git.bottom_pane != crate::app::git_panel::GitBottomPane::Closed {

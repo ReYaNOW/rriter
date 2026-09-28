@@ -388,19 +388,23 @@ impl Renderer {
 
                 let content_h = database_table_review_content_height(s, total_lines);
                 if content_h > body_h {
-                    let thumb_h = (body_h / content_h * body_h)
-                        .max((30.0 * s).round())
-                        .min(body_h)
-                        .round();
-                    let ratio = (logical_scroll / max_scroll.max(1.0)).clamp(0.0, 1.0);
-                    self.push_rounded_rect(
-                        (body_x + body_w - 8.0 * s).round(),
-                        (body_y + ratio * (body_h - thumb_h)).round(),
-                        (5.0 * s).round().max(1.0),
-                        thumb_h,
-                        (2.5 * s).round().max(1.0),
-                        [0.62, 0.38, 0.82, 0.9],
-                    );
+                    let bar = crate::render_view::scrollbar_widget::Scrollbar {
+                        style: crate::render_view::scrollbar_widget::ScrollbarStyle {
+                            thumb_thickness: 5.0,
+                            edge_gap: Some(3.0),
+                            track_pad: 0.0,
+                            min_thumb: 30.0,
+                            radius: Some(2.5),
+                            track_color: None,
+                            thumb_color: [0.62, 0.38, 0.82, 0.9],
+                        },
+                        axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
+                        lane: (body_x + body_w - 8.0 * s, body_y, 8.0 * s, body_h),
+                        extent: crate::render_view::scrollbar_widget::ScrollbarExtent::with_max(
+                            body_h, max_scroll, logical_scroll,
+                        ),
+                    };
+                    self.draw_scrollbar(&bar, s, 1.0, None);
                 }
                 if summary.truncated_details {
                     self.push_rect(body_x, body_y + body_h - 27.0 * s, body_w, 27.0 * s, [0.16,0.12,0.05,0.95]);
@@ -559,70 +563,49 @@ impl Renderer {
         self.flush();
         unsafe { self.gl.disable(glow::SCISSOR_TEST) };
 
-        let track_color = [0.055, 0.058, 0.075, 1.0];
-        let thumb_color = [0.35, 0.68, 0.94, 0.92];
         if show_y {
             let track_x = outer_x + viewport_w;
-            self.push_rect(track_x, outer_y, scrollbar, viewport_h, track_color);
-            ui.register_rect(
-                UiId::DatabaseTableModalScroll,
-                track_x,
-                outer_y,
-                scrollbar,
-                viewport_h,
-                mx,
-                my,
+            let bar = database_table_modal_scrollbar(
+                (track_x, outer_y, scrollbar, viewport_h), viewport_h, content_h,
+                scroll_y, false,
             );
-            if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                outer_y,
-                viewport_h,
-                viewport_h,
-                content_h,
-                scroll_y,
-                (28.0 * s).round(),
-            ) {
-                self.push_rounded_rect(
-                    track_x + (2.0 * s).round(),
-                    thumb.start.round(),
-                    (scrollbar - 4.0 * s).max(4.0).round(),
-                    thumb.len.round(),
-                    (3.0 * s).round(),
-                    thumb_color,
-                );
-            }
+            self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: &mut *ui, id: UiId::DatabaseTableModalScroll, mx, my, blocker: false,
+            }));
         }
         if show_x {
             let track_y = outer_y + viewport_h;
-            self.push_rect(outer_x + gutter_w, track_y, code_w, scrollbar, track_color);
-            ui.register_rect(
-                UiId::DatabaseTableModalScrollX,
-                outer_x + gutter_w,
-                track_y,
-                code_w,
-                scrollbar,
-                mx,
-                my,
+            let bar = database_table_modal_scrollbar(
+                (outer_x + gutter_w, track_y, code_w, scrollbar), code_w, content_w,
+                scroll_x, true,
             );
-            if let Some(thumb) = crate::scroll::scrollbar_thumb(
-                outer_x + gutter_w,
-                code_w,
-                code_w,
-                content_w,
-                scroll_x,
-                (36.0 * s).round(),
-            ) {
-                self.push_rounded_rect(
-                    thumb.start.round(),
-                    track_y + (2.0 * s).round(),
-                    thumb.len.round(),
-                    (scrollbar - 4.0 * s).max(4.0).round(),
-                    (3.0 * s).round(),
-                    thumb_color,
-                );
-            }
+            self.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: &mut *ui, id: UiId::DatabaseTableModalScrollX, mx, my, blocker: false,
+            }));
         }
     }
 
+}
+
+pub(crate) fn database_table_modal_scrollbar(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 0.0,
+            edge_gap: Some(2.0),
+            track_pad: 0.0,
+            min_thumb: if horizontal { 36.0 } else { 28.0 },
+            radius: Some(3.0),
+            track_color: Some([0.055, 0.058, 0.075, 1.0]),
+            thumb_color: [0.35, 0.68, 0.94, 0.92],
+        },
+        axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
+        lane,
+        extent: ScrollbarExtent::new(viewport, content, offset),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

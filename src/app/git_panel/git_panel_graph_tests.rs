@@ -32,18 +32,21 @@
 
     #[test]
     fn git_graph_scroll_thumb_shrinks_as_loaded_commits_grow() {
-        let initial = git_graph_scroll_thumb_h(100, 500.0, 1.0);
-        let loaded_more = git_graph_scroll_thumb_h(300, 500.0, 1.0);
+        let thumb_h = |commits: usize, rows_h: f32, scale: f32| {
+            git_graph_scrollbar(0.0, 300.0, 0.0, rows_h, commits, 0.0, scale)
+                .geometry(scale)
+                .map(|g| g.thumb.len)
+                .expect("graph overflows")
+        };
+        let initial = thumb_h(100, 500.0, 1.0);
+        let loaded_more = thumb_h(300, 500.0, 1.0);
 
         assert!(loaded_more < initial);
         assert!(loaded_more >= 10.0);
-    }
 
-    #[test]
-    fn git_graph_scroll_thumb_handles_tiny_track() {
-        let thumb = git_graph_scroll_thumb_h(100, 23.921906, 1.3333334);
-        assert!(thumb > 0.0);
-        assert!(thumb <= 23.921906);
+        let tiny = thumb_h(100, 23.921906, 1.3333334);
+        assert!(tiny > 0.0);
+        assert!(tiny <= 23.921906);
     }
 
     #[test]
@@ -53,7 +56,7 @@
         scroll.target = 12.0;
         scroll.velocity = 9.0;
 
-        apply_git_graph_scroll_drag(&mut scroll, 240.0, 7.0);
+        assert!(crate::app::mouse::apply_scrollbar_drag_target(&mut scroll, 240.0, 7.0));
 
         assert_eq!(scroll.current, 12.0);
         assert_eq!(scroll.target, 240.0);

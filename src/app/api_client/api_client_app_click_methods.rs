@@ -512,6 +512,7 @@ impl crate::app::App {
                 self.place_api_cursor_from_last_click(id, true, same_click_target);
             }
             crate::ui_system::UiId::ApiMockCombinedPython(_) => {}
+            crate::ui_system::UiId::ApiMockCombinedScrollY(_) => {}
             crate::ui_system::UiId::ApiMockContractInput(route_idx) => {
                 self.focus_api_input(ApiFocus::MockContract { route_idx });
                 self.place_api_cursor_from_last_click(id, true, same_click_target);

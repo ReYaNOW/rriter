@@ -450,8 +450,10 @@ mod tests {
         let rect = (100.0, 200.0, 14.0, 120.0);
         let line_count = 30;
         let current = 180.0;
-        let thumb = api_mock_server_log_scrollbar_thumb(rect, line_count, current, 1.0)
-            .expect("scrollbar thumb");
+        let thumb = api_mock_server_log_scrollbar(rect, line_count, current, 1.0)
+            .geometry(1.0)
+            .expect("scrollbar")
+            .thumb;
         let pointer = thumb.start + 5.0;
         let (offset, target) = api_mock_server_log_scrollbar_drag_target(
             rect, line_count, current, pointer, 1.0, None,
@@ -642,8 +644,10 @@ mod tests {
         let rect = (100.0, 50.0, 320.0, 158.0);
         let max_scroll = api_python_version_list_max_scroll(20, rect.3, 1.0);
         let current = max_scroll * 0.5;
-        let (_, _, thumb) =
-            api_python_scrollbar_thumb(rect, current, max_scroll, 1.0).expect("python thumb");
+        let thumb = api_python_scrollbar(rect, current, max_scroll, 1.0)
+            .geometry(1.0)
+            .expect("python scrollbar")
+            .thumb;
         let pointer = thumb.start + 5.0;
         let (offset, initial_target) =
             api_python_scrollbar_drag_target(rect, current, max_scroll, pointer, 1.0, None)
@@ -1105,12 +1109,15 @@ fn python_version_scroll_uses_actual_compressed_viewport() {
 }
 
 #[test]
-fn python_scrollbar_metrics_handle_tiny_viewports_without_invalid_bounds() {
-    assert_eq!(api_python_scrollbar_metrics(8.0, 100.0, 1.0), None);
-    let (track_h, thumb_h) =
-        api_python_scrollbar_metrics(100.0, 200.0, 1.0).expect("scrollbar");
-    assert_eq!(track_h, 88.0);
-    assert!(thumb_h >= 18.0 && thumb_h <= track_h);
+fn python_scrollbar_geometry_handles_tiny_viewports_without_invalid_bounds() {
+    assert!(api_python_scrollbar((0.0, 0.0, 100.0, 8.0), 0.0, 100.0, 1.0)
+        .geometry(1.0)
+        .is_none());
+    let geometry = api_python_scrollbar((0.0, 0.0, 100.0, 100.0), 0.0, 200.0, 1.0)
+        .geometry(1.0)
+        .expect("scrollbar");
+    assert_eq!(geometry.track_len, 88.0);
+    assert!(geometry.thumb.len >= 18.0 && geometry.thumb.len <= geometry.track_len);
 }
 
 #[test]

@@ -19,50 +19,75 @@ pub(crate) fn lsp_server_logs_h_for_content(inner_total_h: f32, content_h: f32, 
     (inner_total_h + 54.0 * s).clamp(min_h, max_h)
 }
 
-pub(crate) fn lsp_log_scrollbar_thumb(
-    track_start: f32,
-    track_len: f32,
+pub(crate) fn lsp_log_scrollbar(
+    lane: (f32, f32, f32, f32),
     viewport_len: f32,
     content_len: f32,
     current_scroll: f32,
-    scale: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
-    crate::scroll::scrollbar_thumb(
-        track_start,
-        track_len,
-        viewport_len,
-        content_len,
-        current_scroll,
-        20.0 * scale,
-    )
+    axis: crate::render_view::scrollbar_widget::ScrollbarAxis,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 4.0,
+            edge_gap: Some(4.0),
+            track_pad: 7.0,
+            min_thumb: 20.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.22],
+            ..ScrollbarStyle::BASE
+        },
+        axis,
+        lane,
+        extent: ScrollbarExtent::new(viewport_len, content_len, current_scroll),
+    }
 }
 
-pub(crate) fn lsp_log_scrollbar_drag_target(
-    pointer: f32,
-    track_start: f32,
-    track_len: f32,
+pub(crate) fn lsp_log_scrollbar_target(
+    lane: (f32, f32, f32, f32),
     viewport_len: f32,
     content_len: f32,
     current_scroll: f32,
-    scale: f32,
+    axis: crate::render_view::scrollbar_widget::ScrollbarAxis,
+    pointer: f32,
     drag_offset: Option<f32>,
+    scale: f32,
 ) -> Option<(f32, f32)> {
-    let thumb = lsp_log_scrollbar_thumb(
-        track_start,
-        track_len,
+    let geometry = lsp_log_scrollbar(
+        lane,
         viewport_len,
         content_len,
         current_scroll,
-        scale,
-    )?;
-    crate::scroll::scrollbar_drag_target(
-        pointer,
-        track_start,
-        track_len,
-        thumb,
-        (content_len - viewport_len).max(0.0),
-        drag_offset,
+        axis,
     )
+    .geometry(scale)?;
+    if let Some(offset) = drag_offset {
+        Some((offset, geometry.drag_target(pointer, offset)?))
+    } else {
+        geometry.press_target(pointer)
+    }
+}
+
+pub(crate) fn lsp_panel_scrollbar(
+    lane: (f32, f32, f32, f32),
+    content_h: f32,
+    current_scroll: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle {
+            track_pad: 5.0,
+            min_thumb: 40.0,
+            thumb_color: [1.0, 1.0, 1.0, 0.22],
+            ..ScrollbarStyle::BASE
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent::new(lane.3, content_h, current_scroll),
+    }
 }
 
 pub(crate) fn lsp_log_inner_size_by<F>(
@@ -607,45 +632,47 @@ mod tests {
     }
     #[test]
     fn lsp_log_scrollbar_drag_uses_the_rendered_track_origin() {
-        let track_start = 107.0;
-        let track_len = 186.0;
+        let lane = (0.0, 100.0, 14.0, 200.0);
         let viewport_len = 200.0;
         let content_len = 600.0;
         let current = 150.0;
-        let thumb = lsp_log_scrollbar_thumb(
-            track_start,
-            track_len,
+        let rendered = lsp_log_scrollbar(
+            lane,
             viewport_len,
             content_len,
             current,
-            1.0,
+            crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
         )
+        .geometry(1.0)
         .unwrap();
-        let pointer_offset = thumb.len * 0.35;
-        let pointer = thumb.start + pointer_offset;
-        let (offset, target) = lsp_log_scrollbar_drag_target(
-            pointer,
-            track_start,
-            track_len,
+        assert_eq!(rendered.track_start, 107.0);
+        assert_eq!(rendered.track_len, 186.0);
+        let pointer_offset = rendered.thumb.len * 0.35;
+        let pointer = rendered.thumb.start + pointer_offset;
+        let axis = crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical;
+        let (offset, target) = lsp_log_scrollbar_target(
+            lane,
             viewport_len,
             content_len,
             current,
-            1.0,
+            axis,
+            pointer,
             None,
+            1.0,
         )
         .unwrap();
         assert!((offset - pointer_offset).abs() < 0.001);
         assert!((target - current).abs() < 0.001);
 
-        let (_, moved_target) = lsp_log_scrollbar_drag_target(
-            track_start + track_len * 0.8,
-            track_start,
-            track_len,
+        let (_, moved_target) = lsp_log_scrollbar_target(
+            lane,
             viewport_len,
             content_len,
             current,
-            1.0,
+            axis,
+            rendered.track_start + rendered.track_len * 0.8,
             Some(offset),
+            1.0,
         )
         .unwrap();
         let mut scroll = crate::scroll::ScrollState::new(7.0);

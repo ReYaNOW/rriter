@@ -1312,19 +1312,30 @@ fn database_dialog_form_scissor(
     )
 }
 
-fn database_connection_dialog_scrollbar_thumb(
+fn database_connection_dialog_scrollbar(
     layout: &DatabaseConnectionDialogLayout,
     current_scroll: f32,
-) -> Option<crate::scroll::ScrollbarThumb> {
+) -> Option<crate::render_view::scrollbar_widget::Scrollbar> {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
     let track = layout.scrollbar_track?;
-    crate::scroll::scrollbar_thumb(
-        track.y,
-        track.h,
-        layout.form_clip.h,
-        layout.content_height,
-        current_scroll.clamp(0.0, layout.max_scroll),
-        DATABASE_DIALOG_MIN_THUMB_H * layout.modal.scale,
-    )
+    Some(Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 0.0,
+            edge_gap: None,
+            track_pad: 0.0,
+            min_thumb: DATABASE_DIALOG_MIN_THUMB_H,
+            radius: None,
+            track_color: Some([0.20, 0.21, 0.25, 0.55]),
+            thumb_color: [0.48, 0.50, 0.58, 0.90],
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane: (track.x, track.y, track.w, track.h),
+        extent: ScrollbarExtent::new(
+            layout.form_clip.h,
+            layout.content_height,
+            current_scroll.clamp(0.0, layout.max_scroll),
+        ),
+    })
 }
 
 fn database_dialog_tooltip_rect(
@@ -1371,7 +1382,7 @@ impl Renderer {
         crate::ui_system::UiClipRect,
         f32,
         f32,
-        Option<(crate::ui_system::UiClipRect, crate::scroll::ScrollbarThumb)>,
+        Option<(crate::ui_system::UiClipRect, crate::render_view::scrollbar_widget::ScrollbarGeometry)>,
     ) {
         let layout = database_connection_dialog_layout(
             self.width,
@@ -1380,8 +1391,9 @@ impl Renderer {
             visible_rows,
         );
         let scrollbar = layout.scrollbar_track.and_then(|track| {
-            database_connection_dialog_scrollbar_thumb(&layout, current_scroll)
-                .map(|thumb| (track, thumb))
+            database_connection_dialog_scrollbar(&layout, current_scroll)
+                .and_then(|bar| bar.geometry(layout.modal.scale))
+                .map(|geometry| (track, geometry))
         });
         (
             layout.form_clip,

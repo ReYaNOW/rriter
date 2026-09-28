@@ -639,6 +639,7 @@ impl Renderer {
                 git_graph_tooltip_visible_copied: None,
                 git_logs_layout_cache: GitLogsLayoutCache::default(),
                 git_logs_selecting: false,
+                git_workspace_scrollbar: None,
                 git_tooltip_waiting: false,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,

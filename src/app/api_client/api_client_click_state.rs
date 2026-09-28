@@ -255,30 +255,14 @@ impl ApiClientState {
         pointer_y: f32,
         scale: f32,
     ) {
-        let max_scroll = api_mock_guide_max_scroll(rect.3, scale);
-        let track_start = rect.1 + 7.0 * scale;
-        let track_len = (rect.3 - 14.0 * scale).max(0.0);
-        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-            track_start,
-            track_len,
-            rect.3,
-            rect.3 + max_scroll,
-            self.mock_guide_scroll.current,
-            28.0 * scale,
-        ) && let Some((drag_offset, target)) = crate::scroll::scrollbar_drag_target(
+        let geometry = api_mock_guide_scrollbar(rect, self.mock_guide_scroll.current, scale)
+            .geometry(scale);
+        let _ = crate::app::mouse::press_scrollbar(
+            &mut self.mock_guide_scroll,
+            geometry,
+            0.0,
             pointer_y,
-            track_start,
-            track_len,
-            thumb,
-            max_scroll,
-            Some(thumb.len * 0.5),
-        ) {
-            crate::app::mouse::apply_scrollbar_drag_target(
-                &mut self.mock_guide_scroll,
-                target,
-                drag_offset,
-            );
-        }
+        );
     }
 
     /// Cycles the method of a manual mock route; `false` when the index is gone

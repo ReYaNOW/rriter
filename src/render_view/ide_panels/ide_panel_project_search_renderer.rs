@@ -844,49 +844,28 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         scale: f32,
     ) {
-        let viewport = crate::app::project_search::project_search_query_viewport(rect, scale);
-        for (axis, id, track) in [
+        for (axis, id) in [
             (
                 ProjectSearchQueryScrollAxis::Vertical,
                 crate::ui_system::UiId::ProjectSearchQueryScrollbarY,
-                viewport.vertical_track,
             ),
             (
                 ProjectSearchQueryScrollAxis::Horizontal,
                 crate::ui_system::UiId::ProjectSearchQueryScrollbarX,
-                viewport.horizontal_track,
             ),
         ] {
-            let Some(thumb) = crate::app::project_search::project_search_query_scrollbar_thumb(
+            let Some(bar) = crate::app::project_search::project_search_query_scrollbar(
                 rect, state, axis, scale,
             ) else {
                 continue;
             };
-            ui_registry.register_rect(
+            self.draw_scrollbar(&bar, 1.0, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: &mut *ui_registry,
                 id,
-                track.x,
-                track.y,
-                track.w,
-                track.h,
-                self.last_mouse_x,
-                self.last_mouse_y,
-            );
-            self.push_rounded_rect(
-                track.x.round(),
-                track.y.round(),
-                track.w,
-                track.h,
-                3.0 * scale,
-                [1.0, 1.0, 1.0, 0.035],
-            );
-            self.push_rounded_rect(
-                thumb.x.round(),
-                thumb.y.round(),
-                thumb.w,
-                thumb.h,
-                3.0 * scale,
-                [0.48, 0.48, 0.56, 0.68],
-            );
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: false,
+            }));
         }
     }
 
@@ -1249,30 +1228,17 @@ impl Renderer {
         ui_registry: &mut crate::ui_system::UiRegistry,
         scale: f32,
     ) {
-        let Some(thumb) =
-            crate::app::project_search::project_search_scrollbar_thumb(layout, state, scale)
+        let Some(bar) =
+            crate::app::project_search::project_search_scrollbar(layout, state, scale)
         else {
             return;
         };
-        if state.running_generation.is_some() || !state.has_run {
-            return;
-        }
-        ui_registry.register_rect(
-            crate::ui_system::UiId::ProjectSearchScrollbar,
-            layout.list.x + layout.list.w - 14.0 * scale,
-            layout.list.y,
-            12.0 * scale,
-            layout.list.h,
-            self.last_mouse_x,
-            self.last_mouse_y,
-        );
-        self.push_rounded_rect(
-            thumb.x.round(),
-            thumb.y.round(),
-            thumb.w,
-            thumb.h,
-            3.0 * scale,
-            [0.48, 0.48, 0.56, 0.55],
-        );
+        self.draw_scrollbar(&bar, scale, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: &mut *ui_registry,
+            id: crate::ui_system::UiId::ProjectSearchScrollbar,
+            mx: self.last_mouse_x,
+            my: self.last_mouse_y,
+            blocker: false,
+        }));
     }
 }

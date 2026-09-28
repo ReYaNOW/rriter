@@ -343,18 +343,18 @@ fn terminal_mouse_helpers_match_sgr_protocol_edges() {
 
 #[test]
 fn autocomplete_scroll_click_target_keeps_thumb_or_pages_to_pointer() {
-    assert_eq!(
-        autocomplete_scroll_click_target(20.0, 10.0, 200.0, 0.0, 3, 1.0),
-        None,
-    );
+    let press = |pointer: f32, rect_h: f32, items: usize| {
+        autocomplete_scrollbar((0.0, 10.0, 300.0, rect_h), items, 0.0, 1.0)
+            .geometry(1.0)
+            .and_then(|geometry| geometry.press_target(pointer))
+    };
+    assert_eq!(press(20.0, 200.0, 3), None);
 
-    let (drag_offset, target) =
-        autocomplete_scroll_click_target(13.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
+    let (drag_offset, target) = press(13.0, 160.0, 20).unwrap();
     assert_eq!(drag_offset, 0.0);
     assert_eq!(target, 0.0);
 
-    let (_, paged_target) =
-        autocomplete_scroll_click_target(140.0, 10.0, 160.0, 0.0, 20, 1.0).unwrap();
+    let (_, paged_target) = press(140.0, 160.0, 20).unwrap();
     assert!(paged_target > 0.0);
 }
 
@@ -364,7 +364,7 @@ fn autocomplete_scroll_drag_updates_target_without_teleporting_current() {
     scroll.current = 12.0;
     scroll.target = 20.0;
     scroll.velocity = 9.0;
-    apply_autocomplete_scroll_drag(&mut scroll, 144.0, 8.0);
+    assert!(crate::app::mouse::apply_scrollbar_drag_target(&mut scroll, 144.0, 8.0));
     assert_eq!(scroll.current, 12.0);
     assert_eq!(scroll.target, 144.0);
     assert_eq!(scroll.velocity, 9.0);

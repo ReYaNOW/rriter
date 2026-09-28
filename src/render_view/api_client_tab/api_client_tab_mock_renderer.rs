@@ -834,24 +834,23 @@ impl Renderer {
                 let track_y = cy + 8.0 * s;
                 let track_h = (viewport_h - 16.0 * s).max(1.0);
                 let track_w = (3.0 * s).max(2.0);
-                self.push_rect(
-                    track_x,
-                    track_y,
-                    track_w,
-                    track_h,
-                    [0.52, 0.54, 0.60, 0.22],
+                let scrollbar = crate::app::api_client::api_mock_combined_editor_scrollbar(
+                    (track_x, track_y, track_w, track_h),
+                    viewport_h,
+                    combined_h,
+                    combined_scroll_y,
                 );
-                let thumb_h = (viewport_h / combined_h * track_h)
-                    .max(22.0 * s)
-                    .min(track_h);
-                let thumb_y = track_y
-                    + (combined_scroll_y / combined_max_scroll) * (track_h - thumb_h);
-                self.push_rect(
-                    track_x,
-                    thumb_y,
-                    track_w,
-                    thumb_h,
-                    [0.64, 0.66, 0.72, 0.70],
+                let _ = self.draw_scrollbar(
+                    &scrollbar,
+                    s,
+                    1.0,
+                    Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+                        ui: ui_registry,
+                        id: crate::ui_system::UiId::ApiMockCombinedScrollY(route_idx),
+                        mx,
+                        my,
+                        blocker: false,
+                    }),
                 );
             }
             cy += viewport_h + 14.0 * s;

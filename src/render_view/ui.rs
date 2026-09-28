@@ -916,24 +916,12 @@ impl Renderer {
         }
 
         if total_h > target_h {
-            let max_scroll = (total_h - target_h).max(0.0);
-            let scroll_ratio = (scroll_y / max_scroll).clamp(0.0, 1.0);
-
-            let track_margin = autocomplete_scrollbar_track_margin(scale);
-            let track_h = (current_h - track_margin * 2.0).max(1.0);
-            let thumb_h = (current_h / total_h * track_h).max(20.0 * scale);
-            let thumb_y = y + track_margin + scroll_ratio * (track_h - thumb_h);
-
             let alpha = (smooth_progress * 1.5).clamp(0.0, 0.8);
-
-            self.push_rounded_rect(
-                x + max_w - 10.0 * scale,
-                thumb_y,
-                6.0 * scale,
-                thumb_h,
-                3.0 * scale,
-                [0.7, 0.33, 0.54, alpha],
+            let total_items = (total_h / (36.0 * scale).max(1.0)).round() as usize;
+            let bar = crate::app::mouse::autocomplete_scrollbar(
+                (x, y, max_w, current_h), total_items, scroll_y, scale,
             );
+            self.draw_scrollbar(&bar, scale, alpha, None);
         }
 
         self.flush();
@@ -1283,7 +1271,7 @@ impl Renderer {
         let hint_y = content_y + content_h - 30.0 * scale;
 
         let kbd_bg = [0.224, 0.231, 0.251, 1.0];
-        let kbd_border = [0.306, 0.318, 0.341, 1.0];
+        let kbd_border = [0.306, 0.3176, 0.341, 1.0];
         let kbd_text_color = [0.875, 0.882, 0.902, 1.0];
 
         let kbd_h = 22.0 * scale;

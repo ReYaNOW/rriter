@@ -820,23 +820,20 @@ fn preproduction_file_tree_copy_preserves_file_permissions() {
 
 #[test]
 fn file_tree_scrollbar_uses_panel_viewport_for_top_and_bottom_layouts() {
-    assert!(file_tree_scrollbar_layout(48.0, 32.0, 280.0, 500.0, 1.0, 5, 0.0).is_none());
+    let layout = |y: f32, w: f32, h: f32, nodes: usize| {
+        file_tree_scrollbar(48.0, y, w, h, 1.0, nodes, 120.0).and_then(|bar| bar.geometry(1.0))
+    };
+    assert!(layout(32.0, 280.0, 500.0, 5).is_none());
 
-    let top = file_tree_scrollbar_layout(48.0, 32.0, 280.0, 300.0, 1.0, 40, 120.0)
-        .expect("long tree has a scrollbar");
-    let bottom = file_tree_scrollbar_layout(48.0, 640.0, 900.0, 220.0, 1.0, 40, 120.0)
-        .expect("bottom tree has a scrollbar");
+    let top = layout(32.0, 280.0, 300.0, 40).expect("long tree has a scrollbar");
+    let bottom = layout(640.0, 900.0, 220.0, 40).expect("bottom tree has a scrollbar");
 
-    assert_eq!(top.track_x, 316.0);
-    assert_eq!(top.track_y, 36.0);
-    assert_eq!(top.track_h, 292.0);
+    assert_eq!(top.lane, (316.0, 36.0, 12.0, 292.0));
     assert_eq!(top.max_scroll, 820.0);
-    assert_eq!(bottom.track_x, 936.0);
-    assert_eq!(bottom.track_y, 644.0);
-    assert_eq!(bottom.track_h, 212.0);
+    assert_eq!(bottom.lane, (936.0, 644.0, 12.0, 212.0));
     assert_eq!(bottom.max_scroll, 900.0);
-    assert!(top.thumb.start >= top.track_y);
-    assert!(bottom.thumb.start >= bottom.track_y);
+    assert!(top.thumb_rect.1 >= top.track_start);
+    assert!(bottom.thumb_rect.1 >= bottom.track_start);
 }
 
 #[test]

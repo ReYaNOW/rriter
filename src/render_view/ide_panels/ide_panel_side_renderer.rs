@@ -464,7 +464,7 @@ impl Renderer {
                 }
             }
 
-            if let Some(layout) = crate::app::file_tree::file_tree_scrollbar_layout(
+            if let Some(bar) = crate::app::file_tree::file_tree_scrollbar(
                 panel_x,
                 panel_y,
                 panel_w,
@@ -473,23 +473,14 @@ impl Renderer {
                 total_nodes,
                 scroll,
             ) {
-                ui_registry.register_rect(
-                    crate::ui_system::UiId::FileTreeScrollY,
-                    layout.track_x,
-                    layout.track_y,
-                    layout.track_w,
-                    layout.track_h,
-                    hit_mx,
-                    hit_my,
-                );
-                self.push_rounded_rect(
-                    layout.track_x + (layout.track_w - 3.0 * s) * 0.5,
-                    layout.thumb.start,
-                    3.0 * s,
-                    layout.thumb.len,
-                    1.5 * s,
-                    [1.0, 1.0, 1.0, 0.22],
-                );
+                let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+                    ui: ui_registry,
+                    id: crate::ui_system::UiId::FileTreeScrollY,
+                    mx: hit_mx,
+                    my: hit_my,
+                    blocker: false,
+                };
+                let _ = self.draw_scrollbar(&bar, s, 1.0, Some(hit));
             }
         }
 

@@ -137,6 +137,34 @@ pub(crate) fn markdown_read_scrollbar_width(max_scroll: f32, scale: f32) -> f32 
     }
 }
 
+/// Reader vertical scrollbar shared by the renderer and the press/drag handlers: a
+/// `markdown_read_scrollbar_width` lane at the right edge of the Reader `frame`, whose
+/// height is both the track and the viewport. `thumb_color` only matters for drawing.
+pub(crate) fn markdown_read_scrollbar(
+    frame: (f32, f32, f32, f32),
+    content_height: f32,
+    displayed_scroll_y: f32,
+    scale: f32,
+    thumb_color: [f32; 4],
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    let (x, y, w, h) = frame;
+    let extent = ScrollbarExtent::new(h, content_height, displayed_scroll_y);
+    let bar_w = markdown_read_scrollbar_width(extent.max_scroll, scale);
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_color,
+            ..ScrollbarStyle::MARKDOWN_READ
+        },
+        axis: ScrollbarAxis::Vertical,
+        lane: (x + w - bar_w, y, bar_w, h),
+        extent,
+    }
+}
+
+/// Exact (unrounded) Reader thumb along the axis, as press/drag use it.
 pub(crate) fn markdown_read_scrollbar_thumb(
     track_y: f32,
     viewport_height: f32,
@@ -144,17 +172,15 @@ pub(crate) fn markdown_read_scrollbar_thumb(
     displayed_scroll_y: f32,
     scale: f32,
 ) -> Option<crate::scroll::ScrollbarThumb> {
-    if !scale.is_finite() || scale <= 0.0 {
-        return None;
-    }
-    crate::scroll::scrollbar_thumb(
-        track_y,
-        viewport_height,
-        viewport_height,
+    markdown_read_scrollbar(
+        (0.0, track_y, 0.0, viewport_height),
         content_height,
         displayed_scroll_y,
-        20.0 * scale,
+        scale,
+        [0.0; 4],
     )
+    .geometry(scale)
+    .map(|geometry| geometry.thumb)
 }
 
 fn register_markdown_read_text_surface(

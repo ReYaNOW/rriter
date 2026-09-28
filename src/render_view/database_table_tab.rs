@@ -1138,53 +1138,48 @@ fn draw_database_table_scrollbars(
     my: f32,
     s: f32,
 ) {
-    let track_color = [0.055, 0.058, 0.075, 1.0];
-    let thumb_color = [0.62, 0.38, 0.82, 0.9];
     let (vertical_rect, horizontal_rect) = database_table_scrollbar_rects(layout);
     if let Some(rect) = vertical_rect {
         let total_h = state.grid.logical_row_count() as f32
             * crate::app::database::database_grid_row_height_px(s);
-        renderer.push_rect(rect.x, rect.y, rect.w, rect.h, track_color);
-        ui.register_rect(UiId::DatabaseTableScrollY, rect.x, rect.y, rect.w, rect.h, mx, my);
-        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-            rect.y,
-            rect.h,
-            layout.body_rect.h,
-            total_h,
-            state.grid.scroll_y.current * s,
-            (28.0 * s).round(),
-        ) {
-            renderer.push_rounded_rect(
-                rect.x + (2.0 * s).round(),
-                thumb.start.round(),
-                (rect.w - 4.0 * s).max(4.0).round(),
-                thumb.len.round(),
-                (3.0 * s).round(),
-                thumb_color,
-            );
-        }
+        let bar = database_table_scrollbar(
+            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.h, total_h,
+            state.grid.scroll_y.current * s, false,
+        );
+        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: &mut *ui, id: UiId::DatabaseTableScrollY, mx, my, blocker: false,
+        }));
     }
     if let Some(rect) = horizontal_rect {
         let content_w = (state.grid.content_width(metadata) * s).round();
-        renderer.push_rect(rect.x, rect.y, rect.w, rect.h, track_color);
-        ui.register_rect(UiId::DatabaseTableScrollX, rect.x, rect.y, rect.w, rect.h, mx, my);
-        if let Some(thumb) = crate::scroll::scrollbar_thumb(
-            rect.x,
-            rect.w,
-            layout.body_rect.w,
-            content_w,
-            state.grid.scroll_x.current * s,
-            (36.0 * s).round(),
-        ) {
-            renderer.push_rounded_rect(
-                thumb.start.round(),
-                rect.y + (2.0 * s).round(),
-                thumb.len.round(),
-                (rect.h - 4.0 * s).max(4.0).round(),
-                (3.0 * s).round(),
-                thumb_color,
-            );
-        }
+        let bar = database_table_scrollbar(
+            (rect.x, rect.y, rect.w, rect.h), layout.body_rect.w, content_w,
+            state.grid.scroll_x.current * s, true,
+        );
+        renderer.draw_scrollbar(&bar, s, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
+            ui: &mut *ui, id: UiId::DatabaseTableScrollX, mx, my, blocker: false,
+        }));
+    }
+}
+
+pub(crate) fn database_table_scrollbar(
+    lane: (f32, f32, f32, f32), viewport: f32, content: f32,
+    offset: f32, horizontal: bool,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle};
+    Scrollbar {
+        style: ScrollbarStyle {
+            thumb_thickness: 0.0,
+            edge_gap: Some(2.0),
+            track_pad: 0.0,
+            min_thumb: if horizontal { 36.0 } else { 28.0 },
+            radius: Some(3.0),
+            track_color: Some([0.055, 0.058, 0.075, 1.0]),
+            thumb_color: [0.62, 0.38, 0.82, 0.9],
+        },
+        axis: if horizontal { ScrollbarAxis::Horizontal } else { ScrollbarAxis::Vertical },
+        lane,
+        extent: ScrollbarExtent::new(viewport, content, offset),
     }
 }
 

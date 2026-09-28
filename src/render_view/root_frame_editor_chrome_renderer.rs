@@ -230,14 +230,7 @@ impl Renderer {
             ..
         } = editor_text;
         if scrollbar_width > 0.0 {
-            let scroll_ratio_y = (render_scroll_y / max_scroll).clamp(0.0, 1.0);
-            let total_content_height =
-                editor_scroll_content_height(total_lines, self.line_height, editor_scroll_height);
-            let thumb_h = (editor_scroll_height / total_content_height.max(editor_scroll_height)
-                * editor_scroll_height)
-                .max(20.0 * s)
-                .min(editor_scroll_height.max(0.0));
-            let thumb_y = tab_bar_h + scroll_ratio_y * (editor_scroll_height - thumb_h);
+            // Git diff marks sit under the thumb, so they are pushed first.
             if let Some(state) = active_git_diff_state {
                 let total = total_lines.max(1) as f32;
                 for hunk in &state.hunks {
@@ -288,23 +281,20 @@ impl Renderer {
                     }
                 }
             }
-            self.push_rounded_rect(
-                scrollbar_x + 1.0 * s,
-                thumb_y,
-                scrollbar_width - 2.0 * s,
-                thumb_h,
-                (scrollbar_width - 2.0 * s) / 2.0,
-                [0.7, 0.33, 0.54, 0.8],
+            let bar = editor_vertical_scrollbar(
+                (scrollbar_x, tab_bar_h, scrollbar_width, editor_scroll_height),
+                editor_scroll_content_height(total_lines, self.line_height, editor_scroll_height),
+                max_scroll,
+                render_scroll_y,
             );
-            ui_registry.register_rect(
-                crate::ui_system::UiId::EditorScrollbarY,
-                scrollbar_x,
-                tab_bar_h,
-                scrollbar_width,
-                editor_scroll_height,
-                self.last_mouse_x,
-                self.last_mouse_y,
-            );
+            let hit = crate::render_view::scrollbar_widget::ScrollbarHit {
+                ui: ui_registry,
+                id: crate::ui_system::UiId::EditorScrollbarY,
+                mx: self.last_mouse_x,
+                my: self.last_mouse_y,
+                blocker: false,
+            };
+            let _ = self.draw_scrollbar(&bar, s, 1.0, Some(hit));
         }
     }
 
@@ -515,5 +505,28 @@ impl Renderer {
                 None,
             );
         }
+    }
+}
+
+/// Editor vertical scrollbar shared by `draw_root_editor_vertical_scrollbar` and the
+/// `EditorScrollbarY` press/drag handlers. `max_scroll` is the line-rounded editor range
+/// (`get_max_scroll`), which may exceed `content_h - viewport`.
+pub(crate) fn editor_vertical_scrollbar(
+    lane: crate::render_view::scrollbar_widget::ScrollbarRect,
+    content_h: f32,
+    max_scroll: f32,
+    scroll: f32,
+) -> crate::render_view::scrollbar_widget::Scrollbar {
+    use crate::render_view::scrollbar_widget::{
+        Scrollbar, ScrollbarAxis, ScrollbarExtent, ScrollbarStyle,
+    };
+    Scrollbar {
+        style: ScrollbarStyle::EDITOR_Y,
+        axis: ScrollbarAxis::Vertical,
+        lane,
+        extent: ScrollbarExtent {
+            max_scroll,
+            ..ScrollbarExtent::new(lane.3, content_h.max(lane.3), scroll)
+        },
     }
 }

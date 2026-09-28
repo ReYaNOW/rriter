@@ -512,19 +512,10 @@ impl App {
                 return;
             };
 
-            if crate::ui_system::point_in_rect(
-                mx,
-                my,
-                (
-                    layout.content_x,
-                    layout.content_y,
-                    layout.content_w,
-                    layout.content_h,
-                ),
-            ) {
+            if crate::ui_system::point_in_rect(mx, my, layout.content) {
                 self.ide_panel.problems_scroll.anim_speed = 7.0;
                 self.ide_panel.problems_scroll.scroll_by(dy);
-                let max_scroll = (layout.total_h - layout.track_h).max(0.0);
+                let max_scroll = layout.bar.extent.max_scroll;
                 self.ide_panel.problems_scroll.clamp_target(0.0, max_scroll);
                 self.window.as_ref().unwrap().request_redraw();
                 return;
