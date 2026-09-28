@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::Arc;
 use std::time::Duration;
+use crate::ui_waker::OneShotState;
 
 pub(super) struct RuffWorkspaceResult {
     pub(super) workspaces: Vec<PathBuf>,
@@ -20,12 +21,12 @@ pub(super) fn collect_workspace_diagnostics(workspaces: Vec<PathBuf>) -> RuffWor
 
 impl super::LspManager {
     pub(super) fn poll_ruff_workspace_diagnostics(&mut self) -> usize {
-        let Some(rx) = self.ruff_workspace_diag_rx.take() else {
+        let Some(mut rx) = self.ruff_workspace_diag_rx.take() else {
             return 0;
         };
 
-        match rx.try_recv() {
-            Ok(mut result) => {
+        match rx.poll() {
+            OneShotState::Ready(mut result) => {
                 self.ruff_workspace_diag_pending = false;
                 match result.diagnostics.as_mut() {
                     Ok(diagnostics) => {
@@ -45,11 +46,11 @@ impl super::LspManager {
                     }
                 }
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => {
+            OneShotState::Pending => {
                 self.ruff_workspace_diag_rx = Some(rx);
                 0
             }
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            OneShotState::Closed => {
                 self.ruff_workspace_diag_pending = false;
                 self.ruff_workspace_diagnostics.clear();
                 self.mark_diagnostics_changed();
@@ -122,28 +123,27 @@ impl super::LspManager {
         }
 
         let workspaces = self.active_workspaces.clone();
-        let (tx, rx) = self.ui_waker.channel();
-        let spawn_result = crate::platform::spawn_named("rriter-ruff-workspace", move || {
-            let result = collect_workspace_diagnostics(workspaces);
-            let _ = tx.send(result);
-        });
-
-        if spawn_result.is_ok() {
-            self.ruff_workspace_diag_rx = Some(rx);
-            self.ruff_workspace_diag_pending = true;
-            self.ruff_workspace_diag_dirty = false;
-        } else {
-            self.ruff_workspace_diag_dirty = false;
-            self.python_status = super::LspServerStatus::Crashed;
-            self.server_logs
-                .entry("ruff")
-                .or_default()
-                .push(super::LogEntry {
-                    text: "[LSP] Ruff workspace diagnostics worker failed to start".to_string(),
-                    spans: Vec::new(),
-                    folds: Vec::new(),
-                    created_at: std::time::Instant::now(),
-                });
+        match self.ui_waker.spawn_one_shot("rriter-ruff-workspace", move || {
+            collect_workspace_diagnostics(workspaces)
+        }) {
+            Ok(job) => {
+                self.ruff_workspace_diag_rx = Some(job);
+                self.ruff_workspace_diag_pending = true;
+                self.ruff_workspace_diag_dirty = false;
+            }
+            Err(error) => {
+                self.ruff_workspace_diag_dirty = false;
+                self.python_status = super::LspServerStatus::Crashed;
+                self.server_logs
+                    .entry("ruff")
+                    .or_default()
+                    .push(super::LogEntry {
+                        text: format!("[LSP] Ruff workspace diagnostics worker failed to start: {error}"),
+                        spans: Vec::new(),
+                        folds: Vec::new(),
+                        created_at: std::time::Instant::now(),
+                    });
+            }
         }
     }
 }

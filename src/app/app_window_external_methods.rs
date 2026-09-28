@@ -53,6 +53,8 @@ impl App {
         if !self.confirm_dialog.request(action) && !self.confirm_dialog.supersede(action) {
             return;
         }
+        // A superseded flow no longer waits for its protected save.
+        self.protected_saves.clear_awaiting_action();
 
         let Some(event_loop) = host.native() else {
             // Headless: no second window, the dialog is drawn into the main frame.
@@ -153,6 +155,7 @@ impl App {
 
     pub(crate) fn cancel_pending_action(&mut self) {
         self.confirm_dialog.cancel();
+        self.protected_saves.clear_awaiting_action();
         self.request_main_redraw();
     }
 
@@ -316,6 +319,7 @@ impl App {
     }
 
     pub(crate) fn begin_pending_action_save(&mut self) {
+        self.protected_saves.clear_awaiting_action();
         let action = self.confirm_dialog.action();
         if matches!(
             action,
@@ -350,13 +354,24 @@ impl App {
             self.trigger_save_as_picker();
             return;
         }
-        if self.save_current_file() {
-            self.confirm_dialog.mark_ready();
-            self.request_main_redraw();
+        match self.save_current_file_outcome() {
+            SaveOutcome::Saved => {
+                self.confirm_dialog.mark_ready();
+                self.request_main_redraw();
+            }
+            SaveOutcome::Pending(id) => {
+                // The question closes; the action runs once the protected save is
+                // confirmed (`resume_pending_action_after_protected_save`).
+                self.confirm_dialog.begin_save_as(Vec::new());
+                self.protected_saves.await_for_action(id);
+                self.request_main_redraw();
+            }
+            SaveOutcome::Failed => {}
         }
     }
 
     pub(crate) fn discard_pending_action_changes(&mut self) {
+        self.protected_saves.clear_awaiting_action();
         self.confirm_dialog.mark_ready();
         self.request_main_redraw();
     }
@@ -380,9 +395,18 @@ impl App {
                 self.trigger_save_as_picker();
                 return;
             }
-            if !self.save_current_file() {
-                self.cancel_pending_action();
-                return;
+            match self.save_current_file_outcome() {
+                SaveOutcome::Saved => {}
+                SaveOutcome::Pending(id) => {
+                    // Resumed by `resume_pending_action_after_protected_save`; the
+                    // tab is then clean (or dirty again and saved once more).
+                    self.protected_saves.await_for_action(id);
+                    return;
+                }
+                SaveOutcome::Failed => {
+                    self.cancel_pending_action();
+                    return;
+                }
             }
             self.confirm_dialog.finish_save_as_target(index);
         }
@@ -471,13 +495,41 @@ impl App {
         }
     }
 
+    /// `true` only when the file is on disk now; a protected save that went to
+    /// the background returns `false` (see `save_current_file_outcome`).
     pub fn save_current_file(&mut self) -> bool {
+        self.save_current_file_outcome() == SaveOutcome::Saved
+    }
+
+    /// Saves the active document. A plain write that is refused with
+    /// `PermissionDenied` (or a path whose protected save is still running, so
+    /// writes to one path never race) becomes a background elevated save of a
+    /// snapshot of the current text and format.
+    pub(crate) fn save_current_file_outcome(&mut self) -> SaveOutcome {
         if self.active_tab_is_git_diff() {
-            return self.save_active_git_diff();
+            return if self.save_active_git_diff() {
+                SaveOutcome::Saved
+            } else {
+                SaveOutcome::Failed
+            };
         }
-        if let Some(path) = self.file_path.clone() {
-            let content = self.editor.get_full_text();
-            if self.write_current_text_to_path(&path, &content) {
+        let Some(path) = self.file_path.clone() else {
+            self.trigger_save_as_picker();
+            return SaveOutcome::Failed;
+        };
+        if self.headless_write_blocked() {
+            return SaveOutcome::Failed;
+        }
+        let content = self.editor.get_full_text();
+        if self
+            .protected_saves
+            .is_pending(&crate::platform::PathKey::new(&path))
+        {
+            return self.start_protected_save(path, content);
+        }
+        match crate::platform::write_text_file(&path, &content, self.text_file_format) {
+            Ok(()) => {
+                self.ide_panel.file_tree_error = None;
                 self.editor.mark_saved();
                 self.reconcile_saved_current_file_git_index();
                 if self.is_ide_mode
@@ -486,12 +538,116 @@ impl App {
                     lsp.notify_saved(&path, &self.file_extension);
                 }
                 self.save_tabs_state();
-                return true;
+                SaveOutcome::Saved
+            }
+            // Refused elevation falls through to the plain write-error path below.
+            Err(error)
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+            {
+                self.start_protected_save(path, content)
+            }
+            Err(error) => {
+                self.ide_panel.file_tree_error =
+                    Some(format!("Не удалось сохранить {}: {error}", path.display()));
+                SaveOutcome::Failed
+            }
+        }
+    }
+
+    fn start_protected_save(&mut self, path: PathBuf, content: String) -> SaveOutcome {
+        let format = self.text_file_format;
+        match self
+            .protected_saves
+            .enqueue(&self.ui_waker, path.clone(), content, format)
+        {
+            Ok(id) => {
+                self.ide_panel.file_tree_error = None;
+                SaveOutcome::Pending(id)
+            }
+            Err(message) => {
+                self.ide_panel.file_tree_error =
+                    Some(format!("Не удалось сохранить {}: {message}", path.display()));
+                SaveOutcome::Failed
+            }
+        }
+    }
+
+    /// Applies finished protected saves; returns whether anything changed on
+    /// screen. Call it from the host loop's background-result drain.
+    pub(crate) fn poll_protected_saves(&mut self) -> bool {
+        if !self.protected_saves.has_pending() {
+            return false;
+        }
+        let completions = self.protected_saves.poll(&self.ui_waker);
+        if completions.is_empty() {
+            return false;
+        }
+        for completion in completions {
+            self.apply_protected_save_completion(completion);
+        }
+        true
+    }
+
+    fn apply_protected_save_completion(&mut self, done: ProtectedSaveCompletion) {
+        let awaited = self.protected_saves.take_awaited(done.id);
+        match &done.result {
+            Ok(()) => {
+                self.mark_protected_save_written(&done);
+                if awaited && self.confirm_dialog.waiting_for_save_as() {
+                    self.continue_pending_tab_saves();
+                }
+            }
+            Err(message) => {
+                self.ide_panel.file_tree_error =
+                    Some(format!("Не удалось сохранить {}: {message}", done.path.display()));
+                // The tab stays open with the error: the confirmed action is dropped.
+                if awaited && self.confirm_dialog.waiting_for_save_as() {
+                    self.cancel_pending_action();
+                }
+            }
+        }
+    }
+
+    /// The written snapshot becomes the saved baseline of whichever tab shows
+    /// the file now (active or not); a tab closed meanwhile is simply gone.
+    fn mark_protected_save_written(&mut self, done: &ProtectedSaveCompletion) {
+        if self.file_key.as_ref() == Some(&done.key) {
+            self.editor.mark_saved_as(&done.text);
+            self.reconcile_saved_current_file_git_index();
+            if self.is_ide_mode
+                && let Some(lsp) = &mut self.lsp
+            {
+                lsp.notify_saved(&done.path, &self.file_extension);
+            }
+            if let Some(window) = self.window.as_ref() {
+                App::update_window_title(window, &self.base_title, self.editor.is_dirty());
             }
         } else {
-            self.trigger_save_as_picker();
+            let active_tab = self.active_tab;
+            let Some(tab) = self
+                .tabs
+                .iter_mut()
+                .enumerate()
+                .find(|(index, tab)| *index != active_tab && tab.file_key.as_ref() == Some(&done.key))
+                .map(|(_, tab)| tab)
+            else {
+                return;
+            };
+            tab.editor.mark_saved_as(&done.text);
+            if self.is_ide_mode
+                && let Some(lsp) = &mut self.lsp
+            {
+                lsp.notify_saved(&done.path, &tab.file_extension);
+            }
         }
-        false
+        self.save_tabs_state();
+    }
+
+    /// App exit: bounded wait for running protected saves, then the pkexec
+    /// process tree is stopped (`ProtectedSaves::shutdown`).
+    pub(crate) fn shutdown_protected_saves(&mut self) {
+        self.protected_saves.shutdown();
     }
 
     /// Headless without --allow-writes: disk-mutating UI actions are refused with the readonly notice.
@@ -514,10 +670,13 @@ impl App {
                 if error.kind() == std::io::ErrorKind::PermissionDenied
                     && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
             {
+                // Save As stays synchronous: the document identity changes only
+                // after the write, which a background save cannot promise here.
                 crate::platform::write_text_file_elevated(
                     path,
                     content,
                     self.text_file_format,
+                    &std::sync::atomic::AtomicBool::new(false),
                 )
             }
             Err(error) => Err(error),

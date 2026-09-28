@@ -40,7 +40,7 @@ pub struct LspManager {
     diagnostic_total_counts: (usize, usize),
     ty_diag_result_ids: HashMap<PathBuf, String>,
     diag_text_pool: HashMap<Arc<str>, Arc<str>>,
-    ruff_workspace_diag_rx: Option<std::sync::mpsc::Receiver<ruff_workspace::RuffWorkspaceResult>>,
+    ruff_workspace_diag_rx: Option<crate::ui_waker::OneShot<ruff_workspace::RuffWorkspaceResult>>,
     ruff_workspace_diag_pending: bool,
     ruff_workspace_diag_dirty: bool,
     ty_workspace_diag_pending: Option<i32>,

@@ -58,12 +58,12 @@ pub struct ApiClientState {
     pub last_resolved_host: Option<ApiResolvedHost>,
     body_json_validation: Option<ApiJsonValidationState>,
     body_json_validation_pending: Option<(ApiSpecId, usize, u64)>,
-    body_json_validation_rx: Option<Receiver<ApiJsonValidationResult>>,
-    python_version_list_rx: Option<Receiver<ApiPythonVersionListResult>>,
+    body_json_validation_rx: Option<crate::ui_waker::OneShot<ApiJsonValidationResult>>,
+    python_version_list_rx: Option<crate::ui_waker::OneShot<ApiPythonVersionListResult>>,
     python_version_list_cancel: Option<Arc<AtomicBool>>,
     python_install_rx: Option<Receiver<ApiPythonInstallEvent>>,
     python_install_cancel: Option<Arc<AtomicBool>>,
-    python_path_pick_rx: Option<Receiver<ApiPythonPathPickResult>>,
+    python_path_pick_rx: Option<crate::ui_waker::OneShot<ApiPythonPathPickResult>>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -346,12 +346,13 @@ impl ApiClientState {
         while Instant::now() < deadline
             && (self.python_version_list_cancel.is_some() || self.python_install_cancel.is_some())
         {
-            if let Some(rx) = &self.python_version_list_rx {
-                match rx.try_recv() {
-                    Ok(_) | Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+            if let Some(rx) = &mut self.python_version_list_rx {
+                match rx.poll() {
+                    crate::ui_waker::OneShotState::Ready(_)
+                    | crate::ui_waker::OneShotState::Closed => {
                         self.python_version_list_cancel = None;
                     }
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    crate::ui_waker::OneShotState::Pending => {}
                 }
             } else {
                 self.python_version_list_cancel = None;

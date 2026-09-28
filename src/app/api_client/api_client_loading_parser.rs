@@ -125,23 +125,11 @@ pub fn spawn_load_local(
     generation: u64,
     path: PathBuf,
     ui_waker: &crate::ui_waker::UiWaker,
-) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = ui_waker.channel();
-    let worker_tx = tx.clone();
-    if let Err(err) = crate::platform::spawn_named("rriter-api-load-local", move || {
+) -> std::io::Result<crate::ui_waker::OneShot<ApiLoadResult>> {
+    ui_waker.spawn_one_shot("rriter-api-load-local", move || {
         let result = load_local_spec(id, &path);
-        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
-    }) {
-        let _ = tx.send(ApiLoadResult {
-            id,
-            generation,
-            result: Err(ApiLoadError::new(
-                ApiLoadErrorKind::Io,
-                format!("не удалось запустить worker локальной спецификации: {err}"),
-            )),
-        });
-    }
-    rx
+        ApiLoadResult { id, generation, result }
+    })
 }
 
 pub fn spawn_load_url(
@@ -149,23 +137,11 @@ pub fn spawn_load_url(
     generation: u64,
     url: String,
     ui_waker: &crate::ui_waker::UiWaker,
-) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = ui_waker.channel();
-    let worker_tx = tx.clone();
-    if let Err(err) = crate::platform::spawn_named("rriter-api-load-url", move || {
+) -> std::io::Result<crate::ui_waker::OneShot<ApiLoadResult>> {
+    ui_waker.spawn_one_shot("rriter-api-load-url", move || {
         let result = load_url_spec(id, &url);
-        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
-    }) {
-        let _ = tx.send(ApiLoadResult {
-            id,
-            generation,
-            result: Err(ApiLoadError::new(
-                ApiLoadErrorKind::Io,
-                format!("не удалось запустить worker URL-спецификации: {err}"),
-            )),
-        });
-    }
-    rx
+        ApiLoadResult { id, generation, result }
+    })
 }
 
 pub fn spawn_load_cached_url(
@@ -173,26 +149,14 @@ pub fn spawn_load_cached_url(
     generation: u64,
     url: String,
     ui_waker: &crate::ui_waker::UiWaker,
-) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = ui_waker.channel();
-    let worker_tx = tx.clone();
-    if let Err(err) = crate::platform::spawn_named("rriter-api-load-cache", move || {
+) -> std::io::Result<crate::ui_waker::OneShot<ApiLoadResult>> {
+    ui_waker.spawn_one_shot("rriter-api-load-cache", move || {
         let result = match read_url_cache(id) {
             Some(raw) => parse_openapi_payload(id, ApiSpecSource::Url(url), raw, None, None),
             None => Err(ApiLoadError::new(ApiLoadErrorKind::Io, "URL cache пустой")),
         };
-        let _ = worker_tx.send(ApiLoadResult { id, generation, result });
-    }) {
-        let _ = tx.send(ApiLoadResult {
-            id,
-            generation,
-            result: Err(ApiLoadError::new(
-                ApiLoadErrorKind::Io,
-                format!("не удалось запустить worker URL cache: {err}"),
-            )),
-        });
-    }
-    rx
+        ApiLoadResult { id, generation, result }
+    })
 }
 
 fn load_local_spec(id: ApiSpecId, path: &Path) -> Result<ApiLoadPayload, ApiLoadError> {

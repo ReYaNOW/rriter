@@ -767,20 +767,21 @@
     fn api_python_shutdown_cancels_version_and_install_workers() {
         let mut state = ApiClientState::default();
         let list_cancel = Arc::new(AtomicBool::new(false));
-        let install_cancel = Arc::new(AtomicBool::new(false));
-        let (list_tx, list_rx) = mpsc::channel();
-        let (install_tx, install_rx) = mpsc::channel();
         let list_worker_cancel = Arc::clone(&list_cancel);
+        let install_cancel = Arc::new(AtomicBool::new(false));
+        let (install_tx, install_rx) = mpsc::channel();
         let install_worker_cancel = Arc::clone(&install_cancel);
-        let list_worker = std::thread::spawn(move || {
-            while !list_worker_cancel.load(Ordering::Acquire) {
-                std::thread::sleep(Duration::from_millis(2));
-            }
-            let _ = list_tx.send(ApiPythonVersionListResult {
-                rows: Vec::new(),
-                error: Some("cancelled".to_string()),
-            });
-        });
+        let list_rx = crate::ui_waker::UiWaker::counting()
+            .spawn_one_shot("test-api-python-list", move || {
+                while !list_worker_cancel.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(2));
+                }
+                ApiPythonVersionListResult {
+                    rows: Vec::new(),
+                    error: Some("cancelled".to_string()),
+                }
+            })
+            .unwrap();
         let install_worker = std::thread::spawn(move || {
             while !install_worker_cancel.load(Ordering::Acquire) {
                 std::thread::sleep(Duration::from_millis(2));
@@ -797,7 +798,6 @@
         state.mock_python_install_running = true;
 
         state.shutdown_background_tasks();
-        list_worker.join().unwrap();
         install_worker.join().unwrap();
 
         assert!(state.python_version_list_rx.is_none());
@@ -805,4 +805,3 @@
         assert!(!state.mock_python_versions_loading);
         assert!(!state.mock_python_install_running);
     }
-

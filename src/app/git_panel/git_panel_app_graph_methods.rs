@@ -52,7 +52,7 @@ impl App {
         let mut status_event_applied = false;
         let mut next_rx = Vec::with_capacity(self.ide_panel.git.rx.len());
         let receivers = std::mem::take(&mut self.ide_panel.git.rx);
-        for receiver in receivers {
+        for mut receiver in receivers {
             if let Some(runtime_rx) = &receiver.runtime_rx {
                 loop {
                     match runtime_rx.try_recv() {
@@ -64,7 +64,7 @@ impl App {
                     }
                 }
             }
-            let keep = match poll_one_shot_receiver(&receiver.rx) {
+            let keep = match receiver.rx.poll() {
                 OneShotReceiverPoll::Ready(result) => {
                     self.ide_panel
                         .git
@@ -179,9 +179,9 @@ impl App {
         }
         let mut next_graph_rx = Vec::with_capacity(self.ide_panel.git.graph_rx.len());
         let graph_receivers = std::mem::take(&mut self.ide_panel.git.graph_rx);
-        for receiver in graph_receivers {
-            let keep = match poll_one_shot_receiver(&receiver.rx) {
-                OneShotReceiverPoll::Ready(event) => {
+        for mut receiver in graph_receivers {
+            let keep = match receiver.rx.poll() {
+                crate::ui_waker::OneShotState::Ready(event) => {
                     let latest_for_root = self
                         .ide_panel
                         .git
@@ -246,8 +246,8 @@ impl App {
                     }
                     false
                 }
-                OneShotReceiverPoll::Pending => true,
-                OneShotReceiverPoll::Disconnected => {
+                crate::ui_waker::OneShotState::Pending => true,
+                crate::ui_waker::OneShotState::Closed => {
                     self.ide_panel
                         .git
                         .handle_graph_disconnect(&receiver.repo_root, receiver.request_id);

@@ -2,7 +2,7 @@ use super::{DART_SERVER, DiagSeverity, Diagnostic, LogEntry, LspManager, LspProc
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub(super) const DART_SERVER_NAME: &str = DART_SERVER.program;
@@ -18,7 +18,7 @@ pub(super) struct OpenDartFile {
 pub(super) struct DartAnalyzerJob {
     generation: u64,
     cancel: Arc<AtomicBool>,
-    rx: mpsc::Receiver<DartWorkspaceResult>,
+    rx: crate::ui_waker::OneShot<DartWorkspaceResult>,
 }
 
 pub(super) struct DartWorkspaceState {
@@ -274,13 +274,13 @@ impl LspManager {
             let Some(state) = self.dart_workspaces.get_mut(key) else {
                 continue;
             };
-            let Some(job) = state.job.take() else {
+            let Some(mut job) = state.job.take() else {
                 continue;
             };
-            match job.rx.try_recv() {
-                Ok(result) => completed.push((key.clone(), result)),
-                Err(mpsc::TryRecvError::Empty) => state.job = Some(job),
-                Err(mpsc::TryRecvError::Disconnected) => {
+            match job.rx.poll() {
+                crate::ui_waker::OneShotState::Ready(result) => completed.push((key.clone(), result)),
+                crate::ui_waker::OneShotState::Pending => state.job = Some(job),
+                crate::ui_waker::OneShotState::Closed => {
                     self.log_dart_workspace_error(
                         "Dart workspace diagnostics worker disconnected".to_string(),
                     );
@@ -457,25 +457,25 @@ impl LspManager {
             let generation = state.generation;
             let cancel = Arc::new(AtomicBool::new(false));
             let worker_cancel = cancel.clone();
-            let (tx, rx) = self.ui_waker.channel();
-            let spawn = crate::platform::spawn_named("rriter-dart-analyze", move || {
+            let spawn = self.ui_waker.spawn_one_shot("rriter-dart-analyze", move || {
                 let diagnostics = run_dart_workspace_check(&root, &worker_cancel);
-                let _ = tx.send(DartWorkspaceResult {
+                DartWorkspaceResult {
                     root,
                     generation,
                     diagnostics,
-                });
+                }
             });
-            if spawn.is_ok() {
-                state.job = Some(DartAnalyzerJob {
-                    generation,
-                    cancel,
-                    rx,
-                });
-            } else {
-                self.log_dart_workspace_error(
-                    "Dart workspace diagnostics worker failed to start".to_string(),
-                );
+            match spawn {
+                Ok(rx) => {
+                    state.job = Some(DartAnalyzerJob {
+                        generation,
+                        cancel,
+                        rx,
+                    });
+                }
+                Err(error) => self.log_dart_workspace_error(format!(
+                    "Dart workspace diagnostics worker failed to start: {error}"
+                )),
             }
         }
     }

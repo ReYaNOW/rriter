@@ -1477,11 +1477,18 @@ fn r3_095_ruff_workspace_disconnect_clears_stale_diagnostics() {
         PathBuf::from("/tmp/stale.py"),
         diag_arc(vec![test_diag("stale", DiagSeverity::Warning, None)]),
     );
-    let (tx, rx) = mpsc::channel();
+    let rx = crate::ui_waker::UiWaker::counting()
+        .spawn_one_shot("test-ruff-disconnect", || -> super::super::ruff_workspace::RuffWorkspaceResult {
+            panic!("test worker panic")
+        })
+        .unwrap();
     manager.ruff_workspace_diag_rx = Some(rx);
     manager.ruff_workspace_diag_pending = true;
-    drop(tx);
-    manager.poll_ruff_workspace_diagnostics();
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    while manager.ruff_workspace_diag_pending && std::time::Instant::now() < deadline {
+        manager.poll_ruff_workspace_diagnostics();
+        std::thread::yield_now();
+    }
     assert!(manager.ruff_workspace_diagnostics.is_empty());
     assert!(!manager.ruff_workspace_diag_pending);
 }

@@ -644,20 +644,16 @@ impl ApiClientState {
             return;
         }
         let text = self.input_editor.get_full_text();
-        let (tx, rx) = ui_waker.channel();
         self.body_json_validation_pending = Some((spec_id, route_idx, version));
-        self.body_json_validation_rx = Some(rx);
-        let worker_tx = tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-json-validation", move || {
+        match ui_waker.spawn_one_shot("rriter-api-json-validation", move || {
             let valid = json_body_is_valid(&text);
-            let _ = worker_tx.send(ApiJsonValidationResult {
-                spec_id, route_idx, version, valid,
-            });
+            ApiJsonValidationResult { spec_id, route_idx, version, valid }
         }) {
-            eprintln!("RRiter: не удалось запустить JSON validation worker: {err}");
-            let _ = tx.send(ApiJsonValidationResult {
-                spec_id, route_idx, version, valid: false,
-            });
+            Ok(job) => self.body_json_validation_rx = Some(job),
+            Err(err) => {
+                self.body_json_validation_pending = None;
+                self.import_error = Some(format!("Не удалось запустить проверку JSON: {err}"));
+            }
         }
     }
 
@@ -671,15 +667,12 @@ impl ApiClientState {
             self.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
             return;
         };
-        let (tx, rx) = ui_waker.channel();
-        self.python_version_list_rx = Some(rx);
         self.mock_python_versions_loading = true;
         self.mock_python_version_picker_open = true;
         self.mock_python_versions_scroll.reset();
         let cancel = Arc::new(AtomicBool::new(false));
         self.python_version_list_cancel = Some(cancel.clone());
-        let worker_tx = tx.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-python-list", move || {
+        let spawn = ui_waker.spawn_one_shot("rriter-api-python-list", move || {
             let mut command = Command::new(uv_path);
             command.arg("python").arg("list").arg("--all-versions");
             let result = crate::platform::run_command_output_cancelable(
@@ -716,12 +709,15 @@ impl ApiClientState {
                     error: Some(format!("Ошибка запуска uv: {err}")),
                 },
             };
-            let _ = worker_tx.send(payload);
-        }) {
-            let _ = tx.send(ApiPythonVersionListResult {
-                rows: Vec::new(),
-                error: Some(format!("не удалось запустить worker списка Python: {err}")),
-            });
+            payload
+        });
+        match spawn {
+            Ok(job) => self.python_version_list_rx = Some(job),
+            Err(err) => {
+                self.mock_python_versions_loading = false;
+                self.python_version_list_cancel = None;
+                self.mock.uv.last_error = format!("Не удалось запустить список Python: {err}");
+            }
         }
     }
 

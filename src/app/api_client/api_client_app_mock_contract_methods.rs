@@ -15,15 +15,15 @@ impl crate::app::App {
             }
             return;
         }
-        let (tx, rx) = self.ui_waker.channel();
-        self.api_openapi_export_rx = Some(rx);
         let requests = self.external_requests.sink().clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-api-openapi-export", move || {
-            let _ = tx.send(export_api_mock_openapi_file(&requests, &specs, &mock));
+        match self.ui_waker.spawn_one_shot("rriter-api-openapi-export", move || {
+            export_api_mock_openapi_file(&requests, &specs, &mock)
         }) {
-            self.api_openapi_export_rx = None;
-            self.ide_panel.api.persistence_error =
-                Some(format!("Не удалось запустить экспорт OpenAPI: {err}"));
+            Ok(job) => self.api_openapi_export_rx = Some(job),
+            Err(err) => {
+                self.ide_panel.api.persistence_error =
+                    Some(format!("Не удалось запустить экспорт OpenAPI: {err}"));
+            }
         }
     }
 

@@ -10,7 +10,6 @@ use imara_diff::{Algorithm, Diff, InternedInput, TokenSource};
 use rustc_hash::FxHasher;
 use std::hash::Hasher;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc;
 
 pub(crate) const GIT_DIFF_FOCUS_RATIO: f32 = 0.38;
 
@@ -116,7 +115,7 @@ pub struct GitDiffPayload {
 pub struct GitDiffReceiver {
     pub meta: GitDiffTabMeta,
     pub version: u64,
-    pub rx: mpsc::Receiver<GitDiffEvent>,
+    pub rx: crate::ui_waker::OneShot<GitDiffEvent>,
 }
 
 pub struct GitDiffEvent {
@@ -689,15 +688,8 @@ impl App {
     }
 
     fn spawn_git_diff_load(&mut self, meta: GitDiffTabMeta, version: u64, staged: bool) {
-        let (tx, rx) = self.ui_waker.channel();
-        self.git_diff_rx.push(GitDiffReceiver {
-            meta: meta.clone(),
-            version,
-            rx,
-        });
-        let worker_tx = tx.clone();
         let worker_meta = meta.clone();
-        if let Err(err) = crate::platform::spawn_named("rriter-git-diff", move || {
+        let rx = match self.ui_waker.spawn_one_shot("rriter-git-diff", move || {
             let result = if staged {
                 load_git_diff_with_side(
                     worker_meta.repo_root.clone(),
@@ -714,18 +706,27 @@ impl App {
                     worker_meta.status,
                 )
             };
-            let _ = worker_tx.send(GitDiffEvent {
+            GitDiffEvent {
                 meta: worker_meta,
                 result,
                 version,
-            });
+            }
         }) {
-            let _ = tx.send(GitDiffEvent {
-                meta,
-                result: Err(format!("Не удалось запустить загрузку Git diff: {err}")),
-                version,
-            });
-        }
+            Ok(rx) => rx,
+            Err(err) => {
+                self.apply_git_diff_event(GitDiffEvent {
+                    meta,
+                    result: Err(format!("Не удалось запустить загрузку Git diff: {err}")),
+                    version,
+                });
+                return;
+            }
+        };
+        self.git_diff_rx.push(GitDiffReceiver {
+            meta: meta.clone(),
+            version,
+            rx,
+        });
     }
 
     pub(crate) fn reload_git_diff_tab(&mut self, tab_idx: usize) {
@@ -775,14 +776,14 @@ impl App {
         let mut updated = false;
         let mut next_rx = Vec::with_capacity(self.git_diff_rx.len());
         let receivers = std::mem::take(&mut self.git_diff_rx);
-        for receiver in receivers {
-            match receiver.rx.try_recv() {
-                Ok(event) => {
+        for mut receiver in receivers {
+            match receiver.rx.poll() {
+                crate::ui_waker::OneShotState::Ready(event) => {
                     self.apply_git_diff_event(event);
                     updated = true;
                 }
-                Err(mpsc::TryRecvError::Empty) => next_rx.push(receiver),
-                Err(mpsc::TryRecvError::Disconnected) => {
+                crate::ui_waker::OneShotState::Pending => next_rx.push(receiver),
+                crate::ui_waker::OneShotState::Closed => {
                     self.apply_git_diff_event(GitDiffEvent {
                         meta: receiver.meta,
                         result: Err("Загрузка Git diff неожиданно завершилась".to_string()),
@@ -797,32 +798,36 @@ impl App {
     }
 
     pub fn poll_inline_git_diff_popup(&mut self) -> bool {
-        let Some(rx) = self.inline_git_diff_rx.take() else {
+        let Some(mut rx) = self.inline_git_diff_rx.take() else {
             return false;
         };
-        match rx.try_recv() {
-            Ok(event) => {
+        match rx.poll() {
+            crate::ui_waker::OneShotState::Ready(event) => {
                 if event.editor_version == self.editor.version {
-                    if let Ok(payload) = event.result {
-                        self.set_inline_git_popup_from_diff_state(
+                    match event.result {
+                        Ok(payload) => self.set_inline_git_popup_from_diff_state(
                             event.hunk_idx,
                             event.target_hunk,
                             event.anchor_line,
                             &payload.state,
                             payload.spans,
-                        );
-                    } else {
-                        self.inline_git_popup = None;
+                        ),
+                        Err(error) => {
+                            self.inline_git_popup = None;
+                            self.ide_panel.git.notice = Some(error);
+                        }
                     }
                 }
                 true
             }
-            Err(mpsc::TryRecvError::Empty) => {
+            crate::ui_waker::OneShotState::Pending => {
                 self.inline_git_diff_rx = Some(rx);
                 false
             }
-            Err(mpsc::TryRecvError::Disconnected) => {
+            crate::ui_waker::OneShotState::Closed => {
                 self.inline_git_popup = None;
+                self.ide_panel.git.notice =
+                    Some("Загрузка inline Git diff неожиданно завершилась".to_string());
                 true
             }
         }
@@ -1177,12 +1182,9 @@ impl App {
         }
 
         if let Some((repo_root, file)) = self.current_git_file_entry() {
-            let (tx, rx) = self.ui_waker.channel();
-            self.inline_git_diff_rx = Some(rx);
             let editor_version = self.editor.version;
             let file_extension = self.file_extension.clone();
-            let worker_tx = tx.clone();
-            if let Err(err) = crate::platform::spawn_named("rriter-inline-git-diff", move || {
+            match self.ui_waker.spawn_one_shot("rriter-inline-git-diff", move || {
                 let result = load_git_diff_with_side(
                     repo_root,
                     file.rel_path.into(),
@@ -1193,21 +1195,20 @@ impl App {
                 .map(|payload| {
                     build_inline_git_diff_payload(payload, file_extension, target_hunk.after_start)
                 });
-                let _ = worker_tx.send(InlineGitDiffEvent {
+                InlineGitDiffEvent {
                     hunk_idx,
                     target_hunk,
                     anchor_line,
                     editor_version,
                     result,
-                });
+                }
             }) {
-                let _ = tx.send(InlineGitDiffEvent {
-                    hunk_idx,
-                    target_hunk,
-                    anchor_line,
-                    editor_version,
-                    result: Err(format!("Не удалось запустить inline Git diff: {err}")),
-                });
+                Ok(job) => self.inline_git_diff_rx = Some(job),
+                Err(err) => {
+                    self.inline_git_popup = None;
+                    self.ide_panel.git.notice =
+                        Some(format!("Не удалось запустить inline Git diff: {err}"));
+                }
             }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();

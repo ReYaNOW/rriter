@@ -804,6 +804,33 @@ mod round3_editor_regressions {
     }
 
     #[test]
+    fn mark_saved_as_snapshot_keeps_edits_made_during_the_save_dirty() {
+        let mut editor = Editor::new(64);
+        editor.set_clean_text("one\ntwo\n");
+        editor.cursor = editor.len();
+        let _ = editor.insert_str("three\n");
+        let snapshot = editor.get_full_text();
+
+        // Typed while the background write of `snapshot` was running.
+        let _ = editor.insert_str("four\n");
+        editor.mark_saved_as(&snapshot);
+        assert!(editor.is_dirty());
+
+        // The late edit removed: the buffer equals what was written, so it is clean.
+        let _ = editor.replace_range(snapshot.len(), editor.len(), "");
+        assert_eq!(editor.get_full_text(), snapshot);
+        assert!(!editor.is_dirty());
+
+        // No edit during the save: marking the snapshot equals `mark_saved`.
+        let mut untouched = Editor::new(64);
+        untouched.set_clean_text("a\n");
+        let _ = untouched.insert_str("b");
+        let written = untouched.get_full_text();
+        untouched.mark_saved_as(&written);
+        assert!(!untouched.is_dirty());
+    }
+
+    #[test]
     fn longest_line_uses_display_columns_not_bytes() {
         let mut cyrillic = Editor::new(256);
         cyrillic.set_clean_text(&format!("{}\n{}\n", "ж".repeat(30), "x".repeat(40)));

@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, SendError, Sender, SyncSender, TrySendError};
+use std::sync::mpsc::{self, Receiver, SendError, Sender, SyncSender, TryRecvError, TrySendError};
 
 /// Payload-free user event of the native event loop: "some background result is waiting".
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -133,6 +133,66 @@ impl UiWaker {
             waker: self.clone(),
         }
     }
+
+    /// Runs `job` on a named thread; its result wakes the UI. Err = thread spawn failed (caller must show it).
+    pub(crate) fn spawn_one_shot<T: Send + 'static>(
+        &self,
+        thread_name: &str,
+        job: impl FnOnce() -> T + Send + 'static,
+    ) -> std::io::Result<OneShot<T>> {
+        let (tx, rx) = self.one_shot_channel();
+        std::thread::Builder::new()
+            .name(thread_name.to_string())
+            .spawn(move || {
+                let result = job();
+                let _ = tx.send(result);
+            })?;
+        Ok(OneShot { rx: Some(rx) })
+    }
+
+    pub(crate) fn one_shot_channel<T>(&self) -> (WakeSender<T>, OneShot<T>) {
+        let (tx, rx) = self.channel();
+        (tx, OneShot { rx: Some(rx) })
+    }
+}
+
+pub(crate) enum OneShotState<T> {
+    Pending,
+    Ready(T),
+    Closed,
+}
+
+pub(crate) struct OneShot<T> {
+    rx: Option<Receiver<T>>,
+}
+
+impl<T> std::fmt::Debug for OneShot<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("OneShot")
+            .field("pending", &self.is_pending())
+            .finish()
+    }
+}
+
+impl<T> OneShot<T> {
+    /// Ready exactly once; Closed if the worker died without a result, and on every poll after Ready/Closed.
+    pub(crate) fn poll(&mut self) -> OneShotState<T> {
+        let Some(rx) = self.rx.take() else {
+            return OneShotState::Closed;
+        };
+        match rx.try_recv() {
+            Ok(value) => OneShotState::Ready(value),
+            Err(TryRecvError::Empty) => {
+                self.rx = Some(rx);
+                OneShotState::Pending
+            }
+            Err(TryRecvError::Disconnected) => OneShotState::Closed,
+        }
+    }
+
+    pub(crate) fn is_pending(&self) -> bool {
+        self.rx.is_some()
+    }
 }
 
 /// `mpsc::Sender` that wakes the UI after every successful send and when the last
@@ -221,7 +281,7 @@ impl<T> Drop for WakeSyncSender<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::UiWaker;
+    use super::{OneShotState, UiWaker};
     use std::sync::{Arc, Barrier};
 
     #[test]
@@ -347,5 +407,75 @@ mod tests {
         waker.begin_drain();
         waker.redeliver_pending();
         assert_eq!(waker.take_events(), 0);
+    }
+
+    #[test]
+    fn one_shot_returns_ready_once_then_closed() {
+        let mut job = UiWaker::counting()
+            .spawn_one_shot("rriter-test-one-shot-ready", || 42)
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match job.poll() {
+                OneShotState::Ready(value) => {
+                    assert_eq!(value, 42);
+                    break;
+                }
+                OneShotState::Pending if std::time::Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                state => panic!("unexpected one-shot state: {}", match state {
+                    OneShotState::Pending => "pending timeout",
+                    OneShotState::Ready(_) => "ready",
+                    OneShotState::Closed => "closed",
+                }),
+            }
+        }
+        assert!(matches!(job.poll(), OneShotState::Closed));
+        assert!(matches!(job.poll(), OneShotState::Closed));
+    }
+
+    #[test]
+    fn one_shot_panicking_job_closes() {
+        let mut job = UiWaker::counting()
+            .spawn_one_shot("rriter-test-one-shot-panic", || -> () { panic!("worker panic") })
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match job.poll() {
+                OneShotState::Closed => break,
+                OneShotState::Pending if std::time::Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                _ => panic!("panicking one-shot did not close"),
+            }
+        }
+        assert!(matches!(job.poll(), OneShotState::Closed));
+        assert!(matches!(job.poll(), OneShotState::Closed));
+    }
+
+    #[test]
+    fn one_shot_is_pending_transitions_after_completion() {
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let mut job = UiWaker::counting()
+            .spawn_one_shot("rriter-test-one-shot-pending", move || {
+                let _ = release_rx.recv();
+                7
+            })
+            .unwrap();
+        assert!(job.is_pending());
+        assert!(matches!(job.poll(), OneShotState::Pending));
+        release_tx.send(()).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        loop {
+            match job.poll() {
+                OneShotState::Ready(7) => break,
+                OneShotState::Pending if std::time::Instant::now() < deadline => {
+                    std::thread::yield_now();
+                }
+                _ => panic!("one-shot did not become ready"),
+            }
+        }
+        assert!(!job.is_pending());
     }
 }
