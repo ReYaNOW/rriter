@@ -319,7 +319,7 @@ fn about_to_wait_tab_strip_scroll(app: &mut App, dt: f32) -> bool {
 }
 
 /// Background job polls and timed notices.
-/// Returns `(needs_redraw, api_label_wake_at)`.
+/// Returns `(needs_redraw, background_wake_at)`.
 #[cfg_attr(coverage_nightly, coverage(off))]
 fn about_to_wait_background_polls(app: &mut App, now: Instant) -> (bool, Option<Instant>) {
     let mut needs_redraw = false;
@@ -332,7 +332,7 @@ fn about_to_wait_background_polls(app: &mut App, now: Instant) -> (bool, Option<
     if app.poll_project_search_previews() {
         needs_redraw = true;
     }
-    if app.queue_visible_project_search_previews() || app.project_search_has_pending_previews() {
+    if app.queue_visible_project_search_previews() {
         needs_redraw = true;
     }
     if app.poll_git_panel() {
@@ -347,12 +347,39 @@ fn about_to_wait_background_polls(app: &mut App, now: Instant) -> (bool, Option<
     if app.clear_stale_active_database_query_diagnostic() {
         needs_redraw = true;
     }
+    // A pending Database job no longer forces frames: its events arrive through `UiWaker`
+    // and `apply_database_event` requests the redraw; a job that ends here still repaints.
+    let database_job_before = app.ide_panel.database.pending_job.as_ref().map(|job| job.id);
     app.poll_database_runtime();
-    if app.ide_panel.database.pending_job.is_some()
-        || app.ide_panel.database.ddl_hover.borrow().is_some()
-    {
+    if app.ide_panel.database.pending_job.as_ref().map(|job| job.id) != database_job_before {
         needs_redraw = true;
     }
+    let ddl_wake_at = {
+        let database = &mut app.ide_panel.database;
+        if let Ok(ddl_hover) = database.ddl_hover.try_borrow()
+            && ddl_hover
+                .as_ref()
+                .is_some_and(|state| state.popup.anim_progress < 1.0)
+        {
+            match database.ddl_hover_animation_wake_at {
+                Some(at) if at <= now => {
+                    needs_redraw = true;
+                    let next = now + std::time::Duration::from_millis(16);
+                    database.ddl_hover_animation_wake_at = Some(next);
+                    Some(next)
+                }
+                Some(at) => Some(at),
+                None => {
+                    let next = now + std::time::Duration::from_millis(16);
+                    database.ddl_hover_animation_wake_at = Some(next);
+                    Some(next)
+                }
+            }
+        } else {
+            database.ddl_hover_animation_wake_at = None;
+            None
+        }
+    };
     let (api_labels_changed, api_label_expiry) =
         app.ide_panel.api.tick_timed_labels(crate::app::api_client::now_epoch_secs());
     needs_redraw |= api_labels_changed;
@@ -381,7 +408,10 @@ fn about_to_wait_background_polls(app: &mut App, now: Instant) -> (bool, Option<
             }
         }
     }
-    (needs_redraw, api_label_wake_at)
+    (
+        needs_redraw,
+        earliest_optional_wake(api_label_wake_at, ddl_wake_at),
+    )
 }
 
 /// File watcher notifications, external changes and Markdown read model refresh.
@@ -462,7 +492,7 @@ fn about_to_wait_panel_scrolls(app: &mut App, dt: f32) -> bool {
     if app.ide_panel.project_search.query_scroll_x.update(dt) {
         needs_redraw = true;
     }
-    if app.queue_visible_project_search_previews() || app.project_search_has_pending_previews() {
+    if app.queue_visible_project_search_previews() {
         needs_redraw = true;
     }
     if app.ide_panel.git.scroll.update(dt) {

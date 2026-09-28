@@ -85,6 +85,8 @@ use std::path::{Path, PathBuf};
 use zeroize::Zeroizing;
 
 pub const DATABASE_STATE_VERSION: u32 = 2;
+pub(crate) const DATABASE_REFRESH_INDICATOR_DELAY: std::time::Duration =
+    std::time::Duration::from_millis(70);
 pub const MAX_DATABASE_CONNECTIONS: usize = 64;
 pub const MAX_DATABASES_PER_CONNECTION: usize = 512;
 pub const MAX_PUBLIC_TABLES_PER_DATABASE: usize = 10_000;

@@ -65,6 +65,8 @@ pub struct LspManager {
     dart_workspace_analysis_enabled: bool,
     pub server_logs: HashMap<&'static str, Vec<LogEntry>>,
     pub suppress_diagnostics: bool,
+    /// Every server process and workspace job started by this manager wakes the UI with it.
+    ui_waker: crate::ui_waker::UiWaker,
 }
 
 impl LspManager {
@@ -81,7 +83,12 @@ impl LspManager {
         matches!(ext, "py" | "pyi")
     }
 
+    #[cfg(test)]
     pub fn new(workspaces: Vec<PathBuf>) -> Self {
+        Self::with_ui_waker(workspaces, crate::ui_waker::UiWaker::counting())
+    }
+
+    pub fn with_ui_waker(workspaces: Vec<PathBuf>, ui_waker: crate::ui_waker::UiWaker) -> Self {
         let mut manager = LspManager {
             python: None,
             ty_process: None,
@@ -126,6 +133,7 @@ impl LspManager {
             dart_workspace_analysis_enabled: true,
             server_logs: HashMap::new(),
             suppress_diagnostics: false,
+            ui_waker,
         };
         manager.schedule_configured_dart_projects();
         manager
@@ -192,7 +200,11 @@ impl LspManager {
             return false;
         }
         self.python_status = LspServerStatus::Starting;
-        self.python = Some(LspProcess::start(&RUFF_SERVER, workspaces.to_vec()));
+        self.python = Some(LspProcess::start(
+            &RUFF_SERVER,
+            workspaces.to_vec(),
+            self.ui_waker.clone(),
+        ));
         true
     }
 
@@ -204,7 +216,11 @@ impl LspManager {
             return false;
         }
         self.ty_status = LspServerStatus::Starting;
-        self.ty_process = Some(LspProcess::start(&TY_SERVER, workspaces.to_vec()));
+        self.ty_process = Some(LspProcess::start(
+            &TY_SERVER,
+            workspaces.to_vec(),
+            self.ui_waker.clone(),
+        ));
         true
     }
 

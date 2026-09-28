@@ -629,7 +629,7 @@ impl ApiClientState {
         }
     }
 
-    fn queue_api_body_json_validation(&mut self) {
+    fn queue_api_body_json_validation(&mut self, ui_waker: &crate::ui_waker::UiWaker) {
         let Some(ApiFocus::Body { spec_id, route_idx }) = self.focused else {
             return;
         };
@@ -644,7 +644,7 @@ impl ApiClientState {
             return;
         }
         let text = self.input_editor.get_full_text();
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = ui_waker.channel();
         self.body_json_validation_pending = Some((spec_id, route_idx, version));
         self.body_json_validation_rx = Some(rx);
         let worker_tx = tx.clone();
@@ -662,7 +662,7 @@ impl ApiClientState {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn trigger_api_python_version_list(&mut self) {
+    fn trigger_api_python_version_list(&mut self, ui_waker: &crate::ui_waker::UiWaker) {
         if let Some(cancel) = self.python_version_list_cancel.take() {
             cancel.store(true, Ordering::Release);
         }
@@ -671,7 +671,7 @@ impl ApiClientState {
             self.mock.uv.last_error = "uv не найден. Укажите путь к uv.".to_string();
             return;
         };
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = ui_waker.channel();
         self.python_version_list_rx = Some(rx);
         self.mock_python_versions_loading = true;
         self.mock_python_version_picker_open = true;
@@ -726,7 +726,7 @@ impl ApiClientState {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn trigger_api_python_install(&mut self) {
+    fn trigger_api_python_install(&mut self, ui_waker: &crate::ui_waker::UiWaker) {
         if self.mock_python_install_running {
             return;
         }
@@ -739,7 +739,7 @@ impl ApiClientState {
             self.mock.uv.last_error = "Выберите версию Python.".to_string();
             return;
         }
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = ui_waker.channel();
         self.python_install_rx = Some(rx);
         let cancel = Arc::new(AtomicBool::new(false));
         self.python_install_cancel = Some(cancel.clone());

@@ -39,6 +39,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use crate::platform::{self, ManagedChild};
+use crate::ui_waker::{EventSink, UiWaker, WakeSender};
 
 // ── Atomic request ID ─────────────────────────────────────────────────────────
 
@@ -270,7 +271,7 @@ fn spawn_server(
     def: &'static LspServerDef,
     executable: Option<&Path>,
     workspace: Option<&Path>,
-    event_tx: Sender<LspEvent>,
+    event_tx: WakeSender<LspEvent>,
     pending_requests: Arc<Mutex<HashMap<i32, PendingRequestKind>>>,
 ) -> io::Result<SpawnedProcess> {
     let mut cmd = command_for_server(def, executable, workspace)?;
@@ -440,7 +441,7 @@ struct OpenFile {
 
 fn send_and_log(
     out_tx: &Sender<Vec<u8>>,
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn EventSink<LspEvent>,
     server_name: &'static str,
     msg: Vec<u8>,
 ) -> Result<(), mpsc::SendError<Vec<u8>>> {
@@ -457,7 +458,7 @@ fn send_and_log(
 
 fn send_tracked_request(
     out_tx: &Sender<Vec<u8>>,
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn EventSink<LspEvent>,
     server_name: &'static str,
     pending_requests: &Mutex<HashMap<i32, PendingRequestKind>>,
     id: i32,
@@ -519,7 +520,7 @@ fn remove_json_text_fields(value: &mut serde_json::Value) -> bool {
 }
 
 fn disable_lsp_server(
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn EventSink<LspEvent>,
     server: LspServerKind,
     message: String,
 ) {
@@ -535,7 +536,7 @@ fn disable_lsp_server(
 }
 
 fn report_missing_lsp_server(
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn EventSink<LspEvent>,
     server: LspServerKind,
     override_env: &'static str,
     error: &io::Error,
@@ -569,7 +570,7 @@ fn wait_interruptibly(stop: &AtomicBool, duration: Duration) -> bool {
 
 fn shutdown_spawned_process(
     proc: &mut SpawnedProcess,
-    event_tx: &Sender<LspEvent>,
+    event_tx: &dyn EventSink<LspEvent>,
     server_name: &'static str,
 ) {
     if let Some(sid) = next_id() {
@@ -591,7 +592,7 @@ fn run_supervisor(
     executable: Option<PathBuf>,
     workspaces: Vec<PathBuf>,
     cmd_rx: Receiver<Cmd>,
-    event_tx: Sender<LspEvent>,
+    event_tx: WakeSender<LspEvent>,
     stop: Arc<AtomicBool>,
 ) {
     let mut open_files: HashMap<String, OpenFile> = HashMap::new();
@@ -1088,17 +1089,18 @@ pub struct LspProcess {
 
 impl LspProcess {
     #[cfg_attr(coverage_nightly, coverage(off))]
-    fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>) -> Self {
-        Self::start_with_executable(def, workspaces, None)
+    fn start(def: &'static LspServerDef, workspaces: Vec<PathBuf>, ui_waker: UiWaker) -> Self {
+        Self::start_with_executable(def, workspaces, None, ui_waker)
     }
 
     fn start_with_executable(
         def: &'static LspServerDef,
         workspaces: Vec<PathBuf>,
         executable: Option<PathBuf>,
+        ui_waker: UiWaker,
     ) -> Self {
         let (cmd_tx, cmd_rx) = mpsc::channel();
-        let (event_tx, event_rx) = mpsc::channel();
+        let (event_tx, event_rx) = ui_waker.channel();
         let ws = workspaces.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let supervisor_stop = stop.clone();

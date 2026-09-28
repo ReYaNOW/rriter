@@ -122,7 +122,7 @@ impl super::LspManager {
         }
 
         let workspaces = self.active_workspaces.clone();
-        let (tx, rx) = std::sync::mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         let spawn_result = crate::platform::spawn_named("rriter-ruff-workspace", move || {
             let result = collect_workspace_diagnostics(workspaces);
             let _ = tx.send(result);

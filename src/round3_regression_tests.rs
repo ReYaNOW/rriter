@@ -1057,7 +1057,10 @@ fn r3_086_project_search_help_modal_fits_any_tiny_window() {
 fn r3_087_tool_installer_state_changes_only_after_successful_worker_start() {
     let mut installer = crate::app::tool_installer::ToolInstaller::default();
     let before_revision = installer.revision();
-    let result = installer.start(crate::platform::ToolKind::Git, None);
+    let result = installer.start(
+        crate::platform::ToolKind::Git,
+        &crate::ui_waker::UiWaker::counting(),
+    );
     assert!(result.is_err());
     assert_eq!(installer.target(), None);
     assert!(!installer.is_log_open());

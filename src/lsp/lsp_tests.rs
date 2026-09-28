@@ -79,7 +79,7 @@ fn missing_lsp_binary_is_logged_and_disabled_without_restart_loop() {
         extensions: &["dart"],
     };
     let (_cmd_tx, cmd_rx) = mpsc::channel();
-    let (event_tx, event_rx) = mpsc::channel();
+    let (event_tx, event_rx) = crate::ui_waker::UiWaker::counting().channel();
     let started = Instant::now();
 
     run_supervisor(

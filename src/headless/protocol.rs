@@ -62,6 +62,10 @@ pub(crate) enum Command {
     Type(String),
     Settle { ms: u64 },
     Wait { ms: u64 },
+    /// Strict loop model: one native `about_to_wait` wake-up within `ms`.
+    Wake { ms: u64 },
+    /// Strict loop model: `wake` repeated for `ms` of input-free time.
+    Idle { ms: u64 },
     Screenshot(PathBuf),
     Dump(Option<PathBuf>),
     Dialog(DialogAnswer),
@@ -199,6 +203,11 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             let ms = parse_ms(args.required("milliseconds")?)?;
             args.finish()?;
             Command::Wait { ms }
+        }
+        "wake" | "idle" => {
+            let ms = parse_ms(args.required("milliseconds")?)?;
+            args.finish()?;
+            if name == "wake" { Command::Wake { ms } } else { Command::Idle { ms } }
         }
         "dialog" => {
             let answer = match args.required("dialog answer")? {
@@ -519,6 +528,10 @@ mod tests {
         assert_eq!(cmd("wait 100"), Command::Wait { ms: 100 });
         assert_eq!(cmd("wait 60000"), Command::Wait { ms: 60000 });
         assert!(parse("wait").is_err());
+        assert_eq!(cmd("wake 200"), Command::Wake { ms: 200 });
+        assert_eq!(cmd("idle 0"), Command::Idle { ms: 0 });
+        assert!(parse("idle").is_err());
+        assert!(parse("wake 60001").is_err());
         assert!(parse("wait 60001").is_err());
         assert!(parse("settle 70000").is_err());
         assert!(parse("settle -1").is_err());

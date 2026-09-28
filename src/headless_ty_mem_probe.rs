@@ -147,7 +147,11 @@ pub(crate) fn run_headless_ty_mem_probe(args: &[String], flag_idx: usize) {
     let workspace = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let workspace = std::fs::canonicalize(&workspace).unwrap_or(workspace);
     let started_at = Instant::now();
-    let mut manager = crate::lsp::LspManager::new(vec![workspace.clone()]);
+    // The probe drives `poll` itself; no event loop listens for wakes.
+    let mut manager = crate::lsp::LspManager::with_ui_waker(
+        vec![workspace.clone()],
+        crate::ui_waker::UiWaker::counting(),
+    );
     let mut editors = Vec::with_capacity(raw_files.len());
     let mut opened_bytes = 0usize;
 

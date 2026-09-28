@@ -2,8 +2,8 @@ use crate::platform::{
     CURRENT_PLATFORM, PlatformKind, ProcessOutputStream, ToolKind, resolve_executable,
     resolve_tool_kind, run_command_output_cancelable, run_command_streaming_cancelable,
 };
-use crate::platform::WindowHost;
 use crate::scroll::ScrollState;
+use crate::ui_waker::{UiWaker, WakeSyncSender};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
+use std::sync::mpsc::{Receiver, TryRecvError, TrySendError};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -115,7 +115,7 @@ impl DartToolState {
         self.error.as_deref()
     }
 
-    pub(crate) fn refresh(&mut self, workspace: Option<&Path>, window: Option<Arc<WindowHost>>) {
+    pub(crate) fn refresh(&mut self, workspace: Option<&Path>, ui_waker: &UiWaker) {
         self.cancel_probe();
         crate::platform::configure_dart_workspace_root(workspace.map(Path::to_path_buf));
         let resolution = resolve_tool_kind(ToolKind::Dart);
@@ -137,15 +137,12 @@ impl DartToolState {
         };
 
         self.status = DartToolStatus::Checking;
-        let (tx, rx) = mpsc::sync_channel(1);
+        let (tx, rx) = ui_waker.sync_channel(1);
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = Arc::clone(&cancel);
         match crate::platform::spawn_named("rriter-dart-version", move || {
             let result = probe_dart_version(&path, &worker_cancel);
             let _ = tx.send(DartProbeResult { generation, result });
-            if let Some(window) = window.as_ref() {
-                window.request_redraw();
-            }
         }) {
             Ok(worker) => {
                 self.rx = Some(rx);
@@ -330,30 +327,21 @@ fn terminal_install_event(
     }
 }
 
+/// Every successful send wakes the UI (`WakeSyncSender`). A full channel therefore always
+/// has a wake outstanding, so a blocking control message cannot wait on an idle loop.
 #[derive(Clone)]
 struct ToolInstallReporter {
-    tx: SyncSender<ToolInstallEvent>,
-    window: Option<Arc<WindowHost>>,
+    tx: WakeSyncSender<ToolInstallEvent>,
     dropped_lines: Arc<AtomicUsize>,
 }
 
 impl ToolInstallReporter {
-    fn wake(&self) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
-        }
-    }
-
     fn send_control(&self, event: ToolInstallEvent) {
-        // Wake before a blocking control message: if the bounded channel is
-        // full, the event loop must drain it before this worker can continue.
-        self.wake();
         self.flush_dropped_lines(true);
         let _ = self.tx.send(event);
     }
 
     fn send_line_event(&self, line: ToolInstallLogLine) {
-        self.wake();
         self.flush_dropped_lines(false);
         match self.tx.try_send(ToolInstallEvent::Line(line)) {
             Ok(()) => {}
@@ -610,7 +598,7 @@ impl ToolInstaller {
     pub(crate) fn start(
         &mut self,
         kind: ToolKind,
-        window: Option<Arc<WindowHost>>,
+        ui_waker: &UiWaker,
     ) -> Result<(), String> {
         if !kind.supports_managed_install() {
             return Err(format!("{} нельзя установить из RRiter", kind.label()));
@@ -623,10 +611,9 @@ impl ToolInstaller {
         let existing_uv = resolve_tool_kind(ToolKind::Uv).path;
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_for_worker = Arc::clone(&cancel);
-        let (tx, rx) = mpsc::sync_channel(INSTALL_EVENT_CAPACITY);
+        let (tx, rx) = ui_waker.sync_channel(INSTALL_EVENT_CAPACITY);
         let reporter = ToolInstallReporter {
             tx,
-            window,
             dropped_lines: Arc::new(AtomicUsize::new(0)),
         };
         let worker = crate::platform::spawn_named("rriter-tool-installer", move || {
@@ -905,7 +892,7 @@ impl crate::app::App {
             })
             .or_else(|| self.ide_workspaces.first())
             .map(PathBuf::as_path);
-        self.dart_tool_state.refresh(workspace, self.window.clone());
+        self.dart_tool_state.refresh(workspace, &self.ui_waker);
     }
 
     pub(crate) fn poll_dart_tool_state(&mut self) -> bool {
@@ -926,7 +913,7 @@ impl crate::app::App {
         if self.tool_installer.is_running_for(kind) {
             self.tool_installer.cancel();
         } else {
-            match self.tool_installer.start(kind, self.window.clone()) {
+            match self.tool_installer.start(kind, &self.ui_waker) {
                 Ok(()) => {
                     // A picker opened immediately before installation may still
                     // complete on another thread. Its stale result must not

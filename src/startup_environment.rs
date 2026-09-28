@@ -58,6 +58,8 @@ pub(super) fn run_project_search_probe(args: &[String], idx: usize) {
                 workspaces: config.ide_workspaces.clone(),
                 ignore_patterns: config.ide_ignore_patterns.clone(),
             },
+            // This CLI benchmark blocks on `recv` itself; no event loop listens.
+            &crate::ui_waker::UiWaker::counting(),
         );
         let mut result_files = 0usize;
         let mut matches = 0usize;

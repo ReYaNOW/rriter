@@ -582,7 +582,7 @@ impl ApiClientState {
         self.mock.server.stop();
     }
 
-    pub(crate) fn start_api_mock_server(&mut self) {
+    pub(crate) fn start_api_mock_server(&mut self, ui_waker: &crate::ui_waker::UiWaker) {
         let snapshot = self.mock_server_snapshot();
         self.mock.server_status =
             crate::app::api_mock::types::ApiMockServerStatus::Starting;
@@ -593,7 +593,7 @@ impl ApiClientState {
                 snapshot.bind_host, snapshot.port
             ),
         );
-        if let Err(err) = self.mock.server.start(snapshot) {
+        if let Err(err) = self.mock.server.start(snapshot, ui_waker) {
             self.mock.server_status =
                 crate::app::api_mock::types::ApiMockServerStatus::Failed(err.clone());
             push_api_mock_server_log(self, format!("server start failed: {err}"));

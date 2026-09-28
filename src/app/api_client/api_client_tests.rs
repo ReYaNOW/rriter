@@ -890,6 +890,40 @@ fn bodyless_post_does_not_invent_json_content_type_or_body() {
 }
 
 #[test]
+fn api_request_response_wakes_the_ui_loop() {
+    // Nothing listens on a port that was just released: the worker answers with an error.
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .and_then(|listener| listener.local_addr())
+        .expect("free port")
+        .port();
+    let job = ApiJobRequest {
+        request_id: 9,
+        spec_id: ApiSpecId(1),
+        route_idx: 0,
+        method: ApiMethod::Get,
+        url: format!("http://127.0.0.1:{port}/ping"),
+        mock_target: ApiJobMockTarget::None,
+        auth_parts: Vec::new(),
+        body_content_type: None,
+        body_json: None,
+        body_form: None,
+        body_multipart: None,
+        resolved_host: None,
+    };
+    let ui_waker = crate::ui_waker::UiWaker::counting();
+    let rx = spawn_api_request(job, &ui_waker);
+    let response = rx
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("API worker response");
+    assert_eq!(response.request_id, 9);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while ui_waker.take_events() == 0 {
+        assert!(std::time::Instant::now() < deadline, "API response must wake the UI");
+        std::thread::yield_now();
+    }
+}
+
+#[test]
 fn request_worker_disconnect_is_attached_to_the_pending_response() {
     let mut state = ApiClientTabState {
         route_idx: Some(4),

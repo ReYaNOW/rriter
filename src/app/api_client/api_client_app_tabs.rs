@@ -20,7 +20,7 @@ impl crate::app::App {
             }
             return;
         }
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.api_import_file_rx = Some(rx);
         let worker_tx = tx.clone();
         let requests = self.external_requests.sink().clone();
@@ -63,7 +63,7 @@ impl crate::app::App {
             });
             return;
         }
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.api_body_file_rx = Some(rx);
         let worker_tx = tx.clone();
         let fallback_name = name.clone();
@@ -90,7 +90,7 @@ impl crate::app::App {
             self.ide_panel.api.mock.uv.last_error = "Окно выбора Python/uv уже открыто".to_string();
             return;
         }
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = self.ui_waker.channel();
         self.ide_panel.api.python_path_pick_rx = Some(rx);
         let title = match kind {
             ApiPythonPathPickKind::Uv => "Выбрать исполняемый файл uv",
@@ -114,12 +114,12 @@ impl crate::app::App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_version_list(&mut self) {
-        self.ide_panel.api.trigger_api_python_version_list();
+        self.ide_panel.api.trigger_api_python_version_list(&self.ui_waker);
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn trigger_api_python_install(&mut self) {
-        self.ide_panel.api.trigger_api_python_install();
+        self.ide_panel.api.trigger_api_python_install(&self.ui_waker);
     }
 
     fn apply_api_body_file_pick(&mut self, result: ApiBodyFilePickResult) {
@@ -143,7 +143,7 @@ impl crate::app::App {
         self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
             id,
             generation,
-            rx: spawn_load_local(id, generation, path),
+            rx: spawn_load_local(id, generation, path, &self.ui_waker),
         });
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -177,7 +177,7 @@ impl crate::app::App {
         self.api_load_rx.push(crate::app::api_client::ApiLoadReceiver {
             id,
             generation,
-            rx: spawn_load_url(id, generation, url),
+            rx: spawn_load_url(id, generation, url, &self.ui_waker),
         });
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
@@ -201,14 +201,14 @@ impl crate::app::App {
                 crate::app::api_client::ApiLoadReceiver {
                     id,
                     generation,
-                    rx: spawn_load_local(id, generation, path),
+                    rx: spawn_load_local(id, generation, path, &self.ui_waker),
                 },
             ),
             ApiSpecSource::Url(url) => self.api_load_rx.push(
                 crate::app::api_client::ApiLoadReceiver {
                     id,
                     generation,
-                    rx: spawn_load_url(id, generation, url),
+                    rx: spawn_load_url(id, generation, url, &self.ui_waker),
                 },
             ),
         }
@@ -237,14 +237,14 @@ impl crate::app::App {
                 crate::app::api_client::ApiLoadReceiver {
                     id,
                     generation,
-                    rx: spawn_load_local(id, generation, path),
+                    rx: spawn_load_local(id, generation, path, &self.ui_waker),
                 },
             ),
             ApiSpecSource::Url(url) => self.api_load_rx.push(
                 crate::app::api_client::ApiLoadReceiver {
                     id,
                     generation,
-                    rx: spawn_load_cached_url(id, generation, url),
+                    rx: spawn_load_cached_url(id, generation, url, &self.ui_waker),
                 },
             ),
         }

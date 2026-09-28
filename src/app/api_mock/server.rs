@@ -14,7 +14,8 @@ use axum::routing::any;
 use serde_json::{Map, Value, json};
 use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::mpsc::{Receiver, Sender};
+use crate::ui_waker::WakeSender;
+use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -31,7 +32,7 @@ pub struct ApiMockServer {
     /// A stop timed out and the live handle is retained until its thread finishes.
     stopping: bool,
     /// Created on the first start; the sender is cloned into every server thread.
-    events: Option<(Sender<ApiMockServerEvent>, Receiver<ApiMockServerEvent>)>,
+    events: Option<(WakeSender<ApiMockServerEvent>, Receiver<ApiMockServerEvent>)>,
 }
 
 struct ApiMockServerHandle {
@@ -43,7 +44,7 @@ struct ApiMockServerHandle {
 }
 
 #[derive(Clone)]
-struct ApiMockEventSink(Sender<ApiMockServerEvent>);
+struct ApiMockEventSink(WakeSender<ApiMockServerEvent>);
 
 #[derive(Clone)]
 struct ApiMockAxumState {
@@ -72,7 +73,11 @@ impl ApiMockServer {
             .unwrap_or_default()
     }
 
-    pub fn start(&mut self, snapshot: ApiMockServerSnapshot) -> Result<(), String> {
+    pub fn start(
+        &mut self,
+        snapshot: ApiMockServerSnapshot,
+        ui_waker: &crate::ui_waker::UiWaker,
+    ) -> Result<(), String> {
         self.reap_finished();
         if self.stopping {
             return Err("Mock server is still stopping".to_string());
@@ -81,7 +86,7 @@ impl ApiMockServer {
             return Ok(());
         }
 
-        let (events, _) = self.events.get_or_insert_with(std::sync::mpsc::channel);
+        let (events, _) = self.events.get_or_insert_with(|| ui_waker.channel());
         let events = ApiMockEventSink(events.clone());
         let python = Arc::new(PythonWorkerSlot::default());
         let (shutdown_tx, shutdown_rx) = oneshot::channel();

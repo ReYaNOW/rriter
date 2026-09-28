@@ -12,7 +12,7 @@ use super::types::{
 use crate::app::api_client::{ApiMethod, ApiRouteRow, ApiSpecModel};
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::Receiver;
 use std::time::Duration;
 
 const TY_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
@@ -153,8 +153,9 @@ pub fn spawn_api_mock_ty_check(
     route: ApiRouteRow,
     model: ApiSpecModel,
     script: ApiMockPythonScript,
+    ui_waker: &crate::ui_waker::UiWaker,
 ) -> Receiver<ApiMockTyCheckResult> {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = ui_waker.channel();
     let worker_tx = tx.clone();
     if let Err(err) = crate::platform::spawn_named("rriter-api-mock-ty-check", move || {
         let result = run_api_mock_ty_check(

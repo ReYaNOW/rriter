@@ -1,3 +1,7 @@
+/// How long a requested cancel may stay unconfirmed before the job is recovered.
+pub(crate) const DATABASE_CANCEL_CONFIRM_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(2);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseContextTarget {
     Connection(DatabaseConnectionId),
@@ -169,6 +173,7 @@ pub struct DatabasePanelState {
     pub(crate) table_modal_layout_cache: RefCell<DatabaseMultilineLayoutCache>,
     pub table_modal_input_dragging: bool,
     pub ddl_hover: RefCell<Option<DatabaseDdlHoverState>>,
+    pub(crate) ddl_hover_animation_wake_at: Option<std::time::Instant>,
     pub pending_job: Option<DatabasePendingJob>,
     pub active_command: Option<super::DatabaseCommand>,
     pub queued_commands: VecDeque<(super::DatabaseCommand, DatabasePendingJob)>,
@@ -252,6 +257,7 @@ impl DatabasePanelState {
             table_modal_layout_cache: RefCell::new(DatabaseMultilineLayoutCache::default()),
             table_modal_input_dragging: false,
             ddl_hover: RefCell::new(None),
+            ddl_hover_animation_wake_at: None,
             pending_job: None,
             active_command: None,
             queued_commands: VecDeque::new(),
@@ -377,6 +383,12 @@ impl DatabasePanelState {
     ) -> bool {
         self.cancel_requested_at
             .is_some_and(|started| now.saturating_duration_since(started) >= timeout)
+    }
+
+    /// When an unconfirmed cancel gives up; the event loop sets a timer for it.
+    pub(crate) fn cancel_deadline(&self) -> Option<std::time::Instant> {
+        self.cancel_requested_at
+            .map(|started| started + DATABASE_CANCEL_CONFIRM_TIMEOUT)
     }
 
     pub fn allocate_connection_id(&mut self) -> DatabaseConnectionId {

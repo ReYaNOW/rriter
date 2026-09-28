@@ -48,6 +48,15 @@ fn resolve_injected_capture_color(
 }
 
 impl Highlighter {
+    /// Worker results wake the UI through `waker` from now on. The first binding wins;
+    /// rebinding the same owner's waker is a cheap no-op.
+    pub(crate) fn bind_ui_waker(&self, waker: &crate::ui_waker::UiWaker) {
+        let control = &self._worker.control;
+        if control.ui_waker.get().is_none() {
+            let _ = control.ui_waker.set(waker.clone());
+        }
+    }
+
     pub fn new() -> Self {
         let (tx_in, rx_in) = mpsc::channel::<HighlighterMessage>();
         let (tx_out, rx_out) = mpsc::channel::<(
@@ -437,6 +446,7 @@ impl Highlighter {
                                         },
                                         skip_full_highlight,
                                     ));
+                                    worker_control_for_thread.wake_ui();
                                     priority_sent = true;
                                 }
                                 if skip_full_highlight {
@@ -1034,6 +1044,7 @@ impl Highlighter {
                     current_tree.clone(),
                     true,
                 ));
+                worker_control_for_thread.wake_ui();
                 let send_ms = highlight_trace_elapsed_ms(send_start);
                 let total_ms = highlight_trace_elapsed_ms(worker_start);
                 if trace_large || highlight_trace_should_log(text.len(), false, total_ms) {

@@ -131,21 +131,17 @@ fn active_table_state(
     })
 }
 
-#[test]
-fn headless_database_table_cell_edit_saves_and_reloads() {
-    let fixture = crate::headless::tests_support::postgres_fixture();
-    let dir = scratch_dir("ui-database-cell-edit");
-    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+/// Connects to `fixture` through the UI and opens `pgo_items` in a table tab with rows loaded.
+fn open_fixture_table(session: &mut HeadlessSession, fixture: &PostgresFixture) {
     let display_name = format!("Database table fixture {}", fixture.port);
-    let connection_index =
-        connect_postgres_fixture_through_ui(&mut session, &fixture, &display_name);
+    let connection_index = connect_postgres_fixture_through_ui(session, fixture, &display_name);
     let database_index = session.app.ide_panel.database.connections[connection_index]
         .databases
         .iter()
         .position(|database| database.name == fixture.database)
         .expect("fixture database in catalog");
-    click_ui(&mut session, &format!("DatabaseArrow({connection_index}, {database_index})"));
-    wait_until(&mut session, 5000, "fixture table catalog", |session| {
+    click_ui(session, &format!("DatabaseArrow({connection_index}, {database_index})"));
+    wait_until(session, 5000, "fixture table catalog", |session| {
         session.app.ide_panel.database.connections[connection_index].databases[database_index]
             .tables_loaded
     });
@@ -156,14 +152,86 @@ fn headless_database_table_cell_edit_saves_and_reloads() {
         .position(|table| table.name == "pgo_items")
         .expect("fixture table in catalog");
     let table_row = format!("DatabaseTableRow({connection_index}, {database_index}, {table_index})");
-    let (x, y) = ui_center(&dump(&mut session), &table_row);
-    let lines = run_script(&mut session, format!("mouse_move {x} {y}\ndblclick\n").as_bytes());
+    let (x, y) = ui_center(&dump(session), &table_row);
+    let lines = run_script(session, format!("mouse_move {x} {y}\ndblclick\n").as_bytes());
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    wait_until(&mut session, 5000, "fixture table rows", |session| {
+    wait_until(session, 5000, "fixture table rows", |session| {
         active_table_state(session).is_some_and(|state| {
             state.metadata.is_some() && state.grid.row(0).is_some()
         })
     });
+}
+
+/// Strict loop model: a refresh slower than `DATABASE_REFRESH_INDICATOR_DELAY` must draw
+/// its indicator with no input, so the event loop has to arm a wake-up for that moment.
+#[test]
+fn headless_database_table_slow_refresh_draws_indicator_without_input() {
+    const CHUNK_DELAY_MS: u64 = 400;
+    let fixture = crate::headless::tests_support::postgres_fixture_with_args(&[
+        "--table-chunk-delay-ms",
+        &CHUNK_DELAY_MS.to_string(),
+    ]);
+    let dir = scratch_dir("ui-database-slow-refresh");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+    open_fixture_table(&mut session, &fixture);
+    wait_until(&mut session, 10000, "idle database worker", |session| {
+        session.app.ide_panel.database.pending_job.is_none()
+    });
+
+    click_ui(&mut session, "DatabaseTableRefresh");
+    let started = active_table_state(&session)
+        .and_then(|state| state.grid.refresh_started.filter(|_| state.grid.refreshing))
+        .unwrap_or_else(|| panic!("refresh did not start: {}", dump(&mut session)));
+    let delay = crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY;
+    // Only the native loop's own wake-ups run from here: no input, no driver schedule.
+    let mut causes = std::collections::BTreeMap::<&str, u32>::new();
+    let mut indicator_frame = false;
+    let due = started + delay;
+    let budget = std::time::Instant::now() + std::time::Duration::from_millis(CHUNK_DELAY_MS + 3000);
+    while active_table_state(&session).is_some_and(|state| state.grid.refreshing) {
+        let left = budget.saturating_duration_since(std::time::Instant::now());
+        assert!(!left.is_zero(), "refresh did not finish; wake-ups: {causes:?}");
+        let wake = session.native_wake(left);
+        *causes.entry(wake.cause.name()).or_default() += 1;
+        // The frame renders after `stepped_at`; `refreshing` only changes inside that pass.
+        let refreshing = active_table_state(&session).is_some_and(|state| state.grid.refreshing);
+        indicator_frame |= wake.frame
+            && refreshing
+            && wake.stepped_at.is_some_and(|at| at >= due);
+        if !refreshing || indicator_frame || wake.frame {
+            continue;
+        }
+        // The loop goes to sleep while the indicator is still due: a wake-up must be armed
+        // for the moment it is due (`deadline_ms` is rounded down, hence the 1 ms).
+        let event_loop = dump(&mut session)["event_loop"].clone();
+        let now = std::time::Instant::now();
+        let wakes_in_time = match event_loop["control_flow"].as_str() {
+            Some("poll") => true,
+            Some("wait_until") => event_loop["deadline_ms"].as_u64().is_some_and(|ms| {
+                now + std::time::Duration::from_millis(ms) <= due + std::time::Duration::from_millis(1)
+            }),
+            _ => false,
+        };
+        assert!(
+            wakes_in_time,
+            "the loop sleeps without a wake-up at the indicator delay {delay:?} \
+             ({:?} after the refresh started): {event_loop}; wake-ups: {causes:?}",
+            now.duration_since(started)
+        );
+    }
+    assert!(
+        indicator_frame,
+        "no frame drew the refresh indicator between {delay:?} and the result; wake-ups: {causes:?}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_database_table_cell_edit_saves_and_reloads() {
+    let fixture = crate::headless::tests_support::postgres_fixture();
+    let dir = scratch_dir("ui-database-cell-edit");
+    let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
+    open_fixture_table(&mut session, &fixture);
 
     let id_cell = "DatabaseTableCell(0, 0)";
     let (x, y) = ui_center(&dump(&mut session), id_cell);

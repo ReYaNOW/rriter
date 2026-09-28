@@ -20,6 +20,52 @@ pub(crate) enum StepState {
     Idle { flow: ControlFlow },
 }
 
+/// Why the modelled native loop ran its next `about_to_wait` (strict `wake`/`idle`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum WakeCause {
+    /// The previous pass drew a frame: winit runs `about_to_wait` after `RedrawRequested`.
+    Redraw,
+    Poll,
+    UiWaker,
+    /// The `WaitUntil` instant was reached.
+    Deadline,
+    /// The budget ran out while the loop would still sleep; nothing ran.
+    Timeout,
+}
+
+impl WakeCause {
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Redraw => "redraw",
+            Self::Poll => "poll",
+            Self::UiWaker => "ui_waker",
+            Self::Deadline => "deadline",
+            Self::Timeout => "timeout",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NativeWake {
+    pub(crate) cause: WakeCause,
+    /// The pass drew a frame (the app requested one).
+    pub(crate) frame: bool,
+    /// Start of the `about_to_wait` pass; `None` on `Timeout`. The frame is drawn after it.
+    pub(crate) stepped_at: Option<Instant>,
+}
+
+/// `ControlFlow` as `dump`/`wake` report it: name and whole ms left until a `WaitUntil`.
+pub(crate) fn control_flow_label(flow: ControlFlow, now: Instant) -> (&'static str, Option<u64>) {
+    match flow {
+        ControlFlow::Poll => ("poll", None),
+        ControlFlow::Wait => ("wait", None),
+        ControlFlow::WaitUntil(at) => {
+            let left = at.saturating_duration_since(now).as_millis();
+            ("wait_until", Some(u64::try_from(left).unwrap_or(u64::MAX)))
+        }
+    }
+}
+
 /// One iteration of the headless event loop: the same `about_to_wait` the window runs, then
 /// a frame if the app asked for one (or `force`). Never sleeps. Returns true when a frame was drawn.
 pub(crate) fn step_frame(app: &mut App, loop_state: &HeadlessLoopState, force: bool) -> bool {

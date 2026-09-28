@@ -17,6 +17,7 @@ import socket
 import struct
 import sys
 import threading
+import time
 from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
@@ -591,9 +592,12 @@ class LocalPostgresFixture:
         database_name: str = DEFAULT_DATABASE_NAME,
         username: str = DEFAULT_DATABASE_USER,
         row_count: int = PGO_ROW_COUNT,
+        table_chunk_delay: float = 0.0,
     ) -> None:
         if row_count < 1:
             raise ValueError("PostgreSQL fixture needs at least one row")
+        # Seconds every `table_chunk` query waits: UI tests of slow table loads.
+        self.table_chunk_delay = table_chunk_delay
         self.database_name = database_name
         self.username = username
         self._base_rows = tuple(
@@ -1237,6 +1241,8 @@ class _FixtureSession:
             items = self._table_items_for_sql(sql, apply_limit=False)
             return _ExecutionResult(shape.columns, ((len(items),),), "SELECT 1")
         if family == "table_chunk":
+            if self.fixture.table_chunk_delay > 0:
+                time.sleep(self.fixture.table_chunk_delay)
             items = self._table_items_for_sql(sql, apply_limit=True)
             rows = tuple(
                 (str(item.id), item.name, "true" if item.active else "false", item.xmin)
@@ -1515,9 +1521,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--table-chunk-delay-ms", type=int, default=0)
     args = parser.parse_args(argv)
 
-    fixture = LocalPostgresFixture().start(host=args.host, port=args.port)
+    fixture = LocalPostgresFixture(table_chunk_delay=args.table_chunk_delay_ms / 1000).start(
+        host=args.host, port=args.port
+    )
     signal.signal(signal.SIGTERM, _stop_on_signal)
     signal.signal(signal.SIGINT, _stop_on_signal)
     print(fixture.endpoint[1], flush=True)

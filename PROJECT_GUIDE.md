@@ -1599,6 +1599,7 @@ Entrypoints/state:
 * `src/app/project_search_grep.rs` -> grep-searcher streaming backend and line-level match building for fast project search.
 * `src/app/project_search_preview.rs` -> lazy visible-row preview worker and project-search scrollbar drag math.
 * `src/app/project_search_app.rs` -> App methods for project search panel focus, worker start/poll, cursor placement, and result jumps.
+* `src/ui_waker.rs` -> coalesced background-result wake events for the UI event loop.
 * `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
 * `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
 * `src/app/app_file_behavior_tests/app_file_api_mock_tests.rs` -> API Mock lifecycle and editor behavior regressions included by `app_file_behavior_tests.rs`.

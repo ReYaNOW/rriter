@@ -471,7 +471,10 @@ impl App {
         }
 
         if self.lsp.is_none() {
-            let mut lsp = crate::lsp::LspManager::new(self.ide_workspaces.clone());
+            let mut lsp = crate::lsp::LspManager::with_ui_waker(
+                self.ide_workspaces.clone(),
+                self.ui_waker.clone(),
+            );
             lsp.set_dart_workspace_analysis_enabled(self.dart_settings.workspace_analysis);
             if !self.dart_settings.enabled {
                 lsp.set_server_enabled("dart", false);

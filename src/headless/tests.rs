@@ -25,6 +25,12 @@ pub(crate) mod tests_support {
     }
 
     pub(crate) fn postgres_fixture() -> PostgresFixture {
+        postgres_fixture_with_args(&[])
+    }
+
+    /// `postgres_fixture` with extra `scripts/postgres_fixture.py` options
+    /// (e.g. `--table-chunk-delay-ms 300`).
+    pub(crate) fn postgres_fixture_with_args(extra: &[&str]) -> PostgresFixture {
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("scripts")
             .join("postgres_fixture.py");
@@ -32,6 +38,7 @@ pub(crate) mod tests_support {
         command
             .arg(script)
             .args(["--port", "0"])
+            .args(extra)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped());
         let mut child = crate::platform::ManagedChild::spawn(&mut command)
@@ -1022,7 +1029,8 @@ mod session_cases {
         assert_eq!(
             keys,
             [
-                "clipboard", "cursor_icon", "dialog", "editor", "external_request", "hover", "ide_panel", "mode",
+                "clipboard", "cursor_icon", "dialog", "editor", "event_loop", "external_request", "hover",
+                "ide_panel", "mode",
                 "overlays", "scale", "size", "tabs", "ui", "writes_allowed"
             ]
         );

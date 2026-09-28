@@ -442,9 +442,9 @@ pub struct DatabaseRuntime {
 }
 
 impl DatabaseRuntime {
-    pub fn spawn() -> io::Result<Self> {
+    pub fn spawn(ui_waker: &crate::ui_waker::UiWaker) -> io::Result<Self> {
         let (command_tx, command_rx) = tokio_mpsc::unbounded_channel();
-        let (event_tx, event_rx) = mpsc::channel();
+        let (event_tx, event_rx) = ui_waker.channel();
         let worker = thread::Builder::new()
             .name("rriter-database-runtime".to_string())
             .spawn(move || {
@@ -518,7 +518,7 @@ impl Drop for DatabaseRuntime {
 
 async fn worker_loop(
     mut command_rx: tokio_mpsc::UnboundedReceiver<DatabaseCommand>,
-    event_tx: mpsc::Sender<DatabaseEvent>,
+    event_tx: crate::ui_waker::WakeSender<DatabaseEvent>,
 ) {
     let mut active: Option<ActiveJob> = None;
     let mut pending: Option<PendingTransaction> = None;

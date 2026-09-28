@@ -98,10 +98,9 @@ fn transactional_pruning_keeps_current_and_previous_generation() {
         layout.create().unwrap();
         fs::write(layout.executable(), b"test").unwrap();
     }
-    let (tx, _rx) = mpsc::sync_channel(INSTALL_EVENT_CAPACITY);
+    let (tx, _rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
     let reporter = ToolInstallReporter {
         tx,
-        window: None,
         dropped_lines: Arc::new(AtomicUsize::new(0)),
     };
     current.prune_stale_generations(Some(&old.executable()), &reporter);
@@ -318,11 +317,10 @@ fn log_scroll_follows_tail_until_user_scrolls_away() {
 
 #[test]
 fn bounded_reporter_drops_output_instead_of_blocking_the_installer() {
-    let (tx, rx) = mpsc::sync_channel(1);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(1);
     let dropped_lines = Arc::new(AtomicUsize::new(0));
     let reporter = ToolInstallReporter {
         tx,
-        window: None,
         dropped_lines: Arc::clone(&dropped_lines),
     };
     reporter.line(ToolInstallLogKind::Output, "first");
@@ -342,7 +340,7 @@ fn bounded_reporter_drops_output_instead_of_blocking_the_installer() {
 fn terminal_events_update_state_without_starting_network_work() {
     let mut installer = ToolInstaller::default();
     installer.target = Some(ToolKind::Ty);
-    let (tx, rx) = mpsc::sync_channel(INSTALL_EVENT_CAPACITY);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
     installer.rx = Some(rx);
     tx.send(ToolInstallEvent::Phase(
         ToolInstallPhase::InstallingTool,
@@ -408,10 +406,9 @@ fn download_progress_reports_known_and_unknown_lengths() {
 fn cancelled_download_stops_before_network_or_file_creation() {
     let (data, cache) = test_roots("cancel-download");
     let destination = cache.join("installer.sh");
-    let (tx, _rx) = mpsc::sync_channel(INSTALL_EVENT_CAPACITY);
+    let (tx, _rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
     let reporter = ToolInstallReporter {
         tx,
-        window: None,
         dropped_lines: Arc::new(AtomicUsize::new(0)),
     };
     let cancel = AtomicBool::new(true);
@@ -425,7 +422,7 @@ fn cancelled_download_stops_before_network_or_file_creation() {
 #[test]
 fn unsupported_tool_is_rejected_before_worker_or_network_is_started() {
     let mut installer = ToolInstaller::default();
-    let error = installer.start(ToolKind::Git, None).unwrap_err();
+    let error = installer.start(ToolKind::Git, &crate::ui_waker::UiWaker::counting()).unwrap_err();
     assert!(error.contains("нельзя установить"));
     assert!(!installer.is_running());
     assert!(installer.worker.is_none());
@@ -548,10 +545,9 @@ echo 'installed fake ruff'
     permissions.set_mode(0o700);
     fs::set_permissions(&fake_uv, permissions).unwrap();
 
-    let (tx, rx) = mpsc::sync_channel(INSTALL_EVENT_CAPACITY);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
     let reporter = ToolInstallReporter {
         tx,
-        window: None,
         dropped_lines: Arc::new(AtomicUsize::new(0)),
     };
     let cancel = AtomicBool::new(false);
@@ -625,7 +621,7 @@ fn dart_tool_state_ignores_stale_probe_generation() {
     let mut state = DartToolState::default();
     state.status = DartToolStatus::Checking;
     state.generation = 7;
-    let (tx, rx) = mpsc::sync_channel(1);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(1);
     tx.send(DartProbeResult {
         generation: 6,
         result: Ok("Dart SDK version: stale".to_string()),
@@ -643,7 +639,7 @@ fn dart_tool_state_transitions_from_checking_to_ready() {
     let mut state = DartToolState::default();
     state.status = DartToolStatus::Checking;
     state.generation = 3;
-    let (tx, rx) = mpsc::sync_channel(1);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(1);
     tx.send(DartProbeResult {
         generation: 3,
         result: Ok("Dart SDK version: 3.9.0 (stable)".to_string()),
@@ -662,7 +658,7 @@ fn dart_tool_state_preserves_probe_error_for_settings_ui() {
     let mut state = DartToolState::default();
     state.status = DartToolStatus::Checking;
     state.generation = 4;
-    let (tx, rx) = mpsc::sync_channel(1);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(1);
     tx.send(DartProbeResult {
         generation: 4,
         result: Err("invalid executable".to_string()),

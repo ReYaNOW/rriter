@@ -34,6 +34,15 @@ fn serve_spec(server: &str) -> String {
 }
 
 fn request_server(status: u16, body: &'static str) -> (String, Receiver<String>) {
+    request_server_delayed(status, body, std::time::Duration::ZERO)
+}
+
+/// `request_server` that holds the reply for `delay` after reading the request.
+fn request_server_delayed(
+    status: u16,
+    body: &'static str,
+    delay: std::time::Duration,
+) -> (String, Receiver<String>) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind request test server");
     let address = listener.local_addr().expect("request server address");
     let (tx, rx) = mpsc::channel();
@@ -66,6 +75,7 @@ fn request_server(status: u16, body: &'static str) -> (String, Receiver<String>)
             }
         };
         let _ = tx.send(String::from_utf8_lossy(&request).into_owned());
+        thread::sleep(delay);
         let reason = match status {
             200 => "OK",
             201 => "Created",
@@ -147,6 +157,42 @@ fn headless_api_client_get_shows_status_and_body() {
     ));
     reveal_in_tab(&mut session, &format!("ApiResponseBody({route})"));
     assert!(request_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap().starts_with("GET /get "));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Strict loop model: a response that arrives while the UI sleeps reaches the screen
+/// through its `UiWaker` wake-up alone, with no input and no timer.
+#[test]
+fn headless_api_client_response_arrives_through_ui_waker_without_input() {
+    use crate::headless::frame::WakeCause;
+    let (base, _) =
+        request_server_delayed(200, r#"{"message":"woken"}"#, std::time::Duration::from_millis(200));
+    let (dir, mut session) = scratch_request("api-client-ui-waker", &base);
+    let route = open_route(&mut session, "GET", "/get");
+    reveal_in_tab(&mut session, "ApiTryRequest");
+    click_ui(&mut session, "ApiTryRequest");
+    let has_response = |session: &HeadlessSession| {
+        session.app.active_api_tab().is_some_and(|(_, state)| {
+            state.route_idx == Some(route) && state.response.is_some()
+        })
+    };
+    assert!(!has_response(&session), "the delayed response is already shown");
+
+    let budget = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    let mut causes = Vec::new();
+    let applied = loop {
+        let wake = session.native_wake(budget.saturating_duration_since(std::time::Instant::now()));
+        causes.push((wake.cause.name(), wake.frame));
+        assert_ne!(wake.cause, WakeCause::Timeout, "no wake-up delivered the response: {causes:?}");
+        if has_response(&session) {
+            break wake;
+        }
+    };
+    assert_eq!(applied.cause, WakeCause::UiWaker, "wake-ups: {causes:?}");
+    assert!(applied.frame, "the response pass drew no frame: {causes:?}");
+    let response = session.app.active_api_tab().unwrap().1.response.as_ref().unwrap();
+    assert_eq!(response.status, Some(200));
+    assert!(response.body.contains("woken"));
     let _ = std::fs::remove_dir_all(dir);
 }
 

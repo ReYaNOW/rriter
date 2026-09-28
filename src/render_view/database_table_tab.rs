@@ -1071,7 +1071,7 @@ impl Renderer {
         }
         if state.grid.refreshing
             && state.grid.refresh_started.is_some_and(|started| {
-                started.elapsed() >= std::time::Duration::from_millis(70)
+                started.elapsed() >= crate::app::database::DATABASE_REFRESH_INDICATOR_DELAY
             })
         {
             draw_database_refresh_overlay(self, x, y, body_w, body_h, s);

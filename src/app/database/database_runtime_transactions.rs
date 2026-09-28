@@ -296,7 +296,8 @@ mod tests {
 
     #[test]
     fn runtime_can_start_cancel_idle_job_and_shutdown() {
-        let mut runtime = DatabaseRuntime::spawn().unwrap();
+        let ui_waker = crate::ui_waker::UiWaker::counting();
+        let mut runtime = DatabaseRuntime::spawn(&ui_waker).unwrap();
         runtime
             .send(DatabaseCommand::CancelJob {
                 job_id: DatabaseJobId(7),
@@ -315,6 +316,12 @@ mod tests {
                 job_id: DatabaseJobId(7)
             }
         );
+        // The event woke the UI loop; the wake follows the send, so wait for it.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while ui_waker.take_events() == 0 {
+            assert!(std::time::Instant::now() < deadline, "database event must wake the UI");
+            std::thread::yield_now();
+        }
         runtime.shutdown();
     }
 

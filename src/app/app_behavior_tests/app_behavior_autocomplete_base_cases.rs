@@ -224,6 +224,7 @@ pub(crate) fn test_app() -> Option<App> {
         active_tab: 0,
         run_ide_on_startup: false,
         headless_mode: false,
+        ui_waker: crate::ui_waker::UiWaker::counting(),
     })
 }
 

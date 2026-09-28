@@ -130,12 +130,23 @@ pub enum HighlighterMessage {
 
 struct HighlighterWorkerControl {
     cancelled: AtomicBool,
+    /// Bound by the owner after construction (`Highlighter::bind_ui_waker`); synchronous
+    /// helpers that wait for the result themselves leave it empty.
+    ui_waker: std::sync::OnceLock<crate::ui_waker::UiWaker>,
 }
 
 impl HighlighterWorkerControl {
     fn new() -> Self {
         Self {
             cancelled: AtomicBool::new(false),
+            ui_waker: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Worker side, after a result was sent.
+    fn wake_ui(&self) {
+        if let Some(waker) = self.ui_waker.get() {
+            waker.wake();
         }
     }
 

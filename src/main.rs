@@ -23,6 +23,7 @@ mod startup_environment;
 mod state_persistence;
 mod headless_ty_mem_probe;
 mod ui_system;
+mod ui_waker;
 mod widgets;
 
 use crate::app::{App, AppInitOptions};
@@ -234,7 +235,7 @@ fn main() {
     }
 
     let editor = App::initial_editor(&initial_text);
-    let mut event_loop_builder = EventLoop::builder();
+    let mut event_loop_builder = EventLoop::<ui_waker::AppWake>::with_user_event();
     #[cfg(target_os = "macos")]
     {
         use winit::platform::macos::{ActivationPolicy, EventLoopBuilderExtMacOS};
@@ -274,6 +275,7 @@ fn main() {
         scroll_bench_idx,
         scroll_bench_seconds: Some(scroll_bench_seconds),
         headless: false,
+        ui_waker: ui_waker::UiWaker::native(event_loop.create_proxy()),
     };
     let mut app = App::new_from_config(config, options);
 

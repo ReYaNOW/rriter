@@ -120,8 +120,13 @@ fn spawn_api_preconnect(resolved: ApiResolvedHost) {
     }
 }
 
-pub fn spawn_load_local(id: ApiSpecId, generation: u64, path: PathBuf) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = mpsc::channel();
+pub fn spawn_load_local(
+    id: ApiSpecId,
+    generation: u64,
+    path: PathBuf,
+    ui_waker: &crate::ui_waker::UiWaker,
+) -> Receiver<ApiLoadResult> {
+    let (tx, rx) = ui_waker.channel();
     let worker_tx = tx.clone();
     if let Err(err) = crate::platform::spawn_named("rriter-api-load-local", move || {
         let result = load_local_spec(id, &path);
@@ -139,8 +144,13 @@ pub fn spawn_load_local(id: ApiSpecId, generation: u64, path: PathBuf) -> Receiv
     rx
 }
 
-pub fn spawn_load_url(id: ApiSpecId, generation: u64, url: String) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = mpsc::channel();
+pub fn spawn_load_url(
+    id: ApiSpecId,
+    generation: u64,
+    url: String,
+    ui_waker: &crate::ui_waker::UiWaker,
+) -> Receiver<ApiLoadResult> {
+    let (tx, rx) = ui_waker.channel();
     let worker_tx = tx.clone();
     if let Err(err) = crate::platform::spawn_named("rriter-api-load-url", move || {
         let result = load_url_spec(id, &url);
@@ -162,8 +172,9 @@ pub fn spawn_load_cached_url(
     id: ApiSpecId,
     generation: u64,
     url: String,
+    ui_waker: &crate::ui_waker::UiWaker,
 ) -> Receiver<ApiLoadResult> {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = ui_waker.channel();
     let worker_tx = tx.clone();
     if let Err(err) = crate::platform::spawn_named("rriter-api-load-cache", move || {
         let result = match read_url_cache(id) {

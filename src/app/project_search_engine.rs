@@ -1,13 +1,15 @@
 pub fn start_project_search_worker(
     request: ProjectSearchRequest,
+    ui_waker: &crate::ui_waker::UiWaker,
 ) -> Receiver<ProjectSearchWorkerMessage> {
-    start_project_search_worker_cancellable(request).0
+    start_project_search_worker_cancellable(request, ui_waker).0
 }
 
 pub fn start_project_search_worker_cancellable(
     request: ProjectSearchRequest,
+    ui_waker: &crate::ui_waker::UiWaker,
 ) -> (Receiver<ProjectSearchWorkerMessage>, Arc<AtomicBool>) {
-    let (tx, rx) = channel();
+    let (tx, rx) = ui_waker.channel();
     let generation = request.generation;
     let cancel = Arc::new(AtomicBool::new(false));
     let worker_cancel = Arc::clone(&cancel);
@@ -27,7 +29,7 @@ pub fn start_project_search_worker_cancellable(
 
 #[cfg(test)]
 pub fn run_project_search(request: ProjectSearchRequest) -> ProjectSearchWorkerResult {
-    let (tx, rx) = channel();
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().channel();
     stream_project_search(request, tx, Arc::new(AtomicBool::new(false)));
     let mut result = ProjectSearchWorkerResult {
         files: Vec::new(),
@@ -340,7 +342,7 @@ fn push_project_search_ranges(
 
 fn stream_project_search(
     request: ProjectSearchRequest,
-    tx: std::sync::mpsc::Sender<ProjectSearchWorkerMessage>,
+    tx: crate::ui_waker::WakeSender<ProjectSearchWorkerMessage>,
     cancel: Arc<AtomicBool>,
 ) {
     let started = Instant::now();
@@ -444,7 +446,7 @@ fn run_project_search_roots(
     caps: Arc<Mutex<SearchCaps>>,
     profile: Arc<SearchProfile>,
     capped_flag: Arc<AtomicBool>,
-    tx: Sender<ProjectSearchWorkerMessage>,
+    tx: crate::ui_waker::WakeSender<ProjectSearchWorkerMessage>,
     needle: Arc<Vec<u8>>,
     grep_pattern: Option<Arc<str>>,
     case_sensitive: bool,
