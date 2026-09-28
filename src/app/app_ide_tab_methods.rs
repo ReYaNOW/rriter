@@ -944,7 +944,8 @@ mod tests {
             include_str!("ui_handlers/ui_panels.rs"),
             include_str!("ui_handlers/ui_settings.rs"),
         );
-        let about = include_str!("events/about.rs");
+        // `about_to_wait_terminals` holds the terminal tick of `about_to_wait`.
+        let about = include_str!("events/about/about_tick_input_sections.rs");
 
         assert_eq!(app_production.matches("Terminal::spawn(").count(), 1);
         assert!(app_production.contains("take_terminal_creation_number("));
@@ -1097,7 +1098,8 @@ mod tests {
             include_str!("ui_handlers/ui_settings.rs"),
         );
         let main_keys = include_str!("keyboard/main_keys.rs");
-        let about = include_str!("events/about.rs");
+        // `about_to_wait_terminals` holds the terminal tick of `about_to_wait`.
+        let about = include_str!("events/about/about_tick_input_sections.rs");
         let renderer = include_str!("../render_view/terminal_ui.rs");
 
         assert!(!lifecycle.contains("presentation_visible"));
@@ -1493,7 +1495,8 @@ mod tests {
         assert_eq!(active, 0);
         assert_eq!(ids[active], 'b');
 
-        let about = include_str!("events/about.rs");
+        // `about_to_wait_terminals` holds the terminal tick of `about_to_wait`.
+        let about = include_str!("events/about/about_tick_input_sections.rs");
         let cleanup = about
             .split("for idx in closed_terminals.into_iter().rev()")
             .nth(1)

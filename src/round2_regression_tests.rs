@@ -2,7 +2,14 @@ use super::*;
 
 const API_PANEL: &str =
     include_str!("render_view/api_client_panel/api_client_panel_main_renderer.rs");
-const API_TAB: &str = include_str!("render_view/api_client_tab/api_client_tab_main_renderer.rs");
+// `draw_api_client_tab` draws its request/mock/response sections from their own files,
+// all inside the tab clip it pushes.
+const API_TAB: &str = concat!(
+    include_str!("render_view/api_client_tab/api_client_tab_main_renderer.rs"),
+    include_str!("render_view/api_client_tab/api_client_tab_request_renderer.rs"),
+    include_str!("render_view/api_client_tab/api_client_tab_mock_renderer.rs"),
+    include_str!("render_view/api_client_tab/api_client_tab_response_renderer.rs"),
+);
 const API_AUTH: &str = include_str!("render_view/api_client_tab/api_client_tab_auth_renderer.rs");
 const SETTINGS: &str = include_str!("render_view/settings_ui.rs");
 const SETTINGS_TOOL_ROWS: &str = include_str!("render_view/settings_tool_rows.rs");

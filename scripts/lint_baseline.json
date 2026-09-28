@@ -83,11 +83,13 @@
     },
     "src/app/app_state.rs": {
       "collapsible_if": 2,
-      "field_reassign_with_default": 3,
       "large_enum_variant": 2,
       "manual_ignore_case_cmp": 2,
       "struct_excessive_bools": 6,
       "unnecessary_lazy_evaluations": 2
+    },
+    "src/app/app_state_tests.rs": {
+      "field_reassign_with_default": 3
     },
     "src/app/app_window_external_methods.rs": {
       "collapsible_if": 7,
@@ -112,15 +114,26 @@
       "too_many_lines": 2
     },
     "src/app/automation.rs": {
-      "cognitive_complexity": 3,
-      "collapsible_if": 2,
-      "collapsible_match": 2,
-      "struct_excessive_bools": 2,
-      "too_many_lines": 5
+      "collapsible_if": 2
+    },
+    "src/app/automation_controller_steps.rs": {
+      "cognitive_complexity": 2,
+      "too_many_lines": 2
     },
     "src/app/automation_database.rs": {
       "collapsible_if": 2,
       "field_reassign_with_default": 1
+    },
+    "src/app/automation_fixtures.rs": {
+      "too_many_lines": 2
+    },
+    "src/app/automation_semantic_actions.rs": {
+      "collapsible_match": 2,
+      "struct_excessive_bools": 2
+    },
+    "src/app/automation_tests.rs": {
+      "cognitive_complexity": 1,
+      "too_many_lines": 1
     },
     "src/app/database.rs": {
       "field_reassign_with_default": 1
@@ -174,17 +187,24 @@
       "unwrap_used": 42
     },
     "src/app/events/about.rs": {
-      "cognitive_complexity": 2,
-      "collapsible_if": 32,
-      "collapsible_match": 2,
-      "extend_with_drain": 2,
-      "manual_is_multiple_of": 2,
-      "too_many_lines": 2,
-      "unwrap_used": 20
+      "manual_is_multiple_of": 2
     },
     "src/app/events/about/about_helpers.rs": {
       "collapsible_if": 4,
       "manual_pattern_char_comparison": 2
+    },
+    "src/app/events/about/about_tick_input_sections.rs": {
+      "collapsible_if": 6,
+      "unwrap_used": 14
+    },
+    "src/app/events/about/about_tick_lsp_sections.rs": {
+      "collapsible_if": 18,
+      "extend_with_drain": 2
+    },
+    "src/app/events/about/about_tick_scroll_sections.rs": {
+      "collapsible_if": 8,
+      "collapsible_match": 2,
+      "unwrap_used": 6
     },
     "src/app/events/main_frame.rs": {
       "cognitive_complexity": 2,
@@ -200,8 +220,10 @@
       "type_complexity": 2
     },
     "src/app/file_tree.rs": {
-      "collapsible_if": 4,
       "manual_strip": 4
+    },
+    "src/app/file_tree_app_actions.rs": {
+      "collapsible_if": 4
     },
     "src/app/file_tree_dialog.rs": {
       "too_many_lines": 2
@@ -419,7 +441,7 @@
       "type_complexity": 2,
       "while_let_loop": 2
     },
-    "src/app/tool_installer.rs": {
+    "src/app/tool_installer_download.rs": {
       "manual_div_ceil": 6
     },
     "src/app/ui_handlers.rs": {
@@ -712,12 +734,17 @@
     "src/render_view/api_client_tab/api_client_tab_auth_renderer.rs": {
       "too_many_lines": 4
     },
-    "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": {
-      "cognitive_complexity": 2,
-      "too_many_lines": 2
+    "src/render_view/api_client_tab/api_client_tab_mock_renderer.rs": {
+      "too_many_lines": 4
     },
     "src/render_view/api_client_tab/api_client_tab_python_renderer.rs": {
       "collapsible_if": 2
+    },
+    "src/render_view/api_client_tab/api_client_tab_request_renderer.rs": {
+      "too_many_lines": 4
+    },
+    "src/render_view/api_client_tab/api_client_tab_response_renderer.rs": {
+      "too_many_lines": 4
     },
     "src/render_view/core_text.rs": {
       "collapsible_if": 8,
@@ -728,7 +755,10 @@
       "field_reassign_with_default": 2,
       "manual_clamp": 2,
       "needless_range_loop": 2,
-      "too_many_lines": 4
+      "too_many_lines": 2
+    },
+    "src/render_view/database_table_tab_controls.rs": {
+      "too_many_lines": 2
     },
     "src/render_view/database_table_tab_overlay.rs": {
       "too_many_lines": 2
@@ -748,6 +778,9 @@
     "src/render_view/ide_panels/ide_panel_behavior_tests.rs": {
       "assertions_on_constants": 2
     },
+    "src/render_view/ide_panels/ide_panel_confirmation_dialog_renderer.rs": {
+      "too_many_lines": 2
+    },
     "src/render_view/ide_panels/ide_panel_database_renderer.rs": {
       "manual_clamp": 2,
       "too_many_lines": 4
@@ -755,7 +788,7 @@
     "src/render_view/ide_panels/ide_panel_dialog_renderer.rs": {
       "collapsible_if": 2,
       "expect_used": 4,
-      "too_many_lines": 4
+      "too_many_lines": 2
     },
     "src/render_view/ide_panels/ide_panel_git_graph_renderer.rs": {
       "collapsible_if": 2,
@@ -783,11 +816,13 @@
       "unwrap_used": 2
     },
     "src/render_view/markdown_read.rs": {
-      "assertions_on_constants": 1,
       "if_same_then_else": 2
     },
     "src/render_view/markdown_read_interaction.rs": {
       "unnecessary_lazy_evaluations": 4
+    },
+    "src/render_view/markdown_read_tests.rs": {
+      "assertions_on_constants": 1
     },
     "src/render_view/markdown_scroll.rs": {
       "field_reassign_with_default": 2,
@@ -823,9 +858,10 @@
     "src/render_view/root_frame_overlay_helpers.rs": {
       "unwrap_used": 2
     },
+    "src/render_view/root_frame_editor_chrome_renderer.rs": {
+      "if_same_then_else": 16
+    },
     "src/render_view/root_frame_renderer.rs": {
-      "cognitive_complexity": 2,
-      "if_same_then_else": 16,
       "too_many_lines": 2
     },
     "src/render_view/settings_tool_rows.rs": {
@@ -908,25 +944,5 @@
       "too_many_lines": 8
     }
   },
-  "file_length": {
-    "src/app/api_client/api_client_app_click_methods.rs": 1626,
-    "src/app/api_client/api_client_app_mock_methods.rs": 2033,
-    "src/app/api_client/api_client_app_request_methods.rs": 1681,
-    "src/app/api_client/api_client_app_text_methods.rs": 2438,
-    "src/app/app_state.rs": 1627,
-    "src/app/automation.rs": 3581,
-    "src/app/events/about.rs": 1716,
-    "src/app/file_tree.rs": 1610,
-    "src/app/markdown.rs": 1657,
-    "src/app/tool_installer.rs": 1611,
-    "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": 3063,
-    "src/render_view/core_text.rs": 1986,
-    "src/render_view/database_query_tab.rs": 1774,
-    "src/render_view/database_table_tab.rs": 2110,
-    "src/render_view/ide_panels/ide_panel_dialog_renderer.rs": 1635,
-    "src/render_view/markdown_read.rs": 2426,
-    "src/render_view/markdown_read_interaction.rs": 1978,
-    "src/render_view/markdown_scroll_transition_review_tests.rs": 1863,
-    "src/render_view/root_frame_renderer.rs": 1671
-  }
+  "file_length": {}
 }

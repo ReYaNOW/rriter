@@ -744,6 +744,7 @@ mod tests {
             include_str!("database/database_table_edit_methods.rs"),
             include_str!("database/database_app_methods.rs"),
             include_str!("../render_view/database_table_tab.rs"),
+            include_str!("../render_view/database_table_tab_controls.rs"),
             include_str!("../render_view/database_table_tab_overlay.rs"),
             include_str!("../render_view/ide_panels/ide_panel_database_renderer.rs"),
         ];
@@ -754,8 +755,10 @@ mod tests {
         let connection_hit = include_str!("database/database_app_methods.rs");
         assert!(!connection_hit.contains("glyph.advance * text_scale"));
 
-        let shared_renderer =
-            include_str!("../render_view/ide_panels/ide_panel_dialog_renderer.rs");
+        let shared_renderer = concat!(
+            include_str!("../render_view/ide_panels/ide_panel_dialog_renderer.rs"),
+            include_str!("../render_view/ide_panels/ide_panel_confirmation_dialog_renderer.rs"),
+        );
         assert!(!shared_renderer.contains("content_w + edge_pad"));
     }
 }
