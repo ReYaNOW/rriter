@@ -678,6 +678,7 @@ fn undo_redo_rebuilds_diff_decorations() {
         icon_key: "default_file",
         syntax_errors: Vec::new(),
         closing_hints: Default::default(),
+        deleted: false,
         kind: crate::app::EditorTabKind::GitDiff(
             crate::app::git_diff::GitDiffTabMeta {
                 repo_root: PathBuf::from("/workspace"),

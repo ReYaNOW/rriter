@@ -42,11 +42,15 @@ mod ui_tests_editor_folding_minimap;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_search;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_editor_search_center;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_selection;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_shortcuts;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_sticky;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_deleted_tab;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_git_commit;
 #[cfg(all(test, target_os = "linux"))]

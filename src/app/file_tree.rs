@@ -594,6 +594,7 @@ impl App {
             FileTreeUndoAction::Created { paths } | FileTreeUndoAction::Copied { paths } => {
                 let trashed = trash_paths(&paths, &self.ide_workspaces)?;
                 selection.extend(trashed.into_iter().map(|entry| entry.original_path));
+                self.close_or_mark_tabs_after_tree_delete(&selection);
             }
             FileTreeUndoAction::Moved { pairs } => {
                 if let Err(error) = undo_moved_pairs(&pairs) {
@@ -613,7 +614,11 @@ impl App {
                 selection.push(old_path);
             }
             FileTreeUndoAction::Trashed { entries } => {
+                // Restored paths come back in `entries` order.
                 selection = restore_trash_entries(&entries)?;
+                for (entry, restored) in entries.iter().zip(&selection) {
+                    self.rebind_deleted_tabs_after_restore(&entry.original_path, restored);
+                }
             }
         }
         self.ide_panel.file_tree_selection.clear();

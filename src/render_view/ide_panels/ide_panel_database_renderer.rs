@@ -146,14 +146,17 @@ impl Renderer {
             button_x += 28.0 * s;
         }
 
+        let mut label_scratch = String::new();
         if let Some(pending) = database.pending_job.as_ref() {
             let text = format!("Запрос #{}…", pending.id.0);
-            self.draw_string_scaled_pixel_snapped(
+            self.draw_tree_label_clipped(
                 &text,
                 button_x + 4.0 * s,
-                panel_y + 22.0 * s,
+                (panel_y + 22.0 * s).round(),
+                (panel_x + panel_w - button_x - 8.0 * s).max(0.0),
                 [0.63, 0.70, 0.92, 1.0],
                 0.78,
+                &mut label_scratch,
             );
         }
 
@@ -176,7 +179,6 @@ impl Renderer {
             );
             let copy_size = (17.0 * s).min((panel_layout.error_h - 8.0 * s).max(0.0));
             let copy_slot_w = if copy_size > 0.0 { 30.0 * s } else { 0.0 };
-            let mut scratch = String::new();
             self.draw_tree_label_clipped(
                 error,
                 panel_x + 8.0 * s,
@@ -188,7 +190,7 @@ impl Renderer {
                 (panel_w - 16.0 * s - copy_slot_w).max(4.0),
                 [1.0, 0.74, 0.76, 1.0],
                 0.78,
-                &mut scratch,
+                &mut label_scratch,
             );
             if copy_size > 0.0 && panel_w >= 40.0 * s {
                 let copy_x = panel_x + panel_w - 8.0 * s - copy_size;
@@ -240,7 +242,6 @@ impl Renderer {
             content_h,
         );
         let mut logical_row = 0usize;
-        let mut label_scratch = String::new();
         for (connection_idx, connection) in database.connections.iter().enumerate() {
             let row_y = database_tree_row_y(content_y, logical_row, row_h, scroll);
             if row_y + row_h >= content_y && row_y <= content_y + content_h {
@@ -357,7 +358,9 @@ impl Renderer {
                         hint,
                         panel_x + 34.0 * s,
                         database_tree_row_y(content_y, logical_row, row_h, scroll),
+                        (panel_w - 42.0 * s).max(0.0),
                         s,
+                        &mut label_scratch,
                     );
                     logical_row += 1;
                 }
@@ -429,7 +432,9 @@ impl Renderer {
                                 "Загрузка таблиц…",
                                 panel_x + 58.0 * s,
                                 database_tree_row_y(content_y, logical_row, row_h, scroll),
+                                (panel_w - 66.0 * s).max(0.0),
                                 s,
+                                &mut label_scratch,
                             );
                             logical_row += 1;
                         }
@@ -501,7 +506,9 @@ impl Renderer {
                 "Добавьте PostgreSQL подключение",
                 panel_x + 14.0 * s,
                 content_y + 30.0 * s,
+                (panel_w - 22.0 * s).max(0.0),
                 s,
+                &mut label_scratch,
             );
         }
 
@@ -1055,14 +1062,24 @@ fn database_tree_row_y(content_y: f32, logical_row: usize, row_h: f32, scroll: f
     (content_y + logical_row as f32 * row_h - scroll).round()
 }
 
-fn draw_database_hint(renderer: &mut Renderer, text: &str, x: f32, y: f32, s: f32) {
+fn draw_database_hint(
+    renderer: &mut Renderer,
+    text: &str,
+    x: f32,
+    y: f32,
+    max_w: f32,
+    s: f32,
+    scratch: &mut String,
+) {
     let row_h = crate::app::database::database_tree_row_height(s);
-    renderer.draw_string_scaled_pixel_snapped(
+    renderer.draw_tree_label_clipped(
         text,
         x.round(),
         Renderer::tree_row_text_y(y.round(), row_h, s),
+        max_w,
         [0.48, 0.50, 0.57, 1.0],
         0.78,
+        scratch,
     );
 }
 

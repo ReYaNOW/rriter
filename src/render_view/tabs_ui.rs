@@ -559,7 +559,7 @@ impl Renderer {
                 );
             }
 
-            let text_color =
+            let mut text_color =
                 if path_for_tab(i).is_some_and(|path| tab_path_is_external(path, ide_workspaces)) {
                     EXTERNAL_TAB_TITLE_COLOR
                 } else if is_active {
@@ -567,6 +567,10 @@ impl Renderer {
                 } else {
                     self.theme.line_num
             };
+            if tab.deleted {
+                // Dimmed title next to the `DELETED_TAB_TITLE_SUFFIX` suffix.
+                text_color[3] *= 0.6;
+            }
             let text_x = current_x + tab_pad + icon_size_tab + 8.0 * s;
             let text_y = standard_tab_text_y(y, h, s);
             if let crate::app::EditorTabKind::ApiClient(meta, _) = &tab.kind

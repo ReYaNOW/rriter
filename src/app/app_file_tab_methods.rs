@@ -39,6 +39,7 @@ impl App {
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
                 closing_hints: Default::default(),
+                deleted: false,
                 kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
@@ -80,6 +81,7 @@ impl App {
             syntax_errors: Vec::new(),
             closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
+            deleted: false,
         };
         self.tabs.push(new_tab);
         self.active_tab = self.tabs.len() - 1;
@@ -626,6 +628,9 @@ impl App {
             || self.active_tab_is_api_client()
             || self.file_path.is_none()
             || !self.editor.is_dirty()
+            // Autosave must not bring a deleted file back; only an explicit
+            // Save / Save As recreates it.
+            || self.tabs.get(self.active_tab).is_some_and(|tab| tab.deleted)
         {
             return false;
         }

@@ -508,6 +508,7 @@ impl App {
                 icon_key: "default_file",
                 syntax_errors: Vec::new(),
                 closing_hints: Default::default(),
+                deleted: false,
                 kind: EditorTabKind::Normal,
             });
             self.active_tab = 0;
@@ -1565,6 +1566,7 @@ mod tests {
             icon_key: "default_file",
             closing_hints: Default::default(),
             kind: EditorTabKind::Normal,
+            deleted: false,
         }
     }
 

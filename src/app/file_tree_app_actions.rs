@@ -232,26 +232,12 @@ impl App {
         }
 
         for tab in &mut self.tabs {
-            if let Some(path) = tab.file_path.clone() {
-                if let Some(updated) = path_after_rename(&path, old_path, new_path) {
-                    tab.file_path = Some(updated.clone());
-                    tab.file_key = Some(crate::platform::PathKey::new(&updated));
-                    tab.base_title = updated
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_else(|| "Безымянный".to_string());
-                    let old_extension = tab.file_extension.clone();
-                    tab.file_extension = updated
-                        .extension()
-                        .map(|ext| ext.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    if crate::app::is_markdown_extension(&old_extension)
-                        != crate::app::is_markdown_extension(&tab.file_extension)
-                    {
-                        tab.markdown = Default::default();
-                    }
-                    tab.icon_key = crate::app::file_icons::file_icon_key_for_name(&tab.base_title);
-                }
+            if let Some(updated) = tab
+                .file_path
+                .as_deref()
+                .and_then(|path| path_after_rename(path, old_path, new_path))
+            {
+                tab.rebind_path(updated);
             }
         }
 
@@ -361,6 +347,9 @@ impl App {
             Ok(entries) => {
                 self.ide_panel.file_tree_delete_dialog = None;
                 if !entries.is_empty() {
+                    let roots: Vec<PathBuf> =
+                        entries.iter().map(|entry| entry.original_path.clone()).collect();
+                    self.close_or_mark_tabs_after_tree_delete(&roots);
                     self.push_file_tree_undo(FileTreeUndoAction::Trashed { entries });
                 }
             }
@@ -372,6 +361,111 @@ impl App {
         self.ide_panel.file_tree_selection.clear();
         self.refresh_file_tree();
         Ok(())
+    }
+
+    /// The only writer of `EditorTab::deleted`: tree delete, the external
+    /// changes check, saves and trash undo all report here what they learned
+    /// about `root` (a file, or a folder for every tab under it). Returns
+    /// whether any tab changed.
+    pub(crate) fn set_tabs_deleted_under(&mut self, root: &Path, deleted: bool) -> bool {
+        let mut changed = false;
+        for idx in 0..self.tabs.len() {
+            let hit = matches!(self.tabs[idx].kind, crate::app::EditorTabKind::Normal)
+                && self.tabs[idx].deleted != deleted
+                && crate::app::tab_effective_path(
+                    &self.tabs,
+                    idx,
+                    self.active_tab,
+                    self.file_path.as_ref(),
+                )
+                .is_some_and(|path| crate::platform::path_is_within(path, root));
+            if hit {
+                self.tabs[idx].deleted = deleted;
+                changed = true;
+            }
+        }
+        if changed && let Some(window) = self.window.as_ref() {
+            window.request_redraw();
+        }
+        changed
+    }
+
+    /// Tree delete (VS Code): clean tabs under `roots` close, tabs with
+    /// unsaved changes stay open and are marked deleted.
+    fn close_or_mark_tabs_after_tree_delete(&mut self, roots: &[PathBuf]) {
+        for idx in (0..self.tabs.len()).rev() {
+            let under = matches!(self.tabs[idx].kind, crate::app::EditorTabKind::Normal)
+                && crate::app::tab_effective_path(
+                    &self.tabs,
+                    idx,
+                    self.active_tab,
+                    self.file_path.as_ref(),
+                )
+                .is_some_and(|path| {
+                    roots.iter().any(|root| crate::platform::path_is_within(path, root))
+                });
+            if under && !self.tab_text_is_dirty(idx) {
+                self.close_tab_at_unchecked(idx);
+            }
+        }
+        for root in roots {
+            self.set_tabs_deleted_under(root, true);
+        }
+    }
+
+    /// Trash undo put `original` back at `restored`: the mark clears, and when
+    /// the original path was taken the deleted tabs follow to the new name.
+    pub(crate) fn rebind_deleted_tabs_after_restore(&mut self, original: &Path, restored: &Path) {
+        if !crate::platform::paths_equal(original, restored) {
+            self.sync_active_tab();
+            let active_old_path = self.tabs.get(self.active_tab).and_then(|tab| {
+                tab.deleted.then(|| tab.file_path.clone()).flatten()
+            });
+            for tab in &mut self.tabs {
+                if !tab.deleted {
+                    continue;
+                }
+                if let Some(updated) = tab
+                    .file_path
+                    .as_deref()
+                    .and_then(|path| path_after_rename(path, original, restored))
+                {
+                    tab.rebind_path(updated);
+                }
+            }
+            self.sync_active_tab();
+            if let (Some(old_path), Some(path)) = (active_old_path, self.file_path.clone())
+                && !crate::platform::paths_equal(&old_path, &path)
+            {
+                self.reopen_active_document_after_rebind(&old_path, &path);
+            }
+        }
+        self.set_tabs_deleted_under(restored, false);
+    }
+
+    /// LSP and highlighter follow the active tab to its new path.
+    fn reopen_active_document_after_rebind(&mut self, old_path: &PathBuf, path: &PathBuf) {
+        if let Some(lsp) = &mut self.lsp {
+            let old_ext = old_path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("")
+                .to_string();
+            lsp.notify_close(old_path, &old_ext);
+            let text = self.editor.get_full_text();
+            lsp.notify_open(
+                path,
+                &self.file_extension,
+                &text,
+                crate::editor::lsp_document_version(self.editor.version),
+            );
+        }
+        self.highlighter.reset(
+            self.editor.version,
+            self.editor.get_full_text(),
+            self.file_extension.clone(),
+            self.editor.cursor,
+        );
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

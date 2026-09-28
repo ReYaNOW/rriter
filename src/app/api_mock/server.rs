@@ -155,11 +155,11 @@ impl ApiMockServer {
         if let Some(shutdown) = handle.shutdown.take() {
             let _ = shutdown.send(());
         }
+        handle.python.stop();
         let finished = !matches!(
             handle.finished.recv_timeout(API_MOCK_STOP_TIMEOUT),
             Err(std::sync::mpsc::RecvTimeoutError::Timeout)
         );
-        handle.python.stop();
         self.stopping = retain_or_join_stopping_server(&mut self.handle, handle, finished);
     }
 

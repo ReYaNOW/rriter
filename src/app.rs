@@ -179,7 +179,7 @@ fn write_api_client_tab_display_title(
     crate::app::api_client::append_api_path_display(&meta.route_path, out);
 }
 
-fn tab_effective_path<'a>(
+pub(crate) fn tab_effective_path<'a>(
     tabs: &'a [EditorTab],
     idx: usize,
     active_tab: usize,
@@ -285,8 +285,14 @@ pub(crate) fn write_tab_display_titles_for(
                 display_title.push_str(title);
             }
         }
+        if tabs[i].deleted {
+            display_title.push_str(DELETED_TAB_TITLE_SUFFIX);
+        }
     }
 }
+
+/// Appended to the title of a tab whose file is gone (`EditorTab::deleted`).
+pub(crate) const DELETED_TAB_TITLE_SUFFIX: &str = " (удалён)";
 
 include!("app/database/database_app_methods.rs");
 include!("app/database/database_app_event_methods.rs");

@@ -6,8 +6,6 @@ use runtime::flatten_spans;
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::{AtomicBool, Ordering};
-#[cfg(test)]
-use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -201,30 +199,10 @@ impl Drop for HighlighterWorker {
 }
 
 #[cfg(test)]
-static ACTIVE_HIGHLIGHTER_WORKERS: AtomicUsize = AtomicUsize::new(0);
-
+#[path = "highlighter_core_tests.rs"]
+mod tests;
 #[cfg(test)]
-struct ActiveHighlighterWorkerGuard;
-
-#[cfg(test)]
-impl ActiveHighlighterWorkerGuard {
-    fn new() -> Self {
-        ACTIVE_HIGHLIGHTER_WORKERS.fetch_add(1, Ordering::AcqRel);
-        Self
-    }
-}
-
-#[cfg(test)]
-impl Drop for ActiveHighlighterWorkerGuard {
-    fn drop(&mut self) {
-        ACTIVE_HIGHLIGHTER_WORKERS.fetch_sub(1, Ordering::AcqRel);
-    }
-}
-
-#[cfg(test)]
-fn active_highlighter_worker_count() -> usize {
-    ACTIVE_HIGHLIGHTER_WORKERS.load(Ordering::Acquire)
-}
+use tests::{active_highlighter_worker_count, ActiveHighlighterWorkerGuard};
 
 pub(crate) const DRACULA_FG: [f32; 4] = [0.972, 0.972, 0.949, 1.0];
 pub(crate) const DRACULA_COMMENT: [f32; 4] = [0.384, 0.447, 0.643, 1.0];
@@ -438,8 +416,11 @@ fn collect_param_scopes(
         while exploring {
             let c_node = t_cursor.node();
             if c_node.kind() == "identifier" {
-                if let Ok(s) =
-                    std::str::from_utf8(&text.as_bytes()[c_node.start_byte()..c_node.end_byte()])
+                // A tree of another text version may point past `text`; skip, never panic.
+                if let Some(Ok(s)) = text
+                    .as_bytes()
+                    .get(c_node.start_byte()..c_node.end_byte())
+                    .map(std::str::from_utf8)
                 {
                     params_set.insert(s.to_string());
                 }
@@ -465,6 +446,14 @@ fn collect_param_scopes(
     }
 
     param_scopes
+}
+
+/// A tree-sitter root spans the whole parsed input, so a tree whose root end differs from
+/// `text.len()` was built for another text version. Such a tree must be neither queried
+/// against `text` nor reused as `old_tree`: incremental parsing keeps reusing its unedited
+/// nodes and yields a tree of the old length, whose captures point past the end of `text`.
+pub(crate) fn tree_matches_text_len(tree: &tree_sitter::Tree, text: &str) -> bool {
+    tree.root_node().end_byte() == text.len()
 }
 
 fn collect_query_highlight_spans(
@@ -498,10 +487,15 @@ fn collect_query_highlight_spans(
         while let Some(m) = matches.next() {
             for cap in m.captures {
                 let name = query.capture_names()[cap.index as usize];
-                let node_text = std::str::from_utf8(
-                    &text.as_bytes()[cap.node.start_byte()..cap.node.end_byte()],
-                )
-                .unwrap_or("");
+                // A tree of another text version may point past `text`: drop the capture
+                // instead of panicking or emitting a span beyond the text end.
+                let Some(node_bytes) = text
+                    .as_bytes()
+                    .get(cap.node.start_byte()..cap.node.end_byte())
+                else {
+                    continue;
+                };
+                let node_text = std::str::from_utf8(node_bytes).unwrap_or("");
                 if lang_name == "py" && name == "py_ident" && is_python_attribute_property(cap.node)
                 {
                     continue;

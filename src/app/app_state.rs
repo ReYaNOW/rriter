@@ -56,6 +56,34 @@ pub struct EditorTab {
     pub icon_key: &'static str,
     pub closing_hints: crate::languages::dart::ClosingHintState,
     pub kind: EditorTabKind,
+    /// The file behind this tab is gone from disk (VS Code "(deleted)"). Not
+    /// swapped by `sync_active_tab`, so it is always read from `tabs[idx]`.
+    /// Written only by `App::set_tabs_deleted_under`.
+    pub deleted: bool,
+}
+
+impl EditorTab {
+    /// Moves the tab's file identity (path, key, title, extension, icon) to
+    /// `path`; used by tree renames and by trash undo to a new name.
+    pub fn rebind_path(&mut self, path: PathBuf) {
+        let old_extension = std::mem::take(&mut self.file_extension);
+        self.file_key = Some(crate::platform::PathKey::new(&path));
+        self.base_title = path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Безымянный".to_string());
+        self.file_extension = path
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if crate::app::is_markdown_extension(&old_extension)
+            != crate::app::is_markdown_extension(&self.file_extension)
+        {
+            self.markdown = Default::default();
+        }
+        self.icon_key = crate::app::file_icons::file_icon_key_for_name(&self.base_title);
+        self.file_path = Some(path);
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -105,8 +133,46 @@ impl EditorTabKind {
 pub struct ExternalFileChange {
     pub tab_idx: usize,
     pub path: PathBuf,
-    pub disk_text: String,
-    pub text_file_format: crate::platform::TextFileFormat,
+    pub disk: ExternalDiskState,
+}
+
+/// What the background tab check found at a tab's path.
+#[derive(Debug)]
+pub enum ExternalDiskState {
+    /// Read for a clean tab.
+    Text {
+        disk_text: String,
+        text_file_format: crate::platform::TextFileFormat,
+    },
+    /// Exists; a dirty tab is not re-read.
+    Present,
+    /// `NotFound`: the file was deleted.
+    Missing,
+}
+
+impl ExternalDiskState {
+    /// Probes `path` off the UI thread. `NotFound` or a folder in the file's
+    /// place is `Missing`; other errors (permissions, bad encoding) say
+    /// nothing about existence: `None`.
+    pub fn probe(path: &std::path::Path, read: bool) -> Option<Self> {
+        let result = std::fs::metadata(path).and_then(|metadata| {
+            if metadata.is_dir() {
+                Ok(Self::Missing)
+            } else if read {
+                crate::platform::read_text_file(path).map(|decoded| Self::Text {
+                    disk_text: decoded.text,
+                    text_file_format: decoded.format,
+                })
+            } else {
+                Ok(Self::Present)
+            }
+        });
+        match result {
+            Ok(state) => Some(state),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(Self::Missing),
+            Err(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

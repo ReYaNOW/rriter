@@ -23,7 +23,6 @@ const OPENAPI_SPEC: &str = r#"{
 }"#;
 
 #[test]
-#[ignore = "bug: queued OpenAPI path does not import a spec; src/app/api_client/api_client_app_request_methods.rs:36"]
 fn headless_api_client_imports_openapi_from_picker() {
     ensure_test_profile_root();
     reset_api_test_state();
@@ -73,7 +72,6 @@ fn headless_api_client_imports_openapi_from_picker() {
 }
 
 #[test]
-#[ignore = "bug: queued welcome-open path leaves the welcome tab open; src/app/events/about/about_tick_input_sections.rs:348"]
 fn headless_welcome_open_file_uses_picker_answer() {
     let dir = scratch_dir("ui-picker-open-file");
     let path = dir.join("picked.txt");
@@ -90,19 +88,23 @@ fn headless_welcome_open_file_uses_picker_answer() {
         .external_requests
         .queue_picker_answer(vec![path.clone()]);
     click_ui(&mut session, "WelcomeOpenFile");
-    wait_until(&mut session, 5000, "picked file tab", |session| {
-        session.app.tabs.iter().any(|tab| tab.file_path.as_ref() == Some(&path))
+    wait_until(&mut session, 5000, "picked active file", |session| {
+        session
+            .app
+            .file_path
+            .as_ref()
+            .is_some_and(|active_path| crate::platform::paths_equal(active_path, &path))
     });
 
     let state = dump(&mut session);
-    assert_eq!(state["tabs"][0]["path"], path.display().to_string(), "{state}");
+    let tab_path = std::path::PathBuf::from(state["tabs"][0]["path"].as_str().expect("tab path"));
+    assert!(crate::platform::paths_equal(&tab_path, &path), "{state}");
     assert_eq!(session.app.editor.get_full_text(), "opened from picker\n");
     drop(session);
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
-#[ignore = "bug: queued folder path is not applied to workspaces; src/app/events/about/about_tick_input_sections.rs:297"]
 fn headless_settings_ide_add_workspace_uses_picker_answer() {
     let dir = scratch_dir("ui-picker-workspace");
     let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
@@ -132,7 +134,6 @@ fn headless_settings_ide_add_workspace_uses_picker_answer() {
 }
 
 #[test]
-#[ignore = "bug: queued Save As path does not save the untitled tab; src/app/events/about/about_tick_input_sections.rs:365"]
 fn headless_untitled_tab_save_as_writes_picker_answer() {
     let dir = scratch_dir("ui-picker-save-as");
     let path = dir.join("saved-from-picker.txt");
@@ -162,12 +163,14 @@ fn headless_untitled_tab_save_as_writes_picker_answer() {
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
 
     wait_until(&mut session, 5000, "Save As picker write", |session| {
-        path.is_file()
-            && session.app.tabs.iter().any(|tab| tab.file_path.as_ref() == Some(&path))
+        session.app.file_path.as_ref().is_some_and(|active_path| {
+            crate::platform::paths_equal(active_path, &path) && active_path.is_file()
+        })
     });
-    assert_eq!(std::fs::read_to_string(&path).expect("read saved file"), "saved by picker");
     let state = dump(&mut session);
-    assert_eq!(state["tabs"][0]["path"], path.display().to_string(), "{state}");
+    let tab_path = std::path::PathBuf::from(state["tabs"][0]["path"].as_str().expect("tab path"));
+    assert!(crate::platform::paths_equal(&tab_path, &path), "{state}");
+    assert_eq!(std::fs::read_to_string(&tab_path).expect("read saved file"), "saved by picker");
     assert_eq!(state["tabs"][0]["title"], "saved-from-picker.txt", "{state}");
     drop(session);
     let _ = std::fs::remove_dir_all(dir);
