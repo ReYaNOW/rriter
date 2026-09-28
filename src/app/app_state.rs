@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use winit::keyboard::ModifiersState;
-use winit::window::Window;
 
 pub struct ScrollRenderBench {
     pub started_at: Option<Instant>,
@@ -124,16 +123,6 @@ pub struct InlineGitPopup {
     pub lines: Vec<InlineGitPopupLine>,
     pub spans: Vec<crate::highlighter::ColorSpan>,
     pub diff_state: crate::app::git_diff::GitDiffState,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum PendingAction {
-    None,
-    Quit,
-    OpenFile,
-    CloseFile,
-    CloseTab(usize),
-    CloseAllTabs,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
@@ -1031,8 +1020,10 @@ pub struct App {
     pub gl_context: Option<PossiblyCurrentContext>,
     pub gl_surface: Option<Surface<WindowSurface>>,
     pub window: Option<std::sync::Arc<WindowHost>>,
-    pub dialog_window: Option<std::sync::Arc<Window>>,
-    pub dialog_gl_surface: Option<Surface<WindowSurface>>,
+    /// Unsaved-changes confirmation flow: dialog surface, armed action, Save-As queue.
+    pub confirm_dialog: crate::app::ConfirmDialog,
+    /// Desktop requests (pickers, URLs) intercepted in headless; read by `dump`.
+    pub external_requests: crate::platform::ExternalRequestLog,
     pub settings_scroll: crate::scroll::ScrollState,
     pub settings_general_scroll: crate::scroll::ScrollState,
     pub settings_database_scroll: crate::scroll::ScrollState,
@@ -1078,10 +1069,6 @@ pub struct App {
     pub last_click_pos: (f32, f32),
     pub last_click_ui_id: Option<UiId>,
 
-    pub pending_action: PendingAction,
-    pub pending_action_waiting_for_save_as: bool,
-    pub pending_action_ready: bool,
-    pub pending_save_tabs: Vec<usize>,
     pub open_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub save_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     pub api_import_file_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
@@ -1220,8 +1207,6 @@ pub struct App {
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,
     pub headless_mode: bool,
-    /// Headless confirmation dialog: drawn into the main frame instead of a second window.
-    pub headless_dialog_open: bool,
 }
 
 #[cfg(test)]

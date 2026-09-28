@@ -387,7 +387,7 @@ impl App {
                 if let Some(href) =
                     crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_href.clone())
                 {
-                    let _ = crate::platform::open_url(&href);
+                    let _ = crate::platform::open_url(self.external_requests.sink(), &href);
                 }
             }
             UiId::ProblemUrl(idx) => {
@@ -397,7 +397,7 @@ impl App {
                             .problem_diagnostic(self.lsp.as_ref(), path, *diag_idx)
                     && let Some(href) = &diag.code_href
                 {
-                    let _ = crate::platform::open_url(href.as_ref());
+                    let _ = crate::platform::open_url(self.external_requests.sink(), href.as_ref());
                 }
             }
             UiId::ProblemJump(idx) => {

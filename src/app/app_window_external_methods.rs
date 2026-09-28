@@ -6,11 +6,15 @@ pub(crate) fn external_changes_disconnect_message() -> &'static str {
     "Проверка внешних изменений неожиданно завершилась; выполняется повтор"
 }
 
-fn pick_tool_path(kind: crate::platform::ToolKind, title: &str) -> Option<std::path::PathBuf> {
+fn pick_tool_path(
+    requests: &crate::platform::ExternalRequestSink,
+    kind: crate::platform::ToolKind,
+    title: &str,
+) -> Option<std::path::PathBuf> {
     if kind == crate::platform::ToolKind::Dart {
-        crate::platform::pick_folder(title)
+        crate::platform::pick_folder(requests, title)
     } else {
-        crate::platform::pick_file(title)
+        crate::platform::pick_file(requests, title)
     }
 }
 
@@ -38,62 +42,81 @@ impl App {
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
+    /// Asks before `action`. A question already on screen keeps its own action
+    /// and the new request is dropped; a flow with no visible question (window
+    /// still requested, Save-As picker open, answer not yet run) is replaced
+    /// whole (`ConfirmDialog::supersede`). Failing to create the dialog window
+    /// cancels the request instead of leaving it armed without a dialog.
+    #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn show_action_dialog(&mut self, host: &crate::app::events::host_loop::HostLoop, action: PendingAction) {
         self.cancel_pointer_interactions();
-        self.pending_action = action;
-
-        if self.modal_dialog_open() {
+        if !self.confirm_dialog.request(action) && !self.confirm_dialog.supersede(action) {
             return;
         }
 
         let Some(event_loop) = host.native() else {
             // Headless: no second window, the dialog is drawn into the main frame.
-            self.headless_dialog_open = true;
-            if let Some(w) = self.window.as_ref() {
-                w.request_redraw();
-            }
+            self.confirm_dialog.attach_frame();
+            self.request_main_redraw();
             return;
         };
 
+        match self.create_confirm_dialog_window(event_loop) {
+            Some((window, surface)) => {
+                self.confirm_dialog.attach_window(std::sync::Arc::new(window), surface);
+            }
+            None => self.cancel_pending_action(),
+        }
+    }
+
+    #[cfg_attr(coverage_nightly, coverage(off))]
+    fn create_confirm_dialog_window(
+        &self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+    ) -> Option<(winit::window::Window, glutin::surface::Surface<glutin::surface::WindowSurface>)> {
         let attrs = crate::platform::apply_window_attributes(winit::window::Window::default_attributes()
             .with_title("Подтверждение — RRiter")
             .with_inner_size(winit::dpi::LogicalSize::new(660.0, 260.0))
             .with_window_level(winit::window::WindowLevel::AlwaysOnTop)
             .with_resizable(false));
 
-        if let Ok(window) = event_loop.create_window(attrs) {
-            use glutin::display::GlDisplay;
-            use winit::raw_window_handle::HasWindowHandle;
-            let Ok(window_handle) = window.window_handle() else {
-                eprintln!("failed to obtain confirmation dialog window handle");
-                return;
-            };
-            let Some(gl_config) = self.gl_config.as_ref() else {
-                eprintln!("confirmation dialog requested before GL configuration was ready");
-                return;
-            };
-            let raw_handle = window_handle.as_raw();
-            let display = gl_config.display();
-            let scale = window.scale_factor();
-            let phys_w = (660.0 * scale).round() as u32;
-            let phys_h = (260.0 * scale).round() as u32;
-            let surface_attrs =
-                glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
-                    .build(
-                        raw_handle,
-                        std::num::NonZeroU32::new(phys_w.max(1))
-                            .unwrap_or(std::num::NonZeroU32::MIN),
-                        std::num::NonZeroU32::new(phys_h.max(1))
-                            .unwrap_or(std::num::NonZeroU32::MIN),
-                    );
-            let surface = unsafe { display.create_window_surface(gl_config, &surface_attrs) };
-            let Ok(surface) = surface else {
-                eprintln!("failed to create confirmation dialog GL surface");
-                return;
-            };
-            self.dialog_window = Some(std::sync::Arc::new(window));
-            self.dialog_gl_surface = Some(surface);
-        }
+        let window = match event_loop.create_window(attrs) {
+            Ok(window) => window,
+            Err(error) => {
+                eprintln!("failed to create confirmation dialog window: {error}");
+                return None;
+            }
+        };
+        use glutin::display::GlDisplay;
+        use winit::raw_window_handle::HasWindowHandle;
+        let Ok(window_handle) = window.window_handle() else {
+            eprintln!("failed to obtain confirmation dialog window handle");
+            return None;
+        };
+        let Some(gl_config) = self.gl_config.as_ref() else {
+            eprintln!("confirmation dialog requested before GL configuration was ready");
+            return None;
+        };
+        let raw_handle = window_handle.as_raw();
+        let display = gl_config.display();
+        let scale = window.scale_factor();
+        let phys_w = (660.0 * scale).round() as u32;
+        let phys_h = (260.0 * scale).round() as u32;
+        let surface_attrs =
+            glutin::surface::SurfaceAttributesBuilder::<glutin::surface::WindowSurface>::new()
+                .build(
+                    raw_handle,
+                    std::num::NonZeroU32::new(phys_w.max(1))
+                        .unwrap_or(std::num::NonZeroU32::MIN),
+                    std::num::NonZeroU32::new(phys_h.max(1))
+                        .unwrap_or(std::num::NonZeroU32::MIN),
+                );
+        let surface = unsafe { display.create_window_surface(gl_config, &surface_attrs) };
+        let Ok(surface) = surface else {
+            eprintln!("failed to create confirmation dialog GL surface");
+            return None;
+        };
+        Some((window, surface))
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]
@@ -118,25 +141,19 @@ impl App {
 
     /// Confirmation dialog is open: a second window, or drawn into the headless frame.
     pub(crate) fn modal_dialog_open(&self) -> bool {
-        self.dialog_window.is_some() || self.headless_dialog_open
+        self.confirm_dialog.is_open()
     }
 
-    #[cfg_attr(coverage_nightly, coverage(off))]
-    pub fn close_dialog(&mut self) {
-        self.dialog_window = None;
-        self.dialog_gl_surface = None;
-        self.headless_dialog_open = false;
+    /// The main window repaints after the confirmation dialog left the screen.
+    fn request_main_redraw(&self) {
         if let Some(w) = self.window.as_ref() {
             w.request_redraw();
         }
     }
 
     pub(crate) fn cancel_pending_action(&mut self) {
-        self.pending_action = PendingAction::None;
-        self.pending_action_waiting_for_save_as = false;
-        self.pending_action_ready = false;
-        self.pending_save_tabs.clear();
-        self.close_dialog();
+        self.confirm_dialog.cancel();
+        self.request_main_redraw();
     }
 
     pub fn close_current_file(&mut self) {
@@ -218,7 +235,7 @@ impl App {
         }
         let title = format!("Выбрать {}", kind.label());
         if crate::platform::native_dialog_requires_main_thread() {
-            let path = pick_tool_path(kind, &title);
+            let path = pick_tool_path(self.external_requests.sink(), kind, &title);
             if path.is_some() {
                 self.apply_tool_path_selection(kind, path);
             }
@@ -227,8 +244,9 @@ impl App {
 
         let (tx, rx) = std::sync::mpsc::channel();
         self.settings_tool_picker_rx = Some(rx);
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-tool-picker", move || {
-            let path = pick_tool_path(kind, &title);
+            let path = pick_tool_path(&requests, kind, &title);
             let _ = tx.send((kind, path));
         }) {
             self.settings_tool_picker_rx = None;
@@ -285,11 +303,10 @@ impl App {
         let saved = selected
             .map(|path| self.apply_save_as_path(path))
             .unwrap_or(false);
-        if self.pending_action_waiting_for_save_as {
-            self.pending_action_waiting_for_save_as = false;
+        if self.confirm_dialog.waiting_for_save_as() {
             if saved {
-                let active = self.active_tab;
-                self.pending_save_tabs.retain(|index| *index != active);
+                // The picker saved the active tab, whichever queue entry it was.
+                self.confirm_dialog.finish_save_as_target(self.active_tab);
                 self.continue_pending_tab_saves();
             } else {
                 self.cancel_pending_action();
@@ -299,8 +316,9 @@ impl App {
     }
 
     pub(crate) fn begin_pending_action_save(&mut self) {
+        let action = self.confirm_dialog.action();
         if matches!(
-            self.pending_action,
+            action,
             PendingAction::Quit | PendingAction::CloseAllTabs | PendingAction::CloseTab(_)
         ) {
             if self.has_blocking_database_changes_for_pending_action() {
@@ -311,7 +329,7 @@ impl App {
                 self.cancel_pending_action();
                 return;
             }
-            self.pending_save_tabs = match self.pending_action {
+            let queue = match action {
                 PendingAction::CloseTab(index) => self
                     .tab_text_is_dirty(index)
                     .then_some(index)
@@ -321,44 +339,44 @@ impl App {
                     .filter(|index| self.tab_text_is_dirty(*index))
                     .collect(),
             };
-            self.close_dialog();
+            self.confirm_dialog.begin_save_as(queue);
+            self.request_main_redraw();
             self.continue_pending_tab_saves();
             return;
         }
         if self.file_path.is_none() && !self.active_tab_is_git_diff() {
-            self.pending_action_waiting_for_save_as = true;
-            self.close_dialog();
+            self.confirm_dialog.begin_save_as(Vec::new());
+            self.request_main_redraw();
             self.trigger_save_as_picker();
             return;
         }
         if self.save_current_file() {
-            self.close_dialog();
-            self.pending_action_ready = true;
+            self.confirm_dialog.mark_ready();
+            self.request_main_redraw();
         }
     }
 
     pub(crate) fn discard_pending_action_changes(&mut self) {
-        self.close_dialog();
-        self.pending_action_waiting_for_save_as = false;
-        self.pending_save_tabs.clear();
-        self.pending_action_ready = true;
+        self.confirm_dialog.mark_ready();
+        self.request_main_redraw();
     }
 
+    /// Saves the queued tabs head first; stops at an untitled tab to ask for
+    /// its path (the picker's answer resumes here) and on a write failure.
     fn continue_pending_tab_saves(&mut self) {
         loop {
-            let Some(index) = self.pending_save_tabs.first().copied() else {
-                self.pending_action_ready = true;
+            let Some(index) = self.confirm_dialog.save_as_target() else {
+                self.confirm_dialog.mark_ready();
                 return;
             };
             if index >= self.tabs.len() || !self.tab_text_is_dirty(index) {
-                self.pending_save_tabs.remove(0);
+                self.confirm_dialog.finish_save_as_target(index);
                 continue;
             }
             if index != self.active_tab {
                 self.switch_to_tab(index);
             }
             if self.file_path.is_none() {
-                self.pending_action_waiting_for_save_as = true;
                 self.trigger_save_as_picker();
                 return;
             }
@@ -366,7 +384,7 @@ impl App {
                 self.cancel_pending_action();
                 return;
             }
-            self.pending_save_tabs.remove(0);
+            self.confirm_dialog.finish_save_as_target(index);
         }
     }
 
@@ -378,15 +396,16 @@ impl App {
             return;
         }
         if crate::platform::native_dialog_requires_main_thread() {
-            if let Some(file) = crate::platform::pick_file("Открыть файл") {
+            if let Some(file) = crate::platform::pick_file(self.external_requests.sink(), "Открыть файл") {
                 self.open_file_in_tab(file, true);
             }
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_file_rx = Some(rx);
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-file-picker", move || {
-            let file = crate::platform::pick_file("Открыть файл");
+            let file = crate::platform::pick_file(&requests, "Открыть файл");
             let _ = tx.send(file);
         }) {
             self.open_file_rx = None;
@@ -403,15 +422,16 @@ impl App {
             return;
         }
         if crate::platform::native_dialog_requires_main_thread() {
-            if let Some(folder) = crate::platform::pick_folder("Выбрать папку") {
+            if let Some(folder) = crate::platform::pick_folder(self.external_requests.sink(), "Выбрать папку") {
                 self.apply_selected_workspace_folder(folder);
             }
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.open_folder_rx = Some(rx);
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-folder-picker", move || {
-            let folder = crate::platform::pick_folder("Выбрать папку");
+            let folder = crate::platform::pick_folder(&requests, "Выбрать папку");
             let _ = tx.send(folder);
         }) {
             self.open_folder_rx = None;
@@ -428,18 +448,24 @@ impl App {
             return;
         }
         if crate::platform::native_dialog_requires_main_thread() {
-            let selected = crate::platform::save_file("Сохранить файл как...", "Безымянный.txt");
+            let selected = crate::platform::save_file(
+                self.external_requests.sink(),
+                "Сохранить файл как...",
+                "Безымянный.txt",
+            );
             self.handle_save_as_selection(selected);
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.save_file_rx = Some(rx);
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-save-picker", move || {
-            let file = crate::platform::save_file("Сохранить файл как...", "Безымянный.txt");
+            let file = crate::platform::save_file(&requests, "Сохранить файл как...", "Безымянный.txt");
             let _ = tx.send(file);
         }) {
             self.save_file_rx = None;
-            self.pending_action_waiting_for_save_as = false;
+            // No picker will answer: the confirmation flow waiting for it ends here.
+            self.confirm_dialog.abort_save_as();
             self.ide_panel.file_tree_error =
                 Some(native_picker_spawn_error("выбор пути сохранения", err));
         }
@@ -1205,8 +1231,12 @@ mod app_window_failure_regression_tests {
     #[test]
     fn bug_66_confirmation_context_and_present_errors_close_only_the_dialog() {
         let source = include_str!("events.rs");
-        assert!(source.contains("confirmation dialog disabled after GL error"));
-        assert!(source.contains("self.close_dialog();"));
+        let gl_error = source
+            .find("confirmation dialog disabled after GL error")
+            .expect("GL error branch of the dialog redraw");
+        // The branch drops the dialog together with its armed action, not the app.
+        let after_error = source[gl_error..].lines().nth(1).unwrap_or_default();
+        assert_eq!(after_error.trim(), "self.cancel_pending_action();");
         assert!(!source.contains("make_current(gl_surface).unwrap"));
         assert!(!source.contains("swap_buffers(gl_context).unwrap"));
     }

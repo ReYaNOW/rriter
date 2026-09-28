@@ -338,7 +338,7 @@ impl ApplicationHandler for App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
-        if let Some(dw) = self.dialog_window.as_ref() {
+        if let Some(dw) = self.confirm_dialog.window() {
             if _id == dw.id() {
                 match event {
                     WindowEvent::CloseRequested => {
@@ -382,8 +382,8 @@ impl ApplicationHandler for App {
                                 .as_ref()
                                 .ok_or_else(|| "GL context is unavailable".to_string())?;
                             let gl_surface = self
-                                .dialog_gl_surface
-                                .as_ref()
+                                .confirm_dialog
+                                .gl_surface()
                                 .ok_or_else(|| "dialog GL surface is unavailable".to_string())?;
                             gl_context.make_current(gl_surface).map_err(|error| {
                                 format!("failed to activate dialog GL surface: {error}")
@@ -427,7 +427,7 @@ impl ApplicationHandler for App {
                         })();
                         if let Err(error) = redraw_result {
                             eprintln!("confirmation dialog disabled after GL error: {error}");
-                            self.close_dialog();
+                            self.cancel_pending_action();
                         }
                     }
                     _ => {}
@@ -456,7 +456,7 @@ impl ApplicationHandler for App {
                     if let Some(r) = self.renderer.as_mut() {
                         r.suppress_popups_until_next_mouse_move();
                     }
-                    if let Some(dw) = self.dialog_window.as_ref() {
+                    if let Some(dw) = self.confirm_dialog.window() {
                         // НЕ вызываем focus_window() здесь.
                         // Это - главная причина "мерцания" при Alt+Tab, т.к. приложение
                         // начинает бороться с оконным менеджером за фокус.

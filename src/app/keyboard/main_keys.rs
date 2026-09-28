@@ -299,7 +299,7 @@ impl App {
                 if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
                     self.cancel_pending_action();
                 } else {
-                    if let Some(dw) = self.dialog_window.as_ref() {
+                    if let Some(dw) = self.confirm_dialog.window() {
                         dw.focus_window();
                         dw.request_redraw();
                     }

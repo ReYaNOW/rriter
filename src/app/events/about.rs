@@ -121,18 +121,13 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
         return; // Пропускаем один кадр, чтобы избежать гонок состояний
     }
 
-    if !app.modal_dialog_open()
-        && !app.pending_action_waiting_for_save_as
-        && !app.pending_action_ready
-        && matches!(app.pending_action, PendingAction::CloseTab(_))
-    {
-        app.show_action_dialog(event_loop, app.pending_action);
+    // `close_tab_at` arms the question without the event loop; the window is created here.
+    if let Some(action) = app.confirm_dialog.needs_window() {
+        app.show_action_dialog(event_loop, action);
         return;
     }
 
-    if app.pending_action_ready {
-        app.pending_action_ready = false;
-        let action = std::mem::replace(&mut app.pending_action, PendingAction::None);
+    if let Some(action) = app.confirm_dialog.take_ready() {
         match action {
             PendingAction::None => {}
             PendingAction::Quit => {
@@ -1105,7 +1100,8 @@ pub(crate) fn about_to_wait(app: &mut App, event_loop: &host_loop::HostLoop) {
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => app.save_file_rx = Some(rx),
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                app.pending_action_waiting_for_save_as = false;
+                // No picker will answer: the confirmation flow waiting for it ends here.
+                app.confirm_dialog.abort_save_as();
                 app.ide_panel.file_tree_error =
                     Some("Диалог сохранения неожиданно завершился".to_string());
                 needs_redraw = true;

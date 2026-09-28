@@ -376,6 +376,7 @@ This architecture guide.
 
 Cross-platform boundary for native directories, path identity/persistence, text encodings and line endings, atomic filesystem replacement, dialogs, Clipboard, Trash, URL/file-manager integration, modifier policy, managed processes, and release-facing native integrations.
 
+* `src/platform/desktop_request.rs` -> native pickers, `reveal_path`, `open_url`; headless intercepts them into the caller's `ExternalRequestSink`, drained per `App` by `ExternalRequestLog` (`dump.external_request`).
 * `src/platform/text_file.rs` -> centralized UTF/legacy decoding, `TextFileFormat` preservation, conservative charset detection, strict re-encoding, and atomic text saves.
 * `src/platform/integration.rs` -> app directories, `ToolPaths`/tool-resolution cache, Dart SDK discovery priority (custom, project Flutter, environment, managed, PATH, other Flutter), native trust/proxy HTTP builders, and process memory.
 * `src/platform/process.rs` -> configured executable resolution, Windows `PATHEXT`, cancelable captured/streaming output with timeout, Unix process groups, Windows Job Objects, and complete-tree termination.
@@ -1483,6 +1484,7 @@ Entrypoints/state:
 * `src/headless_ty_mem_probe.rs` -> headless ty LSP memory probe (`--headless-ty-mem`): smaps/RSS sampling of LSP child processes.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
 * `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
+* `src/app/confirm_dialog.rs` -> `ConfirmDialog` + `PendingAction`: the unsaved-changes confirmation flow (dialog window/headless frame, armed action, Save-As queue, ready hand-off to `about_to_wait`) as one phase enum; `impl App` routes to it; transition unit tests.
 * `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
 * `src/app/markdown_scroll_transition.rs` -> `markdown.rs` include chunk for shared vertical `ScrollState` mode rebasing, cold-layout pending transitions, source-anchor carry-over, and transition physics regressions; it must not become a second scroll owner.
 * `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.

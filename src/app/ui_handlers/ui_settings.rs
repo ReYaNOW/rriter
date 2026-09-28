@@ -271,8 +271,8 @@ impl App {
                     3 => paths.state,
                     _ => return UiClickFlow::Return,
                 };
-                if let Err(error) =
-                    std::fs::create_dir_all(&path).and_then(|_| crate::platform::reveal_path(&path))
+                if let Err(error) = std::fs::create_dir_all(&path)
+                    .and_then(|_| crate::platform::reveal_path(self.external_requests.sink(), &path))
                 {
                     eprintln!(
                         "Failed to open RRiter directory {}: {error}",

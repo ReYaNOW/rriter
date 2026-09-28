@@ -1412,13 +1412,13 @@ fn pending_action_save_existing_file_runs_only_after_successful_write() {
     app.editor = editor_with("new contents");
     let _ = app.editor.insert_str("!");
     app.file_path = Some(path.clone());
-    app.pending_action = PendingAction::CloseFile;
-    app.pending_action_ready = false;
+    app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::CloseFile);
 
     app.begin_pending_action_save();
 
-    assert!(app.pending_action_ready);
-    assert!(!app.pending_action_waiting_for_save_as);
+    assert!(!app.confirm_dialog.is_open());
+    assert!(!app.confirm_dialog.waiting_for_save_as());
+    assert_eq!(app.confirm_dialog.take_ready(), Some(PendingAction::CloseFile));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "new contents!");
     assert!(!app.editor.is_dirty());
 
@@ -1446,12 +1446,13 @@ fn pending_action_save_failure_does_not_execute_action() {
     app.editor = editor_with("new contents");
     let _ = app.editor.insert_str("!");
     app.file_path = Some(path);
-    app.pending_action = PendingAction::CloseFile;
-    app.pending_action_ready = false;
+    app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::CloseFile);
 
     app.begin_pending_action_save();
 
-    assert!(!app.pending_action_ready);
+    // The question stays on screen for another answer.
+    assert!(app.confirm_dialog.is_open());
+    assert_eq!(app.confirm_dialog.take_ready(), None);
     assert!(app.editor.is_dirty());
     assert!(app.ide_panel.file_tree_error.is_some());
 }
@@ -1476,21 +1477,21 @@ fn save_as_selection_resumes_pending_action_only_after_success() {
     app.editor = editor_with("chosen contents");
     let _ = app.editor.insert_str("!");
     app.file_path = None;
-    app.pending_action = PendingAction::CloseFile;
-    app.pending_action_waiting_for_save_as = true;
-    app.pending_action_ready = false;
+    app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::CloseFile);
+    app.confirm_dialog.begin_save_as(Vec::new());
 
     assert!(app.handle_save_as_selection(Some(path.clone())));
-    assert!(!app.pending_action_waiting_for_save_as);
-    assert!(app.pending_action_ready);
+    assert!(!app.confirm_dialog.waiting_for_save_as());
+    assert_eq!(app.confirm_dialog.take_ready(), Some(PendingAction::CloseFile));
     assert_eq!(app.file_path.as_deref(), Some(path.as_path()));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "chosen contents!");
 
-    app.pending_action_waiting_for_save_as = true;
-    app.pending_action_ready = false;
+    app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::CloseFile);
+    app.confirm_dialog.begin_save_as(Vec::new());
     assert!(!app.handle_save_as_selection(None));
-    assert!(!app.pending_action_waiting_for_save_as);
-    assert!(!app.pending_action_ready);
+    assert!(!app.confirm_dialog.waiting_for_save_as());
+    assert_eq!(app.confirm_dialog.take_ready(), None);
+    assert_eq!(app.confirm_dialog.action(), PendingAction::None);
 
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -1512,7 +1513,7 @@ fn dirty_text_tab_requires_confirmation_before_close() {
     app.close_tab_at(1);
 
     assert_eq!(app.tabs.len(), 2);
-    assert!(matches!(app.pending_action, PendingAction::CloseTab(1)));
+    assert_eq!(app.confirm_dialog.needs_window(), Some(PendingAction::CloseTab(1)));
     assert_eq!(app.active_tab, 1);
 }
 
@@ -1531,7 +1532,7 @@ fn dirty_single_text_tab_requires_confirmation_for_legacy_close_index() {
     app.close_tab_at(usize::MAX);
 
     assert_eq!(app.tabs.len(), 1);
-    assert!(matches!(app.pending_action, PendingAction::CloseTab(0)));
+    assert_eq!(app.confirm_dialog.needs_window(), Some(PendingAction::CloseTab(0)));
     assert!(!app.show_welcome);
 }
 
@@ -1581,12 +1582,12 @@ fn pending_quit_save_writes_every_dirty_text_tab() {
     app.sync_active_tab();
     let _ = app.editor.insert_str(" active");
     let _ = app.tabs[1].editor.insert_str(" inactive");
-    app.pending_action = PendingAction::Quit;
+    app.confirm_dialog = crate::app::ConfirmDialog::armed_with(PendingAction::Quit);
 
     app.begin_pending_action_save();
 
-    assert!(app.pending_action_ready);
-    assert!(app.pending_save_tabs.is_empty());
+    assert_eq!(app.confirm_dialog.save_as_target(), None);
+    assert_eq!(app.confirm_dialog.take_ready(), Some(PendingAction::Quit));
     assert_eq!(std::fs::read_to_string(&first).unwrap(), "first active");
     assert_eq!(
         std::fs::read_to_string(&second).unwrap(),

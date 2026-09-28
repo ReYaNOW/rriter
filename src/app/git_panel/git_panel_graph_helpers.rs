@@ -129,8 +129,8 @@ fn run_git_action(
     }
 }
 
-fn open_url_async(url: &str) -> Result<(), String> {
-    crate::platform::open_url(url).map_err(|error| error.to_string())
+fn open_url_async(requests: &crate::platform::ExternalRequestSink, url: &str) -> Result<(), String> {
+    crate::platform::open_url(requests, url).map_err(|error| error.to_string())
 }
 
 fn git_snapshot_has_visible_rows(snapshot: &GitStatusSnapshot) -> bool {

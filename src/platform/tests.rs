@@ -686,7 +686,7 @@ fn broken_symlink_is_an_existing_removable_path_entry() {
 fn url_opener_rejects_non_http_schemes_before_spawning() {
     for url in ["file:///tmp/secret", "javascript:alert(1)", "not a url"] {
         assert_eq!(
-            open_url(url).unwrap_err().kind(),
+            open_url(ExternalRequestLog::default().sink(), url).unwrap_err().kind(),
             io::ErrorKind::InvalidInput
         );
     }
@@ -1415,15 +1415,23 @@ fn headless_policy_elevation_allowed() {
 
 #[test]
 fn headless_policy_intercept_external() {
-    let _ = take_external_request();
-    assert!(!intercept_external(None, ExternalRequest::PickFile));
-    assert_eq!(take_external_request(), None);
+    let mut log = ExternalRequestLog::default();
+    let mut other = ExternalRequestLog::default();
+    assert!(!intercept_external(None, log.sink(), ExternalRequest::PickFile));
+    assert_eq!(log.take(), None);
 
     let policy = Some(HeadlessPolicy { allow_writes: false });
     let url = ExternalRequest::OpenUrl("https://example.com".to_string());
-    assert!(intercept_external(policy, url.clone()));
-    assert_eq!(take_external_request(), Some(url));
-    assert_eq!(take_external_request(), None);
+    assert!(intercept_external(policy, log.sink(), ExternalRequest::PickFile));
+    // A worker thread records through its own clone of the sink; the last request wins.
+    let worker_sink = log.sink().clone();
+    let worker_url = url.clone();
+    std::thread::spawn(move || intercept_external(policy, &worker_sink, worker_url))
+        .join()
+        .unwrap();
+    assert_eq!(other.take(), None, "requests stay in the log that owns the sink");
+    assert_eq!(log.take(), Some(url));
+    assert_eq!(log.take(), None);
 }
 
 #[test]

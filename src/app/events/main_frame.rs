@@ -180,8 +180,8 @@ impl App {
                     blink_alpha,
                     self.show_fps,
                     &self.highlighter.spans,
-                    // `modal_dialog_open()` by fields: `self.renderer` is borrowed here.
-                    self.dialog_window.is_some() || self.headless_dialog_open,
+                    // `modal_dialog_open()` on the field: `self.renderer` is borrowed here.
+                    self.confirm_dialog.is_open(),
                     is_resizing,
                     &self.search_results,
                     self.search_current_idx,

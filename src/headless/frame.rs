@@ -44,7 +44,7 @@ pub(crate) fn take_redraw_request(app: &App) -> bool {
 /// The frame's draw calls: the main frame, then the confirmation dialog over it.
 pub(crate) fn render_frame(app: &mut App) -> FrameOutcome {
     let outcome = app.render_main_frame();
-    if app.headless_dialog_open
+    if app.confirm_dialog.drawn_in_frame()
         && let (Some(window), Some(renderer)) = (app.window.as_ref(), app.renderer.as_mut())
     {
         let size = window.inner_size();

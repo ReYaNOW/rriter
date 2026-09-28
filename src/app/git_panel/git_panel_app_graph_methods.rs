@@ -352,7 +352,7 @@ impl App {
             self.ide_panel.git.graph_notice = Some("No GitHub remote".to_string());
             return;
         };
-        match open_url_async(&url) {
+        match open_url_async(self.external_requests.sink(), &url) {
             Ok(()) => {
                 self.ide_panel.git.graph_notice = Some("Opening GitHub".to_string());
             }

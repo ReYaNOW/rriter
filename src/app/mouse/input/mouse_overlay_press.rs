@@ -379,7 +379,7 @@ impl App {
     ) -> bool {
         if self.modal_dialog_open() {
             if state == ElementState::Pressed {
-                if let Some(dw) = self.dialog_window.as_ref() {
+                if let Some(dw) = self.confirm_dialog.window() {
                     dw.focus_window();
                     dw.request_redraw();
                 }
