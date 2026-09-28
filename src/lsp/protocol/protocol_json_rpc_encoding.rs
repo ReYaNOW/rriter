@@ -856,6 +856,14 @@ pub(super) fn dispatch_frame_for_server(
                                 targets: Vec::new(),
                             });
                         }
+                        // Releases the hover popup parked for this definition and
+                        // ends a pending Ctrl+click lookup.
+                        Some(PendingRequestKind::Definition) => {
+                            let _ = event_tx.send(LspEvent::DefinitionResponse {
+                                request_id: req_id,
+                                target: None,
+                            });
+                        }
                         Some(PendingRequestKind::PrepareRename) => {
                             let _ = event_tx.send(LspEvent::PrepareRenameResponse {
                                 request_id: req_id,

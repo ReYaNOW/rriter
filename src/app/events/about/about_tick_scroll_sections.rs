@@ -194,8 +194,17 @@ fn about_to_wait_hover_timer(
                         ),
                     );
                 }
-            } else if app.hover.request_id.is_some() || app.hover.definition_request_id.is_some() {
+            } else if app.hover.request_id.is_some() {
                 hover_poll_pending = true;
+            } else if app.hover.definition_request_id.is_some() {
+                match app.hover.tick_definition_wait(raw_dt) {
+                    Some(left) => {
+                        hover_poll_pending = true;
+                        hover_wake_at =
+                            Some(now + std::time::Duration::from_secs_f32(left.max(0.0)));
+                    }
+                    None => needs_redraw = true,
+                }
             }
         } else if app.hover.popup.is_some() || app.hover.pending_popup.is_some() {
             let state = &mut app.hover;

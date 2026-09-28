@@ -2,58 +2,16 @@
 //! between the editor, the terminal and Project Search.
 
 use crate::headless::tests_support::{
-    dump, has_ui, run_script, scratch_dir, session_for_test, shell_failed, terminal_has_line,
-    wait_until,
+    dump, has_ui, keyboard_session, open_terminal_with_alt_q, panel_open, run_script,
+    shell_failed, terminal_has_line, wait_until,
 };
 use crate::headless::HeadlessSession;
-use std::path::PathBuf;
 
-const TEST_WIDTH: u32 = 1280;
-const TEST_HEIGHT: u32 = 720;
-const TEST_SCALE: f32 = 4.0 / 3.0;
 const EDITOR_TEXT: &str = "alpha\n";
 
 fn run_ok(session: &mut HeadlessSession, script: &str) {
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-}
-
-/// Workspace with one open file. Under `cfg(test)` panel state is neither loaded
-/// nor saved (`load_panel_state`/`save_panel_state`), so every session starts with
-/// all panels closed and the first Alt+Q takes the "open" branch of
-/// `apply_terminal_alt_q_shortcut`.
-fn keyboard_session(name: &str) -> (PathBuf, HeadlessSession) {
-    let dir = scratch_dir(name);
-    let file = dir.join("a.txt");
-    std::fs::write(&file, EDITOR_TEXT).unwrap();
-    let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
-    run_ok(
-        &mut session,
-        &format!(
-            "scale {TEST_SCALE}\nworkspace {}\nopen {}\nsettle 2000\n",
-            dir.display(),
-            file.display()
-        ),
-    );
-    assert!(!session.app.ide_panel.is_open(crate::app::PanelId::Terminal));
-    assert_eq!(session.app.editor.get_full_text(), EDITOR_TEXT);
-    (dir, session)
-}
-
-fn panel_open(state: &serde_json::Value, panel: &str) -> bool {
-    state["ide_panel"]["open"]
-        .as_array()
-        .is_some_and(|panels| panels.iter().any(|open| open == panel))
-}
-
-fn open_terminal_with_alt_q(session: &mut HeadlessSession) {
-    run_ok(session, "key alt+q\n");
-    wait_until(session, 8000, "terminal panel after Alt+Q", |session| {
-        let state = dump(session);
-        panel_open(&state, "terminal")
-            && has_ui(&state, "TerminalBody")
-            && !session.app.ide_panel.terminals.is_empty()
-    });
 }
 
 #[test]
@@ -172,6 +130,68 @@ fn headless_keyboard_ctrl_shift_f_from_terminal_focuses_query_and_escape_returns
     assert_eq!(session.app.ide_panel.project_search.query_editor.get_full_text(), query);
     assert_eq!(session.app.editor.get_full_text(), EDITOR_TEXT);
     assert!(panel_open(&dump(&mut session), "search"));
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_keyboard_ctrl4_with_terminal_focus_closes_terminal_tab_only() {
+    let (dir, mut session) = keyboard_session("ui-keyboard-routing-ctrl4");
+    open_terminal_with_alt_q(&mut session);
+    assert!(!shell_failed(&session, 0), "test shell must be available");
+    assert!(session.app.ide_panel.terminal_focused);
+
+    let lines = run_script(&mut session, b"key ctrl+4\nsettle 500\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"].as_array().map_or(0, Vec::len), 1, "{state}");
+    assert!(has_ui(&state, "EditorTab(0)"), "{state}");
+    assert!(!has_ui(&state, "TerminalTab(0)"), "{state}");
+    assert!(!session.app.ide_panel.terminal_focused);
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_keyboard_escape_from_project_search_returns_input_to_terminal() {
+    let (dir, mut session) = keyboard_session("ui-keyboard-routing-search-escape");
+    open_terminal_with_alt_q(&mut session);
+    assert!(!shell_failed(&session, 0), "test shell must be available");
+    assert!(session.app.ide_panel.terminal_focused);
+
+    let lines = run_script(
+        &mut session,
+        b"key ctrl+shift+f\ntype query_marker\nkey escape\ntype echo escape_route_marker\nkey enter\n",
+    );
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(session.app.ide_panel.project_search.query_editor.get_full_text().contains("query_marker"));
+    assert!(session.app.ide_panel.project_search.focused.is_none());
+    assert!(session.app.ide_panel.terminal_focused);
+    assert_eq!(session.app.editor.get_full_text(), EDITOR_TEXT);
+    wait_until(&mut session, 5000, "command typed into the terminal after Escape", |session| {
+        terminal_has_line(session, 0, "escape_route_marker")
+    });
+
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_keyboard_f1_opens_settings_only_when_terminal_is_not_focused() {
+    let (dir, mut session) = keyboard_session("ui-keyboard-routing-f1");
+    open_terminal_with_alt_q(&mut session);
+    assert!(!shell_failed(&session, 0), "test shell must be available");
+    assert!(session.app.ide_panel.terminal_focused);
+
+    let lines = run_script(&mut session, b"key f1\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert_eq!(dump(&mut session)["overlays"]["settings"], false);
+    assert!(session.app.ide_panel.terminal_focused);
+
+    let lines = run_script(&mut session, b"key alt+q\nkey f1\n");
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert!(!session.app.ide_panel.terminal_focused);
+    assert_eq!(dump(&mut session)["overlays"]["settings"], true);
+    assert_eq!(session.app.editor.get_full_text(), EDITOR_TEXT);
 
     let _ = std::fs::remove_dir_all(dir);
 }

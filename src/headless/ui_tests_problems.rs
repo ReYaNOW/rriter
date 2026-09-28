@@ -1,10 +1,11 @@
 //! Headless UI coverage for the Problems panel.
 
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, wait_until, workspace_with_explorer,
+    click_ui, disable_python_lsp, dump, has_ui, run_script, scratch_dir, seed_lsp_diagnostics,
+    wait_until, workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
-use crate::lsp::{DiagSeverity, Diagnostic, LspManager};
+use crate::lsp::{DiagSeverity, Diagnostic};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -36,13 +37,7 @@ fn python_problem_session(name: &str) -> (PathBuf, PathBuf, HeadlessSession) {
         .expect("write Python diagnostic fixture");
 
     let mut session = workspace_with_explorer(TEST_WIDTH, TEST_HEIGHT, TEST_SCALE, &dir);
-
-    let lsp = session
-        .app
-        .lsp
-        .get_or_insert_with(|| LspManager::new(vec![dir.clone()]));
-    // The fixture uses the same diagnostic store as LSP results without launching a server.
-    lsp.disable_python();
+    disable_python_lsp(&mut session, vec![dir.clone()]);
 
     let lines = run_script(&mut session, format!("open {}\n", file.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
@@ -50,10 +45,11 @@ fn python_problem_session(name: &str) -> (PathBuf, PathBuf, HeadlessSession) {
         session.app.file_path.as_deref() == Some(file.as_path())
     });
 
-    let lsp = session.app.lsp.as_mut().expect("workspace LSP manager");
-    lsp.diagnostics
-        .insert(file.clone(), Arc::from(vec![problem_diagnostic()]));
-    lsp.dirty_diagnostics = true;
+    seed_lsp_diagnostics(
+        &mut session,
+        vec![dir.clone()],
+        vec![(file.clone(), vec![problem_diagnostic()])],
+    );
 
     click_ui(&mut session, "SidebarSlot(Problems)");
     wait_until(&mut session, 5000, "Problems tabs", |session| {

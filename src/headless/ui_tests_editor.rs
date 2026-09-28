@@ -537,6 +537,90 @@ fn headless_editor_scrollbar_press_without_motion_preserves_offset_and_target() 
     let _ = std::fs::remove_dir_all(dir);
 }
 
+fn editor_horizontal_scrollbar_geometry(
+    session: &mut crate::headless::HeadlessSession,
+) -> crate::render_view::scrollbar_widget::ScrollbarGeometry {
+    let [x, y, w, h] = ui_rect(&dump(session), "EditorScrollbarX");
+    let (scale, max_scroll, current_scroll) = {
+        let Some(renderer) = session.app.renderer.as_ref() else {
+            panic!("editor renderer");
+        };
+        (
+            renderer.scale_factor,
+            renderer.max_scroll_x,
+            session.app.scroll_x.current,
+        )
+    };
+    let geometry = crate::render_view::editor_horizontal_scrollbar(
+        (x as f32, y as f32, w as f32, h as f32),
+        max_scroll,
+        current_scroll,
+    )
+    .geometry(scale);
+    let Some(geometry) = geometry else {
+        panic!("visible editor horizontal scrollbar");
+    };
+    geometry
+}
+
+fn long_editor_file(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("scrollbars.txt");
+    let mut text = format!("{}\n", "wide line ".repeat(300));
+    for line in 0..600 {
+        text.push_str(&format!("line {line:04}\n"));
+    }
+    std::fs::write(&path, text).unwrap_or_else(|err| panic!("write scrollbar fixture: {err}"));
+    path
+}
+
+#[test]
+fn headless_editor_horizontal_scrollbar_drag_moves_long_lines() {
+    let dir = scratch_dir("ui-scrollbar-editor-x");
+    let file = long_editor_file(&dir);
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    let geometry = editor_horizontal_scrollbar_geometry(&mut session);
+    let press_x = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let lane_y = geometry.lane.1 + geometry.lane.3 * 0.5;
+    let drag_x = (press_x + 120.0).min(geometry.track_start + geometry.track_len - 1.0);
+    let lines = run_script(
+        &mut session,
+        format!(
+            "mouse_move {press_x} {lane_y}\nclick left down\nmouse_move {drag_x} {lane_y}\nclick left up\n"
+        )
+        .as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    wait_until(&mut session, 5000, "horizontal scrollbar drag settle", |session| {
+        session.app.scroll_x.is_settled()
+    });
+    assert!(session.app.scroll_x.current > 0.0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_editor_horizontal_scrollbar_press_preserves_vertical_wheel_animation() {
+    let dir = scratch_dir("ui-scrollbar-editor-x-wheel");
+    let file = long_editor_file(&dir);
+    let mut session = open_file_session(900, 600, 1.0, &file);
+    let lines = run_script(&mut session, b"mouse_move 300 300\nwheel 0 -10\n");
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert!(!session.app.scroll_y.is_settled(), "wheel starts vertical scrolling");
+
+    let geometry = editor_horizontal_scrollbar_geometry(&mut session);
+    let press_x = geometry.thumb.start + geometry.thumb.len * 0.5;
+    let lane_y = geometry.lane.1 + geometry.lane.3 * 0.5;
+    let lines = run_script(
+        &mut session,
+        format!("mouse_move {press_x} {lane_y}\nclick left down\n").as_bytes(),
+    );
+    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    assert!(
+        !session.app.scroll_y.is_settled(),
+        "pressing the horizontal scrollbar should preserve vertical wheel animation"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn headless_file_tree_scrollbar_drag_scrolls() {
     let dir = scratch_dir("ui-file-tree-scrollbar-drag");

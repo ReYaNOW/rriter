@@ -391,8 +391,7 @@ fn about_to_wait_lsp_definition_response(
                 }
             }
             if let Some(popup) = popup {
-                state.finish_stale_combined_transition();
-                state.popup = Some(popup);
+                state.show_popup(popup);
                 if let Some(w) = app.window.as_ref() {
                     w.request_redraw();
                 }
