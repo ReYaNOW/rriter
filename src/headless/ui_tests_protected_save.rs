@@ -32,7 +32,9 @@ fn protect_file(path: &Path) {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o444))
             .unwrap_or_else(|error| panic!("make fixture read-only: {error}"));
-        let parent = path.parent().expect("fixture parent");
+        let Some(parent) = path.parent() else {
+            panic!("fixture parent");
+        };
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o555))
             .unwrap_or_else(|error| panic!("make fixture directory read-only: {error}"));
     }
@@ -42,7 +44,9 @@ fn unprotect_file(path: &Path) {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        let parent = path.parent().expect("fixture parent");
+        let Some(parent) = path.parent() else {
+            panic!("fixture parent");
+        };
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o755))
             .unwrap_or_else(|error| panic!("make fixture directory writable: {error}"));
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))

@@ -21,7 +21,7 @@ fn open_nested_search_session(
         source.push_str(&format!("        let nested_tail_{i} = {i};\n"));
     }
     source.push_str("        let needle_next = 2;\n    }\n}\n");
-    std::fs::write(&file, source).expect("write nested search fixture");
+    std::fs::write(&file, source).unwrap_or_else(|error| panic!("write nested search fixture: {error}"));
     let session = open_file_session(width, height, 4.0 / 3.0, &file);
     (dir, session)
 }
@@ -30,27 +30,45 @@ fn assert_match_in_center_band(session: &mut HeadlessSession) {
     let state = dump(session);
     let body = ui_rect(&state, "EditorTextBody");
     // The dump reports 1-based lines; the row index is one less.
-    let match_line = state["tabs"][0]["cursor"]["line"].as_u64().unwrap() as f64;
-    let scroll_y = state["tabs"][0]["scroll_y"].as_f64().unwrap();
-    let line_height = session.app.renderer.as_ref().unwrap().line_height as f64;
+    let Some(match_line) = state["tabs"][0]["cursor"]["line"].as_u64() else {
+        panic!("search match line is not an unsigned integer: {state}");
+    };
+    let Some(scroll_y) = state["tabs"][0]["scroll_y"].as_f64() else {
+        panic!("editor scroll position is not a number: {state}");
+    };
+    let Some(renderer) = session.app.renderer.as_ref() else {
+        panic!("headless renderer");
+    };
+    let line_height = renderer.line_height as f64;
+    let match_line = match_line as f64;
     // Top of the match line; search_anchor_central_band_target snaps this to
     // the nearest edge of the 35-65% band.
     let match_y = body[1] + (match_line - 1.0) * line_height - scroll_y;
-    let sticky_bottom = state["ui"]
-        .as_array()
-        .unwrap()
+    let Some(elements) = state["ui"].as_array() else {
+        panic!("UI dump is not an array: {state}");
+    };
+    let Some(sticky_bottom) = elements
         .iter()
-        .filter(|element| {
-            element["id"]
-                .as_str()
-                .is_some_and(|id| id.starts_with("StickyLine("))
-        })
-        .map(|element| {
-            let rect = element["rect"].as_array().unwrap();
-            rect[1].as_f64().unwrap() + rect[3].as_f64().unwrap()
+        .filter_map(|element| {
+            let id = element["id"].as_str()?;
+            if !id.starts_with("StickyLine(") {
+                return None;
+            }
+            let Some(rect) = element["rect"].as_array() else {
+                panic!("sticky line rect is not an array: {element}");
+            };
+            let Some(top) = rect.get(1).and_then(|value| value.as_f64()) else {
+                panic!("sticky line top is not a number: {element}");
+            };
+            let Some(height) = rect.get(3).and_then(|value| value.as_f64()) else {
+                panic!("sticky line height is not a number: {element}");
+            };
+            Some(top + height)
         })
         .max_by(f64::total_cmp)
-        .expect("nested scopes should show sticky lines");
+    else {
+        panic!("nested scopes should show sticky lines: {state}");
+    };
     let relative_y = (match_y - body[1]) / body[3];
     // The scroll target is rounded to whole pixels.
     let pixel = 1.0 / body[3];
