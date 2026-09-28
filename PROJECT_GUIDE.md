@@ -1483,11 +1483,19 @@ Entrypoints/state:
 * `src/startup_environment.rs` -> startup environment: theme/selection colors, KDE colors, EGL vendor preference, Rayon thread cap, project-search probe, and tests.
 * `src/headless_ty_mem_probe.rs` -> headless ty LSP memory probe (`--headless-ty-mem`): smaps/RSS sampling of LSP child processes.
 * `src/app/app_state.rs` -> `App`, tabs, panels, settings, dialogs, LSP/terminal/search state.
+* `src/app/app_state_tests.rs` -> `app_state.rs` test chunk: panel group/visibility/focus state regressions.
 * `src/app/app_bootstrap.rs` -> `App::new_from_config`, startup FAQ editor, and headless initialization options.
 * `src/app/confirm_dialog.rs` -> `ConfirmDialog` + `PendingAction`: the unsaved-changes confirmation flow (dialog window/headless frame, armed action, Save-As queue, ready hand-off to `about_to_wait`) as one phase enum; `impl App` routes to it; transition unit tests.
 * `src/app/markdown.rs` -> per-tab Markdown Read/Edit semantic/selection state, lazy incremental parser cache, central mode API, and shared-scroll state regressions.
+* `src/app/markdown_app_tests.rs` -> `markdown.rs` test chunk: lazy parser, mode toggle, and Read wheel/shared-scroll routing regressions.
 * `src/app/markdown_scroll_transition.rs` -> `markdown.rs` include chunk for shared vertical `ScrollState` mode rebasing, cold-layout pending transitions, source-anchor carry-over, and transition physics regressions; it must not become a second scroll owner.
 * `src/render_view/markdown_scroll_transition_review_v6_tests.rs` -> test-only deferred-navigation lifecycle regressions, included in the existing offscreen reviewer harness; covers stop/resize after a consumed rebase and relative input after search.
+* `src/render_view/markdown_scroll_transition_late_tests.rs` -> `markdown_scroll_transition_review_tests.rs` test chunk: later-stage search/click-stop/resize rebase reviewer regressions.
+* `src/app/automation.rs` -> PGO automation controller: options, step loop, timing, failure reports.
+* `src/app/automation_controller_steps.rs` -> `automation.rs` include chunk: `AutomationController::run_step` per-step dispatch.
+* `src/app/automation_semantic_actions.rs` -> `automation.rs` include chunk: `App::advance_automation`, step results, semantic panel/terminal actions.
+* `src/app/automation_fixtures.rs` -> `automation.rs` include chunk: fixture Git repository/Python tests and the full PGO scenario step list.
+* `src/app/automation_tests.rs` -> `automation.rs` test chunk: scenario coverage, step markers, failure metadata, terminal readiness.
 * `src/app/automation_database.rs` -> PGO-only semantic Database Tools workload: fixture endpoint parsing, in-memory secretless PostgreSQL connection seeding, production DB waits/actions, table/query scrolling, diagnostics, and regression tests.
 * `src/app/automation_dart.rs` -> PGO-only Dart setup/waits: disables external Dart SDK/LSP work for deterministic training while requiring current tree-sitter syntax closing hints, with diagnostics and regression tests.
 * `src/app/automation_markdown.rs` -> PGO-only Markdown Edit/Read workload: semantic mode/readiness steps, production shared vertical scrolling, deterministic incremental scenario chunk, and focused regressions.
@@ -1523,18 +1531,24 @@ Entrypoints/state:
 * `src/app/database/database_table_view_state.rs`, `database_table_cell_edit_state.rs`, `database_table_modal_state.rs` -> `DatabaseTableTabState` view/page/filter/sort/reload transitions; cell editor, change plan, transaction finish; table modal input/scroll/copy helpers.
 * `src/app/database/database_query_result_state.rs` -> `DatabaseQueryTabState` execution plan, history and result-selection transitions.
 * `src/render_view/database_table_tab.rs` -> virtualized editable grid, two-axis smooth scrolling, pagination, typed cell editors, selection, and column resizing; render code must never perform database or filesystem I/O.
+* `src/render_view/database_table_tab_controls.rs` -> `database_table_tab.rs` include chunk: grid buttons/inputs, pagination status, date-picker geometry.
 * `src/render_view/database_table_tab_overlay.rs` -> full-app-blocking SQL preview, multiline editor, dirty confirmation, custom limit, and transaction review overlays.
 * `src/render_view/database_query_tab.rs` -> SQL toolbar, virtualized result/message/history panes, internal result tabs, and full-app-blocking user-query transaction review; render code must never execute SQL or touch persistence.
+* `src/render_view/database_query_tab_footer.rs` -> `database_query_tab.rs` include chunk: review message layout, execution summary/notices, toolbar button and internal tab helpers.
 * `src/render_view/settings_database_ui.rs` -> Settings -> Databases value rows and +/- controls; keep row ordering aligned with `adjust_database_setting` and test every adjustable entry.
 * `src/app.rs` -> include shell for app-level behavior: tabs, files, search, title, dialogs.
 * `src/app/app_*_methods.rs` -> app behavior chunks split by IDE/tab flow, file/tab ops, window/external-file flow.
 * `src/app/tool_installer.rs` -> cross-platform managed uv/Ruff/Ty bootstrap, isolated install layout, progress/log state, cancellation, validation, and App integration.
+* `src/app/tool_installer_download.rs` -> `tool_installer.rs` include chunk: `ToolInstallLayout` generations/pruning and download/install helpers.
 * `src/app/tool_installer_tests.rs` -> managed-install command/layout, rollback, cancellation, log bounding, and platform-plan regression tests.
 * `src/app/events.rs` -> `winit` event routing, resize/redraw/focus/close, scale-factor and IME routing.
 * `src/app/events/main_frame.rs` -> shared main-frame render and post-present processing for native and headless hosts.
 * `src/app/events/window_runtime.rs` -> platform GL-context plans, window/surface bootstrap, graphics diagnostics, and persisted shutdown.
 * `src/app/events/host_loop.rs` -> native or headless event-loop exit and control-flow adapter.
-* `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion.
+* `src/app/events/about.rs` -> frame tick, polling, animations, redraw scheduling, main-thread native dialog completion; `about_to_wait` is a thin orchestrator over the `about_tick_*` sections.
+* `src/app/events/about/about_tick_scroll_sections.rs` -> `about.rs` include chunk: scroll bench, popup/hover timer, settings/main/tab/panel/content scroll ticks, background polls, file watcher.
+* `src/app/events/about/about_tick_input_sections.rs` -> `about.rs` include chunk: terminal tick, overlay animations, selection drag autoscroll, editor scroll clamp, picker receivers, highlight.
+* `src/app/events/about/about_tick_lsp_sections.rs` -> `about.rs` include chunk: LSP event drain and server log ticks.
 * `src/app/events/about/*` -> about-to-wait helpers/tests split from frame tick.
 * `src/app/events/about/about_helpers.rs` -> `about.rs` include chunk: Python inlay hints and event-loop wait-plan helpers.
 * `src/app/events/about/about_drag_animation_helpers.rs` -> `about.rs` include chunk: animation ticks and drag autoscroll helpers.
@@ -1653,11 +1667,27 @@ Rendering:
 * `src/render_view.rs` -> include shell for frame draw orchestration and layer order. Hot path.
 * `src/render_view/root_*.rs` -> root render helpers and main frame renderer chunks. Hot path.
 * `src/render_view/root_frame_overlay_helpers.rs` -> shared root chrome/finalization plus overlay/resize/search/notice helpers; normal editor and Markdown Read reuse the same tab/status/modal/telemetry path. Hot path.
+* `src/render_view/root_frame_renderer.rs` -> `Renderer::draw`: thin orchestrator over the `root_frame_*` sections, fixed draw order. Hot path.
+* `src/render_view/root_frame_layout_renderer.rs` -> `root_frame_renderer.rs` include chunk: diagnostics prep, panel layout/popup gate, editor viewport, surface and side panels. Hot path.
+* `src/render_view/root_frame_content_frames_renderer.rs` -> `root_frame_renderer.rs` include chunk: API client, Database table and Markdown Read root frames. Hot path.
+* `src/render_view/root_frame_editor_text_renderer.rs` -> `root_frame_renderer.rs` include chunk: editor text, editor overlays and gutter. Hot path.
+* `src/render_view/root_frame_editor_chrome_renderer.rs` -> `root_frame_renderer.rs` include chunk: editor chrome, vertical scrollbar, panels and hover. Hot path.
 * `src/render_view/api_client_panel.rs`, `src/render_view/api_client_tab.rs` -> include shells for API panel/tab renderers.
 * `src/render_view/api_client_panel/*`, `src/render_view/api_client_tab/*` -> API client panel/tab renderer chunks.
+* `src/render_view/api_client_tab/api_client_tab_main_renderer.rs` -> `draw_api_client_tab`: thin orchestrator over request/mock/response sections sharing `ApiTabRouteCtx`.
+* `src/render_view/api_client_tab/api_client_tab_request_renderer.rs` -> API tab request section: servers, params/body inputs, Try request.
+* `src/render_view/api_client_tab/api_client_tab_mock_renderer.rs` -> API tab mock section: mock response editing controls.
+* `src/render_view/api_client_tab/api_client_tab_response_renderer.rs` -> API tab response section: response body/tabs and actions.
 * `src/render_view/api_client_tab/api_client_tab_mock_contract_renderer.rs` -> Python mock contract controls and locked contract block helpers.
 * `src/render_view/core_text.rs` -> core visible text helpers. Hot path.
+* `src/render_view/core_text_editor_helpers.rs` -> `core_text.rs` include chunk: pixel-stable glyph rects, editor glyph pass positions, wrapped text ranges, fold suffix helpers. Hot path.
+* `src/render_view/core_text_tests.rs` -> `core_text.rs` test chunk: glyph geometry pixel-stability regressions.
 * `src/render_view/markdown_read.rs` -> cached tree-sitter-md Read-mode layout/rendering, visible-block virtualization, shared-scroll bounds/projection, code/list/table presentation; no parsing or I/O in the frame loop. Hot path.
+* `src/render_view/markdown_read_text_layout.rs` -> `markdown_read.rs` include chunk: heading scale, inline-code geometry, text colours, visual char metrics. Hot path.
+* `src/render_view/markdown_read_tests.rs` -> `markdown_read.rs` test chunk: Reader layout, baseline and table draw regressions.
+* `src/render_view/markdown_read_interaction_tests.rs` -> `markdown_read_interaction.rs` test chunk: visual/source mapping and hit-testing regressions.
+* `src/render_view/ide_panels/ide_panel_dialog_renderer.rs` -> bottom panel and file/Git dialogs.
+* `src/render_view/ide_panels/ide_panel_confirmation_dialog_renderer.rs` -> `ide_panel_dialog_renderer.rs` include chunk: `draw_file_tree_overlays` (file tree confirm/rename dialogs).
 * `src/render_view/markdown_scroll.rs` -> `markdown_read.rs` include chunk for source-backed Read/Edit viewport anchors, indexed Reader source-line geometry, and fold-aware editor source projection; it owns geometry only, not scroll physics or mode switching. Hot path.
 * `src/render_view/markdown_scroll_review_tests.rs` -> focused stage-1 source/viewport geometry regressions kept outside the hot include chunk so reviewer coverage does not push production geometry past the source-file size limit.
 * `src/render_view/markdown_read_interaction.rs` -> `markdown_read.rs` include chunk for Reader visual/source mapping, mouse hit-testing, selection/copy, search target/highlight geometry, and focused large-layout interaction regressions. Hot path.
@@ -1716,6 +1746,7 @@ LSP:
 Project tree/files:
 
 * `src/app/file_tree.rs` -> explorer types and `App` tree/menu operations.
+* `src/app/file_tree_app_actions.rs` -> `file_tree.rs` include chunk: `App::handle_file_tree_menu_action` and drag-move actions.
 * `src/app/file_tree_scan.rs` -> explorer scan/watch/icon raster cache.
 * `src/app/file_tree_ops.rs` -> file-tree filesystem copy/move/delete/trash helpers.
 * `src/app/file_tree_dialog.rs` -> file-tree dialog keyboard/input routing.

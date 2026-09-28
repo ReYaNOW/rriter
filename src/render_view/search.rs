@@ -282,14 +282,20 @@ mod tests {
 
     #[test]
     fn markdown_read_root_branch_draws_search_panel() {
+        // `Renderer::draw` delegates the markdown-read branch to `draw_root_markdown_read_frame`.
         let source = include_str!("root_frame_renderer.rs");
         let start = source
-            .find("if markdown_read_active {\n            if let Some(pre_editor_start)")
+            .find("if markdown_read_active {\n            let RootFrameChrome")
             .expect("markdown read root branch");
         let end = start
             + source[start..]
                 .find("return (wants_pointer, Vec::new());")
                 .expect("markdown read branch return");
-        assert!(source[start..end].contains("draw_search_panel_if_visible("));
+        assert!(source[start..end].contains("self.draw_root_markdown_read_frame("));
+        let frames = include_str!("root_frame_content_frames_renderer.rs");
+        let body = &frames[frames
+            .find("fn draw_root_markdown_read_frame(")
+            .expect("markdown read frame method")..];
+        assert!(body.contains("draw_search_panel_if_visible("));
     }
 }

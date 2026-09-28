@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
 
@@ -42,6 +43,7 @@ def changed_files(base):
 def added_lines(base, untracked):
     diff = run(["git", "diff", "--no-ext-diff", "--no-renames", "--unified=0", base, "--"]).stdout
     result = []
+    removed = Counter()
     path = None
     line_no = 0
     for line in diff.splitlines():
@@ -57,6 +59,8 @@ def added_lines(base, untracked):
             line_no += 1
         elif line.startswith(" "):
             line_no += 1
+        elif line.startswith("-") and not line.startswith("---") and path and path.endswith(".rs"):
+            removed[line[1:].strip()] += 1
     for name in untracked:
         if not name.endswith(".rs"):
             continue
@@ -66,7 +70,15 @@ def added_lines(base, untracked):
         except (OSError, UnicodeError):
             continue
         result.extend((name, index, content) for index, content in enumerate(lines, 1))
-    return result
+    # A line removed elsewhere in the same diff was moved, not written anew (file splits).
+    fresh = []
+    for entry in result:
+        key = entry[2].strip()
+        if removed[key] > 0:
+            removed[key] -= 1
+        else:
+            fresh.append(entry)
+    return fresh
 
 
 def source_line_counts():

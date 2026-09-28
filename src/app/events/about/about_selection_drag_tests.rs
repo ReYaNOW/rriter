@@ -181,7 +181,14 @@
 
     #[test]
     fn selection_autoscroll_uses_registered_body_rects_and_updates_endpoints() {
-        let about = include_str!("../about.rs");
+        // `about_to_wait` delegates the drag autoscroll to its input tick section.
+        assert_eq!(
+            include_str!("../about.rs")
+                .matches("about_to_wait_selection_drag_autoscroll(app, dt)")
+                .count(),
+            1
+        );
+        let about = include_str!("about_tick_input_sections.rs");
         let terminal = about
             .split("if app.ide_panel.is_dragging_terminal && app.is_dragging && !app.show_settings")
             .nth(1)

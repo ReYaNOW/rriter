@@ -914,7 +914,14 @@ mod tests {
     fn all_git_dropdowns_render_only_from_the_shared_final_overlay_path() {
         let workspace = include_str!("ide_panel_git_workspace_renderer.rs");
         let side = include_str!("ide_panel_side_renderer.rs");
-        let root = include_str!("../root_frame_renderer.rs");
+        // `Renderer::draw` and the root_frame_* section methods it calls.
+        let root = concat!(
+            include_str!("../root_frame_renderer.rs"),
+            include_str!("../root_frame_layout_renderer.rs"),
+            include_str!("../root_frame_content_frames_renderer.rs"),
+            include_str!("../root_frame_editor_text_renderer.rs"),
+            include_str!("../root_frame_editor_chrome_renderer.rs"),
+        );
         let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
         let final_overlay = source_between(
             root_overlays,
@@ -965,7 +972,26 @@ mod tests {
 
     #[test]
     fn git_tooltip_final_overlay_is_shared_by_all_git_compatible_root_paths() {
+        // `Renderer::draw` routes each root path to a section method in the root_frame_* files.
         let root = include_str!("../root_frame_renderer.rs");
+        let root_all = concat!(
+            include_str!("../root_frame_renderer.rs"),
+            include_str!("../root_frame_layout_renderer.rs"),
+            include_str!("../root_frame_content_frames_renderer.rs"),
+            include_str!("../root_frame_editor_text_renderer.rs"),
+            include_str!("../root_frame_editor_chrome_renderer.rs"),
+        );
+        let frames = include_str!("../root_frame_content_frames_renderer.rs");
+        let api_frame = source_between(
+            frames,
+            "fn draw_root_api_client_frame(",
+            "fn draw_root_database_table_frame(",
+        );
+        let database_frame = source_between(
+            frames,
+            "fn draw_root_database_table_frame(",
+            "fn draw_root_markdown_read_frame(",
+        );
         let root_overlays = include_str!("../root_frame_overlay_helpers.rs");
         let final_overlay = source_between(
             root_overlays,
@@ -980,7 +1006,7 @@ mod tests {
         let markdown_path = source_between(
             root,
             "if markdown_read_active {",
-            "editor.ensure_indent_cache_updated();",
+            "let editor_text = self.draw_root_editor_text(",
         );
         let api_path = source_between(
             root,
@@ -1002,10 +1028,12 @@ mod tests {
         assert!(final_overlay.contains("self.draw_git_file_tooltip_overlay("));
         assert!(empty_frame.contains("self.draw_root_ide_final_overlays("));
         assert!(markdown_path.contains("self.finish_root_overlays_and_telemetry("));
-        assert!(api_path.contains("self.draw_root_ide_final_overlays("));
-        assert!(database_path.contains("self.draw_root_ide_final_overlays("));
+        assert!(api_path.contains("self.draw_root_api_client_frame("));
+        assert!(database_path.contains("self.draw_root_database_table_frame("));
+        assert!(api_frame.contains("self.draw_root_ide_final_overlays("));
+        assert!(database_frame.contains("self.draw_root_ide_final_overlays("));
         assert_eq!(
-            root.matches("self.finish_root_overlays_and_telemetry(")
+            root_all.matches("self.finish_root_overlays_and_telemetry(")
                 .count(),
             2,
             "Markdown Read and normal editor must share final telemetry/overlay finish",
@@ -1070,11 +1098,12 @@ mod tests {
 
     #[test]
     fn popup_gate_uses_root_scroll_snapshot_not_editor_layout_scroll_fields() {
-        let root = include_str!("../root_frame_renderer.rs");
+        // The popup gate moved with the rest of `draw_root_panel_layout`.
+        let root = include_str!("../root_frame_layout_renderer.rs");
         let gate = source_between(
             root,
             "self.update_popup_mouse_move_gate();",
-            "let tab_bar_visual_h",
+            "fn draw_root_editor_viewport_layout(",
         );
 
         assert!(gate.contains("self.update_popup_scroll_snapshot(scroll_x, scroll_y)"));
