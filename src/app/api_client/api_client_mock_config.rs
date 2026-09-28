@@ -2,7 +2,7 @@ impl ApiClientState {
     /// The single commit point for every API Mock config change: persists the config
     /// and hot-updates the running server, so no edit is saved without reaching it.
     pub(crate) fn commit_mock_config(&mut self) {
-        self.persist();
+        self.persist_mock_config();
         self.refresh_mock_server();
     }
 

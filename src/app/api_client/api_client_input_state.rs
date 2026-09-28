@@ -1,6 +1,7 @@
 #[derive(Default)]
 pub(crate) struct ApiFocusCommitResult {
     pub(crate) mock_config_changed: bool,
+    pub(crate) credentials_changed: bool,
     pub(crate) invalidate_contract_tools: bool,
     pub(crate) text_for_app: Option<String>,
 }
@@ -152,20 +153,27 @@ impl crate::app::api_client::ApiClientState {
                 }
             }
             ApiFocus::AuthValue { spec_id, scheme } => {
+                let previous = self.auth.entry(*spec_id, scheme).cloned();
                 self.auth.set_value(*spec_id, scheme, text);
-                self.persist();
+                result.credentials_changed = self.auth.entry(*spec_id, scheme) != previous.as_ref();
             }
             ApiFocus::AuthRefreshToken { spec_id, scheme } => {
-                self.auth.entry_mut(*spec_id, scheme).refresh_token = text;
-                self.persist();
+                let previous = self.auth.entry(*spec_id, scheme).cloned();
+                let entry = self.auth.entry_mut(*spec_id, scheme);
+                entry.refresh_token = text;
+                result.credentials_changed = self.auth.entry(*spec_id, scheme) != previous.as_ref();
             }
             ApiFocus::AuthUsername { spec_id, scheme } => {
-                self.auth.entry_mut(*spec_id, scheme).username = text;
-                self.persist();
+                let previous = self.auth.entry(*spec_id, scheme).cloned();
+                let entry = self.auth.entry_mut(*spec_id, scheme);
+                entry.username = text;
+                result.credentials_changed = self.auth.entry(*spec_id, scheme) != previous.as_ref();
             }
             ApiFocus::AuthPassword { spec_id, scheme } => {
-                self.auth.entry_mut(*spec_id, scheme).password = text;
-                self.persist();
+                let previous = self.auth.entry(*spec_id, scheme).cloned();
+                let entry = self.auth.entry_mut(*spec_id, scheme);
+                entry.password = text;
+                result.credentials_changed = self.auth.entry(*spec_id, scheme) != previous.as_ref();
             }
             ApiFocus::PathParam { .. }
             | ApiFocus::QueryParam { .. }
@@ -175,6 +183,9 @@ impl crate::app::api_client::ApiClientState {
             ApiFocus::InputSchema { .. }
             | ApiFocus::OutputSchema { .. }
             | ApiFocus::Response { .. } => {}
+        }
+        if result.credentials_changed {
+            self.persist_credentials();
         }
         result
     }
@@ -709,6 +720,6 @@ impl crate::app::api_client::ApiClientState {
         }
         entry.token_type = token_type;
         entry.expires_at = expires_at;
-        self.persist();
+        self.persist_credentials();
     }
 }

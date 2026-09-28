@@ -52,6 +52,7 @@ impl super::LspManager {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.ruff_workspace_diag_pending = false;
                 self.ruff_workspace_diagnostics.clear();
+                self.mark_diagnostics_changed();
                 self.python_status = super::LspServerStatus::Crashed;
                 self.server_logs
                     .entry("ruff")
@@ -99,7 +100,7 @@ impl super::LspManager {
         }
 
         self.rebuild_diag_text_pool();
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
         received
     }
 

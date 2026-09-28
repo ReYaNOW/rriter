@@ -701,13 +701,11 @@ impl crate::app::App {
             crate::ui_system::UiId::ApiAuthSave(_) => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                self.ide_panel.api.persist();
             }
             crate::ui_system::UiId::ApiAuthAccessSave(_)
             | crate::ui_system::UiId::ApiAuthRefreshSave(_) => {
                 self.commit_api_focus();
                 self.ide_panel.api.focused = None;
-                self.ide_panel.api.persist();
             }
             crate::ui_system::UiId::ApiAuthAccessClear(scheme_idx) => {
                 self.commit_api_focus();

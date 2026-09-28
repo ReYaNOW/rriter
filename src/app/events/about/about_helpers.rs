@@ -31,9 +31,8 @@ fn python_inlay_hint_request_range(
 ) -> Option<(u32, u32, u32, u32, crate::app::PythonInlayHintLineRange)> {
     let line_count = app.editor.line_offsets.len().max(1);
     if line_count <= PYTHON_INLAY_FULL_FILE_MAX_LINES {
-        let text = app.editor.get_full_text();
-        let (end_line, end_col) =
-            crate::lsp::offset_to_lsp_pos(&text, text.len(), &app.editor.line_offsets);
+        let end_line = line_count.saturating_sub(1) as u32;
+        let end_col = python_inlay_final_line_col(app, end_line as usize);
         return Some((0, 0, end_line, end_col, (0, line_count as u32)));
     }
 

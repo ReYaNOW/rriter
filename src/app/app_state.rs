@@ -393,6 +393,13 @@ pub struct IdePanelState {
     pub query_problem_path: Option<std::path::PathBuf>,
     pub query_problem_diagnostics: Vec<crate::lsp::Diagnostic>,
     pub problems_collapsed: FxHashSet<std::path::PathBuf>,
+    flat_diags_cache_tab: Option<usize>,
+    flat_diags_cache_file: Option<std::path::PathBuf>,
+    flat_diags_cache_source_name: Option<String>,
+    flat_diags_cache_problems_tab: usize,
+    flat_diags_cache_collapsed: FxHashSet<std::path::PathBuf>,
+    flat_diags_cache_lsp_generation: u64,
+    flat_diags_cache_has_lsp: bool,
     pub problems_scroll: crate::scroll::ScrollState,
     pub terminals: Vec<crate::app::terminal::Terminal>,
     pub terminal_tab_scroll: crate::scroll::ScrollState,
@@ -502,6 +509,13 @@ impl Default for IdePanelState {
             query_problem_path: None,
             query_problem_diagnostics: Vec::new(),
             problems_collapsed: FxHashSet::default(),
+            flat_diags_cache_tab: None,
+            flat_diags_cache_file: None,
+            flat_diags_cache_source_name: None,
+            flat_diags_cache_problems_tab: 0,
+            flat_diags_cache_collapsed: FxHashSet::default(),
+            flat_diags_cache_lsp_generation: 0,
+            flat_diags_cache_has_lsp: false,
             problems_scroll: crate::scroll::ScrollState::new(15.0),
             terminals: Vec::new(),
             terminal_tab_scroll: crate::scroll::ScrollState::new(7.0),
@@ -521,6 +535,98 @@ impl Default for IdePanelState {
     }
 }
 impl IdePanelState {
+    pub(crate) fn refresh_flat_diagnostics_if_needed(
+        &mut self,
+        active_tab: usize,
+        active_file: Option<&std::path::Path>,
+        query_problem: Option<(&str, &[crate::lsp::Diagnostic])>,
+        lsp: Option<&crate::lsp::LspManager>,
+    ) {
+        let lsp_generation = lsp.map_or(0, crate::lsp::LspManager::diagnostic_generation);
+        let query_changed = match query_problem {
+            Some((database_name, diagnostics)) => {
+                self.flat_diags_cache_source_name.as_deref() != Some(database_name)
+                    || self.query_problem_diagnostics != diagnostics
+            }
+            None => self.flat_diags_cache_source_name.is_some(),
+        };
+        let active_file_changed = self.flat_diags_cache_file.as_deref() != active_file;
+        if self.flat_diags_cache_tab == Some(active_tab)
+            && !active_file_changed
+            && !query_changed
+            && self.flat_diags_cache_problems_tab == self.problems_tab
+            && self.flat_diags_cache_collapsed == self.problems_collapsed
+            && self.flat_diags_cache_lsp_generation == lsp_generation
+            && self.flat_diags_cache_has_lsp == lsp.is_some()
+        {
+            return;
+        }
+
+        self.flat_diags.clear();
+        self.flat_diags_cache_tab = Some(active_tab);
+        self.flat_diags_cache_file = active_file.map(std::path::Path::to_path_buf);
+        self.flat_diags_cache_problems_tab = self.problems_tab;
+        self.flat_diags_cache_collapsed.clone_from(&self.problems_collapsed);
+        self.flat_diags_cache_lsp_generation = lsp_generation;
+        self.flat_diags_cache_has_lsp = lsp.is_some();
+        if let Some((database_name, diagnostics)) = query_problem {
+            let path = std::path::PathBuf::from(format!("SQL-консоль · {database_name}"));
+            self.flat_diags_cache_source_name = Some(database_name.to_owned());
+            self.query_problem_path = Some(path.clone());
+            self.query_problem_diagnostics.clear();
+            self.query_problem_diagnostics.extend_from_slice(diagnostics);
+            if self.problems_tab == 1 {
+                self.flat_diags.push((path.clone(), usize::MAX));
+            }
+            if self.problems_tab == 0 || !self.problems_collapsed.contains(&path) {
+                self.flat_diags
+                    .extend((0..diagnostics.len()).map(|index| (path.clone(), index)));
+            }
+        } else {
+            self.flat_diags_cache_source_name = None;
+            self.query_problem_path = None;
+            self.query_problem_diagnostics.clear();
+        }
+
+        if let Some(lsp) = lsp {
+            if self.problems_tab == 0 {
+                if self.query_problem_path.is_none()
+                    && let Some(path) = active_file
+                {
+                    let mut diagnostics = lsp.diagnostic_entries_for_path(path);
+                    diagnostics.sort_by(|(_, left), (_, right)| {
+                        left.start_line
+                            .cmp(&right.start_line)
+                            .then(left.start_col.cmp(&right.start_col))
+                    });
+                    self.flat_diags.extend(
+                        diagnostics
+                            .into_iter()
+                            .map(|(index, _)| (path.to_path_buf(), index)),
+                    );
+                }
+            } else {
+                for path in lsp.diagnostic_paths() {
+                    let mut diagnostics = lsp.diagnostic_entries_for_path(path);
+                    if diagnostics.is_empty() {
+                        continue;
+                    }
+                    diagnostics.sort_by(|(_, left), (_, right)| {
+                        left.start_line
+                            .cmp(&right.start_line)
+                            .then(left.start_col.cmp(&right.start_col))
+                    });
+                    self.flat_diags.push((path.clone(), usize::MAX));
+                    if !self.problems_collapsed.contains(path) {
+                        self.flat_diags.extend(
+                            diagnostics.into_iter().map(|(index, _)| (path.clone(), index)),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     pub fn problem_diagnostic<'a>(
         &'a self,
         lsp: Option<&'a crate::lsp::LspManager>,
