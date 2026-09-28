@@ -1,43 +1,9 @@
 //! Headless interaction coverage for the integrated terminal.
 
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, run_script, scratch_dir, session_for_test, shell_failed,
-    terminal_has_line, ui_rect, wait_until,
+    click_ui, dump, has_ui, run_script, run_terminal_command, scratch_dir, session_for_test,
+    shell_failed, terminal_has_line, terminal_session, ui_rect, wait_until,
 };
-use crate::headless::HeadlessSession;
-
-const TEST_WIDTH: u32 = 1280;
-const TEST_HEIGHT: u32 = 720;
-const TEST_SCALE: f32 = 4.0 / 3.0;
-
-fn terminal_session(name: &str) -> (std::path::PathBuf, HeadlessSession) {
-    let dir = scratch_dir(name);
-    let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
-    let lines = run_script(
-        &mut session,
-        format!("scale {TEST_SCALE}\nworkspace {}\n", dir.display()).as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-
-    if !session.app.ide_panel.is_open(crate::app::PanelId::Terminal) {
-        click_ui(&mut session, "SidebarSlot(Terminal)");
-    }
-    wait_until(&mut session, 8000, "terminal body", |session| {
-        let state = dump(session);
-        has_ui(&state, "TerminalBody") && !session.app.ide_panel.terminals.is_empty()
-    });
-    (dir, session)
-}
-
-fn run_terminal_command(session: &mut HeadlessSession, command: &str) {
-    click_ui(session, "TerminalBody");
-    assert!(session.app.ide_panel.terminal_focused);
-    let lines = run_script(
-        session,
-        format!("type {command}\nkey enter\n").as_bytes(),
-    );
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-}
 
 #[test]
 fn headless_terminal_types_command_and_shows_its_output() {

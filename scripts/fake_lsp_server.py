@@ -118,6 +118,10 @@ def main() -> None:
                                 },
                                 "message": "Name missing_hover_name is not defined",
                                 "severity": 1,
+                                "code": "unresolved-reference",
+                                "codeDescription": {
+                                    "href": "https://docs.astral.sh/ty/rules/unresolved-reference"
+                                },
                             }
                         ],
                     },

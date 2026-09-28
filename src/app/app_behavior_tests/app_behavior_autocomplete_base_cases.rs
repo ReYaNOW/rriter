@@ -57,6 +57,7 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
         icon_key: "default_file",
         syntax_errors: Vec::new(),
         closing_hints: Default::default(),
+        deleted: false,
         kind: EditorTabKind::Normal,
     }
 }

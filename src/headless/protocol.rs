@@ -69,6 +69,7 @@ pub(crate) enum Command {
     Screenshot(PathBuf),
     Dump(Option<PathBuf>),
     Dialog(DialogAnswer),
+    PickerAnswer(Vec<PathBuf>),
     Bench { frames: u32, csv: Option<PathBuf>, action: BenchAction },
     Record { frames: u32, dir: PathBuf, action: BenchAction },
     Info,
@@ -149,6 +150,10 @@ pub(crate) fn parse_line(line: &[u8]) -> Result<Option<Command>, String> {
             Command::Dump((!rest.is_empty()).then(|| PathBuf::from(rest)))
         }
         "type" => Command::Type(unescape_text(args.remainder())),
+        "picker_answer" => {
+            let paths = std::iter::from_fn(|| args.token()).map(PathBuf::from).collect();
+            Command::PickerAnswer(paths)
+        }
         "resize" => {
             let (w, h) = parse_size(args.required("size")?)?;
             args.finish()?;
@@ -446,6 +451,15 @@ mod tests {
         assert_eq!(err("open"), "missing path");
         assert_eq!(err("workspace   "), "missing path");
         assert_eq!(err("screenshot"), "missing path");
+    }
+
+    #[test]
+    fn headless_protocol_parses_picker_answers() {
+        assert_eq!(cmd("picker_answer"), Command::PickerAnswer(Vec::new()));
+        assert_eq!(
+            cmd("picker_answer /tmp/one /tmp/two"),
+            Command::PickerAnswer(vec![PathBuf::from("/tmp/one"), PathBuf::from("/tmp/two")])
+        );
     }
 
     #[test]

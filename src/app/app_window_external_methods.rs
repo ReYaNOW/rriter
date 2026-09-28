@@ -549,6 +549,7 @@ impl App {
             Ok(()) => {
                 self.ide_panel.file_tree_error = None;
                 self.editor.mark_saved();
+                self.set_tabs_deleted_under(&path, false);
                 self.reconcile_saved_current_file_git_index();
                 if self.is_ide_mode
                     && let Some(lsp) = &mut self.lsp
@@ -561,7 +562,7 @@ impl App {
             // Refused elevation falls through to the plain write-error path below.
             Err(error)
                 if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+                    && self.protected_saves.elevation_allowed() =>
             {
                 self.start_protected_save(path, content)
             }
@@ -612,6 +613,7 @@ impl App {
         match &done.result {
             Ok(()) => {
                 self.mark_protected_save_written(&done);
+                self.set_tabs_deleted_under(&done.path, false);
                 if awaited && self.confirm_dialog.waiting_for_save_as() {
                     self.continue_pending_tab_saves();
                 }
@@ -694,11 +696,11 @@ impl App {
             // Refused elevation falls through to the plain write-error path below.
             Err(error)
                 if error.kind() == std::io::ErrorKind::PermissionDenied
-                    && crate::platform::elevation_allowed(crate::platform::headless_policy()) =>
+                    && self.protected_saves.elevation_allowed() =>
             {
                 // Save As stays synchronous: the document identity changes only
                 // after the write, which a background save cannot promise here.
-                crate::platform::write_text_file_elevated(
+                self.protected_saves.write_synchronously(
                     path,
                     content,
                     self.text_file_format,
@@ -753,6 +755,7 @@ impl App {
             self.markdown = Default::default();
         }
         self.editor.mark_saved();
+        self.set_tabs_deleted_under(&path, false);
 
         if self.is_ide_mode
             && let Some(lsp) = &mut self.lsp
@@ -1232,19 +1235,19 @@ impl App {
             return;
         }
         self.sync_active_tab();
+        // Clean tabs are re-read; dirty ones are only probed for existence.
         let clean_tabs = self
             .tabs
             .iter()
             .enumerate()
             .filter_map(|(idx, tab)| {
-                if tab.editor.is_dirty() {
-                    return None;
-                }
+                let clean = !tab.editor.is_dirty();
                 match &tab.kind {
-                    EditorTabKind::GitDiff(meta, _) => {
-                        Some((idx, meta.repo_root.join(&meta.rel_path)))
+                    EditorTabKind::GitDiff(meta, _) if clean => {
+                        Some((idx, meta.repo_root.join(&meta.rel_path), true))
                     }
-                    EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path)),
+                    EditorTabKind::GitDiff(_, _) => None,
+                    EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path, clean)),
                     EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
                     | EditorTabKind::DatabaseQuery(_, _) => None,
@@ -1258,14 +1261,9 @@ impl App {
         let (tx, rx) = self.ui_waker.channel();
         match crate::platform::spawn_named("rriter-external-changes", move || {
             let mut changes = Vec::new();
-            for (tab_idx, path) in clean_tabs {
-                if let Ok(decoded) = crate::platform::read_text_file(&path) {
-                    changes.push(crate::app::ExternalFileChange {
-                        tab_idx,
-                        path,
-                        disk_text: decoded.text,
-                        text_file_format: decoded.format,
-                    });
+            for (tab_idx, path, read) in clean_tabs {
+                if let Some(disk) = crate::app::ExternalDiskState::probe(&path, read) {
+                    changes.push(crate::app::ExternalFileChange { tab_idx, path, disk });
                 }
             }
             let _ = tx.send(changes);
@@ -1306,7 +1304,23 @@ impl App {
         let mut active_reloaded = false;
         let active_idx = self.active_tab;
         let mut diff_reloads = Vec::new();
+        // (path, exists) for `set_tabs_deleted_under`, applied once the active tab is back in `App`.
+        let mut presence = Vec::new();
         for change in changes {
+            let (disk_text, text_file_format) = match change.disk {
+                crate::app::ExternalDiskState::Text { disk_text, text_file_format } => {
+                    presence.push((change.path.clone(), true));
+                    (disk_text, text_file_format)
+                }
+                crate::app::ExternalDiskState::Present => {
+                    presence.push((change.path, true));
+                    continue;
+                }
+                crate::app::ExternalDiskState::Missing => {
+                    presence.push((change.path, false));
+                    continue;
+                }
+            };
             let Some(tab) = self.tabs.get_mut(change.tab_idx) else {
                 continue;
             };
@@ -1319,7 +1333,7 @@ impl App {
                 {
                     continue;
                 }
-                if change.disk_text != state.worktree_text {
+                if disk_text != state.worktree_text {
                     diff_reloads.push(change.tab_idx);
                     needs_redraw = true;
                 }
@@ -1333,19 +1347,19 @@ impl App {
             {
                 continue;
             }
-            if tab.editor.text_equals(&change.disk_text) {
+            if tab.editor.text_equals(&disk_text) {
                 continue;
             }
             let old_version = tab.editor.version;
-            tab.editor = crate::editor::Editor::new(change.disk_text.len() + 8192);
+            tab.editor = crate::editor::Editor::new(disk_text.len() + 8192);
             tab.editor.version = old_version + 1;
-            let _ = tab.editor.insert_str(&change.disk_text);
+            let _ = tab.editor.insert_str(&disk_text);
             tab.editor.cursor = 0;
             tab.editor.clear_history();
             tab.editor.set_original_text();
             tab.editor.sync_edits.clear();
             tab.closing_hints.invalidate(tab.editor.version);
-            tab.text_file_format = change.text_file_format;
+            tab.text_file_format = text_file_format;
             tab.file_key = Some(crate::platform::PathKey::new(&change.path));
             tab.completions.clear();
             tab.foldable_ranges.clear();
@@ -1358,7 +1372,7 @@ impl App {
                 lsp.notify_change(
                     &change.path,
                     &tab.file_extension,
-                    &change.disk_text,
+                    &disk_text,
                     crate::editor::lsp_document_version(tab.editor.version),
                 );
             }
@@ -1371,6 +1385,11 @@ impl App {
             self.reload_git_diff_tab(idx);
         }
         self.sync_active_tab();
+        for (path, exists) in presence {
+            // A save may have recreated the file after the probe ran.
+            let deleted = !exists && !path.is_file();
+            needs_redraw |= self.set_tabs_deleted_under(&path, deleted);
+        }
         if active_reloaded {
             while self.highlighter.rx.try_recv().is_ok() {}
             self.reset_highlighter_with_text(self.editor.get_full_text(), false);

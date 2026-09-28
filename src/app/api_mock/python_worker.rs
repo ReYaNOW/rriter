@@ -19,7 +19,7 @@ const PYTHON_STDERR_LIMIT: usize = 64 * 1024;
 /// route request and restarted when the runtime config changes.
 #[derive(Default)]
 pub struct PythonWorkerSlot {
-    worker: Mutex<Option<PythonWorker>>,
+    worker: Mutex<Option<Arc<PythonWorker>>>,
 }
 
 pub struct PythonMockRequest {
@@ -41,12 +41,16 @@ pub struct PythonMockResponse {
 }
 
 struct PythonWorker {
-    child: crate::platform::ManagedChild,
+    child: Mutex<crate::platform::ManagedChild>,
+    request: Mutex<PythonWorkerRequest>,
+    stderr: Arc<Mutex<String>>,
+    runtime: ApiPythonRuntimeConfig,
+}
+
+struct PythonWorkerRequest {
     stdin: ChildStdin,
     rx: Receiver<String>,
-    stderr: Arc<Mutex<String>>,
     next_id: u64,
-    runtime: ApiPythonRuntimeConfig,
 }
 
 #[derive(Deserialize)]
@@ -73,16 +77,24 @@ impl PythonWorkerSlot {
             .as_ref()
             .is_none_or(|worker| worker.runtime != *runtime);
         if needs_start {
-            *guard = Some(start_worker(runtime)?);
+            *guard = Some(Arc::new(start_worker(runtime)?));
         }
         let worker = guard
-            .as_mut()
+            .as_ref()
+            .cloned()
             .ok_or_else(|| "Python worker missing".to_string())?;
+        drop(guard);
         match worker.call(script, request) {
             Ok(response) => Ok(response),
             Err(error) => {
                 let detail = worker.stderr_text();
-                *guard = None;
+                let mut guard = crate::platform::lock_recover(&self.worker);
+                if guard
+                    .as_ref()
+                    .is_some_and(|current| Arc::ptr_eq(current, &worker))
+                {
+                    *guard = None;
+                }
                 if detail.is_empty() {
                     Err(error)
                 } else {
@@ -94,8 +106,8 @@ impl PythonWorkerSlot {
 
     pub fn stop(&self) {
         let mut guard = crate::platform::lock_recover(&self.worker);
-        if let Some(mut worker) = guard.take() {
-            let _ = worker.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
+        if let Some(worker) = guard.take() {
+            worker.terminate();
         }
     }
 }
@@ -159,11 +171,13 @@ fn start_worker(runtime: &ApiPythonRuntimeConfig) -> Result<PythonWorker, String
         .map_err(|err| err.to_string())?;
 
     Ok(PythonWorker {
-        child,
-        stdin,
-        rx,
+        child: Mutex::new(child),
+        request: Mutex::new(PythonWorkerRequest {
+            stdin,
+            rx,
+            next_id: 1,
+        }),
         stderr: stderr_text,
-        next_id: 1,
         runtime: runtime.clone(),
     })
 }
@@ -207,12 +221,18 @@ fn python_worker_command(
 
 impl PythonWorker {
     fn call(
-        &mut self,
+        &self,
         script: &ApiMockPythonScript,
         request: PythonMockRequest,
     ) -> Result<PythonMockResponse, String> {
+        let mut request_state = self
+            .request
+            .lock()
+            .map_err(|_| "Python worker request lock failed".to_string())?;
         if self
             .child
+            .lock()
+            .map_err(|_| "Python worker process lock failed".to_string())?
             .try_wait()
             .map_err(|err| err.to_string())?
             .is_some()
@@ -220,8 +240,8 @@ impl PythonWorker {
             return Err("Python worker exited before handling the request".to_string());
         }
 
-        let id = self.next_id.max(1);
-        self.next_id = self.next_id.saturating_add(1).max(1);
+        let id = request_state.next_id.max(1);
+        request_state.next_id = request_state.next_id.saturating_add(1).max(1);
         let msg = json!({
             "id": id,
             "prelude": script.prelude,
@@ -242,11 +262,17 @@ impl PythonWorker {
             "body": request.body,
             "fields": request.fields,
         });
-        serde_json::to_writer(&mut self.stdin, &msg).map_err(|err| err.to_string())?;
-        self.stdin.write_all(b"\n").map_err(|err| err.to_string())?;
-        self.stdin.flush().map_err(|err| err.to_string())?;
+        serde_json::to_writer(&mut request_state.stdin, &msg).map_err(|err| err.to_string())?;
+        request_state
+            .stdin
+            .write_all(b"\n")
+            .map_err(|err| err.to_string())?;
+        request_state
+            .stdin
+            .flush()
+            .map_err(|err| err.to_string())?;
         let timeout = Duration::from_millis(script.timeout_ms.clamp(50, 30_000));
-        let line = self.rx.recv_timeout(timeout).map_err(|error| match error {
+        let line = request_state.rx.recv_timeout(timeout).map_err(|error| match error {
             mpsc::RecvTimeoutError::Timeout => "Python mock timeout".to_string(),
             mpsc::RecvTimeoutError::Disconnected => {
                 "Python worker output stream closed".to_string()
@@ -282,17 +308,24 @@ impl PythonWorker {
             .map(|text| text.trim().to_string())
             .unwrap_or_default()
     }
+
+    fn terminate(&self) {
+        if let Ok(mut child) = self.child.lock() {
+            let _ = child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
+        }
+    }
 }
 
 impl Drop for PythonWorker {
     fn drop(&mut self) {
-        let _ = self.child.terminate(PYTHON_WORKER_SHUTDOWN_GRACE);
+        self.terminate();
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Instant;
 
     #[test]
     fn worker_command_uses_uv_managed_python_version() {
@@ -361,5 +394,46 @@ mod tests {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         assert_eq!(args, vec!["-3", r"C:\Users\Re YaN\worker.py"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stop_terminates_worker_during_route_call() {
+        let slot = Arc::new(PythonWorkerSlot::default());
+        let runtime = ApiPythonRuntimeConfig {
+            mode: ApiPythonRuntimeMode::CustomPython,
+            uv_path: None,
+            custom_python_path: Some(PathBuf::from("python3")),
+            python_version: "3.13".to_string(),
+        };
+        let mut script = super::super::types::default_api_mock_python_script();
+        script.body = "time.sleep(10)\nreturn Response(ok=True)".to_string();
+        script.prelude = "import time".to_string();
+        script.timeout_ms = 30_000;
+        let (started_tx, started_rx) = mpsc::channel();
+        let thread_slot = Arc::clone(&slot);
+        let call = std::thread::spawn(move || {
+            let _ = started_tx.send(());
+            thread_slot.call_route(
+                &runtime,
+                &script,
+                PythonMockRequest {
+                    method: "GET".to_string(),
+                    path: "/slow".to_string(),
+                    headers: BTreeMap::new(),
+                    params: BTreeMap::new(),
+                    query: BTreeMap::new(),
+                    body: Value::Null,
+                    fields: Value::Null,
+                },
+            )
+        });
+
+        started_rx.recv().unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        let started = Instant::now();
+        slot.stop();
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(call.join().unwrap().is_err());
     }
 }

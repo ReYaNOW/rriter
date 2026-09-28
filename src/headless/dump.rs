@@ -235,10 +235,11 @@ fn tabs_json(app: &App) -> Value {
                 // Inactive tabs keep their own state; the active one is swapped into `App`.
                 tab_json(TabView {
                     index,
-                    active: false,
+                    activity: TabActivity::Inactive,
                     path: tab.file_path.as_deref(),
                     title: &tab.base_title,
                     modified: app.tab_text_is_dirty(index),
+                    deleted: tab.deleted,
                     editor: &tab.editor,
                     scroll_y: &tab.scroll_y,
                     scroll_x: &tab.scroll_x,
@@ -252,10 +253,12 @@ fn tabs_json(app: &App) -> Value {
 fn active_tab_json(app: &App, index: usize) -> Value {
     tab_json(TabView {
         index,
-        active: true,
+        activity: TabActivity::Active,
         path: app.file_path.as_deref(),
         title: &app.base_title,
         modified: if app.tabs.is_empty() { app.editor.is_dirty() } else { app.tab_text_is_dirty(index) },
+        // `deleted` is not swapped into `App`: read it from the tab itself.
+        deleted: app.tabs.get(index).is_some_and(|tab| tab.deleted),
         editor: &app.editor,
         scroll_y: &app.scroll_y,
         scroll_x: &app.scroll_x,
@@ -265,14 +268,21 @@ fn active_tab_json(app: &App, index: usize) -> Value {
 
 struct TabView<'a> {
     index: usize,
-    active: bool,
+    activity: TabActivity,
     path: Option<&'a Path>,
     title: &'a str,
     modified: bool,
+    deleted: bool,
     editor: &'a Editor,
     scroll_y: &'a ScrollState,
     scroll_x: &'a ScrollState,
     markdown: bool,
+}
+
+#[derive(Clone, Copy)]
+enum TabActivity {
+    Active,
+    Inactive,
 }
 
 fn tab_json(tab: TabView<'_>) -> Value {
@@ -282,8 +292,9 @@ fn tab_json(tab: TabView<'_>) -> Value {
         // Output only, not persisted: `display()` is fine here.
         "path": tab.path.map(|path| path.display().to_string()),
         "title": tab.title,
-        "active": tab.active,
+        "active": matches!(tab.activity, TabActivity::Active),
         "modified": tab.modified,
+        "deleted": tab.deleted,
         "cursor": {"line": line, "col": col},
         "scroll_y": tab.scroll_y.current,
         "scroll_x": tab.scroll_x.current,

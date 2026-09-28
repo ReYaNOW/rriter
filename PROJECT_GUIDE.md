@@ -1466,6 +1466,12 @@ Root:
 * `src/headless/ui_tests_api_mock_python.rs` -> headless UI tests for API Mock Python handlers: served result, exception/syntax error → 500, edit after restart, and hot update on a running server.
 * `src/headless/ui_tests_api_mock_contract.rs` -> headless UI tests for the API Mock Python handler contract: path/query/JSON body arguments, missing optional query, and timeout → 500 with recovery.
 * `src/headless/ui_tests_api_client_multipart.rs` -> headless UI tests for API Client multipart bodies: fields and file parts, non-ASCII text, empty required field, missing file error.
+* `src/headless/ui_tests_pickers.rs` -> headless UI tests for API Client OpenAPI import, Welcome Open File/cancel, Settings IDE workspace picker, and Save As.
+* `src/headless/ui_tests_scrollbars_panels.rs` -> headless UI tests for Git workspace and API Mock combined editor scrollbar wheel/drag behavior.
+* `src/headless/ui_tests_terminal_scrollbar.rs` -> headless UI test for clicking the terminal scrollbar track to return toward the bottom.
+* `src/headless/ui_tests_problem_url.rs` -> headless UI test for opening a diagnostic URL through the external request log.
+* `src/headless/ui_tests_deleted_tab.rs` -> headless UI tests for deleting/recreating files while their clean or dirty tabs remain open.
+* `src/headless/ui_tests_editor_search_center.rs` -> headless UI tests for keeping editor search matches centered at 2560×1440 and 1280×720.
 * `src/headless/ui_tests_settings_tools.rs` -> headless UI tests for Settings tool rows: Refresh, clearing an override, install log copy/close, Dart Restart and LSP log in/outside IDE, and row button layout.
 * `src/headless/protocol.rs` -> headless line protocol: command parser (`parse_line`), `WxH` size limits (`parse_size`), scale limits (`parse_scale`), and `ok`/`err` response lines.
 * `src/headless/bench.rs` -> headless frame-cost measurement: frame budget (`resolve_budget`), measured frame loop (`run_frames`, `FrameRow`, GPU timer query), nearest-rank percentiles, `/proc` load/CPU and `nvidia-smi` samples, summary JSON, CSV, and the `info` payload.
@@ -1723,6 +1729,8 @@ Syntax/languages:
 * `src/highlighter/*` -> highlighter core and worker/test chunks.
 * `src/highlighter_tests.rs` -> highlighter unit tests.
 * `src/highlighter_runtime.rs` -> highlighter API, polling, span shifting/flattening.
+* `src/highlighter_runtime_tests.rs` -> runtime highlighter regression tests.
+* `src/highlighter/highlighter_core_tests.rs` -> highlighter worker test support.
 * `src/queries.rs` -> Tree-sitter queries/captures/injections/folds.
 * `src/languages/mod.rs` -> language registry.
 * `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.

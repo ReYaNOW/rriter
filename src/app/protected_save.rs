@@ -85,25 +85,55 @@ pub(crate) struct ProtectedSaves {
     slots: Vec<PathSlot>,
     next_id: ProtectedSaveId,
     writer: ProtectedWriter,
+    writer_injected: bool,
+    /// A headless `App` never elevates for real, even in cargo tests, where the
+    /// process-wide headless policy is not installed.
+    headless: bool,
     awaiting_action: Option<ProtectedSaveId>,
 }
 
 impl Default for ProtectedSaves {
     fn default() -> Self {
-        Self::with_writer(Arc::new(|path, text, format, cancel| {
-            crate::platform::write_text_file_elevated(path, text, format, cancel)
-        }))
+        Self::new(false)
     }
 }
 
 impl ProtectedSaves {
+    pub(crate) fn new(headless: bool) -> Self {
+        let mut saves = Self::with_writer(Arc::new(|path, text, format, cancel| {
+            crate::platform::write_text_file_elevated(path, text, format, cancel)
+        }));
+        saves.writer_injected = false;
+        saves.headless = headless;
+        saves
+    }
+
     pub(crate) fn with_writer(writer: ProtectedWriter) -> Self {
         Self {
             slots: Vec::new(),
             next_id: 1,
             writer,
+            writer_injected: true,
+            headless: false,
             awaiting_action: None,
         }
+    }
+
+    /// An injected writer is a fake, so it may run even where real elevation may not.
+    pub(crate) fn elevation_allowed(&self) -> bool {
+        self.writer_injected
+            || (!self.headless
+                && crate::platform::elevation_allowed(crate::platform::headless_policy()))
+    }
+
+    pub(crate) fn write_synchronously(
+        &self,
+        path: &Path,
+        text: &str,
+        format: TextFileFormat,
+        cancel: &AtomicBool,
+    ) -> io::Result<()> {
+        (self.writer)(path, text, format, cancel)
     }
 
     pub(crate) fn has_pending(&self) -> bool {

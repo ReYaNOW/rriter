@@ -1320,6 +1320,7 @@ fn database_tab(
         is_highlight_complete: highlighted,
         icon_key,
         closing_hints: Default::default(),
+        deleted: false,
         kind,
     }
 }

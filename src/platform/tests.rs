@@ -1435,6 +1435,29 @@ fn headless_policy_intercept_external() {
 }
 
 #[test]
+fn picker_answers_are_queued_per_log_and_shared_with_sink_clones() {
+    let log = ExternalRequestLog::default();
+    let sink = log.sink().clone();
+    let first = vec![PathBuf::from("/tmp/first")];
+    let second = vec![PathBuf::from("/tmp/second-a"), PathBuf::from("/tmp/second-b")];
+    log.queue_picker_answer(first.clone());
+    log.queue_picker_answer(second.clone());
+
+    let worker_sink = sink.clone();
+    assert_eq!(
+        std::thread::spawn(move || super::desktop_request::take_picker_answer(&worker_sink))
+            .join()
+            .unwrap(),
+        Some(first)
+    );
+    assert_eq!(super::desktop_request::take_picker_answer(&sink), Some(second));
+    assert_eq!(super::desktop_request::take_picker_answer(&sink), None);
+
+    log.queue_picker_answer(Vec::new());
+    assert_eq!(super::desktop_request::take_picker_answer(&sink), Some(Vec::new()));
+}
+
+#[test]
 fn headless_app_paths_for_root() {
     let root = PathBuf::from("/tmp/rriter-profile");
     let paths = app_paths_for_root(&root);

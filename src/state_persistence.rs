@@ -798,6 +798,7 @@ mod tests {
             icon_key: "default_file",
             syntax_errors: Vec::new(),
             closing_hints: Default::default(),
+            deleted: false,
             kind: crate::app::EditorTabKind::Normal,
         }
     }

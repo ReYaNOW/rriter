@@ -236,12 +236,14 @@ impl Renderer {
             );
             cy += input_h + 10.0 * s;
             if let Some(err) = import_error_visible {
-                self.draw_string_scaled_stable(
+                self.draw_tree_label_clipped(
                     err,
                     x + pad,
-                    cy + 10.0 * s,
+                    (cy + 10.0 * s).round(),
+                    (w - pad * 2.0).max(0.0),
                     [1.0, 0.38, 0.38, 1.0],
                     0.72,
+                    &mut error_scratch,
                 );
                 cy += crate::app::api_client::API_PANEL_IMPORT_ERROR_ADVANCE * s;
             }
@@ -329,12 +331,14 @@ impl Renderer {
             false,
         );
         cy += btn_h + 8.0 * s;
-        self.draw_string_scaled_pixel_snapped(
+        self.draw_tree_label_clipped(
             "Доступен устройствам в сети",
             x + pad,
             api_panel_row_text_y(cy, 22.0 * s, s),
+            (w - pad * 2.0).max(0.0),
             [0.58, 0.61, 0.70, 1.0],
             0.70,
+            &mut error_scratch,
         );
         cy += 22.0 * s;
         let status = match &api.mock.server_status {
@@ -344,12 +348,14 @@ impl Renderer {
             ApiMockServerStatus::Running { url } => url.clone(),
             ApiMockServerStatus::Failed(err) => format!("ошибка: {}", err),
         };
-        self.draw_string_scaled_pixel_snapped(
+        self.draw_tree_label_clipped(
             &status,
             x + pad,
             api_panel_row_text_y(cy, 26.0 * s, s),
+            (w - pad * 2.0 - if api.mock.server_status.running_url().is_some() { 22.0 * s } else { 0.0 }).max(0.0),
             [0.62, 0.66, 0.74, 1.0],
             0.82,
+            &mut error_scratch,
         );
         if api.mock.server_status.running_url().is_some() {
             let copy_size = 16.0 * s;
@@ -448,12 +454,14 @@ impl Renderer {
             false,
         );
         cy += btn_h + 8.0 * s;
-        self.draw_string_scaled_pixel_snapped(
+        self.draw_tree_label_clipped(
             "Базовый URL прокси для немокнутых запросов",
             x + pad,
             api_panel_row_text_y(cy, 20.0 * s, s),
+            (w - pad * 2.0).max(0.0),
             [0.58, 0.61, 0.70, 1.0],
             0.74,
+            &mut error_scratch,
         );
         cy += 20.0 * s;
         let proxy_x = x + pad;
@@ -513,21 +521,25 @@ impl Renderer {
                 format!("Свой Python · {}", runtime_status_label)
             }
         };
-        self.draw_string_scaled_pixel_snapped(
+        self.draw_tree_label_clipped(
             &runtime_status,
             x + pad,
             api_panel_row_text_y(cy, 24.0 * s, s),
+            (w - pad * 2.0).max(0.0),
             [0.62, 0.66, 0.74, 1.0],
             0.74,
+            &mut error_scratch,
         );
         cy += 24.0 * s;
         if !api.mock.uv.last_error.is_empty() {
-            self.draw_string_scaled_stable(
+            self.draw_tree_label_clipped(
                 &api.mock.uv.last_error,
                 x + pad,
-                cy + 16.0 * s,
+                (cy + 16.0 * s).round(),
+                (w - pad * 2.0).max(0.0),
                 [1.0, 0.70, 0.42, 1.0],
                 0.66,
+                &mut error_scratch,
             );
             cy += crate::app::api_client::API_PANEL_UV_ERROR_ADVANCE * s;
         }

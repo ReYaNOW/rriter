@@ -672,6 +672,7 @@ impl App {
             is_highlight_complete: true,
             icon_key: "default_file",
             closing_hints: Default::default(),
+            deleted: false,
             kind: EditorTabKind::GitDiff(meta.clone(), state),
         };
         self.tabs.push(tab);
