@@ -1445,6 +1445,7 @@ Root:
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
+* `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
 * `src/headless/ui_tests_settings_{general,appearance,database,ide}.rs` -> headless UI tests for Settings tabs Основные (Dart, scroll), Редактор (Ctrl+wheel multiplier), Базы данных (limits, scroll), IDE (ignore patterns, workspaces).
 * `src/headless/ui_tests_settings_help.rs` -> headless UI tests for Settings Help wheel/scrollbar clamping, scroll kept across tab switch, Escape close, and 2560×1440 layout.
 * `src/headless/ui_tests_editor_selection.rs` -> headless UI tests for double-click word, Shift+Home/End, Ctrl+A, Ctrl+Shift+arrows, and typing over a selection.

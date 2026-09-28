@@ -1,8 +1,8 @@
 //! Headless UI coverage for the Settings Help tab.
 
 use crate::headless::tests_support::{
-    assert_ui_rect_inside_window, click_ui, dump, has_ui, run_script, sample_file, scratch_dir,
-    session_for_test, ui_center, ui_rect, wait_until,
+    assert_ui_rect_inside_window, click_ui, dump, has_ui, open_settings_tab, run_script,
+    sample_file, scratch_dir, session_for_test, ui_center, ui_rect, wait_until,
 };
 use crate::headless::HeadlessSession;
 use std::path::{Path, PathBuf};
@@ -44,18 +44,8 @@ fn settings_help_session(name: &str, width: u32, height: u32) -> (PathBuf, Headl
         session.app.file_path.as_deref() == Some(file.as_path())
     });
 
-    let lines = run_script(&mut session, b"key f1\n");
-    assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    wait_until(&mut session, 5000, "Settings overlay tabs", |session| {
-        let state = dump(session);
-        state["overlays"]["settings"] == true
-            // The slide-in stops within 1.5 px of the open position, short of 1.0.
-            && session.app.settings_anim_progress >= 0.99
-            && has_ui(&state, "SettingsTab(4)")
-    });
+    open_settings_tab(&mut session, 4);
     assert_ui_rect_inside_window(&dump(&mut session), "SettingsTab(4)");
-
-    click_ui(&mut session, "SettingsTab(4)");
     wait_until(&mut session, 5000, "Help content and scrollbar", |session| {
         let state = dump(session);
         session.app.settings_tab == 4 && has_ui(&state, "SettingsFaqScrollY")

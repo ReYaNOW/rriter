@@ -4,6 +4,7 @@
 pub(crate) mod tests_support {
     use crate::headless::HeadlessSession;
     use crate::headless::profile::HeadlessOptions;
+    use crate::platform::{self, ToolKind};
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use std::net::{SocketAddr, TcpListener, TcpStream};
     use std::path::{Path, PathBuf};
@@ -11,6 +12,27 @@ pub(crate) mod tests_support {
     use std::sync::mpsc;
     use std::sync::OnceLock;
     use std::time::{Duration, Instant};
+
+    pub(crate) fn install_fake_ty(
+        session: &mut HeadlessSession,
+        dir: &Path,
+        basename: &str,
+    ) -> PathBuf {
+        let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("scripts")
+            .join("fake_lsp_server.py");
+        let executable = dir.join(basename);
+        std::fs::copy(source, &executable)
+            .unwrap_or_else(|err| panic!("copy fake LSP server: {err}"));
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
+            .unwrap_or_else(|err| panic!("make fake LSP server executable: {err}"));
+
+        session.app.tool_paths.set(ToolKind::Ty, Some(executable.clone()));
+        platform::configure_tool_paths(session.app.tool_paths.clone());
+        assert_eq!(platform::resolve_tool_kind(ToolKind::Ty).path, Some(executable.clone()));
+        executable
+    }
 
     static TEST_PROFILE_ROOT: OnceLock<PathBuf> = OnceLock::new();
     const POSTGRES_FIXTURE_DATABASE: &str = "rriter_pgo";
@@ -302,6 +324,22 @@ pub(crate) mod tests_support {
         let (x, y) = ui_center(&dump(session), id);
         let lines = run_script(session, format!("mouse_move {x} {y}\nclick\n").as_bytes());
         assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+    }
+
+    pub(crate) fn open_settings_tab(session: &mut HeadlessSession, tab: usize) {
+        let lines = run_script(session, b"key f1\n");
+        assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
+        wait_until(session, 5000, "Settings overlay tabs", |session| {
+            let state = dump(session);
+            state["overlays"]["settings"] == true
+                // The slide-in stops within 1.5 px of the open position, short of 1.0.
+                && session.app.settings_anim_progress >= 0.99
+                && has_ui(&state, &format!("SettingsTab({tab})"))
+        });
+        click_ui(session, &format!("SettingsTab({tab})"));
+        wait_until(session, 5000, "selected Settings tab", |session| {
+            session.app.settings_tab == tab
+        });
     }
 
     /// Point at (`x_fraction`, `y_fraction`) of the `id` hitbox, `(0, 0)` is its top-left.

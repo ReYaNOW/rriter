@@ -2,8 +2,8 @@
 
 use crate::app::DartSettings;
 use crate::headless::tests_support::{
-    assert_ui_rect_inside_window, click_ui, dump, has_ui, run_script, session_for_test, ui_rect,
-    wait_until,
+    assert_ui_rect_inside_window, click_ui, dump, has_ui, open_settings_tab, run_script,
+    session_for_test, ui_rect, wait_until,
 };
 use crate::headless::HeadlessSession;
 
@@ -13,12 +13,10 @@ const DEFAULT_SCALE: f32 = 1.0;
 const FRACTIONAL_SCALE: f32 = 4.0 / 3.0;
 
 fn open_general_settings(session: &mut HeadlessSession, scale: f32) {
-    let script = format!("scale {scale}\nkey f1\nwait 900\n");
+    let script = format!("scale {scale}\n");
     let lines = run_script(session, script.as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-    assert_eq!(dump(session)["overlays"]["settings"], true);
-
-    click_ui(session, "SettingsTab(1)");
+    open_settings_tab(session, 1);
     wait_until(session, 2000, "General settings content", |session| {
         has_ui(&dump(session), "SettingsRefreshTools")
     });

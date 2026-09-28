@@ -1,6 +1,6 @@
 use crate::headless::tests_support::{
     assert_ui_y_integral, click_ui, dump, git_fixture, has_ui, run_script, sample_file, scratch_dir,
-    session_for_test, shell_failed, ui_center, wait_until,
+    install_fake_ty, session_for_test, shell_failed, ui_center, wait_until,
 };
 
 fn click(session: &mut crate::headless::HeadlessSession, id: &str) {
@@ -39,16 +39,6 @@ fn write_python_hover_fixture(dir: &std::path::Path, source: &str) -> std::path:
     let file = dir.join("main.py");
     std::fs::write(&file, source).unwrap();
     file
-}
-
-fn has_available_lsp(session: &crate::headless::HeadlessSession, names: &[&str]) -> bool {
-    session.app.ide_panel.lsp_servers.iter().any(|server| {
-        names.contains(&server.name)
-            && !matches!(
-                server.status,
-                crate::lsp::LspServerStatus::Missing | crate::lsp::LspServerStatus::Crashed
-            )
-    })
 }
 
 fn open_hover_file(session: &mut crate::headless::HeadlessSession, file: &std::path::Path) {
@@ -300,12 +290,8 @@ fn headless_lsp_hover_popup_shows_symbol_and_dismisses_on_mouse_or_escape() {
     let source = hover_source_with_docs(2);
     let file = write_python_hover_fixture(&dir, &source);
     let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server.py");
     open_hover_file(&mut session, &file);
-    if !has_available_lsp(&session, &["ty"]) {
-        eprintln!("skip: no available ty LSP server");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
 
     let target = source.find("hover_subject").unwrap();
     mouse_move_to_source_offset(&mut session, target);
@@ -342,12 +328,8 @@ fn headless_lsp_hover_popup_stays_inside_window_at_right_and_bottom_edges() {
         };
         let source = edge_hover_source(target_row, target_column);
         let file = write_python_hover_fixture(&dir, &source);
+        install_fake_ty(&mut session, &dir, "fake_lsp_server.py");
         open_hover_file(&mut session, &file);
-        if !has_available_lsp(&session, &["ty"]) {
-            eprintln!("skip: no available ty LSP server");
-            let _ = std::fs::remove_dir_all(dir);
-            continue;
-        }
 
         let target = source.rfind("hover_subject").unwrap();
         let (mouse_x, mouse_y) = mouse_move_to_source_offset(&mut session, target);
@@ -375,12 +357,8 @@ fn headless_lsp_hover_popup_scrolls_long_documentation() {
     let source = hover_source_with_docs(18);
     let file = write_python_hover_fixture(&dir, &source);
     let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server_long.py");
     open_hover_file(&mut session, &file);
-    if !has_available_lsp(&session, &["ty"]) {
-        eprintln!("skip: no available ty LSP server");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);
@@ -415,24 +393,26 @@ fn headless_lsp_diagnostic_hover_popup_has_copy_control_when_diagnostics_exist()
     let source = "def broken_value() -> int:\n    return missing_hover_name\n";
     let file = write_python_hover_fixture(&dir, source);
     let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server_diagnostics.py");
     open_hover_file(&mut session, &file);
-    if !has_available_lsp(&session, &["ruff", "ty"]) {
-        eprintln!("skip: no available Python LSP server");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
-    run_script(&mut session, b"wait 5000\n");
+    // Ty publishDiagnostics land in the live (instant) store that the hover popup reads via
+    // `instant_merged_diagnostics`; `get_diagnostics` only sees the legacy map.
+    wait_until(&mut session, 5000, "fake Ty error diagnostic", |session| {
+        session.app.lsp.as_ref().is_some_and(|lsp| {
+            lsp.instant_merged_diagnostics(&file)
+                .1
+                .iter()
+                .any(|diagnostic| diagnostic.severity == crate::lsp::DiagSeverity::Error)
+        })
+    });
     let diagnostic = session.app.lsp.as_ref().and_then(|lsp| {
-        lsp.get_diagnostics(&file)
-            .iter()
+        lsp.instant_merged_diagnostics(&file)
+            .1
+            .into_iter()
             .find(|diagnostic| diagnostic.severity == crate::lsp::DiagSeverity::Error)
             .map(|diagnostic| diagnostic.message.to_string())
     });
-    if diagnostic.is_none() {
-        eprintln!("skip: no Python error diagnostic available");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
+    diagnostic.expect("fake Ty error diagnostic missing");
 
     mouse_move_to_source_offset(&mut session, source.find("missing_hover_name").unwrap());
     wait_for_hover(&mut session);
@@ -465,12 +445,8 @@ fn headless_bug_hover_popup_hitbox_y_is_pixel_aligned() {
     let source = hover_source_with_docs(18);
     let file = write_python_hover_fixture(&dir, &source);
     let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server_long.py");
     open_hover_file(&mut session, &file);
-    if !has_available_lsp(&session, &["ty"]) {
-        eprintln!("skip: no available ty LSP server");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);
@@ -495,12 +471,8 @@ fn headless_bug_typing_hides_lsp_hover_popup() {
     let source = hover_source_with_docs(2);
     let file = write_python_hover_fixture(&dir, &source);
     let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server.py");
     open_hover_file(&mut session, &file);
-    if !has_available_lsp(&session, &["ty"]) {
-        eprintln!("skip: no available ty LSP server");
-        let _ = std::fs::remove_dir_all(dir);
-        return;
-    }
 
     mouse_move_to_source_offset(&mut session, source.find("hover_subject").unwrap());
     wait_for_hover(&mut session);

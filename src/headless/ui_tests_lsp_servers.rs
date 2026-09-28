@@ -1,9 +1,8 @@
 use crate::headless::tests_support::{
-    click_ui, dump, has_ui, scratch_dir, wait_until, workspace_with_explorer,
+    click_ui, dump, has_ui, install_fake_ty, scratch_dir, wait_until, workspace_with_explorer,
 };
-use crate::platform::{self, ToolKind, ToolPaths};
+use crate::platform::{self, ToolPaths};
 use crate::lsp::LspServerStatus;
-use std::path::{Path, PathBuf};
 
 struct ToolPathsReset(ToolPaths);
 
@@ -11,27 +10,6 @@ impl Drop for ToolPathsReset {
     fn drop(&mut self) {
         platform::configure_tool_paths(self.0.clone());
     }
-}
-
-fn install_fake_ty(
-    session: &mut crate::headless::HeadlessSession,
-    dir: &Path,
-    filename: &str,
-) -> PathBuf {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("scripts")
-        .join("fake_lsp_server.py");
-    let executable = dir.join(filename);
-    std::fs::copy(source, &executable)
-        .unwrap_or_else(|err| panic!("copy fake LSP server: {err}"));
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
-        .unwrap_or_else(|err| panic!("make fake LSP server executable: {err}"));
-
-    session.app.tool_paths.set(ToolKind::Ty, Some(executable.clone()));
-    platform::configure_tool_paths(session.app.tool_paths.clone());
-    assert_eq!(platform::resolve_tool_kind(ToolKind::Ty).path, Some(executable.clone()));
-    executable
 }
 
 fn ty_index(session: &crate::headless::HeadlessSession) -> usize {

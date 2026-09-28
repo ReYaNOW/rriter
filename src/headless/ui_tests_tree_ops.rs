@@ -21,7 +21,7 @@ fn tree_fixture(name: &str) -> PathBuf {
     dir
 }
 
-fn tree_node_count(state: &Value) -> usize {
+pub(crate) fn tree_node_count(state: &Value) -> usize {
     state["ui"]
         .as_array()
         .unwrap()
@@ -54,7 +54,7 @@ fn open_context_menu_at(session: &mut HeadlessSession, x: f64, y: f64) {
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
 }
 
-fn open_context_menu_on_node(session: &mut HeadlessSession, id: &str) {
+pub(crate) fn open_context_menu_on_node(session: &mut HeadlessSession, id: &str) {
     let (x, y) = ui_center(&dump(session), id);
     open_context_menu_at(session, x, y);
 }
