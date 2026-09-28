@@ -22,7 +22,7 @@ fn database_query_session(name: &str) -> (std::path::PathBuf, PostgresFixture, H
         .databases
         .iter()
         .position(|database| database.name == fixture.database)
-        .expect("fixture database in catalog");
+        .unwrap_or_else(|| panic!("fixture database in catalog"));
     let database_row = format!("DatabaseRow({connection_index}, {database_index})");
     wait_until(&mut session, 5000, "fixture database row", |session| {
         has_ui(&dump(session), &database_row)

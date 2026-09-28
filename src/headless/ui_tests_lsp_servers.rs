@@ -22,10 +22,11 @@ fn install_fake_ty(
         .join("scripts")
         .join("fake_lsp_server.py");
     let executable = dir.join(filename);
-    std::fs::copy(source, &executable).expect("copy fake LSP server");
+    std::fs::copy(source, &executable)
+        .unwrap_or_else(|err| panic!("copy fake LSP server: {err}"));
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755))
-        .expect("make fake LSP server executable");
+        .unwrap_or_else(|err| panic!("make fake LSP server executable: {err}"));
 
     session.app.tool_paths.set(ToolKind::Ty, Some(executable.clone()));
     platform::configure_tool_paths(session.app.tool_paths.clone());
@@ -40,7 +41,7 @@ fn ty_index(session: &crate::headless::HeadlessSession) -> usize {
         .lsp_servers
         .iter()
         .position(|server| server.name == "ty")
-        .expect("Ty server is listed in LSP panel")
+        .unwrap_or_else(|| panic!("Ty server is listed in LSP panel"))
 }
 
 fn open_lsp_panel(session: &mut crate::headless::HeadlessSession) {

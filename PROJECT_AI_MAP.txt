@@ -5982,11 +5982,11 @@ F headless_bug_settings_hitboxes_inside_window_size_matrix@475>3qd,3qm,3qs,3y6,3
 M src/headless/ui_tests_lsp_servers.rs
 C struct ToolPathsReset@8
 F install_fake_ty@16
-F ty_index@36
-F open_lsp_panel@46>3qm
-F headless_lsp_servers_panel_lists_configured_ty_and_starts_it@51>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
-F headless_lsp_servers_panel_stop_returns_ty_to_disabled@80>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
-F headless_lsp_servers_panel_reports_fake_ty_crash_without_restart_loop@107>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
+F ty_index@37
+F open_lsp_panel@47>3qm
+F headless_lsp_servers_panel_lists_configured_ty_and_starts_it@52>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
+F headless_lsp_servers_panel_stop_returns_ty_to_disabled@81>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
+F headless_lsp_servers_panel_reports_fake_ty_crash_without_restart_loop@108>3q8,3q9,3qe,3qm,3qs,3yq,3yk,3yl,3ym
 I ToolPathsReset
 F drop@11
 M src/headless/ui_tests_markdown.rs
