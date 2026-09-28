@@ -7,12 +7,12 @@ Agents with file access follow `AGENTS.md` instead.
 
 When source files unavailable:
 
-1. Use `code-review-graph` MCP to inspect relevant files/symbols/call edges.
-2. If MCP unavailable, use `PROJECT_AI_MAP.txt` fallback.
+1. Use `rg` to find relevant files and symbols; inspect references to identify likely callers/callees.
+2. Use `PROJECT_AI_MAP.txt` for approximate call edges when useful.
 3. Pick minimal files.
 4. Ask complete files.
 5. No exact patches before full source.
-6. No exact code from graph/map/index.
+6. No exact code from search results/map/index.
 
 Fallback map format for `PROJECT_AI_MAP.txt`:
 
@@ -30,14 +30,14 @@ Required file request format:
 Need files:
 1. path/to/file.rs
    Reason: exact code needed for `Owner.method` / behavior.
-   Graph ref: `file_summary` / `callers_of` / `callees_of` result for target symbol.
+   Search ref: `rg -n 'Owner.method' path/to/file.rs` result for target symbol.
 
 2. path/to/other.rs
    Reason: called by / calls previous symbol.
-   Graph ref: direct caller/callee from `code-review-graph`.
+   Search/map ref: `rg` references or approximate call edge from `PROJECT_AI_MAP.txt`.
 ```
 
-If MCP unavailable and fallback map is used:
+When the fallback map is used:
 
 ```text
 Need files:

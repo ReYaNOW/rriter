@@ -1,8 +1,8 @@
 Architecture guide for RRiter.
 
-Use this file only when broader architecture context is needed. For file selection, prefer `code-review-graph` MCP.
+Use this file only when broader architecture context is needed. For file selection, prefer `rg`.
 
-Use `PROJECT_AI_MAP.txt` only as fallback when MCP is unavailable.
+Use `PROJECT_AI_MAP.txt` as a fallback AI source index/call map; it is not exact source.
 
 ## 1. Product philosophy
 
@@ -348,8 +348,7 @@ Use `make codex_test` when tests matter.
 
 Generates fallback `PROJECT_AI_MAP.txt`.
 
-Primary project index/call graph is `code-review-graph` MCP.
-Use this script only when maintaining fallback map.
+Use this script to maintain the AI source index/call map.
 
 Use after source layout changes if fallback map must stay current:
 
@@ -361,38 +360,9 @@ make api-map
 
 Fallback compact AI navigation map.
 
-Use only when `code-review-graph` MCP is unavailable or broken.
-
 Used to select source files and understand approximate call edges.
 
 Not source code. Never create exact patches from this map only.
-
-#### `.code-review-graph/`
-
-Generated graph database for `code-review-graph`.
-
-Do not edit manually.
-Do not commit.
-
-Regenerate with:
-
-```bash
-code-review-graph build
-```
-
-If full postprocess is too slow, usable fallback build:
-
-```bash
-code-review-graph build --skip-postprocess
-```
-
-Recommended `.code-review-graphignore`:
-
-```text
-target/
-.git/
-.code-review-graph/
-```
 
 #### `AGENTS.md`
 
@@ -1425,18 +1395,6 @@ Use tests when behavior is test-covered:
 make test
 ```
 
-Regenerate `code-review-graph` after structural source changes:
-
-```bash
-code-review-graph build
-```
-
-If full postprocess is too slow, use:
-
-```bash
-code-review-graph build --skip-postprocess
-```
-
 Regenerate fallback AI map only when needed:
 
 ```bash
@@ -1450,9 +1408,7 @@ One-line index of files by subsystem (moved from `AGENTS.md`). Keep it updated w
 Root:
 
 * `AGENTS.md` -> agent rules.
-* `.code-review-graph/` -> generated code-review graph database. Do not edit manually. Ignored by git.
-* `.code-review-graphignore` -> graph ignore rules. Must ignore `target/`, `.git/`, `.code-review-graph/`.
-* `PROJECT_AI_MAP.txt` -> fallback AI source index/call map. Not exact source. Use only when `code-review-graph` MCP unavailable.
+* `PROJECT_AI_MAP.txt` -> fallback AI source index/call map; not exact source.
 * `PROJECT_GUIDE.md` -> broader architecture guide.
 * `WINDOWS_BUILD.md` -> clean Windows 11 toolchain, build, installer, signing, and runtime-tool commands.
 * `MACOS_BUILD.md` -> native/Universal 2 app, signing, notarization, and DMG commands.
@@ -1494,7 +1450,9 @@ Root:
 * `src/headless/ui_tests_splitters.rs` -> headless UI tests for bottom/side panel splitter drag and bounds, and status bar placement.
 * `src/headless/ui_tests_api_mock.rs` -> headless UI tests for API Mock route editing, real HTTP responses, 404 in MockAll, Stop, and Python/contract controls.
 * `src/headless/ui_tests_database_connect.rs` -> headless UI tests for the Database connection form, fixture catalog/table open, and closed-port error.
+* `src/headless/ui_tests_database_edit.rs` -> headless UI tests for UPDATE…RETURNING, successful DDL, table cell save/reload, and primary-key edit errors.
 * `src/headless/ui_tests_database_query.rs` -> headless UI tests for SQL console SELECT grid, EXPLAIN plan, and server error text with a usable console after it.
+* `src/headless/ui_tests_lsp_servers.rs` -> headless UI tests for configured LSP server start/Stop, Disabled state, and bounded crash restarts.
 * `src/headless/ui_tests_tabs_dirty.rs` -> headless UI tests for the dirty-tab close dialog: Save (incl. CRLF), Cancel, Escape, outside click, and close after Ctrl+S.
 * `src/headless/ui_tests_keyboard_panels.rs` -> headless UI tests for panel shortcuts Alt+Q/Shift+Alt+Q terminal, F1 in terminal focus, Alt+W Problems, and Ctrl+Shift+F from the terminal.
 * `src/headless/ui_tests_api_client_import.rs` -> headless UI tests for OpenAPI import by URL from a local HTTP server: routes, URL validation, 404/invalid JSON errors, and no duplicate spec on re-import.

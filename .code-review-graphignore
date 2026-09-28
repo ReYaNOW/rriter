@@ -1,4 +1,0 @@
-target/
-.git/
-.code-review-graph/
-*.lock
