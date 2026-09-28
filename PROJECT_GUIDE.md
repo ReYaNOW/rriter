@@ -358,7 +358,7 @@ make api-map
 
 #### `PROJECT_AI_MAP.txt`
 
-Fallback compact AI navigation map.
+Fallback compact AI navigation map. Not tracked in git: the pre-commit hook regenerates it locally (`make api-map`).
 
 Used to select source files and understand approximate call edges.
 
