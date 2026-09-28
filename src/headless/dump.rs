@@ -170,7 +170,14 @@ pub(crate) fn dump_json(app: &mut App, loop_state: &HeadlessLoopState) -> Value 
         "cursor_icon": format!("{:?}", app.current_cursor),
         "mode": mode,
         "tabs": tabs_json(app),
-        "editor": {"lines": app.editor.line_offsets.len(), "selection": selection},
+        "editor": {
+            "lines": app.editor.line_offsets.len(),
+            "cursor": app.editor.cursor,
+            "selection": selection,
+            "extra_cursors": app.editor.extra_cursors(),
+            "highlight_version": app.highlighter.current_version,
+            "highlight_spans": app.highlighter.spans.iter().map(|span| [span.start, span.end]).collect::<Vec<_>>(),
+        },
         "ide_panel": {"active": active_panel, "open": open_panels, "width": panel.left_width},
         "overlays": {
             "settings": app.show_settings,

@@ -55,7 +55,7 @@ pub(crate) enum Command {
     Resize { w: u32, h: u32 },
     Scale(f64),
     MouseMove { x: f64, y: f64 },
-    Click { button: MouseButtonArg, phase: ClickPhase },
+    Click { button: MouseButtonArg, phase: ClickPhase, alt: bool },
     DblClick { button: MouseButtonArg },
     Wheel { dx: f64, dy: f64, unit: WheelUnit },
     Key { input: KeyInput, mods: ModifiersState, combo: String },
@@ -336,8 +336,11 @@ fn button_arg(t: &str) -> Option<MouseButtonArg> {
 fn parse_click(args: &mut Args) -> Result<Command, String> {
     let mut button = None;
     let mut phase = None;
+    let mut alt = false;
     while let Some(t) = args.token() {
-        let duplicate = if let Some(b) = button_arg(t) {
+        let duplicate = if t == "alt" {
+            std::mem::replace(&mut alt, true)
+        } else if let Some(b) = button_arg(t) {
             button.replace(b).is_some()
         } else {
             let p = match t {
@@ -354,6 +357,7 @@ fn parse_click(args: &mut Args) -> Result<Command, String> {
     Ok(Command::Click {
         button: button.unwrap_or(MouseButtonArg::Left),
         phase: phase.unwrap_or(ClickPhase::Both),
+        alt,
     })
 }
 
@@ -488,12 +492,13 @@ mod tests {
     #[test]
     fn headless_protocol_parses_mouse_commands() {
         assert_eq!(cmd("mouse_move 10.5 -3"), Command::MouseMove { x: 10.5, y: -3.0 });
-        let click = |button, phase| Command::Click { button, phase };
+        let click = |button, phase| Command::Click { button, phase, alt: false };
         assert_eq!(cmd("click"), click(MouseButtonArg::Left, ClickPhase::Both));
         assert_eq!(cmd("click right"), click(MouseButtonArg::Right, ClickPhase::Both));
         assert_eq!(cmd("click down"), click(MouseButtonArg::Left, ClickPhase::Down));
         assert_eq!(cmd("click up right"), click(MouseButtonArg::Right, ClickPhase::Up));
         assert_eq!(cmd("click middle down"), click(MouseButtonArg::Middle, ClickPhase::Down));
+        assert_eq!(cmd("click alt"), Command::Click { button: MouseButtonArg::Left, phase: ClickPhase::Both, alt: true });
         assert_eq!(cmd("dblclick"), Command::DblClick { button: MouseButtonArg::Left });
         assert_eq!(cmd("dblclick middle"), Command::DblClick { button: MouseButtonArg::Middle });
         assert_eq!(cmd("wheel 0 -3"), Command::Wheel { dx: 0.0, dy: -3.0, unit: WheelUnit::Lines });

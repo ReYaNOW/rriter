@@ -825,9 +825,21 @@ impl Editor {
         }
         // Урезаем лимит памяти на историю: 5 МБ на вкладку (вместо 50 МБ)
         while self.history_size > 5 * 1024 * 1024 {
-            if let Some(old) = self.history.pop_front() {
-                let old_size = edit_op_size(&old.op);
-                self.history_size -= old_size;
+            // A multi-cursor group is evicted whole: undo of a half-evicted group would
+            // leave part of one action in the text. The group being recorded stays.
+            let Some(group_id) = self.history.front().map(|step| step.group_id) else {
+                break;
+            };
+            if group_id.is_some() && group_id == self.active_history_group_id {
+                break;
+            }
+            while let Some(old) = self.history.pop_front() {
+                self.history_size = self.history_size.saturating_sub(edit_op_size(&old.op));
+                if group_id.is_none()
+                    || self.history.front().is_none_or(|step| step.group_id != group_id)
+                {
+                    break;
+                }
             }
         }
     }

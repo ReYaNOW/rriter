@@ -5,15 +5,21 @@ fn sync_edit_line_range(
     line_offsets: &[usize],
     text_len: usize,
 ) -> (Option<usize>, Option<usize>) {
-    let edit_start_byte = edits.first().map(|edit| match edit {
-        crate::highlighter::SyncEdit::Insert { offset, .. } => *offset,
-        crate::highlighter::SyncEdit::Delete { offset, .. } => *offset,
-    });
-
-    let edit_end_byte = edits.last().map(|edit| match edit {
-        crate::highlighter::SyncEdit::Insert { offset, text } => offset + text.len(),
-        crate::highlighter::SyncEdit::Delete { offset, .. } => *offset,
-    });
+    let (edit_start_byte, edit_end_byte) = edits.iter().fold(
+        (None, None),
+        |(start, end), edit| {
+            let (edit_start, edit_end) = match edit {
+                crate::highlighter::SyncEdit::Insert { offset, text } => {
+                    (*offset, offset + text.len())
+                }
+                crate::highlighter::SyncEdit::Delete { offset, .. } => (*offset, *offset),
+            };
+            (
+                Some(start.map_or(edit_start, |current: usize| current.min(edit_start))),
+                Some(end.map_or(edit_end, |current: usize| current.max(edit_end))),
+            )
+        },
+    );
 
     let (Some(sb), Some(eb)) = (edit_start_byte, edit_end_byte) else {
         return (None, None);
@@ -357,16 +363,30 @@ impl App {
         }
 
         crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
-        let (deleted, inserted_len) = self.editor.insert_str(text);
-        if let Some((offset, len)) = deleted {
-            self.highlighter.shift_delete(offset, len);
+        let multi_cursor_active = self.editor.has_extra_cursors();
+        if multi_cursor_active {
+            self.editor.apply_at_all_cursors(|editor| {
+                editor.insert_str(text);
+            });
+        } else {
+            let (deleted, inserted_len) = self.editor.insert_str(text);
+            if let Some((offset, len)) = deleted {
+                self.highlighter.shift_delete(offset, len);
+            }
+            self.highlighter
+                .shift_insert(self.editor.cursor - inserted_len, inserted_len, Some(text));
         }
-        self.highlighter
-            .shift_insert(self.editor.cursor - inserted_len, inserted_len, Some(text));
         let trigger = (text == ".").then_some(".");
         let wants_completion =
             text == "." || text.chars().all(|ch| ch.is_alphanumeric() || ch == '_');
-        self.finish_editor_edit_after_input(false, false, false, wants_completion, trigger, true);
+        self.finish_editor_edit_after_input(
+            false,
+            false,
+            multi_cursor_active,
+            wants_completion && !multi_cursor_active,
+            if multi_cursor_active { None } else { trigger },
+            true,
+        );
 
         let database_query_tab = self.active_tab_is_database_query();
         if let (Some(window), Some(renderer)) = (self.window.as_ref(), self.renderer.as_mut()) {
@@ -448,6 +468,36 @@ impl App {
                 shift,
             )
             .is_some();
+        if self.editor.has_extra_cursors() {
+            let plain_navigation = !shift && (!self.modifiers.alt_key() || word);
+            let multi_cursor_action = has_text_insert
+                || (physical_key == PhysicalKey::Code(KeyCode::Space)
+                    && crate::platform::text_input_modifiers_allowed(self.modifiers))
+                || (!ctrl && !self.modifiers.alt_key()
+                    && matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter)))
+                || (ctrl && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)))
+                || (plain_navigation
+                    && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
+                    && ((!ctrl && !word) || word))
+                || (plain_navigation
+                    && !ctrl
+                    && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::Home | KeyCode::End)));
+            if physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                self.editor.clear_extra_cursors();
+                self.close_autocomplete();
+                if let Some(window) = self.window.as_ref() {
+                    window.request_redraw();
+                }
+                return;
+            }
+            if !multi_cursor_action {
+                self.editor.clear_extra_cursors();
+            }
+        }
+        let multi_cursor_active = self.editor.has_extra_cursors();
+        if multi_cursor_active {
+            self.close_autocomplete();
+        }
         let markdown_action = markdown_editor_key_action(
             self.active_document_is_markdown(),
             self.markdown_mode() == crate::app::MarkdownMode::Read,
@@ -526,7 +576,7 @@ impl App {
             return;
         }
 
-        if self.autocomplete_active {
+        if self.autocomplete_active && !multi_cursor_active {
             match self.handle_active_autocomplete_key(physical_key, ctrl) {
                 AutocompletePopupKeyResult::Consumed => return,
                 AutocompletePopupKeyResult::Continue | AutocompletePopupKeyResult::NotHandled => {}
@@ -763,31 +813,59 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::ArrowLeft) => {
                 if word {
-                    self.editor.move_word_left(shift);
+                    if multi_cursor_active {
+                        self.editor.move_all_cursors(|editor| editor.move_word_left(false));
+                    } else {
+                        self.editor.move_word_left(shift);
+                    }
                 } else {
-                    self.editor.move_left(shift);
+                    if multi_cursor_active {
+                        self.editor.move_all_cursors(|editor| editor.move_left(false));
+                    } else {
+                        self.editor.move_left(shift);
+                    }
                 }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowRight) => {
                 if word {
-                    self.editor.move_word_right(shift);
+                    if multi_cursor_active {
+                        self.editor.move_all_cursors(|editor| editor.move_word_right(false));
+                    } else {
+                        self.editor.move_word_right(shift);
+                    }
                 } else {
-                    self.editor.move_right(shift);
+                    if multi_cursor_active {
+                        self.editor.move_all_cursors(|editor| editor.move_right(false));
+                    } else {
+                        self.editor.move_right(shift);
+                    }
                 }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
-                self.editor.move_up(self.renderer.as_mut().unwrap(), shift);
+                if multi_cursor_active {
+                    let renderer = self.renderer.as_mut().unwrap();
+                    self.editor.move_all_cursors(|editor| editor.move_up(renderer, false));
+                } else {
+                    self.editor.move_up(self.renderer.as_mut().unwrap(), shift);
+                }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
-                self.editor
-                    .move_down(self.renderer.as_mut().unwrap(), shift);
+                if multi_cursor_active {
+                    let renderer = self.renderer.as_mut().unwrap();
+                    self.editor.move_all_cursors(|editor| editor.move_down(renderer, false));
+                } else {
+                    self.editor
+                        .move_down(self.renderer.as_mut().unwrap(), shift);
+                }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Home) => {
-                if ctrl {
+                if multi_cursor_active {
+                    self.editor.move_all_cursors(|editor| editor.move_home(false));
+                } else if ctrl {
                     self.editor.move_start_of_file(shift);
                 } else {
                     self.editor.move_home(shift);
@@ -795,7 +873,9 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::End) => {
-                if ctrl {
+                if multi_cursor_active {
+                    self.editor.move_all_cursors(|editor| editor.move_end(false));
+                } else if ctrl {
                     self.editor.move_end_of_file(shift);
                 } else {
                     self.editor.move_end(shift);
@@ -851,9 +931,14 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Backspace) => {
+                let before_sync_edits = self.editor.sync_edits.len();
                 let before_cursor = self.editor.cursor;
                 let before_lines = self.editor.line_offsets.clone();
-                if let Some((offset, len)) = self.editor.backspace() {
+                if multi_cursor_active {
+                    self.editor.apply_at_all_cursors(|editor| {
+                        editor.backspace();
+                    });
+                } else if let Some((offset, len)) = self.editor.backspace() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     force_close_autocomplete = backspace_crossed_line(
@@ -869,10 +954,21 @@ impl App {
                         }
                     }
                 }
+                if multi_cursor_active && self.editor.sync_edits.len() > before_sync_edits {
+                    is_edit = true;
+                    force_close_autocomplete = true;
+                }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Delete) => {
-                if let Some((offset, len)) = self.editor.delete_forward() {
+                if multi_cursor_active {
+                    let before_sync_edits = self.editor.sync_edits.len();
+                    self.editor.apply_at_all_cursors(|editor| {
+                        editor.delete_forward();
+                    });
+                    is_edit = self.editor.sync_edits.len() > before_sync_edits;
+                    force_close_autocomplete = is_edit;
+                } else if let Some((offset, len)) = self.editor.delete_forward() {
                     self.highlighter.shift_delete(offset, len);
                     is_edit = true;
                     if self.autocomplete_active {
@@ -885,19 +981,28 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::Enter) => {
-                let indent = self.editor.get_auto_indent();
-                let insert_text = format!("\n{}", indent);
-                let (del_info, ins_len) = self.editor.insert_str(&insert_text);
-                if let Some((offset, len)) = del_info {
-                    self.highlighter.shift_delete(offset, len);
+                if multi_cursor_active {
+                    self.editor.apply_at_all_cursors(|editor| {
+                        let insert_text = format!("\n{}", editor.get_auto_indent());
+                        editor.insert_str(&insert_text);
+                    });
+                    is_edit = true;
+                    force_close_autocomplete = true;
+                } else {
+                    let indent = self.editor.get_auto_indent();
+                    let insert_text = format!("\n{}", indent);
+                    let (del_info, ins_len) = self.editor.insert_str(&insert_text);
+                    if let Some((offset, len)) = del_info {
+                        self.highlighter.shift_delete(offset, len);
+                    }
+                    self.highlighter.shift_insert(
+                        self.editor.cursor - ins_len,
+                        ins_len,
+                        Some(&insert_text),
+                    );
+                    is_edit = true;
                 }
-                self.highlighter.shift_insert(
-                    self.editor.cursor - ins_len,
-                    ins_len,
-                    Some(&insert_text),
-                );
                 cursor_moved = true;
-                is_edit = true;
             }
             PhysicalKey::Code(KeyCode::Tab) => {
                 let (del_info, ins_len) = self.editor.insert_str("    ");
@@ -934,14 +1039,22 @@ impl App {
                 return;
             }
             PhysicalKey::Code(KeyCode::Space) => {
-                let (del_info, ins_len) = self.editor.insert_str(" ");
-                if let Some((offset, len)) = del_info {
-                    self.highlighter.shift_delete(offset, len);
+                if multi_cursor_active {
+                    self.editor.apply_at_all_cursors(|editor| {
+                        editor.insert_str(" ");
+                    });
+                    is_edit = true;
+                    force_close_autocomplete = true;
+                } else {
+                    let (del_info, ins_len) = self.editor.insert_str(" ");
+                    if let Some((offset, len)) = del_info {
+                        self.highlighter.shift_delete(offset, len);
+                    }
+                    self.highlighter
+                        .shift_insert(self.editor.cursor - ins_len, ins_len, Some(" "));
+                    is_edit = true;
                 }
-                self.highlighter
-                    .shift_insert(self.editor.cursor - ins_len, ins_len, Some(" "));
                 cursor_moved = true;
-                is_edit = true;
                 should_notify_lsp = false;
             }
             PhysicalKey::Code(KeyCode::Digit4) if ctrl => {
@@ -996,20 +1109,28 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyV) if ctrl => {
                 if let Some(text) = self.get_clipboard_text() {
-                    let (del_info, ins_len) = self.editor.insert_str(&text);
-                    if del_info.is_some() || ins_len > 0 {
-                        if let Some((offset, len)) = del_info {
-                            self.highlighter.shift_delete(offset, len);
+                    if multi_cursor_active {
+                        let before_sync_edits = self.editor.sync_edits.len();
+                        self.editor.paste_at_all_cursors(&text);
+                        is_edit = self.editor.sync_edits.len() > before_sync_edits;
+                        force_close_autocomplete = is_edit;
+                        cursor_moved = true;
+                    } else {
+                        let (del_info, ins_len) = self.editor.insert_str(&text);
+                        if del_info.is_some() || ins_len > 0 {
+                            if let Some((offset, len)) = del_info {
+                                self.highlighter.shift_delete(offset, len);
+                            }
+                            self.highlighter.shift_insert(
+                                self.editor.cursor - ins_len,
+                                ins_len,
+                                Some(&text),
+                            );
+                            is_edit = true;
                         }
-                        self.highlighter.shift_insert(
-                            self.editor.cursor - ins_len,
-                            ins_len,
-                            Some(&text),
-                        );
-                        is_edit = true;
+                        cursor_moved = true;
                     }
                 }
-                cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::KeyA) if ctrl => {
                 self.editor.select_all();
@@ -1045,28 +1166,38 @@ impl App {
                             });
                         }
 
-                        let (del_info, ins_len) = self.editor.insert_str(insert_txt);
-                        if let Some((offset, len)) = del_info {
-                            self.highlighter.shift_delete(offset, len);
-                        }
-                        self.highlighter.shift_insert(
-                            self.editor.cursor - ins_len,
-                            ins_len,
-                            Some(insert_txt),
-                        );
-                        if move_inside_pair {
-                            self.editor.move_left(false);
+                        if multi_cursor_active {
+                            self.editor.apply_at_all_cursors(|editor| {
+                                editor.insert_str(insert_txt);
+                                if move_inside_pair {
+                                    editor.move_left(false);
+                                }
+                            });
+                            force_close_autocomplete = true;
+                        } else {
+                            let (del_info, ins_len) = self.editor.insert_str(insert_txt);
+                            if let Some((offset, len)) = del_info {
+                                self.highlighter.shift_delete(offset, len);
+                            }
+                            self.highlighter.shift_insert(
+                                self.editor.cursor - ins_len,
+                                ins_len,
+                                Some(insert_txt),
+                            );
+                            if move_inside_pair {
+                                self.editor.move_left(false);
+                            }
                         }
                         cursor_moved = true;
                         is_edit = true;
 
-                        if txt == "." {
+                        if txt == "." && !multi_cursor_active {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(".");
-                        } else if self.file_extension == "dart" && matches!(txt, "(" | ",") {
+                        } else if !multi_cursor_active && self.file_extension == "dart" && matches!(txt, "(" | ",") {
                             should_trigger_autocomplete = true;
                             ty_completion_trigger = Some(if txt == "(" { "(" } else { "," });
-                        } else if txt.chars().all(|c| c.is_alphanumeric() || c == '_') {
+                        } else if !multi_cursor_active && txt.chars().all(|c| c.is_alphanumeric() || c == '_') {
                             should_trigger_autocomplete = true;
                         }
                         if txt == "=" {

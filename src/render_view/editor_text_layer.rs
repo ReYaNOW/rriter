@@ -970,7 +970,54 @@ impl Renderer {
                 {
                     self.push_rect(
                         cx_screen,
-                        cy - self.baseline_offset + 2.0,
+                        (cy - self.baseline_offset + 2.0).round(),
+                        2.0,
+                        self.line_height - 2.0,
+                        self.theme.fg,
+                    );
+                }
+            }
+        }
+
+        if sel_start == sel_end
+            && blink_alpha > 0.5
+            && !dialog_window_open
+            && !editor_cursor_blocked
+            && !show_settings
+            && skip_visual_lines < end_visual_line
+        {
+            let extra_cursors = editor.extra_cursors();
+            let first_visible_byte = self.visual_lines[skip_visual_lines].byte_idx;
+            let visible_end_byte = self
+                .visual_lines
+                .get(end_visual_line)
+                .map_or(len.saturating_add(1), |line| line.byte_idx);
+            let first_extra = extra_cursors.partition_point(|&pos| pos < first_visible_byte);
+            let end_extra = extra_cursors.partition_point(|&pos| pos < visible_end_byte);
+            for &pos in &extra_cursors[first_extra..end_extra] {
+                let line_idx = self
+                    .visual_lines
+                    .partition_point(|line| line.byte_idx <= pos)
+                    .saturating_sub(1);
+                if line_idx < skip_visual_lines || line_idx >= end_visual_line {
+                    continue;
+                }
+                let line = self.visual_lines[line_idx];
+                if line.is_folded {
+                    continue;
+                }
+                let cx_screen = self.left_padding
+                    + self.visual_x_for_byte_offset(editor, line.byte_idx, pos, true)
+                    - render_scroll_x;
+                let cy = self.baseline_offset + line.y_offset - render_scroll_y;
+                if cy > -self.line_height
+                    && cy < self.height + self.line_height
+                    && cx_screen < interaction_right
+                    && cx_screen >= self.left_padding
+                {
+                    self.push_rect(
+                        cx_screen,
+                        (cy - self.baseline_offset + 2.0).round(),
                         2.0,
                         self.line_height - 2.0,
                         self.theme.fg,

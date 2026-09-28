@@ -49,7 +49,6 @@ impl Editor {
             .collect();
         carets.sort_by_key(|caret| std::cmp::Reverse(caret.0));
 
-        let history_start = self.history.len();
         let group_id = self.next_history_group_id;
         self.next_history_group_id = self.next_history_group_id.wrapping_add(1).max(1);
         self.active_history_group_id = Some(group_id);
@@ -88,14 +87,16 @@ impl Editor {
         }
 
         let after = self.caret_snapshot();
-        let group_steps: Vec<usize> = self
-            .history
-            .iter()
-            .enumerate()
-            .skip(history_start.min(self.history.len()))
-            .filter_map(|(index, step)| (step.group_id == Some(group_id)).then_some(index))
-            .collect();
-        if let (Some(&first), Some(&last)) = (group_steps.first(), group_steps.last()) {
+        // The group's steps are contiguous at the back; eviction may have shifted indices.
+        let last = self.history.iter().rposition(|step| step.group_id == Some(group_id));
+        let first = last.map(|last| {
+            self.history
+                .iter()
+                .take(last + 1)
+                .rposition(|step| step.group_id != Some(group_id))
+                .map_or(0, |index| index + 1)
+        });
+        if let (Some(first), Some(last)) = (first, last) {
             if let Some(step) = self.history.get_mut(first) {
                 step.group_before = Some(before);
             }
@@ -343,6 +344,27 @@ mod multi_cursor_tests {
         assert!(editor.extra_cursors().is_empty());
         editor.toggle_extra_cursor(100);
         assert_eq!(editor.extra_cursors(), &[4]);
+    }
+
+    #[test]
+    fn history_limit_evicts_multi_cursor_group_whole() {
+        let big = "x".repeat(1536 * 1024);
+        let mut editor = make_editor("a\nb", 0, &[2]);
+        editor.apply_at_all_cursors(|editor| {
+            editor.insert_str(&big);
+        });
+        let text_after_first = editor.get_full_text();
+        let carets_after_first = (editor.cursor, editor.extra_cursors().to_vec());
+        editor.apply_at_all_cursors(|editor| {
+            editor.insert_str(&big);
+        });
+
+        assert!(editor.undo().is_some());
+        assert_eq!(editor.get_full_text(), text_after_first);
+        assert_eq!((editor.cursor, editor.extra_cursors().to_vec()), carets_after_first);
+        // The first group was evicted as a whole, so nothing half-undoes it.
+        assert!(editor.undo().is_none());
+        assert_eq!(editor.get_full_text(), text_after_first);
     }
 
     #[test]

@@ -63,7 +63,7 @@ need no quoting. Coordinates are physical pixels of the framebuffer.
 | `resize WxH` | Resize the framebuffer; on failure size and context stay. | `ok <w>x<h>` |
 | `scale S` | Change the scale factor, 0.5 … 4.0. | `ok` |
 | `mouse_move x y` | Move the cursor (hover). | `ok` |
-| `click [left\|right\|middle] [down\|up]` | Press+release, or one phase. Default `left`. | `ok` |
+| `click [left\|right\|middle] [down\|up] [alt]` | Press+release, or one phase. Default `left`; `alt` synthesizes Alt/Option for this click. | `ok` |
 | `dblclick [btn]` | Two clicks with no pause. | `ok` |
 | `wheel dx dy [lines\|px]` | Scroll; default `lines`. | `ok` |
 | `key <combo>` | Press+release, e.g. `ctrl+s`, `shift+tab`, `escape`, `f5`. Unknown token → `err unknown key token '<t>'`. | `ok` |
@@ -139,7 +139,8 @@ what the cursor is over after `mouse_move`.
 
 Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
-markdown), `editor` (line count, selection), `ide_panel`, `overlays`,
+markdown), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
+highlight version and byte-range spans), `ide_panel`, `overlays`,
 `dialog`, `external_request`, `clipboard`, `writes_allowed`.
 In headless mode, `clipboard` is `{"mode":"memory","text":...}`; `text` is
 `null` until something is copied.

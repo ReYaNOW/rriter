@@ -343,13 +343,20 @@ impl HeadlessSession {
                 self.app.handle_main_cursor_moved(PhysicalPosition::new(x, y));
                 self.frame_ok()
             }
-            Command::Click { button, phase } => {
+            Command::Click { button, phase, alt } => {
                 let button = mouse_button(button);
+                let saved_modifiers = self.app.modifiers;
+                self.app.modifiers = if alt {
+                    winit::keyboard::ModifiersState::ALT
+                } else {
+                    winit::keyboard::ModifiersState::empty()
+                };
                 match phase {
                     ClickPhase::Both => self.click(button),
                     ClickPhase::Down => self.mouse_event(ElementState::Pressed, button),
                     ClickPhase::Up => self.mouse_event(ElementState::Released, button),
                 }
+                self.app.modifiers = saved_modifiers;
                 Response::Ok(None)
             }
             Command::DblClick { button } => {

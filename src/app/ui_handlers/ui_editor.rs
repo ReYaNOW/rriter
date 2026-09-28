@@ -409,6 +409,8 @@ impl App {
                 }
             }
             UiId::EditorTextBody => {
+                let alt_click = crate::platform::terminal_alt_modifier(self.modifiers)
+                    && !self.modifiers.control_key();
                 let database_query_tab = self.active_tab_is_database_query();
                 if let Some(r) = self.renderer.as_mut() {
                     let tab_bar_h = crate::render_view::editor_content_top_inset(
@@ -427,7 +429,7 @@ impl App {
                     r.suppress_popups_until_next_mouse_move();
                 }
                 self.is_dragging = false;
-                self.is_editor_drag_pending = true;
+                self.is_editor_drag_pending = !alt_click;
                 self.focus_document_text_surface();
                 crate::app::mouse::clear_hover_popup(&mut self.hover);
                 self.scroll_y.anim_speed = 15.0;
@@ -459,17 +461,34 @@ impl App {
                         database_query_tab,
                         r.scale_factor,
                     );
-                    self.editor.set_cursor_at_pos(
-                        mx,
-                        my - tab_bar_h + self.scroll_y.current,
-                        r,
-                        true,
-                    );
+                    if alt_click {
+                        let primary_cursor = self.editor.cursor;
+                        self.editor.set_cursor_at_pos(
+                            mx,
+                            my - tab_bar_h + self.scroll_y.current,
+                            r,
+                            true,
+                        );
+                        let pos = self.editor.cursor;
+                        self.editor.cursor = primary_cursor;
+                        self.editor.selection_anchor = None;
+                        self.editor.toggle_extra_cursor(pos);
+                        self.close_autocomplete();
+                        self.click_count = 1;
+                    } else {
+                        self.editor.clear_extra_cursors();
+                        self.editor.set_cursor_at_pos(
+                            mx,
+                            my - tab_bar_h + self.scroll_y.current,
+                            r,
+                            true,
+                        );
+                    }
                 }
 
-                if self.click_count == 2 {
+                if !alt_click && self.click_count == 2 {
                     self.editor.select_word();
-                } else if self.click_count >= 3 {
+                } else if !alt_click && self.click_count >= 3 {
                     self.editor.select_line();
                     self.click_count = 3;
                 }
