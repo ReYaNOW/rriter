@@ -9,8 +9,7 @@
     },
     "src/app/api_client.rs": {
       "collapsible_if": 2,
-      "needless_lifetimes": 2,
-      "struct_excessive_bools": 4
+      "needless_lifetimes": 2
     },
     "src/app/api_client/api_client_app_click_methods.rs": {
       "cognitive_complexity": 2,
@@ -28,15 +27,21 @@
     "src/app/api_client/api_client_input_state.rs": {
       "too_many_lines": 2
     },
-    "src/app/api_client/api_client_defaults_persist.rs": {
-      "needless_return": 1
-    },
     "src/app/api_client/api_client_layout_input.rs": {
       "if_same_then_else": 2,
       "obfuscated_if_else": 2
     },
-    "src/app/api_client/api_client_tests.rs": {
+    "src/app/api_client/api_client_persistence_logs.rs": {
+      "needless_return": 1
+    },
+    "src/app/api_client/api_client_request_state_tests.rs": {
       "assertions_on_constants": 2
+    },
+    "src/app/api_client/api_client_runtime_state.rs": {
+      "struct_excessive_bools": 2
+    },
+    "src/app/api_client/api_client_tab_auth_state.rs": {
+      "struct_excessive_bools": 2
     },
     "src/app/api_mock/contract.rs": {
       "field_reassign_with_default": 2
@@ -56,7 +61,7 @@
     "src/app/api_mock/types.rs": {
       "enum_variant_names": 2
     },
-    "src/app/app_behavior_tests/app_behavior_autocomplete_base_cases.rs": {
+    "src/app/app_behavior_tests/app_behavior_ty_detail_tests.rs": {
       "len_zero": 1,
       "manual_contains": 1
     },
@@ -133,15 +138,20 @@
       "struct_excessive_bools": 2,
       "useless_vec": 1
     },
-    "src/app/database/database_grid.rs": {
+    "src/app/database/database_grid_selection_state.rs": {
       "struct_excessive_bools": 2
     },
     "src/app/database/database_panel.rs": {
-      "field_reassign_with_default": 2,
       "items_after_test_module": 1,
-      "struct_excessive_bools": 6
+      "struct_excessive_bools": 4
     },
-    "src/app/database/database_query.rs": {
+    "src/app/database/database_panel_state.rs": {
+      "struct_excessive_bools": 2
+    },
+    "src/app/database/database_panel_tree_job_tests.rs": {
+      "field_reassign_with_default": 2
+    },
+    "src/app/database/database_query_execution_tests.rs": {
       "redundant_async_block": 1
     },
     "src/app/database/database_runtime.rs": {
@@ -225,9 +235,14 @@
       "too_many_lines": 2
     },
     "src/app/git_panel/git_panel_status_tests.rs": {
-      "field_reassign_with_default": 7,
-      "needless_range_loop": 4,
+      "needless_range_loop": 2,
       "question_mark": 2
+    },
+    "src/app/git_panel/git_panel_graph_tests.rs": {
+      "needless_range_loop": 2
+    },
+    "src/app/git_panel/git_panel_stage_status_tests.rs": {
+      "field_reassign_with_default": 7
     },
     "src/app/git_panel/git_panel_types.rs": {
       "field_reassign_with_default": 2,
@@ -569,14 +584,18 @@
       "needless_range_loop": 2
     },
     "src/languages/python.rs": {
-      "cognitive_complexity": 4,
+      "cognitive_complexity": 2,
+      "too_many_lines": 2,
+      "unwrap_used": 2
+    },
+    "src/languages/python_highlight_spans.rs": {
+      "cognitive_complexity": 2,
       "collapsible_if": 4,
       "if_same_then_else": 2,
       "needless_range_loop": 2,
-      "too_many_lines": 4,
+      "too_many_lines": 2,
       "type_complexity": 2,
-      "unnecessary_map_or": 2,
-      "unwrap_used": 2
+      "unnecessary_map_or": 2
     },
     "src/languages/python_tests.rs": {
       "manual_contains": 5
@@ -890,30 +909,16 @@
     }
   },
   "file_length": {
-    "src/app/api_client.rs": 2194,
     "src/app/api_client/api_client_app_click_methods.rs": 1626,
     "src/app/api_client/api_client_app_mock_methods.rs": 2033,
     "src/app/api_client/api_client_app_request_methods.rs": 1681,
     "src/app/api_client/api_client_app_text_methods.rs": 2438,
-    "src/app/api_client/api_client_defaults_persist.rs": 1736,
-    "src/app/api_client/api_client_tests.rs": 3218,
-    "src/app/app_behavior_tests/app_behavior_autocomplete_base_cases.rs": 1676,
-    "src/app/app_file_behavior_tests/app_file_ui_git_api_tests.rs": 2517,
     "src/app/app_state.rs": 1627,
     "src/app/automation.rs": 3581,
-    "src/app/database/database_grid.rs": 1928,
-    "src/app/database/database_panel.rs": 2247,
-    "src/app/database/database_query.rs": 2740,
-    "src/app/database/database_runtime.rs": 1633,
     "src/app/events/about.rs": 1716,
     "src/app/file_tree.rs": 1610,
-    "src/app/git_panel/git_panel_status_tests.rs": 2474,
-    "src/app/keyboard/editor_keys.rs": 1619,
     "src/app/markdown.rs": 1657,
-    "src/app/mouse/wheel.rs": 1633,
     "src/app/tool_installer.rs": 1611,
-    "src/languages/python.rs": 1652,
-    "src/languages/sql_analysis.rs": 1677,
     "src/render_view/api_client_tab/api_client_tab_main_renderer.rs": 3063,
     "src/render_view/core_text.rs": 1986,
     "src/render_view/database_query_tab.rs": 1774,
@@ -922,7 +927,6 @@
     "src/render_view/markdown_read.rs": 2426,
     "src/render_view/markdown_read_interaction.rs": 1978,
     "src/render_view/markdown_scroll_transition_review_tests.rs": 1863,
-    "src/render_view/root_frame_renderer.rs": 1671,
-    "src/render_view/ui/hover_widget.rs": 1924
+    "src/render_view/root_frame_renderer.rs": 1671
   }
 }

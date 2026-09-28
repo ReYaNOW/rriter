@@ -1499,15 +1499,24 @@ Entrypoints/state:
 * `src/app/database/database_ssh_builtin.rs` -> built-in `russh` password/key/agent fallback, host-key verification, direct-tcpip, and one-hop bastion support.
 * `src/app/database/database_secrets.rs` -> stable Database secret identities and zeroizing load/store/delete coordination through the strict platform secret API.
 * `src/app/database/database_runtime.rs` -> dedicated Tokio database worker, one-active-job policy, busy/cancel/shutdown events, and cancellation propagation.
+* `src/app/database/database_runtime_transactions.rs` -> database worker transaction preparation, apply/rollback, and query completion event handling.
 * `src/app/database/database_panel.rs` -> Database panel/tree/dialog/context/host-key/DDL-hover state plus global table overlays; password fields must remain zeroizing and non-debuggable.
+* `src/app/database/database_panel_state.rs` -> panel state types for connection prompts, context menus, pending jobs, and query tabs.
+* `src/app/database/database_panel_tree_job_tests.rs` -> database tree, queued-job recovery, and connection/job id regression tests included in `database_panel.rs`.
 * `src/app/database/database_panel_restored_expansion_tests.rs` -> restored connection expansion/catalog-loading state-machine regressions included by `database_panel.rs`.
 * `src/app/database/database_catalog.rs` -> bounded autocommit PostgreSQL metadata reads and reconstructed `public` table DDL.
 * `src/app/database/database_app_methods.rs` and `database_app_event_methods.rs` -> Database panel commands/events, tab/session restore, connection delete guards, and exact SQL console persistence.
 * `src/render_view/ide_panels/ide_panel_database_renderer.rs` -> Database sidebar, embedded dimmed dialogs, tree/context rendering, and common-hover-based selectable DDL overlay.
 * `src/app/database/database_grid.rs` -> typed table rows/cells, selection, bounded chunk cache, visible ranges, editor state, and PK-based post-refresh selection restore.
+* `src/app/database/database_grid_selection_state.rs` -> grid cell position/selection, editor state, table prompts, and selection restoration state.
 * `src/app/database/database_table.rs` -> autocommit COUNT/chunk SQL, immutable parameterized DML plans, PK+`xmin` conflict checks, and dedicated pending transaction execution.
 * `src/app/database/database_table_app_methods.rs` and `database_table_edit_methods.rs` -> table loading, page/filter/sort changes, lazy request coalescing, edits, dirty prompts, preview, Apply/Rollback, and post-commit refresh.
 * `src/app/database/database_query.rs` -> SQL execution-target selection, metadata completion, bounded result streaming, PostgreSQL notices/diagnostics, sanitized history, formatting support, and dedicated managed user-SQL transactions.
+* `src/app/database/database_query_analysis_completion.rs` -> SQL formatting, semantic diagnostics, and completion candidate generation.
+* `src/app/database/database_query_analysis_completion_tests.rs` -> SQL completion and editor diagnostic regressions included by `database_query.rs`.
+* `src/app/database/database_query_execution.rs` -> SQL execution plans, result diagnostics, and managed transaction execution helpers.
+* `src/app/database/database_query_execution_tests.rs` -> SQL execution target and transaction side-effect regressions included by `database_query.rs`.
+* `src/app/database/database_query_history_tests.rs` -> query history sanitization and persistence regressions included by `database_query.rs`.
 * `src/app/database/database_query_app_methods.rs` -> query Run/Cancel, Explain/Analyze, Format, History, completion, result selection, close guards, transaction Apply/Rollback, and Database-settings mutation.
 * `src/app/database/database_panel_connection_state.rs`, `database_panel_job_state.rs` -> `DatabasePanelState` transitions: connection dialog/tree/context menu; job queue, cancellation, secret staging, recovery, load commands.
 * `src/app/database/database_event_state.rs` -> query/table tab transitions for Database worker events (routed by `apply_database_event`).
@@ -1535,6 +1544,13 @@ Entrypoints/state:
 * `src/app/events/source_hover.rs` -> source-backed hover enrichment.
 * `src/app/api_client.rs` -> include shell for API client types/state, native upload paths, cancelable Python tool tasks, and behavior chunks.
 * `src/app/api_client/api_client_loading_parser.rs` -> API HTTP client cache, DNS pinning/cache keys, and OpenAPI loading over the shared platform builders.
+* `src/app/api_client/api_client_runtime_state.rs` -> API Client runtime state, persisted spec loading, load tickets, and focus navigation.
+* `src/app/api_client/api_client_tab_auth_state.rs` -> API tab/route state, focus targets, and authentication store types.
+* `src/app/api_client/api_client_schema_documents.rs` -> bounded API schema document generation and inline value formatting helpers.
+* `src/app/api_client/api_client_persistence_logs.rs` -> API authentication/cache persistence and Python/mock runtime log helpers.
+* `src/app/api_client/api_client_parse_auth_tests.rs` -> API authentication parsing regressions included by `api_client.rs`.
+* `src/app/api_client/api_client_parse_schema_tests.rs` -> API schema parsing, request body, and response rendering regressions included by `api_client.rs`.
+* `src/app/api_client/api_client_request_state_tests.rs` -> API request, route state, focus, persistence, and runtime state regressions included by `api_client.rs`.
 * `src/app/api_client/api_client_defaults_persist.rs` -> defaults, multipart `PathBuf` assembly, atomic state/cache persistence, and protected authentication persistence.
 * `src/app/api_client/api_client_mock_config.rs` -> `commit_mock_config`: the single "mock config changed" point (persist + hot-update of the running mock server).
 * `src/app/api_client/api_client_app_tabs.rs` -> App routers for OpenAPI import and API spec/auth/route tab opening.
@@ -1553,6 +1569,7 @@ Entrypoints/state:
 * `src/app/python_completion.rs` -> include shell for Python autocomplete/fold/source-owner helpers.
 * `src/app/python_completion/*` -> Python completion chunks split by source/module helpers and class/member helpers.
 * `src/app/app_behavior_tests.rs` -> include shell for app/autocomplete behavior tests.
+* `src/app/app_behavior_tests/app_behavior_ty_detail_tests.rs` -> Ty detail and autocomplete rendering behavior regressions included by `app_behavior_tests.rs`.
 * `src/app/app_behavior_tests/*` -> app behavior test chunks split by autocomplete basics, Ty cache/tree-sitter, member owner cases.
 * `src/app/app_behavior_tests/app_behavior_host_cases.rs` -> offscreen host input characterization tests.
 * `src/app/git_panel.rs` -> include shell for Git panel state/actions/collection/tests.
@@ -1570,12 +1587,16 @@ Entrypoints/state:
 * `src/app/project_search_app.rs` -> App methods for project search panel focus, worker start/poll, cursor placement, and result jumps.
 * `src/app/app_file_behavior_tests.rs` -> include shell for app file/tab/search/UI behavior tests.
 * `src/app/app_file_behavior_tests/*` -> app file behavior test chunks split by tab flow, IDE definition jumps, UI/Git/API cases.
+* `src/app/app_file_behavior_tests/app_file_api_mock_tests.rs` -> API Mock lifecycle and editor behavior regressions included by `app_file_behavior_tests.rs`.
+* `src/app/app_file_behavior_tests/app_file_api_mock_completion_tests.rs` -> API Mock Python completion and diagnostic regressions included by `app_file_behavior_tests.rs`.
+* `src/app/app_file_behavior_tests/app_file_git_reconcile_tests.rs` -> Git status reconciliation and file behavior regressions included by `app_file_behavior_tests.rs`.
 
 Input:
 
 * `src/app/keyboard.rs` -> keyboard router + terminal/search helpers.
 * `src/app/keyboard/main_keys.rs` -> global shortcuts + mode routing.
 * `src/app/keyboard/editor_keys.rs` -> editor text keys, autocomplete, tab shortcuts.
+* `src/app/keyboard/editor_keys_tests.rs` -> editor keyboard, selection, and shortcut regressions included by `editor_keys.rs`.
 * `src/app/keyboard/key_input.rs` -> constructible keyboard input, combo parsing, native event conversion.
 * `src/app/mouse.rs` -> mouse module shell.
 * `src/app/mouse/input.rs` -> mouse button module shell + shared click helpers.
@@ -1594,6 +1615,7 @@ Input:
 * `src/app/mouse/cursor/cursor_drag_updates.rs` -> in-progress drag updates: IDE panel DnD/resize before hover, then the post-hover drag chain (settings ignore, LSP log, problems, search, editor scrollbars, terminal/editor selection).
 * `src/app/mouse/cursor/cursor_helpers.rs` -> cursor geometry helpers and their tests.
 * `src/app/mouse/wheel.rs` -> wheel routing for editor/panels/hover/terminal/settings/autocomplete.
+* `src/app/mouse/wheel_tests.rs` -> wheel routing and scroll state regressions included by `wheel.rs`.
 * `src/app/mouse/hover_state_core.rs` -> hover state structs + bridge geometry.
 * `src/app/mouse/hover_mouse_logic.rs` -> hover targets, diagnostic byte ranges, visibility helpers.
 * `src/app/mouse/hover_mouse_tests.rs` -> hover test module shell.
@@ -1653,6 +1675,7 @@ Rendering:
 * `src/render_view/lsp_ui.rs` -> LSP server panel/action menu visuals.
 * `src/render_view/hover_overlays.rs` -> squiggles + hover popup routing.
 * `src/render_view/ui/hover_widget.rs` -> hover popup layout/render/selection/scroll.
+* `src/render_view/ui/hover_popup_geometry.rs` -> hover popup positioning, clipping, and fade geometry helpers included by `hover_widget.rs`.
 * `src/render_view/ui/problems_panel.rs` -> Problems panel rows/groups.
 * `src/render_view/ui.rs` -> dialogs, welcome, autocomplete, icons, misc overlay UI.
 
@@ -1667,6 +1690,8 @@ Syntax/languages:
 * `src/languages/dart.rs` -> Dart import-block helpers plus cached Tree-sitter and analysis-server closing-label models.
 * `src/languages/markdown.rs` -> owned tree-sitter-md semantic document model plus incremental Markdown parse state for Read-mode caches.
 * `src/languages/python.rs` -> Python import blocks, hover formatting/highlighting helpers.
+* `src/languages/python_highlight_spans.rs` -> Python syntax highlight span extraction helpers included by `python.rs`.
+* `src/languages/sql_analysis_tests.rs` -> SQL AST diagnostics and completion analysis regressions included by `sql_analysis.rs`.
 * `src/languages/python_tests.rs` -> Python language helper tests.
 * `src/languages/rust.rs` -> Rust import-block helpers.
 * `src/languages/sql.rs` -> PostgreSQL statement scanner/classifier, managed-transaction safety validation, statement selection, SQL keywords/functions, and regression tests.
