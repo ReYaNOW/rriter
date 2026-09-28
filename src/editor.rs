@@ -6,4 +6,5 @@ pub(crate) fn byte_offset_for_char_col(line: &str, col: usize) -> usize {
 }
 
 include!("editor/editor_core.rs");
+include!("editor/editor_multi_cursor.rs");
 include!("editor/editor_behavior_tests.rs");

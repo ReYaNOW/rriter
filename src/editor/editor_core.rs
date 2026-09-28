@@ -183,6 +183,9 @@ pub struct HistoryStep {
     pub op: EditOp,
     pub cursor_before: usize,
     pub cursor_after: usize,
+    pub group_id: Option<u64>,
+    pub group_before: Option<Vec<usize>>,
+    pub group_after: Option<Vec<usize>>,
 }
 
 pub enum UndoRedoDelta {
@@ -197,6 +200,7 @@ pub struct Editor {
     gap_end: usize,
     pub cursor: usize,
     pub selection_anchor: Option<usize>,
+    extra_cursors: Vec<usize>,
     pub version: u64,
     pub line_offsets: Vec<usize>,
     pub longest_line_idx: usize,
@@ -205,6 +209,8 @@ pub struct Editor {
     pub redo_stack: VecDeque<HistoryStep>,
     pub history_size: usize,
     pub is_working_history: bool,
+    next_history_group_id: u64,
+    active_history_group_id: Option<u64>,
 
     pub original_hashes: Vec<u64>,
     pub saved_hashes: Vec<u64>,
@@ -233,6 +239,7 @@ impl Editor {
             gap_end: capacity,
             cursor: 0,
             selection_anchor: None,
+            extra_cursors: Vec::new(),
             version: 0,
             line_offsets: vec![0],
             longest_line_idx: 0,
@@ -240,6 +247,8 @@ impl Editor {
             redo_stack: VecDeque::new(),
             history_size: 0,
             is_working_history: false,
+            next_history_group_id: 1,
+            active_history_group_id: None,
             original_hashes: vec![],
             saved_hashes: vec![],
             git_base_text: None,
@@ -510,6 +519,9 @@ impl Editor {
                     },
                     cursor_before,
                     cursor_after: self.cursor,
+                    group_id: None,
+                    group_before: None,
+                    group_after: None,
                 });
                 self.update_modifications();
                 return Some((start, len));
@@ -540,6 +552,9 @@ impl Editor {
                 op: EditOp::Delete { offset: prev, text },
                 cursor_before,
                 cursor_after: self.cursor,
+                group_id: None,
+                group_before: None,
+                group_after: None,
             });
             self.update_modifications();
             return Some((prev, len));
@@ -746,8 +761,12 @@ impl Editor {
             return;
         }
         self.redo_stack.clear();
+        let mut step = step;
+        step.group_id = self.active_history_group_id;
         let mut merge = false;
-        if let Some(last) = self.history.back_mut() {
+        if let Some(last) = self.history.back_mut().filter(|last| {
+            step.group_id.is_none() && last.group_id.is_none()
+        }) {
             if let (
                 EditOp::Insert {
                     offset: last_off,
@@ -814,117 +833,11 @@ impl Editor {
     }
 
     pub fn undo(&mut self) -> Option<UndoRedoDelta> {
-        if let Some(mut step) = self.history.pop_back() {
-            self.history_size = self.history_size.saturating_sub(edit_op_size(&step.op));
-            self.is_working_history = true;
-            let delta = match &mut step.op {
-                EditOp::Insert { offset, text } => {
-                    self.selection_anchor = Some(*offset);
-                    self.cursor = *offset + text.len();
-                    let len = text.len();
-                    let start = *offset;
-                    self.shift_folds_delete(start, len);
-                    self.move_gap(start);
-                    self.sync_edits
-                        .push(SyncEdit::Delete { offset: start, len });
-                    self.gap_end += len;
-                    self.cursor = start;
-                    self.selection_anchor = None;
-                    UndoRedoDelta::Delete(*offset, text.len())
-                }
-                EditOp::Delete { offset, text } => {
-                    self.cursor = *offset;
-                    self.selection_anchor = None;
-                    self.insert_str_internal(text);
-                    UndoRedoDelta::Insert(*offset, text.len(), text.clone())
-                }
-                EditOp::Replace {
-                    offset,
-                    old_text,
-                    new_text,
-                } => {
-                    let len = new_text.len();
-                    self.shift_folds_delete(*offset, len);
-                    self.move_gap(*offset);
-                    self.gap_end += len;
-                    self.sync_edits.push(SyncEdit::Delete {
-                        offset: *offset,
-                        len,
-                    });
-
-                    self.cursor = *offset;
-                    self.insert_str_internal(old_text);
-
-                    UndoRedoDelta::Replace(*offset, len, old_text.clone(), new_text.clone())
-                }
-            };
-            self.cursor = self.valid_cursor(step.cursor_before);
-            self.selection_anchor = None;
-            self.redo_stack.push_back(step);
-            self.is_working_history = false;
-            self.version = next_editor_version(self.version);
-
-            self.update_modifications();
-            return Some(delta);
-        }
-        None
+        self.undo_with_groups()
     }
 
     pub fn redo(&mut self) -> Option<UndoRedoDelta> {
-        if let Some(step) = self.redo_stack.pop_back() {
-            self.is_working_history = true;
-            let delta = match &step.op {
-                EditOp::Insert { offset, text } => {
-                    self.cursor = *offset;
-                    self.selection_anchor = None;
-                    self.insert_str_internal(text);
-                    UndoRedoDelta::Insert(*offset, text.len(), text.clone())
-                }
-                EditOp::Delete { offset, text, .. } => {
-                    self.selection_anchor = Some(*offset);
-                    self.cursor = step.cursor_before;
-                    let len = text.len();
-                    let start = *offset;
-                    self.shift_folds_delete(start, len);
-                    self.move_gap(start);
-                    self.sync_edits
-                        .push(SyncEdit::Delete { offset: start, len });
-                    self.gap_end += len;
-                    self.cursor = start;
-                    self.selection_anchor = None;
-                    UndoRedoDelta::Delete(*offset, len)
-                }
-                EditOp::Replace {
-                    offset,
-                    old_text,
-                    new_text,
-                } => {
-                    let len = old_text.len();
-                    self.shift_folds_delete(*offset, len);
-                    self.move_gap(*offset);
-                    self.gap_end += len;
-                    self.sync_edits.push(SyncEdit::Delete {
-                        offset: *offset,
-                        len,
-                    });
-
-                    self.cursor = *offset;
-                    self.insert_str_internal(new_text);
-
-                    UndoRedoDelta::Replace(*offset, len, new_text.clone(), old_text.clone())
-                }
-            };
-            self.cursor = self.valid_cursor(step.cursor_after);
-            self.selection_anchor = None;
-            self.history_size = self.history_size.saturating_add(edit_op_size(&step.op));
-            self.history.push_back(step);
-            self.is_working_history = false;
-            self.version = next_editor_version(self.version);
-
-            self.update_modifications();
-            return Some(delta);
-        }
-        None
+        self.redo_with_groups()
     }
 
     pub fn text_parts(&self) -> (&str, &str) {
@@ -987,6 +900,7 @@ impl Editor {
         self.gap_end = capacity;
         self.cursor = cursor;
         self.selection_anchor = None;
+        self.extra_cursors.clear();
         self.version = version;
         self.history = history;
         self.redo_stack = redo_stack;
@@ -1014,6 +928,7 @@ impl Editor {
         self.gap_end = capacity;
         self.cursor = 0;
         self.selection_anchor = None;
+        self.extra_cursors.clear();
         self.history.clear();
         self.redo_stack.clear();
         self.history_size = 0;
@@ -1136,6 +1051,9 @@ impl Editor {
             },
             cursor_before: cursor_before_op,
             cursor_after: self.cursor,
+            group_id: None,
+            group_before: None,
+            group_after: None,
         });
 
         self.update_modifications();
@@ -1320,6 +1238,9 @@ impl Editor {
             },
             cursor_before,
             cursor_after: self.cursor,
+            group_id: None,
+            group_before: None,
+            group_after: None,
         });
 
         self.update_modifications();
@@ -1355,6 +1276,9 @@ impl Editor {
                     },
                     cursor_before,
                     cursor_after: self.cursor,
+                    group_id: None,
+                    group_before: None,
+                    group_after: None,
                 });
                 self.update_modifications();
                 return Some((start, len));
@@ -1393,6 +1317,9 @@ impl Editor {
                 op: EditOp::Delete { offset, text },
                 cursor_before,
                 cursor_after: self.cursor,
+                group_id: None,
+                group_before: None,
+                group_after: None,
             });
             self.update_modifications();
             return Some((offset, len));
