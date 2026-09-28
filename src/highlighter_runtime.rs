@@ -32,6 +32,7 @@ impl Highlighter {
         }
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         self.sync_text = text.clone();
+        self.sync_version = version;
         self.sync_ext = ext.clone();
         self.sync_tree = None;
         self.current_version = version;
@@ -40,6 +41,7 @@ impl Highlighter {
         if self
             .tx
             .send(HighlighterMessage::Restore {
+                version,
                 text,
                 ext,
                 spans: self.spans.clone(),
@@ -68,6 +70,7 @@ impl Highlighter {
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         let request_id = self.current_request_id;
         self.sync_text = text.clone();
+        self.sync_version = version;
         self.sync_ext = ext.clone();
         self.sync_tree = None;
         self.current_version = version;
@@ -119,6 +122,7 @@ impl Highlighter {
         self.current_request_id = self.current_request_id.wrapping_add(1).max(1);
         let request_id = self.current_request_id;
         self.sync_text = text.clone();
+        self.sync_version = version;
         self.sync_ext = ext.clone();
         self.sync_tree = None;
         self.is_complete = false;
@@ -150,14 +154,76 @@ impl Highlighter {
         }
     }
 
-    pub fn apply_edits(
+    /// Test shorthand: the document is `sync_text` with `edits` applied (edits that do not
+    /// fit leave it as is, like an editor that rejected them).
+    #[cfg(test)]
+    pub(crate) fn apply_edits(
         &mut self,
         version: u64,
         edits: Vec<SyncEdit>,
         edit_start_byte: Option<usize>,
         edit_end_byte: Option<usize>,
     ) {
-        if !edits.is_empty() {
+        let mut document = self.sync_text.clone();
+        for edit in &edits {
+            let _ = apply_sync_edit_to_replica(&mut document, None, edit);
+        }
+        let document_len = document.len();
+        self.apply_document_edits(
+            version,
+            edits,
+            edit_start_byte,
+            edit_end_byte,
+            document_len,
+            move || document,
+        );
+    }
+
+    /// The single commit point for editor edits. Both replicas (`sync_text` here and the
+    /// worker copy) apply the same ordered `edits` with `apply_sync_edit_to_replica`, and the
+    /// worker only on top of the same `sync_version`, so they cannot diverge from each other.
+    /// If the edits do not fit `sync_text` or the result is not `document_len` long, the
+    /// replica had drifted from the editor: both are reset from `document_text()` (O(n) only
+    /// then; the regular path is O(edit)).
+    pub fn apply_document_edits(
+        &mut self,
+        version: u64,
+        edits: Vec<SyncEdit>,
+        edit_start_byte: Option<usize>,
+        edit_end_byte: Option<usize>,
+        document_len: usize,
+        document_text: impl FnOnce() -> String,
+    ) {
+        if edits.is_empty() {
+            return;
+        }
+        let worker_desynced = self
+            ._worker
+            .control
+            .replica_desynced
+            .swap(false, Ordering::AcqRel);
+        let applied = edits.iter().all(|edit| {
+            apply_sync_edit_to_replica(&mut self.sync_text, self.sync_tree.as_mut(), edit)
+        });
+        if !applied || worker_desynced || self.sync_text.len() != document_len {
+            if !cfg!(test) {
+                eprintln!(
+                    "[HL TRACE runtime:replica_resync] ver={} sync_ver={} applied={} worker_desynced={} sync_bytes={} doc_bytes={}",
+                    version,
+                    self.sync_version,
+                    applied,
+                    worker_desynced,
+                    self.sync_text.len(),
+                    document_len,
+                );
+            }
+            let ext = self.sync_ext.clone();
+            self.reset(version, document_text(), ext, edit_start_byte.unwrap_or(0));
+            return;
+        }
+        let base_version = self.sync_version;
+        self.sync_version = version;
+        {
             let (invalidate_start_byte, invalidate_end_byte) =
                 sync_edit_invalidation_byte_range(&edits);
             let worker_edit_start_byte = edit_start_byte.or(invalidate_start_byte);
@@ -196,6 +262,7 @@ impl Highlighter {
                 .tx
                 .send(HighlighterMessage::Edits {
                     request_id: self.current_request_id,
+                    base_version,
                     version,
                     edits,
                     edit_start_byte: worker_edit_start_byte,
@@ -280,7 +347,9 @@ impl Highlighter {
         }
     }
 
-    pub fn request_priority_highlight(&mut self, version: u64, anchor: usize) -> bool {
+    /// `_version`: the reply carries the version of the worker replica it was built from
+    /// (`HighlighterMessage::Priority`), so the caller's version is not sent.
+    pub fn request_priority_highlight(&mut self, _version: u64, anchor: usize) -> bool {
         if self.current_request_id == 0 || self.sync_text.is_empty() {
             return false;
         }
@@ -302,7 +371,6 @@ impl Highlighter {
             .tx
             .send(HighlighterMessage::Priority {
                 request_id: self.current_request_id,
-                version,
                 priority_anchor: anchor,
             })
             .is_err()
@@ -318,7 +386,22 @@ impl Highlighter {
         self.pending_priority_anchor.is_some()
     }
 
+    /// The worker dropped its replica (see `HighlighterWorkerControl::replica_desynced`):
+    /// re-seed it from `sync_text`, which `apply_document_edits` checked against the editor.
+    fn resync_worker_if_desynced(&mut self) {
+        if self
+            ._worker
+            .control
+            .replica_desynced
+            .swap(false, Ordering::AcqRel)
+        {
+            let anchor = self.pending_priority_anchor.unwrap_or(0);
+            self.reset(self.sync_version, self.sync_text.clone(), self.sync_ext.clone(), anchor);
+        }
+    }
+
     pub fn poll(&mut self, current_editor_version: u64) -> bool {
+        self.resync_worker_if_desynced();
         let mut updated = false;
         loop {
             match self.rx.try_recv() {
@@ -402,11 +485,11 @@ impl Highlighter {
         self.completions = completions;
         self.foldable_ranges = foldable_ranges;
         self.syntax_errors = syntax_errors;
-        // The worker tree belongs to the worker replica of `ver`; the main-thread replica
-        // `sync_text` is maintained separately (shift_insert/shift_delete), so the version
-        // match alone does not prove they hold the same text. Never pair them on a mismatch.
+        // The worker tree belongs to the worker replica of `ver`; it may be paired with
+        // `sync_text` only when that holds the same version. The length check stays as a
+        // last line of defence against a tree of another text.
         self.sync_tree = tree.filter(|tree| {
-            let matches = tree_matches_text_len(tree, &self.sync_text);
+            let matches = ver == self.sync_version && tree_matches_text_len(tree, &self.sync_text);
             if !matches && !cfg!(test) {
                 eprintln!(
                     "[HL TRACE runtime:poll_tree_mismatch] req={} ver={} tree_bytes={} sync_bytes={}",
@@ -489,33 +572,10 @@ impl Highlighter {
         }
     }
 
+    /// Shifts the displayed spans for an edit the editor just made (with a predicted color
+    /// for the inserted text). The text replicas are not touched here: they follow the
+    /// editor's `SyncEdit`s in `apply_document_edits` only.
     pub fn shift_insert(&mut self, offset: usize, len: usize, text_opt: Option<&str>) {
-        if let Some(text) = text_opt {
-            let start_byte = offset;
-            let old_end_byte = offset;
-            let new_end_byte = offset + text.len();
-            let start_position = get_point(&self.sync_text, start_byte);
-            let old_end_position = start_position;
-            if offset <= self.sync_text.len() && self.sync_text.is_char_boundary(offset) {
-                self.sync_text.insert_str(offset, text);
-                let new_end_position = get_point(&self.sync_text, new_end_byte);
-                if let Some(tree) = &mut self.sync_tree {
-                    tree.edit(&tree_sitter::InputEdit {
-                        start_byte,
-                        old_end_byte,
-                        new_end_byte,
-                        start_position,
-                        old_end_position,
-                        new_end_position,
-                    });
-                }
-            } else {
-                self.sync_tree = None;
-            }
-        } else {
-            self.sync_tree = None;
-        }
-
         let prev_offset = offset.saturating_sub(1);
         let mut predicted_color = DRACULA_FG;
 
@@ -612,31 +672,8 @@ impl Highlighter {
         }
     }
 
+    /// Span-only counterpart of `shift_insert`.
     pub fn shift_delete(&mut self, offset: usize, len: usize) {
-        let start_byte = offset;
-        let old_end_byte = offset + len;
-        let new_end_byte = offset;
-        let start_position = get_point(&self.sync_text, start_byte);
-        let old_end_position = get_point(&self.sync_text, old_end_byte);
-        if offset + len <= self.sync_text.len()
-            && self.sync_text.is_char_boundary(offset)
-            && self.sync_text.is_char_boundary(offset + len)
-        {
-            self.sync_text.replace_range(offset..offset + len, "");
-            if let Some(tree) = &mut self.sync_tree {
-                tree.edit(&tree_sitter::InputEdit {
-                    start_byte,
-                    old_end_byte,
-                    new_end_byte,
-                    start_position,
-                    old_end_position,
-                    new_end_position: start_position,
-                });
-            }
-        } else {
-            self.sync_tree = None;
-        }
-
         let end_del = offset + len;
         for span in &mut self.spans {
             if span.start >= end_del {
@@ -974,6 +1011,47 @@ pub(super) fn flatten_spans(
     flat
 }
 
+/// Applies one editor `SyncEdit` to a document replica and keeps its tree in step. Both
+/// replicas (`Highlighter::sync_text` and the worker copy) go through this one function, in
+/// the order the editor produced the edits, so any valid ordered list (including many
+/// back-to-front edits of one multi-cursor action) yields the same text in both. Returns
+/// `false` and leaves the replica untouched when the edit does not fit it: the replica is
+/// out of sync with the editor and has to be reset, never patched by a guess.
+pub(super) fn apply_sync_edit_to_replica(
+    text: &mut String,
+    tree: Option<&mut tree_sitter::Tree>,
+    edit: &SyncEdit,
+) -> bool {
+    let (start_byte, old_end_byte, inserted) = match edit {
+        SyncEdit::Insert { offset, text } => (*offset, *offset, text.as_str()),
+        SyncEdit::Delete { offset, len } => (*offset, offset.saturating_add(*len), ""),
+    };
+    if old_end_byte > text.len()
+        || !text.is_char_boundary(start_byte)
+        || !text.is_char_boundary(old_end_byte)
+    {
+        return false;
+    }
+    let start_position = get_point(text, start_byte);
+    let old_end_position = get_point(text, old_end_byte);
+    text.replace_range(start_byte..old_end_byte, inserted);
+    if let Some(tree) = tree {
+        let new_end_byte = start_byte + inserted.len();
+        tree.edit(&tree_sitter::InputEdit {
+            start_byte,
+            old_end_byte,
+            new_end_byte,
+            start_position,
+            old_end_position,
+            new_end_position: get_point(text, new_end_byte),
+        });
+    }
+    true
+}
+
 #[cfg(test)]
 #[path = "highlighter_runtime_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "highlighter_replica_sync_tests.rs"]
+mod replica_sync_tests;

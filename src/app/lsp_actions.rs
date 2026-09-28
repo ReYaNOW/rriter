@@ -474,8 +474,14 @@ impl App {
                     );
                 }
             }
-            self.highlighter
-                .apply_edits(self.editor.version, edits, None, None);
+            self.highlighter.apply_document_edits(
+                self.editor.version,
+                edits,
+                None,
+                None,
+                self.editor.len(),
+                || self.editor.get_full_text(),
+            );
         }
 
         if let Some(window) = self.window.as_ref() {
@@ -581,8 +587,14 @@ impl App {
                             );
                         }
                     }
-                    self.highlighter
-                        .apply_edits(self.editor.version, edits, None, None);
+                    self.highlighter.apply_document_edits(
+                        self.editor.version,
+                        edits,
+                        None,
+                        None,
+                        self.editor.len(),
+                        || self.editor.get_full_text(),
+                    );
                 }
 
                 if let Some(window) = self.window.as_ref() {

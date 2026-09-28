@@ -277,11 +277,13 @@ impl App {
             let (invalidate_start_byte, invalidate_end_byte) =
                 crate::highlighter::sync_edit_invalidation_byte_range(&edits);
 
-            self.highlighter.apply_edits(
+            self.highlighter.apply_document_edits(
                 self.editor.version,
                 edits,
                 line_start_byte,
                 line_end_byte,
+                self.editor.len(),
+                || self.editor.get_full_text(),
             );
             self.highlighter.sync_highlight_after_edit(
                 self.editor.version,
