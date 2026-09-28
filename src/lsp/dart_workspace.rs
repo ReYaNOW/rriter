@@ -143,7 +143,7 @@ impl LspManager {
             process.notify_open(&path, text, version, Some(&root));
         }
         self.schedule_dart_workspace_analysis(&root, Duration::from_secs(1));
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
     }
 
     pub(super) fn change_dart_document(&mut self, path: PathBuf, text: Arc<str>, version: i32) {
@@ -166,7 +166,7 @@ impl LspManager {
         {
             process.notify_change(&path, text, version);
         }
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
     }
 
     pub(super) fn close_dart_document(&mut self, path: &Path) {
@@ -183,7 +183,7 @@ impl LspManager {
         self.dart_live_diagnostics.remove(&open.path);
         self.merged_diagnostic_indices.remove(&open.path);
         self.closed_dart_documents.push(open.path.clone());
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
 
         let root_still_open = self
             .open_dart_files
@@ -328,7 +328,7 @@ impl LspManager {
             self.dart_workspaces.clear();
             self.dart_live_diagnostics.clear();
             self.dart_workspace_diagnostics.clear();
-            self.dirty_diagnostics = true;
+            self.mark_diagnostics_changed();
             return;
         }
         let documents = self.open_dart_files.values().cloned().collect::<Vec<_>>();
@@ -345,7 +345,7 @@ impl LspManager {
         for document in documents {
             self.open_dart_document(document.path, document.text, document.version);
         }
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
     }
 
     pub fn set_dart_workspace_analysis_enabled(&mut self, enabled: bool) {
@@ -360,7 +360,7 @@ impl LspManager {
                 state.due_at = None;
             }
             self.dart_workspace_diagnostics.clear();
-            self.dirty_diagnostics = true;
+            self.mark_diagnostics_changed();
             return;
         }
         if self.open_dart_files.is_empty() {
@@ -524,7 +524,7 @@ impl LspManager {
                 .insert(path, Arc::from(items.into_boxed_slice()));
         }
         self.rebuild_diag_text_pool();
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
         received
     }
 

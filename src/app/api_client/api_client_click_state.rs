@@ -393,7 +393,7 @@ impl ApiClientState {
         entry.access_token.clear();
         entry.value.clear();
         self.focused = None;
-        self.persist();
+        self.persist_credentials();
     }
 
     fn clear_auth_refresh(&mut self, spec_id: ApiSpecId, scheme_idx: usize) {
@@ -405,7 +405,7 @@ impl ApiClientState {
             .refresh_token
             .clear();
         self.focused = None;
-        self.persist();
+        self.persist_credentials();
     }
 
     fn remove_auth_entry(&mut self, spec_id: ApiSpecId, scheme_idx: usize) {
@@ -414,7 +414,7 @@ impl ApiClientState {
         };
         self.auth.remove(spec_id, &scheme);
         self.focused = None;
-        self.persist();
+        self.persist_credentials();
     }
 
     /// Applies a clicked enum/example value to the tab's path or query input;

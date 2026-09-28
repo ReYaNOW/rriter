@@ -386,27 +386,45 @@ impl ApiClientState {
     }
 
     pub fn persist(&mut self) {
-        let saved = ApiSpecsPersist {
-            specs: self.specs.clone(),
-            selected_spec: self.selected_spec,
-            last_resolved_host: self.last_resolved_host.clone(),
-            next_id: self.next_id.max(
-                self.specs
-                    .iter()
-                    .map(|entry| entry.id.0.saturating_add(1))
-                    .max()
-                    .unwrap_or(1),
-            ),
-        };
+        self.persist_parts(true, true, true);
+    }
+
+    pub(crate) fn persist_credentials(&mut self) {
+        self.persist_parts(false, true, false);
+    }
+
+    pub(crate) fn persist_mock_config(&mut self) {
+        self.persist_parts(false, false, true);
+    }
+
+    fn persist_parts(&mut self, specs: bool, auth: bool, mocks: bool) {
         let result = (|| -> Result<(), String> {
-            let content = serde_json::to_vec_pretty(&saved)
-                .map_err(|err| format!("API specifications не сериализованы: {err}"))?;
-            crate::platform::atomic_write(&api_specs_path(), &content)
-                .map_err(|err| format!("API specifications не сохранены: {err}"))?;
-            save_api_auth(&self.auth)
-                .map_err(|err| format!("API credentials не сохранены: {err}"))?;
-            save_api_mocks(&self.mock)
-                .map_err(|err| format!("API mock configuration не сохранена: {err}"))?;
+            if specs {
+                let saved = ApiSpecsPersist {
+                    specs: self.specs.clone(),
+                    selected_spec: self.selected_spec,
+                    last_resolved_host: self.last_resolved_host.clone(),
+                    next_id: self.next_id.max(
+                        self.specs
+                            .iter()
+                            .map(|entry| entry.id.0.saturating_add(1))
+                            .max()
+                            .unwrap_or(1),
+                    ),
+                };
+                let content = serde_json::to_vec_pretty(&saved)
+                    .map_err(|err| format!("API specifications не сериализованы: {err}"))?;
+                crate::platform::atomic_write(&api_specs_path(), &content)
+                    .map_err(|err| format!("API specifications не сохранены: {err}"))?;
+            }
+            if auth {
+                save_api_auth(&self.auth)
+                    .map_err(|err| format!("API credentials не сохранены: {err}"))?;
+            }
+            if mocks {
+                save_api_mocks(&self.mock)
+                    .map_err(|err| format!("API mock configuration не сохранена: {err}"))?;
+            }
             Ok(())
         })();
         self.persistence_error = result.err();
@@ -762,4 +780,3 @@ fn api_focus_order_for_view(
     }
     out
 }
-

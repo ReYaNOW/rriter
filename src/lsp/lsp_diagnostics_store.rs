@@ -233,7 +233,7 @@ impl LspManager {
                                     .insert(path.clone(), (stored_version, items));
                             }
 
-                            self.dirty_diagnostics = true;
+                            self.mark_diagnostics_changed();
                             self.last_change = None;
                         } else {
                             items.clear();
@@ -376,6 +376,7 @@ impl LspManager {
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
         };
+        self.mark_diagnostics_changed();
         self.diagnostics.remove(&abs_path);
         self.instant_diagnostics.remove(&abs_path);
         self.ruff_workspace_diagnostics.remove(&abs_path);
@@ -544,6 +545,9 @@ impl LspManager {
     }
 
     fn rebuild_merged_diagnostic_indices(&mut self) {
+        // Every visible diagnostics change passes through here, including
+        // paths that clear the dirty flag themselves (workspace pruning).
+        self.diagnostic_generation = self.diagnostic_generation.wrapping_add(1);
         let mut paths = std::collections::HashSet::new();
         for path in self.diagnostics.keys() {
             paths.insert(path.clone());

@@ -34,6 +34,7 @@ pub struct LspManager {
     pub ty_instant_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     dart_live_diagnostics: HashMap<PathBuf, (i32, Arc<[Diagnostic]>)>,
     dart_workspace_diagnostics: HashMap<PathBuf, Arc<[Diagnostic]>>,
+    diagnostic_generation: u64,
     merged_diagnostic_indices: HashMap<PathBuf, Arc<[MergedDiagnosticIndex]>>,
     diagnostic_ancestor_severities: HashMap<PathBuf, DiagSeverity>,
     diagnostic_total_counts: (usize, usize),
@@ -67,6 +68,15 @@ pub struct LspManager {
 }
 
 impl LspManager {
+    pub fn diagnostic_generation(&self) -> u64 {
+        self.diagnostic_generation
+    }
+
+    pub(super) fn mark_diagnostics_changed(&mut self) {
+        self.diagnostic_generation = self.diagnostic_generation.wrapping_add(1);
+        self.dirty_diagnostics = true;
+    }
+
     fn is_python_ext(ext: &str) -> bool {
         matches!(ext, "py" | "pyi")
     }
@@ -87,6 +97,7 @@ impl LspManager {
             ty_instant_diagnostics: HashMap::new(),
             dart_live_diagnostics: HashMap::new(),
             dart_workspace_diagnostics: HashMap::new(),
+            diagnostic_generation: 0,
             merged_diagnostic_indices: HashMap::new(),
             diagnostic_ancestor_severities: HashMap::new(),
             diagnostic_total_counts: (0, 0),
@@ -166,7 +177,7 @@ impl LspManager {
         self.diagnostic_ancestor_severities.clear();
         self.diagnostic_total_counts = (0, 0);
         self.diag_text_pool.clear();
-        self.dirty_diagnostics = true;
+        self.mark_diagnostics_changed();
         self.ty_workspace_diag_pending = None;
         self.ty_workspace_diag_dirty =
             !self.open_python_files.is_empty() && !self.active_workspaces.is_empty();
@@ -309,6 +320,7 @@ impl LspManager {
         if let Some(p) = self.ty_process.take() {
             p.shutdown();
         }
+        self.mark_diagnostics_changed();
         self.diagnostics.clear();
         self.instant_diagnostics.clear();
         self.ruff_workspace_diagnostics.clear();
@@ -403,7 +415,7 @@ impl LspManager {
                 self.dart_status = LspServerStatus::Disabled;
                 self.dart_live_diagnostics.clear();
                 self.dart_workspace_diagnostics.clear();
-                self.dirty_diagnostics = true;
+                self.mark_diagnostics_changed();
             }
             self.rebuild_merged_diagnostic_indices();
             return;
@@ -422,6 +434,7 @@ impl LspManager {
                         process.shutdown();
                     }
                     self.python_status = LspServerStatus::Disabled;
+                    self.mark_diagnostics_changed();
                     self.ruff_workspace_diagnostics.clear();
                     self.ruff_workspace_diag_rx = None;
                     self.ruff_workspace_diag_pending = false;
@@ -441,6 +454,7 @@ impl LspManager {
                         process.shutdown();
                     }
                     self.ty_status = LspServerStatus::Disabled;
+                    self.mark_diagnostics_changed();
                     self.ty_instant_diagnostics.clear();
                     self.ty_diag_result_ids.clear();
                     self.ty_workspace_diag_pending = None;
@@ -589,7 +603,7 @@ impl LspManager {
             }
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
-            self.dirty_diagnostics = true;
+            self.mark_diagnostics_changed();
         } else if ext == "dart" {
             self.current_python_file = None;
             self.current_python_lines = None;
@@ -643,7 +657,7 @@ impl LspManager {
             }
             self.ty_workspace_diag_dirty = true;
             self.ruff_workspace_diag_dirty = true;
-            self.dirty_diagnostics = true;
+            self.mark_diagnostics_changed();
         } else if ext == "dart"
             && self
                 .open_dart_files
@@ -838,7 +852,7 @@ impl LspManager {
                 self.prune_inactive_workspace_diagnostics();
                 self.ty_workspace_diag_dirty = !self.active_workspaces.is_empty();
                 self.ruff_workspace_diag_dirty = self.ty_workspace_diag_dirty;
-                self.dirty_diagnostics = true;
+                self.mark_diagnostics_changed();
             }
         } else if ext == "dart" {
             if self.current_path.as_ref() == Some(&abs_path) {

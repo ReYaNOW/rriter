@@ -72,79 +72,22 @@ impl App {
                 // Очищаем UI registry перед новым кадром```
                 self.ui_registry.clear();
 
-                self.ide_panel.flat_diags.clear();
-                let query_diagnostics =
-                    self.tabs
-                        .get(self.active_tab)
-                        .and_then(|tab| match &tab.kind {
-                            crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((
-                                std::path::PathBuf::from(format!(
-                                    "SQL-консоль · {}",
-                                    meta.database_name
-                                )),
-                                state.editor_diagnostics.clone(),
-                            )),
-                            _ => None,
-                        });
-                if let Some((path, diagnostics)) = query_diagnostics {
-                    self.ide_panel.query_problem_path = Some(path.clone());
-                    self.ide_panel.query_problem_diagnostics = diagnostics;
-                    if self.ide_panel.problems_tab == 1 {
-                        self.ide_panel.flat_diags.push((path.clone(), usize::MAX));
-                    }
-                    if self.ide_panel.problems_tab == 0
-                        || !self.ide_panel.problems_collapsed.contains(&path)
-                    {
-                        self.ide_panel.flat_diags.extend(
-                            (0..self.ide_panel.query_problem_diagnostics.len())
-                                .map(|index| (path.clone(), index)),
-                        );
-                    }
-                } else {
-                    self.ide_panel.query_problem_path = None;
-                    self.ide_panel.query_problem_diagnostics.clear();
-                }
-                if let Some(lsp) = &self.lsp {
-                    if self.ide_panel.problems_tab == 0 {
-                        if self.ide_panel.query_problem_path.is_none()
-                            && let Some(path) = &self.file_path
-                        {
-                            let mut diagnostics = lsp.diagnostic_entries_for_path(path);
-                            diagnostics.sort_by(|(_, left), (_, right)| {
-                                left.start_line
-                                    .cmp(&right.start_line)
-                                    .then(left.start_col.cmp(&right.start_col))
-                            });
-                            self.ide_panel.flat_diags.extend(
-                                diagnostics
-                                    .into_iter()
-                                    .map(|(index, _)| (path.clone(), index)),
-                            );
-                        }
-                    } else {
-                        for path in lsp.diagnostic_paths() {
-                            let mut diagnostics = lsp.diagnostic_entries_for_path(path);
-                            if diagnostics.is_empty() {
-                                continue;
-                            }
-                            diagnostics.sort_by(|(_, left), (_, right)| {
-                                left.start_line
-                                    .cmp(&right.start_line)
-                                    .then(left.start_col.cmp(&right.start_col))
-                            });
-                            self.ide_panel
-                                .flat_diags
-                                .push(((*path).clone(), usize::MAX));
-                            if !self.ide_panel.problems_collapsed.contains(path) {
-                                self.ide_panel.flat_diags.extend(
-                                    diagnostics
-                                        .into_iter()
-                                        .map(|(index, _)| ((*path).clone(), index)),
-                                );
-                            }
-                        }
-                    }
-                }
+                let query_problem = self
+                    .tabs
+                    .get(self.active_tab)
+                    .and_then(|tab| match &tab.kind {
+                        crate::app::EditorTabKind::DatabaseQuery(meta, state) => Some((
+                            meta.database_name.as_str(),
+                            state.editor_diagnostics.as_slice(),
+                        )),
+                        _ => None,
+                    });
+                self.ide_panel.refresh_flat_diagnostics_if_needed(
+                    self.active_tab,
+                    self.file_path.as_deref(),
+                    query_problem,
+                    self.lsp.as_ref(),
+                );
 
                 if let Some(log) = &mut self.pending_key_log {
                     if log.t_render.is_none() {
