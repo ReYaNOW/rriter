@@ -1477,11 +1477,10 @@ fn r3_095_ruff_workspace_disconnect_clears_stale_diagnostics() {
         PathBuf::from("/tmp/stale.py"),
         diag_arc(vec![test_diag("stale", DiagSeverity::Warning, None)]),
     );
-    let rx = crate::ui_waker::UiWaker::counting()
-        .spawn_one_shot("test-ruff-disconnect", || -> super::ruff_workspace::RuffWorkspaceResult {
-            panic!("test worker panic")
-        })
-        .unwrap();
+    // panic=abort builds: a worker that died without a result is a sender dropped unsent.
+    let (tx, rx) = crate::ui_waker::UiWaker::counting()
+        .one_shot_channel::<super::ruff_workspace::RuffWorkspaceResult>();
+    drop(tx);
     manager.ruff_workspace_diag_rx = Some(rx);
     manager.ruff_workspace_diag_pending = true;
     let deadline = std::time::Instant::now() + Duration::from_secs(1);

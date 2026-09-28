@@ -606,8 +606,9 @@ impl App {
                     branch_ahead_cache,
                 });
             });
-            if job.is_err() {
+            if let Err(err) = job {
                 self.ide_panel.git.handle_status_disconnect(request_id);
+                self.ide_panel.git.notice = Some(format!("Не удалось запустить Git worker: {err}"));
                 if refresh {
                     self.ide_panel.git.finish_status_refresh();
                 }
@@ -642,8 +643,9 @@ impl App {
                 refresh,
                 status_mutation,
             }),
-            Err(_err) => {
+            Err(err) => {
                 self.ide_panel.git.handle_status_disconnect(request_id);
+                self.ide_panel.git.notice = Some(format!("Не удалось запустить Git worker: {err}"));
                 if refresh {
                     self.ide_panel.git.finish_status_refresh();
                 }
