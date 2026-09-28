@@ -1478,12 +1478,11 @@ where
     state.pending_popup = None;
     state.definition_request_id = None;
     state.hide_diagnostic_popup_until_ready();
-    state.definition_request_id = request_definition();
-    if state.definition_request_id.is_some() {
-        state.pending_popup = Some(popup);
-    } else {
-        state.finish_stale_combined_transition();
-        state.popup = Some(popup);
+    match request_definition() {
+        Some(definition_request_id) => {
+            state.park_popup_for_definition(popup, definition_request_id)
+        }
+        None => state.show_popup(popup),
     }
     state.selection_anchor = None;
     state.selection_cursor = None;

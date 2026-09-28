@@ -1432,10 +1432,11 @@ Root:
 * `src/headless/dump.rs` -> headless confirmation dialog centered in the main frame (`dialog_layout`, `dialog_buttons`, `draw_dialog` with a scissored clear) and the `dump` JSON snapshot of UI state (`dump_json`: tabs, overlays, dialog, external request, hover, `ui` hit rects).
 * `src/headless/tests.rs` -> headless session integration tests on offscreen EGL and `tests_support` (`ensure_test_profile_root`, `session_for_test`) for later headless tests.
 * `src/headless/tests.rs` `tests_support` UI helpers -> `postgres_fixture()` (spawns `scripts/postgres_fixture.py --port 0`), `connect_postgres_fixture_through_ui`, `add_database_connection_through_ui`, `set_database_dialog_field`, `click_ui_fraction`, `ui_point`, `dirty_ide_tab`, `terminal_*`, `API_MOCK_TEST_LOCK`, `start_mock_server`/`stop_mock_server`, `get_from_mock`.
-* `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, and long tabs.
+* `src/headless/ui_tests_editor.rs` -> headless UI regression tests for editor selection, folding, minimap/scroll, search/completion, long tabs, and horizontal scrollbar drag/press behavior.
 * `src/headless/ui_tests_goto_definition.rs` -> headless UI tests for Ctrl-hover highlighting and same-file/cross-file definition navigation.
 * `src/headless/ui_tests_layout.rs` -> headless UI regression tests for welcome/editor/tree size and scale matrices, resize, and frame benchmarks.
 * `src/headless/ui_tests_problems.rs` -> headless UI tests for listing Python diagnostics, jumping to a diagnostic, and clearing stale rows.
+* `src/headless/ui_tests_problems_groups.rs` -> headless UI tests for Problems current-file/all tabs, file group collapse, and per-file groups.
 * `src/headless/ui_tests_markdown.rs` -> headless UI tests for Markdown Read block layout, scrolling, code copy, edit toggle, and scrollbar drag.
 * `src/headless/ui_tests_welcome.rs` -> headless UI tests for creating a file, entering IDE mode, and opening/removing recent files.
 * `src/headless/ui_tests_project_search.rs` -> headless UI tests for include/exclude globs, query controls, result navigation, and scrolling.
@@ -1443,6 +1444,8 @@ Root:
 * `src/headless/ui_tests_terminal.rs` -> headless UI tests for terminal commands, tabs, search navigation, and mouse selection/copy.
 * `src/headless/ui_tests_api_client_spec.rs` -> headless UI tests for API spec endpoints, path/query parameters, and auth controls.
 * `src/headless/ui_tests_api_client_request.rs` -> headless UI tests for API GET/POST requests, errors, response bodies, and cURL copy.
+* `src/headless/ui_tests_api_client_navigation.rs` -> headless UI tests for API spec refresh/remove, route filter, and tag group collapse.
+* `src/headless/ui_tests_api_client_response_views.rs` -> headless UI tests for API response Headers/Body, status variants, and Input/Schema views.
 * `src/headless/ui_tests_tabs_tree.rs` -> headless UI regression tests for tab close behavior, file-tree expansion, large trees, and long filenames.
 * `src/headless/ui_tests_tree_ops.rs` -> headless UI regression tests for File Tree create/rename/move/delete and context menus.
 * `src/headless/ui_tests_tree_trash.rs` -> headless UI tests for confirmed File Tree deletion into the per-PID test Trash (`platform::trash_layout` under cfg(test)) and undo restore.
@@ -1458,7 +1461,7 @@ Root:
 * `src/headless/ui_tests_database_query.rs` -> headless UI tests for SQL console SELECT grid, EXPLAIN plan, and server error text with a usable console after it.
 * `src/headless/ui_tests_lsp_servers.rs` -> headless UI tests for configured LSP server start/Stop, Disabled state, and bounded crash restarts.
 * `src/headless/ui_tests_tabs_dirty.rs` -> headless UI tests for the dirty-tab close dialog: Save (incl. CRLF), Cancel, Escape, outside click, and close after Ctrl+S.
-* `src/headless/ui_tests_keyboard_panels.rs` -> headless UI tests for panel shortcuts Alt+Q/Shift+Alt+Q terminal, F1 in terminal focus, Alt+W Problems, and Ctrl+Shift+F from the terminal.
+* `src/headless/ui_tests_keyboard_panels.rs` -> headless UI tests for panel shortcuts Alt+Q/Shift+Alt+Q terminal, F1 in terminal focus, Alt+W Problems, Ctrl+Shift+F from the terminal, Ctrl+4, and Escape from Project Search.
 * `src/headless/ui_tests_api_client_import.rs` -> headless UI tests for OpenAPI import by URL from a local HTTP server: routes, URL validation, 404/invalid JSON errors, and no duplicate spec on re-import.
 * `src/headless/ui_tests_api_mock_python.rs` -> headless UI tests for API Mock Python handlers: served result, exception/syntax error → 500, edit after restart, and hot update on a running server.
 * `src/headless/ui_tests_api_mock_contract.rs` -> headless UI tests for the API Mock Python handler contract: path/query/JSON body arguments, missing optional query, and timeout → 500 with recovery.

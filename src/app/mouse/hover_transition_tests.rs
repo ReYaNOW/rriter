@@ -302,6 +302,45 @@ fn mouse_motion_resets_type_hover_request_wait() {
 }
 
 #[test]
+fn unanswered_definition_releases_parked_hover_popup_after_bounded_wait() {
+    let mut state = HoverState {
+        byte_offset: Some(12),
+        ..HoverState::default()
+    };
+    state.park_popup_for_definition(
+        crate::app::mouse::HoverPopup {
+            text: "parked".to_string(),
+            spans: Vec::new(),
+            line_kinds: Vec::new(),
+            inline_code_ranges: Vec::new(),
+            byte_offset: 12,
+            anchor_x: 0.0,
+            anchor_y: 0.0,
+            offset_x: None,
+            offset_y: None,
+            anim_progress: 0.0,
+            scroll: crate::scroll::ScrollState::new(15.0),
+            layout_cache: None,
+        },
+        7,
+    );
+
+    let wait = super::super::hover_state_core::HOVER_DEFINITION_WAIT_SEC;
+    let Some(left) = state.tick_definition_wait(wait * 0.5) else {
+        panic!("definition wait should still be active");
+    };
+    assert!(left > 0.0 && left <= wait * 0.5 + f32::EPSILON);
+    assert!(state.popup.is_none());
+    assert_eq!(state.definition_request_id, Some(7));
+
+    assert!(state.tick_definition_wait(wait).is_none());
+    assert_eq!(state.popup.as_ref().map(|popup| popup.text.as_str()), Some("parked"));
+    assert!(state.pending_popup.is_none());
+    assert!(state.definition_request_id.is_none(), "late definition must not reshape the popup");
+    assert_eq!(state.timer, 0.0);
+}
+
+#[test]
 fn shared_hover_target_update_restarts_after_click_clear() {
     let mut editor = crate::editor::Editor::new(64);
     editor.set_text_clean("json_response\njson_ressposnse");

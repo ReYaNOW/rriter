@@ -140,6 +140,72 @@ pub(crate) mod tests_support {
         session
     }
 
+    pub(crate) fn keyboard_session(name: &str) -> (PathBuf, HeadlessSession) {
+        const TEST_WIDTH: u32 = 1280;
+        const TEST_HEIGHT: u32 = 720;
+        const TEST_SCALE: f32 = 4.0 / 3.0;
+        const EDITOR_TEXT: &str = "alpha\n";
+
+        let dir = scratch_dir(name);
+        let file = dir.join("a.txt");
+        std::fs::write(&file, EDITOR_TEXT)
+            .unwrap_or_else(|err| panic!("write keyboard fixture: {err}"));
+        let mut session = session_for_test(TEST_WIDTH, TEST_HEIGHT);
+        let lines = run_script(
+            &mut session,
+            format!(
+                "scale {TEST_SCALE}\nworkspace {}\nopen {}\nsettle 2000\n",
+                dir.display(),
+                file.display()
+            )
+            .as_bytes(),
+        );
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        assert!(!session.app.ide_panel.is_open(crate::app::PanelId::Terminal));
+        assert_eq!(session.app.editor.get_full_text(), EDITOR_TEXT);
+        (dir, session)
+    }
+
+    pub(crate) fn panel_open(state: &serde_json::Value, panel: &str) -> bool {
+        state["ide_panel"]["open"]
+            .as_array()
+            .is_some_and(|panels| panels.iter().any(|open| open == panel))
+    }
+
+    pub(crate) fn open_terminal_with_alt_q(session: &mut HeadlessSession) {
+        let lines = run_script(session, b"key alt+q\n");
+        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+        wait_until(session, 8000, "terminal panel after Alt+Q", |session| {
+            let state = dump(session);
+            panel_open(&state, "terminal")
+                && has_ui(&state, "TerminalBody")
+                && !session.app.ide_panel.terminals.is_empty()
+        });
+    }
+
+    pub(crate) fn seed_lsp_diagnostics(
+        session: &mut HeadlessSession,
+        workspace_dirs: Vec<PathBuf>,
+        fixtures: Vec<(PathBuf, Vec<crate::lsp::Diagnostic>)>,
+    ) {
+        disable_python_lsp(session, workspace_dirs);
+        let Some(lsp) = session.app.lsp.as_mut() else {
+            panic!("workspace LSP manager was not initialized");
+        };
+        for (file, diagnostics) in fixtures {
+            lsp.diagnostics.insert(file, std::sync::Arc::from(diagnostics));
+        }
+        lsp.dirty_diagnostics = true;
+    }
+
+    pub(crate) fn disable_python_lsp(session: &mut HeadlessSession, workspace_dirs: Vec<PathBuf>) {
+        let lsp = session
+            .app
+            .lsp
+            .get_or_insert_with(|| crate::lsp::LspManager::new(workspace_dirs));
+        lsp.disable_python();
+    }
+
     pub(crate) fn open_file_session(w: u32, h: u32, scale: f32, path: &Path) -> HeadlessSession {
         let mut session = session_for_test(w, h);
         let lines = run_script(
@@ -692,26 +758,68 @@ pub(crate) mod tests_support {
         let _ = read_http_request(stream);
     }
 
-    pub(crate) fn serve_api_spec(server: &str, paths: serde_json::Value) -> String {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind API spec server");
-        let address = listener.local_addr().expect("API spec server address");
-        let server = server.to_string();
+    /// Starts a local fixed-response HTTP fixture and captures each request line.
+    pub(crate) fn serve_http_responses(
+        path: &'static str,
+        responses: Vec<(u16, &'static str, &'static str, String, Duration)>,
+    ) -> (String, mpsc::Receiver<String>) {
+        let listener = TcpListener::bind(("127.0.0.1", 0))
+            .unwrap_or_else(|err| panic!("bind HTTP fixture: {err}"));
+        let address = listener
+            .local_addr()
+            .unwrap_or_else(|err| panic!("HTTP fixture address: {err}"));
+        listener
+            .set_nonblocking(true)
+            .unwrap_or_else(|err| panic!("set HTTP fixture listener nonblocking: {err}"));
+        let (sender, receiver) = mpsc::channel();
         std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept API spec import");
-            read_request_before_reply(&mut stream);
-            let spec = serde_json::json!({
+            for (status, reason, headers, body, delay) in responses {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                let (mut stream, request) = loop {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
+                            let request = read_http_request(&mut stream);
+                            if !request.is_empty() {
+                                break (stream, request);
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            if Instant::now() >= deadline {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(10));
+                        }
+                        Err(error) => panic!("accept HTTP fixture request: {error}"),
+                    }
+                };
+                let _ = sender.send(String::from_utf8_lossy(&request).into_owned());
+                std::thread::sleep(delay);
+                let response = format!(
+                    "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                if let Err(error) = stream.write_all(response.as_bytes()) {
+                    panic!("write HTTP fixture response: {error}");
+                }
+            }
+        });
+        (format!("http://{address}{path}"), receiver)
+    }
+
+    pub(crate) fn serve_api_spec(server: &str, paths: serde_json::Value) -> String {
+        let spec = serde_json::json!({
                 "openapi": "3.1.0",
                 "info": {"title": "Headless API Client", "version": "1.0.0"},
                 "servers": [{"url": server}],
                 "paths": paths
-            }).to_string();
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                spec.len(), spec
-            );
-            stream.write_all(response.as_bytes()).expect("write API spec");
-        });
-        format!("http://{address}/openapi.json")
+            })
+            .to_string();
+        let (url, _) = serve_http_responses(
+            "/openapi.json",
+            vec![(200, "OK", "", spec, Duration::ZERO)],
+        );
+        url
     }
 
     pub(crate) fn workspace_session(dir: &Path) -> HeadlessSession {
@@ -745,6 +853,15 @@ pub(crate) mod tests_support {
             let api = &session.app.ide_panel.api;
             api.loading.is_empty() && api.selected_spec.is_some_and(|id| api.models.contains_key(&id))
         });
+    }
+
+    pub(crate) fn api_client_session(name: &str, spec_url: &str) -> (PathBuf, HeadlessSession) {
+        ensure_test_profile_root();
+        reset_api_test_state();
+        let dir = scratch_dir(name);
+        let mut session = workspace_session(&dir);
+        install_spec(&mut session, spec_url);
+        (dir, session)
     }
 
     pub(crate) fn send_request(session: &mut HeadlessSession, route_idx: usize) {

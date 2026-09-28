@@ -45,6 +45,10 @@ def main() -> None:
     crash_after_initialize = "_crash" in mode
     long_hover = "_long" in mode
     publish_diagnostics = "_diagnostics" in mode
+    # A server that never answers textDocument/definition (overloaded ty).
+    definition_never_answers = "_nodefinition" in mode
+    # A server that answers textDocument/definition with a JSON-RPC error.
+    definition_error = "_definitionerror" in mode
     while message := read_message():
         method = message.get("method")
         request_id = message.get("id")
@@ -83,6 +87,17 @@ def main() -> None:
                 }
             )
         elif method == "textDocument/definition":
+            if definition_never_answers:
+                continue
+            if definition_error:
+                write_message(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": {"code": -32603, "message": "definition failed"},
+                    }
+                )
+                continue
             write_message({"jsonrpc": "2.0", "id": request_id, "result": None})
         elif method == "textDocument/inlayHint":
             write_message({"jsonrpc": "2.0", "id": request_id, "result": []})

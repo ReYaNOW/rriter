@@ -1,14 +1,10 @@
 use crate::app::api_client::{ApiMethod, ApiSpecSource};
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script, scratch_dir, wait_until,
-    wheel_until_visible, workspace_with_explorer,
+    click_ui, dump, ensure_test_profile_root, has_ui, reset_api_test_state, run_script, scratch_dir,
+    serve_http_responses, wait_until, wheel_until_visible, workspace_with_explorer,
 };
 use crate::headless::HeadlessSession;
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
 use std::time::Duration;
 
 const TEST_WIDTH: u32 = 1280;
@@ -28,31 +24,14 @@ const IMPORT_SPEC: &str = r#"{
   }
 }"#;
 
-/// Serves `responses` on 127.0.0.1, one connection each, in order; every request line
-/// goes to the returned channel so a test can prove the import really hit the server.
-fn fixture_server(responses: Vec<(u16, &'static str)>) -> (String, Receiver<String>) {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind OpenAPI fixture server");
-    let url = format!("http://{}/openapi.json", listener.local_addr().expect("fixture address"));
-    let (tx, rx) = mpsc::channel();
-    thread::spawn(move || {
-        for (status, body) in responses {
-            let Ok((mut stream, _)) = listener.accept() else { return };
-            let mut reader = BufReader::new(stream.try_clone().expect("clone fixture stream"));
-            let mut request_line = String::new();
-            let _ = reader.read_line(&mut request_line);
-            let mut header = String::new();
-            while reader.read_line(&mut header).is_ok_and(|n| n > 2) {
-                header.clear();
-            }
-            let _ = tx.send(request_line.trim_end().to_string());
-            let _ = write!(
-                stream,
-                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                body.len()
-            );
-        }
-    });
-    (url, rx)
+fn fixture_server(responses: Vec<(u16, &'static str)>) -> (String, std::sync::mpsc::Receiver<String>) {
+    serve_http_responses(
+        "/openapi.json",
+        responses
+            .into_iter()
+            .map(|(status, body)| (status, "X", "", body.to_string(), Duration::ZERO))
+            .collect(),
+    )
 }
 
 fn import_session(name: &str) -> (PathBuf, HeadlessSession) {

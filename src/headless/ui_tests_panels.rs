@@ -313,6 +313,61 @@ fn headless_lsp_hover_popup_shows_symbol_and_dismisses_on_mouse_or_escape() {
 }
 
 #[test]
+fn headless_lsp_hover_popup_shows_when_definition_is_never_answered() {
+    let dir = scratch_dir("ui-lsp-hover-no-definition");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server_nodefinition.py");
+    open_hover_file(&mut session, &file);
+
+    let first = source
+        .find("hover_subject")
+        .unwrap_or_else(|| panic!("first hover_subject fixture occurrence"));
+    mouse_move_to_source_offset(&mut session, first);
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text(&session).unwrap_or_else(|| {
+        panic!("hover popup must not wait forever for an unanswered definition request")
+    });
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+
+    let second = source
+        .rfind("hover_subject")
+        .unwrap_or_else(|| panic!("second hover_subject fixture occurrence"));
+    assert_ne!(first, second);
+    mouse_move_to_source_offset(&mut session, second);
+    wait_for_hover(&mut session);
+    // The popup keys on the normalized hover byte, which may sit inside the token.
+    let popup_byte = session.app.hover.popup.as_ref().map(|popup| popup.byte_offset);
+    assert!(
+        popup_byte.is_some_and(|byte| (second..second + "hover_subject".len()).contains(&byte)),
+        "second symbol did not get its own hover popup: {popup_byte:?}, second at {second}"
+    );
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_lsp_hover_popup_shows_when_definition_answers_with_error() {
+    let dir = scratch_dir("ui-lsp-hover-definition-error");
+    let source = hover_source_with_docs(2);
+    let file = write_python_hover_fixture(&dir, &source);
+    let mut session = workspace_session(1280, 720, 4.0 / 3.0, &dir);
+    install_fake_ty(&mut session, &dir, "fake_lsp_server_definitionerror.py");
+    open_hover_file(&mut session, &file);
+
+    let target = source
+        .find("hover_subject")
+        .unwrap_or_else(|| panic!("hover_subject fixture occurrence"));
+    mouse_move_to_source_offset(&mut session, target);
+    wait_for_hover(&mut session);
+    let text = current_hover_popup_text(&session)
+        .unwrap_or_else(|| panic!("a definition error response must release the hover popup"));
+    assert!(text.contains("hover_subject"), "hover text is unrelated: {text}");
+    assert_eq!(session.app.hover.definition_request_id, None);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
 fn headless_lsp_hover_popup_stays_inside_window_at_right_and_bottom_edges() {
     for (w, h) in [(1280, 720), (2560, 1440)] {
         let dir = scratch_dir("ui-lsp-hover-edges");

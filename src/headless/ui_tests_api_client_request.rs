@@ -2,16 +2,12 @@
 
 use crate::app::api_client::ApiClientRouteIdentity;
 use crate::headless::tests_support::{
-    click_ui, dump, ensure_test_profile_root, reset_api_test_state, run_script,
-    scratch_dir, send_request, serve_api_spec, read_http_request, workspace_session,
-    install_spec, wait_until, wheel_until_visible,
+    api_client_session, click_ui, dump, run_script, send_request, serve_api_spec,
+    serve_http_responses, wait_until, wheel_until_visible,
 };
 use crate::headless::HeadlessSession;
-use std::io::Write;
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver};
-use std::thread;
 
 /// Cursor over the API side panel (x 64..384 at this size and scale).
 const PANEL_POINT: (f64, f64) = (200.0, 500.0);
@@ -33,7 +29,7 @@ fn serve_spec(server: &str) -> String {
     }))
 }
 
-fn request_server(status: u16, body: &'static str) -> (String, Receiver<String>) {
+fn request_server(status: u16, body: &'static str) -> (String, std::sync::mpsc::Receiver<String>) {
     request_server_delayed(status, body, std::time::Duration::ZERO)
 }
 
@@ -42,55 +38,18 @@ fn request_server_delayed(
     status: u16,
     body: &'static str,
     delay: std::time::Duration,
-) -> (String, Receiver<String>) {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind request test server");
-    let address = listener.local_addr().expect("request server address");
-    let (tx, rx) = mpsc::channel();
-    listener.set_nonblocking(true).expect("set accept nonblocking");
-    thread::spawn(move || {
-        // The server starts before the session (workspace, spec import, scrolling to the
-        // endpoint), which under a parallel test run can take well over ten seconds.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-        let (mut stream, request) = loop {
-            let mut stream = match listener.accept() {
-                Ok((stream, _)) => stream,
-                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                    if std::time::Instant::now() >= deadline {
-                        return;
-                    }
-                    thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
-                }
-                Err(error) => panic!("accept API request: {error}"),
-            };
-            stream.set_nonblocking(false).expect("set request stream blocking");
-            stream
-                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
-                .expect("set server read timeout");
-            let request = read_http_request(&mut stream);
-            // `measure_direct_server_reach_ms` opens and closes a bare TCP connection before
-            // the real request; skip such empty connections.
-            if !request.is_empty() {
-                break (stream, request);
-            }
-        };
-        let _ = tx.send(String::from_utf8_lossy(&request).into_owned());
-        thread::sleep(delay);
-        let reason = match status {
-            200 => "OK",
-            201 => "Created",
-            404 => "Not Found",
-            500 => "Internal Server Error",
-            _ => "Response",
-        };
-        write!(
-            stream,
-            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        )
-        .expect("write canned response");
-    });
-    (format!("http://{address}"), rx)
+) -> (String, std::sync::mpsc::Receiver<String>) {
+    let reason = match status {
+        200 => "OK",
+        201 => "Created",
+        404 => "Not Found",
+        500 => "Internal Server Error",
+        _ => "Response",
+    };
+    serve_http_responses(
+        "",
+        vec![(status, reason, "", body.to_string(), delay)],
+    )
 }
 
 fn refused_address() -> String {
@@ -134,12 +93,7 @@ fn open_route(session: &mut HeadlessSession, method: &str, path: &str) -> usize 
 }
 
 fn scratch_request(name: &str, server: &str) -> (PathBuf, HeadlessSession) {
-    ensure_test_profile_root();
-    reset_api_test_state();
-    let dir = scratch_dir(name);
-    let mut session = workspace_session(&dir);
-    install_spec(&mut session, &serve_spec(server));
-    (dir, session)
+    api_client_session(name, &serve_spec(server))
 }
 
 #[test]

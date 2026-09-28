@@ -55,6 +55,9 @@ pub struct HoverLayoutCache {
 pub type DiagnosticPopupRect = (f32, f32, f32, f32, f32, f32, f32);
 pub type HoveredDiagnostic = (usize, f32, f32, f32, f32);
 const HOVER_SOURCE_LINE_HALF_H_SCALE: f32 = 10.0;
+/// Longest wait for the definition response that enriches a finished hover popup; a slow,
+/// silent or definition-less server shows the plain hover after this.
+pub const HOVER_DEFINITION_WAIT_SEC: f32 = 0.25;
 
 pub struct HoverState {
     pub request_id: Option<i32>,
@@ -477,6 +480,37 @@ impl HoverState {
         }
         self.stale_combined_popup = false;
         self.popup_diag_type_target = None;
+    }
+
+    /// Makes `popup` the visible hover popup.
+    pub fn show_popup(&mut self, popup: HoverPopup) {
+        self.finish_stale_combined_transition();
+        self.popup = Some(popup);
+    }
+
+    /// Parks a finished hover popup until the definition response `definition_request_id`
+    /// enriches it (class signature, attribute docs, module path), for at most
+    /// `HOVER_DEFINITION_WAIT_SEC`; `timer` counts the wait.
+    pub fn park_popup_for_definition(&mut self, popup: HoverPopup, definition_request_id: i32) {
+        self.definition_request_id = Some(definition_request_id);
+        self.pending_popup = Some(popup);
+        self.timer = 0.0;
+    }
+
+    /// Advances the wait for an outstanding definition response. Returns the seconds left,
+    /// or `None` once the wait expired: the parked popup is then shown as is and the late
+    /// definition response is ignored, so the visible popup never changes under the mouse.
+    pub fn tick_definition_wait(&mut self, dt: f32) -> Option<f32> {
+        self.timer += dt;
+        if self.timer < HOVER_DEFINITION_WAIT_SEC {
+            return Some(HOVER_DEFINITION_WAIT_SEC - self.timer);
+        }
+        self.timer = 0.0;
+        self.definition_request_id = None;
+        if let Some(popup) = self.pending_popup.take() {
+            self.show_popup(popup);
+        }
+        None
     }
 
     pub fn should_keep_popup_through_empty_space(&self) -> bool {

@@ -14,7 +14,11 @@ mod ui_tests_api_client_import;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_multipart;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_navigation;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_request;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_api_client_response_views;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_api_client_spec;
 #[cfg(all(test, target_os = "linux"))]
@@ -63,6 +67,8 @@ mod ui_tests_markdown;
 mod ui_tests_panels;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_problems;
+#[cfg(all(test, target_os = "linux"))]
+mod ui_tests_problems_groups;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_project_search;
 #[cfg(all(test, target_os = "linux"))]

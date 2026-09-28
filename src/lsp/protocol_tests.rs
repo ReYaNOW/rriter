@@ -742,6 +742,7 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
         (3, PendingRequestKind::Hover),
         (6, PendingRequestKind::Completion),
         (7, PendingRequestKind::WorkspaceDiagnostic),
+        (8, PendingRequestKind::Definition),
     ])));
 
     dispatch_frame(
@@ -958,6 +959,27 @@ fn lsp_dispatch_handles_pending_kinds_fallbacks_and_notifications() {
     let reply: serde_json::Value = serde_json::from_slice(&out_rx.try_recv().unwrap()).unwrap();
     assert_eq!(reply["id"], 5);
     assert!(reply["result"].is_null());
+
+    // An error answer to a definition request still reaches the app as an empty
+    // result, so a hover popup parked for the definition is released.
+    dispatch_frame(
+        br#"{"jsonrpc":"2.0","id":8,"error":{"code":-32603,"message":"definition failed"}}"#,
+        &event_tx,
+        "ty",
+        &out_tx,
+        &pending,
+    );
+    // `try_iter`, not `recv_non_log`: a dropped error must fail, not hang.
+    let definition = event_rx
+        .try_iter()
+        .find(|event| !matches!(event, LspEvent::Log { .. }));
+    match definition {
+        Some(LspEvent::DefinitionResponse { request_id, target }) => {
+            assert_eq!(request_id, 8);
+            assert!(target.is_none());
+        }
+        other => panic!("definition error was not reported: {other:?}"),
+    }
 }
 
 #[test]
