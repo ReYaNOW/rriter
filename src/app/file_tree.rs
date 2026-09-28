@@ -1471,7 +1471,7 @@ impl App {
                 .map(Path::to_path_buf)
                 .unwrap_or_else(|| path.to_path_buf())
         };
-        let _ = crate::platform::reveal_path(&folder);
+        let _ = crate::platform::reveal_path(self.external_requests.sink(), &folder);
     }
 
     pub(crate) fn show_path_in_file_tree(&mut self, path: &Path) {

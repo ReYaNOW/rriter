@@ -1,5 +1,8 @@
+use crate::app::PendingAction;
+use crate::app::events::host_loop::HostLoop;
 use crate::headless::HeadlessSession;
 use crate::headless::tests_support::{dirty_ide_tab, dump, run_script, wait_until};
+use std::sync::atomic::Ordering;
 
 /// Ctrl+4 on the dirty tab opens the unsaved-changes dialog for that tab.
 fn open_close_dialog(session: &mut HeadlessSession) {
@@ -100,5 +103,41 @@ fn headless_tabs_close_after_ctrl_s_skips_dialog() {
     let state = dump(&mut session);
     assert_eq!(state["dialog"], serde_json::Value::Null, "{state}");
     assert!(state["tabs"].as_array().is_none_or(Vec::is_empty), "{state}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_dirty_close_dialog_keeps_its_action_over_a_quit_request() {
+    let (dir, file, mut session) = dirty_ide_tab("ui-tabs-dirty-quit-over", b"original\n");
+    open_close_dialog(&mut session);
+    // Seeded: headless has no main-window close button; its `CloseRequested` handler asks this.
+    session.app.show_action_dialog(&HostLoop::headless(&session.loop_state), PendingAction::Quit);
+    assert_eq!(dump(&mut session)["dialog"]["action"], "CloseTab");
+    // Discard answers the question on screen: the tab closes, the editor keeps running.
+    assert_eq!(run_script(&mut session, b"dialog discard\n"), ["ok"]);
+    wait_until(&mut session, 5000, "close of the discarded dirty tab", |s| tab_count(s) == 0);
+    assert!(!session.loop_state.exit_requested.load(Ordering::Relaxed));
+    assert_eq!(std::fs::read(&file).unwrap(), b"original\n");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn headless_tabs_dirty_vanished_save_picker_disarms_the_close() {
+    let (dir, file, mut session) = dirty_ide_tab("ui-tabs-dirty-picker-gone", b"original\n");
+    open_close_dialog(&mut session);
+    // Seeded: the Save-As picker is native and has no headless path. Move the flow to its
+    // Save-As phase and hand it a picker channel whose thread already died.
+    session.app.confirm_dialog.begin_save_as(vec![0]);
+    let (tx, rx) = std::sync::mpsc::channel();
+    drop(tx);
+    session.app.save_file_rx = Some(rx);
+    run_script(&mut session, b"mouse_move 0 0\nsettle 500\n");
+    assert!(session.app.save_file_rx.is_none(), "the dead picker channel was polled");
+    assert_eq!(session.app.confirm_dialog.action(), PendingAction::None);
+    let state = dump(&mut session);
+    assert_eq!(state["dialog"], serde_json::Value::Null, "{state}");
+    assert_eq!(state["tabs"].as_array().unwrap().len(), 1);
+    assert_eq!(state["tabs"][0]["modified"], true);
+    assert_eq!(std::fs::read(&file).unwrap(), b"original\n");
     let _ = std::fs::remove_dir_all(dir);
 }

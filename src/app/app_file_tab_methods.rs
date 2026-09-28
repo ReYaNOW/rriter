@@ -167,10 +167,11 @@ impl App {
             if idx != self.active_tab {
                 self.switch_to_tab(idx);
             }
-            self.pending_action = PendingAction::CloseTab(idx);
-            self.pending_action_ready = false;
-            self.pending_action_waiting_for_save_as = false;
-            self.pending_save_tabs.clear();
+            // The question window is created by `about_to_wait`, which owns the event loop.
+            let action = PendingAction::CloseTab(idx);
+            if !self.confirm_dialog.request(action) && !self.confirm_dialog.supersede(action) {
+                return;
+            }
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }

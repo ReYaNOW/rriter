@@ -7,15 +7,13 @@ use std::fs::{self, File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::process::Child;
-#[cfg(any(windows, target_os = "linux"))]
-use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread::JoinHandle;
 use std::time::Duration;
 use winit::window::WindowAttributes;
 
+mod desktop_request;
 mod elevated_save;
 mod integration;
 #[cfg(target_os = "linux")]
@@ -61,6 +59,11 @@ pub fn cache_dir() -> PathBuf {
 pub fn state_dir() -> PathBuf {
     integration::state_dir()
 }
+pub(crate) use desktop_request::intercept_external;
+pub use desktop_request::{
+    ExternalRequest, ExternalRequestLog, ExternalRequestSink, open_url, pick_file,
+    pick_file_with_filter, pick_files, pick_folder, reveal_path, save_file, save_file_with_filter,
+};
 pub use elevated_save::{handle_startup_helper, write_text_file_elevated};
 pub(crate) use integration::configured_tool_path_for_env;
 #[cfg(any(windows, test))]
@@ -179,37 +182,6 @@ pub fn probe_display_refresh_hz() -> Option<f64> {
 /// pkexec/UAC prompts would pop over the user's fullscreen app: never in headless.
 pub(crate) fn elevation_allowed(policy: Option<HeadlessPolicy>) -> bool {
     policy.is_none()
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ExternalRequest {
-    PickFile,
-    PickFiles,
-    PickFolder,
-    SaveFile,
-    OpenUrl(String),
-    RevealPath(PathBuf),
-}
-
-static LAST_EXTERNAL_REQUEST: Mutex<Option<ExternalRequest>> = Mutex::new(None);
-
-pub fn note_external_request(request: ExternalRequest) {
-    *lock_recover(&LAST_EXTERNAL_REQUEST) = Some(request);
-}
-
-/// Returns the last intercepted request and clears it (read by `dump`).
-pub fn take_external_request() -> Option<ExternalRequest> {
-    lock_recover(&LAST_EXTERNAL_REQUEST).take()
-}
-
-/// `true` when the caller must not touch the desktop: headless records the
-/// request instead of opening a picker, browser, or file manager.
-pub(crate) fn intercept_external(policy: Option<HeadlessPolicy>, request: ExternalRequest) -> bool {
-    if policy.is_none() {
-        return false;
-    }
-    note_external_request(request);
-    true
 }
 
 pub(crate) fn corrupt_file_backup_note(path: &Path) -> String {
@@ -1369,168 +1341,6 @@ fn clipboard_retry<T>(
         }
     }
     Err(last_error.expect("clipboard retry loop always executes"))
-}
-
-pub fn pick_file(title: &str) -> Option<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::PickFile) {
-        return None;
-    }
-    rfd::FileDialog::new().set_title(title).pick_file()
-}
-
-pub fn pick_file_with_filter(
-    title: &str,
-    filter_name: &str,
-    extensions: &[&str],
-) -> Option<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::PickFile) {
-        return None;
-    }
-    rfd::FileDialog::new()
-        .set_title(title)
-        .add_filter(filter_name, extensions)
-        .pick_file()
-}
-
-pub fn pick_files(title: &str) -> Vec<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::PickFiles) {
-        return Vec::new();
-    }
-    rfd::FileDialog::new()
-        .set_title(title)
-        .pick_files()
-        .unwrap_or_default()
-}
-
-pub fn pick_folder(title: &str) -> Option<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::PickFolder) {
-        return None;
-    }
-    rfd::FileDialog::new().set_title(title).pick_folder()
-}
-
-pub fn save_file(title: &str, file_name: &str) -> Option<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::SaveFile) {
-        return None;
-    }
-    rfd::FileDialog::new()
-        .set_title(title)
-        .set_file_name(file_name)
-        .save_file()
-}
-
-pub fn save_file_with_filter(
-    title: &str,
-    file_name: &str,
-    filter_name: &str,
-    extensions: &[&str],
-) -> Option<PathBuf> {
-    if intercept_external(headless_policy(), ExternalRequest::SaveFile) {
-        return None;
-    }
-    rfd::FileDialog::new()
-        .set_title(title)
-        .set_file_name(file_name)
-        .add_filter(filter_name, extensions)
-        .save_file()
-}
-
-pub fn reveal_path(path: &Path) -> io::Result<Child> {
-    if intercept_external(headless_policy(), ExternalRequest::RevealPath(path.to_path_buf())) {
-        return Err(io::Error::new(io::ErrorKind::Unsupported, "disabled in headless mode"));
-    }
-    #[cfg(windows)]
-    {
-        let mut command = Command::new("explorer.exe");
-        if path.is_dir() {
-            command.arg(path);
-        } else {
-            command.arg("/select,").arg(path);
-        }
-        process::configure_background_command(&mut command);
-        return command.spawn();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        return macos::reveal_path(path);
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let target = if path.is_dir() {
-            path
-        } else {
-            path.parent().unwrap_or(path)
-        };
-        return Command::new("xdg-open").arg(target).spawn();
-    }
-    #[allow(unreachable_code)]
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "revealing files is not supported on this platform",
-    ))
-}
-
-pub fn open_url(url: &str) -> io::Result<()> {
-    if intercept_external(headless_policy(), ExternalRequest::OpenUrl(url.to_string())) {
-        return Ok(());
-    }
-    let parsed =
-        url::Url::parse(url).map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "only http and https URLs may be opened",
-        ));
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::ffi::OsStrExt;
-        use windows_sys::Win32::UI::Shell::ShellExecuteW;
-        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
-
-        let operation = OsStr::new("open")
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let target = OsStr::new(parsed.as_str())
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect::<Vec<_>>();
-        let result = unsafe {
-            ShellExecuteW(
-                std::ptr::null_mut(),
-                operation.as_ptr(),
-                target.as_ptr(),
-                std::ptr::null(),
-                std::ptr::null(),
-                SW_SHOWNORMAL,
-            )
-        };
-        if result as isize > 32 {
-            return Ok(());
-        }
-        return Err(io::Error::other(format!(
-            "ShellExecuteW failed with code {}",
-            result as isize
-        )));
-    }
-    #[cfg(target_os = "macos")]
-    {
-        return macos::open_url(parsed.as_str());
-    }
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        return Command::new("xdg-open")
-            .arg(parsed.as_str())
-            .spawn()
-            .map(|_| ());
-    }
-    #[allow(unreachable_code)]
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "opening URLs is not supported on this platform",
-    ))
 }
 
 pub fn copy_symlink(source: &Path, destination: &Path) -> io::Result<()> {

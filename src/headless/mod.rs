@@ -361,7 +361,7 @@ impl HeadlessSession {
             Command::Quit => Response::Ok(None),
             Command::Dump(path) => self.dump(path.as_deref()),
             Command::Dialog(answer) => {
-                if !self.app.headless_dialog_open {
+                if !self.app.confirm_dialog.drawn_in_frame() {
                     return Response::Err("no dialog".to_string());
                 }
                 // The same methods as the window's dialog buttons; they clear the flag.

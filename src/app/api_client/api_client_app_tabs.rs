@@ -11,6 +11,7 @@ impl crate::app::App {
         }
         if crate::platform::native_dialog_requires_main_thread() {
             if let Some(path) = crate::platform::pick_file_with_filter(
+                self.external_requests.sink(),
                 "Импорт openapi.json",
                 "OpenAPI JSON",
                 &["json"],
@@ -22,9 +23,10 @@ impl crate::app::App {
         let (tx, rx) = mpsc::channel();
         self.api_import_file_rx = Some(rx);
         let worker_tx = tx.clone();
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-api-file-picker", move || {
             let file = crate::platform::pick_file_with_filter(
-                "Импорт openapi.json", "OpenAPI JSON", &["json"],
+                &requests, "Импорт openapi.json", "OpenAPI JSON", &["json"],
             );
             let _ = worker_tx.send(file);
         }) {
@@ -45,10 +47,11 @@ impl crate::app::App {
             return;
         }
         if crate::platform::native_dialog_requires_main_thread() {
+            let requests = self.external_requests.sink();
             let paths = if multi {
-                crate::platform::pick_files("Выбрать файл")
+                crate::platform::pick_files(requests, "Выбрать файл")
             } else {
-                crate::platform::pick_file("Выбрать файл")
+                crate::platform::pick_file(requests, "Выбрать файл")
                     .into_iter()
                     .collect()
             };
@@ -64,11 +67,12 @@ impl crate::app::App {
         self.api_body_file_rx = Some(rx);
         let worker_tx = tx.clone();
         let fallback_name = name.clone();
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-api-body-file-picker", move || {
             let paths = if multi {
-                crate::platform::pick_files("Выбрать файл")
+                crate::platform::pick_files(&requests, "Выбрать файл")
             } else {
-                crate::platform::pick_file("Выбрать файл").into_iter().collect()
+                crate::platform::pick_file(&requests, "Выбрать файл").into_iter().collect()
             };
             let _ = worker_tx.send(ApiBodyFilePickResult {
                 spec_id, route_idx, name, paths,
@@ -93,13 +97,14 @@ impl crate::app::App {
             ApiPythonPathPickKind::CustomPython => "Выбрать исполняемый файл Python",
         };
         if crate::platform::native_dialog_requires_main_thread() {
-            let path = crate::platform::pick_file(title);
+            let path = crate::platform::pick_file(self.external_requests.sink(), title);
             let _ = tx.send(ApiPythonPathPickResult { kind, path });
             return;
         }
         let worker_tx = tx.clone();
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-api-python-path-picker", move || {
-            let path = crate::platform::pick_file(title);
+            let path = crate::platform::pick_file(&requests, title);
             let _ = worker_tx.send(ApiPythonPathPickResult { kind, path });
         }) {
             self.ide_panel.api.mock.uv.last_error = format!("Не удалось открыть выбор пути: {err}");

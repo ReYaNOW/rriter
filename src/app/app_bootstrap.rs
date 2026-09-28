@@ -139,8 +139,8 @@ impl App {
             gl_context: None,
             gl_surface: None,
             window: None,
-            dialog_window: None,
-            dialog_gl_surface: None,
+            confirm_dialog: crate::app::ConfirmDialog::default(),
+            external_requests: crate::platform::ExternalRequestLog::default(),
             settings_scroll: crate::scroll::ScrollState::new(15.0),
             tab_scroll: crate::scroll::ScrollState::new(15.0),
             renderer: None,
@@ -185,10 +185,6 @@ impl App {
             last_click_pos: (0.0, 0.0),
             last_click_ui_id: None,
 
-            pending_action: crate::app::PendingAction::None,
-            pending_action_waiting_for_save_as: false,
-            pending_action_ready: false,
-            pending_save_tabs: Vec::new(),
             open_file_rx: None,
             save_file_rx: None,
             api_import_file_rx: None,
@@ -311,7 +307,6 @@ impl App {
             active_tab: 0,
             run_ide_on_startup: options.run_ide_on_startup,
             headless_mode: options.headless,
-            headless_dialog_open: false,
         };
 
         if !options.headless {

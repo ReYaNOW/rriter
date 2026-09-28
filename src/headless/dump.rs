@@ -163,7 +163,7 @@ pub(crate) fn dump_json(app: &mut App) -> Value {
             "inline_git_popup": app.inline_git_popup.is_some(),
         },
         "dialog": dialog,
-        "external_request": external_request_json(crate::platform::take_external_request()),
+        "external_request": external_request_json(app.external_requests.take()),
         "clipboard": clipboard,
         "writes_allowed": crate::platform::headless_writes_allowed(),
         "hover": {
@@ -175,10 +175,10 @@ pub(crate) fn dump_json(app: &mut App) -> Value {
 }
 
 fn dialog_json(app: &mut App, w: u32, h: u32) -> Value {
-    if !app.headless_dialog_open {
+    if !app.confirm_dialog.drawn_in_frame() {
         return Value::Null;
     }
-    let action = match app.pending_action {
+    let action = match app.confirm_dialog.action() {
         PendingAction::None => "None",
         PendingAction::Quit => "Quit",
         PendingAction::OpenFile => "OpenFile",

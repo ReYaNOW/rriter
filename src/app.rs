@@ -8,6 +8,8 @@ pub use markdown::{MarkdownMode, MarkdownTabState};
 mod app_state;
 mod app_bootstrap;
 mod autocomplete;
+mod confirm_dialog;
+pub use confirm_dialog::{ConfirmDialog, PendingAction};
 pub mod automation;
 mod automation_dart;
 mod automation_database;

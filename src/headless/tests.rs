@@ -1034,6 +1034,25 @@ mod session_cases {
     }
 
     #[test]
+    fn headless_external_requests_stay_in_their_session() {
+        // Seeded: tests never set the process-wide headless policy (it would block writes in
+        // every later test), so a picker would open for real; record through the session's
+        // own sink the way the intercepting platform functions do.
+        let mut first = session_for_test(320, 200);
+        let mut second = session_for_test(320, 200);
+        let policy = Some(crate::platform::HeadlessPolicy { allow_writes: false });
+        let sink = first.app.external_requests.sink().clone();
+        assert!(crate::platform::intercept_external(
+            policy,
+            &sink,
+            crate::platform::ExternalRequest::PickFolder
+        ));
+        assert_eq!(dump(&mut second)["external_request"], serde_json::Value::Null);
+        assert_eq!(dump(&mut first)["external_request"]["kind"], "pick_folder");
+        assert_eq!(dump(&mut first)["external_request"], serde_json::Value::Null);
+    }
+
+    #[test]
     fn headless_dump_to_file_and_io_error() {
         let dir = scratch_dir("dump-file");
         let out = dir.join("nested").join("d.json");

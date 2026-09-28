@@ -72,8 +72,8 @@ pub(crate) fn test_app() -> Option<App> {
         gl_context: None,
         gl_surface: None,
         window: None,
-        dialog_window: None,
-        dialog_gl_surface: None,
+        confirm_dialog: crate::app::ConfirmDialog::default(),
+        external_requests: crate::platform::ExternalRequestLog::default(),
         settings_scroll: crate::scroll::ScrollState::new(15.0),
         settings_general_scroll: crate::scroll::ScrollState::new(7.0),
         settings_database_scroll: crate::scroll::ScrollState::new(7.0),
@@ -117,10 +117,6 @@ pub(crate) fn test_app() -> Option<App> {
         click_count: 0,
         last_click_pos: (0.0, 0.0),
         last_click_ui_id: None,
-        pending_action: PendingAction::None,
-        pending_action_waiting_for_save_as: false,
-        pending_action_ready: false,
-        pending_save_tabs: Vec::new(),
         open_file_rx: None,
         save_file_rx: None,
         api_import_file_rx: None,
@@ -228,7 +224,6 @@ pub(crate) fn test_app() -> Option<App> {
         active_tab: 0,
         run_ide_on_startup: false,
         headless_mode: false,
-        headless_dialog_open: false,
     })
 }
 

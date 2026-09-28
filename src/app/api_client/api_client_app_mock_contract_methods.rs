@@ -8,15 +8,18 @@ impl crate::app::App {
         }
         let (specs, mock) = self.ide_panel.api.api_mock_openapi_export_snapshot();
         if crate::platform::native_dialog_requires_main_thread() {
-            if let Err(error) = export_api_mock_openapi_file(&specs, &mock) {
+            if let Err(error) =
+                export_api_mock_openapi_file(self.external_requests.sink(), &specs, &mock)
+            {
                 self.ide_panel.api.persistence_error = Some(error);
             }
             return;
         }
         let (tx, rx) = std::sync::mpsc::channel();
         self.api_openapi_export_rx = Some(rx);
+        let requests = self.external_requests.sink().clone();
         if let Err(err) = crate::platform::spawn_named("rriter-api-openapi-export", move || {
-            let _ = tx.send(export_api_mock_openapi_file(&specs, &mock));
+            let _ = tx.send(export_api_mock_openapi_file(&requests, &specs, &mock));
         }) {
             self.api_openapi_export_rx = None;
             self.ide_panel.api.persistence_error =
@@ -150,6 +153,7 @@ impl crate::app::App {
 }
 
 fn export_api_mock_openapi_file(
+    requests: &crate::platform::ExternalRequestSink,
     specs: &[(crate::app::api_client::ApiSpecEntry, crate::app::api_client::ApiSpecModel)],
     mock: &crate::app::api_mock::types::ApiMockState,
 ) -> Result<Option<std::path::PathBuf>, String> {
@@ -157,6 +161,7 @@ fn export_api_mock_openapi_file(
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| format!("Не удалось сериализовать OpenAPI: {error}"))?;
     let Some(path) = crate::platform::save_file_with_filter(
+        requests,
         "Экспорт openapi.json",
         "openapi.json",
         "OpenAPI JSON",
