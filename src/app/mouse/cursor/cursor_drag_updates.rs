@@ -498,34 +498,32 @@ impl App {
                 window.request_redraw();
             }
             return true;
-        } else if crate::app::mouse::HOVER_STATE.with(|s| {
-            s.borrow()
-                .popup
-                .as_ref()
-                .map(|p| p.scroll.is_dragging)
-                .unwrap_or(false)
-        }) {
-            crate::app::mouse::HOVER_STATE.with(|hover_state| {
-                let mut state = hover_state.borrow_mut();
-                if let Some(rect) = state.rect {
-                    let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup {
-                        let geometry = crate::app::mouse::hover_popup_scrollbar(
-                            rect,
-                            max_scroll,
-                            popup.scroll.current,
-                            s,
-                        )
-                        .geometry(s);
-                        let _ = crate::app::mouse::drag_scrollbar(
-                            &mut popup.scroll,
-                            geometry,
-                            position.x as f32,
-                            position.y as f32,
-                        );
-                    }
+        } else if self
+            .hover
+            .popup
+            .as_ref()
+            .map(|p| p.scroll.is_dragging)
+            .unwrap_or(false)
+        {
+            let state = &mut self.hover;
+            if let Some(rect) = state.rect {
+                let max_scroll = state.max_scroll;
+                if let Some(popup) = &mut state.popup {
+                    let geometry = crate::app::mouse::hover_popup_scrollbar(
+                        rect,
+                        max_scroll,
+                        popup.scroll.current,
+                        s,
+                    )
+                    .geometry(s);
+                    let _ = crate::app::mouse::drag_scrollbar(
+                        &mut popup.scroll,
+                        geometry,
+                        position.x as f32,
+                        position.y as f32,
+                    );
                 }
-            });
+            }
             self.window.as_ref().unwrap().request_redraw();
             return true;
         } else if self.ide_panel.lsp_scroll_y.is_dragging {
@@ -815,7 +813,7 @@ impl App {
                 self.renderer.as_mut().unwrap(),
                 false,
             );
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
         }
         false
     }

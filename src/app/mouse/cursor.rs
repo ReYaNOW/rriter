@@ -34,7 +34,7 @@ impl App {
             window_size.width as f32,
             window_size.height as f32,
         ) {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.update_ctrl_definition_hover(None);
             return;
         }
@@ -69,12 +69,12 @@ impl App {
             return;
         }
         if editor_text_selecting && self.drag_api_text_cursor_from_last_mouse() {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.window.as_ref().unwrap().request_redraw();
             return;
         }
         if editor_text_selecting {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             if let Some(r) = self.renderer.as_mut() {
                 r.suppress_popups_until_next_mouse_move();
             }

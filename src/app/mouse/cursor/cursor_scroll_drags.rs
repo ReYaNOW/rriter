@@ -54,12 +54,14 @@ impl App {
         }
 
         let mut popup_selecting = false;
-        HOVER_STATE.with(|hover_state| {
-            let mut hs = hover_state.borrow_mut();
+        {
+            let hs = &mut self.hover;
             if hs.selecting {
-                if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref()) {
+                if let (Some(rect), Some(popup), Some(renderer)) =
+                    (hs.rect, hs.popup.as_ref(), self.renderer.as_mut())
+                {
                     let byte = hover_popup_byte_at(
-                        self.renderer.as_mut().unwrap(),
+                        renderer,
                         popup,
                         rect,
                         position.x as f32,
@@ -76,7 +78,7 @@ impl App {
                 hs.diag_selection_cursor = Some(byte);
                 popup_selecting = true;
             }
-        });
+        }
         if popup_selecting {
             self.window.as_ref().unwrap().request_redraw();
             return true;
@@ -296,7 +298,7 @@ impl App {
         }
 
         if self.drag_api_route_text_selection_from_last_mouse() {
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }
@@ -305,7 +307,7 @@ impl App {
             && self.markdown.code_scroll_drag.is_some()
         {
             let _ = self.drag_markdown_code_scrollbar_to(px);
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -314,14 +316,14 @@ impl App {
 
         if self.markdown_mode() == crate::app::MarkdownMode::Read && self.scroll_y.is_dragging {
             let _ = self.drag_markdown_read_scrollbar_to(py);
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }
 
         if self.markdown.read_selecting {
             let _ = self.update_markdown_read_selection_at(px, py);
-            clear_hover_popup(self.renderer.as_mut());
+            clear_hover_popup(&mut self.hover);
             self.window.as_ref().unwrap().request_redraw();
             return true;
         }

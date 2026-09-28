@@ -263,6 +263,7 @@ impl Renderer {
         lsp_diagnostics: &[&crate::lsp::Diagnostic],
         ide_panel: &crate::app::IdePanelState,
         ui_registry: &mut crate::ui_system::UiRegistry,
+        hover: &mut crate::app::mouse::HoverState,
         active_tab: usize,
         layout: RootFramePanelLayout<'_>,
         viewport: RootFrameViewport,
@@ -296,13 +297,12 @@ impl Renderer {
         } = editor_text;
         let overlays_start = telemetry_frame_start.map(|_| Instant::now());
         self.flush();
-        let mouse_in_popup = crate::app::mouse::HOVER_STATE.with(|s| {
-            s.borrow()
-                .popup_or_bridge_contains(mx, my, self.width, self.scale_factor)
-                .0
-        });
+        let mouse_in_popup = hover
+            .popup_or_bridge_contains(mx, my, self.width, self.scale_factor)
+            .0;
 
         let hovered_diag_type_target = self.draw_lsp_squiggles_and_collect_hovered_diag(
+            hover,
             editor,
             lsp_diagnostics,
             scroll_x,

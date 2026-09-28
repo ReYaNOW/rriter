@@ -343,31 +343,24 @@ impl AutomationController {
                 &mut self.hover_last_anchor,
             ),
             AutomationStep::ScrollHoverTimed { duration_secs } => {
-                let hover_ready = crate::app::mouse::HOVER_STATE.with(|state| {
-                    let state = state.borrow();
-                    state.popup.is_some() && state.rect.is_some()
-                });
+                let hover_ready = app.hover.popup.is_some() && app.hover.rect.is_some();
                 if !hover_ready {
                     return StepResult::Failed(format!(
                         "hover popup disappeared before scrolling; {}",
-                        hover_state_diagnostics()
+                        hover_state_diagnostics(&app.hover)
                     ));
                 }
-                self.timed_scroll(app, now, *duration_secs, |_app, direction| {
-                    crate::app::mouse::HOVER_STATE.with(|state| {
-                        let mut state = state.borrow_mut();
-                        let max_scroll = state.max_scroll.max(480.0);
-                        if let Some(popup) = state.popup.as_mut() {
-                            popup.scroll.scroll_by(24.0 * direction);
-                            popup.scroll.clamp_target(0.0, max_scroll);
-                        }
-                    });
+                self.timed_scroll(app, now, *duration_secs, |app, direction| {
+                    let state = &mut app.hover;
+                    let max_scroll = state.max_scroll.max(480.0);
+                    if let Some(popup) = state.popup.as_mut() {
+                        popup.scroll.scroll_by(24.0 * direction);
+                        popup.scroll.clamp_target(0.0, max_scroll);
+                    }
                 })
             }
             AutomationStep::ClearHover => {
-                crate::app::mouse::HOVER_STATE.with(|state| {
-                    *state.borrow_mut() = crate::app::mouse::HoverState::default();
-                });
+                app.hover = crate::app::mouse::HoverState::default();
                 request_redraw(app);
                 StepResult::Done
             }

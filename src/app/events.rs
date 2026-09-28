@@ -472,6 +472,7 @@ impl ApplicationHandler<crate::ui_waker::AppWake> for App {
                     self.close_autocomplete();
                     self.cancel_pointer_interactions();
                     crate::app::mouse::suppress_hover_popup_until_mouse_move(
+                        &mut self.hover,
                         self.renderer.as_mut(),
                     );
                 }

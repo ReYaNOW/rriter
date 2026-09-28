@@ -109,20 +109,18 @@ impl App {
                 self.close_autocomplete();
                 self.window.as_ref().unwrap().request_redraw();
             }
-            let in_hover_popup = HOVER_STATE.with(|hover_state| {
-                hover_state
-                    .borrow()
-                    .popup_or_bridge_contains(
-                        mx,
-                        my,
-                        self.renderer.as_ref().unwrap().width,
-                        self.renderer.as_ref().unwrap().scale_factor,
-                    )
-                    .0
-            });
+            let in_hover_popup = self
+                .hover
+                .popup_or_bridge_contains(
+                    mx,
+                    my,
+                    self.renderer.as_ref().unwrap().width,
+                    self.renderer.as_ref().unwrap().scale_factor,
+                )
+                .0;
 
             if !in_hover_popup {
-                clear_hover_popup(self.renderer.as_mut());
+                clear_hover_popup(&mut self.hover);
             }
 
             if self.modifiers.control_key() {

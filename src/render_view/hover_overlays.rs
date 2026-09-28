@@ -14,6 +14,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_lsp_squiggles_and_collect_hovered_diag(
         &mut self,
+        hover: &mut crate::app::mouse::HoverState,
         editor: &Editor,
         lsp_diagnostics: &[&crate::lsp::Diagnostic],
         scroll_x: f32,
@@ -27,12 +28,9 @@ impl Renderer {
         mouse_in_popup: bool,
     ) -> Option<usize> {
         // LSP squiggles — волнистые подчёркивания диагностик
-        crate::app::mouse::HOVER_STATE.with(|s| {
-            let mut state = s.borrow_mut();
-            if !state.stale_combined_popup && !state.has_active_combined_type_popup() {
-                state.hovered_diags_cache.clear();
-            }
-        });
+        if !hover.stale_combined_popup && !hover.has_active_combined_type_popup() {
+            hover.hovered_diags_cache.clear();
+        }
         let mut hovered_diag_type_target = None;
         if !self.lsp_diagnostic_indices.is_empty() {
             let render_scroll_x = scroll_x.round();
@@ -131,9 +129,7 @@ impl Renderer {
                     let squiggle_hit_y_top = v_line.y_offset;
 
                     if mouse_in_popup {
-                        if crate::app::mouse::HOVER_STATE
-                            .with(|s| s.borrow().hovered_diags.contains(&idx))
-                        {
+                        if hover.hovered_diags.contains(&idx) {
                             in_hitbox = true;
                         }
                     } else if crate::app::mouse::hover_content_y_in_line_hitbox(
@@ -155,9 +151,7 @@ impl Renderer {
 
                 if in_hitbox {
                     let target_to_record = if mouse_in_popup {
-                        crate::app::mouse::HOVER_STATE
-                            .with(|s| s.borrow().combined_type_target())
-                            .or(hit_type_target)
+                        hover.combined_type_target().or(hit_type_target)
                     } else {
                         let visual_line_x = mx - self.left_padding + render_scroll_x;
                         let line_x = self.text_x_for_visual_line_x(editor, line, visual_line_x);
@@ -169,24 +163,18 @@ impl Renderer {
                                 hit_type_target,
                                 |ch| self.char_advance(ch),
                             );
-                        crate::app::mouse::HOVER_STATE
-                            .with(|s| s.borrow().byte_offset)
-                            .or(target_under_cursor)
+                        hover.byte_offset.or(target_under_cursor)
                     };
                     if hovered_diag_type_target.is_none() {
-                        hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
-                            s.borrow_mut().record_hovered_diagnostic(
-                                (idx, x_start, top_y, top_y + self.line_height, x_end),
-                                target_to_record,
-                            )
-                        });
+                        hovered_diag_type_target = hover.record_hovered_diagnostic(
+                            (idx, x_start, top_y, top_y + self.line_height, x_end),
+                            target_to_record,
+                        );
                     } else {
-                        crate::app::mouse::HOVER_STATE.with(|s| {
-                            s.borrow_mut().record_hovered_diagnostic(
-                                (idx, x_start, top_y, top_y + self.line_height, x_end),
-                                target_to_record,
-                            );
-                        });
+                        hover.record_hovered_diagnostic(
+                            (idx, x_start, top_y, top_y + self.line_height, x_end),
+                            target_to_record,
+                        );
                     }
                 }
 
@@ -247,6 +235,7 @@ impl Renderer {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn draw_hover_overlays(
         &mut self,
+        hover: &mut crate::app::mouse::HoverState,
         editor: &Editor,
         lsp_diagnostics: &[&crate::lsp::Diagnostic],
         ide_panel: &crate::app::IdePanelState,
@@ -259,19 +248,12 @@ impl Renderer {
         wants_pointer: &mut bool,
         clip_rect: Option<(f32, f32, f32, f32)>,
     ) {
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            state.borrow_mut().interaction_rect = None;
-        });
+        hover.interaction_rect = None;
 
         // --- LSP Diagnostic Tooltip ---
-        let hovered_diags_cache_empty =
-            crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diagnostic_popup_cache_is_empty());
-        if hovered_diags_cache_empty {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                state.diag_rect = None;
-                state.hovered_diags.clear();
-            });
+        if hover.diagnostic_popup_cache_is_empty() {
+            hover.diag_rect = None;
+            hover.hovered_diags.clear();
         }
 
         let now = std::time::Instant::now();
@@ -288,21 +270,18 @@ impl Renderer {
             has_byte_offset,
             hover_byte_offset,
             type_popup_byte,
-        ) = crate::app::mouse::HOVER_STATE.with(|s| {
-            let state = s.borrow();
-            (
-                state.popup.is_some(),
-                state.request_id.is_some() || state.definition_request_id.is_some(),
-                state.timer,
-                state.byte_offset.is_some(),
-                state
-                    .byte_offset
-                    .or_else(|| state.popup.as_ref().map(|p| p.byte_offset)),
-                state.popup.as_ref().map(|p| p.byte_offset),
-            )
-        });
+        ) = (
+            hover.popup.is_some(),
+            hover.request_id.is_some() || hover.definition_request_id.is_some(),
+            hover.timer,
+            hover.byte_offset.is_some(),
+            hover
+                .byte_offset
+                .or_else(|| hover.popup.as_ref().map(|p| p.byte_offset)),
+            hover.popup.as_ref().map(|p| p.byte_offset),
+        );
 
-        if crate::app::mouse::HOVER_STATE.with(|s| s.borrow().hovered_diags_cache.is_empty()) {
+        if hover.hovered_diags_cache.is_empty() {
             if let Some(byte_offset) = hover_byte_offset {
                 let hover_line = editor
                     .line_offsets
@@ -400,26 +379,24 @@ impl Renderer {
                                 x_end_px = cur_x.max(x_start_px + avg_adv * 4.0);
                             }
 
-                            hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
-                                s.borrow_mut().record_hovered_diagnostic(
-                                    (
-                                        idx,
-                                        self.left_padding + x_start_px - render_scroll_x,
-                                        top_y,
-                                        top_y + self.line_height,
-                                        self.left_padding + x_end_px - render_scroll_x,
-                                    ),
-                                    Some(type_target),
-                                )
-                            });
+                            hovered_diag_type_target = hover.record_hovered_diagnostic(
+                                (
+                                    idx,
+                                    self.left_padding + x_start_px - render_scroll_x,
+                                    top_y,
+                                    top_y + self.line_height,
+                                    self.left_padding + x_end_px - render_scroll_x,
+                                ),
+                                Some(type_target),
+                            );
                         }
                     }
                 }
             }
         }
 
-        let first_idx = crate::app::mouse::HOVER_STATE.with(|s| {
-            let mut state = s.borrow_mut();
+        let first_idx = {
+            let state = &mut *hover;
             state.update_hovered_diag_type_target_for_frame(hovered_diag_type_target);
             state.hovered_diags.clear();
             if state.stale_combined_popup && !state.stale_hovered_diags_cache.is_empty() {
@@ -434,17 +411,14 @@ impl Renderer {
                 }
             }
             state.hovered_diags.first().copied()
-        });
+        };
 
         let type_in_progress = has_byte_offset
             && !has_type_popup
             && (hover_timer < crate::app::mouse::HOVER_REQUEST_DELAY_SEC || is_hover_pending);
-        let is_error_hovered =
-            crate::app::mouse::HOVER_STATE.with(|s| !s.borrow().diagnostic_popup_cache_is_empty());
-        let effective_hovered_diag_type_target = crate::app::mouse::HOVER_STATE.with(|s| {
-            s.borrow()
-                .effective_hovered_diag_type_target(hovered_diag_type_target)
-        });
+        let is_error_hovered = !hover.diagnostic_popup_cache_is_empty();
+        let effective_hovered_diag_type_target =
+            hover.effective_hovered_diag_type_target(hovered_diag_type_target);
         let diagnostic_needs_type =
             is_error_hovered && effective_hovered_diag_type_target.is_some();
         let type_matches_diag = crate::app::mouse::hover_bytes_share_token(
@@ -460,15 +434,12 @@ impl Renderer {
         let type_matches_hover =
             crate::app::mouse::hover_bytes_share_token(editor, type_popup_byte, hover_byte_offset);
 
-        let error_timer_ready = crate::app::mouse::HOVER_STATE.with(|s| {
-            let mut state = s.borrow_mut();
-            state.advance_diagnostic_hover_timer(
-                first_idx,
-                has_type_popup,
-                type_in_progress,
-                popup_dt,
-            )
-        });
+        let error_timer_ready = hover.advance_diagnostic_hover_timer(
+            first_idx,
+            has_type_popup,
+            type_in_progress,
+            popup_dt,
+        );
 
         let (show_error, show_type, show_combined) =
             crate::app::mouse::compute_hover_visibility_from_matches(
@@ -479,13 +450,10 @@ impl Renderer {
                 type_matches_diag,
                 hover_matches_diag,
                 type_matches_hover,
-                crate::app::mouse::HOVER_STATE.with(|s| s.borrow().stale_combined_popup),
+                hover.stale_combined_popup,
             );
 
-        let show_placeholder_type = crate::app::mouse::HOVER_STATE.with(|s| {
-            s.borrow()
-                .should_show_stale_popup_while_target_loads(show_type)
-        });
+        let show_placeholder_type = hover.should_show_stale_popup_while_target_loads(show_type);
 
         if crate::render_view::hover_trace_enabled() {
             static LAST_LOG: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -494,10 +462,7 @@ impl Renderer {
             if (is_error_hovered || has_type_popup || hover_byte_offset.is_some())
                 && now_ms - last_log > 500
             {
-                let (stale, popup_diag) = crate::app::mouse::HOVER_STATE.with(|s| {
-                    let state = s.borrow();
-                    (state.stale_combined_popup, state.popup_diag_type_target)
-                });
+                let (stale, popup_diag) = (hover.stale_combined_popup, hover.popup_diag_type_target);
                 println!(
                     "[HOVER VIS LOG] is_error: {}, timer_ready: {}, has_type: {}, d_type_target: {:?}, type_byte: {:?}, hover_byte: {:?}, stale: {}, popup_diag: {:?}, SHOW_ERR: {}, SHOW_TYPE: {}, SHOW_COMB: {}, SHOW_PLACEHOLDER: {}",
                     is_error_hovered,
@@ -518,49 +483,45 @@ impl Renderer {
         }
 
         let (attached_hover_w, attached_hover_h) = if show_combined {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                if let Some(popup) = state.popup.as_mut() {
-                    let scale = self.scale_factor;
-                    let pad = 12.0 * scale;
-                    let line_h = 22.0 * scale;
-                    let max_text_w = (self.width - 80.0 * scale)
-                        .min(820.0 * scale)
-                        .max(320.0 * scale);
-                    let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
-                        cache.scale_factor == self.scale_factor
-                            && cache.max_text_w == max_text_w
-                            && cache.span_count == popup.spans.len()
-                            && cache.text_len == popup.text.len()
-                    });
-                    if !cache_valid {
-                        popup.layout_cache =
-                            Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
-                    }
-                    if let Some(layout) = popup.layout_cache.as_ref() {
-                        (
-                            layout.max_line_w + pad * 2.0,
-                            (self.height * 0.35).min(layout.total_text_h + pad * 2.0),
-                        )
-                    } else {
-                        (0.0, 0.0)
-                    }
+            if let Some(popup) = hover.popup.as_mut() {
+                let scale = self.scale_factor;
+                let pad = 12.0 * scale;
+                let line_h = 22.0 * scale;
+                let max_text_w = (self.width - 80.0 * scale)
+                    .min(820.0 * scale)
+                    .max(320.0 * scale);
+                let cache_valid = popup.layout_cache.as_ref().is_some_and(|cache| {
+                    cache.scale_factor == self.scale_factor
+                        && cache.max_text_w == max_text_w
+                        && cache.span_count == popup.spans.len()
+                        && cache.text_len == popup.text.len()
+                });
+                if !cache_valid {
+                    popup.layout_cache =
+                        Some(self.build_hover_popup_layout(popup, max_text_w, line_h));
+                }
+                if let Some(layout) = popup.layout_cache.as_ref() {
+                    (
+                        layout.max_line_w + pad * 2.0,
+                        (self.height * 0.35).min(layout.total_text_h + pad * 2.0),
+                    )
                 } else {
                     (0.0, 0.0)
                 }
-            })
+            } else {
+                (0.0, 0.0)
+            }
         } else {
             (0.0, 0.0)
         };
 
         if !show_type && !show_placeholder_type {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                s.borrow_mut().rect = None;
-            });
+            hover.rect = None;
         }
 
         if show_error {
             self.draw_diagnostic_popup(
+                hover,
                 lsp_diagnostics,
                 ide_panel,
                 ui_registry,
@@ -572,18 +533,14 @@ impl Renderer {
                 wants_pointer,
             );
         } else if is_error_hovered {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                s.borrow_mut().hide_diagnostic_popup_until_ready();
-            });
+            hover.hide_diagnostic_popup_until_ready();
         } else {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                s.borrow_mut().reset_diagnostic_popup();
-            });
+            hover.reset_diagnostic_popup();
         }
 
         if show_type || show_placeholder_type {
-            let (mut popup, selection, attached_diag) = crate::app::mouse::HOVER_STATE
-                .with(|s| s.borrow_mut().take_type_popup_for_draw(show_combined));
+            let (mut popup, selection, attached_diag) =
+                hover.take_type_popup_for_draw(show_combined);
             if let Some(popup_ref) = popup.as_mut() {
                 let (bx, by, bw, bh, ms) = self.draw_hover_popup(
                     popup_ref,
@@ -591,6 +548,7 @@ impl Renderer {
                     selection,
                     editor,
                     ui_registry,
+                    Some(&mut *hover),
                     mx,
                     my,
                     render_scroll_y,
@@ -599,24 +557,15 @@ impl Renderer {
                     None,
                     clip_rect,
                 );
-                crate::app::mouse::HOVER_STATE.with(|s| {
-                    let mut state = s.borrow_mut();
-                    state.put_type_popup_after_draw(popup, Some((bx, by, bw, bh)), ms);
-                    state.mark_type_popup_drawn(show_combined, effective_hovered_diag_type_target);
-                });
+                hover.put_type_popup_after_draw(popup, Some((bx, by, bw, bh)), ms);
+                hover.mark_type_popup_drawn(show_combined, effective_hovered_diag_type_target);
             } else {
-                crate::app::mouse::HOVER_STATE.with(|s| {
-                    let mut state = s.borrow_mut();
-                    state.put_type_popup_after_draw(None, None, 0.0);
-                    state.mark_type_popup_drawn(false, None);
-                });
+                hover.put_type_popup_after_draw(None, None, 0.0);
+                hover.mark_type_popup_drawn(false, None);
             }
         } else {
-            crate::app::mouse::HOVER_STATE.with(|s| {
-                let mut state = s.borrow_mut();
-                state.rect = None;
-                state.mark_type_popup_drawn(false, None);
-            });
+            hover.rect = None;
+            hover.mark_type_popup_drawn(false, None);
         }
     }
 }

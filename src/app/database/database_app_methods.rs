@@ -507,12 +507,12 @@ impl App {
 
     pub fn open_database_connection_dialog(&mut self) {
         self.ide_panel.database.open_connection_dialog();
-        crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+        crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
     }
 
     pub fn edit_database_connection(&mut self, connection_id: DatabaseConnectionId) {
         self.ide_panel.database.edit_connection_dialog(connection_id);
-        crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+        crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, self.renderer.as_mut());
     }
 
     pub(crate) fn cancel_database_owner(&mut self, owner: DatabaseJobOwner) {

@@ -168,17 +168,29 @@ impl crate::app::App {
         true
     }
 
+    /// Applies the hover release parked by `ApiClientState::reset_api_mock_hover_tracking`
+    /// to `self.hover`. Runs after App-level resets, before every frame
+    /// (`render_main_frame`) and before the hover timers tick (`about_to_wait_hover_timer`).
+    pub(crate) fn release_api_mock_hover(&mut self) {
+        if let Some(target) = self.ide_panel.api.released_mock_hover_target.take() {
+            ApiClientState::release_api_mock_hover_state(&mut self.hover, &target);
+        }
+    }
+
+    fn reset_api_mock_hover_tracking(&mut self) {
+        self.ide_panel.api.reset_api_mock_hover_tracking();
+        self.release_api_mock_hover();
+    }
+
     fn move_api_mock_hover_to_empty_space(&mut self) {
         self.ide_panel.api.mock_hover_request = None;
-        let clear_target = crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            crate::app::mouse::move_type_hover_to_empty_space(&mut state);
-            state.byte_offset.is_none()
-                && state.popup.is_none()
-                && state.pending_popup.is_none()
-                && state.rect.is_none()
-                && state.diagnostic_popup_cache_is_empty()
-        });
+        let state = &mut self.hover;
+        crate::app::mouse::move_type_hover_to_empty_space(state);
+        let clear_target = state.byte_offset.is_none()
+            && state.popup.is_none()
+            && state.pending_popup.is_none()
+            && state.rect.is_none()
+            && state.diagnostic_popup_cache_is_empty();
         if clear_target {
             self.ide_panel.api.mock_hover_target = None;
         }
@@ -230,6 +242,7 @@ impl crate::app::App {
         in_hover_popup: bool,
         in_hover_source_line: bool,
     ) -> bool {
+        self.release_api_mock_hover();
         if !self.active_tab_is_api_client() {
             return false;
         }
@@ -246,7 +259,7 @@ impl crate::app::App {
             return true;
         };
         let Some(rect) = self.ui_registry.rect_for(focus) else {
-            self.ide_panel.api.reset_api_mock_hover_tracking();
+            self.reset_api_mock_hover_tracking();
             return true;
         };
         if self
@@ -256,7 +269,7 @@ impl crate::app::App {
             .as_ref()
             .is_some_and(|target| target.route_idx != route_idx || target.part != part)
         {
-            self.ide_panel.api.reset_api_mock_hover_tracking();
+            self.reset_api_mock_hover_tracking();
         }
         if mx < rect.0 || mx > rect.0 + rect.2 || my < rect.1 || my > rect.1 + rect.3 {
             if !in_hover_popup {
@@ -276,7 +289,7 @@ impl crate::app::App {
         let top_y = ApiClientState::api_multiline_cursor_top_y(focus, rect, scale);
         let text_y = ApiClientState::api_mock_text_baseline_y(focus, rect, scale);
         if !self.ensure_api_mock_hover_editor(route_idx, part) {
-            self.ide_panel.api.reset_api_mock_hover_tracking();
+            self.reset_api_mock_hover_tracking();
             return true;
         }
         let ty_diagnostics = if matches!(
@@ -292,7 +305,7 @@ impl crate::app::App {
         };
         let diag_hover = if let Some(ty_diagnostics) = ty_diagnostics {
             let Some(editor) = self.ide_panel.api.api_mock_hover_editor(route_idx, part) else {
-                self.ide_panel.api.reset_api_mock_hover_tracking();
+                self.reset_api_mock_hover_tracking();
                 return true;
             };
             let text = editor.get_full_text();
@@ -339,7 +352,7 @@ impl crate::app::App {
             } else {
                 let key = (route_idx, part);
                 let Some(editor) = self.ide_panel.api.mock_python_editors.remove(&key) else {
-                    self.ide_panel.api.reset_api_mock_hover_tracking();
+                    self.reset_api_mock_hover_tracking();
                     return true;
                 };
                 let byte = if let Some(renderer) = self.renderer.as_mut() {
@@ -360,7 +373,7 @@ impl crate::app::App {
             return true;
         };
         let Some(hover_editor) = self.ide_panel.api.api_mock_hover_editor(route_idx, part) else {
-            self.ide_panel.api.reset_api_mock_hover_tracking();
+            self.reset_api_mock_hover_tracking();
             return true;
         };
         let mut target = ApiMockHoverTarget {
@@ -373,10 +386,10 @@ impl crate::app::App {
         let mut accepted_hover_target = false;
         let mut clear_mock_hover_request = false;
         let mut stable_target_byte = target.edit_byte;
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            match crate::app::mouse::update_editor_hover_state_for_cursor(
-                &mut state,
+        let state = &mut self.hover;
+        if let Some(should_reset_diag_popup) =
+            crate::app::mouse::update_editor_hover_state_for_cursor(
+                state,
                 hover_editor,
                 target.edit_byte,
                 diag_hover.as_ref().map(|(_, byte)| *byte),
@@ -384,15 +397,10 @@ impl crate::app::App {
                 in_hover_popup,
                 in_hover_source_line,
                 false,
-            ) {
-                Some(should_reset_diag_popup) => {
-                    accepted_hover_target = true;
-                    reset_diag_popup = should_reset_diag_popup;
-                }
-                None => {
-                    return;
-                }
-            }
+            )
+        {
+            accepted_hover_target = true;
+            reset_diag_popup = should_reset_diag_popup;
             clear_mock_hover_request = state.request_id.is_none();
             if reset_diag_popup {
                 state.reset_diagnostic_popup();
@@ -413,7 +421,7 @@ impl crate::app::App {
                 state.hovered_diags.clear();
                 state.hovered_diag_type_target = None;
             }
-        });
+        }
         if !accepted_hover_target {
             return true;
         }
@@ -442,16 +450,14 @@ impl crate::app::App {
     }
 
     fn clear_api_mock_hover_response(&mut self, target: &ApiMockHoverTarget) {
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            state.request_id = None;
-            state.definition_request_id = None;
-            state.pending_popup = None;
-            if state.byte_offset == Some(target.edit_byte) {
-                state.popup = None;
-                state.rect = None;
-            }
-        });
+        let state = &mut self.hover;
+        state.request_id = None;
+        state.definition_request_id = None;
+        state.pending_popup = None;
+        if state.byte_offset == Some(target.edit_byte) {
+            state.popup = None;
+            state.rect = None;
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -504,12 +510,9 @@ impl crate::app::App {
             source_cursor,
             anchor,
         });
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if state.byte_offset == Some(target_edit_byte) {
-                state.request_id = Some(request_id);
-            }
-        });
+        if self.hover.byte_offset == Some(target_edit_byte) {
+            self.hover.request_id = Some(request_id);
+        }
         true
     }
 
@@ -525,13 +528,10 @@ impl crate::app::App {
         let module_path = self.api_mock_hover_module_path(target.route_idx);
         let mut editor = Editor::new(request.source.len().saturating_add(512));
         editor.set_text_clean(&request.source);
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if self.ide_panel.api.mock_hover_target.as_ref() != Some(&target) {
-                return;
-            }
+        if self.ide_panel.api.mock_hover_target.as_ref() == Some(&target) {
+            let state = &mut self.hover;
             if crate::app::events::apply_source_hover_response_to_state(
-                &mut state,
+                state,
                 request_id,
                 &editor,
                 target.edit_byte,
@@ -545,7 +545,7 @@ impl crate::app::App {
             {
                 crate::app::events::prepend_hover_module_path(popup, module_path);
             }
-        });
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }

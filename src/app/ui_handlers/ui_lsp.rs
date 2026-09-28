@@ -320,10 +320,8 @@ impl App {
                 }
             }
             UiId::PopupOpenDiagUrl(_idx) | UiId::OpenDiagUrl(_idx) => {
-                if let Some(href) =
-                    crate::app::mouse::HOVER_STATE.with(|s| s.borrow().diag_href.clone())
-                {
-                    let _ = crate::platform::open_url(self.external_requests.sink(), &href);
+                if let Some(href) = self.hover.diag_href.as_deref() {
+                    let _ = crate::platform::open_url(self.external_requests.sink(), href);
                 }
             }
             UiId::ProblemUrl(idx) => {
@@ -382,14 +380,12 @@ impl App {
                 }
             }
             UiId::PopupCopyDiagnostic(idx) => {
-                let mut message = crate::app::mouse::HOVER_STATE.with(|state| {
-                    state
-                        .borrow()
-                        .diag_copy_texts
-                        .get(idx)
-                        .filter(|text| !text.is_empty())
-                        .cloned()
-                });
+                let mut message = self
+                    .hover
+                    .diag_copy_texts
+                    .get(idx)
+                    .filter(|text| !text.is_empty())
+                    .cloned();
                 if let Some(path) = &self.file_path {
                     if message.is_none() {
                         message = self
@@ -400,10 +396,8 @@ impl App {
                     }
                 }
                 if message.is_none() {
-                    message = crate::app::mouse::HOVER_STATE.with(|state| {
-                        let state = state.borrow();
-                        (!state.diag_text.is_empty()).then(|| state.diag_text.clone())
-                    });
+                    message = (!self.hover.diag_text.is_empty())
+                        .then(|| self.hover.diag_text.clone());
                 }
                 if let Some(message) = message {
                     self.set_clipboard_text(message);

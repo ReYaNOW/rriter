@@ -642,6 +642,7 @@ impl Renderer {
                 git_logs_selecting: false,
                 git_workspace_scrollbar: None,
                 git_tooltip_waiting: false,
+                editor_hover_blocked: false,
                 git_tooltip_timer: None,
                 was_empty_ide: false,
                 empty_ide_art_idx: 0,

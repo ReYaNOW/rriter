@@ -194,8 +194,9 @@ impl App {
         if key_event.state == ElementState::Pressed
             && should_suppress_hover_for_keyboard(key_event.physical_key, ctrl, alt)
         {
+            let renderer = self.renderer.as_mut();
             let had_hover =
-                crate::app::mouse::suppress_hover_popup_until_mouse_move(self.renderer.as_mut());
+                crate::app::mouse::suppress_hover_popup_until_mouse_move(&mut self.hover, renderer);
             if had_hover {
                 if let Some(w) = self.window.as_ref() {
                     w.request_redraw();
@@ -511,7 +512,7 @@ impl App {
                 return;
             }
             if key_event.physical_key == PhysicalKey::Code(KeyCode::Escape)
-                && crate::app::mouse::clear_hover_popup(self.renderer.as_mut())
+                && crate::app::mouse::clear_hover_popup(&mut self.hover)
             {
                 self.window.as_ref().unwrap().request_redraw();
             }

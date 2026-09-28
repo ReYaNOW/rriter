@@ -270,8 +270,8 @@ impl App {
             return;
         }
         let mut consumed_by_hover = false;
-        HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut self.hover;
             if state
                 .interaction_rect
                 .is_some_and(|rect| crate::ui_system::point_in_rect(mx, my, rect))
@@ -295,14 +295,14 @@ impl App {
                     consumed_by_hover = true;
                 }
             }
-        });
+        }
         if consumed_by_hover {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
             return;
         }
-        if clear_hover_popup(self.renderer.as_mut()) {
+        if clear_hover_popup(&mut self.hover) {
             if let Some(window) = self.window.as_ref() {
                 window.request_redraw();
             }
@@ -1357,7 +1357,7 @@ impl App {
 
         // При скролле основного редактора hover-popup с типом должен скрываться,
         // так же как исчезает popup с диагностикой.
-        clear_hover_popup(self.renderer.as_mut());
+        clear_hover_popup(&mut self.hover);
 
         if shift {
             self.scroll_x.scroll_by(dy); // Shift конвертирует вертикальный скролл в горизонтальный

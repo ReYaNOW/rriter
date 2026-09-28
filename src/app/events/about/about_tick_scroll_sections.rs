@@ -116,6 +116,7 @@ fn about_to_wait_hover_timer(
     let mut hover_wake_at: Option<Instant> = None;
     let mut hover_poll_pending = false;
     let mut api_mock_hover_request_due = false;
+    app.release_api_mock_hover();
     let api_mock_hover_byte = if app.active_tab_is_api_client() {
         app.ide_panel
             .api
@@ -126,32 +127,35 @@ fn about_to_wait_hover_timer(
         None
     };
 
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        if let Some(popup) = &mut state.popup {
+    // `app.hover` is re-borrowed per access (no long-lived alias): the request branch
+    // below also calls `&App` methods (`active_git_diff_lsp_hover_target`).
+    {
+        if let Some(popup) = &mut app.hover.popup {
             if popup.scroll.update(dt) {
                 needs_redraw = true;
             }
         }
-        if let Some(byte_offset) = state.byte_offset {
+        if let Some(byte_offset) = app.hover.byte_offset {
             let is_api_mock_hover = api_mock_hover_byte == Some(byte_offset);
-            let popup_matches_byte = state
+            let popup_matches_byte = app
+                .hover
                 .popup
                 .as_ref()
                 .is_some_and(|popup| popup.byte_offset == byte_offset);
-            let pending_popup_matches_byte = state
+            let pending_popup_matches_byte = app
+                .hover
                 .pending_popup
                 .as_ref()
                 .is_some_and(|popup| popup.byte_offset == byte_offset);
 
             if !popup_matches_byte
                 && !pending_popup_matches_byte
-                && state.request_id.is_none()
-                && state.definition_request_id.is_none()
+                && app.hover.request_id.is_none()
+                && app.hover.definition_request_id.is_none()
             {
-                state.timer += raw_dt;
-                if state.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
-                    state.timer = 0.0;
+                app.hover.timer += raw_dt;
+                if app.hover.timer >= crate::app::mouse::HOVER_REQUEST_DELAY_SEC {
+                    app.hover.timer = 0.0;
                     if is_api_mock_hover {
                         api_mock_hover_request_due = true;
                     } else if app.is_ide_mode {
@@ -169,15 +173,15 @@ fn about_to_wait_hover_timer(
                         };
                         if let Some(lsp) = &mut app.lsp {
                             if let Some((path, line, col)) = target {
-                                state.request_id =
+                                app.hover.request_id =
                                     lsp.request_hover(&path, &app.file_extension, line, col);
                                 if crate::render_view::hover_trace_enabled() {
                                     println!(
                                         "[HOVER DEBUG] 0.34s expired. Sent hover request. id: {:?}",
-                                        state.request_id
+                                        app.hover.request_id
                                     );
                                 }
-                                if state.request_id.is_some() {
+                                if app.hover.request_id.is_some() {
                                     hover_poll_pending = true;
                                 }
                             }
@@ -186,14 +190,15 @@ fn about_to_wait_hover_timer(
                 } else {
                     hover_wake_at = Some(
                         now + std::time::Duration::from_secs_f32(
-                            crate::app::mouse::HOVER_REQUEST_DELAY_SEC - state.timer,
+                            crate::app::mouse::HOVER_REQUEST_DELAY_SEC - app.hover.timer,
                         ),
                     );
                 }
-            } else if state.request_id.is_some() || state.definition_request_id.is_some() {
+            } else if app.hover.request_id.is_some() || app.hover.definition_request_id.is_some() {
                 hover_poll_pending = true;
             }
-        } else if state.popup.is_some() || state.pending_popup.is_some() {
+        } else if app.hover.popup.is_some() || app.hover.pending_popup.is_some() {
+            let state = &mut app.hover;
             state.timer += raw_dt;
             if state.timer >= 0.25 {
                 if crate::render_view::hover_trace_enabled() {
@@ -209,7 +214,7 @@ fn about_to_wait_hover_timer(
                     Some(now + std::time::Duration::from_secs_f32((0.25 - state.timer).max(0.0)));
             }
         }
-    });
+    }
     if api_mock_hover_request_due && app.request_active_api_mock_hover() {
         hover_poll_pending = true;
     }

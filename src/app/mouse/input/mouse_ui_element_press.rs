@@ -127,55 +127,42 @@ impl App {
         }
 
         let in_hover_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
-            && HOVER_STATE.with(|hover_state| {
-                if let Some((x, y, w, h)) = hover_state.borrow().rect {
-                    mx >= x && mx <= x + w && my >= y && my <= y + h
-                } else {
-                    false
-                }
-            });
+            && if let Some((x, y, w, h)) = self.hover.rect {
+                mx >= x && mx <= x + w && my >= y && my <= y + h
+            } else {
+                false
+            };
         let in_diag_popup_body = clicked_id == crate::ui_system::UiId::BottomPanelBody
-            && HOVER_STATE.with(|s| {
-                s.borrow().diag_rect.map_or(false, |(x, y, w, h, _, _, _)| {
-                    mx >= x && mx <= x + w && my >= y && my <= y + h
-                })
+            && self.hover.diag_rect.map_or(false, |(x, y, w, h, _, _, _)| {
+                mx >= x && mx <= x + w && my >= y && my <= y + h
             });
 
         if in_hover_popup_body || in_diag_popup_body {
             if button == winit::event::MouseButton::Left {
                 if in_hover_popup_body {
-                    HOVER_STATE.with(|hover_state| {
-                        let mut hs = hover_state.borrow_mut();
-                        if let (Some(rect), Some(popup)) = (hs.rect, hs.popup.as_ref())
-                        {
-                            let byte = hover_popup_byte_at(
-                                self.renderer.as_mut().unwrap(),
-                                popup,
-                                rect,
-                                mx,
-                                my,
-                            );
-                            if state == ElementState::Pressed {
-                                hs.selection_anchor = Some(byte);
-                                hs.selection_cursor = Some(byte);
-                                hs.selecting = true;
-                            } else {
-                                hs.selecting = false;
-                            }
-                        }
-                    });
-                } else {
-                    HOVER_STATE.with(|hover_state| {
-                        let mut hs = hover_state.borrow_mut();
-                        let byte = crate::render_view::ui::diag_popup_byte_at(mx, my);
+                    let hs = &mut self.hover;
+                    if let (Some(rect), Some(popup), Some(renderer)) =
+                        (hs.rect, hs.popup.as_ref(), self.renderer.as_mut())
+                    {
+                        let byte = hover_popup_byte_at(renderer, popup, rect, mx, my);
                         if state == ElementState::Pressed {
-                            hs.diag_selection_anchor = Some(byte);
-                            hs.diag_selection_cursor = Some(byte);
-                            hs.diag_selecting = true;
+                            hs.selection_anchor = Some(byte);
+                            hs.selection_cursor = Some(byte);
+                            hs.selecting = true;
                         } else {
-                            hs.diag_selecting = false;
+                            hs.selecting = false;
                         }
-                    });
+                    }
+                } else {
+                    let hs = &mut self.hover;
+                    let byte = crate::render_view::ui::diag_popup_byte_at(mx, my);
+                    if state == ElementState::Pressed {
+                        hs.diag_selection_anchor = Some(byte);
+                        hs.diag_selection_cursor = Some(byte);
+                        hs.diag_selecting = true;
+                    } else {
+                        hs.diag_selecting = false;
+                    }
                 }
                 self.window.as_ref().unwrap().request_redraw();
             }
@@ -186,27 +173,25 @@ impl App {
         }
         if clicked_id == crate::ui_system::UiId::HoverPopupScroll {
             let s = self.renderer.as_ref().unwrap().scale_factor;
-            crate::app::mouse::HOVER_STATE.with(|hover_state| {
-                let mut state = hover_state.borrow_mut();
-                if let Some(rect) = state.rect {
-                    let max_scroll = state.max_scroll;
-                    if let Some(popup) = &mut state.popup {
-                        let geometry = crate::app::mouse::hover_popup_scrollbar(
-                            rect,
-                            max_scroll,
-                            popup.scroll.current,
-                            s,
-                        )
-                        .geometry(s);
-                        let _ = crate::app::mouse::press_scrollbar(
-                            &mut popup.scroll,
-                            geometry,
-                            mx,
-                            my,
-                        );
-                    }
+            let state = &mut self.hover;
+            if let Some(rect) = state.rect {
+                let max_scroll = state.max_scroll;
+                if let Some(popup) = &mut state.popup {
+                    let geometry = crate::app::mouse::hover_popup_scrollbar(
+                        rect,
+                        max_scroll,
+                        popup.scroll.current,
+                        s,
+                    )
+                    .geometry(s);
+                    let _ = crate::app::mouse::press_scrollbar(
+                        &mut popup.scroll,
+                        geometry,
+                        mx,
+                        my,
+                    );
                 }
-            });
+            }
             self.window.as_ref().unwrap().request_redraw();
             return;
         }

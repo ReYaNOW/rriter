@@ -547,25 +547,17 @@ fn api_mock_python_hover_uses_virtual_source_fallback() {
         source_cursor,
         anchor: (0.0, 0.0),
     });
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        state.byte_offset = Some(edit_byte);
-        state.request_id = Some(77);
-        state.popup = None;
-        state.pending_popup = None;
-    });
+    app.hover.byte_offset = Some(edit_byte);
+    app.hover.request_id = Some(77);
+    app.hover.popup = None;
+    app.hover.pending_popup = None;
 
     assert!(app.apply_api_mock_hover_response(77, Some("None".to_string())));
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        let popup_text = state.popup.as_ref().map(|popup| popup.text.as_str());
-        assert!(popup_text.is_some_and(|text| {
-            text.starts_with("[[MODULE]] api_mock.mock_api.get_users\n")
-                && text.contains("class Response")
-        }));
-        state.popup = None;
-        state.byte_offset = None;
-    });
+    let popup_text = app.hover.popup.as_ref().map(|popup| popup.text.as_str());
+    assert!(popup_text.is_some_and(|text| {
+        text.starts_with("[[MODULE]] api_mock.mock_api.get_users\n")
+            && text.contains("class Response")
+    }));
 }
 
 #[test]
@@ -592,8 +584,8 @@ fn api_mock_hover_clears_old_popup_when_crossing_mock_editors() {
         version: 1,
     };
     app.ide_panel.api.mock_hover_target = Some(old_target);
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
+    {
+        let state = &mut app.hover;
         *state = crate::app::mouse::HoverState::default();
         state.byte_offset = Some(3);
         state.request_id = Some(44);
@@ -612,19 +604,15 @@ fn api_mock_hover_clears_old_popup_when_crossing_mock_editors() {
             scroll: crate::scroll::ScrollState::new(15.0),
             layout_cache: None,
         });
-    });
+    }
 
     assert!(app.update_api_mock_hover_from_cursor(20.0, 20.0, false, false));
 
     assert!(app.ide_panel.api.mock_hover_target.is_none());
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        assert!(state.popup.is_none());
-        assert!(state.byte_offset.is_none());
-        assert!(state.request_id.is_none());
-        assert!(state.rect.is_none());
-        *state = crate::app::mouse::HoverState::default();
-    });
+    assert!(app.hover.popup.is_none());
+    assert!(app.hover.byte_offset.is_none());
+    assert!(app.hover.request_id.is_none());
+    assert!(app.hover.rect.is_none());
 }
 
 #[test]

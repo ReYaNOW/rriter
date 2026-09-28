@@ -320,7 +320,7 @@ pub(crate) use input::autocomplete_scrollbar;
 pub(crate) use hover_mouse_logic::embedded_editor_hover_content_y_at_point;
 pub(crate) use hover_mouse_logic::hover_popup_byte_at;
 pub use hover_mouse_logic::{
-    HOVER_REQUEST_DELAY_SEC, HOVER_STATE, advance_hover_anim_progress, clear_hover_popup,
+    HOVER_REQUEST_DELAY_SEC, advance_hover_anim_progress, clear_hover_popup,
     compute_hover_visibility_from_matches, hover_anchor_for_byte,
     suppress_hover_popup_until_mouse_move,
 };

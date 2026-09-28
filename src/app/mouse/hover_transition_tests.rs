@@ -1,7 +1,7 @@
 #![allow(unused_imports)]
 
 use super::super::{
-    HOVER_STATE, HoverState, advance_hover_anim_progress, clear_hover_popup,
+    HoverState, advance_hover_anim_progress, clear_hover_popup,
     compute_hover_visibility, compute_hover_visibility_from_matches,
     diagnostic_hover_byte_range_on_line, diagnostic_hover_range_on_line,
     diagnostic_hover_target_byte_on_line, diagnostic_hover_type_target_at_x,

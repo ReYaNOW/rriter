@@ -185,8 +185,8 @@ impl crate::app::App {
             .as_ref()
             .map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
         let mut copied_text: Option<String> = None;
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
+        {
+            let state = &mut self.hover;
             if let (Some(popup), Some(a), Some(b)) = (
                 state.popup.as_ref(),
                 state.selection_anchor,
@@ -232,7 +232,7 @@ impl crate::app::App {
             {
                 copied_text = Some(state.diag_text.clone());
             }
-        });
+        }
         if let Some(text) = copied_text {
             self.set_clipboard_text(text);
             true

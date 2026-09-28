@@ -456,6 +456,9 @@ pub struct Renderer {
     pub(crate) git_logs_selecting: bool,
     pub(crate) git_workspace_scrollbar: Option<crate::render_view::scrollbar_widget::Scrollbar>,
     pub git_tooltip_waiting: bool,
+    /// Frame output: the editor hover is blocked (status bar, bottom panel, modal, ...)
+    /// and `App::render_main_frame` must clear `App::hover` after `draw`.
+    pub(crate) editor_hover_blocked: bool,
     pub(crate) git_tooltip_timer: Option<GitTooltipTimer>,
 
     pub was_empty_ide: bool,

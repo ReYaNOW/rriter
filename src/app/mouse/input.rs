@@ -216,13 +216,11 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App, preserve_main_vertical: boo
         }
     }
 
-    crate::app::mouse::HOVER_STATE.with(|state| {
-        let mut state = state.borrow_mut();
-        stop_scroll_anim(&mut state.diag_scroll);
-        if let Some(popup) = state.popup.as_mut() {
-            stop_scroll_anim(&mut popup.scroll);
-        }
-    });
+    let state = &mut app.hover;
+    stop_scroll_anim(&mut state.diag_scroll);
+    if let Some(popup) = state.popup.as_mut() {
+        stop_scroll_anim(&mut popup.scroll);
+    }
 }
 
 fn project_search_help_captures_pressed_click(app: &App) -> bool {
@@ -405,14 +403,12 @@ impl App {
             renderer.git_graph_tooltip_selecting = false;
             renderer.git_logs_selecting = false;
         }
-        crate::app::mouse::HOVER_STATE.with(|state| {
-            let mut state = state.borrow_mut();
-            if let Some(popup) = &mut state.popup {
-                popup.scroll.end_drag();
-            }
-            state.selecting = false;
-            state.diag_selecting = false;
-        });
+        let state = &mut self.hover;
+        if let Some(popup) = &mut state.popup {
+            popup.scroll.end_drag();
+        }
+        state.selecting = false;
+        state.diag_selecting = false;
     }
 
     #[cfg_attr(coverage_nightly, coverage(off))]

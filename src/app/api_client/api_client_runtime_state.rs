@@ -47,6 +47,9 @@ pub struct ApiClientState {
     pub mock_ty_diagnostics: Vec<ApiMockTyDiagnostic>,
     pub(crate) mock_hover_target: Option<ApiMockHoverTarget>,
     pub(crate) mock_hover_request: Option<ApiMockHoverRequest>,
+    /// Target dropped by `reset_api_mock_hover_tracking` whose popup in `App::hover`
+    /// is still to be cleared by `App::release_api_mock_hover`.
+    pub(crate) released_mock_hover_target: Option<ApiMockHoverTarget>,
     mock_lsp_opened: FxHashMap<PathBuf, i32>,
     pub mock_highlighter: Highlighter,
     pub mock_highlight_target: Option<(usize, ApiMockSourcePart, u64)>,
@@ -233,6 +236,7 @@ impl Default for ApiClientState {
             mock_ty_diagnostics: Vec::new(),
             mock_hover_target: None,
             mock_hover_request: None,
+            released_mock_hover_target: None,
             mock_lsp_opened: FxHashMap::default(),
             mock_highlighter: Highlighter::new(),
             mock_highlight_target: None,
