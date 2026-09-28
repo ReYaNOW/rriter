@@ -650,8 +650,22 @@ impl App {
         }
         let expanded = self.ide_panel.file_tree_expanded.clone();
         let patterns = self.ide_ignore_patterns.clone();
+        let known_icons = self.renderer.as_ref().map_or_else(FxHashSet::default, |renderer| {
+            renderer
+                .file_icon_cache
+                .keys()
+                .chain(renderer.rasterized_file_icons.keys())
+                .copied()
+                .collect()
+        });
         self.ide_panel.file_tree_error = None;
-        self.file_tree_rx = Some(spawn_scan(roots, expanded, patterns, &self.ui_waker));
+        self.file_tree_rx = Some(spawn_scan(
+            roots,
+            expanded,
+            patterns,
+            known_icons,
+            &self.ui_waker,
+        ));
     }
 
     /// Поллит канал результатов фонового скана.
@@ -697,7 +711,9 @@ impl App {
                                 updated = true;
                             }
                             crate::app::file_tree::FileTreeScanMessage::Icon(key, state) => {
-                                if let Some(renderer) = self.renderer.as_mut() {
+                                if let Some(renderer) = self.renderer.as_mut()
+                                    && !renderer.file_icon_cache.contains_key(key)
+                                {
                                     renderer.rasterized_file_icons.insert(key, state);
                                 }
                                 updated = true;

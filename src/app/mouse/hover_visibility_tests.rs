@@ -182,8 +182,10 @@ fn hover_visibility_combines_offsets_inside_same_identifier() {
 
 #[test]
 fn hover_state_resets_all_diagnostic_popup_fields() {
-    let mut state = HoverState::default();
-    state.diag_rect = Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0));
+    let mut state = HoverState {
+        diag_rect: Some((10.0, 20.0, 30.0, 40.0, 11.0, 21.0, 31.0)),
+        ..HoverState::default()
+    };
     state.diag_scroll.current = 12.0;
     state.diag_scroll.target = 24.0;
     state.diag_max_scroll = 99.0;

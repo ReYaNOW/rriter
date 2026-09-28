@@ -380,6 +380,7 @@ pub fn spawn_scan(
     roots: Vec<PathBuf>,
     expanded: FxHashSet<PathBuf>,
     user_patterns: Vec<String>,
+    known_icons: FxHashSet<&'static str>,
     ui_waker: &crate::ui_waker::UiWaker,
 ) -> mpsc::Receiver<FileTreeScanMessage> {
     let (tx, rx) = ui_waker.channel();
@@ -417,6 +418,7 @@ pub fn spawn_scan(
         for node in &full_nodes {
             needed_icons.insert((node.icon_key, node.is_dir));
         }
+        needed_icons.retain(|(key, _)| !known_icons.contains(key));
 
         // Отправляем полное дерево немедленно (текст появится мгновенно)
         let _ = worker_tx.send(FileTreeScanMessage::Nodes(full_nodes));
