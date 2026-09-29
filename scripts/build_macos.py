@@ -366,6 +366,60 @@ def bundle_layout(app: Path) -> tuple[Path, Path, Path]:
     return contents, macos, resources
 
 
+def pdfium_library_path(app: Path) -> Path:
+    return app / "Contents" / "Frameworks" / "libpdfium.dylib"
+
+
+def stage_pdfium(app: Path, architecture_label: str) -> None:
+    frameworks = pdfium_library_path(app).parent
+    frameworks.mkdir(parents=True, exist_ok=True)
+    fetch_script = ROOT / "scripts" / "fetch_pdfium.py"
+    platform_key = {
+        TARGET_ARM64: "mac-arm64",
+        TARGET_X86_64: "mac-x64",
+    }.get(architecture_label)
+    if platform_key is not None:
+        run(
+            [
+                sys.executable,
+                fetch_script,
+                "--dest",
+                frameworks,
+                "--platform",
+                platform_key,
+            ]
+        )
+        return
+    if architecture_label != "universal2":
+        raise BuildError(f"unsupported PDFium architecture: {architecture_label}")
+
+    require_commands(["lipo"])
+    with tempfile.TemporaryDirectory(prefix="rriter-pdfium-universal-") as directory:
+        arm64 = Path(directory) / "arm64"
+        x86_64 = Path(directory) / "x86_64"
+        for destination, platform_key in ((arm64, "mac-arm64"), (x86_64, "mac-x64")):
+            run(
+                [
+                    sys.executable,
+                    fetch_script,
+                    "--dest",
+                    destination,
+                    "--platform",
+                    platform_key,
+                ]
+            )
+        run(
+            [
+                "lipo",
+                "-create",
+                arm64 / "libpdfium.dylib",
+                x86_64 / "libpdfium.dylib",
+                "-output",
+                pdfium_library_path(app),
+            ]
+        )
+
+
 def create_bundle(
     executable: Path,
     *,
@@ -379,6 +433,7 @@ def create_bundle(
     contents, macos, resources = bundle_layout(app)
     macos.mkdir(parents=True)
     resources.mkdir(parents=True)
+    stage_pdfium(app, architecture_label)
     destination = macos / "RRiter"
     shutil.copy2(executable, destination)
     destination.chmod(0o755)
@@ -408,6 +463,7 @@ def sign_bundle(
 ) -> None:
     require_commands(["codesign"])
     executable = app / "Contents" / "MacOS" / "RRiter"
+    pdfium = pdfium_library_path(app)
     common: list[str | os.PathLike[str]] = [
         "codesign",
         "--force",
@@ -421,6 +477,7 @@ def sign_bundle(
 
     # Sign nested code first and the bundle last. Avoid --deep for signing: it
     # can silently rewrite nested signatures and produce non-reproducible apps.
+    run([*common, pdfium])
     run([*common, executable])
     run([*common, app])
     run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", app])
@@ -556,6 +613,11 @@ def self_test() -> None:
         raise BuildError("macOS tests must follow the project serial-test policy")
     if cargo_build_command(TARGET_ARM64, release=True)[-1] != "--release":
         raise BuildError("release cargo command self-test failed")
+    if (
+        pdfium_library_path(Path("RRiter.app")).as_posix()
+        != "RRiter.app/Contents/Frameworks/libpdfium.dylib"
+    ):
+        raise BuildError("PDFium bundle staging path self-test failed")
     if cargo_environment("12.0").get("MACOSX_DEPLOYMENT_TARGET") != "12.0":
         raise BuildError("deployment target was not applied to Cargo")
     try:
