@@ -583,8 +583,7 @@ impl App {
                     }
                     crate::OpenTabSnapshot::Pdf { path, page, frac } => {
                         if path.exists() {
-                            self.open_pdf_tab(path);
-                            if let Some(pdf) = self.active_pdf_tab_mut() { pdf.restore = Some((page, frac)); }
+                            self.open_pdf_tab_restored(path, page, frac);
                             loaded_any = true;
                         }
                     }

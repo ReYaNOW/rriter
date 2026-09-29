@@ -33,6 +33,15 @@ impl App {
     }
 
     pub fn open_pdf_tab(&mut self, path: PathBuf) {
+        self.open_pdf_tab_at(path, None);
+    }
+
+    /// Session restore: the position is in the tab before the switch saves the session.
+    pub fn open_pdf_tab_restored(&mut self, path: PathBuf, page: usize, frac: f32) {
+        self.open_pdf_tab_at(path, Some((page, frac)));
+    }
+
+    fn open_pdf_tab_at(&mut self, path: PathBuf, restore: Option<(usize, f32)>) {
         if !self.is_ide_mode {
             return;
         }
@@ -79,7 +88,7 @@ impl App {
         };
         let index = self.tabs.len();
         self.tabs.push(tab);
-        if let Some(state) = self.pdf_tab_mut(index) { state.doc = Some(doc); }
+        if let Some(state) = self.pdf_tab_mut(index) { state.doc = Some(doc); state.restore = restore; }
         if index == self.active_tab {
             self.sync_active_tab();
             self.pdf_tab_activated(index);
@@ -191,15 +200,6 @@ impl App {
     }
 
     pub fn pdf_tab_activated(&mut self, _idx: usize) {}
-
-    pub fn pdf_engine_label(&self) -> String {
-        match &self.pdf_engine {
-            PdfEngineState::Missing { message, .. } => message.clone(),
-            PdfEngineState::Failed(message) => format!("движок PDF остановлен: {message}. Перезапустите RRiter"),
-            PdfEngineState::Installing { .. } => "Установка движка PDF…".to_owned(),
-            _ => "Загрузка документа PDF…".to_owned(),
-        }
-    }
 }
 
 fn pdf_event_doc_id(event: &PdfEvent) -> Option<DocId> {

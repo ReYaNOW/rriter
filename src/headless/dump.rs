@@ -320,7 +320,7 @@ fn tab_json(tab: TabView<'_>) -> Value {
             crate::app::pdf_tab::PdfEngineState::Ready => ("ready", ""),
             crate::app::pdf_tab::PdfEngineState::Missing { message, .. } => ("missing", message.as_str()),
             crate::app::pdf_tab::PdfEngineState::Failed(message) => ("failed", message.as_str()),
-            crate::app::pdf_tab::PdfEngineState::Installing { prev } => ("installing", prev.as_str()),
+            crate::app::pdf_tab::PdfEngineState::Installing { .. } => ("installing", ""),
         };
         serde_json::json!({
             "phase": phase, "page_count": pdf.page_count(), "current_page": current_page,

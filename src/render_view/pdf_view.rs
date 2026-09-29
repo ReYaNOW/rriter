@@ -1,4 +1,4 @@
-use crate::app::pdf_tab::{PdfPhase, PdfTabState};
+use crate::app::pdf_tab::{PdfEngineState, PdfPhase, PdfTabState};
 use crate::renderer::Renderer;
 use crate::ui_system::{UiClipRect, UiId, UiRegistry};
 
@@ -6,6 +6,7 @@ impl Renderer {
     pub(crate) fn draw_root_pdf_frame(
         &mut self,
         tab: &PdfTabState,
+        engine: &PdfEngineState,
         x: f32,
         y: f32,
         w: f32,
@@ -40,15 +41,19 @@ impl Renderer {
             );
         }
 
+        // Engine screens show `PdfEngineState::label`;
+        // a tab error set by the engine (already the full sentence) wins over it, so the
+        // `Failed` label is not formatted per frame. `Error` holds `PdfError::message`.
         let state_message = match &tab.phase {
-            PdfPhase::EngineMissing { error } => Some(error.as_deref().unwrap_or("Движок PDF недоступен")),
-            PdfPhase::EngineStarting | PdfPhase::Loading => Some("Загрузка документа PDF…"),
-            PdfPhase::Error(message) => Some(message.as_str()),
-            PdfPhase::PasswordRequired => Some("Документ защищён паролем"),
+            PdfPhase::EngineMissing { error: Some(error) } => Some(std::borrow::Cow::Borrowed(error.as_str())),
+            PdfPhase::EngineMissing { error: None } | PdfPhase::EngineStarting => Some(engine.label()),
+            PdfPhase::Loading => Some(std::borrow::Cow::Borrowed("Загрузка документа PDF…")),
+            PdfPhase::Error(message) => Some(std::borrow::Cow::Borrowed(message.as_str())),
+            PdfPhase::PasswordRequired => Some(std::borrow::Cow::Borrowed("Документ защищён паролем")),
             PdfPhase::Ready => None,
         };
         if let Some(message) = state_message {
-            self.draw_pdf_centered_message(message, x, y, w, h, scale);
+            self.draw_pdf_centered_message(&message, x, y, w, h, scale);
         }
     }
 

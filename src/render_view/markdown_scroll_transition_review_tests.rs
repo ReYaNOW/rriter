@@ -582,6 +582,7 @@ pub(crate) mod reviewer_stage2_integration {
             &app.ide_workspaces,
             false,
             None,
+            &app.pdf_engine,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;

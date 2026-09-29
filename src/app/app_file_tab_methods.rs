@@ -325,19 +325,9 @@ impl App {
     ) {
         let path = crate::platform::canonicalize_or_absolutize(&path);
         let path_key = crate::platform::PathKey::new(&path);
-        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
-            if !self.is_ide_mode { return; }
-            if self.file_key.as_ref() == Some(&path_key)
-                || self.file_path.as_deref().is_some_and(|open| crate::platform::paths_equal(open, &path))
-            {
-                self.reveal_active_tab_now();
-            } else if let Some(index) = self.tabs.iter().position(|tab| tab.file_key.as_ref() == Some(&path_key)) {
-                self.switch_to_tab(index);
-            } else {
-                self.open_pdf_tab(path);
-            }
-            return;
-        }
+        // No single-file transition into IDE mode exists (a folder only adds a workspace),
+        // so outside IDE mode a `.pdf` goes the binary-file way through `load_file_internal`.
+        let is_pdf = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
         if !self.is_ide_mode {
             if start_highlighter {
                 self.load_file_internal(path, add_to_history, wait_highlight);
@@ -376,6 +366,10 @@ impl App {
             } else if wait_highlight {
                 self.switch_to_tab(i);
             }
+            return;
+        }
+        if is_pdf {
+            self.open_pdf_tab(path);
             return;
         }
 

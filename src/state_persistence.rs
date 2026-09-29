@@ -314,7 +314,7 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
         }
         crate::app::EditorTabKind::GitDiff(_, _) => None,
         crate::app::EditorTabKind::Pdf => tab.pdf.as_ref().and_then(|pdf| {
-            let (page, frac) = pdf.anchor();
+            let (page, frac) = pdf.session_position();
             let record = serde_json::json!({
                 "path": crate::platform::encode_persisted_path(&pdf.path),
                 "page": page,
@@ -1017,6 +1017,24 @@ mod tests {
         assert_eq!(parsed, vec![OpenTabSnapshot::Pdf { path, page: 0, frac: 200.0 / 994.0 }]);
         assert!(parse_open_tabs_content_checked("0\nPDF\t{\"path\":\"/tmp/a.pdf\"}\n").is_err());
         assert!(parse_open_tabs_content_checked("0\nPDF\t{\n").is_err());
+    }
+
+    #[test]
+    fn pdf_session_record_keeps_pending_restore_before_opened() {
+        let path = PathBuf::from("/tmp/session.pdf");
+        let mut tab = tab(Some("/tmp/session.pdf"));
+        tab.kind = crate::app::EditorTabKind::Pdf;
+        let mut pdf = crate::app::pdf_tab::PdfTabState::new(
+            path.clone(),
+            std::sync::Arc::new(crate::pdf::DocGens::new()),
+            crate::app::pdf_tab::PdfPhase::EngineMissing { error: None },
+        );
+        pdf.restore = Some((4, 0.5));
+        pdf.set_viewport(800, 400, 1.0);
+        tab.pdf = Some(Box::new(pdf));
+        let line = open_tab_line(&tab).expect("PDF session line");
+        let (parsed, _) = parse_open_tabs_content_checked(&format!("0\n{line}\n")).expect("parse PDF session");
+        assert_eq!(parsed, vec![OpenTabSnapshot::Pdf { path, page: 4, frac: 0.5 }]);
     }
 
     #[test]

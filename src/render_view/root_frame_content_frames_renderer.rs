@@ -196,6 +196,68 @@ impl Renderer {
         show_fps: bool,
         blink_alpha: f32,
         tab_scroll_x: f32,
+        wants_pointer: bool,
+    ) -> (bool, Vec<(usize, usize)>) {
+        let s = layout.s;
+        let (tab_x, tab_y, tab_w, tab_h) =
+            self.tab_body_rect(s, layout.panel_left_w, viewport.tab_bar_h, viewport.editor_height);
+        self.draw_database_table_tab(
+            tab_x,
+            tab_y,
+            tab_w,
+            tab_h,
+            s,
+            tab_meta,
+            tab_state,
+            ui_registry,
+            layout.ui_mx,
+            layout.ui_my,
+            blink_alpha,
+        );
+        self.draw_root_tab_frame_chrome(
+            editor,
+            editor_title,
+            editor_path,
+            tabs,
+            active_tab,
+            markdown,
+            ide_panel,
+            lsp,
+            ui_registry,
+            ide_workspaces,
+            layout,
+            viewport,
+            active_api_route,
+            has_lsp_diagnostics,
+            show_fps,
+            blink_alpha,
+            tab_scroll_x,
+            wants_pointer,
+        )
+    }
+
+    /// Tab bar, bottom panel, status bar and the frame tail (tab tooltip, FPS, final
+    /// overlays, flush, resize blockers) around a non-editor tab body. Shared by the
+    /// Database table and PDF frames, which draw only their body before calling it.
+    fn draw_root_tab_frame_chrome(
+        &mut self,
+        editor: &Editor,
+        editor_title: &str,
+        editor_path: Option<&std::path::PathBuf>,
+        tabs: &[crate::app::EditorTab],
+        active_tab: usize,
+        markdown: &crate::app::MarkdownTabState,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        ide_workspaces: &[std::path::PathBuf],
+        layout: RootFramePanelLayout<'_>,
+        viewport: RootFrameViewport,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        has_lsp_diagnostics: bool,
+        show_fps: bool,
+        blink_alpha: f32,
+        tab_scroll_x: f32,
         mut wants_pointer: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         let RootFramePanelLayout {
@@ -220,20 +282,7 @@ impl Renderer {
             editor_height,
             ..
         } = viewport;
-        let (tab_x, tab_y, tab_w, tab_h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
-        self.draw_database_table_tab(
-            tab_x,
-            tab_y,
-            tab_w,
-            tab_h,
-            s,
-            tab_meta,
-            tab_state,
-            ui_registry,
-            ui_mx,
-            ui_my,
-            blink_alpha,
-        );
+        let (tab_x, _, tab_w, _) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
         let tab_tooltip = self.draw_tab_bar(
             tabs,
             active_tab,

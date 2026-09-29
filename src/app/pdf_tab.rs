@@ -17,6 +17,18 @@ pub enum PdfEngineState {
     Installing { prev: String },
 }
 
+impl PdfEngineState {
+    /// Status-screen text for the engine; only `Failed` allocates.
+    pub fn label(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            Self::Missing { message, .. } => std::borrow::Cow::Borrowed(message.as_str()),
+            Self::Failed(message) => std::borrow::Cow::Owned(format!("движок PDF остановлен: {message}. Перезапустите RRiter")),
+            Self::Installing { .. } => std::borrow::Cow::Borrowed("Установка движка PDF…"),
+            Self::NotStarted | Self::Starting | Self::Ready => std::borrow::Cow::Borrowed("Загрузка документа PDF…"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum PdfPhase {
     EngineMissing { error: Option<String> },
@@ -204,7 +216,9 @@ impl PdfTabState {
             self.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             self.layout_dirty = false;
         }
-        if let Some((page, frac)) = self.restore.take().filter(|_| !self.pages.is_empty() && w > 0 && h > 0) {
+        // The restore waits until the document is opened and the body has a size;
+        // frames drawn while `Loading` must not consume it.
+        if !self.pages.is_empty() && w > 0 && h > 0 && let Some((page, frac)) = self.restore.take() {
             let page = page.min(self.pages.len() - 1);
             let (y, ph) = self.layout.rows[page];
             self.scroll.jump_to(y as f32 + frac.clamp(0.0, 1.0) * ph as f32);
@@ -235,6 +249,9 @@ impl PdfTabState {
         let (y, h) = self.layout.rows[page];
         (page, ((offset - y) as f32 / h.max(1) as f32).clamp(0.0, 1.0))
     }
+    /// Position written to the session: the pending restore until `set_viewport`
+    /// applies it (engine missing, still loading), then the live anchor.
+    pub fn session_position(&self) -> (usize, f32) { self.restore.unwrap_or_else(|| self.anchor()) }
     pub fn visible_range(&self) -> Range<usize> {
         if self.layout.rows.is_empty() { return 0..0; }
         let top = self.scroll.current.round() as i32;
@@ -306,5 +323,24 @@ mod tests {
         tab.restore = Some((usize::MAX, 0.5));
         tab.set_viewport(1000, 500, 1.0);
         assert_eq!(tab.anchor().0, 2);
+    }
+
+    #[test]
+    fn restore_survives_loading_frames_and_applies_after_opened() {
+        let letter = PageGeom { width_pt: 612.0, height_pt: 792.0 };
+        let mut tab = PdfTabState::new(PathBuf::from("a.pdf"), Arc::new(DocGens::new()), PdfPhase::Loading);
+        tab.restore = Some((1, 0.25));
+        tab.set_viewport(1000, 500, 1.0);
+        tab.set_viewport(1000, 500, 1.0);
+        assert_eq!(tab.restore, Some((1, 0.25)));
+        assert_eq!(tab.session_position(), (1, 0.25));
+
+        tab.apply_event(&PdfEvent::Opened { id: crate::pdf::DocId(1), pages: vec![letter; 3] });
+        tab.set_viewport(1000, 500, 1.0);
+        assert_eq!(tab.restore, None);
+        let (page, frac) = tab.anchor();
+        assert_eq!(page, 1);
+        assert!((frac - 0.25).abs() <= 1.0 / 1253.0, "frac {frac}");
+        assert_eq!(tab.session_position(), (page, frac));
     }
 }
