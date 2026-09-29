@@ -1033,7 +1033,12 @@ pub(super) fn apply_sync_edit_to_replica(
         return false;
     }
     let start_position = get_point(text, start_byte);
-    let old_end_position = get_point(text, old_end_byte);
+    // `get_point` scans the prefix; an insert's old end is its start, don't scan twice.
+    let old_end_position = if old_end_byte == start_byte {
+        start_position
+    } else {
+        get_point(text, old_end_byte)
+    };
     text.replace_range(start_byte..old_end_byte, inserted);
     if let Some(tree) = tree {
         let new_end_byte = start_byte + inserted.len();

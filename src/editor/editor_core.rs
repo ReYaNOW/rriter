@@ -1027,7 +1027,7 @@ impl Editor {
             || !self.is_char_boundary(start)
             || !self.is_char_boundary(end)
         {
-            return (cursor_before_op, cursor_before_op, String::new());
+            return (cursor_before_op, 0, String::new());
         }
         self.version = next_editor_version(self.version);
 

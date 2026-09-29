@@ -36,6 +36,8 @@ mod ui_tests_database_query;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor;
 #[cfg(all(test, target_os = "linux"))]
+mod ui_tests_multi_cursor;
+#[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_completion;
 #[cfg(all(test, target_os = "linux"))]
 mod ui_tests_editor_folding_minimap;

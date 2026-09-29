@@ -480,7 +480,7 @@ impl App {
                 || (ctrl && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)))
                 || (plain_navigation
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
-                    && ((!ctrl && !word) || word))
+                    && (!ctrl || word))
                 || (plain_navigation
                     && !ctrl
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowUp | KeyCode::ArrowDown | KeyCode::Home | KeyCode::End)));
@@ -757,7 +757,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyZ) if ctrl => {
                 if let Some(delta) = self.editor.undo() {
-                    if !is_git_diff_tab {
+                    if !is_git_diff_tab && !multi_cursor_active {
                         match delta {
                             crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
                                 self.highlighter.shift_insert(offset, len, Some(&text));
@@ -786,7 +786,7 @@ impl App {
             }
             PhysicalKey::Code(KeyCode::KeyY) if ctrl => {
                 if let Some(delta) = self.editor.redo() {
-                    if !is_git_diff_tab {
+                    if !is_git_diff_tab && !multi_cursor_active {
                         match delta {
                             crate::editor::UndoRedoDelta::Insert(offset, len, text) => {
                                 self.highlighter.shift_insert(offset, len, Some(&text));
@@ -846,21 +846,24 @@ impl App {
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowUp) => {
+                let Some(renderer) = self.renderer.as_mut() else {
+                    return;
+                };
                 if multi_cursor_active {
-                    let renderer = self.renderer.as_mut().unwrap();
                     self.editor.move_all_cursors(|editor| editor.move_up(renderer, false));
                 } else {
-                    self.editor.move_up(self.renderer.as_mut().unwrap(), shift);
+                    self.editor.move_up(renderer, shift);
                 }
                 cursor_moved = true;
             }
             PhysicalKey::Code(KeyCode::ArrowDown) => {
+                let Some(renderer) = self.renderer.as_mut() else {
+                    return;
+                };
                 if multi_cursor_active {
-                    let renderer = self.renderer.as_mut().unwrap();
                     self.editor.move_all_cursors(|editor| editor.move_down(renderer, false));
                 } else {
-                    self.editor
-                        .move_down(self.renderer.as_mut().unwrap(), shift);
+                    self.editor.move_down(renderer, shift);
                 }
                 cursor_moved = true;
             }

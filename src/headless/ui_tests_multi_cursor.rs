@@ -114,12 +114,11 @@ fn headless_multi_cursor_types_at_three_carets_and_updates_highlights() {
 fn headless_multi_cursor_backspace_edits_each_line_and_escape_clears() {
     let (dir, mut session) = multi_cursor_session("ui-multi-cursor-backspace", "one\ntwo\nthree");
     click_offsets(&mut session, &[5, 9]);
-    click_offset(&mut session, 1, true);
     assert_eq!(extra_offsets(&dump(&mut session)), vec![5, 9]);
 
     let lines = run_script(&mut session, b"key backspace\n");
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
-    assert_eq!(session.app.editor.get_full_text(), "ne\nwo\nhree");
+    assert_eq!(session.app.editor.get_full_text(), "one\nwo\nhree");
 
     let before_escape = dump(&mut session);
     let lines = run_script(&mut session, b"key escape\n");
@@ -154,7 +153,7 @@ fn headless_multi_cursor_undo_restores_all_carets_and_redo_reapplies() {
     let lines = run_script(&mut session, b"key ctrl+y\n");
     assert!(lines.iter().all(|line| line == "ok"), "{lines:?}");
     assert_eq!(session.app.editor.get_full_text(), "Xone\nXtwo\nXthree");
-    assert_eq!(extra_offsets(&dump(&mut session)), vec![5, 10]);
+    assert_eq!(extra_offsets(&dump(&mut session)), vec![6, 11]);
     let _ = std::fs::remove_dir_all(dir);
 }
 

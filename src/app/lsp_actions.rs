@@ -443,18 +443,24 @@ impl App {
             let old_noqa_str = &line_text[noqa_pos_in_line..];
             let new_noqa = build_noqa_comment(Some(old_noqa_str), codes);
 
+            let sync_edits_before = self.editor.sync_edits.len();
             let (off, len, _) = self
                 .editor
                 .replace_range(noqa_byte_start, actual_end, &new_noqa);
-            self.highlighter.shift_delete(off, len);
-            self.highlighter
-                .shift_insert(off, new_noqa.len(), Some(&new_noqa));
+            if self.editor.sync_edits.len() > sync_edits_before {
+                self.highlighter.shift_delete(off, len);
+                self.highlighter
+                    .shift_insert(off, new_noqa.len(), Some(&new_noqa));
+            }
         } else {
             // Нет noqa — добавляем в конец строки
             let noqa = build_noqa_comment(None, codes);
+            let sync_edits_before = self.editor.sync_edits.len();
             let (off, len, _) = self.editor.replace_range(actual_end, actual_end, &noqa);
-            self.highlighter.shift_delete(off, len);
-            self.highlighter.shift_insert(off, noqa.len(), Some(&noqa));
+            if self.editor.sync_edits.len() > sync_edits_before {
+                self.highlighter.shift_delete(off, len);
+                self.highlighter.shift_insert(off, noqa.len(), Some(&noqa));
+            }
         }
 
         // Синхронизируем с LSP и подсветчиком
@@ -530,10 +536,13 @@ impl App {
 
                 for (start, end, new_text) in &ops {
                     if *start <= *end {
+                        let sync_edits_before = self.editor.sync_edits.len();
                         let (off, len, _) = self.editor.replace_range(*start, *end, new_text);
-                        self.highlighter.shift_delete(off, len);
-                        self.highlighter
-                            .shift_insert(off, new_text.len(), Some(new_text));
+                        if self.editor.sync_edits.len() > sync_edits_before {
+                            self.highlighter.shift_delete(off, len);
+                            self.highlighter
+                                .shift_insert(off, new_text.len(), Some(new_text));
+                        }
                     }
                 }
 

@@ -956,6 +956,7 @@ impl App {
     }
 
     fn reset_highlighter_with_text(&mut self, text: String, _seed_immediately: bool) {
+        self.editor.sync_edits.clear();
         self.closing_hint_state.invalidate(self.editor.version);
         let priority =
             crate::highlighter::should_prioritize_front_highlight(&self.file_extension, &text);

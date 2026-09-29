@@ -646,9 +646,9 @@ mod round3_editor_regressions {
         editor.insert_str("aé😀z");
         let before = editor.get_full_text();
         let version = editor.version;
-        assert_eq!(editor.replace_range(4, 2, "x").2, "");
-        assert_eq!(editor.replace_range(0, 999, "x").2, "");
-        assert_eq!(editor.replace_range(2, 3, "x").2, "");
+        assert_eq!(editor.replace_range(4, 2, "x").1, 0);
+        assert_eq!(editor.replace_range(0, 999, "x").1, 0);
+        assert_eq!(editor.replace_range(2, 3, "x").1, 0);
         assert_eq!(editor.get_full_text(), before);
         assert_eq!(editor.version, version);
     }

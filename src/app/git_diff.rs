@@ -1293,12 +1293,15 @@ impl App {
             current_text.len(),
         );
         self.editor.cursor = replace_end;
+        let sync_edits_before = self.editor.sync_edits.len();
         let (offset, len, _) = self
             .editor
             .replace_range(replace_start, replace_end, &old_text);
-        self.highlighter.shift_delete(offset, len);
-        self.highlighter
-            .shift_insert(offset, old_text.len(), Some(&old_text));
+        if self.editor.sync_edits.len() > sync_edits_before {
+            self.highlighter.shift_delete(offset, len);
+            self.highlighter
+                .shift_insert(offset, old_text.len(), Some(&old_text));
+        }
         self.inline_git_popup = None;
         self.inline_git_diff_rx = None;
         if !self.editor.sync_edits.is_empty() {
