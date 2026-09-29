@@ -561,7 +561,11 @@ impl Renderer {
         let Some(RasterizedIconState::Ready(data)) = self.rasterized_file_icons.remove(key) else {
             return None;
         };
-        let entry = self.upload_icon_rgba(64, 64, &data)?;
+        let Some(entry) = self.upload_icon_rgba(64, 64, &data) else {
+            // A failed atlas upload must not re-rasterize the svg every frame.
+            self.rasterized_file_icons.insert(key, RasterizedIconState::Missing);
+            return None;
+        };
         self.file_icon_cache.insert(key, entry);
         Some(entry)
     }
