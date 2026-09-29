@@ -43,14 +43,22 @@ impl Renderer {
             enabled.then_some(previous)
         };
         ui_registry.push_clip(clip);
+        let ready = matches!(tab.phase, PdfPhase::Ready);
+        // Registered first so pages, text lines and links win `find_at`; it only absorbs
+        // presses in margins and gaps (a click there must not reach the hidden editor).
+        if ready {
+            ui_registry.register_blocker(UiId::PdfBody, x, y, w, h, mx, my);
+        }
+        // One scratch buffer for the whole frame; the highlights of every page reuse it.
+        let mut rects = Vec::new();
         for page in tab.visible_range() {
             let Some((page_y, page_h)) = tab.layout.rows.get(page).copied() else { continue };
             let px = (x + ((w - tab.layout.page_w as f32) * 0.5)).round();
-            let py = y + page_y as f32 - offset as f32;
+            let py = (y + page_y as f32 - offset as f32).round();
             let page_w = tab.layout.page_w as f32;
             let page_h = page_h as f32;
             if let Some(texture) = tab.textures.get(&page) {
-                self.draw_texture_quad(&texture.tex, px, py.round(), page_w, page_h);
+                self.draw_texture_quad(&texture.tex, px, py, page_w, page_h);
             } else {
                 let paper = if tab.dark { [0.11, 0.12, 0.13, 1.0] } else { [0.94, 0.94, 0.91, 1.0] };
                 self.push_rect(px, py, page_w, page_h, paper);
@@ -65,15 +73,16 @@ impl Renderer {
                     caption_scale,
                 );
             }
-            self.draw_pdf_highlights(tab, page, px, py, page_w, page_h);
-            ui_registry.register_rect_clipped(
+            self.draw_pdf_highlights(tab, page, (px, py, page_w, page_h), &mut rects);
+            // A blocker keeps the default cursor on blank paper; lines and links below override it.
+            ui_registry.register_blocker_clipped(
                 UiId::PdfPage(page), px, py, page_w, page_h, clip, mx, my,
             );
+            if ready {
+                register_pdf_page_hits(tab, page, (px, py, page_w, page_h), clip, ui_registry, (mx, my));
+            }
         }
-        // Registered after the pages so it wins `find_at`; the scrollbar lane is registered later still.
-        if matches!(tab.phase, PdfPhase::Ready) {
-            ui_registry.register_text_region(UiId::PdfText, x, y, w, h, mx, my);
-        }
+        // The scrollbar lane is registered after the pages, so it wins `find_at`.
         ui_registry.pop_clip();
         self.flush();
         unsafe {
@@ -112,21 +121,32 @@ impl Renderer {
     }
 
     /// Search matches and the text selection of one page, drawn over the raster.
-    fn draw_pdf_highlights(&mut self, tab: &PdfTabState, page: usize, px: f32, py: f32, page_w: f32, page_h: f32) {
+    fn draw_pdf_highlights(
+        &mut self,
+        tab: &PdfTabState,
+        page: usize,
+        (px, py, page_w, page_h): (f32, f32, f32, f32),
+        rects: &mut Vec<crate::pdf::PtRect>,
+    ) {
         let (Some(Some(text)), Some(geom)) = (tab.text.get(page), tab.pages.get(page)) else { return };
         if tab.search.matches.is_empty() && tab.selection.is_none() { return; }
         let kx = page_w / geom.width_pt.max(1.0);
         let ky = page_h / geom.height_pt.max(1.0);
-        let mut rects = Vec::new();
+        // Edges are rounded, not sizes, so neighbouring rectangles of one line stay gap-free.
         let fill = |renderer: &mut Self, rects: &[crate::pdf::PtRect], color: [f32; 4]| {
             for rect in rects {
-                renderer.push_rect(px + rect.x * kx, py + rect.y * ky, (rect.w * kx).max(1.0), (rect.h * ky).max(1.0), color);
+                let (x0, x1) = ((px + rect.x * kx).round(), (px + (rect.x + rect.w) * kx).round());
+                let (y0, y1) = ((py + rect.y * ky).round(), (py + (rect.y + rect.h) * ky).round());
+                renderer.push_rect(x0, y0, (x1 - x0).max(1.0), (y1 - y0).max(1.0), color);
             }
         };
-        for (idx, item) in tab.search.matches.iter().enumerate().filter(|(_, item)| item.page == page) {
+        // `matches` is ordered by (page, start): this page's matches are one contiguous slice.
+        let first = tab.search.matches.partition_point(|item| item.page < page);
+        let last = tab.search.matches.partition_point(|item| item.page <= page);
+        for (offset, item) in tab.search.matches[first..last].iter().enumerate() {
             rects.clear();
-            crate::app::pdf_tab::text::line_rects(&text.chars, item.start as usize, item.end as usize, &mut rects);
-            let color = if tab.search.current == Some(idx) { [1.0, 0.55, 0.1, 0.55] } else { [1.0, 0.85, 0.2, 0.35] };
+            crate::app::pdf_tab::text::line_rects(&text.chars, item.start as usize, item.end as usize, rects);
+            let color = if tab.search.current == Some(first + offset) { [1.0, 0.55, 0.1, 0.55] } else { [1.0, 0.85, 0.2, 0.35] };
             fill(self, rects.as_slice(), color);
         }
         if let Some(selection) = tab.selection {
@@ -135,7 +155,7 @@ impl Renderer {
                 let start = if page == first_page { first_char } else { 0 };
                 let end = if page == last_page { last_char.saturating_add(1) } else { text.chars.len() };
                 rects.clear();
-                crate::app::pdf_tab::text::line_rects(&text.chars, start, end, &mut rects);
+                crate::app::pdf_tab::text::line_rects(&text.chars, start, end, rects);
                 let sel = self.theme.sel;
                 fill(self, rects.as_slice(), [sel[0], sel[1], sel[2], 0.55]);
             }
@@ -152,6 +172,34 @@ impl Renderer {
             self.theme.fg,
             text_scale,
         );
+    }
+}
+
+/// Registers the text lines (I-beam) and links (hand, clickable) of one visible page.
+/// Links go last so they win `find_at` over the lines beneath them.
+fn register_pdf_page_hits(
+    tab: &PdfTabState,
+    page: usize,
+    (px, py, page_w, page_h): (f32, f32, f32, f32),
+    clip: UiClipRect,
+    ui_registry: &mut UiRegistry,
+    (mx, my): (f32, f32),
+) {
+    let Some(geom) = tab.pages.get(page) else { return };
+    let kx = page_w / geom.width_pt.max(1.0);
+    let ky = page_h / geom.height_pt.max(1.0);
+    if let Some(Some(lines)) = tab.line_boxes.get(page) {
+        for rect in lines {
+            ui_registry.register_text_region(UiId::PdfText, px + rect.x * kx, py + rect.y * ky, rect.w * kx, rect.h * ky, mx, my);
+        }
+    }
+    if let Some(links) = tab.links.get(page) {
+        for (idx, link) in links.iter().enumerate() {
+            let rect = link.rect;
+            ui_registry.register_rect_clipped(
+                UiId::PdfLink(page, idx), px + rect.x * kx, py + rect.y * ky, rect.w * kx, rect.h * ky, clip, mx, my,
+            );
+        }
     }
 }
 

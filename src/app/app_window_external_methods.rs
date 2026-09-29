@@ -531,6 +531,10 @@ impl App {
                 SaveOutcome::Failed
             };
         }
+        // A PDF tab keeps an empty hidden editor; writing it would replace the document with nothing.
+        if self.active_pdf_tab().is_some() {
+            return SaveOutcome::Failed;
+        }
         let Some(path) = self.file_path.clone() else {
             self.trigger_save_as_picker();
             return SaveOutcome::Failed;

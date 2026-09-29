@@ -21,8 +21,7 @@ impl App {
         }
         if pressed && input.physical_key == PhysicalKey::Code(KeyCode::Escape) {
             // Escape first drops the selection; without one it falls through so the search panel closes.
-            if self.active_pdf_tab_mut().is_some_and(|pdf| pdf.selection.is_some() || pdf.pending_copy.is_some()) {
-                if let Some(pdf) = self.active_pdf_tab_mut() { pdf.clear_selection(); }
+            if self.active_pdf_tab_mut().is_some_and(|pdf| pdf.clear_selection()) {
                 if let Some(window) = self.window.as_ref() { window.request_redraw(); }
                 return true;
             }
@@ -82,64 +81,49 @@ impl App {
 
     /// Copies the selection; when a page's text is not cached yet the copy completes on arrival.
     pub(crate) fn pdf_copy_selection(&mut self) {
-        let text = {
-            let Some(pdf) = self.active_pdf_tab_mut() else { return };
-            let Some(selection) = pdf.selection else { return };
-            pdf.pending_copy = Some(selection);
-            pdf.take_copy_text()
-        };
-        if let Some(text) = text { self.set_clipboard_text(text); }
+        let Some(text) = self.active_pdf_tab_mut().and_then(|pdf| pdf.copy_selection()) else { return };
+        self.set_clipboard_text(text);
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
     }
 
-    pub(crate) fn pdf_link_at(&self, x: f32, y: f32) -> Option<(usize, usize)> {
-        self.active_pdf_tab()?.link_at(x, y)
-    }
-
-    /// Left press on the page area: remembers the start; it becomes a selection drag or a click on release.
-    pub(crate) fn press_pdf_body(&mut self, x: f32, y: f32) {
+    /// Left press on the page area (`link` = the `PdfLink` under it): it becomes a
+    /// selection drag, or on release a click that follows the link.
+    pub(crate) fn press_pdf_body(&mut self, x: f32, y: f32, link: Option<(usize, usize)>) {
         self.focus_document_text_surface();
-        let Some(pdf) = self.active_pdf_tab_mut() else { return };
-        pdf.press = Some((x, y));
-        pdf.dragging = false;
-        pdf.drag_anchor = None;
+        if let Some(pdf) = self.active_pdf_tab_mut() { pdf.begin_press(x, y, link); }
     }
 
     /// Pointer move while the left button is down on the page area; `true` = a PDF press is active.
     pub(crate) fn update_pdf_drag(&mut self, x: f32, y: f32) -> bool {
         let threshold = 4.0 * self.renderer.as_ref().map_or(1.0, |renderer| renderer.scale_factor);
         let Some(pdf) = self.active_pdf_tab_mut() else { return false };
-        let Some((press_x, press_y)) = pdf.press else { return false };
-        if !pdf.dragging {
-            if (x - press_x).hypot(y - press_y) < threshold { return true; }
-            pdf.dragging = true;
-            pdf.drag_anchor = pdf.hit_char_at(press_x, press_y);
-        }
-        if let Some(head) = pdf.hit_char_at(x, y) {
-            let anchor = *pdf.drag_anchor.get_or_insert(head);
-            pdf.pending_copy = None;
-            pdf.selection = Some(crate::app::pdf_tab::PdfSelection { anchor, head });
-        }
+        if !pdf.drag_to(x, y, threshold) { return false; }
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
         true
+    }
+
+    /// Frame tick of a held text drag: scrolls while the pointer rests at the window edge.
+    pub(crate) fn tick_pdf_drag_autoscroll(&mut self) -> bool {
+        let Some((x, y, scale)) = self.renderer.as_ref().map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y, renderer.scale_factor)) else { return false };
+        self.active_pdf_tab_mut().is_some_and(|pdf| pdf.autoscroll_step(x, y, scale))
     }
 
     /// Left release: ends a selection drag, or treats the press as a click (clears the
-    /// selection, follows a link). `true` = the release belonged to a PDF press.
+    /// selection, follows the pressed link when the pointer is still on it). `true` = the
+    /// release belonged to a PDF press.
     pub(crate) fn finish_pdf_drag(&mut self, x: f32, y: f32) -> bool {
-        let Some(pdf) = self.active_pdf_tab_mut() else { return false };
-        if pdf.press.take().is_none() { return false; }
-        let dragged = std::mem::take(&mut pdf.dragging);
-        pdf.drag_anchor = None;
-        if !dragged {
-            pdf.clear_selection();
-            if let Some((page, idx)) = pdf.link_at(x, y) { self.pdf_follow_link(page, idx); }
+        let Some(press) = self.active_pdf_tab_mut().and_then(|pdf| pdf.end_press()) else { return false };
+        if !press.dragging
+            && let Some((page, idx)) = press.link
+            && self.ui_registry.find_at(x, y) == Some(crate::ui_system::UiId::PdfLink(page, idx))
+        {
+            self.handle_ui_click(crate::ui_system::UiId::PdfLink(page, idx));
         }
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
         true
     }
 
-    fn pdf_follow_link(&mut self, page: usize, idx: usize) {
+    pub(crate) fn pdf_follow_link(&mut self, page: usize, idx: usize) {
         use crate::pdf::LinkTarget;
         let Some(target) = self.active_pdf_tab().and_then(|pdf| pdf.links.get(page)?.get(idx)).map(|link| link.target.clone()) else { return };
         match target {

@@ -9,7 +9,7 @@ mod engine;
 mod input;
 pub mod text;
 
-pub use text::{PdfMatch, PdfSearch, PdfSelection};
+pub use text::{PdfMatch, PdfPress, PdfSearch, PdfSelection};
 
 #[derive(Clone, Debug)]
 pub enum PdfEngineState {
@@ -141,10 +141,8 @@ pub struct PdfTabState {
     pub line_boxes: Vec<Option<Vec<PtRect>>>,
     /// Tab body rectangle of the last prepared frame; maps window points to pages.
     pub body: (f32, f32, f32, f32),
-    /// Left press on the page area: where it started and whether it became a text drag.
-    pub press: Option<(f32, f32)>,
-    pub dragging: bool,
-    pub drag_anchor: Option<(usize, usize)>,
+    /// Left press on the page area (see `PdfPress`); changed only through the tab's press methods.
+    pub press: Option<PdfPress>,
     pub(crate) layout_scale: f32,
     pub(crate) layout_dirty: bool,
     pub(crate) status_label: String,
@@ -156,7 +154,7 @@ impl PdfTabState {
             scroll: ScrollState::new(15.0), textures: HashMap::new(), pending_bitmaps: Vec::new(),
             requested: HashSet::new(), text: Vec::new(), links: Vec::new(), text_requested: Vec::new(),
             search: PdfSearch::default(), selection: None, pending_copy: None, restore: None,
-            hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, dragging: false, drag_anchor: None, layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
+            hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
     }
 
     pub fn apply_event(&mut self, ev: &PdfEvent) -> PdfEventOutcome {

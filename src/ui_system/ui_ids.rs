@@ -243,8 +243,12 @@ pub enum UiId {
     DatabaseArrow(usize, usize),
     DatabaseTableRow(usize, usize, usize),
     PdfPage(usize),
-    /// Text layer of the visible PDF page area (selection, links, I-beam cursor).
+    /// Whole PDF tab body; absorbs presses in margins and gaps and keeps the default cursor.
+    PdfBody,
+    /// One text line of a visible PDF page (I-beam cursor, start of a text selection).
     PdfText,
+    /// Link `(page, index in the page's links)` of a visible PDF page.
+    PdfLink(usize, usize),
     DatabaseContextItem(usize),
     DatabaseDialogBackdrop,
     DatabaseDialogBody,

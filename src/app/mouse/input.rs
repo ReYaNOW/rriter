@@ -301,6 +301,8 @@ impl App {
     pub(crate) fn cancel_pointer_interactions(&mut self) {
         self.finish_database_table_drag();
         self.finish_markdown_read_selection_gesture();
+        // A release lost to focus loss or a tab switch must not leave a PDF press that swallows later moves.
+        for pdf in self.tabs.iter_mut().filter_map(|tab| tab.pdf.as_deref_mut()) { pdf.cancel_press(); }
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         self.is_dragging_search = false;

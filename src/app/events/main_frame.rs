@@ -724,12 +724,10 @@ impl App {
                         _ => winit::window::CursorIcon::Default,
                     }
                 } else if self.active_pdf_tab().is_some() {
-                    let (mx, my) = self.renderer.as_ref().map_or((-1.0, -1.0), |renderer| {
-                        (renderer.last_mouse_x, renderer.last_mouse_y)
-                    });
-                    if wants_pointer || self.pdf_link_at(mx, my).is_some() {
+                    // Links register as pointer areas and text lines as text regions; the registry decides.
+                    if wants_pointer {
                         winit::window::CursorIcon::Pointer
-                    } else if self.ui_registry.find_at(mx, my) == Some(crate::ui_system::UiId::PdfText) {
+                    } else if self.ui_registry.wants_text() {
                         winit::window::CursorIcon::Text
                     } else {
                         winit::window::CursorIcon::Default

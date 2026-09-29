@@ -11,6 +11,7 @@ impl App {
             }
             UiId::PdfDarkToggle => self.toggle_pdf_dark_pages(),
             UiId::PdfScrollY => {}
+            UiId::PdfLink(page, idx) => self.pdf_follow_link(page, idx),
             UiId::MarkdownCodeCopy(block_id) => {
                 let _ = self.copy_markdown_read_code_block(block_id);
                 if let Some(window) = self.window.as_ref() {

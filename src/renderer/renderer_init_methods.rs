@@ -627,6 +627,7 @@ impl Renderer {
                 scratch_buffer: String::with_capacity(256),
                 last_search_idx: None,
                 last_search_len: 0,
+                last_search_pending: false,
                 icons: HashMap::new(),
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 rasterized_file_icons: rustc_hash::FxHashMap::default(),

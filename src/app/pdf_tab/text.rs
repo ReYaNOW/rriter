@@ -29,6 +29,17 @@ pub struct PdfSelection {
     pub head: (usize, usize),
 }
 
+/// Left press on the page area: where it started, the link under it and the drag progress.
+/// Only `PdfTabState::{begin_press, drag_to, end_press, cancel_press}` change it.
+#[derive(Clone, Copy, Debug)]
+pub struct PdfPress {
+    pub x: f32,
+    pub y: f32,
+    pub link: Option<(usize, usize)>,
+    pub dragging: bool,
+    anchor: Option<(usize, usize)>,
+}
+
 impl PdfSelection {
     pub fn ordered(&self) -> ((usize, usize), (usize, usize)) {
         if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
@@ -125,17 +136,6 @@ pub fn link_url_allowed(url: &str) -> bool {
 }
 
 impl PdfTabState {
-    /// Page under a window point plus the point in page points (Y down); the point is
-    /// clamped into the nearest page so a drag through gaps and margins keeps working.
-    pub fn point_to_page_pt(&self, x: f32, y: f32) -> Option<(usize, f32, f32)> {
-        self.locate(x, y, true)
-    }
-
-    /// Like `point_to_page_pt`, but `None` for points outside every page (margins, gaps).
-    pub fn point_in_page_pt(&self, x: f32, y: f32) -> Option<(usize, f32, f32)> {
-        self.locate(x, y, false)
-    }
-
     /// Char under a window point on an already cached page (clamped into the nearest page).
     pub fn hit_char_at(&self, x: f32, y: f32) -> Option<(usize, usize)> {
         let (page, x_pt, y_pt) = self.point_to_page_pt(x, y)?;
@@ -143,13 +143,61 @@ impl PdfTabState {
         hit_test_char(&text.chars, x_pt, y_pt).map(|idx| (page, idx))
     }
 
-    /// Link (page, index) under a window point; needs the page text/links to be cached.
-    pub fn link_at(&self, x: f32, y: f32) -> Option<(usize, usize)> {
-        let (page, x_pt, y_pt) = self.point_in_page_pt(x, y)?;
-        hit_test_link(self.links.get(page)?, x_pt, y_pt).map(|idx| (page, idx))
+    /// Starts a left press on the page area; it becomes a selection drag or a click on release.
+    pub fn begin_press(&mut self, x: f32, y: f32, link: Option<(usize, usize)>) {
+        self.press = Some(PdfPress { x, y, link, dragging: false, anchor: None });
     }
 
-    fn locate(&self, x: f32, y: f32, clamp: bool) -> Option<(usize, f32, f32)> {
+    /// Drops a press whose release will never arrive (focus loss, tab switch).
+    pub fn cancel_press(&mut self) {
+        self.press = None;
+    }
+
+    /// Pointer move with the button held. `false` = no PDF press is active. Past `threshold`
+    /// pixels the press turns into a drag and the selection follows the pointer.
+    pub fn drag_to(&mut self, x: f32, y: f32, threshold: f32) -> bool {
+        let Some(mut press) = self.press else { return false };
+        if !press.dragging {
+            if (x - press.x).hypot(y - press.y) < threshold { return true; }
+            press.dragging = true;
+            press.anchor = self.hit_char_at(press.x, press.y);
+        }
+        if let Some(head) = self.hit_char_at(x, y) {
+            let anchor = *press.anchor.get_or_insert(head);
+            self.pending_copy = None;
+            self.selection = Some(PdfSelection { anchor, head });
+        }
+        self.press = Some(press);
+        true
+    }
+
+    /// Left release. Returns the finished press (`None` = it was not ours); a press
+    /// that never became a drag also clears the selection, as a click does.
+    pub fn end_press(&mut self) -> Option<PdfPress> {
+        let press = self.press.take()?;
+        if !press.dragging { self.clear_selection(); }
+        Some(press)
+    }
+
+    /// One tick of edge autoscroll while a drag is held near the top or bottom of the
+    /// body; the selection head keeps following the (stationary) pointer. `true` = scrolled.
+    pub fn autoscroll_step(&mut self, x: f32, y: f32, scale: f32) -> bool {
+        if !self.press.is_some_and(|press| press.dragging) { return false; }
+        let (_, body_y, _, body_h) = self.body;
+        let edge = (24.0 * scale).round();
+        if body_h <= 2.0 * edge { return false; }
+        let step = (12.0 * scale).round();
+        let delta = if y <= body_y + edge { -step } else if y >= body_y + body_h - edge { step } else { return false };
+        let before = self.scroll.target;
+        self.scroll_by(delta);
+        if self.scroll.target == before { return false; }
+        if let Some(head) = self.hit_char_at(x, y) && let Some(sel) = self.selection.as_mut() { sel.head = head; }
+        true
+    }
+
+    /// Page under a window point plus the point in page points (Y down); the point is
+    /// clamped into the nearest page so a drag through gaps and margins keeps working.
+    pub fn point_to_page_pt(&self, x: f32, y: f32) -> Option<(usize, f32, f32)> {
         if !(x.is_finite() && y.is_finite()) || self.layout.rows.is_empty() || self.pages.len() != self.layout.rows.len() {
             return None;
         }
@@ -160,10 +208,8 @@ impl PdfTabState {
         let geom = self.pages.get(page)?;
         let page_w = self.layout.page_w.max(1) as f32;
         let left = (body_x + (body_w - page_w) * 0.5).round();
-        let raw_fx = (x - left) / page_w;
-        let raw_fy = (content_y - row_y as f32) / row_h.max(1) as f32;
-        if !clamp && !((0.0..=1.0).contains(&raw_fx) && (0.0..=1.0).contains(&raw_fy)) { return None; }
-        let (fx, fy) = (raw_fx.clamp(0.0, 1.0), raw_fy.clamp(0.0, 1.0));
+        let fx = ((x - left) / page_w).clamp(0.0, 1.0);
+        let fy = ((content_y - row_y as f32) / row_h.max(1) as f32).clamp(0.0, 1.0);
         Some((page, fx * geom.width_pt, fy * geom.height_pt))
     }
 
@@ -266,6 +312,13 @@ impl PdfTabState {
             return;
         }
         if self.match_rect_top(idx).is_some() { self.goto_current_match(); }
+    }
+
+    /// Ctrl+C: the selection text now, or `None` while some page still lacks text; the copy
+    /// then stays pending and `take_copy_text` finishes it when the text arrives.
+    pub fn copy_selection(&mut self) -> Option<String> {
+        self.pending_copy = self.selection;
+        self.take_copy_text()
     }
 
     /// Clipboard text once every page of the pending copy has text; the copy is dropped
@@ -448,6 +501,47 @@ mod tests {
         tab.apply_event(&PdfEvent::TextFailed { id: DocId(1), page: 2, error: "x".into() });
         assert_eq!(tab.search.pending_jump, None, "stale generation is discarded");
         assert!(tab.text[2].as_ref().is_some_and(|text| text.chars.is_empty()), "failed text becomes empty text");
+    }
+
+    #[test]
+    fn press_drag_click_cancel_and_autoscroll_are_owned_by_the_tab() {
+        let mut tab = ready_tab(2);
+        let text = Arc::new(PageText { chars: line("Hello world", 72.0, 74.0) });
+        tab.apply_event(&PdfEvent::Text { id: DocId(1), page: 0, text, links: Vec::new() });
+        let (row_y, _) = tab.layout.rows[0];
+        let k = tab.layout.page_w as f32 / 612.0;
+        let left = ((1000.0 - tab.layout.page_w as f32) * 0.5).round();
+        let (x0, y0) = (left + 73.0 * k, row_y as f32 + 80.0 * k);
+        let (x1, y1) = (left + 120.0 * k, row_y as f32 + 80.0 * k);
+        assert!(!tab.drag_to(x1, y1, 4.0), "no press, no drag");
+        tab.begin_press(x0, y0, None);
+        assert!(tab.drag_to(x0 + 1.0, y0, 4.0));
+        assert!(tab.selection.is_none(), "below the drag threshold");
+        assert!(tab.drag_to(x1, y1, 4.0));
+        assert_eq!(tab.selection, Some(PdfSelection { anchor: (0, 0), head: (0, 4) }));
+        assert!(tab.end_press().is_some_and(|press| press.dragging));
+        assert!(tab.selection.is_some(), "a drag keeps its selection");
+        assert!(tab.end_press().is_none(), "release without a press is not ours");
+        // A click clears the selection and reports the link under the press.
+        tab.begin_press(x0, y0, Some((0, 1)));
+        let click = tab.end_press().expect("press");
+        assert_eq!((click.dragging, click.link), (false, Some((0, 1))));
+        assert!(tab.selection.is_none());
+        // Focus loss drops the press: the next moves are not swallowed.
+        tab.begin_press(x0, y0, None);
+        tab.cancel_press();
+        assert!(!tab.drag_to(x1, y1, 4.0));
+        // Autoscroll runs only during a drag and only near the body edges.
+        tab.begin_press(x0, y0, None);
+        assert!(!tab.autoscroll_step(x1, 790.0, 1.0), "not dragging yet");
+        tab.drag_to(x1, y1, 4.0);
+        assert!(!tab.autoscroll_step(x1, 400.0, 1.0), "middle of the body");
+        let before = tab.scroll.target;
+        assert!(tab.autoscroll_step(x1, 790.0, 1.0));
+        assert_eq!(tab.scroll.target, before + 12.0);
+        assert!(tab.autoscroll_step(x1, 5.0, 1.0));
+        assert_eq!(tab.scroll.target, before);
+        assert!(!tab.autoscroll_step(x1, 5.0, 1.0), "clamped at the top");
     }
 
     #[test]
