@@ -421,6 +421,9 @@ impl App {
                     );
                     let content_y = r.last_mouse_y - tab_bar_h + self.scroll_y.current;
                     if !content_y_hits_visual_text_row(content_y, r.line_height, &r.visual_lines) {
+                        if !alt_click {
+                            self.editor.clear_extra_cursors();
+                        }
                         self.is_dragging = false;
                         self.window.as_ref().unwrap().request_redraw();
                         return UiClickFlow::Return;

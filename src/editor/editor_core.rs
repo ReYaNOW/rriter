@@ -1029,6 +1029,9 @@ impl Editor {
         {
             return (cursor_before_op, 0, String::new());
         }
+        // Range replacements come from single-caret paths (LSP, git revert, format);
+        // extra carets would keep offsets into the old text.
+        self.clear_extra_cursors();
         self.version = next_editor_version(self.version);
 
         let len = end - start;

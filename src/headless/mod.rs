@@ -348,11 +348,10 @@ impl HeadlessSession {
             Command::Click { button, phase, alt } => {
                 let button = mouse_button(button);
                 let saved_modifiers = self.app.modifiers;
-                self.app.modifiers = if alt {
-                    winit::keyboard::ModifiersState::ALT
-                } else {
-                    winit::keyboard::ModifiersState::empty()
-                };
+                // Held modifiers (e.g. Ctrl for go-to-definition) stay; `alt` only adds Alt.
+                if alt {
+                    self.app.modifiers |= winit::keyboard::ModifiersState::ALT;
+                }
                 match phase {
                     ClickPhase::Both => self.click(button),
                     ClickPhase::Down => self.mouse_event(ElementState::Pressed, button),

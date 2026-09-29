@@ -477,7 +477,9 @@ impl App {
                     && crate::platform::text_input_modifiers_allowed(self.modifiers))
                 || (!ctrl && !self.modifiers.alt_key()
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::Backspace | KeyCode::Delete | KeyCode::Enter)))
-                || (ctrl && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)))
+                || (ctrl
+                    && !self.modifiers.alt_key()
+                    && matches!(physical_key, PhysicalKey::Code(KeyCode::KeyV | KeyCode::KeyZ | KeyCode::KeyY)))
                 || (plain_navigation
                     && matches!(physical_key, PhysicalKey::Code(KeyCode::ArrowLeft | KeyCode::ArrowRight))
                     && (!ctrl || word))
