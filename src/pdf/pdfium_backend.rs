@@ -88,7 +88,7 @@ fn recolor_object(object: &mut PdfPageObject<'_>) {
     match object {
         PdfPageObject::Path(path) => {
             if let Ok(color) = path.fill_color() {
-                let (red, green, blue) = invert_lightness(color.red(), color.green(), color.blue());
+                let (red, green, blue) = dark_fill(color.red(), color.green(), color.blue());
                 let _ = path.set_fill_color(PdfColor::new(red, green, blue, color.alpha()));
             }
             if let Ok(color) = path.stroke_color() {
@@ -248,9 +248,58 @@ fn invert_lightness(red: u8, green: u8, blue: u8) -> (u8, u8, u8) {
     )
 }
 
+/// Lowest luminance `dark_fill` darkens a light colour fill to: keeps the hue
+/// visible on `DARK_PAPER` and gives white (inverted black) text 7:1 on it.
+const DARK_FILL_MIN_LUMINANCE: f32 = 0.1;
+
+/// Dark-page colour of a path fill. HSL inversion keeps saturated light
+/// colours bright (pure yellow has L = 0.5), so a text highlight stays light
+/// under text that turned light. The fill is therefore capped at the
+/// luminance its luminance-equivalent grey gets from the same inversion, but
+/// not below `DARK_FILL_MIN_LUMINANCE`; greys map exactly as before, and
+/// colours that were dark keep the HSL result.
+fn dark_fill(red: u8, green: u8, blue: u8) -> (u8, u8, u8) {
+    let inverted = invert_lightness(red, green, blue);
+    if red == green && green == blue {
+        return inverted;
+    }
+    let grey = srgb_encode(luminance(red, green, blue));
+    let target = srgb_decode(1.0 - grey).max(DARK_FILL_MIN_LUMINANCE);
+    let current = luminance(inverted.0, inverted.1, inverted.2);
+    if current <= target {
+        return inverted;
+    }
+    // Luminance is linear in linear-light channels: scaling them keeps the hue.
+    let scale = target / current;
+    let channel = |value: u8| (srgb_encode(srgb_decode(f32::from(value) / 255.0) * scale) * 255.0).round() as u8;
+    (channel(inverted.0), channel(inverted.1), channel(inverted.2))
+}
+
+/// Relative luminance (WCAG) of an sRGB colour.
+fn luminance(red: u8, green: u8, blue: u8) -> f32 {
+    let linear = |value: u8| srgb_decode(f32::from(value) / 255.0);
+    0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+}
+
+fn srgb_decode(value: f32) -> f32 {
+    if value <= 0.04045 {
+        value / 12.92
+    } else {
+        ((value + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+fn srgb_encode(value: f32) -> f32 {
+    if value <= 0.003_130_8 {
+        value * 12.92
+    } else {
+        1.055 * value.powf(1.0 / 2.4) - 0.055
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{flip_rect, flip_y, invert_lightness, normalize_chars};
+    use super::{dark_fill, flip_rect, flip_y, invert_lightness, normalize_chars};
     use crate::pdf::{PageChar, PtRect};
 
     fn item(ch: char, x: f32) -> PageChar {
@@ -274,5 +323,14 @@ mod tests {
         assert_eq!(invert_lightness(0, 0, 0), (255, 255, 255));
         assert_eq!(invert_lightness(255, 0, 0), (255, 0, 0));
         assert_eq!(invert_lightness(200, 200, 200), (55, 55, 55));
+    }
+
+    #[test]
+    fn dark_fill_darkens_light_saturated_colours_and_keeps_greys_and_dark_colours() {
+        assert_eq!(dark_fill(255, 255, 0), (92, 92, 0));
+        assert_eq!(dark_fill(255, 255, 255), invert_lightness(255, 255, 255));
+        assert_eq!(dark_fill(128, 128, 128), invert_lightness(128, 128, 128));
+        assert_eq!(dark_fill(255, 0, 0), (255, 0, 0));
+        assert_eq!(dark_fill(0, 0, 128), invert_lightness(0, 0, 128));
     }
 }

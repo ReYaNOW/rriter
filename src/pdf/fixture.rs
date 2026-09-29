@@ -16,7 +16,6 @@ fn write_fixture_pdf_with_target_height(
     target_height: f32,
     destination_y: f32,
 ) -> PathBuf {
-    let path = dir.join(filename);
     let page_one = b"BT /F1 24 Tf 72 700 Td (Hello PDF viewer) Tj 0 -40 Td (Go to second) Tj ET";
     let page_two = b"BT /F1 24 Tf 72 700 Td (Second page target) Tj ET";
     let objects = vec![
@@ -34,6 +33,27 @@ fn write_fixture_pdf_with_target_height(
         "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>".to_owned(),
         "<< /Type /Annot /Subtype /Link /Rect [72 520 200 550] /Border [0 0 0] /A << /S /GoTo /D [99 /XYZ 0 792 0] >> >>".to_owned(),
     ];
+    write_pdf(dir, filename, &objects)
+}
+
+/// One page with a text highlight the way LibreOffice writes it: a yellow
+/// filled path (`1 1 0 rg … re f`) under black text. The yellow box spans
+/// x 72..540, y 300..700 (PDF points, origin bottom-left); the text sits at
+/// x 150..~420, y 450..~560, so the box corners are highlight without text.
+pub fn write_fixture_pdf_highlight(dir: &Path) -> PathBuf {
+    let content = b"1 1 0 rg 72 300 468 400 re f 0 0 0 rg BT /F1 150 Tf 150 450 Td (HH) Tj ET";
+    let objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 >>".to_owned(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>".to_owned(),
+        "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>".to_owned(),
+        stream_object(content),
+    ];
+    write_pdf(dir, "rriter-fixture-highlight.pdf", &objects)
+}
+
+fn write_pdf(dir: &Path, filename: &str, objects: &[String]) -> PathBuf {
+    let path = dir.join(filename);
     let mut pdf = String::from("%PDF-1.4\n");
     let mut offsets = Vec::with_capacity(objects.len() + 1);
     offsets.push(0usize);
