@@ -124,8 +124,29 @@ fn headless_tree_250_files_expands_and_scrolls_within_budget() {
     let out = dir.join("tree-scroll");
     let lines = run_script(&mut session, format!("record 5 {} wheel 0 -3\n", out.display()).as_bytes());
     let summary = ok_json(&lines[0]);
-    assert_eq!(summary["over_budget"], 0, "{summary}");
+    assert_cpu_frames_within_budget(&summary);
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Frame budget on the app's own work: `update_ms + draw_cpu_ms` of every recorded frame.
+/// `total_ms` (and so `over_budget`) also holds the `glFinish` wait, which grows with every
+/// other GL context on the GPU (parallel test processes, a game): on the same frames it goes
+/// from ~0.2 ms alone to 4-5 ms next to 8 other contexts while the CPU part stays ~0.1 ms, so
+/// it cannot be asserted in a parallel suite. In-frame work (e.g. a synchronous svg
+/// rasterization) lands in `draw_cpu_ms` and still fails this check.
+fn assert_cpu_frames_within_budget(summary: &serde_json::Value) {
+    let budget = summary["budget_ms"].as_f64().unwrap_or(0.0);
+    assert!(budget > 0.0, "{summary}");
+    let Ok(csv) = std::fs::read_to_string(summary["csv"].as_str().unwrap_or_default()) else {
+        panic!("record csv missing: {summary}");
+    };
+    let rows: Vec<&str> = csv.lines().skip(1).collect();
+    assert_eq!(Some(rows.len() as u64), summary["frames"].as_u64(), "{csv}");
+    for row in rows {
+        // A malformed cell parses to NaN and fails the comparison below.
+        let cells: Vec<f64> = row.split(',').take(3).map(|cell| cell.parse().unwrap_or(f64::NAN)).collect();
+        assert!(cells.len() == 3 && cells[1] + cells[2] <= budget, "frame over budget on CPU: {row}\n{summary}");
+    }
 }
 
 #[test]
@@ -240,7 +261,7 @@ fn headless_tree_record_wheel_keeps_frame_budget_at_common_scales() {
         let lines = run_script(&mut session, format!("record 4 {} wheel 0 -3\n", output.display()).as_bytes());
         let summary = ok_json(&lines[0]);
         assert_eq!(summary["frames"], 4);
-        assert_eq!(summary["over_budget"], 0, "{summary}");
+        assert_cpu_frames_within_budget(&summary);
     }
     let _ = std::fs::remove_dir_all(dir);
 }
