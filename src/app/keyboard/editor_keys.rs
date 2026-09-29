@@ -367,7 +367,9 @@ impl App {
     }
 
     pub fn handle_editor_ime_commit(&mut self, text: &str) {
-        if text.is_empty() || self.show_welcome {
+        // The hidden editor under a PDF tab is not a text field: only the inputs handled before
+        // this call (search panel, terminal, dialogs) take IME text there.
+        if text.is_empty() || self.show_welcome || self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) {
             return;
         }
         if self.active_tab_is_git_diff() || self.markdown_mode() == crate::app::MarkdownMode::Read {
