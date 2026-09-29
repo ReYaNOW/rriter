@@ -461,3 +461,51 @@ fn pdf_page_label_follows_scroll_and_its_layout_ignores_the_current_page() {
     assert!(nine.number_dx > ten.number_dx, "the shorter number is right-aligned inside the same field");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// WCAG relative luminance of a screenshot pixel.
+fn pixel_luminance(pixel: [u8; 4]) -> f32 {
+    let linear = |value: u8| {
+        let value = f32::from(value) / 255.0;
+        if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(pixel[0]) + 0.7152 * linear(pixel[1]) + 0.0722 * linear(pixel[2])
+}
+
+#[test]
+fn dark_pages_keep_highlighted_text_readable_on_a_darkened_highlight() {
+    let dir = scratch_dir("ui-pdf-dark-highlight");
+    let path = crate::pdf::fixture::write_fixture_pdf_highlight(&dir);
+    let mut session = session_for_test(1280, 720);
+    let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_ready(&mut session);
+    wait_until(&mut session, 5000, "highlight page texture", |session| dump(session)["tabs"][0]["pdf"]["textures"].as_u64().unwrap_or(0) >= 1);
+    // Dark pages are the default (see `pdf_fixture_opens_and_draws_a_rasterized_page`).
+    let shot_path = dir.join("pdf-dark-highlight.png");
+    let (bg_x, bg_y) = page_point(&session, 100.0, 150.0);
+    wait_until(&mut session, 5000, "highlight rasterized", |session| {
+        let lines = run_script(session, format!("screenshot {}\n", shot_path.display()).as_bytes());
+        lines[0].starts_with("ok ") && image::open(&shot_path).is_ok_and(|shot| {
+            let pixel = shot.to_rgba8().get_pixel(bg_x.round() as u32, bg_y.round() as u32).0;
+            pixel[0] > pixel[2].saturating_add(40)
+        })
+    });
+    let shot = image::open(&shot_path).unwrap_or_else(|error| panic!("decode PDF screenshot: {error}")).to_rgba8();
+    let highlight = shot.get_pixel(bg_x.round() as u32, bg_y.round() as u32).0;
+    // Brightest pixel over the top of the "HH" glyphs (x 150..367 pt, Y-down 234..342 pt).
+    let (x0, y0) = page_point(&session, 160.0, 245.0);
+    let (x1, y1) = page_point(&session, 360.0, 300.0);
+    let text = (x0.round() as u32..(x1.round() as u32).min(shot.width()))
+        .flat_map(|x| (y0.round() as u32..(y1.round() as u32).min(shot.height())).map(move |y| (x, y)))
+        .map(|(x, y)| shot.get_pixel(x, y).0)
+        .max_by(|a, b| pixel_luminance(*a).total_cmp(&pixel_luminance(*b)))
+        .unwrap_or_else(|| panic!("text area on screen"));
+    assert!(pixel_luminance(text) > 0.7, "inverted black text should be light, got {text:?} (highlight {highlight:?})");
+    assert!(
+        highlight[0] > highlight[2].saturating_add(40) && highlight[0].abs_diff(highlight[1]) < 30,
+        "highlight should stay yellow, got {highlight:?}"
+    );
+    let contrast = (pixel_luminance(text) + 0.05) / (pixel_luminance(highlight) + 0.05);
+    assert!(contrast >= 4.5, "text {text:?} on highlight {highlight:?}: contrast {contrast:.2} < 4.5");
+    let _ = std::fs::remove_dir_all(dir);
+}
