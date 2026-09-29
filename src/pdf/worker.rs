@@ -18,6 +18,11 @@ struct ActiveSearch {
     next_page: usize,
 }
 
+struct CachedPage {
+    text: Arc<PageText>,
+    links: Arc<[super::PageLink]>,
+}
+
 pub fn start(lib_path: PathBuf, waker: &UiWaker) -> PdfWorkerHandle {
     let (tx, rx) = mpsc::channel();
     let (event_tx, event_rx) = waker.channel();
@@ -41,7 +46,7 @@ fn run(lib_path: PathBuf, rx: Receiver<PdfRequest>, event_tx: WakeSender<PdfEven
     };
     let _ = event_tx.send(PdfEvent::EngineReady);
     let mut docs: HashMap<DocId, (Doc<'_>, Arc<DocGens>)> = HashMap::new();
-    let mut text_cache: HashMap<(DocId, usize), Arc<PageText>> = HashMap::new();
+    let mut text_cache: HashMap<(DocId, usize), CachedPage> = HashMap::new();
     let mut active_search: Option<ActiveSearch> = None;
     loop {
         while let Ok(request) = rx.try_recv() {
@@ -77,7 +82,7 @@ fn handle_request<'a>(
     request: PdfRequest,
     event_tx: &WakeSender<PdfEvent>,
     docs: &mut HashMap<DocId, (Doc<'a>, Arc<DocGens>)>,
-    text_cache: &mut HashMap<(DocId, usize), Arc<PageText>>,
+    text_cache: &mut HashMap<(DocId, usize), CachedPage>,
     active_search: &mut Option<ActiveSearch>,
 ) {
     match request {
@@ -129,17 +134,23 @@ fn handle_request<'a>(
                 return;
             }
             if let Some(text) = text_cache.get(&(id, page)) {
-                let _ = event_tx.send(PdfEvent::Text { id, page, text: Arc::clone(text), links: Vec::new() });
+                let _ = event_tx.send(PdfEvent::Text {
+                    id,
+                    page,
+                    text: Arc::clone(&text.text),
+                    links: text.links.to_vec(),
+                });
                 return;
             }
             match pdfium_backend::text(doc, page) {
                 Ok((text, links)) => {
                     let text = Arc::new(text);
-                    text_cache.insert((id, page), Arc::clone(&text));
-                    let _ = event_tx.send(PdfEvent::Text { id, page, text, links });
+                    let links: Arc<[super::PageLink]> = links.into();
+                    text_cache.insert((id, page), CachedPage { text: Arc::clone(&text), links: Arc::clone(&links) });
+                    let _ = event_tx.send(PdfEvent::Text { id, page, text, links: links.to_vec() });
                 }
                 Err(error) => {
-                    text_cache.insert((id, page), Arc::new(PageText::default()));
+                    text_cache.insert((id, page), CachedPage { text: Arc::new(PageText::default()), links: Arc::from([]) });
                     let _ = event_tx.send(PdfEvent::TextFailed { id, page, error });
                 }
             }
@@ -168,7 +179,7 @@ fn handle_request<'a>(
 fn search_one_page(
     event_tx: &WakeSender<PdfEvent>,
     docs: &HashMap<DocId, (Doc<'_>, Arc<DocGens>)>,
-    text_cache: &mut HashMap<(DocId, usize), Arc<PageText>>,
+    text_cache: &mut HashMap<(DocId, usize), CachedPage>,
     active_search: &mut Option<ActiveSearch>,
 ) {
     let Some(search) = active_search.as_mut() else {
@@ -189,12 +200,12 @@ fn search_one_page(
     }
     let page = search.next_page;
     search.next_page += 1;
-    let text = text_cache.entry((search.id, page)).or_insert_with(|| {
-        let text = pdfium_backend::text(doc, page)
-            .map_or_else(|_| PageText::default(), |(text, _)| text);
-        Arc::new(text)
+    let cached = text_cache.entry((search.id, page)).or_insert_with(|| {
+        let (text, links) = pdfium_backend::text(doc, page)
+            .map_or_else(|_| (PageText::default(), Vec::new()), |result| result);
+        CachedPage { text: Arc::new(text), links: links.into() }
     });
-    let string = text.text();
+    let string = cached.text.text();
     let char_starts = string.char_indices().map(|(byte, _)| byte).collect::<Vec<_>>();
     let matches = search
         .regex
@@ -227,7 +238,7 @@ mod tests {
     use crate::ui_waker::UiWaker;
 
     use super::start;
-    use crate::pdf::fixture::{write_empty, write_fixture_pdf, write_garbage};
+    use crate::pdf::fixture::{write_empty, write_fixture_pdf, write_fixture_pdf_mixed, write_garbage};
     use crate::pdf::{DocGens, DocId, LinkTarget, PdfError, PdfEvent, PdfRequest};
 
     fn temp_dir() -> PathBuf {
@@ -274,15 +285,43 @@ mod tests {
             PdfEvent::Text { text, links, .. } => {
                 assert!(text.text().contains("Hello PDF viewer"));
                 assert!((60.0..100.0).contains(&text.chars[0].rect.y));
-                assert_eq!(links.len(), 3);
+                assert_eq!(links.len(), 4);
                 assert!(links.iter().any(|link| link.target == LinkTarget::Uri("https://example.com/".to_owned())));
                 assert!(links.iter().any(|link| link.target == LinkTarget::Page { page: 1, y_pt: Some(0.0) }));
                 assert!(links.iter().any(|link| link.target == LinkTarget::Page { page: 2, y_pt: None }));
+                assert!(links.iter().any(|link| link.target == LinkTarget::Page { page: 99, y_pt: None }));
             }
             event => panic!("expected Text, got {event:?}"),
         }
         worker.tx.send(PdfRequest::PageText { id, page: 2 }).unwrap();
         assert!(matches!(recv(&worker.rx), PdfEvent::Text { text, .. } if text.chars.is_empty()));
+    }
+
+    #[test]
+    fn search_cache_keeps_page_links_and_goto_uses_target_page_height() {
+        let (worker, dir) = worker();
+        let path = write_fixture_pdf_mixed(&dir);
+        let id = DocId(7);
+        let gens = Arc::new(DocGens::new());
+        let pages = open(&worker, id, &path, &gens);
+        assert_eq!(pages[0].height_pt, 792.0);
+        assert_eq!(pages[1].height_pt, 612.0);
+        gens.search.store(1, std::sync::atomic::Ordering::Relaxed);
+        worker.tx.send(PdfRequest::Search { id, query: "Hello".to_owned(), r#gen: 1 }).unwrap();
+        loop {
+            if matches!(recv(&worker.rx), PdfEvent::SearchDone { .. }) {
+                break;
+            }
+        }
+        worker.tx.send(PdfRequest::PageText { id, page: 0 }).unwrap();
+        match recv(&worker.rx) {
+            PdfEvent::Text { links, .. } => {
+                assert_eq!(links.len(), 4);
+                assert!(links.iter().any(|link| link.target == LinkTarget::Page { page: 1, y_pt: Some(112.0) }));
+                assert!(links.iter().any(|link| link.target == LinkTarget::Page { page: 99, y_pt: None }));
+            }
+            event => panic!("expected cached Text, got {event:?}"),
+        }
     }
 
     #[test]

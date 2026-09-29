@@ -162,9 +162,9 @@ pub(super) fn text(doc: &Doc<'_>, page_index: usize) -> Result<(PageText, Vec<Pa
                     .then_some(LinkTarget::Uri(uri))
             }),
             Some(PdfAction::LocalDestination(action)) => {
-                action.destination().ok().and_then(|destination| link_target(destination, geom.height_pt))
+                action.destination().ok().and_then(|destination| link_target(destination, &doc.pages))
             }
-            _ => link.destination().and_then(|destination| link_target(destination, geom.height_pt)),
+            _ => link.destination().and_then(|destination| link_target(destination, &doc.pages)),
         };
         if let Some(target) = target {
             links.push(PageLink { rect, target });
@@ -173,14 +173,14 @@ pub(super) fn text(doc: &Doc<'_>, page_index: usize) -> Result<(PageText, Vec<Pa
     Ok((PageText { chars }, links))
 }
 
-fn link_target(destination: PdfDestination<'_>, page_height: f32) -> Option<LinkTarget> {
-    let y_pt = match destination.view_settings().ok()? {
+fn link_target(destination: PdfDestination<'_>, pages: &[PageGeom]) -> Option<LinkTarget> {
+    let page = usize::try_from(destination.page_index().ok()?).ok()?;
+    let y_pt = pages.get(page).and_then(|geom| match destination.view_settings().ok()? {
         PdfDestinationViewSettings::SpecificCoordinatesAndZoom(_, Some(y), _) => {
-            Some(flip_y(page_height, y.value))
+            Some(flip_y(geom.height_pt, y.value))
         }
         _ => None,
-    };
-    let page = usize::try_from(destination.page_index().ok()?).ok()?;
+    });
     Some(LinkTarget::Page { page, y_pt })
 }
 
