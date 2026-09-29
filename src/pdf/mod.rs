@@ -1,7 +1,7 @@
 pub mod library;
-// Task 3: pub mod worker;
-// Task 3: mod pdfium_backend;
-// Task 3: #[cfg(test)] pub mod fixture;
+pub mod worker;
+mod pdfium_backend;
+#[cfg(test)] pub mod fixture;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -71,6 +71,7 @@ impl PdfError {
     }
 }
 
+#[derive(Debug)]
 pub struct DocGens {
     pub render: AtomicU32,
     pub search: AtomicU32,
@@ -119,6 +120,7 @@ impl Default for DocGens {
     }
 }
 
+#[derive(Debug)]
 pub enum PdfRequest {
     Open { id: DocId, path: PathBuf, gens: Arc<DocGens> },
     Close { id: DocId },
@@ -127,6 +129,7 @@ pub enum PdfRequest {
     Search { id: DocId, query: String, r#gen: u32 },
 }
 
+#[derive(Debug)]
 pub enum PdfEvent {
     EngineReady,
     EngineFailed(String),

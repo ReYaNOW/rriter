@@ -1428,6 +1428,9 @@ Root:
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
 * `src/pdf/mod.rs` -> PDF protocol types, worker channel contracts, document generations, and user-facing errors.
 * `src/pdf/library.rs` -> Pdfium manifest parsing, managed paths, archive URL, and library discovery.
+* `src/pdf/pdfium_backend.rs` -> Pdfium binding, document metadata, rendering, text/link extraction, and PDF-to-UI coordinate conversion.
+* `src/pdf/worker.rs` -> Dedicated Pdfium thread, prioritized render/text/search requests, generation checks, and per-document text caching.
+* `src/pdf/fixture.rs` -> Test-only generated three-page PDF, invalid PDF, and empty-file fixtures.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.
