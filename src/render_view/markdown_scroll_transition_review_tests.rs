@@ -583,6 +583,7 @@ pub(crate) mod reviewer_stage2_integration {
             false,
             None,
             &app.pdf_engine,
+            app.pdf_dark_pages,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;
@@ -669,7 +670,7 @@ pub(crate) mod reviewer_stage2_integration {
                     &app.editor,
                     None,
                     MarkdownMode::Edit,
-                    Some(true),
+                    Some(crate::app::pdf_tab::PdfStatus { dark: true, page: None }),
                     None,
                     &mut app.ui_registry,
                     scale,

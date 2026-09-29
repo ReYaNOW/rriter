@@ -7,6 +7,7 @@ impl Renderer {
         &mut self,
         tab: &PdfTabState,
         engine: &PdfEngineState,
+        dark_pages: bool,
         x: f32,
         y: f32,
         w: f32,
@@ -50,7 +51,8 @@ impl Renderer {
             ui_registry.register_blocker(UiId::PdfBody, x, y, w, h, mx, my);
         }
         // One scratch buffer for the whole frame; the highlights of every page reuse it.
-        let mut rects = Vec::new();
+        // The buffer lives in the tab and is taken/put back, so a frame with highlights allocates nothing.
+        let mut rects = tab.line_rects_buf.take();
         for page in tab.visible_range() {
             let Some((page_y, page_h)) = tab.layout.rows.get(page).copied() else { continue };
             let px = (x + ((w - tab.layout.page_w as f32) * 0.5)).round();
@@ -60,9 +62,11 @@ impl Renderer {
             if let Some(texture) = tab.textures.get(&page) {
                 self.draw_texture_quad(&texture.tex, px, py, page_w, page_h);
             } else {
-                let paper = if tab.dark { [0.11, 0.12, 0.13, 1.0] } else { [0.94, 0.94, 0.91, 1.0] };
+                let paper = if dark_pages { [0.11, 0.12, 0.13, 1.0] } else { [0.94, 0.94, 0.91, 1.0] };
                 self.push_rect(px, py, page_w, page_h, paper);
-                let caption = format!("стр. {}", page + 1);
+                let mut caption = std::mem::take(&mut self.scratch_buffer);
+                caption.clear();
+                let _ = std::fmt::Write::write_fmt(&mut caption, format_args!("стр. {}", page + 1));
                 let caption_scale = (0.9 * scale).max(0.6);
                 let text_w = self.measure_ui_width(&caption, caption_scale);
                 self.draw_string_scaled_pixel_snapped(
@@ -72,6 +76,7 @@ impl Renderer {
                     self.theme.fg,
                     caption_scale,
                 );
+                self.scratch_buffer = caption;
             }
             self.draw_pdf_highlights(tab, page, (px, py, page_w, page_h), &mut rects);
             // A blocker keeps the default cursor on blank paper; lines and links below override it.
@@ -82,6 +87,7 @@ impl Renderer {
                 register_pdf_page_hits(tab, page, (px, py, page_w, page_h), clip, ui_registry, (mx, my));
             }
         }
+        tab.line_rects_buf.set(rects);
         // The scrollbar lane is registered after the pages, so it wins `find_at`.
         ui_registry.pop_clip();
         self.flush();
@@ -113,7 +119,8 @@ impl Renderer {
             PdfPhase::EngineMissing { error: Some(error) }
                 if !matches!(
                     engine,
-                    PdfEngineState::Missing { .. } | PdfEngineState::Installing { .. } | PdfEngineState::Starting
+                    PdfEngineState::NotInstalled | PdfEngineState::Missing { .. }
+                        | PdfEngineState::Installing { .. } | PdfEngineState::Starting
                 ) => Some(std::borrow::Cow::Borrowed(error.as_str())),
             PdfPhase::EngineMissing { .. } | PdfPhase::EngineStarting => Some(engine.label()),
             PdfPhase::Loading => Some(std::borrow::Cow::Borrowed("Загрузка документа PDF…")),
@@ -144,14 +151,8 @@ impl Renderer {
         let button_h = (29.0 * scale).round();
         let first_y = (y + h * 0.5 + 18.0 * scale).round();
         let (id, label, button_y) = match engine {
-            PdfEngineState::Missing { message, installable: true } => {
-                let label = if message == crate::pdf::library::NOT_FOUND_MESSAGE {
-                    "Загрузить PDF-движок (3,7 МБ)"
-                } else {
-                    "Повторить"
-                };
-                (UiId::PdfEngineInstall, label, first_y)
-            }
+            PdfEngineState::NotInstalled => (UiId::PdfEngineInstall, "Загрузить PDF-движок (3,7 МБ)", first_y),
+            PdfEngineState::Missing { installable: true, .. } => (UiId::PdfEngineInstall, "Повторить", first_y),
             PdfEngineState::Installing { progress, .. } => {
                 if !progress.is_empty() {
                     let progress_w = self.measure_ui_width(progress, text_scale).min(w.max(0.0));

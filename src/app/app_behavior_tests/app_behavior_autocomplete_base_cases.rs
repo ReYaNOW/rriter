@@ -227,7 +227,7 @@ pub(crate) fn test_app() -> Option<App> {
         tabs: Vec::new(),
         active_tab: 0,
         pdf_engine: crate::app::pdf_tab::PdfEngineState::NotStarted,
-        pdf_engine_path_override: None,
+        pdf_library_source: crate::app::pdf_tab::PdfLibrarySource::ProcessEnv,
         pdf_worker: None,
         next_doc_id: 1,
         pdf_textures_to_free: Vec::new(),

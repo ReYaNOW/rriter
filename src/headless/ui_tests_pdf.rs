@@ -157,7 +157,7 @@ fn unavailable_pdfium_shows_engine_message_without_install_button() {
     let dir = scratch_dir("ui-pdf-engine-missing");
     let path = crate::pdf::fixture::write_fixture_pdf(&dir);
     let mut session = session_for_test(1280, 720);
-    session.app.pdf_engine_path_override = Some(Some("/nonexistent/libpdfium.so".into()));
+    session.app.pdf_library_source = crate::app::pdf_tab::PdfLibrarySource::EnvValue(Some("/nonexistent/libpdfium.so".into()));
     let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = dump(&mut session);
@@ -175,7 +175,7 @@ fn missing_pdfium_offers_download_and_returns_to_retry_when_install_fails() {
     let dir = scratch_dir("ui-pdf-engine-install");
     let path = crate::pdf::fixture::write_fixture_pdf(&dir);
     let mut session = session_for_test(1280, 720);
-    session.app.pdf_engine_path_override = Some(None);
+    session.app.pdf_library_source = crate::app::pdf_tab::PdfLibrarySource::EnvValue(None);
     let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
     assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
     let state = dump(&mut session);
@@ -415,5 +415,49 @@ fn pdf_scan_page_has_no_selectable_text_and_search_finds_matches_with_page_three
         let state = dump(session);
         state["tabs"][0]["pdf"]["search_done"] == true && state["tabs"][0]["pdf"]["search_matches"] == 2
     });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// Track thumb colour of the status-bar progress indicator, blended over the bar background.
+fn is_progress_track_purple(pixel: [u8; 4]) -> bool {
+    (125..=155).contains(&pixel[0]) && (70..=100).contains(&pixel[1]) && (180..=215).contains(&pixel[2])
+}
+
+#[test]
+fn ready_pdf_tab_shows_page_label_without_a_progress_track() {
+    let (dir, _path, mut session) = open_fixture("ui-pdf-status-no-track");
+    wait_ready(&mut session);
+    run_script(&mut session, b"mouse_move 0 0\n");
+    assert_eq!(session.app.active_pdf_tab().and_then(|pdf| pdf.status_page()), Some((1, 3)));
+    let shot = dir.join("status.png");
+    let lines = run_script(&mut session, format!("screenshot {}\n", shot.display()).as_bytes());
+    assert!(lines[0].starts_with("ok "), "{lines:?}");
+    let image = image::open(&shot).unwrap_or_else(|error| panic!("decode screenshot: {error}")).to_rgba8();
+    let bar_top = image.height().saturating_sub(40);
+    let purple = (bar_top..image.height())
+        .flat_map(|y| (0..image.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| is_progress_track_purple(image.get_pixel(x, y).0))
+        .count();
+    assert_eq!(purple, 0, "a ready PDF tab must not draw the progress thumb in the status bar");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn pdf_page_label_follows_scroll_and_its_layout_ignores_the_current_page() {
+    let (dir, _path, mut session) = open_fixture("ui-pdf-status-label");
+    wait_ready(&mut session);
+    run_script(&mut session, b"key end\nmouse_move 0 0\n");
+    wait_until(&mut session, 5000, "status label shows the last page", |session| {
+        run_script(session, b"mouse_move 0 0\n");
+        session.app.active_pdf_tab().and_then(|pdf| pdf.status_page()) == Some((3, 3))
+    });
+    let renderer = session.app.renderer.as_mut().expect("renderer");
+    let first = renderer.pdf_page_label_layout(1, 7);
+    let last = renderer.pdf_page_label_layout(7, 7);
+    assert_eq!(first, last, "single-digit page numbers must not move any part of the label");
+    let nine = renderer.pdf_page_label_layout(9, 12);
+    let ten = renderer.pdf_page_label_layout(10, 12);
+    assert_eq!((nine.separator_dx, nine.count_dx, nine.width), (ten.separator_dx, ten.count_dx, ten.width), "9 -> 10 must not shift the separator, the count or the width");
+    assert!(nine.number_dx > ten.number_dx, "the shorter number is right-aligned inside the same field");
     let _ = std::fs::remove_dir_all(dir);
 }
