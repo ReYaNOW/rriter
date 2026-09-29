@@ -168,6 +168,7 @@ impl Renderer {
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
+        self.icon_rasterize_budget = 1;
         self.sync_current_python_inlay_hints(python_inlay_hints);
 
         let frame_now = Instant::now();

@@ -424,6 +424,8 @@ pub struct Renderer {
     pub file_icon_cache: rustc_hash::FxHashMap<&'static str, IconAtlasEntry>,
     pub(crate) rasterized_file_icons:
         rustc_hash::FxHashMap<&'static str, crate::app::file_tree::RasterizedIconState>,
+    /// On-demand file icon rasterizations still allowed in this frame; reset at frame start.
+    pub(crate) icon_rasterize_budget: u8,
     pub sticky_scroll_rects: Vec<(f32, f32, f32, f32, usize)>,
     pub phys_to_visual: Vec<usize>,
     pub phys_to_visual_editor_version: u64,

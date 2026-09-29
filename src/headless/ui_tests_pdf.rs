@@ -442,6 +442,61 @@ fn ready_pdf_tab_shows_page_label_without_a_progress_track() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// Bright (text-coloured) pixels of the status bar within `x0..x1`.
+fn bright_status_pixels(image: &image::RgbaImage, x0: u32, x1: u32) -> usize {
+    let bar_top = image.height().saturating_sub(40);
+    (bar_top..image.height())
+        .flat_map(|y| (x0..x1.min(image.width())).map(move |x| (x, y)))
+        .filter(|&(x, y)| image.get_pixel(x, y).0[..3].iter().all(|&c| c > 140))
+        .count()
+}
+
+fn status_bar_shot(session: &mut HeadlessSession, path: &Path) -> image::RgbaImage {
+    let lines = run_script(session, format!("mouse_move 0 0\nscreenshot {}\n", path.display()).as_bytes());
+    assert!(lines[1].starts_with("ok "), "{lines:?}");
+    image::open(path).unwrap_or_else(|error| panic!("decode screenshot: {error}")).to_rgba8()
+}
+
+#[test]
+fn pdf_tab_status_bar_shows_page_label_and_pdf_language_instead_of_cursor_items() {
+    let (dir, _path, mut session) = open_fixture("ui-pdf-status-right");
+    wait_ready(&mut session);
+    let image = status_bar_shot(&mut session, &dir.join("status.png"));
+    let state = dump(&mut session);
+    let toggle = crate::headless::tests_support::ui_rect(&state, "PdfDarkToggle");
+    let renderer = session.app.renderer.as_mut().expect("renderer");
+    let label = renderer.pdf_page_label_layout(1, 3);
+    let language_w = f64::from(renderer.measure_ui_width("PDF", 0.95).round());
+    let language_x = 1280.0 - 10.0 - language_w;
+    let page_right = language_x - 22.0;
+    let label_x = page_right - f64::from(label.width);
+    // Right to left: "PDF" language label, page label, dark toggle one gap left of the page label.
+    let toggle_right = toggle[0] + toggle[2];
+    assert!((label_x - 14.0 - toggle_right).abs() <= 2.0, "toggle {toggle:?}, label_x {label_x}");
+    // Nothing (no "Стр"/"Сим" items) between the toggle and the label; the "PDF" slot is drawn.
+    assert_eq!(bright_status_pixels(&image, (toggle_right + 2.0) as u32, (label_x - 2.0) as u32), 0);
+    assert!(bright_status_pixels(&image, label_x as u32, (page_right + 1.0) as u32) > 0, "page label must be drawn");
+    assert_eq!(bright_status_pixels(&image, (page_right + 2.0) as u32, (language_x - 2.0) as u32), 0);
+    assert!(bright_status_pixels(&image, language_x as u32, 1270) > 0, "PDF language label must be drawn");
+    // Nothing between the diagnostics group and the toggle either.
+    assert_eq!(bright_status_pixels(&image, 300, (toggle[0] - 2.0) as u32), 0);
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn regular_tab_status_bar_still_shows_cursor_and_language_items() {
+    let dir = scratch_dir("ui-status-regular");
+    let path = dir.join("a.txt");
+    std::fs::write(&path, "hello\n").expect("write text file");
+    let mut session = session_for_test(1280, 720);
+    let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let image = status_bar_shot(&mut session, &dir.join("status.png"));
+    assert!(bright_status_pixels(&image, 300, 1160) > 0, "line/col items expected");
+    assert!(bright_status_pixels(&image, 1160, 1270) > 0, "language label expected");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn pdf_page_label_follows_scroll_and_its_layout_ignores_the_current_page() {
     let (dir, _path, mut session) = open_fixture("ui-pdf-status-label");

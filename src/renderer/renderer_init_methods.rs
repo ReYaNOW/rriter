@@ -631,6 +631,7 @@ impl Renderer {
                 icons: HashMap::new(),
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 rasterized_file_icons: rustc_hash::FxHashMap::default(),
+                icon_rasterize_budget: 1,
                 icon_logo,
                 sticky_scroll_rects: Vec::new(),
                 phys_to_visual: Vec::new(),

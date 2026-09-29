@@ -545,6 +545,12 @@ impl Renderer {
         // rasterize it here, once. `Missing` stays in the map as a negative cache, otherwise
         // an absent asset would be re-rasterized every frame.
         if !self.rasterized_file_icons.contains_key(key) {
+            // At most one synchronous rasterization per frame; the rest retry next frame
+            // (or get picked up by the file-tree scan).
+            if self.icon_rasterize_budget == 0 {
+                return None;
+            }
+            self.icon_rasterize_budget -= 1;
             let mut state = crate::app::file_tree::pre_rasterize_icon(key, false);
             if matches!(state, RasterizedIconState::Missing) {
                 // Callers pass an unreliable `is_folder`; folder-only keys live in another set.

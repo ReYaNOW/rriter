@@ -281,7 +281,7 @@ impl Renderer {
             .and_then(|(path, _)| path.extension())
             .and_then(|ext| ext.to_str())
             .unwrap_or("");
-        let language = language_display_name_for_ext(ext);
+        let language = if pdf_status.is_some() { "PDF" } else { language_display_name_for_ext(ext) };
         let language_w = self.measure_ui_width(language, text_scale).round();
         let status_markdown_mode = markdown_status_mode_for_ext(ext, markdown_mode);
         let status_encoding = editor_file.map(|(_, encoding)| encoding);
@@ -327,20 +327,20 @@ impl Renderer {
             if status.dark { "Тёмные: вкл" } else { "Тёмные: выкл" },
         ));
         let pdf_page = pdf_status.and_then(|status| status.page);
+        let pdf_label = pdf_page.map(|(page, count)| self.pdf_page_label_layout(page, count));
+        let mut pdf_page_x = None;
         let markdown_layout = if let Some((full_label, compact_label)) = pdf_status_labels {
-            Some(status_markdown_layout(
+            // A PDF tab has no line/column items: the page label takes their place, the language slot reads "PDF".
+            let (layout, page_x) = status_pdf_layout(
                 bar_rect,
-                StatusMarkdownWidths {
-                    language: language_w,
-                    encoding: encoding_w,
-                    mode_full: self.measure_ui_width(full_label, 0.82).round(),
-                    mode_compact: self.measure_ui_width(compact_label, 0.82).round(),
-                    line: line_block_w,
-                    character: char_block_w,
-                    selected: selected_block_w,
-                },
+                self.measure_ui_width(full_label, 0.82).round(),
+                self.measure_ui_width(compact_label, 0.82).round(),
+                language_w,
+                pdf_label.map(|label| label.width.round()),
                 s,
-            ))
+            );
+            pdf_page_x = page_x;
+            Some(layout)
         } else {
             status_markdown_mode.map(|mode| {
                 status_markdown_layout(
@@ -458,7 +458,11 @@ impl Renderer {
             (
                 layout.line_x,
                 layout.show_selected,
-                layout.line_x.map(|_| layout.group_left),
+                if pdf_status_labels.is_some() {
+                    Some(layout.group_left)
+                } else {
+                    layout.line_x.map(|_| layout.group_left)
+                },
             )
         } else {
             let position_group_right = self.draw_status_language_group(
@@ -481,29 +485,19 @@ impl Renderer {
                 Some(raw_line_x),
             )
         };
-        // The PDF page label is a plain status item (no track); real progress, if any, sits left of it.
-        let progress_anchor_x = match (pdf_page, progress_anchor_x) {
-            (Some((page, count)), Some(anchor_x)) => {
-                let label = self.pdf_page_label_layout(page, count);
-                let label_x = (anchor_x - 18.0 * s - label.width).round();
-                if label_x > left_status_limit + 8.0 * s {
-                    let color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72];
-                    let label_y = text_y.round();
-                    self.draw_string_scaled("стр. ", label_x, label_y, color, PDF_PAGE_LABEL_SCALE);
-                    scratch.clear();
-                    let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{page}"));
-                    self.draw_string_mono_scaled(&scratch, label_x + label.number_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
-                    self.draw_string_scaled(" / ", (label_x + label.separator_dx).round(), label_y, color, PDF_PAGE_LABEL_SCALE);
-                    scratch.clear();
-                    let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{count}"));
-                    self.draw_string_mono_scaled(&scratch, label_x + label.count_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
-                    Some(label_x)
-                } else {
-                    Some(anchor_x)
-                }
-            }
-            (_, anchor_x) => anchor_x,
-        };
+        // The PDF page label is a plain status item (no track) at the right edge; real progress, if any, sits left of it.
+        if let (Some((page, count)), Some(label), Some(label_x)) = (pdf_page, pdf_label, pdf_page_x) {
+            let color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72];
+            let label_y = text_y.round();
+            self.draw_string_scaled("стр. ", label_x, label_y, color, PDF_PAGE_LABEL_SCALE);
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{page}"));
+            self.draw_string_mono_scaled(&scratch, label_x + label.number_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
+            self.draw_string_scaled(" / ", (label_x + label.separator_dx).round(), label_y, color, PDF_PAGE_LABEL_SCALE);
+            scratch.clear();
+            let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{count}"));
+            self.draw_string_mono_scaled(&scratch, label_x + label.count_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
+        }
         if let Some(label) = progress_label {
             let label_w = self.measure_ui_width(label, 0.82).round();
             let progress_gap = 8.0 * s;

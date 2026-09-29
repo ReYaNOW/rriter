@@ -98,6 +98,51 @@ fn status_language_layout(
     }
 }
 
+/// PDF tab status layout, right to left: language label ("PDF"), page label (where line/column sit
+/// on other tabs), dark-pages toggle. Returns the layout and the page label x.
+fn status_pdf_layout(
+    bar: crate::ui_system::UiClipRect,
+    mode_full: f32,
+    mode_compact: f32,
+    language_w: f32,
+    page_w: Option<f32>,
+    scale: f32,
+) -> (StatusMarkdownLayout, Option<f32>) {
+    let pad = (10.0 * scale).round();
+    let item_gap = (14.0 * scale).round();
+    let inner_left = (bar.x + pad).round();
+    let inner_right = (bar.x + bar.w - pad).max(inner_left).round();
+    let trailing_gap = (22.0 * scale).round();
+    let language_x = (language_w > 0.0).then(|| (inner_right - language_w).max(inner_left).round());
+    let page_right = language_x.map_or(inner_right, |x| (x - trailing_gap).max(inner_left));
+    let page_x = page_w.map(|w| (page_right - w).max(inner_left).round());
+    let (cursor, gap) = match page_x {
+        Some(x) => (x, item_gap),
+        None => (page_right, 0.0),
+    };
+    let full_w = (mode_full + 16.0 * scale).round();
+    let compact_w = (mode_compact + 12.0 * scale).round();
+    let available = (cursor - gap - inner_left).max(0.0);
+    let compact_mode = full_w > available;
+    let w = if compact_mode { compact_w } else { full_w };
+    let mode_rect = (w <= available).then(|| {
+        let h = (bar.h - 6.0 * scale).max(1.0).round();
+        let y = (bar.y + (bar.h - h) * 0.5).round();
+        crate::ui_system::UiClipRect::new((cursor - gap - w).round(), y, w, h)
+    });
+    let group_left = mode_rect.map(|rect| rect.x).or(page_x).or(language_x).unwrap_or(inner_right);
+    let layout = StatusMarkdownLayout {
+        language_x,
+        encoding_x: None,
+        mode_rect,
+        compact_mode,
+        line_x: None,
+        show_selected: false,
+        group_left,
+    };
+    (layout, page_x)
+}
+
 fn status_markdown_layout(
     bar: crate::ui_system::UiClipRect,
     widths: StatusMarkdownWidths,
