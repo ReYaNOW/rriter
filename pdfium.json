@@ -1,0 +1,25 @@
+{
+  "version": "chromium/8066",
+  "platforms": {
+    "linux-x64": {
+      "archive": "pdfium-linux-x64.tgz",
+      "sha256": "0b43f405477cf2cfc4dbff06905093c3309756c6bca1fb9da99234a2ca97fed2",
+      "lib": "lib/libpdfium.so"
+    },
+    "win-x64": {
+      "archive": "pdfium-win-x64.tgz",
+      "sha256": "739a57d597d864297909cc40a2411eba728490c76a0fa25e3ea299c7f6b07020",
+      "lib": "bin/pdfium.dll"
+    },
+    "mac-arm64": {
+      "archive": "pdfium-mac-arm64.tgz",
+      "sha256": "336219e80580b93c6523f44db7dc1de59cc497b13a7390ddac84223f68ca162b",
+      "lib": "lib/libpdfium.dylib"
+    },
+    "mac-x64": {
+      "archive": "pdfium-mac-x64.tgz",
+      "sha256": "841ecac278cdd46288dd065873522cf72f3996560d8978f473d336f01d59942c",
+      "lib": "lib/libpdfium.dylib"
+    }
+  }
+}

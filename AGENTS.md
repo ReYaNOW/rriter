@@ -52,7 +52,7 @@ Allowed file ops inside project:
 * Read files
 * Search files
 * Edit files
-* Create only `.rs`, `.py`, `.dart`, `.md`, `.txt`
+* Create only `.rs`, `.py`, `.dart`, `.md`, `.txt`, and the single manifest `pdfium.json` at the repo root (named exception, 30.09)
 * Delete only `.rs`, `.py`, `.dart`, `.md`, `.txt` when directly required
 
 Allowed shell commands:
@@ -67,6 +67,8 @@ Allowed shell commands:
 * `make api-map` if still present
 * `python3 scripts/build_windows.py --self-test`
 * `python3 scripts/build_macos.py --self-test`
+* `python3 scripts/fetch_pdfium.py`
+* `make pdfium`
 * Read-only inspection commands that stay in project root
 * Subagent finds a bug outside its task (other function/module, not blocking the task): do not fix it — add a `#[ignore = "bug: …"]` test if cheap, and put cause (`file:line`) and repro in the report; the main session decides and dispatches the fix. Fix in place only when the bug sits in the code you are already changing or blocks your task. Reason: side fixes land unreviewed, collide with parallel agents' files, and stretch the task toward its turn limit.
 * Branches, commits, PRs — only the main session; subagents never commit. Decide yourself, and don't shy away from branches:
