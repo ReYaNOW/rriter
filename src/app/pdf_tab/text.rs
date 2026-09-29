@@ -40,6 +40,10 @@ pub struct PdfPress {
     anchor: Option<(usize, usize)>,
 }
 
+/// Edge autoscroll speed in physical px per second at scale 1.0 (about 12 px per 60 Hz frame).
+/// The caller passes the app's frame dt, which `animation_dt` already caps for stalled frames.
+const AUTOSCROLL_SPEED_PX_S: f32 = 720.0;
+
 impl PdfSelection {
     pub fn ordered(&self) -> ((usize, usize), (usize, usize)) {
         if self.anchor <= self.head { (self.anchor, self.head) } else { (self.head, self.anchor) }
@@ -179,14 +183,15 @@ impl PdfTabState {
         Some(press)
     }
 
-    /// One tick of edge autoscroll while a drag is held near the top or bottom of the
+    /// Edge autoscroll by `dt` seconds while a drag is held near the top or bottom of the
     /// body; the selection head keeps following the (stationary) pointer. `true` = scrolled.
-    pub fn autoscroll_step(&mut self, x: f32, y: f32, scale: f32) -> bool {
+    pub fn autoscroll_step(&mut self, x: f32, y: f32, scale: f32, dt: f32) -> bool {
         if !self.press.is_some_and(|press| press.dragging) { return false; }
         let (_, body_y, _, body_h) = self.body;
         let edge = (24.0 * scale).round();
         if body_h <= 2.0 * edge { return false; }
-        let step = (12.0 * scale).round();
+        if !dt.is_finite() || dt <= 0.0 { return false; }
+        let step = AUTOSCROLL_SPEED_PX_S * scale * dt;
         let delta = if y <= body_y + edge { -step } else if y >= body_y + body_h - edge { step } else { return false };
         let before = self.scroll.target;
         self.scroll_by(delta);
@@ -533,15 +538,21 @@ mod tests {
         assert!(!tab.drag_to(x1, y1, 4.0));
         // Autoscroll runs only during a drag and only near the body edges.
         tab.begin_press(x0, y0, None);
-        assert!(!tab.autoscroll_step(x1, 790.0, 1.0), "not dragging yet");
+        let dt = 1.0 / 60.0;
+        assert!(!tab.autoscroll_step(x1, 790.0, 1.0, dt), "not dragging yet");
         tab.drag_to(x1, y1, 4.0);
-        assert!(!tab.autoscroll_step(x1, 400.0, 1.0), "middle of the body");
+        assert!(!tab.autoscroll_step(x1, 400.0, 1.0, dt), "middle of the body");
         let before = tab.scroll.target;
-        assert!(tab.autoscroll_step(x1, 790.0, 1.0));
-        assert_eq!(tab.scroll.target, before + 12.0);
-        assert!(tab.autoscroll_step(x1, 5.0, 1.0));
-        assert_eq!(tab.scroll.target, before);
-        assert!(!tab.autoscroll_step(x1, 5.0, 1.0), "clamped at the top");
+        assert!(tab.autoscroll_step(x1, 790.0, 1.0, dt));
+        assert!((tab.scroll.target - (before + 12.0)).abs() < 1e-3);
+        // Speed is time-based: twice the elapsed time scrolls twice as far.
+        let mid = tab.scroll.target;
+        assert!(tab.autoscroll_step(x1, 790.0, 1.0, 2.0 * dt));
+        assert!((tab.scroll.target - (mid + 24.0)).abs() < 1e-3);
+        assert!(!tab.autoscroll_step(x1, 790.0, 1.0, 0.0), "no time, no scroll");
+        for _ in 0..10 { tab.autoscroll_step(x1, 5.0, 1.0, 0.05); }
+        assert_eq!(tab.scroll.target, 0.0);
+        assert!(!tab.autoscroll_step(x1, 5.0, 1.0, dt), "clamped at the top");
     }
 
     #[test]

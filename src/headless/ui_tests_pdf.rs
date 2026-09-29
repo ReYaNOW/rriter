@@ -417,3 +417,83 @@ fn pdf_scan_page_has_no_selectable_text_and_search_finds_matches_with_page_three
     });
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[test]
+fn pdf_tab_allow_list_keeps_editing_keys_and_ime_out_of_the_hidden_editor() {
+    let (dir, path, mut session) = open_fixture("ui-pdf-allow-list");
+    wait_ready(&mut session);
+    wait_page_text(&mut session, 0);
+    let before = std::fs::read(&path).expect("fixture PDF");
+    // Seeded directly (no UI path fills the hidden editor): a non-empty text and a cursor
+    // in its middle make any edit or cursor move visible. A frame is rendered afterwards.
+    session.app.editor = crate::app::reviewer_stage2_editor_with("one\ntwo\nthree");
+    session.app.editor.cursor = 5;
+    run_script(&mut session, b"mouse_move 0 0\n");
+    // Editing shortcuts, cursor keys with modifiers and IME text never reach the hidden editor.
+    let script = "key alt+up\nkey alt+down\nkey ctrl+d\nkey ctrl+shift+d\nkey alt+enter\nkey tab\nkey enter\nkey space\nkey backspace\nkey delete\ntype \u{436}\u{436}\ntype abc\n";
+    let lines = run_script(&mut session, script.as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    assert_eq!(session.app.editor.get_full_text(), "one\ntwo\nthree");
+    assert_eq!(session.app.editor.cursor, 5, "no key or IME text may move the hidden cursor");
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"][0]["modified"], false, "{state}");
+    assert_eq!(std::fs::read(&path).expect("fixture PDF"), before);
+    // The PDF keys still work: page navigation ...
+    run_script(&mut session, b"key end\n");
+    assert_eq!(dump(&mut session)["tabs"][0]["pdf"]["current_page"], 2);
+    run_script(&mut session, b"key home\n");
+    assert_eq!(dump(&mut session)["tabs"][0]["pdf"]["current_page"], 0);
+    // ... and copy of a selection.
+    let (x0, y0) = page_point(&session, 73.0, 85.0);
+    let (x1, y1) = page_point(&session, 200.0, 85.0);
+    let script = format!("mouse_move {x0} {y0}\nclick down\nmouse_move {x1} {y1}\nclick up\nkey ctrl+c\n");
+    run_script(&mut session, script.as_bytes());
+    let copied = dump(&mut session)["clipboard"]["text"].as_str().unwrap_or_default().to_owned();
+    assert!(copied.starts_with("Hello"), "copied {copied:?}");
+    // The search field is an application shortcut plus a PDF text field: it takes the IME text.
+    run_script(&mut session, b"key ctrl+f\ntype second\n");
+    wait_until(&mut session, 5000, "search finished", |session| {
+        let state = dump(session);
+        state["tabs"][0]["pdf"]["search_done"] == true && state["tabs"][0]["pdf"]["search_matches"] == 2
+    });
+    assert_eq!(dump(&mut session)["overlays"]["search"], true);
+    assert_eq!(session.app.editor.get_full_text(), "one\ntwo\nthree", "search typing must not leak into the hidden editor");
+    // Application shortcuts still work on a PDF tab: close the search, open a second tab, then
+    // switch tabs with Ctrl+PageDown / Ctrl+PageUp, toggle settings with F1 and close the tab with Ctrl+4.
+    run_script(&mut session, b"key escape\n");
+    assert_eq!(dump(&mut session)["overlays"]["search"], false);
+    let second = dir.join("second.txt");
+    std::fs::write(&second, "second tab\n").expect("write second file");
+    let lines = run_script(&mut session, format!("open {}\n", second.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let active_tab = |session: &mut HeadlessSession| {
+        let state = dump(session);
+        state["tabs"].as_array().unwrap().iter().position(|tab| tab["active"] == true)
+    };
+    assert_eq!(active_tab(&mut session), Some(1), "the opened file is active");
+    run_script(&mut session, b"key ctrl+pageup\n");
+    assert_eq!(active_tab(&mut session), Some(0));
+    assert_eq!(dump(&mut session)["tabs"][0]["kind"], "pdf");
+    run_script(&mut session, b"key ctrl+pagedown\n");
+    assert_eq!(active_tab(&mut session), Some(1), "Ctrl+PageDown on the PDF tab switches tabs");
+    run_script(&mut session, b"key ctrl+pagedown\n");
+    assert_eq!(active_tab(&mut session), Some(0), "Ctrl+PageDown wraps back to the PDF tab");
+    run_script(&mut session, b"key ctrl+pageup\n");
+    assert_eq!(active_tab(&mut session), Some(1), "Ctrl+PageUp on the PDF tab switches tabs");
+    run_script(&mut session, b"key ctrl+pageup\n");
+    assert_eq!(active_tab(&mut session), Some(0));
+    run_script(&mut session, b"key f1\n");
+    assert_eq!(dump(&mut session)["overlays"]["settings"], true, "F1 opens settings over a PDF tab");
+    run_script(&mut session, b"key f1\n");
+    assert_eq!(dump(&mut session)["overlays"]["settings"], false);
+    let fps = |session: &mut HeadlessSession| session.app.show_fps;
+    let fps_before = fps(&mut session);
+    run_script(&mut session, b"key f8\n");
+    assert_ne!(fps(&mut session), fps_before, "F8 toggles the FPS overlay over a PDF tab");
+    run_script(&mut session, b"key ctrl+4\nsettle 500\n");
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"].as_array().unwrap().len(), 1, "Ctrl+4 closes the PDF tab: {state}");
+    assert_eq!(state["tabs"][0]["kind"], "normal");
+    assert_eq!(std::fs::read(&path).expect("fixture PDF"), before);
+    let _ = std::fs::remove_dir_all(dir);
+}

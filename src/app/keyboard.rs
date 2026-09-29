@@ -478,6 +478,11 @@ impl App {
             return true;
         }
 
+        // The hidden editor under a PDF tab is not a text field: only the inputs handled above
+        // (search panel, terminal, dialogs) take IME text there.
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) {
+            return true;
+        }
         self.handle_editor_ime_commit(text);
         true
     }
