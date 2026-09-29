@@ -242,6 +242,7 @@ pub enum UiId {
     DatabaseRow(usize, usize),
     DatabaseArrow(usize, usize),
     DatabaseTableRow(usize, usize, usize),
+    PdfPage(usize),
     DatabaseContextItem(usize),
     DatabaseDialogBackdrop,
     DatabaseDialogBody,

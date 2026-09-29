@@ -44,6 +44,7 @@ pub(crate) fn tab_with(title: &str, path: Option<&str>, text: &str) -> EditorTab
             .map(|ext| ext.to_string_lossy().to_string())
             .unwrap_or_default(),
         markdown: Default::default(),
+        pdf: None,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),
@@ -225,6 +226,10 @@ pub(crate) fn test_app() -> Option<App> {
         hover: crate::app::mouse::HoverState::default(),
         tabs: Vec::new(),
         active_tab: 0,
+        pdf_engine: crate::app::pdf_tab::PdfEngineState::NotStarted,
+        pdf_worker: None,
+        next_doc_id: 1,
+        pdf_textures_to_free: Vec::new(),
         run_ide_on_startup: false,
         headless_mode: false,
         ui_waker: crate::ui_waker::UiWaker::counting(),

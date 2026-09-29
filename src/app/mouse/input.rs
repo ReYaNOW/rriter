@@ -212,7 +212,7 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App, preserve_main_vertical: boo
                 stop_scroll_anim(&mut state.result_view.scroll_y);
                 stop_scroll_anim(&mut state.result_view.review_message_scroll_y);
             }
-            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) => {}
+            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) | crate::app::EditorTabKind::Pdf => {}
         }
     }
 

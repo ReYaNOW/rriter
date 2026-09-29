@@ -577,7 +577,8 @@ impl App {
             EditorTabKind::Normal
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _) => None,
+            | EditorTabKind::DatabaseQuery(_, _)
+            | EditorTabKind::Pdf => None,
         }
     }
 
@@ -587,7 +588,8 @@ impl App {
             EditorTabKind::Normal
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _) => None,
+            | EditorTabKind::DatabaseQuery(_, _)
+            | EditorTabKind::Pdf => None,
         }
     }
 
@@ -633,7 +635,8 @@ impl App {
             EditorTabKind::Normal
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _) => false,
+            | EditorTabKind::DatabaseQuery(_, _)
+            | EditorTabKind::Pdf => false,
         }) {
             if idx != self.active_tab {
                 self.switch_to_tab(idx);
@@ -659,6 +662,7 @@ impl App {
                 .map(|ext| ext.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             markdown: Default::default(),
+            pdf: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -845,7 +849,8 @@ impl App {
             EditorTabKind::Normal
             | EditorTabKind::ApiClient(_, _)
             | EditorTabKind::DatabaseTable(_, _)
-            | EditorTabKind::DatabaseQuery(_, _) => false,
+            | EditorTabKind::DatabaseQuery(_, _)
+            | EditorTabKind::Pdf => false,
         }) else {
             return;
         };
@@ -1564,7 +1569,8 @@ impl App {
                     EditorTabKind::Normal
                     | EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
-                    | EditorTabKind::DatabaseQuery(_, _) => unreachable!(),
+                    | EditorTabKind::DatabaseQuery(_, _)
+                    | EditorTabKind::Pdf => unreachable!(),
                 })
         else {
             return false;

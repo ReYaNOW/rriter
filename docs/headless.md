@@ -139,9 +139,10 @@ what the cursor is over after `mouse_move`.
 
 Other `dump` keys: `size`, `scale`, `cursor_icon`, `mode`
 (`ide|editor|welcome`), `tabs` (path, title, active, modified, cursor, scroll,
-markdown), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
+markdown, `kind` (`normal|git_diff|api_client|database_table|database_query|pdf`)), `editor` (line count, byte-offset `cursor` and `extra_cursors`, selection,
 highlight version and byte-range spans), `ide_panel`, `overlays`,
 `dialog`, `external_request`, `clipboard`, `writes_allowed`.
+PDF tabs add `pdf` with `phase` (`engine_missing|engine_starting|loading|ready|error|password_required`), `page_count`, zero-based `current_page`, `scroll`, `search_matches`, `search_done`, `selection_chars`, `engine` (`not_started|starting|ready|missing|failed|installing`), and `engine_message`. For PDF tabs, `scroll_y` equals `pdf.scroll`.
 In headless mode, `clipboard` is `{"mode":"memory","text":...}`; `text` is
 `null` until something is copied.
 

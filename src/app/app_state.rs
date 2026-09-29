@@ -42,6 +42,7 @@ pub struct EditorTab {
     pub base_title: String,
     pub file_extension: String,
     pub markdown: MarkdownTabState,
+    pub pdf: Option<Box<super::pdf_tab::PdfTabState>>,
     pub scroll_y: crate::scroll::ScrollState,
     pub scroll_x: crate::scroll::ScrollState,
     pub spans: Vec<crate::highlighter::ColorSpan>,
@@ -105,6 +106,7 @@ pub enum EditorTabKind {
         crate::app::database::DatabaseQueryTabMeta,
         crate::app::database::DatabaseQueryTabState,
     ),
+    Pdf,
 }
 
 impl EditorTabKind {
@@ -122,6 +124,10 @@ impl EditorTabKind {
 
     pub fn is_database_query(&self) -> bool {
         matches!(self, Self::DatabaseQuery(_, _))
+    }
+
+    pub fn is_pdf(&self) -> bool {
+        matches!(self, Self::Pdf)
     }
 
     pub fn is_database_tab(&self) -> bool {
@@ -1403,6 +1409,10 @@ pub struct App {
 
     pub tabs: Vec<EditorTab>,
     pub active_tab: usize,
+    pub pdf_engine: super::pdf_tab::PdfEngineState,
+    pub pdf_worker: Option<crate::pdf::PdfWorkerHandle>,
+    pub next_doc_id: u64,
+    pub pdf_textures_to_free: Vec<glow::Texture>,
 
     /// Флаг для отложенного входа в IDE-режим при старте с --ide
     pub run_ide_on_startup: bool,

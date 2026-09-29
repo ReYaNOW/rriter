@@ -133,6 +133,8 @@ pub enum PdfRequest {
 pub enum PdfEvent {
     EngineReady,
     EngineFailed(String),
+    LoadStarted,
+    EngineUnavailable(String),
     Opened { id: DocId, pages: Vec<PageGeom> },
     OpenFailed { id: DocId, error: PdfError },
     Page { id: DocId, page: usize, r#gen: u32, width_px: u32, height_px: u32, rgba: Vec<u8> },

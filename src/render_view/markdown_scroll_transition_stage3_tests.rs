@@ -16,6 +16,7 @@ fn stage3_install_normal_ide_tab(app: &mut App) {
         base_title: "reviewer-stage3.md".to_string(),
         file_extension: "md".to_string(),
         markdown: Default::default(),
+        pdf: None,
         scroll_y: crate::scroll::ScrollState::new(15.0),
         scroll_x: crate::scroll::ScrollState::new(15.0),
         spans: Vec::new(),

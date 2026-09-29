@@ -8,6 +8,19 @@ struct RootFrameChrome {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn tab_body_rect(
+        &self,
+        scale: f32,
+        panel_left_w: f32,
+        tab_bar_h: f32,
+        editor_height: f32,
+    ) -> (f32, f32, f32, f32) {
+        let x = (48.0 * scale + panel_left_w).round() + 1.0;
+        (x, tab_bar_h, (self.width - x).max(0.0), editor_height.max(0.0))
+    }
+}
+
+impl Renderer {
     fn draw_root_api_client_frame(
         &mut self,
         tab_meta: &crate::app::api_client::ApiClientTabMeta,
@@ -207,14 +220,12 @@ impl Renderer {
             editor_height,
             ..
         } = viewport;
-        let gutter_x = 48.0 * s + panel_left_w;
-        let tab_x = gutter_x.round() + 1.0;
-        let tab_w = self.width - tab_x;
+        let (tab_x, tab_y, tab_w, tab_h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
         self.draw_database_table_tab(
             tab_x,
-            tab_bar_h,
+            tab_y,
             tab_w,
-            editor_height,
+            tab_h,
             s,
             tab_meta,
             tab_state,

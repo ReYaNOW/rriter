@@ -222,6 +222,9 @@ impl Renderer {
             modal_overlay_open,
             ui_mx,
             ui_my,
+            status_progress_label,
+            status_progress_elapsed,
+            status_progress_value,
             is_ui_disabled,
             ..
         } = layout;
@@ -259,6 +262,33 @@ impl Renderer {
             &mut telemetry_root_phases,
             &mut telemetry_side_panel_time,
         );
+        if is_ide_mode
+            && !show_welcome
+            && let Some(tab) = tabs.get(active_tab).filter(|tab| tab.kind.is_pdf())
+            && let Some(pdf) = tab.pdf.as_deref()
+        {
+            let (x, y, w, h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, viewport.editor_height);
+            self.draw_root_pdf_frame(pdf, x, y, w, h, s, ui_mx, ui_my, ui_registry);
+            let tab_x = (48.0 * s + panel_left_w).round() + 1.0;
+            let tab_w = (self.width - tab_x).max(0.0);
+            let _ = self.draw_tab_bar(tabs, active_tab, editor, editor_title, editor_path,
+                tab_x, 0.0, tab_w, viewport.tab_bar_visual_h, s, ui_mx, ui_my,
+                ui_registry, tab_scroll_x, ide_panel.tab_drag.as_ref(), lsp,
+                &ide_panel.api, ide_workspaces);
+            if panel_bottom_h > 0.0 {
+                self.draw_ide_bottom_panel(ide_panel, lsp, ui_registry, has_lsp_diagnostics,
+                    s, ui_mx, ui_my, panel_bottom_h, is_ui_disabled, blink_alpha,
+                    active_api_route);
+            }
+            self.draw_status_bar(editor, None, markdown.mode, lsp, ui_registry, s,
+                ui_mx, ui_my, panel_bottom_h, status_progress_label,
+                status_progress_elapsed, status_progress_value);
+            wants_pointer |= self.draw_search_panel(show_search, search_anim_y, search_editor,
+                search_focused, search_case_sensitive, search_results, search_current_idx,
+                blink_alpha, crate::render_view::search::search_panel_scrollbar_x(
+                    self.width, self.minimap_width, 10.0 * s, None), ui_registry);
+            return (wants_pointer, Vec::new());
+        }
         let pre_editor_start = telemetry_frame_start.map(|_| Instant::now());
         if is_ide_mode
             && !show_welcome

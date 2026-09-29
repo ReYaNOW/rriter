@@ -1431,6 +1431,9 @@ Root:
 * `src/pdf/pdfium_backend.rs` -> Pdfium binding, document metadata, rendering, text/link extraction, and PDF-to-UI coordinate conversion.
 * `src/pdf/worker.rs` -> Dedicated Pdfium thread, prioritized render/text/search requests, generation checks, and per-document text caching.
 * `src/pdf/fixture.rs` -> Test-only generated three-page PDF, invalid PDF, and empty-file fixtures.
+* `src/app/pdf_tab.rs` / `src/app/pdf_tab/engine.rs` -> PDF tab data, point-to-pixel layout, document transitions, worker lifecycle, and visible-page requests.
+* `src/render_view/pdf_view.rs` -> PDF loading/error states, visible-page placeholders, and page hit targets.
+* `src/headless/ui_tests_pdf.rs` -> PDF tab lifecycle, invalid documents, path deduplication, tab switching/closing, and missing-engine tests.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.

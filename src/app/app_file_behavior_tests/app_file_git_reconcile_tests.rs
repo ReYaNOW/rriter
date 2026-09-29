@@ -689,6 +689,7 @@ fn undo_redo_rebuilds_diff_decorations() {
             },
             state,
         ),
+        pdf: None,
     });
 
     app.rollback_active_git_diff_hunk(0);
@@ -798,4 +799,3 @@ fn ui_handlers_search_problem_log_and_diagnostic_actions_are_headless_safe() {
         None
     );
 }
-

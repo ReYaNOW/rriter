@@ -26,6 +26,7 @@ impl App {
                 base_title: String::new(),
                 file_extension: String::new(),
                 markdown: Default::default(),
+                pdf: None,
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -67,6 +68,7 @@ impl App {
             base_title: "Безымянный".to_string(),
             file_extension: String::new(),
             markdown: Default::default(),
+            pdf: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -223,6 +225,8 @@ impl App {
         }
 
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
+        if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
+        self.prepare_pdf_tab_close(idx);
 
         if self.tabs.len() <= 1 {
             // close_current_file() prepares all database tabs before clearing the
@@ -287,6 +291,7 @@ impl App {
             }
         }
         self.prepare_all_database_tabs_close();
+        for idx in 0..self.tabs.len() { self.prepare_pdf_tab_close(idx); }
         self.tabs.clear();
         self.active_tab = 0;
         self.close_current_file();
@@ -320,6 +325,19 @@ impl App {
     ) {
         let path = crate::platform::canonicalize_or_absolutize(&path);
         let path_key = crate::platform::PathKey::new(&path);
+        if path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
+            if !self.is_ide_mode { return; }
+            if self.file_key.as_ref() == Some(&path_key)
+                || self.file_path.as_deref().is_some_and(|open| crate::platform::paths_equal(open, &path))
+            {
+                self.reveal_active_tab_now();
+            } else if let Some(index) = self.tabs.iter().position(|tab| tab.file_key.as_ref() == Some(&path_key)) {
+                self.switch_to_tab(index);
+            } else {
+                self.open_pdf_tab(path);
+            }
+            return;
+        }
         if !self.is_ide_mode {
             if start_highlighter {
                 self.load_file_internal(path, add_to_history, wait_highlight);

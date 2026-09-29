@@ -76,6 +76,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         closing_hints: Default::default(),
         deleted: false,
         kind: EditorTabKind::Normal,
+        pdf: None,
     });
     app.tabs[0].scroll_y.current = 300.0;
     app.tabs.push(EditorTab {
@@ -107,6 +108,7 @@ fn closing_definition_tab_resets_transient_editor_state() {
         closing_hints: Default::default(),
         deleted: false,
         kind: EditorTabKind::Normal,
+        pdf: None,
     });
     app.active_tab = 1;
     app.sync_active_tab();

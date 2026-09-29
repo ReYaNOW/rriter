@@ -495,6 +495,7 @@ impl App {
                 base_title: self.base_title.clone(),
                 file_extension: self.file_extension.clone(),
                 markdown: Default::default(),
+                pdf: None,
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -577,6 +578,13 @@ impl App {
                     } => {
                         if self.ide_panel.database.connection(connection_id).is_some() {
                             self.restore_database_query_tab(connection_id, &database_name, console_id);
+                            loaded_any = true;
+                        }
+                    }
+                    crate::OpenTabSnapshot::Pdf { path, page, frac } => {
+                        if path.exists() {
+                            self.open_pdf_tab(path);
+                            if let Some(pdf) = self.active_pdf_tab_mut() { pdf.restore = Some((page, frac)); }
                             loaded_any = true;
                         }
                     }
@@ -804,17 +812,19 @@ impl App {
 
         self.cancel_pointer_interactions();
         let previous_tab = self.active_tab;
+        self.pdf_tab_deactivated(previous_tab);
         self.save_active_database_query();
         self.commit_api_focus();
         self.ide_panel.api.focused = None;
         self.markdown.clear_code_copy_transient();
         self.sync_active_tab();
         self.active_tab = new_idx;
+        self.pdf_tab_activated(new_idx);
         self.sync_active_tab();
         self.markdown.clear_code_copy_transient();
         self.prefetch_active_tab_git_graph();
 
-        if self.active_tab_is_api_client() || self.active_tab_is_database_table() {
+        if self.active_tab_is_api_client() || self.active_tab_is_database_table() || self.tabs[self.active_tab].kind.is_pdf() {
             while self.highlighter.rx.try_recv().is_ok() {}
             self.autocomplete_active = false;
             self.inline_git_popup = None;
@@ -852,7 +862,7 @@ impl App {
             self.wait_for_current_highlight();
         }
 
-        if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() {
+        if self.is_ide_mode && !self.active_tab_is_api_client() && !self.active_tab_is_database() && !self.tabs[self.active_tab].kind.is_pdf() {
             if let Some(lsp) = &mut self.lsp {
                 if let Some(path) = &self.file_path {
                     let text = self.editor.get_full_text();
@@ -1552,6 +1562,7 @@ mod tests {
             base_title: "large.rs".to_string(),
             file_extension: "rs".to_string(),
             markdown: Default::default(),
+            pdf: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans,
