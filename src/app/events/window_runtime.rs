@@ -359,10 +359,13 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         ide_ignore_patterns: app.ide_ignore_patterns.clone(),
         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
             .load(std::sync::atomic::Ordering::Relaxed),
+        pdf_dark_pages: app.pdf_dark_pages,
         ctrl_wheel_multiplier: app.ctrl_wheel_multiplier,
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),
     });
+    // Single exit commit point (Quit, window close and `exiting` all pass here): stores the PDF read position.
+    app.save_tabs_state();
     if app.is_ide_mode {
         app.ide_panel.api.persist();
         crate::save_panel_state(&app.ide_panel);

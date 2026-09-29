@@ -194,6 +194,7 @@ impl Renderer {
         editor: &crate::editor::Editor,
         editor_file: Option<(&std::path::PathBuf, crate::platform::TextEncoding)>,
         markdown_mode: crate::app::MarkdownMode,
+        pdf_dark_pages: Option<bool>,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         s: f32,
@@ -288,9 +289,28 @@ impl Renderer {
                     .round()
                 + self.measure_ui_width(" выделено)", text_scale).round()
         });
-        let markdown_layout = status_markdown_mode.map(|mode| {
-            status_markdown_layout(
+        let pdf_status_labels = pdf_dark_pages.map(|dark| (
+            if dark { "Тёмные страницы: вкл" } else { "Тёмные страницы: выкл" },
+            if dark { "Тёмные: вкл" } else { "Тёмные: выкл" },
+        ));
+        let markdown_layout = if let Some((full_label, compact_label)) = pdf_status_labels {
+            Some(status_markdown_layout(
                 bar_rect,
+                StatusMarkdownWidths {
+                    language: language_w,
+                    encoding: encoding_w,
+                    mode_full: self.measure_ui_width(full_label, 0.82).round(),
+                    mode_compact: self.measure_ui_width(compact_label, 0.82).round(),
+                    line: line_block_w,
+                    character: char_block_w,
+                    selected: selected_block_w,
+                },
+                s,
+            ))
+        } else {
+            status_markdown_mode.map(|mode| {
+                status_markdown_layout(
+                    bar_rect,
                 StatusMarkdownWidths {
                     language: language_w,
                     encoding: encoding_w,
@@ -300,11 +320,11 @@ impl Renderer {
                     character: char_block_w,
                     selected: selected_block_w,
                 },
-                s,
-            )
-        });
-        let language_layout = status_markdown_mode
-            .is_none()
+                    s,
+                )
+            })
+        };
+        let language_layout = markdown_layout.is_none()
             .then(|| status_language_layout(bar_rect, language_w, s));
         scratch.clear();
         let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{}", error_count));
@@ -376,13 +396,22 @@ impl Renderer {
             bar_x + pad_x
         };
         let pos_color = self.theme.fg;
-        let (line_x, show_selected, progress_anchor_x) = if let (Some(mode), Some(layout)) =
-            (status_markdown_mode, markdown_layout)
-        {
-            self.draw_status_markdown_right_group(
+        let (line_x, show_selected, progress_anchor_x) = if let Some(layout) = markdown_layout {
+            let (toggle_id, mode, override_labels) = if let Some(labels) = pdf_status_labels {
+                (crate::ui_system::UiId::PdfDarkToggle, crate::app::MarkdownMode::Edit, Some(labels))
+            } else {
+                (
+                    crate::ui_system::UiId::MarkdownModeToggle,
+                    status_markdown_mode.unwrap_or(crate::app::MarkdownMode::Edit),
+                    None,
+                )
+            };
+            self.draw_status_toggle_right_group(
                 language,
                 encoding_label,
                 mode,
+                toggle_id,
+                override_labels,
                 layout,
                 ui_registry,
                 bar_rect,

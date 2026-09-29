@@ -4,6 +4,7 @@ pub(crate) const SEARCH_HIGHLIGHT_COLOR: [f32; 4] = [0.6, 0.6, 0.6, 0.35];
 
 pub mod core_text;
 pub(crate) mod database_table_tab;
+pub(crate) mod pdf_view;
 pub(crate) mod database_query_tab;
 pub(crate) mod database_table_tab_overlay;
 pub mod api_client_panel;
@@ -13,7 +14,6 @@ mod hover_overlays;
 #[cfg(test)]
 pub(crate) use hover_overlays::hover_trace_epoch_millis;
 mod ide_panels;
-#[cfg(test)]
 pub(crate) use ide_panels::intersect_scissor_boxes;
 pub mod lsp_ui;
 pub mod minimap_ui;

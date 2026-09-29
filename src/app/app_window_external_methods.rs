@@ -167,7 +167,7 @@ impl App {
 
         self.cancel_pointer_interactions();
         if self.is_ide_mode && !self.tabs.is_empty() {
-            self.prepare_all_database_tabs_close();
+            self.prepare_all_tabs_close();
         }
 
         let path_to_close = self.file_path.take();
@@ -531,6 +531,10 @@ impl App {
                 SaveOutcome::Failed
             };
         }
+        // A PDF tab keeps an empty hidden editor; writing it would replace the document with nothing.
+        if self.active_pdf_tab().is_some() {
+            return SaveOutcome::Failed;
+        }
         let Some(path) = self.file_path.clone() else {
             self.trigger_save_as_picker();
             return SaveOutcome::Failed;
@@ -726,6 +730,10 @@ impl App {
     /// the replacement has completed successfully.
     pub fn save_current_file_as(&mut self, path: PathBuf) -> bool {
         if self.active_tab_is_git_diff() {
+            return false;
+        }
+        // The async picker can return after the user switched to a PDF tab; its hidden editor is empty.
+        if self.active_pdf_tab().is_some() {
             return false;
         }
 
@@ -1166,7 +1174,8 @@ impl App {
                     EditorTabKind::Normal
                     | EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
-                    | EditorTabKind::DatabaseQuery(_, _) => None,
+                    | EditorTabKind::DatabaseQuery(_, _)
+                    | EditorTabKind::Pdf => None,
                 };
                 if let Some(path) = tab.file_path.as_ref().or(diff_path.as_ref()) {
                     if let Ok(decoded) = crate::platform::read_text_file(path) {
@@ -1251,7 +1260,8 @@ impl App {
                     EditorTabKind::Normal => tab.file_path.clone().map(|path| (idx, path, clean)),
                     EditorTabKind::ApiClient(_, _)
                     | EditorTabKind::DatabaseTable(_, _)
-                    | EditorTabKind::DatabaseQuery(_, _) => None,
+                    | EditorTabKind::DatabaseQuery(_, _)
+                    | EditorTabKind::Pdf => None,
                 }
             })
             .collect::<Vec<_>>();

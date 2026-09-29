@@ -1,4 +1,90 @@
 #[test]
+fn closing_definition_tab_resets_transient_editor_state() {
+    let Some(mut app) = test_app() else {
+        return;
+    };
+    app.is_ide_mode = true;
+    app.show_welcome = false;
+    app.editor = editor_with("box.id");
+    app.file_path = Some(PathBuf::from("/tmp/main.py"));
+    app.file_extension = "py".to_string();
+    app.base_title = "main.py".to_string();
+    app.scroll_y.current = 300.0;
+    app.autocomplete_active = true;
+    app.autocomplete_pending_request_id = Some(7);
+    app.tabs.push(EditorTab {
+        editor: editor_with("box.id"),
+        file_path: Some(PathBuf::from("/tmp/main.py")),
+        file_key: Some(crate::platform::PathKey::new(std::path::Path::new(
+            "/tmp/main.py",
+        ))),
+        text_file_format: crate::platform::TextFileFormat::default(),
+        base_title: "main.py".to_string(),
+        file_extension: "py".to_string(),
+        markdown: Default::default(),
+        scroll_y: crate::scroll::ScrollState::new(15.0),
+        scroll_x: crate::scroll::ScrollState::new(15.0),
+        spans: Vec::new(),
+        completions: Vec::new(),
+        foldable_ranges: Vec::new(),
+        last_sent_version: 0,
+        search_results: Vec::new(),
+        search_current_idx: None,
+        is_highlighted_once: true,
+        is_highlight_complete: true,
+        icon_key: "python",
+        syntax_errors: Vec::new(),
+        closing_hints: Default::default(),
+        deleted: false,
+        kind: EditorTabKind::Normal,
+        pdf: None,
+    });
+    app.tabs[0].scroll_y.current = 300.0;
+    app.tabs.push(EditorTab {
+        editor: editor_with("class BoxReadPublic:\n    id: int\n"),
+        file_path: Some(PathBuf::from("/tmp/output.py")),
+        file_key: Some(crate::platform::PathKey::new(std::path::Path::new(
+            "/tmp/output.py",
+        ))),
+        text_file_format: crate::platform::TextFileFormat::default(),
+        base_title: "output.py".to_string(),
+        file_extension: "py".to_string(),
+        markdown: Default::default(),
+        scroll_y: crate::scroll::ScrollState::new(15.0),
+        scroll_x: crate::scroll::ScrollState::new(15.0),
+        spans: vec![crate::highlighter::ColorSpan {
+            start: 0,
+            end: 5,
+            color: crate::highlighter::DRACULA_PINK,
+        }],
+        completions: Vec::new(),
+        foldable_ranges: Vec::new(),
+        last_sent_version: 0,
+        search_results: Vec::new(),
+        search_current_idx: None,
+        is_highlighted_once: true,
+        is_highlight_complete: true,
+        icon_key: "python",
+        syntax_errors: Vec::new(),
+        closing_hints: Default::default(),
+        deleted: false,
+        kind: EditorTabKind::Normal,
+        pdf: None,
+    });
+    app.active_tab = 1;
+    app.sync_active_tab();
+
+    let old_version = app.tabs[0].editor.version;
+    app.close_tab_at(1);
+
+    assert_eq!(app.file_path.as_deref(), Some(Path::new("/tmp/main.py")));
+    assert!(app.editor.version > old_version);
+    assert!(!app.autocomplete_active);
+    assert_eq!(app.autocomplete_pending_request_id, None);
+    assert_eq!(app.scroll_y.current, 300.0);
+}
+
+#[test]
 fn ide_mode_startup_tab_and_tab_close_paths_are_headless_safe() {
     let Some(mut app) = test_app() else {
         return;

@@ -416,6 +416,7 @@ pub struct Renderer {
     pub scratch_buffer: String,
     pub last_search_idx: Option<usize>,
     pub last_search_len: usize,
+    pub last_search_pending: bool,
 
     pub icons: std::collections::HashMap<crate::widgets::IconType, IconAtlasEntry>,
     pub icon_logo: Option<glow::Texture>,

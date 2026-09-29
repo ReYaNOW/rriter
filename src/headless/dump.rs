@@ -251,6 +251,9 @@ fn tabs_json(app: &App) -> Value {
                     scroll_y: &tab.scroll_y,
                     scroll_x: &tab.scroll_x,
                     markdown: tab.markdown.mode != MarkdownMode::Edit,
+                    kind: tab_kind_name(tab),
+                    pdf: tab.pdf.as_deref(),
+                    engine: &app.pdf_engine,
                 })
             }
         })
@@ -270,6 +273,9 @@ fn active_tab_json(app: &App, index: usize) -> Value {
         scroll_y: &app.scroll_y,
         scroll_x: &app.scroll_x,
         markdown: app.markdown_mode() != MarkdownMode::Edit,
+        kind: app.tabs.get(index).map(tab_kind_name).unwrap_or("normal"),
+        pdf: app.tabs.get(index).and_then(|tab| tab.pdf.as_deref()),
+        engine: &app.pdf_engine,
     })
 }
 
@@ -284,6 +290,9 @@ struct TabView<'a> {
     scroll_y: &'a ScrollState,
     scroll_x: &'a ScrollState,
     markdown: bool,
+    kind: &'static str,
+    pdf: Option<&'a crate::app::pdf_tab::PdfTabState>,
+    engine: &'a crate::app::pdf_tab::PdfEngineState,
 }
 
 #[derive(Clone, Copy)]
@@ -294,7 +303,35 @@ enum TabActivity {
 
 fn tab_json(tab: TabView<'_>) -> Value {
     let (line, col) = crate::render_view::cursor_line_and_character(tab.editor);
-    json!({
+    let scroll_y = tab.pdf.map_or(tab.scroll_y.current, |pdf| pdf.scroll.current);
+    let pdf = tab.pdf.map(|pdf| {
+        let (current_page, _) = pdf.anchor();
+        let phase = match &pdf.phase {
+            crate::app::pdf_tab::PdfPhase::EngineMissing { .. } => "engine_missing",
+            crate::app::pdf_tab::PdfPhase::EngineStarting => "engine_starting",
+            crate::app::pdf_tab::PdfPhase::Loading => "loading",
+            crate::app::pdf_tab::PdfPhase::Ready => "ready",
+            crate::app::pdf_tab::PdfPhase::Error(_) => "error",
+            crate::app::pdf_tab::PdfPhase::PasswordRequired => "password_required",
+        };
+        let (engine_name, engine_message) = match tab.engine {
+            crate::app::pdf_tab::PdfEngineState::NotStarted => ("not_started", ""),
+            crate::app::pdf_tab::PdfEngineState::Starting => ("starting", ""),
+            crate::app::pdf_tab::PdfEngineState::Ready => ("ready", ""),
+            crate::app::pdf_tab::PdfEngineState::Missing { message, .. } => ("missing", message.as_str()),
+            crate::app::pdf_tab::PdfEngineState::Failed(message) => ("failed", message.as_str()),
+            crate::app::pdf_tab::PdfEngineState::Installing { .. } => ("installing", ""),
+        };
+        serde_json::json!({
+            "phase": phase, "page_count": pdf.page_count(), "current_page": current_page,
+            "scroll": pdf.scroll.current, "search_matches": pdf.search.matches.len(),
+            "textures": pdf.textures.len(),
+            "search_done": pdf.search.done, "selection_chars": pdf.selection_chars(),
+            "search_current": pdf.search.current,
+            "engine": engine_name, "engine_message": engine_message,
+        })
+    });
+    let mut value = json!({
         "index": tab.index,
         // Output only, not persisted: `display()` is fine here.
         "path": tab.path.map(|path| path.display().to_string()),
@@ -303,10 +340,24 @@ fn tab_json(tab: TabView<'_>) -> Value {
         "modified": tab.modified,
         "deleted": tab.deleted,
         "cursor": {"line": line, "col": col},
-        "scroll_y": tab.scroll_y.current,
+        "scroll_y": scroll_y,
         "scroll_x": tab.scroll_x.current,
         "markdown": tab.markdown,
-    })
+        "kind": tab.kind,
+    });
+    if let Some(pdf) = pdf { value["pdf"] = pdf; }
+    value
+}
+
+fn tab_kind_name(tab: &crate::app::EditorTab) -> &'static str {
+    match &tab.kind {
+        crate::app::EditorTabKind::Normal => "normal",
+        crate::app::EditorTabKind::GitDiff(_, _) => "git_diff",
+        crate::app::EditorTabKind::ApiClient(_, _) => "api_client",
+        crate::app::EditorTabKind::DatabaseTable(_, _) => "database_table",
+        crate::app::EditorTabKind::DatabaseQuery(_, _) => "database_query",
+        crate::app::EditorTabKind::Pdf => "pdf",
+    }
 }
 
 fn panel_name(id: PanelId) -> &'static str {

@@ -11,6 +11,7 @@ mod highlighter;
 mod languages;
 mod lsp;
 mod platform;
+mod pdf;
 mod queries;
 mod render_view;
 mod renderer;

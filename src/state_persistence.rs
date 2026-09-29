@@ -23,6 +23,7 @@ pub struct Config {
     pub ide_workspaces: Vec<std::path::PathBuf>,
     pub ide_ignore_patterns: Vec<String>,
     pub enable_telemetry: bool,
+    pub pdf_dark_pages: bool,
     pub ctrl_wheel_multiplier: f32,
     pub tool_paths: crate::platform::ToolPaths,
     pub dart_settings: crate::app::DartSettings,
@@ -37,6 +38,7 @@ impl Default for Config {
             ide_workspaces: Vec::new(),
             ide_ignore_patterns: Vec::new(),
             enable_telemetry: false,
+            pdf_dark_pages: true,
             ctrl_wheel_multiplier: CTRL_WHEEL_MULTIPLIER_DEFAULT,
             tool_paths: crate::platform::ToolPaths::default(),
             dart_settings: crate::app::DartSettings::default(),
@@ -141,7 +143,7 @@ pub fn save_recent_files(files: &[PathBuf]) {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum OpenTabSnapshot {
     Empty,
     File(PathBuf),
@@ -160,6 +162,7 @@ pub enum OpenTabSnapshot {
         database_name: String,
         console_id: crate::app::database::SqlConsoleId,
     },
+    Pdf { path: PathBuf, page: usize, frac: f32 },
 }
 
 #[cfg(test)]
@@ -225,6 +228,19 @@ fn parse_open_tabs_content_checked(content: &str) -> Result<(Vec<OpenTabSnapshot
                 database_name,
                 console_id: crate::app::database::SqlConsoleId(console_id),
             });
+        } else if let Some(rest) = line.strip_prefix("PDF\t") {
+            let record: serde_json::Value = serde_json::from_str(rest)
+                .map_err(|_| "open tabs contains invalid PDF record".to_string())?;
+            let path = record.get("path").and_then(serde_json::Value::as_str)
+                .and_then(crate::platform::decode_persisted_path)
+                .ok_or_else(|| "open tabs contains invalid PDF path".to_string())?;
+            let page = record.get("page").and_then(serde_json::Value::as_u64)
+                .and_then(|page| usize::try_from(page).ok())
+                .ok_or_else(|| "open tabs contains invalid PDF page".to_string())?;
+            let frac = record.get("frac").and_then(serde_json::Value::as_f64)
+                .map(|frac| frac as f32).filter(|frac| frac.is_finite())
+                .ok_or_else(|| "open tabs contains invalid PDF fraction".to_string())?;
+            tabs.push(OpenTabSnapshot::Pdf { path, page, frac });
         } else {
             let path = crate::platform::decode_persisted_path(line)
                 .ok_or_else(|| "open tabs contains invalid file path record".to_string())?;
@@ -299,6 +315,15 @@ fn open_tab_line(tab: &crate::app::EditorTab) -> Option<String> {
                 .map(|payload| format!("DBQUERY\t{payload}"))
         }
         crate::app::EditorTabKind::GitDiff(_, _) => None,
+        crate::app::EditorTabKind::Pdf => tab.pdf.as_ref().and_then(|pdf| {
+            let (page, frac) = pdf.session_position();
+            let record = serde_json::json!({
+                "path": crate::platform::encode_persisted_path(&pdf.path),
+                "page": page,
+                "frac": frac,
+            });
+            serde_json::to_string(&record).ok().map(|payload| format!("PDF\t{payload}"))
+        }),
     }
 }
 
@@ -584,6 +609,7 @@ fn format_config_content(config: &Config) -> String {
         "ide_workspaces": workspaces,
         "ide_ignore_patterns": config.ide_ignore_patterns,
         "enable_telemetry": config.enable_telemetry,
+        "pdf_dark_pages": config.pdf_dark_pages,
         "ctrl_wheel_multiplier": normalize_ctrl_wheel_multiplier(config.ctrl_wheel_multiplier),
         "tool_paths": tool_paths,
         "dart": {
@@ -671,6 +697,9 @@ fn parse_config_content(content: &str, mut config: Config) -> Config {
         .and_then(serde_json::Value::as_bool)
     {
         config.enable_telemetry = value;
+    }
+    if let Some(value) = value.get("pdf_dark_pages").and_then(serde_json::Value::as_bool) {
+        config.pdf_dark_pages = value;
     }
     if let Some(value) = value
         .get("ctrl_wheel_multiplier")
@@ -785,6 +814,7 @@ mod tests {
             base_title: path.unwrap_or("Безымянный").to_string(),
             file_extension: String::new(),
             markdown: Default::default(),
+            pdf: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -968,6 +998,49 @@ mod tests {
                 auth_view: true,
             }]
         );
+    }
+
+    #[test]
+    fn pdf_session_record_roundtrips_and_rejects_missing_page_or_bad_json() {
+        let path = PathBuf::from("/tmp/session.pdf");
+        let mut tab = tab(Some("/tmp/session.pdf"));
+        tab.kind = crate::app::EditorTabKind::Pdf;
+        let mut pdf = crate::app::pdf_tab::PdfTabState::new(
+            path.clone(),
+            std::sync::Arc::new(crate::pdf::DocGens::new()),
+            crate::app::pdf_tab::PdfPhase::Ready,
+        );
+        pdf.apply_event(&crate::pdf::PdfEvent::Opened {
+            id: crate::pdf::DocId(7),
+            pages: vec![crate::pdf::PageGeom { width_pt: 612.0, height_pt: 792.0 }],
+        });
+        pdf.set_viewport(800, 400, 1.0);
+        pdf.scroll.current = pdf.layout.rows[0].0 as f32 + 200.0;
+        tab.pdf = Some(Box::new(pdf));
+        let line = open_tab_line(&tab).expect("PDF session line");
+        assert!(line.starts_with("PDF\t"));
+        let (parsed, _) = parse_open_tabs_content_checked(&format!("0\n{line}\n")).expect("parse PDF session");
+        assert_eq!(parsed, vec![OpenTabSnapshot::Pdf { path, page: 0, frac: 200.0 / 994.0 }]);
+        assert!(parse_open_tabs_content_checked("0\nPDF\t{\"path\":\"/tmp/a.pdf\"}\n").is_err());
+        assert!(parse_open_tabs_content_checked("0\nPDF\t{\n").is_err());
+    }
+
+    #[test]
+    fn pdf_session_record_keeps_pending_restore_before_opened() {
+        let path = PathBuf::from("/tmp/session.pdf");
+        let mut tab = tab(Some("/tmp/session.pdf"));
+        tab.kind = crate::app::EditorTabKind::Pdf;
+        let mut pdf = crate::app::pdf_tab::PdfTabState::new(
+            path.clone(),
+            std::sync::Arc::new(crate::pdf::DocGens::new()),
+            crate::app::pdf_tab::PdfPhase::EngineMissing { error: None },
+        );
+        pdf.restore = Some((4, 0.5));
+        pdf.set_viewport(800, 400, 1.0);
+        tab.pdf = Some(Box::new(pdf));
+        let line = open_tab_line(&tab).expect("PDF session line");
+        let (parsed, _) = parse_open_tabs_content_checked(&format!("0\n{line}\n")).expect("parse PDF session");
+        assert_eq!(parsed, vec![OpenTabSnapshot::Pdf { path, page: 4, frac: 0.5 }]);
     }
 
     #[test]

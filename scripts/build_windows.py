@@ -210,6 +210,7 @@ def inno_setup_script(
     version: str,
 ) -> str:
     source = str(source_exe.resolve()).replace('"', '""')
+    pdfium = str(source_exe.with_name("pdfium.dll").resolve()).replace('"', '""')
     icon_path = str(icon.resolve()).replace('"', '""')
     output = str(output_dir.resolve()).replace('"', '""')
     version_info = ".".join(str(part) for part in version_quad(version))
@@ -256,6 +257,7 @@ def inno_setup_script(
 
         [Files]
         Source: "{source}"; DestDir: "{{app}}"; Flags: ignoreversion
+        Source: "{pdfium}"; DestDir: "{{app}}"; Flags: ignoreversion
 
         [Icons]
         Name: "{{autoprograms}}\\RRiter"; Filename: "{{app}}\\{{#MyAppExeName}}"
@@ -723,6 +725,11 @@ def stage_portable(executable: Path, version: str) -> Path:
         shutil.rmtree(portable)
     portable.mkdir(parents=True)
     shutil.copy2(executable, portable / "rriter.exe")
+    subprocess.run(
+        [sys.executable, "scripts/fetch_pdfium.py", "--dest", str(portable), "--platform", "win-x64"],
+        check=True,
+        cwd=ROOT,
+    )
     readme = portable / "README.txt"
     readme.write_text(
         "RRiter portable build\n\nRun rriter.exe. User configuration stays in "
@@ -774,7 +781,7 @@ def package(
     archive = zip_portable(portable, version)
     installer = None
     if create_installer:
-        installer = build_installer(executable, version, environment)
+        installer = build_installer(portable / "rriter.exe", version, environment)
         sign_file(installer, environment, signing)
     return BuildArtifacts(executable, portable, archive, installer)
 
@@ -825,6 +832,7 @@ def self_test() -> None:
             "App Paths",
             "UninstallDisplayIcon",
             "AppId={{8A36207E-3C0C-47A8-9C8A-683647F299CE}",
+            "pdfium.dll",
         ]
         if not all(token in iss for token in required):
             raise BuildError("Inno Setup template self-test failed")

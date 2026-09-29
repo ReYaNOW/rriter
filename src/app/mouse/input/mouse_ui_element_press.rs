@@ -259,6 +259,28 @@ impl App {
                 my,
             );
             self.handle_ui_click(clicked_id);
+        } else if matches!(
+            clicked_id,
+            crate::ui_system::UiId::PdfBody
+                | crate::ui_system::UiId::PdfPage(_)
+                | crate::ui_system::UiId::PdfText
+                | crate::ui_system::UiId::PdfLink(_, _)
+        ) {
+            if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+                let link = match clicked_id {
+                    crate::ui_system::UiId::PdfLink(page, idx) => Some((page, idx)),
+                    _ => None,
+                };
+                self.press_pdf_body(mx, my, link);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
+        } else if clicked_id == crate::ui_system::UiId::PdfScrollY {
+            if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+                self.press_pdf_scrollbar(mx, my);
+            }
+            self.handle_ui_click(clicked_id);
         } else if clicked_id == crate::ui_system::UiId::GitLogsScroll {
             if state == ElementState::Pressed
                 && button == winit::event::MouseButton::Left

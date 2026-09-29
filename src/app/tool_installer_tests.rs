@@ -714,3 +714,191 @@ fn dart_restart_adapter_targets_only_dart_server() {
     assert!(!body.contains("restart_server(\"ruff\")"));
     assert!(!body.contains("restart_server(\"ty\")"));
 }
+
+fn poll_until_finish(installer: &mut ToolInstaller) -> ToolInstallFinish {
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(5) {
+        if let Some(finish) = installer.poll_finish() {
+            return finish;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    panic!("installer did not finish");
+}
+
+#[test]
+fn pdfium_kind_stays_out_of_settings_and_config_paths() {
+    assert!(!ToolKind::ALL.contains(&ToolKind::Pdfium));
+    assert_eq!(ToolKind::from_index(ToolKind::Pdfium.index()), None);
+    assert_eq!(ToolKind::Pdfium.config_key(), "pdfium");
+    assert!(!ToolKind::Pdfium.supports_managed_install());
+    let mut paths = crate::platform::ToolPaths::default();
+    paths.set(ToolKind::Pdfium, Some(PathBuf::from("/x/libpdfium.so")));
+    assert_eq!(paths.get(ToolKind::Pdfium), None);
+    assert_eq!(paths.iter().count(), ToolKind::ALL.len());
+    assert!(resolve_tool_kind(ToolKind::Pdfium).path.is_none());
+}
+
+#[test]
+fn pdfium_install_fails_at_once_in_tests_without_touching_the_network() {
+    let mut installer = ToolInstaller::default();
+    installer
+        .start_pdfium_install(&crate::ui_waker::UiWaker::counting())
+        .unwrap();
+    assert_eq!(installer.target(), Some(ToolKind::Pdfium));
+    assert!(!installer.is_log_open(), "the PDF tab shows progress itself");
+    assert_eq!(
+        poll_until_finish(&mut installer),
+        ToolInstallFinish::Failed("загрузка отключена в тестах".to_string())
+    );
+    assert_eq!(installer.phase(), ToolInstallPhase::Failed);
+    assert!(!installer.is_running());
+    assert!(installer.worker.is_none());
+}
+
+#[test]
+fn pdfium_install_is_refused_while_another_tool_installs() {
+    let mut installer = ToolInstaller::default();
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
+    installer.target = Some(ToolKind::Uv);
+    installer.rx = Some(rx);
+    assert!(installer.is_running());
+    assert_eq!(
+        installer.start_pdfium_install(&crate::ui_waker::UiWaker::counting()),
+        Err("Другая установка уже выполняется".to_string())
+    );
+    assert_eq!(installer.target(), Some(ToolKind::Uv));
+}
+
+#[test]
+fn pdfium_cancel_and_failure_are_reported_as_terminal_finishes() {
+    let mut installer = ToolInstaller::default();
+    installer.target = Some(ToolKind::Pdfium);
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
+    installer.rx = Some(rx);
+    tx.send(terminal_install_event(
+        Err(INSTALL_CANCELLED_MESSAGE.to_string()),
+        true,
+    ))
+    .unwrap();
+    assert_eq!(installer.poll_finish(), Some(ToolInstallFinish::Cancelled));
+    assert_eq!(installer.phase(), ToolInstallPhase::Cancelled);
+    assert!(installer.poll_finish().is_none());
+
+    let (tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
+    installer.rx = Some(rx);
+    installer.phase = ToolInstallPhase::Idle;
+    tx.send(ToolInstallEvent::Done(Err("архив повреждён".to_string())))
+        .unwrap();
+    assert_eq!(
+        installer.poll_finish(),
+        Some(ToolInstallFinish::Failed("архив повреждён".to_string()))
+    );
+    // `poll` keeps its old contract: only a success is returned.
+    assert!(installer.poll().is_none());
+}
+
+#[test]
+fn pdf_engine_button_flow_installs_once_and_returns_to_retry() {
+    use crate::app::pdf_tab::PdfEngineState;
+    let (_context, mut app) =
+        crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+    // Not installable (explicit path or unsupported platform): the click does nothing.
+    app.pdf_engine = PdfEngineState::Missing {
+        message: "fixed".to_string(),
+        installable: false,
+    };
+    app.install_pdf_engine();
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Missing { message, installable: false } if message == "fixed"));
+    assert!(app.tool_installer.target().is_none());
+
+    app.pdf_engine = PdfEngineState::Missing {
+        message: "not found".to_string(),
+        installable: true,
+    };
+    app.install_pdf_engine();
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Installing { prev, .. } if prev == "not found"));
+    // A second click while installing is ignored.
+    app.install_pdf_engine();
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Installing { prev, .. } if prev == "not found"));
+
+    let started = Instant::now();
+    while matches!(app.pdf_engine, PdfEngineState::Installing { .. }) {
+        assert!(started.elapsed() < Duration::from_secs(5), "install did not finish");
+        app.poll_tool_installer();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(matches!(
+        &app.pdf_engine,
+        PdfEngineState::Missing { message, installable: true } if message == "загрузка отключена в тестах"
+    ));
+    // The engine is not a configured tool: nothing was stored for it.
+    assert_eq!(app.tool_paths.get(ToolKind::Pdfium), None);
+}
+
+#[test]
+fn pdf_engine_button_reports_a_running_install_of_another_tool() {
+    use crate::app::pdf_tab::PdfEngineState;
+    let (_context, mut app) =
+        crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+    let (_tx, rx) = crate::ui_waker::UiWaker::counting().sync_channel(INSTALL_EVENT_CAPACITY);
+    app.tool_installer.target = Some(ToolKind::Ruff);
+    app.tool_installer.rx = Some(rx);
+    app.pdf_engine = PdfEngineState::Missing {
+        message: "not found".to_string(),
+        installable: true,
+    };
+    app.install_pdf_engine();
+    assert!(matches!(
+        &app.pdf_engine,
+        PdfEngineState::Missing { message, installable: true } if message == "идёт установка другого инструмента"
+    ));
+    assert_eq!(app.tool_installer.target(), Some(ToolKind::Ruff));
+}
+
+#[test]
+fn pdf_engine_install_finishes_map_to_engine_states() {
+    use crate::app::pdf_tab::PdfEngineState;
+    let installing = || PdfEngineState::Installing {
+        prev: "prev".to_string(),
+        progress: String::new(),
+    };
+    let (_context, mut app) =
+        crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+
+    app.pdf_engine = installing();
+    assert!(app.sync_pdf_engine_install(Some(ToolInstallFinish::Cancelled)));
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Missing { message, installable: true } if message == "prev"));
+
+    app.pdf_engine = installing();
+    assert!(app.sync_pdf_engine_install(Some(ToolInstallFinish::Failed("сеть недоступна".to_string()))));
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Missing { message, installable: true } if message == "сеть недоступна"));
+
+    // Outside `Installing` a stray finish changes nothing.
+    assert!(!app.sync_pdf_engine_install(Some(ToolInstallFinish::Cancelled)));
+
+    // Progress follows the last installer log line.
+    app.pdf_engine = installing();
+    app.tool_installer.note("Загрузка PDF-движка: 64/3800 КиБ (1%)");
+    assert!(app.sync_pdf_engine_install(None));
+    assert!(matches!(&app.pdf_engine, PdfEngineState::Installing { progress, .. } if progress.contains("64/3800")));
+    assert!(!app.sync_pdf_engine_install(None));
+
+    // A finished install whose library is still not located must not loop into a download.
+    let located = crate::app::pdf_tab::engine_after_install(
+        PdfEngineState::Missing {
+            message: "not found".to_string(),
+            installable: true,
+        },
+        Path::new("/managed/pdfium/chromium-8066/libpdfium.so"),
+    );
+    assert!(matches!(
+        located,
+        PdfEngineState::Missing { message, installable: true }
+            if message == "библиотека установлена, но не найдена: /managed/pdfium/chromium-8066/libpdfium.so"
+    ));
+    assert!(matches!(
+        crate::app::pdf_tab::engine_after_install(PdfEngineState::Starting, Path::new("/x")),
+        PdfEngineState::Starting
+    ));
+}

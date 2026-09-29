@@ -447,6 +447,7 @@ impl App {
                         ide_ignore_patterns: self.ide_ignore_patterns.clone(),
                         enable_telemetry: crate::render_view::TELEMETRY_ENABLED
                             .load(std::sync::atomic::Ordering::Relaxed),
+                        pdf_dark_pages: self.pdf_dark_pages,
                         ctrl_wheel_multiplier: self.ctrl_wheel_multiplier,
                         tool_paths: self.tool_paths.clone(),
                         dart_settings: self.dart_settings.clone(),

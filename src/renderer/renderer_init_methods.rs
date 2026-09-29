@@ -40,6 +40,28 @@ fn required_graphics_attribute(
 }
 
 impl Renderer {
+    pub fn upload_rgba(&mut self, w: u32, h: u32, rgba: &[u8]) -> Option<glow::Texture> {
+        let texture = unsafe { self.gl.create_texture().ok()? };
+        unsafe {
+            self.gl.active_texture(glow::TEXTURE0);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+            self.gl.tex_image_2d(
+                glow::TEXTURE_2D, 0, glow::RGBA8 as i32, w as i32, h as i32, 0,
+                glow::RGBA, glow::UNSIGNED_BYTE, glow::PixelUnpackData::Slice(Some(rgba)),
+            );
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MIN_FILTER, glow::LINEAR as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_MAG_FILTER, glow::LINEAR as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, glow::CLAMP_TO_EDGE as i32);
+            self.gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, glow::CLAMP_TO_EDGE as i32);
+            self.gl.bind_texture(glow::TEXTURE_2D, Some(self.texture));
+        }
+        Some(texture)
+    }
+
+    pub fn delete_texture(&mut self, texture: glow::Texture) {
+        unsafe { self.gl.delete_texture(texture); }
+    }
+
     #[inline(always)]
     pub(crate) fn delayed_tooltip_anchor(
         &mut self,
@@ -605,6 +627,7 @@ impl Renderer {
                 scratch_buffer: String::with_capacity(256),
                 last_search_idx: None,
                 last_search_len: 0,
+                last_search_pending: false,
                 icons: HashMap::new(),
                 file_icon_cache: rustc_hash::FxHashMap::default(),
                 rasterized_file_icons: rustc_hash::FxHashMap::default(),

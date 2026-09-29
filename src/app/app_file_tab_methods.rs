@@ -1,4 +1,11 @@
 impl App {
+    pub(crate) fn prepare_all_tabs_close(&mut self) {
+        self.prepare_all_database_tabs_close();
+        for idx in 0..self.tabs.len() {
+            self.prepare_pdf_tab_close(idx);
+        }
+    }
+
     pub fn open_new_tab(&mut self) {
         if !self.is_ide_mode {
             self.close_current_file();
@@ -26,6 +33,7 @@ impl App {
                 base_title: String::new(),
                 file_extension: String::new(),
                 markdown: Default::default(),
+                pdf: None,
                 scroll_y: crate::scroll::ScrollState::new(15.0),
                 scroll_x: crate::scroll::ScrollState::new(15.0),
                 spans: Vec::new(),
@@ -67,6 +75,7 @@ impl App {
             base_title: "Безымянный".to_string(),
             file_extension: String::new(),
             markdown: Default::default(),
+            pdf: None,
             scroll_y: crate::scroll::ScrollState::new(15.0),
             scroll_x: crate::scroll::ScrollState::new(15.0),
             spans: Vec::new(),
@@ -221,16 +230,15 @@ impl App {
         if idx == self.active_tab && self.tabs.len() > 1 {
             self.cancel_pointer_interactions();
         }
-
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
 
         if self.tabs.len() <= 1 {
-            // close_current_file() prepares all database tabs before clearing the
-            // final IDE tab, so do not save/remove this tab twice here.
             self.close_current_file();
             return;
         }
 
+        if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
+        self.prepare_pdf_tab_close(idx);
         self.prepare_database_tab_close(idx);
         let closing_lsp = self.tab_lsp_close_identity(idx);
         if idx == self.active_tab {
@@ -286,7 +294,7 @@ impl App {
                 }
             }
         }
-        self.prepare_all_database_tabs_close();
+        self.prepare_all_tabs_close();
         self.tabs.clear();
         self.active_tab = 0;
         self.close_current_file();
@@ -320,6 +328,9 @@ impl App {
     ) {
         let path = crate::platform::canonicalize_or_absolutize(&path);
         let path_key = crate::platform::PathKey::new(&path);
+        // No single-file transition into IDE mode exists (a folder only adds a workspace),
+        // so outside IDE mode a `.pdf` goes the binary-file way through `load_file_internal`.
+        let is_pdf = path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"));
         if !self.is_ide_mode {
             if start_highlighter {
                 self.load_file_internal(path, add_to_history, wait_highlight);
@@ -358,6 +369,10 @@ impl App {
             } else if wait_highlight {
                 self.switch_to_tab(i);
             }
+            return;
+        }
+        if is_pdf {
+            self.open_pdf_tab(path);
             return;
         }
 
@@ -852,6 +867,10 @@ impl App {
     }
 
     pub fn update_search(&mut self) {
+        if self.active_pdf_tab().is_some() {
+            self.pdf_update_search();
+            return;
+        }
         let previous_match_start = self
             .search_current_idx
             .and_then(|idx| self.search_results.get(idx).map(|&(s, _)| s));
@@ -915,6 +934,8 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn jump_to_search_result(&mut self) {
+        // A PDF tab scrolls itself when its first match arrives; the hidden editor has nothing to jump to.
+        if self.active_pdf_tab().is_some() { return; }
         let show_welcome = self.show_welcome;
         let is_ide_mode = self.is_ide_mode;
         let database_query = self.active_tab_is_database_query();

@@ -9,6 +9,11 @@ impl App {
             UiId::MarkdownModeToggle => {
                 self.toggle_markdown_mode();
             }
+            UiId::PdfDarkToggle => self.toggle_pdf_dark_pages(),
+            UiId::PdfScrollY => {}
+            UiId::PdfEngineInstall => self.install_pdf_engine(),
+            UiId::PdfEngineCancel => self.cancel_pdf_engine_install(),
+            UiId::PdfLink(page, idx) => self.pdf_follow_link(page, idx),
             UiId::MarkdownCodeCopy(block_id) => {
                 let _ = self.copy_markdown_read_code_block(block_id);
                 if let Some(window) = self.window.as_ref() {
@@ -330,9 +335,13 @@ impl App {
                 self.search_focused = false;
                 self.search_results.clear();
                 self.search_current_idx = None;
+                self.pdf_restart_search_if_open();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            UiId::SearchNext | UiId::SearchPrev if self.active_pdf_tab().is_some() => {
+                self.pdf_jump_search(id == UiId::SearchNext);
             }
             UiId::SearchNext => {
                 if !self.search_results.is_empty() {

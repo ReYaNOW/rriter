@@ -1426,6 +1426,15 @@ Root:
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
+* `src/pdf/mod.rs` -> PDF protocol types, worker channel contracts, document generations, and user-facing errors.
+* `src/pdf/library.rs` -> Pdfium manifest parsing, managed paths, archive URL, and library discovery.
+* `src/pdf/pdfium_backend.rs` -> Pdfium binding, document metadata, rendering, text/link extraction, and PDF-to-UI coordinate conversion.
+* `src/pdf/worker.rs` -> Dedicated Pdfium thread, prioritized render/text/search requests, generation checks, and per-document text caching.
+* `src/pdf/fixture.rs` -> Test-only generated three-page PDF, invalid PDF, and empty-file fixtures.
+* `src/app/pdf_tab.rs` / `src/app/pdf_tab/engine.rs` / `src/app/pdf_tab/input.rs` -> PDF tab data, page texture cache, scrolling and keys, document transitions, and worker lifecycle.
+* `src/app/pdf_tab/text.rs` -> PDF text layer: page-text cache requests, search state and generations, selection, copy, link and char hit testing.
+* `src/render_view/pdf_view.rs` -> PDF loading/error states, textured pages, search/selection highlights, page hit targets, and the text-layer hit region.
+* `src/headless/ui_tests_pdf.rs` -> PDF tab lifecycle, rasterized pages, input, invalid documents, path deduplication, tab switching/closing, and missing-engine tests.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.

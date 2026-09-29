@@ -595,6 +595,306 @@ fn installer_script_extension(platform: PlatformKind) -> &'static str {
     }
 }
 
+const MAX_PDFIUM_ARCHIVE_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PDFIUM_LIB_BYTES: u64 = 256 * 1024 * 1024;
+const PDFIUM_VERSION_DIR_PREFIX: &str = "chromium-";
+
+/// Everything the worker needs from the manifest; the worker never touches the manifest itself.
+struct PdfiumInstallPlan {
+    url: String,
+    archive: String,
+    sha256: String,
+    lib_member: String,
+    slug: String,
+}
+
+fn install_pdfium(
+    plan: &PdfiumInstallPlan,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+) -> Result<ToolInstallOutcome, String> {
+    // Tests drive the state machine without a network: the run fails at once.
+    if cfg!(test) {
+        return Err("загрузка отключена в тестах".to_string());
+    }
+    if Path::new(&plan.archive).file_name() != Some(OsStr::new(&plan.archive)) {
+        return Err("недопустимое имя архива PDF-движка".to_string());
+    }
+    // The archive lives in a generation directory next to the versioned one and is
+    // always removed, whatever the outcome.
+    let layout = ToolInstallLayout::current(ToolKind::Pdfium);
+    let result = (|| {
+        fs::create_dir_all(&layout.generation_root)
+            .map_err(|error| format!("Не удалось создать каталог загрузки: {error}"))?;
+        check_cancelled(cancel)?;
+        reporter.phase(ToolInstallPhase::Downloading, "Загрузка PDF-движка");
+        let archive_path = layout.generation_root.join(&plan.archive);
+        download_pdfium_archive(&plan.url, &archive_path, cancel, reporter)?;
+        let installed = install_from_archive_with(
+            &archive_path,
+            &plan.sha256,
+            &plan.lib_member,
+            &layout.managed_root,
+            &plan.slug,
+            cancel,
+            &mut |phase, detail| reporter.phase(phase, detail),
+        )?;
+        Ok(ToolInstallOutcome {
+            paths: vec![(ToolKind::Pdfium, installed)],
+        })
+    })();
+    if let Err(error) = layout.remove_generation() {
+        reporter.line(
+            ToolInstallLogKind::Info,
+            format!("Не удалось удалить временный каталог загрузки: {error}"),
+        );
+    }
+    result
+}
+
+fn download_pdfium_archive(
+    url: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+) -> Result<(), String> {
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("Не удалось запустить сетевой runtime: {error}"))?;
+    runtime.block_on(download_pdfium_archive_async(
+        url,
+        destination,
+        cancel,
+        reporter,
+    ))
+}
+
+async fn download_pdfium_archive_async(
+    url: &str,
+    destination: &Path,
+    cancel: &AtomicBool,
+    reporter: &ToolInstallReporter,
+) -> Result<(), String> {
+    check_cancelled(cancel)?;
+    let client = crate::platform::async_http_client_builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|error| format!("Не удалось создать HTTP-клиент: {error}"))?;
+    let mut response = tokio::select! {
+        biased;
+        () = wait_for_install_cancel(cancel) => {
+            return Err(INSTALL_CANCELLED_MESSAGE.to_string());
+        }
+        response = client.get(url).send() => response,
+    }
+    .and_then(reqwest::Response::error_for_status)
+    .map_err(|error| format!("Не удалось загрузить PDF-движок: {error}"))?;
+    let content_length = response.content_length();
+    if content_length.is_some_and(|length| length > MAX_PDFIUM_ARCHIVE_BYTES) {
+        return Err("Архив PDF-движка превышает допустимый размер".to_string());
+    }
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)
+        .map_err(|error| format!("Не удалось создать файл архива: {error}"))?;
+    let mut downloaded = 0u64;
+    let mut last_progress = 0u64;
+    loop {
+        let chunk = tokio::select! {
+            biased;
+            () = wait_for_install_cancel(cancel) => {
+                return Err(INSTALL_CANCELLED_MESSAGE.to_string());
+            }
+            chunk = response.chunk() => chunk,
+        }
+        .map_err(|error| format!("Ошибка чтения архива PDF-движка: {error}"))?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        downloaded = downloaded.saturating_add(chunk.len() as u64);
+        if downloaded > MAX_PDFIUM_ARCHIVE_BYTES {
+            return Err("Архив PDF-движка превышает допустимый размер".to_string());
+        }
+        output
+            .write_all(&chunk)
+            .map_err(|error| format!("Не удалось сохранить архив PDF-движка: {error}"))?;
+        if last_progress == 0
+            || downloaded.saturating_sub(last_progress) >= 64 * 1024
+            || content_length == Some(downloaded)
+        {
+            reporter.line(
+                ToolInstallLogKind::Info,
+                pdfium_progress_line(downloaded, content_length),
+            );
+            last_progress = downloaded;
+        }
+    }
+    output
+        .flush()
+        .map_err(|error| format!("Не удалось сохранить архив PDF-движка: {error}"))?;
+    if downloaded == 0 {
+        return Err("Получен пустой архив PDF-движка".to_string());
+    }
+    Ok(())
+}
+
+fn pdfium_progress_line(downloaded: u64, total: Option<u64>) -> String {
+    let downloaded_kib = downloaded.div_ceil(1024);
+    if let Some(total) = total.filter(|total| *total > 0) {
+        let percent = (u128::from(downloaded) * 100 / u128::from(total)).min(100);
+        format!(
+            "Загрузка PDF-движка: {downloaded_kib}/{} КиБ ({percent}%)",
+            total.div_ceil(1024)
+        )
+    } else {
+        format!("Загрузка PDF-движка: {downloaded_kib} КиБ")
+    }
+}
+
+/// Network-free half of the PDF engine install: checks the whole archive against
+/// `expected_sha256`, reads only the entry named exactly `lib_member` and atomically
+/// writes it to `managed_root/<version_slug>/<file name>`. Older `chromium-*` version
+/// directories are removed afterwards. The caller owns (and removes) the generation
+/// directory the archive was downloaded into; `prune_stale_generations` is not used
+/// because it would delete the versioned directory too.
+fn install_from_archive_with(
+    archive: &Path,
+    expected_sha256: &str,
+    lib_member: &str,
+    managed_root: &Path,
+    version_slug: &str,
+    cancel: &AtomicBool,
+    on_phase: &mut dyn FnMut(ToolInstallPhase, &str),
+) -> Result<PathBuf, String> {
+    let member = normalized_archive_member(Path::new(lib_member))
+        .ok_or_else(|| format!("недопустимый путь в архиве: {lib_member}"))?;
+    let file_name = member
+        .file_name()
+        .ok_or_else(|| format!("недопустимый путь в архиве: {lib_member}"))?
+        .to_owned();
+    let mut slug_parts = Path::new(version_slug).components();
+    if !matches!(
+        (slug_parts.next(), slug_parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) {
+        return Err(format!("недопустимая версия PDF-движка: {version_slug}"));
+    }
+    check_cancelled(cancel)?;
+    on_phase(ToolInstallPhase::Verifying, "Проверка контрольной суммы архива");
+    let actual = sha256_file_hex(archive)
+        .map_err(|error| format!("Не удалось прочитать архив PDF-движка: {error}"))?;
+    if !actual.eq_ignore_ascii_case(expected_sha256.trim()) {
+        return Err("архив повреждён или версия не совпадает".to_string());
+    }
+    check_cancelled(cancel)?;
+    on_phase(ToolInstallPhase::Extracting, &format!("Распаковка {lib_member}"));
+    let bytes = read_archive_member(archive, &member, lib_member, cancel)?;
+    check_cancelled(cancel)?;
+    let target = managed_root.join(version_slug).join(file_name);
+    crate::platform::atomic_write(&target, &bytes)
+        .map_err(|error| format!("Не удалось сохранить {}: {error}", target.display()))?;
+    prune_old_pdfium_versions(managed_root, version_slug);
+    Ok(target)
+}
+
+/// Lexical archive path without `.` parts; `None` for `..`, absolute and prefixed paths.
+fn normalized_archive_member(path: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    (!normalized.as_os_str().is_empty()).then_some(normalized)
+}
+
+fn sha256_file_hex(path: &Path) -> io::Result<String> {
+    use io::Read;
+    use sha2::{Digest, Sha256};
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = vec![0u8; 64 * 1024];
+    loop {
+        let read = file.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
+}
+
+/// Reads the single entry `member` of a `.tgz`; nothing else is extracted, so archive
+/// entries with `..` or absolute names can never reach the file system.
+fn read_archive_member(
+    archive: &Path,
+    member: &Path,
+    lib_member: &str,
+    cancel: &AtomicBool,
+) -> Result<Vec<u8>, String> {
+    use io::Read;
+    let read_error = |error: io::Error| format!("Не удалось прочитать архив PDF-движка: {error}");
+    let file = fs::File::open(archive).map_err(read_error)?;
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(io::BufReader::new(file)));
+    for entry in tar.entries().map_err(read_error)? {
+        check_cancelled(cancel)?;
+        let entry = entry.map_err(read_error)?;
+        let matches = entry
+            .path()
+            .ok()
+            .and_then(|path| normalized_archive_member(&path))
+            .is_some_and(|path| path == member);
+        if !matches {
+            continue;
+        }
+        if !entry.header().entry_type().is_file() {
+            return Err(format!("{lib_member} в архиве не является файлом"));
+        }
+        if entry.size() > MAX_PDFIUM_LIB_BYTES {
+            return Err(format!("{lib_member} превышает допустимый размер"));
+        }
+        let mut bytes = Vec::with_capacity(usize::try_from(entry.size()).unwrap_or(0));
+        entry
+            .take(MAX_PDFIUM_LIB_BYTES)
+            .read_to_end(&mut bytes)
+            .map_err(read_error)?;
+        if bytes.is_empty() {
+            return Err(format!("{lib_member} в архиве пуст"));
+        }
+        return Ok(bytes);
+    }
+    Err(format!("в архиве нет {lib_member}"))
+}
+
+/// Best effort: a locked or busy old version stays and is retried on the next install.
+fn prune_old_pdfium_versions(managed_root: &Path, keep_slug: &str) {
+    let Ok(entries) = fs::read_dir(managed_root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(PDFIUM_VERSION_DIR_PREFIX)
+            && name != keep_slug
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+        {
+            let _ = fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
 fn tool_executable_name(kind: ToolKind, platform: PlatformKind) -> &'static str {
     match (kind, platform) {
         (ToolKind::Uv, PlatformKind::Windows) => "uv.exe",
@@ -607,3 +907,231 @@ fn tool_executable_name(kind: ToolKind, platform: PlatformKind) -> &'static str 
     }
 }
 
+
+#[cfg(test)]
+mod pdfium_archive_tests {
+    use super::*;
+
+    struct Fixture {
+        root: PathBuf,
+        archive: PathBuf,
+        sha256: String,
+        managed_root: PathBuf,
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// Raw header names, so `../evil` and absolute names can be stored (the builder API refuses them).
+    fn append_raw(
+        builder: &mut tar::Builder<flate2::write::GzEncoder<Vec<u8>>>,
+        name: &str,
+        kind: tar::EntryType,
+        data: &[u8],
+    ) {
+        let mut header = tar::Header::new_gnu();
+        header.as_old_mut().name[..name.len()].copy_from_slice(name.as_bytes());
+        header.set_entry_type(kind);
+        header.set_size(data.len() as u64);
+        header.set_mode(0o644);
+        header.set_cksum();
+        builder.append(&header, data).unwrap();
+    }
+
+    fn fixture(name: &str) -> Fixture {
+        let root = std::env::temp_dir().join(format!(
+            "rriter-pdfium-archive-{name}-{}",
+            crate::platform::next_operation_id()
+        ));
+        let managed_root = root.join("managed");
+        fs::create_dir_all(managed_root.join("chromium-7000")).unwrap();
+        fs::write(managed_root.join("chromium-7000/libpdfium.so"), b"old").unwrap();
+        fs::create_dir_all(managed_root.join("other")).unwrap();
+        fs::write(managed_root.join("other/keep"), b"keep").unwrap();
+        let mut builder = tar::Builder::new(flate2::write::GzEncoder::new(
+            Vec::new(),
+            flate2::Compression::fast(),
+        ));
+        append_raw(&mut builder, "./lib/libpdfium.so", tar::EntryType::Regular, b"lib");
+        append_raw(&mut builder, "../evil", tar::EntryType::Regular, b"evil");
+        append_raw(&mut builder, "/abs/evil", tar::EntryType::Regular, b"evil");
+        append_raw(&mut builder, "bin/other", tar::EntryType::Regular, b"other");
+        append_raw(&mut builder, "lib/dir", tar::EntryType::Directory, b"");
+        let bytes = builder.into_inner().unwrap().finish().unwrap();
+        let archive = root.join("pdfium.tgz");
+        fs::write(&archive, &bytes).unwrap();
+        let sha256 = sha256_file_hex(&archive).unwrap();
+        Fixture {
+            root,
+            archive,
+            sha256,
+            managed_root,
+        }
+    }
+
+    /// Test-only shorthand: no cancellation, no phase reporting.
+    fn install_from_archive(
+        archive: &Path,
+        expected_sha256: &str,
+        lib_member: &str,
+        managed_root: &Path,
+        version_slug: &str,
+    ) -> Result<PathBuf, String> {
+        install_from_archive_with(
+            archive,
+            expected_sha256,
+            lib_member,
+            managed_root,
+            version_slug,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
+    }
+
+    fn install(fixture: &Fixture, sha256: &str, member: &str) -> Result<PathBuf, String> {
+        install_from_archive(
+            &fixture.archive,
+            sha256,
+            member,
+            &fixture.managed_root,
+            "chromium-8066",
+        )
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn sha256_helper_matches_the_known_vector() {
+        let dir = fixture("vector");
+        let file = dir.root.join("abc");
+        fs::write(&file, b"abc").unwrap();
+        assert_eq!(
+            sha256_file_hex(&file).unwrap(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
+
+    #[test]
+    fn valid_archive_installs_the_library_and_prunes_only_old_versions() {
+        let fixture = fixture("ok");
+        let installed = install(&fixture, &fixture.sha256, "lib/libpdfium.so").unwrap();
+        assert_eq!(installed, fixture.managed_root.join("chromium-8066/libpdfium.so"));
+        assert_eq!(fs::read(&installed).unwrap(), b"lib");
+        assert_eq!(names(&fixture.managed_root), ["chromium-8066", "other"]);
+        assert!(fixture.managed_root.join("other/keep").is_file());
+
+        // A repeated install replaces the existing file atomically.
+        fs::write(&installed, b"stale").unwrap();
+        let upper = fixture.sha256.to_ascii_uppercase();
+        assert_eq!(install(&fixture, &upper, "lib/libpdfium.so").unwrap(), installed);
+        assert_eq!(fs::read(&installed).unwrap(), b"lib");
+        assert_eq!(names(&fixture.managed_root.join("chromium-8066")), ["libpdfium.so"]);
+    }
+
+    #[test]
+    fn wrong_hash_is_rejected_before_anything_is_written() {
+        let fixture = fixture("hash");
+        let wrong = "0".repeat(64);
+        let error = install(&fixture, &wrong, "lib/libpdfium.so").unwrap_err();
+        assert!(error.starts_with("архив повреждён"), "{error}");
+        assert_eq!(names(&fixture.managed_root), ["chromium-7000", "other"]);
+    }
+
+    #[test]
+    fn traversal_and_absolute_members_are_rejected_and_never_extracted() {
+        let fixture = fixture("traversal");
+        for member in ["../evil", "/abs/evil", "lib/../../evil", "", "."] {
+            let error = install(&fixture, &fixture.sha256, member).unwrap_err();
+            assert!(error.contains("недопустимый путь"), "{member}: {error}");
+        }
+        // A valid member next to hostile entries reads only its own entry.
+        install(&fixture, &fixture.sha256, "lib/libpdfium.so").unwrap();
+        assert!(!fixture.root.join("evil").exists());
+        assert!(!Path::new("/abs/evil").exists());
+        assert_eq!(names(&fixture.root), ["managed", "pdfium.tgz"]);
+        assert_eq!(names(&fixture.managed_root), ["chromium-8066", "other"]);
+    }
+
+    #[test]
+    fn missing_or_non_file_member_is_an_error_without_side_effects() {
+        let fixture = fixture("missing");
+        assert_eq!(
+            install(&fixture, &fixture.sha256, "lib/none").unwrap_err(),
+            "в архиве нет lib/none"
+        );
+        let error = install(&fixture, &fixture.sha256, "lib/dir").unwrap_err();
+        assert!(error.contains("не является файлом"), "{error}");
+        assert_eq!(names(&fixture.managed_root), ["chromium-7000", "other"]);
+    }
+
+    #[test]
+    fn invalid_version_slug_is_rejected() {
+        let fixture = fixture("slug");
+        for slug in ["", "..", "a/b", "/abs"] {
+            let error = install_from_archive(
+                &fixture.archive,
+                &fixture.sha256,
+                "lib/libpdfium.so",
+                &fixture.managed_root,
+                slug,
+            )
+            .unwrap_err();
+            assert!(error.contains("недопустимая версия"), "{slug}: {error}");
+        }
+        assert_eq!(names(&fixture.managed_root), ["chromium-7000", "other"]);
+    }
+
+    #[test]
+    fn cancel_before_extraction_leaves_the_managed_directory_untouched() {
+        let fixture = fixture("cancel");
+        let cancel = AtomicBool::new(true);
+        let error = install_from_archive_with(
+            &fixture.archive,
+            &fixture.sha256,
+            "lib/libpdfium.so",
+            &fixture.managed_root,
+            "chromium-8066",
+            &cancel,
+            &mut |_, _| {},
+        )
+        .unwrap_err();
+        assert_eq!(error, INSTALL_CANCELLED_MESSAGE);
+        assert_eq!(names(&fixture.managed_root), ["chromium-7000", "other"]);
+    }
+
+    #[test]
+    fn cancel_between_verify_and_extract_stops_before_the_write() {
+        let fixture = fixture("cancel-mid");
+        let cancel = AtomicBool::new(false);
+        let mut phases = Vec::new();
+        let error = install_from_archive_with(
+            &fixture.archive,
+            &fixture.sha256,
+            "lib/libpdfium.so",
+            &fixture.managed_root,
+            "chromium-8066",
+            &cancel,
+            &mut |phase, _| {
+                phases.push(phase);
+                if phase == ToolInstallPhase::Extracting {
+                    cancel.store(true, Ordering::Release);
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error, INSTALL_CANCELLED_MESSAGE);
+        assert_eq!(phases, [ToolInstallPhase::Verifying, ToolInstallPhase::Extracting]);
+        assert_eq!(names(&fixture.managed_root), ["chromium-7000", "other"]);
+    }
+}

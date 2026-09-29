@@ -108,6 +108,10 @@ impl App {
                     }
                 }
 
+                if let Some(mut renderer) = self.renderer.take() {
+                    self.pdf_prepare_frame(&mut renderer);
+                    self.renderer = Some(renderer);
+                }
                 let ctrl_definition_range = self.ctrl_definition_highlight_range();
                 let python_inlay_hints = if self.python_inlay_hint_path.as_ref()
                     == self.file_path.as_ref()
@@ -166,6 +170,7 @@ impl App {
                     self.readonly_notice_until
                         .is_some_and(|until| std::time::Instant::now() < until),
                     self.inline_git_popup.as_ref(),
+                    &self.pdf_engine,
                 );
 
                 self.target_sticky_lines = target_sticky;
@@ -717,6 +722,15 @@ impl App {
                             winit::window::CursorIcon::Pointer
                         }
                         _ => winit::window::CursorIcon::Default,
+                    }
+                } else if self.active_pdf_tab().is_some() {
+                    // Links register as pointer areas and text lines as text regions; the registry decides.
+                    if wants_pointer {
+                        winit::window::CursorIcon::Pointer
+                    } else if self.ui_registry.wants_text() {
+                        winit::window::CursorIcon::Text
+                    } else {
+                        winit::window::CursorIcon::Default
                     }
                 } else if self.active_tab_is_api_client() {
                     if self.ui_registry.wants_text() {

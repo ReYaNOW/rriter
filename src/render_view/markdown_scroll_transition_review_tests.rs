@@ -582,6 +582,7 @@ pub(crate) mod reviewer_stage2_integration {
             &app.ide_workspaces,
             false,
             None,
+            &app.pdf_engine,
         );
         renderer.flush();
         app.target_sticky_lines = sticky;
@@ -616,6 +617,7 @@ pub(crate) mod reviewer_stage2_integration {
                     Some((&markdown_path, crate::platform::TextEncoding::Utf16Le)),
                     MarkdownMode::Read,
                     None,
+                    None,
                     &mut app.ui_registry,
                     scale,
                     -1.0,
@@ -645,6 +647,7 @@ pub(crate) mod reviewer_stage2_integration {
                     Some((&source_path, crate::platform::TextEncoding::Utf16Le)),
                     MarkdownMode::Read,
                     None,
+                    None,
                     &mut app.ui_registry,
                     scale,
                     -1.0,
@@ -660,6 +663,24 @@ pub(crate) mod reviewer_stage2_integration {
                     None,
                     "ordinary source tabs must not acquire a Markdown toggle"
                 );
+
+                app.ui_registry.clear();
+                renderer.draw_status_bar(
+                    &app.editor,
+                    None,
+                    MarkdownMode::Edit,
+                    Some(true),
+                    None,
+                    &mut app.ui_registry,
+                    scale,
+                    -1.0,
+                    -1.0,
+                    0.0,
+                    None,
+                    None,
+                    None,
+                );
+                assert!(app.ui_registry.rect_for(crate::ui_system::UiId::PdfDarkToggle).is_some());
             }
         }
     }

@@ -182,7 +182,8 @@ impl Renderer {
             crate::app::EditorTabKind::Normal
             | crate::app::EditorTabKind::ApiClient(_, _)
             | crate::app::EditorTabKind::DatabaseTable(_, _)
-            | crate::app::EditorTabKind::DatabaseQuery(_, _) => None,
+            | crate::app::EditorTabKind::DatabaseQuery(_, _)
+            | crate::app::EditorTabKind::Pdf => None,
         });
 
         let editor_clip_x = self.left_padding.round().max(0.0);

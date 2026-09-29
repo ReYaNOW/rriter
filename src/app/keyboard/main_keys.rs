@@ -410,7 +410,7 @@ impl App {
                     _ => {}
                 }
             }
-            if self.handle_database_table_key(&key_event) {
+            if self.handle_database_table_key(&key_event) || self.handle_pdf_key(&key_event) {
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }

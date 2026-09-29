@@ -8,6 +8,19 @@ struct RootFrameChrome {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn tab_body_rect(
+        &self,
+        scale: f32,
+        panel_left_w: f32,
+        tab_bar_h: f32,
+        editor_height: f32,
+    ) -> (f32, f32, f32, f32) {
+        let x = (48.0 * scale + panel_left_w).round() + 1.0;
+        (x, tab_bar_h, (self.width - x).max(0.0), editor_height.max(0.0))
+    }
+}
+
+impl Renderer {
     fn draw_root_api_client_frame(
         &mut self,
         tab_meta: &crate::app::api_client::ApiClientTabMeta,
@@ -114,6 +127,7 @@ impl Renderer {
                 editor,
                 None,
                 markdown.mode,
+                None,
                 lsp,
                 ui_registry,
                 s,
@@ -183,6 +197,70 @@ impl Renderer {
         show_fps: bool,
         blink_alpha: f32,
         tab_scroll_x: f32,
+        wants_pointer: bool,
+    ) -> (bool, Vec<(usize, usize)>) {
+        let s = layout.s;
+        let (tab_x, tab_y, tab_w, tab_h) =
+            self.tab_body_rect(s, layout.panel_left_w, viewport.tab_bar_h, viewport.editor_height);
+        self.draw_database_table_tab(
+            tab_x,
+            tab_y,
+            tab_w,
+            tab_h,
+            s,
+            tab_meta,
+            tab_state,
+            ui_registry,
+            layout.ui_mx,
+            layout.ui_my,
+            blink_alpha,
+        );
+        self.draw_root_tab_frame_chrome(
+            editor,
+            editor_title,
+            editor_path,
+            tabs,
+            active_tab,
+            markdown,
+            None,
+            ide_panel,
+            lsp,
+            ui_registry,
+            ide_workspaces,
+            layout,
+            viewport,
+            active_api_route,
+            has_lsp_diagnostics,
+            show_fps,
+            blink_alpha,
+            tab_scroll_x,
+            wants_pointer,
+        )
+    }
+
+    /// Tab bar, bottom panel, status bar and the frame tail (tab tooltip, FPS, final
+    /// overlays, flush, resize blockers) around a non-editor tab body. Shared by the
+    /// Database table and PDF frames, which draw only their body before calling it.
+    fn draw_root_tab_frame_chrome(
+        &mut self,
+        editor: &Editor,
+        editor_title: &str,
+        editor_path: Option<&std::path::PathBuf>,
+        tabs: &[crate::app::EditorTab],
+        active_tab: usize,
+        markdown: &crate::app::MarkdownTabState,
+        pdf_dark_pages: Option<bool>,
+        ide_panel: &crate::app::IdePanelState,
+        lsp: Option<&crate::lsp::LspManager>,
+        ui_registry: &mut crate::ui_system::UiRegistry,
+        ide_workspaces: &[std::path::PathBuf],
+        layout: RootFramePanelLayout<'_>,
+        viewport: RootFrameViewport,
+        active_api_route: Option<(crate::app::api_client::ApiSpecId, usize)>,
+        has_lsp_diagnostics: bool,
+        show_fps: bool,
+        blink_alpha: f32,
+        tab_scroll_x: f32,
         mut wants_pointer: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         let RootFramePanelLayout {
@@ -207,22 +285,7 @@ impl Renderer {
             editor_height,
             ..
         } = viewport;
-        let gutter_x = 48.0 * s + panel_left_w;
-        let tab_x = gutter_x.round() + 1.0;
-        let tab_w = self.width - tab_x;
-        self.draw_database_table_tab(
-            tab_x,
-            tab_bar_h,
-            tab_w,
-            editor_height,
-            s,
-            tab_meta,
-            tab_state,
-            ui_registry,
-            ui_mx,
-            ui_my,
-            blink_alpha,
-        );
+        let (tab_x, _, tab_w, _) = self.tab_body_rect(s, panel_left_w, tab_bar_h, editor_height);
         let tab_tooltip = self.draw_tab_bar(
             tabs,
             active_tab,
@@ -262,6 +325,7 @@ impl Renderer {
             editor,
             None,
             markdown.mode,
+            pdf_dark_pages,
             lsp,
             ui_registry,
             s,

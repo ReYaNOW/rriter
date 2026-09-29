@@ -331,11 +331,13 @@ impl Renderer {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn draw_status_markdown_right_group(
+    fn draw_status_toggle_right_group(
         &mut self,
         language: &str,
         encoding_label: Option<&str>,
         mode: crate::app::MarkdownMode,
+        toggle_id: crate::ui_system::UiId,
+        override_labels: Option<(&str, &str)>,
         layout: StatusMarkdownLayout,
         ui_registry: &mut crate::ui_system::UiRegistry,
         bar: crate::ui_system::UiClipRect,
@@ -353,7 +355,7 @@ impl Renderer {
         }
         if let Some(rect) = layout.mode_rect {
             let hovered = ui_registry.register_rect_clipped(
-                crate::ui_system::UiId::MarkdownModeToggle,
+                toggle_id,
                 rect.x,
                 rect.y,
                 rect.w,
@@ -377,12 +379,16 @@ impl Renderer {
                 markdown_status_mode_label(mode)
             };
             let mode_scale = 0.82;
+            let visible_label = override_labels
+                .map(|(full, compact)| if layout.compact_mode { compact } else { full })
+                .unwrap_or(visible_label);
             let label_w = self.measure_ui_width(visible_label, mode_scale).round();
             debug_assert!(label_w <= rect.w + 0.5);
             let label_x = (rect.x + (rect.w - label_w) * 0.5).round();
             self.draw_string_scaled(visible_label, label_x, text_y, self.theme.fg, mode_scale);
         }
     }
+
 }
 
 fn project_search_help_content_factor(dialog_h: f32, scale: f32) -> f32 {

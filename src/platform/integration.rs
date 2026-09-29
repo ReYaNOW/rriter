@@ -8,6 +8,7 @@ pub enum ManagedToolInstallPlan {
     UvBootstrap,
     UvPackage(&'static str),
     DartSdkArchive,
+    PdfiumArchive,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -19,6 +20,9 @@ pub enum ToolKind {
     Python,
     Shell,
     Dart,
+    /// PDF engine library. Installed by `tool_installer` but deliberately absent from
+    /// `ALL`: it has no settings row, no config path and no resolution cache slot.
+    Pdfium,
 }
 
 impl ToolKind {
@@ -41,6 +45,8 @@ impl ToolKind {
             Self::Python => 4,
             Self::Shell => 5,
             Self::Dart => 6,
+            // Outside `ALL`; `ToolPaths` and the resolution cache ignore this index.
+            Self::Pdfium => ToolKind::ALL.len(),
         }
     }
 
@@ -66,6 +72,7 @@ impl ToolKind {
             Self::Python => "Python",
             Self::Shell => "Терминал",
             Self::Dart => "Dart SDK",
+            Self::Pdfium => "PDF-движок",
         }
     }
 
@@ -78,6 +85,7 @@ impl ToolKind {
             Self::Python => "python",
             Self::Shell => "shell",
             Self::Dart => "dart",
+            Self::Pdfium => "pdfium",
         }
     }
 
@@ -90,6 +98,7 @@ impl ToolKind {
             Self::Python => "RRITER_PYTHON_PATH",
             Self::Shell => "RRITER_SHELL",
             Self::Dart => "RRITER_DART_PATH",
+            Self::Pdfium => "RRITER_PDFIUM_PATH",
         }
     }
 
@@ -99,6 +108,8 @@ impl ToolKind {
             Self::Ruff => Some(ManagedToolInstallPlan::UvPackage("ruff")),
             Self::Ty => Some(ManagedToolInstallPlan::UvPackage("ty")),
             Self::Dart => Some(ManagedToolInstallPlan::DartSdkArchive),
+            // Archive download with a pinned hash, not a uv package; see `start_pdfium_install`.
+            Self::Pdfium => Some(ManagedToolInstallPlan::PdfiumArchive),
             Self::Git | Self::Python | Self::Shell => None,
         }
     }
@@ -125,11 +136,13 @@ pub struct ToolPaths {
 
 impl ToolPaths {
     pub fn get(&self, kind: ToolKind) -> Option<&Path> {
-        self.paths[kind.index()].as_deref()
+        self.paths.get(kind.index()).and_then(Option::as_deref)
     }
 
     pub fn set(&mut self, kind: ToolKind, path: Option<PathBuf>) {
-        self.paths[kind.index()] = path.filter(|path| !path.as_os_str().is_empty());
+        if let Some(slot) = self.paths.get_mut(kind.index()) {
+            *slot = path.filter(|path| !path.as_os_str().is_empty());
+        }
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (ToolKind, Option<&Path>)> {
@@ -234,18 +247,29 @@ pub(crate) fn configured_tool_path_for_env(override_env: &str) -> Option<PathBuf
 
 pub fn resolve_tool_kind(kind: ToolKind) -> ToolResolution {
     if let Ok(cache) = TOOL_RESOLUTION_CACHE.read()
-        && let Some(resolution) = cache[kind.index()].as_ref()
+        && let Some(resolution) = cache.get(kind.index()).and_then(Option::as_ref)
     {
         return resolution.clone();
     }
     let resolution = resolve_tool_kind_uncached(kind);
-    if let Ok(mut cache) = TOOL_RESOLUTION_CACHE.write() {
-        cache[kind.index()] = Some(resolution.clone());
+    if let Ok(mut cache) = TOOL_RESOLUTION_CACHE.write()
+        && let Some(slot) = cache.get_mut(kind.index())
+    {
+        *slot = Some(resolution.clone());
     }
     resolution
 }
 
 fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
+    if kind == ToolKind::Pdfium {
+        // The PDF engine is located by `pdf::library::locate`, never through tool settings.
+        return ToolResolution {
+            path: None,
+            configured_path: None,
+            source: None,
+            sdk_root: None,
+        };
+    }
     if kind == ToolKind::Dart {
         return resolve_dart_uncached();
     }
@@ -277,7 +301,7 @@ fn resolve_tool_kind_uncached(kind: ToolKind) -> ToolResolution {
         (ToolKind::Shell, PlatformKind::Windows) => &["pwsh.exe", "powershell.exe", "cmd.exe"],
         (ToolKind::Shell, PlatformKind::Macos) => &["/bin/zsh", "/bin/bash", "/bin/sh"],
         (ToolKind::Shell, _) => &["/bin/bash", "/bin/sh"],
-        (ToolKind::Dart, _) => &[],
+        (ToolKind::Dart | ToolKind::Pdfium, _) => &[],
     };
     let path = candidates
         .iter()

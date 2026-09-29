@@ -1330,6 +1330,10 @@ impl App {
         if self.try_markdown_code_wheel(hovered, mx, my, dx, dy, shift) {
             return;
         }
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf()) {
+            self.handle_pdf_wheel(dy);
+            return;
+        }
         let read_scroll_bounds = self.markdown.read_scroll_bounds();
         let allow_stale_editor_surface = self
             .markdown

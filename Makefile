@@ -23,7 +23,7 @@ TEST ?=
 TEST_THREADS ?= 8
 BUILD_STD_TEST = $(BUILD_STD)
 
-.PHONY: all fast max bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean
+.PHONY: all fast max bloat-max codex_test lint-baseline test test-one test-list test-hunt test-time scroll-bench pgo-bench-tools pgo-bench-self-test pgo-bench-build pgo-bench-run pgo-bench pgo-gen pgo-run pgo-merge pgo-max pgo-auto pgo-gen-fast pgo-script pgo-train pgo-use pgo-clean pgo clean pdfium
 
 all: max
 
@@ -74,9 +74,9 @@ bloat-max:
 	--crates \
 	-n 40
 
-codex_test:
+codex_test: pdfium
 	@python3 scripts/lint_changed.py
-	@$(CODEX_ENV) $(MAKE) test
+	@$(CODEX_ENV) $(MAKE) test PDFIUM_READY=1
 	@$(CODEX_ENV) $(MAKE) fast
 
 lint-baseline:
@@ -87,8 +87,9 @@ lint-baseline:
 # RUST_BACKTRACE=full для детального отчета при ошибках.
 # --nocapture показывает stdout/stderr тестов сразу.
 # --test-threads=1 делает вывод последовательным, чтобы было видно, где зависло.
-test:
+test: $(if $(PDFIUM_READY),,pdfium)
 	@echo "🧪 Запуск тестов (на базе FAST профиля, подробный режим)..."
+	RRITER_PDFIUM_PATH=$$(cat target/pdfium.path) \
 	$(FAST_PROFILE_OPTS) \
 	CARGO_TERM_COLOR=always \
 	RUSTFLAGS="$(COMMON_RUSTFLAGS)" \
@@ -104,6 +105,10 @@ test:
 	--nocapture \
 	--test-threads=$(TEST_THREADS)
 	@echo "✅ Тесты завершены"
+
+pdfium:
+	mkdir -p target
+	python3 scripts/fetch_pdfium.py > target/pdfium.path
 
 test-cov:
 	cargo +nightly llvm-cov --summary-only

@@ -242,6 +242,13 @@ pub enum UiId {
     DatabaseRow(usize, usize),
     DatabaseArrow(usize, usize),
     DatabaseTableRow(usize, usize, usize),
+    PdfPage(usize),
+    /// Whole PDF tab body; absorbs presses in margins and gaps and keeps the default cursor.
+    PdfBody,
+    /// One text line of a visible PDF page (I-beam cursor, start of a text selection).
+    PdfText,
+    /// Link `(page, index in the page's links)` of a visible PDF page.
+    PdfLink(usize, usize),
     DatabaseContextItem(usize),
     DatabaseDialogBackdrop,
     DatabaseDialogBody,
@@ -450,6 +457,12 @@ pub enum UiId {
     StatusBar,
     StatusDiagnostics,
     MarkdownModeToggle,
+    PdfDarkToggle,
+    PdfScrollY,
+    /// "Download the PDF engine" / "Retry" button of the engine-missing screen.
+    PdfEngineInstall,
+    /// "Cancel" button of the engine download.
+    PdfEngineCancel,
     TerminalBody,
     TerminalScrollY,
     TerminalTab(usize),

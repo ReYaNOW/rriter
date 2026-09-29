@@ -1307,6 +1307,7 @@ fn database_tab(
         base_title: title,
         file_extension: extension.to_string(),
         markdown: Default::default(),
+        pdf: None,
         scroll_y: ScrollState::new(15.0),
         scroll_x: ScrollState::new(15.0),
         spans: Vec::new(),

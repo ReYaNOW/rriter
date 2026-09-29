@@ -71,6 +71,10 @@ impl App {
         state: ElementState,
     ) -> bool {
         if state == ElementState::Released {
+            let (mx, my) = self.renderer.as_ref().map_or((0.0, 0.0), |renderer| (renderer.last_mouse_x, renderer.last_mouse_y));
+            if self.finish_pdf_drag(mx, my) {
+                return true;
+            }
             self.finish_database_table_drag();
         }
         if state == ElementState::Released && self.autocomplete_detail_selecting {

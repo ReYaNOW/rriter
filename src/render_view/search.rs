@@ -40,6 +40,14 @@ pub(crate) fn search_panel_scrollbar_x(
     }
 }
 
+/// `k/n` for a non-empty result set, with a trailing `+` while more results may still arrive
+/// (a PDF search streams matches page by page); nothing when there are no results.
+pub(crate) fn format_search_counter(out: &mut String, current: Option<usize>, count: usize, pending: bool) {
+    if count == 0 { return; }
+    use std::fmt::Write;
+    let _ = write!(out, "{}/{}{}", current.unwrap_or(0) + 1, count, if pending { "+" } else { "" });
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
     #[allow(clippy::too_many_arguments)]
@@ -50,7 +58,8 @@ impl Renderer {
         search_editor: &Editor,
         search_focused: bool,
         search_case_sensitive: bool,
-        search_results: &[(usize, usize)],
+        search_count: usize,
+        search_pending: bool,
         search_current_idx: Option<usize>,
         blink_alpha: f32,
         scrollbar_x: f32,
@@ -199,30 +208,26 @@ impl Renderer {
             })
         } else { None };
 
-        if search_results.len() != self.last_search_len
+        if search_count != self.last_search_len
             || search_current_idx != self.last_search_idx
+            || search_pending != self.last_search_pending
         {
             self.search_res_string.clear();
-            if !search_results.is_empty() {
-                use std::fmt::Write;
-                let _ = write!(
-                    &mut self.search_res_string,
-                    "{}/{}",
-                    search_current_idx.unwrap_or(0) + 1,
-                    search_results.len()
-                );
-            }
-            self.last_search_len = search_results.len();
+            format_search_counter(&mut self.search_res_string, search_current_idx, search_count, search_pending);
+            self.last_search_len = search_count;
             self.last_search_idx = search_current_idx;
+            self.last_search_pending = search_pending;
         }
 
         let temp_res_text = std::mem::take(&mut self.search_res_string);
 
         let (res_text, text_color) = if !show_search {
             ("", [0.6, 0.6, 0.6, 1.0])
-        } else if search_results.is_empty() {
+        } else if search_count == 0 {
             if search_editor.get_full_text().is_empty() {
                 ("", [0.6, 0.6, 0.6, 1.0])
+            } else if search_pending {
+                ("...", [0.6, 0.6, 0.6, 1.0])
             } else {
                 ("Нет", [0.95, 0.35, 0.45, 1.0])
             }
@@ -272,6 +277,19 @@ impl Renderer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn search_counter_shows_plus_while_results_are_still_streaming() {
+        let counter = |current, count, pending| {
+            let mut out = String::new();
+            format_search_counter(&mut out, current, count, pending);
+            out
+        };
+        assert_eq!(counter(Some(1), 5, false), "2/5");
+        assert_eq!(counter(Some(1), 5, true), "2/5+");
+        assert_eq!(counter(None, 3, true), "1/3+");
+        assert_eq!(counter(None, 0, true), "");
+    }
 
     #[test]
     fn search_panel_scrollbar_x_uses_reader_scrollbar_edge_in_markdown_read() {

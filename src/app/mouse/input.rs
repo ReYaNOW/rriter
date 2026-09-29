@@ -212,7 +212,7 @@ pub(crate) fn stop_click_scroll_anims(app: &mut App, preserve_main_vertical: boo
                 stop_scroll_anim(&mut state.result_view.scroll_y);
                 stop_scroll_anim(&mut state.result_view.review_message_scroll_y);
             }
-            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) => {}
+            crate::app::EditorTabKind::Normal | crate::app::EditorTabKind::GitDiff(_, _) | crate::app::EditorTabKind::Pdf => {}
         }
     }
 
@@ -301,6 +301,8 @@ impl App {
     pub(crate) fn cancel_pointer_interactions(&mut self) {
         self.finish_database_table_drag();
         self.finish_markdown_read_selection_gesture();
+        // A release lost to focus loss or a tab switch must not leave a PDF press that swallows later moves.
+        for pdf in self.tabs.iter_mut().filter_map(|tab| tab.pdf.as_deref_mut()) { pdf.cancel_press(); }
         self.is_dragging = false;
         self.is_editor_drag_pending = false;
         self.is_dragging_search = false;
@@ -330,6 +332,7 @@ impl App {
         self.ide_panel.database.table_modal_input_dragging = false;
 
         self.scroll_y.end_drag();
+        if let Some(pdf) = self.active_pdf_tab_mut() { pdf.scroll.end_drag(); }
         self.markdown.end_code_scroll_drag();
         self.scroll_x.end_drag();
         self.settings_scroll.end_drag();
