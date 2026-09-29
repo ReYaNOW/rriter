@@ -364,7 +364,7 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),
     });
-    // Single exit commit point (Quit, window close and `exiting` all pass here): stores the PDF read position.
+    // Single exit commit point (native: `ApplicationHandler::exiting`, headless: `save_state_and_exit`): stores the PDF read position.
     app.save_tabs_state();
     if app.is_ide_mode {
         app.ide_panel.api.persist();
@@ -375,7 +375,12 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
 
 #[cfg_attr(coverage_nightly, coverage(off))]
 pub(super) fn save_state_and_exit(app: &mut App, event_loop: &super::host_loop::HostLoop) {
-    persist_state_and_shutdown(app);
+    // The native loop calls `ApplicationHandler::exiting` after `exit()`, and that path
+    // persists; doing it here as well would write the state and shut services down twice.
+    // The headless loop has no `exiting`, so it persists here.
+    if matches!(event_loop, super::host_loop::HostLoop::Headless(_)) {
+        persist_state_and_shutdown(app);
+    }
     event_loop.exit();
 }
 

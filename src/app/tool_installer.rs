@@ -23,7 +23,14 @@ const INSTALL_LOG_LIMIT: usize = 4096;
 const INSTALL_LOG_BYTES_LIMIT: usize = 1024 * 1024;
 const INSTALL_LINE_BYTES_LIMIT: usize = 16 * 1024;
 const INSTALL_CANCELLED_MESSAGE: &str = "Установка отменена";
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+// Downloads are bounded by inactivity, not by total time: a slow but steady link must
+// finish. `DOWNLOAD_TOTAL_LIMIT` is only a hard ceiling for a link that trickles forever.
+const DOWNLOAD_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+const DOWNLOAD_TOTAL_LIMIT: Duration = Duration::from_secs(60 * 60);
+// An operation directory this old cannot belong to a running install (see `DOWNLOAD_TOTAL_LIMIT`).
+const STALE_OP_DIR_MIN_AGE: Duration = Duration::from_secs(2 * 60 * 60);
+const MAX_STALE_OP_DIRS_PER_RUN: usize = 32;
 const UV_INSTALL_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const TOOL_INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const TOOL_VALIDATE_TIMEOUT: Duration = Duration::from_secs(30);

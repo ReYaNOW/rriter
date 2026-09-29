@@ -532,7 +532,10 @@ impl App {
             };
         }
         // A PDF tab keeps an empty hidden editor; writing it would replace the document with nothing.
+        // Report it like every other failed save (`file_tree_error`), otherwise Ctrl+S is silent.
         if self.active_pdf_tab().is_some() {
+            self.ide_panel.file_tree_error =
+                Some("PDF нельзя сохранить: документ открыт только для просмотра".to_string());
             return SaveOutcome::Failed;
         }
         let Some(path) = self.file_path.clone() else {

@@ -902,3 +902,118 @@ fn pdf_engine_install_finishes_map_to_engine_states() {
         PdfEngineState::Starting
     ));
 }
+
+fn block_on_test<F: std::future::Future>(future: F) -> F::Output {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap()
+        .block_on(future)
+}
+
+#[test]
+fn download_watchdog_lets_a_slow_but_steady_transfer_finish() {
+    // Each step is far below the stall limit even though the sum exceeds it.
+    let watchdog = DownloadWatchdog::new(Duration::from_millis(200), Duration::from_secs(60));
+    let steps = block_on_test(async {
+        let mut steps = 0;
+        for _ in 0..6 {
+            watchdog
+                .step(tokio::time::sleep(Duration::from_millis(60)))
+                .await
+                .unwrap();
+            steps += 1;
+        }
+        steps
+    });
+    assert_eq!(steps, 6);
+}
+
+#[test]
+fn download_watchdog_fails_a_stalled_step() {
+    let watchdog = DownloadWatchdog::new(Duration::from_millis(50), Duration::from_secs(60));
+    let started = Instant::now();
+    let error = block_on_test(watchdog.step(std::future::pending::<()>())).unwrap_err();
+    assert!(error.contains("нет данных"), "{error}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn download_watchdog_enforces_the_total_ceiling() {
+    let watchdog = DownloadWatchdog::new(Duration::from_secs(60), Duration::from_millis(50));
+    let error = block_on_test(watchdog.step(std::future::pending::<()>())).unwrap_err();
+    assert!(error.contains("предельное время"), "{error}");
+    std::thread::sleep(Duration::from_millis(60));
+    let error = block_on_test(watchdog.step(async {})).unwrap_err();
+    assert!(error.contains("предельное время"), "{error}");
+}
+
+#[test]
+fn download_timeouts_are_bounded_and_not_a_whole_request_cap() {
+    assert!(DOWNLOAD_STALL_TIMEOUT >= Duration::from_secs(10));
+    assert!(DOWNLOAD_STALL_TIMEOUT < DOWNLOAD_TOTAL_LIMIT);
+    // 64 MiB at the total ceiling must still be possible on a slow (< 31 KB/s) link.
+    assert!(DOWNLOAD_TOTAL_LIMIT >= Duration::from_secs(30 * 60));
+    assert!(STALE_OP_DIR_MIN_AGE > DOWNLOAD_TOTAL_LIMIT);
+}
+
+#[test]
+fn operation_dir_names_match_only_pid_counter_ids() {
+    assert!(is_operation_dir_name(&crate::platform::next_operation_id()));
+    assert!(is_operation_dir_name("123-4"));
+    for name in ["chromium-8066", "123", "123-", "-4", "1-2-3", "a-1", "", "other"] {
+        assert!(!is_operation_dir_name(name), "{name}");
+    }
+}
+
+#[test]
+fn stale_pdfium_ops_are_removed_and_everything_else_is_kept() {
+    let (data, _cache) = test_roots("stale-pdfium");
+    let managed = data.join("tools").join("managed").join("pdfium");
+    let keep = managed.join("900-1");
+    for stale in ["100-1", "100-2"] {
+        fs::create_dir_all(managed.join(stale)).unwrap();
+        fs::write(managed.join(stale).join("archive.tgz"), b"partial").unwrap();
+    }
+    fs::create_dir_all(&keep).unwrap();
+    fs::create_dir_all(managed.join("chromium-8066")).unwrap();
+    fs::write(managed.join("chromium-8066").join("libpdfium.so"), b"lib").unwrap();
+    fs::create_dir_all(managed.join("unrelated")).unwrap();
+    fs::write(managed.join("100-3"), b"a file, not a directory").unwrap();
+
+    // Fresh directories stay: they may belong to a concurrent install.
+    assert_eq!(
+        prune_stale_pdfium_ops(&managed, &keep, Duration::from_secs(3600), 32),
+        (0, 0)
+    );
+    assert!(managed.join("100-1").exists());
+
+    assert_eq!(prune_stale_pdfium_ops(&managed, &keep, Duration::ZERO, 32), (2, 0));
+    assert!(!managed.join("100-1").exists());
+    assert!(!managed.join("100-2").exists());
+    assert!(keep.exists(), "the running install's own directory stays");
+    assert!(managed.join("chromium-8066").join("libpdfium.so").exists());
+    assert!(managed.join("unrelated").exists());
+    assert!(managed.join("100-3").is_file());
+    let _ = fs::remove_dir_all(data.parent().unwrap());
+}
+
+#[test]
+fn stale_pdfium_op_cleanup_is_bounded_and_tolerates_a_missing_root() {
+    let (data, _cache) = test_roots("stale-pdfium-limit");
+    let managed = data.join("pdfium");
+    assert_eq!(
+        prune_stale_pdfium_ops(&managed, &managed.join("keep"), Duration::ZERO, 32),
+        (0, 0)
+    );
+    for index in 0..5 {
+        fs::create_dir_all(managed.join(format!("200-{index}"))).unwrap();
+    }
+    assert_eq!(
+        prune_stale_pdfium_ops(&managed, &managed.join("keep"), Duration::ZERO, 3),
+        (3, 0)
+    );
+    let left = fs::read_dir(&managed).unwrap().count();
+    assert_eq!(left, 2);
+    let _ = fs::remove_dir_all(data.parent().unwrap());
+}

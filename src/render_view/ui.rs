@@ -540,17 +540,30 @@ impl Renderer {
     ) -> Option<IconAtlasEntry> {
         use crate::app::file_tree::RasterizedIconState;
 
-        match self.rasterized_file_icons.remove(key) {
-            Some(RasterizedIconState::Ready(data)) => {
-                let entry = self.upload_icon_rgba(64, 64, &data)?;
-                self.file_icon_cache.insert(key, entry);
-                Some(entry)
+        // The file-tree scan only rasterizes keys of nodes it lists. A tab of a file outside
+        // the workspace (or in a collapsed folder) asks for a key nobody rasterized, so
+        // rasterize it here, once. `Missing` stays in the map as a negative cache, otherwise
+        // an absent asset would be re-rasterized every frame.
+        if !self.rasterized_file_icons.contains_key(key) {
+            let mut state = crate::app::file_tree::pre_rasterize_icon(key, false);
+            if matches!(state, RasterizedIconState::Missing) {
+                // Callers pass an unreliable `is_folder`; folder-only keys live in another set.
+                state = crate::app::file_tree::pre_rasterize_icon(key, true);
             }
-            Some(RasterizedIconState::Missing) => {
-                None
-            }
-            None => None,
+            self.rasterized_file_icons.insert(key, state);
         }
+        if !matches!(
+            self.rasterized_file_icons.get(key),
+            Some(RasterizedIconState::Ready(_))
+        ) {
+            return None;
+        }
+        let Some(RasterizedIconState::Ready(data)) = self.rasterized_file_icons.remove(key) else {
+            return None;
+        };
+        let entry = self.upload_icon_rgba(64, 64, &data)?;
+        self.file_icon_cache.insert(key, entry);
+        Some(entry)
     }
 
     /// Рисует SVG-иконку из кэша file_icon_cache.
