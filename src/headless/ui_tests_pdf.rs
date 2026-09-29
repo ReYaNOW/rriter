@@ -37,20 +37,25 @@ fn pdf_fixture_opens_and_draws_visible_page_placeholders() {
 }
 
 #[test]
-fn invalid_pdf_files_show_errors_and_keep_the_session_alive() {
-    for (name, make_file) in [
-        ("ui-pdf-garbage", crate::pdf::fixture::write_garbage as fn(&Path) -> PathBuf),
-        ("ui-pdf-empty", crate::pdf::fixture::write_empty as fn(&Path) -> PathBuf),
-    ] {
-        let dir = scratch_dir(name);
-        let path = make_file(&dir);
-        let mut session = session_for_test(1280, 720);
-        let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
-        assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
-        wait_until(&mut session, 5000, "invalid PDF error", |session| dump(session)["tabs"][0]["pdf"]["phase"] == "error");
-        let lines = run_script(&mut session, b"mouse_move 0 0\n");
-        assert_eq!(lines, ["ok"]);
-    }
+fn garbage_pdf_shows_error_and_keeps_the_session_alive() {
+    assert_invalid_pdf_shows_error("ui-pdf-garbage", crate::pdf::fixture::write_garbage);
+}
+
+#[test]
+fn empty_pdf_shows_error_and_keeps_the_session_alive() {
+    assert_invalid_pdf_shows_error("ui-pdf-empty", crate::pdf::fixture::write_empty);
+}
+
+// One session per test: pdfium binds once per process and the engine never restarts (spec §4.3).
+fn assert_invalid_pdf_shows_error(name: &str, make_file: fn(&Path) -> PathBuf) {
+    let dir = scratch_dir(name);
+    let path = make_file(&dir);
+    let mut session = session_for_test(1280, 720);
+    let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    wait_until(&mut session, 5000, "invalid PDF error", |session| dump(session)["tabs"][0]["pdf"]["phase"] == "error");
+    let lines = run_script(&mut session, b"mouse_move 0 0\n");
+    assert_eq!(lines, ["ok"]);
 }
 
 #[test]
