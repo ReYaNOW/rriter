@@ -18,17 +18,41 @@ pub enum PdfEngineState {
     NotStarted,
     Starting,
     Ready,
+    /// The library is simply not installed yet: the screen offers "download" (not "retry").
+    NotInstalled,
+    /// The library cannot be used; `installable` tells whether a download can fix it.
+    /// The screen offers "retry" for an installable one.
     Missing { message: String, installable: bool },
     Failed(String),
-    /// Engine download in progress. `prev` is the `Missing` message restored on cancel;
+    /// Engine download in progress. `prev` is the `Missing` message restored on cancel
+    /// (empty when the download started from `NotInstalled`, which is restored instead);
     /// `progress` is the last installer log line shown under the headline.
     Installing { prev: String, progress: String },
+}
+
+/// Where the engine library path comes from. Tests inject a value instead of the process environment.
+#[derive(Clone, Debug, Default)]
+pub enum PdfLibrarySource {
+    /// Read `RRITER_PDFIUM_PATH` and the standard locations.
+    #[default]
+    ProcessEnv,
+    /// Behave as if `RRITER_PDFIUM_PATH` had this value (`None`: unset).
+    EnvValue(Option<std::ffi::OsString>),
+}
+
+/// What the status bar shows for the active PDF tab: the page-toggle state and the page label slot.
+#[derive(Clone, Copy, Debug)]
+pub struct PdfStatus {
+    pub dark: bool,
+    /// (current 1-based page, page count); `None` until the document is ready.
+    pub page: Option<(usize, usize)>,
 }
 
 impl PdfEngineState {
     /// Status-screen text for the engine; only `Failed` allocates.
     pub fn label(&self) -> std::borrow::Cow<'_, str> {
         match self {
+            Self::NotInstalled => std::borrow::Cow::Borrowed(crate::pdf::library::NOT_FOUND_MESSAGE),
             Self::Missing { message, .. } => std::borrow::Cow::Borrowed(message.as_str()),
             Self::Failed(message) => std::borrow::Cow::Owned(format!("движок PDF остановлен: {message}. Перезапустите RRiter")),
             Self::Installing { .. } => std::borrow::Cow::Borrowed("Установка движка PDF…"),
@@ -139,9 +163,9 @@ pub struct PdfTabState {
     pub pending_copy: Option<PdfSelection>,
     pub restore: Option<(usize, f32)>,
     pub hover_link: Option<(usize, usize)>,
-    pub dark: bool,
     pub viewport: (u32, u32),
-    pub line_rects_buf: Vec<PtRect>,
+    /// Reusable highlight-rectangle buffer of `draw_root_pdf_frame` (taken and put back each frame).
+    pub line_rects_buf: std::cell::Cell<Vec<PtRect>>,
     pub line_boxes: Vec<Option<Vec<PtRect>>>,
     /// Tab body rectangle of the last prepared frame; maps window points to pages.
     pub body: (f32, f32, f32, f32),
@@ -149,7 +173,8 @@ pub struct PdfTabState {
     pub press: Option<PdfPress>,
     pub(crate) layout_scale: f32,
     pub(crate) layout_dirty: bool,
-    pub(crate) status_label: String,
+    /// (1-based current page, page count) shown in the status bar; written only by `set_viewport`.
+    pub(crate) status_page: Option<(usize, usize)>,
 }
 
 impl PdfTabState {
@@ -158,7 +183,7 @@ impl PdfTabState {
             scroll: ScrollState::new(15.0), textures: HashMap::new(), pending_bitmaps: Vec::new(),
             requested: HashSet::new(), text: Vec::new(), links: Vec::new(), text_requested: Vec::new(),
             search: PdfSearch::default(), selection: None, pending_copy: None, restore: None,
-            hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
+            hover_link: None, viewport: (0, 0), line_rects_buf: std::cell::Cell::new(Vec::new()), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, layout_scale: 1.0, layout_dirty: true, status_page: None }
     }
 
     /// Applies an owned event; a `Page` bitmap is moved into `pending_bitmaps` without a copy.
@@ -249,13 +274,10 @@ impl PdfTabState {
         self.clamp_scroll();
         let wanted = self.wanted_range();
         if wanted.is_empty() { self.gens.clear_wanted(); } else { self.gens.set_wanted(wanted.start, wanted.end - 1); }
-        if matches!(self.phase, PdfPhase::Ready) {
-            let (page, _) = self.anchor();
-            self.status_label = format!("стр. {} / {}", page + 1, self.page_count());
-        } else {
-            self.status_label.clear();
-        }
+        self.status_page = matches!(self.phase, PdfPhase::Ready).then(|| (self.anchor().0 + 1, self.page_count()));
     }
+
+    pub fn status_page(&self) -> Option<(usize, usize)> { self.status_page }
 
     pub fn bump_render_gen(&self) {
         self.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -294,7 +316,6 @@ impl PdfTabState {
     }
     pub fn take_render_requests(&mut self, dark: bool) -> Vec<PdfRequest> {
         let Some(id) = self.doc else { return Vec::new() };
-        self.dark = dark;
         let r#gen = self.gens.render.load(std::sync::atomic::Ordering::Relaxed);
         let wanted = self.wanted_range();
         let mut requests = Vec::new();

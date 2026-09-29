@@ -10,8 +10,41 @@ pub(crate) fn intersect_scissor_boxes(first: [i32; 4], second: [i32; 4]) -> [i32
     [left, bottom, (right - left).max(0), (top - bottom).max(0)]
 }
 
+const PDF_PAGE_LABEL_SCALE: f32 = 0.82;
+
+/// Offsets (from the label's left edge) of the parts of the PDF status label "стр. N / M".
+/// The digits are monospaced and N sits right-aligned in a field as wide as M, so none of
+/// these values depends on N except `number_dx`, which only right-aligns it inside that field.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PdfPageLabelLayout {
+    pub number_dx: f32,
+    pub separator_dx: f32,
+    pub count_dx: f32,
+    pub width: f32,
+}
+
+fn decimal_digits(value: usize) -> usize {
+    value.checked_ilog10().map_or(1, |log| log as usize + 1)
+}
+
 #[cfg_attr(coverage_nightly, coverage(off))]
 impl Renderer {
+    pub(crate) fn pdf_page_label_layout(&mut self, page: usize, count: usize) -> PdfPageLabelLayout {
+        let digit_w = self.measure_mono_width("0", PDF_PAGE_LABEL_SCALE);
+        let prefix_w = self.measure_ui_width("стр. ", PDF_PAGE_LABEL_SCALE).round();
+        let separator_w = self.measure_ui_width(" / ", PDF_PAGE_LABEL_SCALE).round();
+        let field_digits = decimal_digits(count);
+        let field_w = digit_w * field_digits as f32;
+        let padding = field_digits.saturating_sub(decimal_digits(page));
+        let separator_dx = prefix_w + field_w;
+        PdfPageLabelLayout {
+            number_dx: prefix_w + digit_w * padding as f32,
+            separator_dx,
+            count_dx: separator_dx + separator_w,
+            width: (separator_dx + separator_w + field_w).round(),
+        }
+    }
+
     pub(crate) fn one_line_ui_advance(&mut self, ch: char, text_scale: f32) -> f32 {
         self.get_ui_glyph(ch)
             .map(|glyph| Self::snapped_text_advance(glyph.advance, text_scale))
@@ -194,7 +227,7 @@ impl Renderer {
         editor: &crate::editor::Editor,
         editor_file: Option<(&std::path::PathBuf, crate::platform::TextEncoding)>,
         markdown_mode: crate::app::MarkdownMode,
-        pdf_dark_pages: Option<bool>,
+        pdf_status: Option<crate::app::pdf_tab::PdfStatus>,
         lsp: Option<&crate::lsp::LspManager>,
         ui_registry: &mut crate::ui_system::UiRegistry,
         s: f32,
@@ -289,10 +322,11 @@ impl Renderer {
                     .round()
                 + self.measure_ui_width(" выделено)", text_scale).round()
         });
-        let pdf_status_labels = pdf_dark_pages.map(|dark| (
-            if dark { "Тёмные страницы: вкл" } else { "Тёмные страницы: выкл" },
-            if dark { "Тёмные: вкл" } else { "Тёмные: выкл" },
+        let pdf_status_labels = pdf_status.map(|status| (
+            if status.dark { "Тёмные страницы: вкл" } else { "Тёмные страницы: выкл" },
+            if status.dark { "Тёмные: вкл" } else { "Тёмные: выкл" },
         ));
+        let pdf_page = pdf_status.and_then(|status| status.page);
         let markdown_layout = if let Some((full_label, compact_label)) = pdf_status_labels {
             Some(status_markdown_layout(
                 bar_rect,
@@ -446,6 +480,29 @@ impl Renderer {
                 true,
                 Some(raw_line_x),
             )
+        };
+        // The PDF page label is a plain status item (no track); real progress, if any, sits left of it.
+        let progress_anchor_x = match (pdf_page, progress_anchor_x) {
+            (Some((page, count)), Some(anchor_x)) => {
+                let label = self.pdf_page_label_layout(page, count);
+                let label_x = (anchor_x - 18.0 * s - label.width).round();
+                if label_x > left_status_limit + 8.0 * s {
+                    let color = [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], 0.72];
+                    let label_y = text_y.round();
+                    self.draw_string_scaled("стр. ", label_x, label_y, color, PDF_PAGE_LABEL_SCALE);
+                    scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{page}"));
+                    self.draw_string_mono_scaled(&scratch, label_x + label.number_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
+                    self.draw_string_scaled(" / ", (label_x + label.separator_dx).round(), label_y, color, PDF_PAGE_LABEL_SCALE);
+                    scratch.clear();
+                    let _ = std::fmt::Write::write_fmt(&mut scratch, format_args!("{count}"));
+                    self.draw_string_mono_scaled(&scratch, label_x + label.count_dx, label_y, color, PDF_PAGE_LABEL_SCALE);
+                    Some(label_x)
+                } else {
+                    Some(anchor_x)
+                }
+            }
+            (_, anchor_x) => anchor_x,
         };
         if let Some(label) = progress_label {
             let label_w = self.measure_ui_width(label, 0.82).round();

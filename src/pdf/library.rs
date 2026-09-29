@@ -101,11 +101,14 @@ pub fn managed_path() -> Option<PathBuf> {
     Some(managed_dir().join(lib_name(&entry)))
 }
 
-/// `Missing` message of an engine that is simply not installed (as opposed to an install failure).
+/// Text of an engine that is simply not installed (as opposed to an install failure).
 pub const NOT_FOUND_MESSAGE: &str = "библиотека PDF-движка не найдена";
 
 pub enum LocateResult {
     Found(PathBuf),
+    /// Supported platform, library absent from every candidate location: it can be downloaded.
+    NotInstalled,
+    /// Cannot be fixed by a first download (bad explicit path, unsupported platform).
     Missing { message: String, installable: bool },
 }
 
@@ -162,10 +165,7 @@ pub fn locate_with(explicit: Option<std::ffi::OsString>) -> LocateResult {
             return LocateResult::Found(candidate);
         }
     }
-    LocateResult::Missing {
-        message: NOT_FOUND_MESSAGE.to_owned(),
-        installable: true,
-    }
+    LocateResult::NotInstalled
 }
 
 #[cfg(test)]
@@ -244,6 +244,7 @@ mod tests {
                 assert!(message.contains(&missing.to_string_lossy().to_string()));
             }
             LocateResult::Found(path) => panic!("unexpected path: {}", path.display()),
+            LocateResult::NotInstalled => panic!("an explicit path is never a plain download case"),
         }
 
         let existing = root.join("pdfium");

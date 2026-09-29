@@ -266,13 +266,8 @@ impl Renderer {
         } else {
             (mx, my)
         };
-        let pdf_progress_label = tabs.get(active_tab).and_then(|tab| tab.pdf.as_deref())
-            .filter(|pdf| matches!(pdf.phase, crate::app::pdf_tab::PdfPhase::Ready))
-            .map(|pdf| pdf.status_label.as_str());
+        // Only real background work uses the progress channel; the PDF page label has its own slot.
         let (status_progress_label, status_progress_elapsed, status_progress_value) =
-            if let Some(label) = pdf_progress_label {
-                (Some(label), None, None)
-            } else {
             match ide_panel.api.mock.server_status {
                 crate::app::api_mock::types::ApiMockServerStatus::Starting => {
                     (Some("Мок-сервер"), None, Some(0.55))
@@ -282,7 +277,6 @@ impl Renderer {
                     ide_panel.git.pending_elapsed_secs(frame_now),
                     None,
                 ),
-            }
             };
         let editor_bottom_h = if is_ide_mode {
             ide_panel.editor_reserved_bottom_height(s) + database_query_results_h

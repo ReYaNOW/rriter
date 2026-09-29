@@ -164,6 +164,7 @@ impl Renderer {
         show_readonly_notice: bool,
         inline_git_popup: Option<&crate::app::InlineGitPopup>,
         pdf_engine: &crate::app::pdf_tab::PdfEngineState,
+        pdf_dark_pages: bool,
     ) -> (bool, Vec<(usize, usize)>) {
         let scroll_y = scroll_y_state.current;
         self.editor_hover_blocked = false;
@@ -266,13 +267,14 @@ impl Renderer {
             && let Some(pdf) = tab.pdf.as_deref()
         {
             let (x, y, w, h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, viewport.editor_height);
-            self.draw_root_pdf_frame(pdf, pdf_engine, x, y, w, h, s, ui_mx, ui_my, ui_registry);
+            self.draw_root_pdf_frame(pdf, pdf_engine, pdf_dark_pages, x, y, w, h, s, ui_mx, ui_my, ui_registry);
             wants_pointer |= self.draw_search_panel(show_search, search_anim_y, search_editor,
                 search_focused, search_case_sensitive, pdf.search.matches.len(), !pdf.search.done,
                 pdf.search.current, blink_alpha, crate::render_view::search::search_panel_scrollbar_x(
                     self.width, self.minimap_width, 10.0 * s, None), ui_registry);
             return self.draw_root_tab_frame_chrome(editor, editor_title, editor_path, tabs,
-                active_tab, markdown, Some(pdf.dark), ide_panel, lsp, ui_registry, ide_workspaces, layout,
+                active_tab, markdown,
+                Some(crate::app::pdf_tab::PdfStatus { dark: pdf_dark_pages, page: pdf.status_page() }), ide_panel, lsp, ui_registry, ide_workspaces, layout,
                 viewport, active_api_route, has_lsp_diagnostics, show_fps, blink_alpha,
                 tab_scroll_x, wants_pointer);
         }

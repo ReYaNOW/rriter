@@ -1,4 +1,4 @@
-use super::{PdfEngineState, PdfEventOutcome, PdfPhase, PdfTabState};
+use super::{PdfEngineState, PdfEventOutcome, PdfLibrarySource, PdfPhase, PdfTabState};
 use crate::app::tool_installer::ToolInstallFinish;
 use crate::app::{App, EditorTab, EditorTabKind};
 use crate::pdf::{DocGens, DocId, PdfEvent, PdfRequest};
@@ -22,14 +22,17 @@ impl App {
         if !matches!(self.pdf_engine, PdfEngineState::NotStarted) {
             return;
         }
-        let located = match self.pdf_engine_path_override.clone() {
-            Some(explicit) => crate::pdf::library::locate_with(explicit),
-            None => crate::pdf::library::locate(),
+        let located = match &self.pdf_library_source {
+            PdfLibrarySource::EnvValue(explicit) => crate::pdf::library::locate_with(explicit.clone()),
+            PdfLibrarySource::ProcessEnv => crate::pdf::library::locate(),
         };
         match located {
             crate::pdf::library::LocateResult::Found(path) => {
                 self.pdf_worker = Some(crate::pdf::worker::start(path, &self.ui_waker));
                 self.pdf_engine = PdfEngineState::Starting;
+            }
+            crate::pdf::library::LocateResult::NotInstalled => {
+                self.pdf_engine = PdfEngineState::NotInstalled;
             }
             crate::pdf::library::LocateResult::Missing { message, installable } => {
                 self.pdf_engine = PdfEngineState::Missing { message, installable };
@@ -37,11 +40,14 @@ impl App {
         }
     }
 
-    /// Handler of the "download engine" button. Only a `Missing { installable: true }` engine
-    /// starts a download, so a second click while `Installing` is ignored. No automatic retry.
+    /// Handler of the "download engine" button. Only a `NotInstalled` or `Missing { installable: true }`
+    /// engine starts a download, so a second click while `Installing` is ignored. No automatic retry.
     pub fn install_pdf_engine(&mut self) {
-        let PdfEngineState::Missing { message, installable: true } = &self.pdf_engine else { return };
-        let prev = message.clone();
+        let prev = match &self.pdf_engine {
+            PdfEngineState::NotInstalled => String::new(),
+            PdfEngineState::Missing { message, installable: true } => message.clone(),
+            _ => return,
+        };
         self.pdf_engine = if self.tool_installer.is_running() {
             PdfEngineState::Missing { message: "идёт установка другого инструмента".to_owned(), installable: true }
         } else {
@@ -64,8 +70,7 @@ impl App {
 
     /// Applies one installer poll to `pdf_engine` while it is `Installing`; true when it changed.
     pub(crate) fn sync_pdf_engine_install(&mut self, finish: Option<ToolInstallFinish>) -> bool {
-        let PdfEngineState::Installing { prev, .. } = &self.pdf_engine else { return false };
-        let prev = prev.clone();
+        if !matches!(self.pdf_engine, PdfEngineState::Installing { .. }) { return false; }
         match finish {
             None => {
                 let last = self.tool_installer.logs().last().map(|line| line.text.as_str()).unwrap_or_default();
@@ -78,7 +83,16 @@ impl App {
                 }
             }
             Some(ToolInstallFinish::Cancelled) => {
-                self.pdf_engine = PdfEngineState::Missing { message: prev, installable: true };
+                // The previous state moves out of `Installing`; nothing is cloned per poll.
+                let prev = match std::mem::replace(&mut self.pdf_engine, PdfEngineState::NotStarted) {
+                    PdfEngineState::Installing { prev, .. } => prev,
+                    _ => String::new(),
+                };
+                self.pdf_engine = if prev.is_empty() {
+                    PdfEngineState::NotInstalled
+                } else {
+                    PdfEngineState::Missing { message: prev, installable: true }
+                };
                 true
             }
             Some(ToolInstallFinish::Failed(message)) => {
@@ -122,6 +136,10 @@ impl App {
             ),
             PdfEngineState::Failed(message) => (
                 PdfPhase::EngineMissing { error: Some(format!("движок PDF остановлен: {message}. Перезапустите RRiter")) },
+                false,
+            ),
+            PdfEngineState::NotInstalled => (
+                PdfPhase::EngineMissing { error: Some(crate::pdf::library::NOT_FOUND_MESSAGE.to_owned()) },
                 false,
             ),
             PdfEngineState::NotStarted | PdfEngineState::Installing { .. } => (
@@ -221,7 +239,15 @@ impl App {
                 other => {
                     let Some(id) = pdf_event_doc_id(&other) else { continue };
                     let active_doc = self.tabs.get(self.active_tab).and_then(|tab| tab.pdf.as_ref()).and_then(|pdf| pdf.doc);
-                    if matches!(other, PdfEvent::Page { .. }) && active_doc != Some(id) { continue; }
+                    if let PdfEvent::Page { page, r#gen, .. } = &other && active_doc != Some(id) {
+                        // The bitmap of an inactive tab is dropped, but its in-flight slot must not
+                        // stay set: the page would never be requested again after the tab returns.
+                        let slot = (*page, *r#gen);
+                        if let Some(pdf) = self.tabs.iter_mut().find_map(|tab| tab.pdf.as_deref_mut().filter(|pdf| pdf.doc == Some(id))) {
+                            pdf.requested.remove(&slot);
+                        }
+                        continue;
+                    }
                     let Some(tab) = self.tabs.iter_mut().find(|tab| tab.pdf.as_ref().is_some_and(|pdf| pdf.doc == Some(id))) else { continue };
                     let is_text = matches!(other, PdfEvent::Text { .. } | PdfEvent::TextFailed { .. });
                     let is_opened = matches!(other, PdfEvent::Opened { .. });
@@ -328,7 +354,7 @@ impl App {
 /// download: it becomes an explicit `Missing` the user can retry by hand.
 pub(crate) fn engine_after_install(located: PdfEngineState, installed: &std::path::Path) -> PdfEngineState {
     match located {
-        PdfEngineState::Missing { .. } => PdfEngineState::Missing {
+        PdfEngineState::Missing { .. } | PdfEngineState::NotInstalled => PdfEngineState::Missing {
             message: format!("библиотека установлена, но не найдена: {}", installed.display()),
             installable: true,
         },
@@ -371,6 +397,46 @@ mod tests {
 
         assert_eq!(app.pdf_textures_to_free.as_slice(), &[texture]);
         assert!(matches!(rx.try_recv(), Ok(PdfRequest::Close { id }) if id == doc));
+    }
+
+    #[test]
+    fn page_bitmap_for_an_inactive_tab_frees_its_slot_so_the_page_is_requested_again_on_return() {
+        let (_context, mut app) =
+            crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+        app.is_ide_mode = true;
+        app.pdf_engine = PdfEngineState::Ready;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        app.pdf_worker = Some(crate::pdf::PdfWorkerHandle { tx, rx: event_rx });
+        app.open_pdf_tab(PathBuf::from("inactive-a.pdf"));
+        let doc = app.pdf_tab_mut(0).unwrap().doc.unwrap();
+        let geom = crate::pdf::PageGeom { width_pt: 612.0, height_pt: 792.0 };
+        event_tx.send(PdfEvent::Opened { id: doc, pages: vec![geom; 2] }).unwrap();
+        assert!(app.poll_pdf_worker());
+        let requests = {
+            let pdf = app.pdf_tab_mut(0).unwrap();
+            pdf.set_viewport(400, 300, 1.0);
+            pdf.take_render_requests(false)
+        };
+        let Some(PdfRequest::Render { page, r#gen, .. }) = requests.first() else { panic!("no render request: {}", requests.len()) };
+        let slot = (*page, *r#gen);
+
+        app.open_pdf_tab(PathBuf::from("inactive-b.pdf"));
+        assert_eq!(app.active_tab, 1);
+        // The render finished after the switch; model the request still being recorded as in flight.
+        app.pdf_tab_mut(0).unwrap().requested.insert(slot);
+        event_tx.send(PdfEvent::Page { id: doc, page: slot.0, r#gen: slot.1, width_px: 1, height_px: 1, rgba: vec![0; 4] }).unwrap();
+        app.poll_pdf_worker();
+        assert!(app.pdf_tab_mut(0).unwrap().requested.is_empty(), "the dropped bitmap must free its in-flight slot");
+        assert!(app.pdf_tab_mut(0).unwrap().pending_bitmaps.is_empty());
+
+        app.switch_to_tab(0);
+        let again = {
+            let pdf = app.pdf_tab_mut(0).unwrap();
+            pdf.set_viewport(400, 300, 1.0);
+            pdf.take_render_requests(false)
+        };
+        assert!(again.iter().any(|request| matches!(request, PdfRequest::Render { page, .. } if *page == slot.0)), "page must be re-requested after the tab returns");
     }
 
     #[test]
