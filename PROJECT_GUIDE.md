@@ -1426,6 +1426,8 @@ Root:
 * `scripts/rriter_headless.py` -> standard-library-only `rriter --headless` driver: `shot` (PNG path), `bench` (summary + CSV path), `run` (script), `repl`, `--self-test`; protocol in `docs/headless.md`.
 * `scripts/postgres_fixture.py` -> standard-library-only deterministic PostgreSQL wire-protocol fixture shared by PGO and headless UI tests; configurable TCP listener, narrow production SQL families, binary/text codecs, telemetry, and lifecycle cleanup.
 * `src/platform.rs` -> cross-platform path/text/filesystem/dialog/Clipboard/Trash/openers/modifier boundary and public platform API.
+* `src/pdf/mod.rs` -> PDF protocol types, worker channel contracts, document generations, and user-facing errors.
+* `src/pdf/library.rs` -> Pdfium manifest parsing, managed paths, archive URL, and library discovery.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
 * `src/headless/mod.rs` -> Linux-only headless mode: `run` (exit codes, profile/policy setup), `HeadlessSession` (App + offscreen GL), `execute` per protocol command, and the `run_loop` over stdin/`--script`.
