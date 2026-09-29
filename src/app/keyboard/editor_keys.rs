@@ -80,6 +80,17 @@ fn key_text_for_editor_insert<'a>(
     }
 }
 
+/// Keys a PDF tab still lets into the editor key match: exactly its application-level arms
+/// (settings F1, close-all Ctrl+Q, find Ctrl+F, open file Ctrl+O, close tab Ctrl+4, Escape
+/// closing the search panel). Every other arm there edits or moves the hidden text.
+fn pdf_tab_key_reaches_editor(physical_key: PhysicalKey, primary: bool) -> bool {
+    match physical_key {
+        PhysicalKey::Code(KeyCode::F1 | KeyCode::Escape) => true,
+        PhysicalKey::Code(KeyCode::KeyQ | KeyCode::KeyF | KeyCode::KeyO | KeyCode::Digit4) => primary,
+        _ => false,
+    }
+}
+
 fn editor_line_comment_marker(
     file_extension: &str,
     physical_key: PhysicalKey,
@@ -460,6 +471,15 @@ impl App {
                 }
                 _ => {}
             }
+            return;
+        }
+
+        // The hidden editor under a PDF tab must not run any text or cursor command (edit, move,
+        // select, clipboard, undo, save: Ctrl+S would overwrite the .pdf with the empty text).
+        // Global shortcuts (tab switching, panels, project search, F8) are handled before this point.
+        if self.tabs.get(self.active_tab).is_some_and(|tab| tab.kind.is_pdf())
+            && !pdf_tab_key_reaches_editor(physical_key, ctrl)
+        {
             return;
         }
 

@@ -9,16 +9,18 @@ impl App {
         if !self.editor_has_input_focus() { return false; }
         let pressed = input.state == ElementState::Pressed;
         if self.modifiers.control_key() || self.modifiers.alt_key() || self.modifiers.super_key() {
-            // The hidden editor of a PDF tab must never see edit/save shortcuts (Ctrl+S would
-            // overwrite the .pdf with its empty text); other combos stay global (Ctrl+F, Ctrl+W, tab switching).
+            // Modified keys are application shortcuts (tab switching, panels, find, close tab): they go on to
+            // the global handlers. The hidden editor's text commands are cut off later, in
+            // `handle_editor_keyboard_input` (`pdf_tab_key_reaches_editor`). Only PDF copy is taken here.
             let primary = crate::platform::primary_shortcut_modifier(self.modifiers);
-            let edit_key = matches!(input.physical_key, PhysicalKey::Code(
-                KeyCode::KeyC | KeyCode::KeyX | KeyCode::KeyV | KeyCode::KeyA | KeyCode::KeyZ | KeyCode::KeyY
-                | KeyCode::KeyS | KeyCode::Slash | KeyCode::Backspace | KeyCode::Delete));
-            if !edit_key { return false; }
-            if pressed && primary && input.physical_key == PhysicalKey::Code(KeyCode::KeyC) { self.pdf_copy_selection(); }
-            return true;
+            if primary && !self.modifiers.alt_key() && input.physical_key == PhysicalKey::Code(KeyCode::KeyC) {
+                if pressed { self.pdf_copy_selection(); }
+                return true;
+            }
+            return false;
         }
+        // Settings (F1) and the FPS overlay (F8) are application shortcuts, handled by the global handlers.
+        if matches!(input.physical_key, PhysicalKey::Code(KeyCode::F1 | KeyCode::F8)) { return false; }
         if pressed && input.physical_key == PhysicalKey::Code(KeyCode::Escape) {
             // Escape first drops the selection; without one it falls through so the search panel closes.
             if self.active_pdf_tab_mut().is_some_and(|pdf| pdf.clear_selection()) {
@@ -103,9 +105,9 @@ impl App {
     }
 
     /// Frame tick of a held text drag: scrolls while the pointer rests at the window edge.
-    pub(crate) fn tick_pdf_drag_autoscroll(&mut self) -> bool {
+    pub(crate) fn tick_pdf_drag_autoscroll(&mut self, dt: f32) -> bool {
         let Some((x, y, scale)) = self.renderer.as_ref().map(|renderer| (renderer.last_mouse_x, renderer.last_mouse_y, renderer.scale_factor)) else { return false };
-        self.active_pdf_tab_mut().is_some_and(|pdf| pdf.autoscroll_step(x, y, scale))
+        self.active_pdf_tab_mut().is_some_and(|pdf| pdf.autoscroll_step(x, y, scale, dt))
     }
 
     /// Left release: ends a selection drag, or treats the press as a click (clears the
