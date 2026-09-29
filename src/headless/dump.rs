@@ -318,6 +318,7 @@ fn tab_json(tab: TabView<'_>) -> Value {
             crate::app::pdf_tab::PdfEngineState::NotStarted => ("not_started", ""),
             crate::app::pdf_tab::PdfEngineState::Starting => ("starting", ""),
             crate::app::pdf_tab::PdfEngineState::Ready => ("ready", ""),
+            crate::app::pdf_tab::PdfEngineState::NotInstalled => ("missing", crate::pdf::library::NOT_FOUND_MESSAGE),
             crate::app::pdf_tab::PdfEngineState::Missing { message, .. } => ("missing", message.as_str()),
             crate::app::pdf_tab::PdfEngineState::Failed(message) => ("failed", message.as_str()),
             crate::app::pdf_tab::PdfEngineState::Installing { .. } => ("installing", ""),

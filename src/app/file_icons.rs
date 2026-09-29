@@ -344,6 +344,21 @@ mod tests {
     }
 
     #[test]
+    fn pdf_tab_icon_resolves_and_rasterizes_without_file_tree() {
+        use crate::app::file_tree::{RasterizedIconState, pre_rasterize_icon};
+
+        // A PDF tab outside the workspace tree gets its icon only through the on-demand
+        // rasterization in `Renderer::draw_file_icon`; it needs a resolvable key and a
+        // renderable svg asset.
+        assert_eq!(file_icon_key_for_name("Report.PDF"), "pdf");
+        assert!(!svg_for_key("pdf", false).is_empty());
+        assert!(matches!(
+            pre_rasterize_icon("pdf", false),
+            RasterizedIconState::Ready(_)
+        ));
+    }
+
+    #[test]
     fn folder_icon_resolution_covers_exact_pattern_and_fallback() {
         assert_ne!(folder_icon_key("src"), "default");
         assert_ne!(folder_icon_key(".github"), "default");

@@ -265,18 +265,18 @@ async fn download_installer_async(
         .ok_or_else(|| "Установка uv не поддерживается на этой платформе".to_string())?;
     check_cancelled(cancel)?;
     let client = crate::platform::async_http_client_builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(DOWNLOAD_TIMEOUT)
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
         .build()
         .map_err(|error| format!("Не удалось создать HTTP-клиент: {error}"))?;
+    let watchdog = DownloadWatchdog::new(DOWNLOAD_STALL_TIMEOUT, DOWNLOAD_TOTAL_LIMIT);
 
     let response = tokio::select! {
         biased;
         () = wait_for_install_cancel(cancel) => {
             return Err(INSTALL_CANCELLED_MESSAGE.to_string());
         }
-        response = client.get(url).send() => response,
-    }
+        response = watchdog.step(client.get(url).send()) => response,
+    }?
     .and_then(reqwest::Response::error_for_status)
     .map_err(|error| format!("Не удалось загрузить установщик uv: {error}"))?;
     let mut response = response;
@@ -298,8 +298,8 @@ async fn download_installer_async(
             () = wait_for_install_cancel(cancel) => {
                 return Err(INSTALL_CANCELLED_MESSAGE.to_string());
             }
-            chunk = response.chunk() => chunk,
-        }
+            chunk = watchdog.step(response.chunk()) => chunk,
+        }?
         .map_err(|error| format!("Ошибка чтения установщика uv: {error}"))?;
         let Some(chunk) = chunk else {
             break;
@@ -346,6 +346,48 @@ async fn download_installer_async(
 async fn wait_for_install_cancel(cancel: &AtomicBool) {
     while !cancel.load(Ordering::Acquire) {
         tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// Bounds a download by inactivity instead of total time: every awaited step (response
+/// headers, each body chunk) must finish within `stall`, and the whole download within
+/// `total`. A slow but steady link therefore completes, a dead one fails after `stall`.
+struct DownloadWatchdog {
+    stall: Duration,
+    total: Duration,
+    deadline: tokio::time::Instant,
+}
+
+impl DownloadWatchdog {
+    fn new(stall: Duration, total: Duration) -> Self {
+        Self {
+            stall,
+            total,
+            deadline: tokio::time::Instant::now() + total,
+        }
+    }
+
+    async fn step<T>(&self, future: impl std::future::Future<Output = T>) -> Result<T, String> {
+        let remaining = self
+            .deadline
+            .saturating_duration_since(tokio::time::Instant::now());
+        let total_exceeded = || {
+            format!(
+                "Загрузка превысила предельное время ({} мин)",
+                self.total.as_secs().div_ceil(60)
+            )
+        };
+        if remaining.is_zero() {
+            return Err(total_exceeded());
+        }
+        let limit = self.stall.min(remaining);
+        tokio::time::timeout(limit, future).await.map_err(|_| {
+            if remaining < self.stall {
+                total_exceeded()
+            } else {
+                format!("Загрузка остановилась: нет данных более {:?}", self.stall)
+            }
+        })
     }
 }
 
@@ -623,6 +665,21 @@ fn install_pdfium(
     // The archive lives in a generation directory next to the versioned one and is
     // always removed, whatever the outcome.
     let layout = ToolInstallLayout::current(ToolKind::Pdfium);
+    // A crash or kill skips the cleanup below; sweep what earlier runs left behind.
+    let (removed, failed) = prune_stale_pdfium_ops(
+        &layout.managed_root,
+        &layout.generation_root,
+        STALE_OP_DIR_MIN_AGE,
+        MAX_STALE_OP_DIRS_PER_RUN,
+    );
+    if removed > 0 || failed > 0 {
+        reporter.line(
+            ToolInstallLogKind::Info,
+            format!(
+                "Удалены остатки прерванных загрузок PDF-движка: {removed}, не удалось: {failed}"
+            ),
+        );
+    }
     let result = (|| {
         fs::create_dir_all(&layout.generation_root)
             .map_err(|error| format!("Не удалось создать каталог загрузки: {error}"))?;
@@ -678,17 +735,17 @@ async fn download_pdfium_archive_async(
 ) -> Result<(), String> {
     check_cancelled(cancel)?;
     let client = crate::platform::async_http_client_builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(DOWNLOAD_TIMEOUT)
+        .connect_timeout(DOWNLOAD_CONNECT_TIMEOUT)
         .build()
         .map_err(|error| format!("Не удалось создать HTTP-клиент: {error}"))?;
+    let watchdog = DownloadWatchdog::new(DOWNLOAD_STALL_TIMEOUT, DOWNLOAD_TOTAL_LIMIT);
     let mut response = tokio::select! {
         biased;
         () = wait_for_install_cancel(cancel) => {
             return Err(INSTALL_CANCELLED_MESSAGE.to_string());
         }
-        response = client.get(url).send() => response,
-    }
+        response = watchdog.step(client.get(url).send()) => response,
+    }?
     .and_then(reqwest::Response::error_for_status)
     .map_err(|error| format!("Не удалось загрузить PDF-движок: {error}"))?;
     let content_length = response.content_length();
@@ -708,8 +765,8 @@ async fn download_pdfium_archive_async(
             () = wait_for_install_cancel(cancel) => {
                 return Err(INSTALL_CANCELLED_MESSAGE.to_string());
             }
-            chunk = response.chunk() => chunk,
-        }
+            chunk = watchdog.step(response.chunk()) => chunk,
+        }?
         .map_err(|error| format!("Ошибка чтения архива PDF-движка: {error}"))?;
         let Some(chunk) = chunk else {
             break;
@@ -893,6 +950,56 @@ fn prune_old_pdfium_versions(managed_root: &Path, keep_slug: &str) {
             let _ = fs::remove_dir_all(entry.path());
         }
     }
+}
+
+/// `<pid>-<counter>`, the shape of `platform::next_operation_id`.
+fn is_operation_dir_name(name: &str) -> bool {
+    let mut parts = name.split('-');
+    let digits = |part: Option<&str>| {
+        part.is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    };
+    digits(parts.next()) && digits(parts.next()) && parts.next().is_none()
+}
+
+/// Removes staging directories (`managed_root/<op_id>`) left by an install that crashed
+/// before its own cleanup. Only real directories directly inside `managed_root` whose name
+/// is an operation id are touched (never `chromium-*` versions, files or symlinks), not
+/// `keep`, and only when unmodified for `min_age` so a concurrent install keeps its
+/// directory. At most `limit` directories are removed per call. Returns (removed, failed).
+fn prune_stale_pdfium_ops(
+    managed_root: &Path,
+    keep: &Path,
+    min_age: Duration,
+    limit: usize,
+) -> (usize, usize) {
+    let Ok(entries) = fs::read_dir(managed_root) else {
+        return (0, 0);
+    };
+    let (mut removed, mut failed) = (0, 0);
+    for entry in entries.flatten() {
+        if removed + failed >= limit {
+            break;
+        }
+        let path = entry.path();
+        let name = entry.file_name();
+        let is_stale = path != keep
+            && name.to_str().is_some_and(is_operation_dir_name)
+            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+            && entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .ok()
+                .and_then(|modified| modified.elapsed().ok())
+                .is_some_and(|age| age >= min_age);
+        if !is_stale {
+            continue;
+        }
+        match fs::remove_dir_all(&path) {
+            Ok(()) => removed += 1,
+            Err(_) => failed += 1,
+        }
+    }
+    (removed, failed)
 }
 
 fn tool_executable_name(kind: ToolKind, platform: PlatformKind) -> &'static str {

@@ -171,6 +171,7 @@ impl App {
                         .is_some_and(|until| std::time::Instant::now() < until),
                     self.inline_git_popup.as_ref(),
                     &self.pdf_engine,
+                    self.pdf_dark_pages,
                 );
 
                 self.target_sticky_lines = target_sticky;
