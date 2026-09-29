@@ -1,4 +1,5 @@
 use super::{PdfEngineState, PdfEventOutcome, PdfPhase, PdfTabState};
+use crate::app::tool_installer::ToolInstallFinish;
 use crate::app::{App, EditorTab, EditorTabKind};
 use crate::pdf::{DocGens, DocId, PdfEvent, PdfRequest};
 use std::path::PathBuf;
@@ -28,6 +29,65 @@ impl App {
             }
             crate::pdf::library::LocateResult::Missing { message, installable } => {
                 self.pdf_engine = PdfEngineState::Missing { message, installable };
+            }
+        }
+    }
+
+    /// Handler of the "download engine" button. Only a `Missing { installable: true }` engine
+    /// starts a download, so a second click while `Installing` is ignored. No automatic retry.
+    pub fn install_pdf_engine(&mut self) {
+        let PdfEngineState::Missing { message, installable: true } = &self.pdf_engine else { return };
+        let prev = message.clone();
+        self.pdf_engine = if self.tool_installer.is_running() {
+            PdfEngineState::Missing { message: "идёт установка другого инструмента".to_owned(), installable: true }
+        } else {
+            match self.tool_installer.start_pdfium_install(&self.ui_waker) {
+                Ok(()) => PdfEngineState::Installing { prev, progress: String::new() },
+                Err(message) => PdfEngineState::Missing { message, installable: true },
+            }
+        };
+        if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+    }
+
+    /// Handler of the "cancel" button; the state returns to `Missing` when the worker reports it.
+    pub fn cancel_pdf_engine_install(&mut self) {
+        if matches!(self.pdf_engine, PdfEngineState::Installing { .. })
+            && self.tool_installer.is_running_for(crate::platform::ToolKind::Pdfium)
+        {
+            self.tool_installer.cancel();
+        }
+    }
+
+    /// Applies one installer poll to `pdf_engine` while it is `Installing`; true when it changed.
+    pub(crate) fn sync_pdf_engine_install(&mut self, finish: Option<ToolInstallFinish>) -> bool {
+        let PdfEngineState::Installing { prev, .. } = &self.pdf_engine else { return false };
+        let prev = prev.clone();
+        match finish {
+            None => {
+                let last = self.tool_installer.logs().last().map(|line| line.text.as_str()).unwrap_or_default();
+                match &mut self.pdf_engine {
+                    PdfEngineState::Installing { progress, .. } if progress.as_str() != last => {
+                        *progress = last.to_owned();
+                        true
+                    }
+                    _ => false,
+                }
+            }
+            Some(ToolInstallFinish::Cancelled) => {
+                self.pdf_engine = PdfEngineState::Missing { message: prev, installable: true };
+                true
+            }
+            Some(ToolInstallFinish::Failed(message)) => {
+                self.pdf_engine = PdfEngineState::Missing { message, installable: true };
+                true
+            }
+            Some(ToolInstallFinish::Installed(outcome)) => {
+                let installed = outcome.paths.first().map(|(_, path)| path.clone()).unwrap_or_default();
+                self.pdf_engine = PdfEngineState::NotStarted;
+                self.ensure_pdf_engine();
+                let located = std::mem::replace(&mut self.pdf_engine, PdfEngineState::NotStarted);
+                self.pdf_engine = engine_after_install(located, &installed);
+                true
             }
         }
     }
@@ -249,6 +309,18 @@ impl App {
             if let Some(pdf) = tab.pdf.as_ref() { pdf.bump_render_gen(); }
         }
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+    }
+}
+
+/// A finished install whose library `locate()` still cannot find must not loop back into a
+/// download: it becomes an explicit `Missing` the user can retry by hand.
+pub(crate) fn engine_after_install(located: PdfEngineState, installed: &std::path::Path) -> PdfEngineState {
+    match located {
+        PdfEngineState::Missing { .. } => PdfEngineState::Missing {
+            message: format!("библиотека установлена, но не найдена: {}", installed.display()),
+            installable: true,
+        },
+        other => other,
     }
 }
 

@@ -107,9 +107,15 @@ impl Renderer {
         // Engine screens show `PdfEngineState::label`;
         // a tab error set by the engine (already the full sentence) wins over it, so the
         // `Failed` label is not formatted per frame. `Error` holds `PdfError::message`.
+        // While the engine is missing, installing or starting, the engine state is the source of
+        // truth: the tab's own error is a snapshot from the time it was opened.
         let state_message = match &tab.phase {
-            PdfPhase::EngineMissing { error: Some(error) } => Some(std::borrow::Cow::Borrowed(error.as_str())),
-            PdfPhase::EngineMissing { error: None } | PdfPhase::EngineStarting => Some(engine.label()),
+            PdfPhase::EngineMissing { error: Some(error) }
+                if !matches!(
+                    engine,
+                    PdfEngineState::Missing { .. } | PdfEngineState::Installing { .. } | PdfEngineState::Starting
+                ) => Some(std::borrow::Cow::Borrowed(error.as_str())),
+            PdfPhase::EngineMissing { .. } | PdfPhase::EngineStarting => Some(engine.label()),
             PdfPhase::Loading => Some(std::borrow::Cow::Borrowed("Загрузка документа PDF…")),
             PdfPhase::Error(message) => Some(std::borrow::Cow::Borrowed(message.as_str())),
             PdfPhase::PasswordRequired => Some(std::borrow::Cow::Borrowed("Документ защищён паролем")),
@@ -118,6 +124,61 @@ impl Renderer {
         if let Some(message) = state_message {
             self.draw_pdf_centered_message(&message, x, y, w, h, scale);
         }
+        if matches!(tab.phase, PdfPhase::EngineMissing { .. }) {
+            self.draw_pdf_engine_actions(engine, (x, y, w, h), scale, (mx, my), ui_registry);
+        }
+    }
+
+    /// Buttons under the engine message: download / retry while the library is missing and
+    /// installable, a progress line and "Cancel" during the download, nothing otherwise
+    /// (not installable, failed or starting engine).
+    fn draw_pdf_engine_actions(
+        &mut self,
+        engine: &PdfEngineState,
+        (x, y, w, h): (f32, f32, f32, f32),
+        scale: f32,
+        (mx, my): (f32, f32),
+        ui_registry: &mut UiRegistry,
+    ) {
+        let text_scale = (0.82 * scale).max(0.6);
+        let button_h = (29.0 * scale).round();
+        let first_y = (y + h * 0.5 + 18.0 * scale).round();
+        let (id, label, button_y) = match engine {
+            PdfEngineState::Missing { message, installable: true } => {
+                let label = if message == crate::pdf::library::NOT_FOUND_MESSAGE {
+                    "Загрузить PDF-движок (3,7 МБ)"
+                } else {
+                    "Повторить"
+                };
+                (UiId::PdfEngineInstall, label, first_y)
+            }
+            PdfEngineState::Installing { progress, .. } => {
+                if !progress.is_empty() {
+                    let progress_w = self.measure_ui_width(progress, text_scale).min(w.max(0.0));
+                    self.draw_string_scaled_pixel_snapped(
+                        progress,
+                        (x + (w - progress_w) * 0.5).round(),
+                        first_y,
+                        self.theme.line_num,
+                        text_scale,
+                    );
+                }
+                (UiId::PdfEngineCancel, "Отмена", (first_y + 28.0 * scale).round())
+            }
+            _ => return,
+        };
+        let button_w = (self.measure_ui_width(label, text_scale) + 32.0 * scale).round();
+        let button = crate::widgets::ButtonView {
+            x: (x + (w - button_w) * 0.5).round(),
+            y: button_y,
+            w: button_w,
+            h: button_h,
+            text: label,
+            icon: None,
+            text_scale,
+            icon_size: 0.0,
+        };
+        ui_registry.register_button_view(id, button, self, mx, my, scale, false);
     }
 
     /// Search matches and the text selection of one page, drawn over the raster.

@@ -167,6 +167,34 @@ fn unavailable_pdfium_shows_engine_message_without_install_button() {
     assert!(!has_ui(&state, "PdfEngineInstall"), "{state}");
 }
 
+/// Scenario 7. The test build never reaches the network: `install_pdfium` fails at once, so this
+/// covers the button -> Installing -> Missing(retry) state machine, not the download itself.
+#[test]
+fn missing_pdfium_offers_download_and_returns_to_retry_when_install_fails() {
+    // The library is in neither the test binary's directory nor the per-process test profile.
+    unsafe { std::env::remove_var("RRITER_PDFIUM_PATH"); }
+    let dir = scratch_dir("ui-pdf-engine-install");
+    let path = crate::pdf::fixture::write_fixture_pdf(&dir);
+    let mut session = session_for_test(1280, 720);
+    let lines = run_script(&mut session, format!("workspace {}\nopen {}\n", dir.display(), path.display()).as_bytes());
+    assert!(lines.iter().all(|line| line.starts_with("ok")), "{lines:?}");
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"][0]["pdf"]["phase"], "engine_missing");
+    assert_eq!(state["tabs"][0]["pdf"]["engine"], "missing");
+    assert!(has_ui(&state, "PdfEngineInstall"), "{state}");
+
+    click_ui(&mut session, "PdfEngineInstall");
+    wait_until(&mut session, 5000, "failed engine install", |session| {
+        dump(session)["tabs"][0]["pdf"]["engine_message"].as_str().is_some_and(|message| message.contains("отключена в тестах"))
+    });
+    let state = dump(&mut session);
+    assert_eq!(state["tabs"][0]["pdf"]["phase"], "engine_missing");
+    assert_eq!(state["tabs"][0]["pdf"]["engine"], "missing");
+    assert!(has_ui(&state, "PdfEngineInstall"), "retry button expected: {state}");
+    assert!(!has_ui(&state, "PdfEngineCancel"), "{state}");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 fn wait_page_text(session: &mut HeadlessSession, page: usize) {
     wait_until(session, 5000, "PDF page text", |session| {
         session.app.active_pdf_tab().is_some_and(|pdf| pdf.text.get(page).is_some_and(Option::is_some))

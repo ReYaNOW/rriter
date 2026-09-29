@@ -10,6 +10,8 @@ mod input;
 pub mod text;
 
 pub use text::{PdfMatch, PdfPress, PdfSearch, PdfSelection};
+#[cfg(test)]
+pub(crate) use engine::engine_after_install;
 
 #[derive(Clone, Debug)]
 pub enum PdfEngineState {
@@ -18,7 +20,9 @@ pub enum PdfEngineState {
     Ready,
     Missing { message: String, installable: bool },
     Failed(String),
-    Installing { prev: String },
+    /// Engine download in progress. `prev` is the `Missing` message restored on cancel;
+    /// `progress` is the last installer log line shown under the headline.
+    Installing { prev: String, progress: String },
 }
 
 impl PdfEngineState {

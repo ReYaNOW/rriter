@@ -459,6 +459,10 @@ pub enum UiId {
     MarkdownModeToggle,
     PdfDarkToggle,
     PdfScrollY,
+    /// "Download the PDF engine" / "Retry" button of the engine-missing screen.
+    PdfEngineInstall,
+    /// "Cancel" button of the engine download.
+    PdfEngineCancel,
     TerminalBody,
     TerminalScrollY,
     TerminalTab(usize),

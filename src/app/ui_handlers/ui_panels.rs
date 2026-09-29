@@ -11,6 +11,8 @@ impl App {
             }
             UiId::PdfDarkToggle => self.toggle_pdf_dark_pages(),
             UiId::PdfScrollY => {}
+            UiId::PdfEngineInstall => self.install_pdf_engine(),
+            UiId::PdfEngineCancel => self.cancel_pdf_engine_install(),
             UiId::PdfLink(page, idx) => self.pdf_follow_link(page, idx),
             UiId::MarkdownCodeCopy(block_id) => {
                 let _ = self.copy_markdown_read_code_block(block_id);

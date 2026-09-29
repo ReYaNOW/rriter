@@ -260,6 +260,10 @@ pub(crate) enum ToolInstallPhase {
     InstallingUv,
     InstallingTool,
     Validating,
+    /// PDF engine archive: download, hash check, extraction of the library.
+    Downloading,
+    Verifying,
+    Extracting,
     Succeeded,
     Failed,
     Cancelled,
@@ -273,6 +277,9 @@ impl ToolInstallPhase {
             Self::InstallingUv => "Установка uv",
             Self::InstallingTool => "Установка инструмента",
             Self::Validating => "Проверка установки",
+            Self::Downloading => "Загрузка",
+            Self::Verifying => "Проверка архива",
+            Self::Extracting => "Распаковка",
             Self::Succeeded => "Готово",
             Self::Failed => "Ошибка",
             Self::Cancelled => "Отменено",
@@ -301,6 +308,14 @@ pub(crate) struct ToolInstallLogLine {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ToolInstallOutcome {
     pub paths: Vec<(ToolKind, PathBuf)>,
+}
+
+/// Terminal result of one install run, as seen by `ToolInstaller::poll_finish`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ToolInstallFinish {
+    Installed(ToolInstallOutcome),
+    Failed(String),
+    Cancelled,
 }
 
 #[derive(Debug)]
@@ -625,6 +640,64 @@ impl ToolInstaller {
         })
         .map_err(|err| format!("Не удалось запустить установщик {}: {err}", kind.label()))?;
 
+        self.begin_run(kind, initial_detail, true, cancel, rx, worker);
+        Ok(())
+    }
+
+    /// Downloads the pinned PDF engine archive into a fresh generation directory and
+    /// unpacks the library into the versioned managed directory. Never retries on its own.
+    /// The settings log window stays closed: the PDF tab shows the progress line itself.
+    pub(crate) fn start_pdfium_install(&mut self, ui_waker: &UiWaker) -> Result<(), String> {
+        if self.is_running() {
+            return Err("Другая установка уже выполняется".to_string());
+        }
+        self.join_finished_worker();
+        let manifest = crate::pdf::library::manifest()?;
+        let entry = manifest
+            .platform
+            .ok_or_else(|| "платформа не поддерживается".to_string())?;
+        let plan = PdfiumInstallPlan {
+            url: crate::pdf::library::archive_url(&manifest.version, &entry),
+            slug: crate::pdf::library::version_slug(&manifest.version),
+            archive: entry.archive,
+            sha256: entry.sha256,
+            lib_member: entry.lib,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancel_for_worker = Arc::clone(&cancel);
+        let (tx, rx) = ui_waker.sync_channel(INSTALL_EVENT_CAPACITY);
+        let reporter = ToolInstallReporter {
+            tx,
+            dropped_lines: Arc::new(AtomicUsize::new(0)),
+        };
+        let worker = crate::platform::spawn_named("rriter-pdfium-installer", move || {
+            let result = install_pdfium(&plan, &cancel_for_worker, &reporter);
+            reporter.send_control(terminal_install_event(
+                result,
+                cancel_for_worker.load(Ordering::Acquire),
+            ));
+        })
+        .map_err(|err| format!("Не удалось запустить установку PDF-движка: {err}"))?;
+        self.begin_run(
+            ToolKind::Pdfium,
+            "Подготовка загрузки PDF-движка".to_string(),
+            false,
+            cancel,
+            rx,
+            worker,
+        );
+        Ok(())
+    }
+
+    fn begin_run(
+        &mut self,
+        kind: ToolKind,
+        initial_detail: String,
+        log_open: bool,
+        cancel: Arc<AtomicBool>,
+        rx: Receiver<ToolInstallEvent>,
+        worker: JoinHandle<()>,
+    ) {
         self.target = Some(kind);
         self.phase = ToolInstallPhase::Idle;
         self.detail = initial_detail;
@@ -633,13 +706,12 @@ impl ToolInstaller {
         self.log_truncated = false;
         self.log_scroll = ScrollState::new(7.0);
         self.follow_log = true;
-        self.log_open = true;
+        self.log_open = log_open;
         self.revision = self.revision.wrapping_add(1);
         self.push_log(ToolInstallLogKind::Info, self.detail.clone());
         self.cancel = Some(cancel);
         self.rx = Some(rx);
         self.worker = Some(worker);
-        Ok(())
     }
 
     pub(crate) fn report_external_error(&mut self, message: impl Into<String>) {
@@ -662,6 +734,15 @@ impl ToolInstaller {
     }
 
     pub(crate) fn poll(&mut self) -> Option<ToolInstallOutcome> {
+        match self.poll_finish() {
+            Some(ToolInstallFinish::Installed(outcome)) => Some(outcome),
+            Some(ToolInstallFinish::Failed(_) | ToolInstallFinish::Cancelled) | None => None,
+        }
+    }
+
+    /// Drains worker events; a terminal event is returned once, including failure and
+    /// cancellation (which `poll` folds into `None`).
+    pub(crate) fn poll_finish(&mut self) -> Option<ToolInstallFinish> {
         let Some(rx) = self.rx.take() else {
             self.join_finished_worker();
             return None;
@@ -687,12 +768,13 @@ impl ToolInstaller {
                                     self.target.map(ToolKind::label).unwrap_or("Инструмент")
                                 );
                                 self.push_log(ToolInstallLogKind::Success, self.detail.clone());
-                                outcome = Some(done);
+                                outcome = Some(ToolInstallFinish::Installed(done));
                             }
                             Err(error) => {
                                 self.phase = ToolInstallPhase::Failed;
                                 self.detail = error.clone();
-                                self.push_log(ToolInstallLogKind::Error, error);
+                                self.push_log(ToolInstallLogKind::Error, error.clone());
+                                outcome = Some(ToolInstallFinish::Failed(error));
                             }
                         }
                     }
@@ -701,6 +783,7 @@ impl ToolInstaller {
                         self.phase = ToolInstallPhase::Cancelled;
                         self.detail = "Установка отменена".to_string();
                         self.push_log(ToolInstallLogKind::Info, self.detail.clone());
+                        outcome = Some(ToolInstallFinish::Cancelled);
                     }
                 },
                 Err(TryRecvError::Empty) => break,
@@ -710,6 +793,7 @@ impl ToolInstaller {
                         self.phase = ToolInstallPhase::Failed;
                         self.detail = "Поток установки неожиданно завершился".to_string();
                         self.push_log(ToolInstallLogKind::Error, self.detail.clone());
+                        outcome = Some(ToolInstallFinish::Failed(self.detail.clone()));
                     }
                     break;
                 }
@@ -945,10 +1029,15 @@ impl crate::app::App {
     pub(crate) fn poll_tool_installer(&mut self) -> bool {
         let before_revision = self.tool_installer.revision();
         let was_running = self.tool_installer.is_running();
-        let outcome = self.tool_installer.poll();
+        let finish = self.tool_installer.poll_finish();
         let mut changed = was_running != self.tool_installer.is_running()
             || before_revision != self.tool_installer.revision();
-        if let Some(outcome) = outcome {
+        // The PDF engine is not a configured tool: no `tool_paths`, no config save.
+        // `locate()` finds the library under the managed directory by itself.
+        let pdfium = self.tool_installer.target() == Some(ToolKind::Pdfium);
+        if pdfium {
+            changed |= self.sync_pdf_engine_install(finish);
+        } else if let Some(ToolInstallFinish::Installed(outcome)) = finish {
             let mut restart_lsp = false;
             let mut persist_api_runtime = false;
             for (kind, path) in outcome.paths {
