@@ -14,7 +14,6 @@ mod hover_overlays;
 #[cfg(test)]
 pub(crate) use hover_overlays::hover_trace_epoch_millis;
 mod ide_panels;
-#[cfg(test)]
 pub(crate) use ide_panels::intersect_scissor_boxes;
 pub mod lsp_ui;
 pub mod minimap_ui;

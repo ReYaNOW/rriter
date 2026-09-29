@@ -19,6 +19,29 @@ impl Renderer {
         self.push_rect(x, y, w, h, self.theme.bg);
         let offset = tab.scroll.current.round() as i32;
         let clip = UiClipRect { x, y, w, h };
+        self.flush();
+        let restore_scissor = unsafe {
+            use glow::HasContext;
+            let enabled = self.gl.is_enabled(glow::SCISSOR_TEST);
+            let mut previous = [0i32; 4];
+            if enabled {
+                self.gl.get_parameter_i32_slice(glow::SCISSOR_BOX, &mut previous);
+            }
+            self.gl.enable(glow::SCISSOR_TEST);
+            let requested = [
+                x.round() as i32,
+                (self.height - (y + h)).round() as i32,
+                w.round().max(0.0) as i32,
+                h.round().max(0.0) as i32,
+            ];
+            let active = if enabled {
+                crate::render_view::intersect_scissor_boxes(previous, requested)
+            } else {
+                requested
+            };
+            self.gl.scissor(active[0], active[1], active[2], active[3]);
+            enabled.then_some(previous)
+        };
         ui_registry.push_clip(clip);
         for page in tab.visible_range() {
             let Some((page_y, page_h)) = tab.layout.rows.get(page).copied() else { continue };
@@ -47,6 +70,15 @@ impl Renderer {
             );
         }
         ui_registry.pop_clip();
+        self.flush();
+        unsafe {
+            use glow::HasContext;
+            if let Some(previous) = restore_scissor {
+                self.gl.scissor(previous[0], previous[1], previous[2], previous[3]);
+            } else {
+                self.gl.disable(glow::SCISSOR_TEST);
+            }
+        }
         let bar = crate::render_view::scrollbar_widget::Scrollbar {
             style: crate::render_view::scrollbar_widget::ScrollbarStyle::MARKDOWN_READ,
             axis: crate::render_view::scrollbar_widget::ScrollbarAxis::Vertical,
@@ -58,12 +90,6 @@ impl Renderer {
         self.draw_scrollbar(&bar, scale, 1.0, Some(crate::render_view::scrollbar_widget::ScrollbarHit {
             ui: ui_registry, id: UiId::PdfScrollY, mx, my, blocker: false,
         }));
-        let toggle = UiClipRect::new(x + w - 170.0 * scale, y + h - 30.0 * scale, 160.0 * scale, 24.0 * scale);
-        let hovered = ui_registry.register_rect_clipped(UiId::PdfDarkToggle, toggle.x, toggle.y, toggle.w, toggle.h, clip, mx, my);
-        self.push_rounded_rect(toggle.x, toggle.y, toggle.w, toggle.h, 4.0 * scale,
-            [self.theme.fg[0], self.theme.fg[1], self.theme.fg[2], if hovered { 0.16 } else { 0.09 }]);
-        self.draw_string_scaled_pixel_snapped("Тёмные страницы", toggle.x + 8.0 * scale, (toggle.y + 16.0 * scale).round(), self.theme.fg, (0.78 * scale).max(0.6));
-
         // Engine screens show `PdfEngineState::label`;
         // a tab error set by the engine (already the full sentence) wins over it, so the
         // `Failed` label is not formatted per frame. `Error` holds `PdfError::message`.

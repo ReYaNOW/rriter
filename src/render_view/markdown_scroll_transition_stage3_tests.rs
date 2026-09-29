@@ -717,6 +717,7 @@ fn stage4_status_toggle_rect(app: &mut App) -> (f32, f32, f32, f32) {
         Some((&path, crate::platform::TextEncoding::Utf8)),
         mode,
         None,
+        None,
         &mut app.ui_registry,
         renderer.scale_factor,
         -1.0,

@@ -240,7 +240,7 @@ impl App {
         self.pdf_dark_pages = !self.pdf_dark_pages;
         self.save_current_config();
         for tab in &self.tabs {
-            if let Some(pdf) = tab.pdf.as_ref() { pdf.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+            if let Some(pdf) = tab.pdf.as_ref() { pdf.bump_render_gen(); }
         }
         if let Some(window) = self.window.as_ref() { window.request_redraw(); }
     }
@@ -253,5 +253,33 @@ fn pdf_event_doc_id(event: &PdfEvent) -> Option<DocId> {
         | PdfEvent::Text { id, .. } | PdfEvent::TextFailed { id, .. }
         | PdfEvent::SearchPage { id, .. } | PdfEvent::SearchDone { id, .. } => Some(*id),
         PdfEvent::EngineReady | PdfEvent::EngineFailed(_) | PdfEvent::LoadStarted | PdfEvent::EngineUnavailable(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::pdf_tab::PageTexture;
+
+    #[test]
+    fn bulk_close_queues_pdf_textures_and_sends_worker_close() {
+        let (_context, mut app) =
+            crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+        app.is_ide_mode = true;
+        app.pdf_engine = PdfEngineState::Ready;
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (_event_tx, event_rx) = std::sync::mpsc::channel();
+        app.pdf_worker = Some(crate::pdf::PdfWorkerHandle { tx, rx: event_rx });
+        app.open_pdf_tab(PathBuf::from("bulk-close.pdf"));
+        let texture = app.renderer.as_mut().unwrap().upload_rgba(1, 1, &[0, 0, 0, 255]).unwrap();
+        let pdf = app.pdf_tab_mut(0).unwrap();
+        pdf.textures.insert(0, PageTexture { tex: texture, width_px: 1, height_px: 1, r#gen: 1 });
+        let doc = pdf.doc.unwrap();
+        while rx.try_recv().is_ok() {}
+
+        app.prepare_all_tabs_close();
+
+        assert_eq!(app.pdf_textures_to_free.as_slice(), &[texture]);
+        assert!(matches!(rx.try_recv(), Ok(PdfRequest::Close { id }) if id == doc));
     }
 }

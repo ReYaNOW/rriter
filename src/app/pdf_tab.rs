@@ -220,7 +220,7 @@ impl PdfTabState {
         if layout_changed {
             self.layout_scale = s;
             self.layout = PdfLayout::compute(&self.pages, w, s);
-            self.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.bump_render_gen();
             self.layout_dirty = false;
         }
         // The restore waits until the document is opened and the body has a size;
@@ -239,6 +239,10 @@ impl PdfTabState {
         } else {
             self.status_label.clear();
         }
+    }
+
+    pub fn bump_render_gen(&self) {
+        self.gens.render.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn clamp_scroll(&mut self) { self.scroll.clamp_target(0.0, self.layout.total_h.saturating_sub(self.viewport.1 as i32).max(0) as f32); }

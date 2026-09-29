@@ -1,4 +1,11 @@
 impl App {
+    pub(crate) fn prepare_all_tabs_close(&mut self) {
+        self.prepare_all_database_tabs_close();
+        for idx in 0..self.tabs.len() {
+            self.prepare_pdf_tab_close(idx);
+        }
+    }
+
     pub fn open_new_tab(&mut self) {
         if !self.is_ide_mode {
             self.close_current_file();
@@ -223,18 +230,15 @@ impl App {
         if idx == self.active_tab && self.tabs.len() > 1 {
             self.cancel_pointer_interactions();
         }
-
         normalize_tab_drag_after_close(&mut self.ide_panel.tab_drag, idx);
-        if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
-        self.prepare_pdf_tab_close(idx);
 
         if self.tabs.len() <= 1 {
-            // close_current_file() prepares all database tabs before clearing the
-            // final IDE tab, so do not save/remove this tab twice here.
             self.close_current_file();
             return;
         }
 
+        if idx == self.active_tab { self.pdf_tab_deactivated(idx); }
+        self.prepare_pdf_tab_close(idx);
         self.prepare_database_tab_close(idx);
         let closing_lsp = self.tab_lsp_close_identity(idx);
         if idx == self.active_tab {
@@ -290,8 +294,7 @@ impl App {
                 }
             }
         }
-        self.prepare_all_database_tabs_close();
-        for idx in 0..self.tabs.len() { self.prepare_pdf_tab_close(idx); }
+        self.prepare_all_tabs_close();
         self.tabs.clear();
         self.active_tab = 0;
         self.close_current_file();

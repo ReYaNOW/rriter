@@ -272,7 +272,7 @@ impl Renderer {
                 blink_alpha, crate::render_view::search::search_panel_scrollbar_x(
                     self.width, self.minimap_width, 10.0 * s, None), ui_registry);
             return self.draw_root_tab_frame_chrome(editor, editor_title, editor_path, tabs,
-                active_tab, markdown, ide_panel, lsp, ui_registry, ide_workspaces, layout,
+                active_tab, markdown, Some(pdf.dark), ide_panel, lsp, ui_registry, ide_workspaces, layout,
                 viewport, active_api_route, has_lsp_diagnostics, show_fps, blink_alpha,
                 tab_scroll_x, wants_pointer);
         }
