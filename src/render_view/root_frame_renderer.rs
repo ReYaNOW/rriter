@@ -268,8 +268,8 @@ impl Renderer {
             let (x, y, w, h) = self.tab_body_rect(s, panel_left_w, tab_bar_h, viewport.editor_height);
             self.draw_root_pdf_frame(pdf, pdf_engine, x, y, w, h, s, ui_mx, ui_my, ui_registry);
             wants_pointer |= self.draw_search_panel(show_search, search_anim_y, search_editor,
-                search_focused, search_case_sensitive, search_results, search_current_idx,
-                blink_alpha, crate::render_view::search::search_panel_scrollbar_x(
+                search_focused, search_case_sensitive, pdf.search.matches.len(), !pdf.search.done,
+                pdf.search.current, blink_alpha, crate::render_view::search::search_panel_scrollbar_x(
                     self.width, self.minimap_width, 10.0 * s, None), ui_registry);
             return self.draw_root_tab_frame_chrome(editor, editor_title, editor_path, tabs,
                 active_tab, markdown, Some(pdf.dark), ide_panel, lsp, ui_registry, ide_workspaces, layout,

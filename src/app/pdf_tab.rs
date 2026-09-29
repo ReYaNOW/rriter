@@ -7,6 +7,9 @@ use std::sync::Arc;
 
 mod engine;
 mod input;
+pub mod text;
+
+pub use text::{PdfMatch, PdfSearch, PdfSelection};
 
 #[derive(Clone, Debug)]
 pub enum PdfEngineState {
@@ -38,29 +41,6 @@ pub enum PdfPhase {
     Ready,
     Error(String),
     PasswordRequired,
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct PdfSearch {
-    pub r#gen: u32,
-    pub query: String,
-    pub matches: Vec<PdfMatch>,
-    pub current: Option<usize>,
-    pub done: bool,
-    pub pending_jump: Option<(u32, usize)>,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PdfMatch {
-    pub page: usize,
-    pub start: u32,
-    pub end: u32,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PdfSelection {
-    pub anchor: (usize, usize),
-    pub head: (usize, usize),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -159,6 +139,12 @@ pub struct PdfTabState {
     pub viewport: (u32, u32),
     pub line_rects_buf: Vec<PtRect>,
     pub line_boxes: Vec<Option<Vec<PtRect>>>,
+    /// Tab body rectangle of the last prepared frame; maps window points to pages.
+    pub body: (f32, f32, f32, f32),
+    /// Left press on the page area: where it started and whether it became a text drag.
+    pub press: Option<(f32, f32)>,
+    pub dragging: bool,
+    pub drag_anchor: Option<(usize, usize)>,
     pub(crate) layout_scale: f32,
     pub(crate) layout_dirty: bool,
     pub(crate) status_label: String,
@@ -170,7 +156,7 @@ impl PdfTabState {
             scroll: ScrollState::new(15.0), textures: HashMap::new(), pending_bitmaps: Vec::new(),
             requested: HashSet::new(), text: Vec::new(), links: Vec::new(), text_requested: Vec::new(),
             search: PdfSearch::default(), selection: None, pending_copy: None, restore: None,
-            hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
+            hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, dragging: false, drag_anchor: None, layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
     }
 
     pub fn apply_event(&mut self, ev: &PdfEvent) -> PdfEventOutcome {
@@ -200,13 +186,32 @@ impl PdfTabState {
                 PdfEventOutcome::Bitmap
             }
             PdfEvent::RenderSkipped { page, r#gen, .. } => { self.requested.remove(&(*page, *r#gen)); PdfEventOutcome::Redraw }
-            PdfEvent::Text { page, text, links, .. } if *page < self.pages.len() => {
-                self.text[*page] = Some(Arc::clone(text)); self.links[*page] = links.clone(); self.text_requested[*page] = false; PdfEventOutcome::Redraw
+            PdfEvent::Text { page, text, links, .. } if *page < self.pages.len() && *page < self.text.len() => {
+                self.text_requested[*page] = false;
+                if self.text[*page].is_some() { return PdfEventOutcome::Ignore; }
+                let mut boxes = Vec::new();
+                text::line_rects(&text.chars, 0, text.chars.len(), &mut boxes);
+                self.line_boxes[*page] = Some(boxes);
+                self.text[*page] = Some(Arc::clone(text));
+                self.links[*page] = links.clone();
+                self.resume_pending_jump();
+                PdfEventOutcome::Redraw
             }
-            PdfEvent::TextFailed { page, .. } if *page < self.pages.len() => { self.text_requested[*page] = false; PdfEventOutcome::Redraw }
+            PdfEvent::TextFailed { page, .. } if *page < self.pages.len() && *page < self.text.len() => {
+                self.text_requested[*page] = false;
+                if self.text[*page].is_none() {
+                    self.text[*page] = Some(Arc::new(PageText::default()));
+                    self.line_boxes[*page] = Some(Vec::new());
+                }
+                self.resume_pending_jump();
+                PdfEventOutcome::Redraw
+            }
             PdfEvent::SearchPage { r#gen, page, matches, .. } if *r#gen == self.search.r#gen => {
-                self.search.matches.retain(|item| item.page != *page);
                 self.search.matches.extend(matches.iter().map(|(start, end)| PdfMatch { page: *page, start: *start, end: *end }));
+                if self.search.current.is_none() && !self.search.matches.is_empty() {
+                    self.search.current = Some(0);
+                    self.goto_current_match();
+                }
                 PdfEventOutcome::Redraw
             }
             PdfEvent::SearchDone { r#gen, .. } if *r#gen == self.search.r#gen => { self.search.done = true; PdfEventOutcome::Redraw }

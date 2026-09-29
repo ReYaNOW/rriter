@@ -50,7 +50,8 @@ impl Renderer {
         search_editor: &Editor,
         search_focused: bool,
         search_case_sensitive: bool,
-        search_results: &[(usize, usize)],
+        search_count: usize,
+        search_pending: bool,
         search_current_idx: Option<usize>,
         blink_alpha: f32,
         scrollbar_x: f32,
@@ -199,20 +200,20 @@ impl Renderer {
             })
         } else { None };
 
-        if search_results.len() != self.last_search_len
+        if search_count != self.last_search_len
             || search_current_idx != self.last_search_idx
         {
             self.search_res_string.clear();
-            if !search_results.is_empty() {
+            if search_count != 0 {
                 use std::fmt::Write;
                 let _ = write!(
                     &mut self.search_res_string,
                     "{}/{}",
                     search_current_idx.unwrap_or(0) + 1,
-                    search_results.len()
+                    search_count
                 );
             }
-            self.last_search_len = search_results.len();
+            self.last_search_len = search_count;
             self.last_search_idx = search_current_idx;
         }
 
@@ -220,9 +221,11 @@ impl Renderer {
 
         let (res_text, text_color) = if !show_search {
             ("", [0.6, 0.6, 0.6, 1.0])
-        } else if search_results.is_empty() {
+        } else if search_count == 0 {
             if search_editor.get_full_text().is_empty() {
                 ("", [0.6, 0.6, 0.6, 1.0])
+            } else if search_pending {
+                ("...", [0.6, 0.6, 0.6, 1.0])
             } else {
                 ("Нет", [0.95, 0.35, 0.45, 1.0])
             }

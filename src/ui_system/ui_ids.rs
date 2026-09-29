@@ -243,6 +243,8 @@ pub enum UiId {
     DatabaseArrow(usize, usize),
     DatabaseTableRow(usize, usize, usize),
     PdfPage(usize),
+    /// Text layer of the visible PDF page area (selection, links, I-beam cursor).
+    PdfText,
     DatabaseContextItem(usize),
     DatabaseDialogBackdrop,
     DatabaseDialogBody,

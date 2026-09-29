@@ -154,9 +154,13 @@ impl App {
                     let active_doc = self.tabs.get(self.active_tab).and_then(|tab| tab.pdf.as_ref()).and_then(|pdf| pdf.doc);
                     if matches!(other, PdfEvent::Page { .. }) && active_doc != Some(id) { continue; }
                     let Some(tab) = self.tabs.iter_mut().find(|tab| tab.pdf.as_ref().is_some_and(|pdf| pdf.doc == Some(id))) else { continue };
+                    let mut copied = None;
                     if let Some(pdf) = tab.pdf.as_mut() {
                         redraw |= matches!(pdf.apply_event(&other), PdfEventOutcome::Redraw | PdfEventOutcome::Bitmap);
+                        if matches!(other, PdfEvent::Text { .. } | PdfEvent::TextFailed { .. }) { copied = pdf.take_copy_text(); }
                     }
+                    if let Some(text) = copied { self.set_clipboard_text(text); }
+                    if matches!(other, PdfEvent::Opened { .. }) && active_doc == Some(id) { self.pdf_restart_search_if_open(); }
                 }
             }
         }
@@ -178,6 +182,7 @@ impl App {
         let (tabs, textures_to_free) = (&mut self.tabs, &mut self.pdf_textures_to_free);
         if let Some(tab) = tabs.get_mut(self.active_tab).and_then(|tab| tab.pdf.as_deref_mut()) {
             tab.set_viewport(w.max(0.0) as u32, h.max(0.0) as u32, s);
+            tab.body = (x, y, w, h);
             let wanted = tab.wanted_range();
             tab.textures.retain(|page, texture| {
                 if wanted.contains(page) { true } else { textures_to_free.push(texture.tex); false }
@@ -198,12 +203,12 @@ impl App {
             if !tab.pending_bitmaps.is_empty() {
                 if let Some(window) = window { window.request_redraw(); }
             }
-            let requests = tab.take_render_requests(dark_pages);
+            let mut requests = tab.take_render_requests(dark_pages);
+            requests.extend(tab.take_text_requests());
             if let Some(worker) = worker {
                 for request in requests { let _ = worker.tx.send(request); }
             }
         }
-        let _ = (x, y);
     }
 
     pub fn prepare_pdf_tab_close(&mut self, idx: usize) {
@@ -234,6 +239,7 @@ impl App {
 
     pub fn pdf_tab_activated(&mut self, idx: usize) {
         if let Some(pdf) = self.pdf_tab_mut(idx) { pdf.layout_dirty = true; }
+        self.pdf_restart_search_if_open();
     }
 
     pub fn toggle_pdf_dark_pages(&mut self) {

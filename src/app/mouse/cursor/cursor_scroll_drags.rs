@@ -16,6 +16,9 @@ impl App {
             if let Some(window) = self.window.as_ref() { window.request_redraw(); }
             return true;
         }
+        if self.update_pdf_drag(px, py) {
+            return true;
+        }
         if self.ide_panel.explorer_scroll.is_dragging {
             let s = self.renderer.as_ref().unwrap().scale_factor;
             let geometry = super::explorer_scrollbar_geometry(self, s);

@@ -65,9 +65,14 @@ impl Renderer {
                     caption_scale,
                 );
             }
+            self.draw_pdf_highlights(tab, page, px, py, page_w, page_h);
             ui_registry.register_rect_clipped(
                 UiId::PdfPage(page), px, py, page_w, page_h, clip, mx, my,
             );
+        }
+        // Registered after the pages so it wins `find_at`; the scrollbar lane is registered later still.
+        if matches!(tab.phase, PdfPhase::Ready) {
+            ui_registry.register_text_region(UiId::PdfText, x, y, w, h, mx, my);
         }
         ui_registry.pop_clip();
         self.flush();
@@ -103,6 +108,37 @@ impl Renderer {
         };
         if let Some(message) = state_message {
             self.draw_pdf_centered_message(&message, x, y, w, h, scale);
+        }
+    }
+
+    /// Search matches and the text selection of one page, drawn over the raster.
+    fn draw_pdf_highlights(&mut self, tab: &PdfTabState, page: usize, px: f32, py: f32, page_w: f32, page_h: f32) {
+        let (Some(Some(text)), Some(geom)) = (tab.text.get(page), tab.pages.get(page)) else { return };
+        if tab.search.matches.is_empty() && tab.selection.is_none() { return; }
+        let kx = page_w / geom.width_pt.max(1.0);
+        let ky = page_h / geom.height_pt.max(1.0);
+        let mut rects = Vec::new();
+        let fill = |renderer: &mut Self, rects: &[crate::pdf::PtRect], color: [f32; 4]| {
+            for rect in rects {
+                renderer.push_rect(px + rect.x * kx, py + rect.y * ky, (rect.w * kx).max(1.0), (rect.h * ky).max(1.0), color);
+            }
+        };
+        for (idx, item) in tab.search.matches.iter().enumerate().filter(|(_, item)| item.page == page) {
+            rects.clear();
+            crate::app::pdf_tab::text::line_rects(&text.chars, item.start as usize, item.end as usize, &mut rects);
+            let color = if tab.search.current == Some(idx) { [1.0, 0.55, 0.1, 0.55] } else { [1.0, 0.85, 0.2, 0.35] };
+            fill(self, rects.as_slice(), color);
+        }
+        if let Some(selection) = tab.selection {
+            let ((first_page, first_char), (last_page, last_char)) = selection.ordered();
+            if (first_page..=last_page).contains(&page) {
+                let start = if page == first_page { first_char } else { 0 };
+                let end = if page == last_page { last_char.saturating_add(1) } else { text.chars.len() };
+                rects.clear();
+                crate::app::pdf_tab::text::line_rects(&text.chars, start, end, &mut rects);
+                let sel = self.theme.sel;
+                fill(self, rects.as_slice(), [sel[0], sel[1], sel[2], 0.55]);
+            }
         }
     }
 

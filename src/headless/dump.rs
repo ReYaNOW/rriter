@@ -326,7 +326,8 @@ fn tab_json(tab: TabView<'_>) -> Value {
             "phase": phase, "page_count": pdf.page_count(), "current_page": current_page,
             "scroll": pdf.scroll.current, "search_matches": pdf.search.matches.len(),
             "textures": pdf.textures.len(),
-            "search_done": pdf.search.done, "selection_chars": 0,
+            "search_done": pdf.search.done, "selection_chars": pdf.selection_chars(),
+            "search_current": pdf.search.current,
             "engine": engine_name, "engine_message": engine_message,
         })
     });

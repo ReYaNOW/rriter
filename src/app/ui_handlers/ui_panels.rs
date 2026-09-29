@@ -332,9 +332,13 @@ impl App {
                 self.search_focused = false;
                 self.search_results.clear();
                 self.search_current_idx = None;
+                self.pdf_restart_search_if_open();
                 if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
+            }
+            UiId::SearchNext | UiId::SearchPrev if self.active_pdf_tab().is_some() => {
+                self.pdf_jump_search(id == UiId::SearchNext);
             }
             UiId::SearchNext => {
                 if !self.search_results.is_empty() {

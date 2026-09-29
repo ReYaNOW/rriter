@@ -259,6 +259,13 @@ impl App {
                 my,
             );
             self.handle_ui_click(clicked_id);
+        } else if clicked_id == crate::ui_system::UiId::PdfText {
+            if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
+                self.press_pdf_body(mx, my);
+            }
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
+            }
         } else if clicked_id == crate::ui_system::UiId::PdfScrollY {
             if state == ElementState::Pressed && button == winit::event::MouseButton::Left {
                 self.press_pdf_scrollbar(mx, my);

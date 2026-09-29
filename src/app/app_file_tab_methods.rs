@@ -867,6 +867,10 @@ impl App {
     }
 
     pub fn update_search(&mut self) {
+        if self.active_pdf_tab().is_some() {
+            self.pdf_update_search();
+            return;
+        }
         let previous_match_start = self
             .search_current_idx
             .and_then(|idx| self.search_results.get(idx).map(|&(s, _)| s));
@@ -930,6 +934,8 @@ impl App {
 
     #[cfg_attr(coverage_nightly, coverage(off))]
     pub fn jump_to_search_result(&mut self) {
+        // A PDF tab scrolls itself when its first match arrives; the hidden editor has nothing to jump to.
+        if self.active_pdf_tab().is_some() { return; }
         let show_welcome = self.show_welcome;
         let is_ide_mode = self.is_ide_mode;
         let database_query = self.active_tab_is_database_query();

@@ -707,10 +707,18 @@ impl App {
                     self.search_focused = false;
                     self.search_results.clear();
                     self.search_current_idx = None;
+                    self.pdf_restart_search_if_open();
                     self.window.as_ref().unwrap().request_redraw();
                 }
                 PhysicalKey::Code(KeyCode::KeyF) if ctrl => {
                     self.search_editor.select_all();
+                }
+                PhysicalKey::Code(KeyCode::Enter | KeyCode::ArrowUp | KeyCode::ArrowDown)
+                    if self.active_pdf_tab().is_some() =>
+                {
+                    let backward = key_event.physical_key == PhysicalKey::Code(KeyCode::ArrowUp)
+                        || (key_event.physical_key == PhysicalKey::Code(KeyCode::Enter) && shift);
+                    self.pdf_jump_search(!backward);
                 }
                 PhysicalKey::Code(KeyCode::Enter) => {
                     if !self.search_results.is_empty() {

@@ -1432,7 +1432,8 @@ Root:
 * `src/pdf/worker.rs` -> Dedicated Pdfium thread, prioritized render/text/search requests, generation checks, and per-document text caching.
 * `src/pdf/fixture.rs` -> Test-only generated three-page PDF, invalid PDF, and empty-file fixtures.
 * `src/app/pdf_tab.rs` / `src/app/pdf_tab/engine.rs` / `src/app/pdf_tab/input.rs` -> PDF tab data, page texture cache, scrolling and keys, document transitions, and worker lifecycle.
-* `src/render_view/pdf_view.rs` -> PDF loading/error states, textured pages, and page hit targets.
+* `src/app/pdf_tab/text.rs` -> PDF text layer: page-text cache requests, search state and generations, selection, copy, link and char hit testing.
+* `src/render_view/pdf_view.rs` -> PDF loading/error states, textured pages, search/selection highlights, page hit targets, and the text-layer hit region.
 * `src/headless/ui_tests_pdf.rs` -> PDF tab lifecycle, rasterized pages, input, invalid documents, path deduplication, tab switching/closing, and missing-engine tests.
 * `src/platform/window_host.rs` -> native window delegation and headless window state used by App.
 * `src/platform/offscreen_gl.rs` -> Linux surfaceless EGL pbuffer context and offscreen App test fixture.
