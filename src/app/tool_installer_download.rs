@@ -760,25 +760,6 @@ fn pdfium_progress_line(downloaded: u64, total: Option<u64>) -> String {
 /// directories are removed afterwards. The caller owns (and removes) the generation
 /// directory the archive was downloaded into; `prune_stale_generations` is not used
 /// because it would delete the versioned directory too.
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn install_from_archive(
-    archive: &Path,
-    expected_sha256: &str,
-    lib_member: &str,
-    managed_root: &Path,
-    version_slug: &str,
-) -> Result<PathBuf, String> {
-    install_from_archive_with(
-        archive,
-        expected_sha256,
-        lib_member,
-        managed_root,
-        version_slug,
-        &AtomicBool::new(false),
-        &mut |_, _| {},
-    )
-}
-
 fn install_from_archive_with(
     archive: &Path,
     expected_sha256: &str,
@@ -989,6 +970,25 @@ mod pdfium_archive_tests {
             sha256,
             managed_root,
         }
+    }
+
+    /// Test-only shorthand: no cancellation, no phase reporting.
+    fn install_from_archive(
+        archive: &Path,
+        expected_sha256: &str,
+        lib_member: &str,
+        managed_root: &Path,
+        version_slug: &str,
+    ) -> Result<PathBuf, String> {
+        install_from_archive_with(
+            archive,
+            expected_sha256,
+            lib_member,
+            managed_root,
+            version_slug,
+            &AtomicBool::new(false),
+            &mut |_, _| {},
+        )
     }
 
     fn install(fixture: &Fixture, sha256: &str, member: &str) -> Result<PathBuf, String> {

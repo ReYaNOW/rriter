@@ -364,6 +364,8 @@ pub(super) fn persist_state_and_shutdown(app: &mut App) {
         tool_paths: app.tool_paths.clone(),
         dart_settings: app.dart_settings.clone(),
     });
+    // Single exit commit point (Quit, window close and `exiting` all pass here): stores the PDF read position.
+    app.save_tabs_state();
     if app.is_ide_mode {
         app.ide_panel.api.persist();
         crate::save_panel_state(&app.ide_panel);

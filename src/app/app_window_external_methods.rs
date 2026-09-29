@@ -732,6 +732,10 @@ impl App {
         if self.active_tab_is_git_diff() {
             return false;
         }
+        // The async picker can return after the user switched to a PDF tab; its hidden editor is empty.
+        if self.active_pdf_tab().is_some() {
+            return false;
+        }
 
         let requested_path = crate::platform::canonicalize_or_absolutize(&path);
         let content = self.editor.get_full_text();

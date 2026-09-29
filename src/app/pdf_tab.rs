@@ -161,6 +161,23 @@ impl PdfTabState {
             hover_link: None, dark: false, viewport: (0, 0), line_rects_buf: Vec::new(), line_boxes: Vec::new(), body: (0.0, 0.0, 0.0, 0.0), press: None, layout_scale: 1.0, layout_dirty: true, status_label: String::new() }
     }
 
+    /// Applies an owned event; a `Page` bitmap is moved into `pending_bitmaps` without a copy.
+    pub fn apply_event_owned(&mut self, ev: PdfEvent) -> PdfEventOutcome {
+        match ev {
+            PdfEvent::Page { page, r#gen, width_px, height_px, rgba, .. } => {
+                self.requested.remove(&(page, r#gen));
+                if r#gen != self.gens.render.load(std::sync::atomic::Ordering::Relaxed)
+                    || !self.gens.contains(page) || page >= self.pages.len()
+                    || (width_px as usize).checked_mul(height_px as usize).and_then(|size| size.checked_mul(4)) != Some(rgba.len()) { return PdfEventOutcome::Ignore; }
+                self.pending_bitmaps.push(PendingBitmap { page, r#gen, width_px, height_px, rgba });
+                PdfEventOutcome::Bitmap
+            }
+            other => self.apply_event(&other),
+        }
+    }
+
+    /// Borrowed variant for every event except `Page`: those carry the bitmap and must go through
+    /// `apply_event_owned`, so this ignores them.
     pub fn apply_event(&mut self, ev: &PdfEvent) -> PdfEventOutcome {
         match ev {
             PdfEvent::LoadStarted => { self.phase = PdfPhase::Loading; PdfEventOutcome::Redraw }
@@ -178,14 +195,6 @@ impl PdfTabState {
             PdfEvent::OpenFailed { error, .. } => {
                 self.phase = if matches!(error, crate::pdf::PdfError::PasswordRequired) { PdfPhase::PasswordRequired } else { PdfPhase::Error(error.message()) };
                 PdfEventOutcome::Redraw
-            }
-            PdfEvent::Page { page, r#gen, width_px, height_px, rgba, .. } => {
-                self.requested.remove(&(*page, *r#gen));
-                if *r#gen != self.gens.render.load(std::sync::atomic::Ordering::Relaxed)
-                    || !self.gens.contains(*page) || *page >= self.pages.len()
-                    || (*width_px as usize).checked_mul(*height_px as usize).and_then(|size| size.checked_mul(4)) != Some(rgba.len()) { return PdfEventOutcome::Ignore; }
-                self.pending_bitmaps.push(PendingBitmap { page: *page, r#gen: *r#gen, width_px: *width_px, height_px: *height_px, rgba: rgba.clone() });
-                PdfEventOutcome::Bitmap
             }
             PdfEvent::RenderSkipped { page, r#gen, .. } => { self.requested.remove(&(*page, *r#gen)); PdfEventOutcome::Redraw }
             PdfEvent::Text { page, text, links, .. } if *page < self.pages.len() && *page < self.text.len() => {
@@ -351,15 +360,18 @@ mod tests {
         assert!(requests.iter().all(|request| matches!(request, PdfRequest::Render { width_px: 968, r#gen: 1, .. })));
         assert!(tab.take_render_requests(false).is_empty());
         let malformed = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 1, width_px: 2, height_px: 2, rgba: vec![0; 3] };
-        assert_eq!(tab.apply_event(&malformed), PdfEventOutcome::Ignore);
+        assert_eq!(tab.apply_event_owned(malformed), PdfEventOutcome::Ignore);
         assert!(tab.pending_bitmaps.is_empty());
         tab.set_viewport(900, 800, 1.0);
         assert_eq!(tab.gens.render.load(std::sync::atomic::Ordering::Relaxed), 2);
         let stale = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 1, width_px: 2, height_px: 2, rgba: vec![0; 16] };
-        assert_eq!(tab.apply_event(&stale), PdfEventOutcome::Ignore);
-        let current = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 2, width_px: 2, height_px: 2, rgba: vec![0; 16] };
-        assert_eq!(tab.apply_event(&current), PdfEventOutcome::Bitmap);
+        assert_eq!(tab.apply_event_owned(stale), PdfEventOutcome::Ignore);
+        let bitmap = vec![7; 16];
+        let bitmap_ptr = bitmap.as_ptr();
+        let current = PdfEvent::Page { id: crate::pdf::DocId(1), page: 0, r#gen: 2, width_px: 2, height_px: 2, rgba: bitmap };
+        assert_eq!(tab.apply_event_owned(current), PdfEventOutcome::Bitmap);
         assert_eq!(tab.pending_bitmaps.len(), 1);
+        assert_eq!(tab.pending_bitmaps[0].rgba.as_ptr(), bitmap_ptr, "bitmap must be moved, not copied");
     }
 
     #[test]

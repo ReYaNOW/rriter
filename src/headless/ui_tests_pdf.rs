@@ -309,6 +309,13 @@ fn pdf_selection_copies_text_and_ctrl_keys_never_reach_the_hidden_editor() {
     // The save sink itself refuses a PDF tab, whatever key path (Ctrl+Enter, autosave) reached it.
     assert_eq!(session.app.save_current_file_outcome(), crate::app::SaveOutcome::Failed);
     assert_eq!(std::fs::read(&path).expect("fixture PDF"), before, "the save sink must not overwrite the PDF");
+    // A Save As picker that returns while the PDF tab is active must not write the empty hidden editor.
+    let save_as_target = dir.join("picked-late.txt");
+    let (pdf_path_before, tab_path_before) = (session.app.active_pdf_tab().map(|pdf| pdf.path.clone()), session.app.file_path.clone());
+    assert!(!session.app.save_current_file_as(save_as_target.clone()));
+    assert!(!save_as_target.exists(), "Save As must not create a file for a PDF tab");
+    assert_eq!(session.app.active_pdf_tab().map(|pdf| pdf.path.clone()), pdf_path_before);
+    assert_eq!(session.app.file_path, tab_path_before, "Save As must not retarget the PDF tab");
     // Escape drops the selection first; the open search panel closes only on the next Escape.
     run_script(&mut session, b"key ctrl+f\n");
     assert_eq!(dump(&mut session)["overlays"]["search"], true);

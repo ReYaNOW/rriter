@@ -185,7 +185,12 @@ impl App {
         }
         if disconnected {
             self.pdf_worker = None;
-            events.push(PdfEvent::EngineFailed("поток движка завершился".to_owned()));
+            // A bind failure ends the worker right after reporting it; keep that reason instead of overwriting it.
+            let already_failed = matches!(self.pdf_engine, PdfEngineState::Failed(_))
+                || events.iter().any(|event| matches!(event, PdfEvent::EngineFailed(_)));
+            if !already_failed {
+                events.push(PdfEvent::EngineFailed("поток движка завершился".to_owned()));
+            }
         }
         let mut redraw = false;
         for event in events {
@@ -214,13 +219,16 @@ impl App {
                     let active_doc = self.tabs.get(self.active_tab).and_then(|tab| tab.pdf.as_ref()).and_then(|pdf| pdf.doc);
                     if matches!(other, PdfEvent::Page { .. }) && active_doc != Some(id) { continue; }
                     let Some(tab) = self.tabs.iter_mut().find(|tab| tab.pdf.as_ref().is_some_and(|pdf| pdf.doc == Some(id))) else { continue };
+                    let is_text = matches!(other, PdfEvent::Text { .. } | PdfEvent::TextFailed { .. });
+                    let is_opened = matches!(other, PdfEvent::Opened { .. });
                     let mut copied = None;
                     if let Some(pdf) = tab.pdf.as_mut() {
-                        redraw |= matches!(pdf.apply_event(&other), PdfEventOutcome::Redraw | PdfEventOutcome::Bitmap);
-                        if matches!(other, PdfEvent::Text { .. } | PdfEvent::TextFailed { .. }) { copied = pdf.take_copy_text(); }
+                        // Owned: a `Page` bitmap (up to 64 MB) is moved, not copied.
+                        redraw |= matches!(pdf.apply_event_owned(other), PdfEventOutcome::Redraw | PdfEventOutcome::Bitmap);
+                        if is_text { copied = pdf.take_copy_text(); }
                     }
                     if let Some(text) = copied { self.set_clipboard_text(text); }
-                    if matches!(other, PdfEvent::Opened { .. }) && active_doc == Some(id) { self.pdf_restart_search_if_open(); }
+                    if is_opened && active_doc == Some(id) { self.pdf_restart_search_if_open(); }
                 }
             }
         }
@@ -359,5 +367,29 @@ mod tests {
 
         assert_eq!(app.pdf_textures_to_free.as_slice(), &[texture]);
         assert!(matches!(rx.try_recv(), Ok(PdfRequest::Close { id }) if id == doc));
+    }
+
+    #[test]
+    fn bind_failure_reason_survives_worker_disconnect() {
+        let (_context, mut app) =
+            crate::platform::offscreen_gl::test_support::offscreen_test_app(64, 64, 1.0);
+        app.is_ide_mode = true;
+        app.pdf_engine = PdfEngineState::Starting;
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let (event_tx, event_rx) = std::sync::mpsc::channel();
+        app.pdf_worker = Some(crate::pdf::PdfWorkerHandle { tx, rx: event_rx });
+        app.open_pdf_tab(PathBuf::from("bind-failure.pdf"));
+        // The worker reports the bind error and exits: the sender is gone before the UI polls.
+        event_tx.send(PdfEvent::EngineFailed("bind: library validation failed".to_owned())).unwrap();
+        drop(event_tx);
+
+        assert!(app.poll_pdf_worker());
+        assert!(app.pdf_worker.is_none());
+        assert!(matches!(&app.pdf_engine, PdfEngineState::Failed(message) if message == "bind: library validation failed"));
+        let phase = app.pdf_tab_mut(0).unwrap().phase.clone();
+        assert!(matches!(&phase, PdfPhase::EngineMissing { error: Some(error) } if error.contains("bind: library validation failed")), "{phase:?}");
+        // Later polls without a worker must not invent a second failure either.
+        app.poll_pdf_worker();
+        assert!(matches!(&app.pdf_engine, PdfEngineState::Failed(message) if message == "bind: library validation failed"));
     }
 }
